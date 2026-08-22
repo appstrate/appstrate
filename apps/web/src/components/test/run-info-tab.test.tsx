@@ -62,7 +62,7 @@ function makeRun(overrides: Partial<EnrichedRun> = {}): EnrichedRun {
     version_ref: "1.0.0",
     package_ephemeral: false,
     runOrigin: "platform",
-    document_counts: { input: 0, output: 0 },
+    file_counts: { input: 0, output: 0 },
     ...overrides,
   } as unknown as EnrichedRun;
 }

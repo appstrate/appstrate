@@ -19,11 +19,11 @@
  * loop so a bucket can never silently miss the grace window or the `_system/`
  * carve-out):
  *
- *   documents        ← documents.storage_key
+ *   files        ← files.storage_key
  *   uploads          ← uploads.storage_key
  *   agent-packages   ← package_versions  (published version artifacts)
  *   library-packages ← packages          (library item artifacts, incl. _system/)
- *   run-workspace    ← runs.id           (bundle + manifest + input documents)
+ *   run-workspace    ← runs.id           (bundle + manifest + input files)
  *
  * SYSTEM packages (`packages.org_id IS NULL`, objects under `_system/`) are
  * part of the known-set by construction — the queries apply no org filter — so

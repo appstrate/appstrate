@@ -220,7 +220,7 @@ describe("createStepCapController — connect offers survive the cap", () => {
   // pi-agent-core rebuilds a tool result as exactly {content, details, terminate}
   // whenever `afterToolCall` returns a truthy override, so terminating on a batch
   // that carries a `connectOffer` would strip the connect URL and leave the user
-  // a card with no button. `mcp-tools.ts` documents that contract.
+  // a card with no button. `mcp-tools.ts` files that contract.
   const offerContext = (message: object) => ({
     assistantMessage: message,
     result: { content: [], connectOffer: { connect_url: "https://example.test/c" } },

@@ -26,7 +26,7 @@ export function parseDraftManifest(value: unknown): Partial<Manifest> {
  *
  * The test is deliberately shape-based: the fallback is a serialized JSON
  * object and an `INTEGRATION.md` is markdown, so "starts with `{` and ends with
- * `}`" separates them without parsing a document that may be tens of KB.
+ * `}`" separates them without parsing a file that may be tens of KB.
  *
  * ## It is a HEURISTIC — know what a false positive costs at each call site
  *

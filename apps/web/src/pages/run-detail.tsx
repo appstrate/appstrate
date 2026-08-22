@@ -19,9 +19,10 @@ import { RunModal } from "../components/run-modal";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { RunInfoTab } from "../components/run-info-tab";
-import { RunDocumentsTab } from "../components/run-documents-tab";
+import { RunFilesTab } from "../components/run-files-tab";
 import { RunDetailTabsController } from "../components/run-detail-tabs-controller";
-import { invalidateOrgStorage } from "../hooks/use-documents";
+import { invalidateOrgStorage } from "../hooks/use-files";
+import { isPublishedFileLogEvent } from "../lib/files";
 import { RunRow } from "../components/run-row";
 import { RunCostReadout } from "../components/run-cost-readout";
 import { ContextGaugeReadout } from "../components/run-context-gauge";
@@ -117,17 +118,17 @@ export function RunDetailPage() {
   const runMemoryCount = (runMemories?.length ?? 0) + (runPinned?.length ?? 0);
   const hasRunMemory = runMemoryCount > 0;
 
-  // Document count for the tab badge — read off the run DTO the page already
-  // has (same field `run-row.tsx` renders). Listing the run's documents just to
+  // File count for the tab badge — read off the run DTO the page already
+  // has (same field `run-row.tsx` renders). Listing the run's files just to
   // count them cost a request on every run page and silently saturated at the
   // page size; the list query now runs only when the tab is actually opened.
-  const inputDocumentCount = run?.document_counts.input ?? 0;
-  const outputDocumentCount = run?.document_counts.output ?? 0;
-  const documentCount = inputDocumentCount + outputDocumentCount;
+  const inputFileCount = run?.file_counts.input ?? 0;
+  const outputFileCount = run?.file_counts.output ?? 0;
+  const fileCount = inputFileCount + outputFileCount;
   // The derived presentation rule (#1177): a run that PRODUCED exactly one file
   // leads with the tab that shows it. Inputs the run consumed never count, and
   // nothing the agent declared takes part — the count is the whole rule.
-  const hasFeaturedDocument = outputDocumentCount === 1;
+  const hasFeaturedFile = outputFileCount === 1;
 
   // Per-run SSE for log inserts + live metric updates. Status patches
   // come from `useGlobalRunSync` (mounted in MainLayout), which writes
@@ -157,13 +158,14 @@ export function RunDetailPage() {
           if (prev.some((l) => l.id === entry.id)) return prev;
           return [...prev, entry];
         });
-        // A published document arrives as a `type='result' event='document'`
-        // log frame — invalidate the run's documents list (the tab body), the
-        // run itself (its `document_counts` drives the tab badge) and the org
+        // A published file arrives as a `type='result' event='file'`
+        // log frame — invalidate the run's files list (the tab body), the
+        // run itself (its `file_counts` drives the tab badge) and the org
         // storage total those new bytes just moved, without a dedicated SSE
-        // channel.
-        if (entry.type === "result" && entry.event === "document") {
-          void qc.invalidateQueries({ queryKey: ["get", "/api/documents"] });
+        // channel. The tag set is legacy-tolerant (`isPublishedFileLogEvent`):
+        // a still-deployed pre-#1177 emitter must not go unnoticed here.
+        if (entry.type === "result" && isPublishedFileLogEvent(entry.event)) {
+          void qc.invalidateQueries({ queryKey: ["get", "/api/files"] });
           void qc.invalidateQueries({ queryKey: runKeys.detail(orgId, applicationId, runId) });
           invalidateOrgStorage(qc);
         }
@@ -276,7 +278,7 @@ export function RunDetailPage() {
 
       <RunDetailTabsController
         key={runId}
-        availability={{ hasFeaturedDocument, hasResult: hasOutput, hasMemory: hasRunMemory }}
+        availability={{ hasFeaturedFile, hasResult: hasOutput, hasMemory: hasRunMemory }}
       >
         {({ activeTab, setActiveTab }) => (
           <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as RunDetailTab)}>
@@ -304,11 +306,11 @@ export function RunDetailPage() {
                       </span>
                     </TabsTrigger>
                   )}
-                  <TabsTrigger value="documents">
-                    {t("run.tabDocuments")}
-                    {documentCount > 0 && (
+                  <TabsTrigger value="files">
+                    {t("run.tabFiles")}
+                    {fileCount > 0 && (
                       <span className="bg-primary/15 text-primary ml-1.5 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none font-medium">
-                        {documentCount}
+                        {fileCount}
                       </span>
                     )}
                   </TabsTrigger>
@@ -376,8 +378,8 @@ export function RunDetailPage() {
               </TabsContent>
             )}
 
-            <TabsContent value="documents" className="mt-0">
-              {runId && <RunDocumentsTab runId={runId} />}
+            <TabsContent value="files" className="mt-0">
+              {runId && <RunFilesTab runId={runId} />}
             </TabsContent>
 
             <TabsContent value="info" className="mt-0">

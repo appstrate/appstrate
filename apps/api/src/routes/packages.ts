@@ -2258,7 +2258,7 @@ export function createPackagesRouter() {
     // Always octet-stream + nosniff + attachment: package bytes are
     // author-controlled, so no response from here may be something a browser
     // decides to execute or render in this origin. `Referrer-Policy` +
-    // `Cross-Origin-Resource-Policy` mirror what `routes/documents.ts` applies
+    // `Cross-Origin-Resource-Policy` mirror what `routes/files.ts` applies
     // to comparable authenticated tenant bytes.
     return new Response(new Uint8Array(bytes), {
       status: 200,

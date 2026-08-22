@@ -124,7 +124,7 @@ describe("POST /api/runs/inline — validation", () => {
 
 describe("POST /api/runs/inline — input file fields (parseRequestInput wiring)", () => {
   // Inline runs share the agent-route input parser: file fields resolve
-  // `upload://` / `document://` / `data:` URIs before the pipeline fires.
+  // `upload://` / `appfile://` / `data:` URIs before the pipeline fires.
   // Success would launch the pipeline (out of scope, see the dependency-
   // resolution suite note), so the wiring is proven through the parser's
   // pre-pipeline rejections — which the old path (preflight-only, input
@@ -159,15 +159,15 @@ describe("POST /api/runs/inline — input file fields (parseRequestInput wiring)
     };
   }
 
-  it("returns 404 when a document:// input references a missing document", async () => {
+  it("returns 404 when an appfile:// input references a missing file", async () => {
     const res = await post({
       manifest: manifestWithFileInput(),
       prompt: "describe the screenshot",
-      input: { screenshot: "document://doc_00000000-0000-0000-0000-000000000000" },
+      input: { screenshot: "appfile://doc_00000000-0000-0000-0000-000000000000" },
     });
     expect(res.status).toBe(404);
     const body = (await res.json()) as { detail?: string };
-    expect(body.detail ?? "").toMatch(/document/i);
+    expect(body.detail ?? "").toMatch(/file/i);
   });
 
   it("returns 400 when a file field carries a non-URI value", async () => {
@@ -194,23 +194,23 @@ describe("POST /api/runs/inline — input file fields (parseRequestInput wiring)
     await post({
       manifest: manifestWithFileInput(),
       prompt: "describe the screenshot",
-      input: { screenshot: "document://doc_00000000-0000-0000-0000-000000000000" },
+      input: { screenshot: "appfile://doc_00000000-0000-0000-0000-000000000000" },
     });
     const rows = await db.select().from(packages).where(eq(packages.ephemeral, true));
     expect(rows).toHaveLength(0);
   });
 
-  it("returns 400 when the prompt references a document:// URI the input does not mount", async () => {
+  it("returns 400 when the prompt references an appfile:// URI the input does not mount", async () => {
     // The observed chat failure mode: URIs pasted into the sub-agent's prompt
     // text with no input at all — the run would launch against dead URIs.
     const res = await post({
       manifest: validManifest(),
       prompt:
-        "Read this image: document://doc_627ff7c8-f102-41e2-9c8d-136f8bbc00f5 and describe it.",
+        "Read this image: appfile://doc_627ff7c8-f102-41e2-9c8d-136f8bbc00f5 and describe it.",
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { errors?: { code?: string; field?: string }[] };
-    expect(body.errors?.[0]?.code).toBe("document_uri_in_prompt");
+    expect(body.errors?.[0]?.code).toBe("file_uri_in_prompt");
     expect(body.errors?.[0]?.field).toBe("prompt");
     // No durable side effect on rejection.
     const rows = await db.select().from(packages).where(eq(packages.ephemeral, true));

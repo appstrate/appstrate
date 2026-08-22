@@ -22,7 +22,7 @@ import type { Context } from "hono";
 import type { UIMessage } from "ai";
 import { z } from "zod";
 import { parseBody, invalidRequest } from "@appstrate/core/api-errors";
-import { isAttachmentUri } from "@appstrate/core/document-uri";
+import { isAttachmentUri } from "@appstrate/core/file-uri";
 import { logger } from "./logger.ts";
 import { listModels, pickModel, resolveDefaultApplicationId } from "./llm.ts";
 import { platformMcpUrl } from "./platform-mcp.ts";
@@ -104,9 +104,9 @@ export type ChatEngine = (input: PiChatInput) => Response;
 // The client (assistant-ui / useChat) posts the full thread plus optional
 // session/model/context extras. `messages` are UIMessages; we keep validation
 // loose here and let `convertToModelMessages` enforce the real shape — with one
-// tightening: any `file` part MUST reference an `upload://` or `document://`
+// tightening: any `file` part MUST reference an `upload://` or `appfile://`
 // URI. That rejects inline `data:` bytes and arbitrary URLs in the chat channel
-// (attachments flow only through the document store, never inline).
+// (attachments flow only through the file store, never inline).
 export const chatStreamSchema = z.object({
   id: z.string().optional(),
   messages: z
@@ -124,7 +124,7 @@ export const chatStreamSchema = z.object({
           if (!isAttachmentUri(url)) {
             ctx.addIssue({
               code: "custom",
-              message: "File attachment URI must be an 'upload://' or 'document://' URI.",
+              message: "File attachment URI must be an 'upload://' or 'appfile://' URI.",
               path: [i, "parts", j, "url"],
             });
           }
@@ -241,14 +241,14 @@ export async function handleChatStream(
   });
 
   // Materialize the new turn's composer attachments into durable, session-scoped
-  // documents and rewrite each `upload://` (or already-`document://`) file part
-  // to its stable `document://` URI, BEFORE the turn is persisted (persistence
-  // stores only `document://`) and before it reaches the engine (the model is
+  // files and rewrite each `upload://` (or already-`appfile://`) file part
+  // to its stable `appfile://` URI, BEFORE the turn is persisted (persistence
+  // stores only `appfile://`) and before it reaches the engine (the model is
   // shown the attachment as a text line, never a raw file URL). Needs the session
-  // (the document container) and the resolved application id, both known here;
+  // (the file container) and the resolved application id, both known here;
   // nothing has been opened yet, so a quota/cap rejection surfaces as a clean
   // error with no MCP/stop-controller to leak. Only the last message can carry
-  // fresh uploads — earlier turns already hold rewritten `document://` URIs.
+  // fresh uploads — earlier turns already hold rewritten `appfile://` URIs.
   if (sessionId && lastMessage && applicationId) {
     lastMessage = await materializeUserAttachments(lastMessage, (uri) =>
       deps.resolveChatAttachment({

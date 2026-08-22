@@ -19,7 +19,7 @@ import { toISORequired } from "../lib/date-helpers.ts";
 import type { AppScope } from "../lib/scope.ts";
 import { assertApplicationInScope } from "./applications.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
-import { detachOrDeleteContainedDocuments, storageKeyToDeletionJob } from "./documents.ts";
+import { detachOrDeleteContainedFiles, storageKeyToDeletionJob } from "./files.ts";
 
 function toEndUserResponse(row: {
   id: string;
@@ -291,7 +291,7 @@ export async function deleteEndUser(scope: AppScope, endUserId: string): Promise
   // cascade them. Delete every notification for that recipient explicitly,
   // scoped to the app for tenant safety.
   await db.transaction(async (tx) => {
-    // Follow the org-first lock order used by document/upload writes, then lock
+    // Follow the org-first lock order used by file/upload writes, then lock
     // the parent end-user before enumerating cascade-owned children. Runs are
     // deliberately excluded: their FK is ON DELETE SET NULL, so their
     // workspaces remain live and must not be purged.
@@ -317,14 +317,14 @@ export async function deleteEndUser(scope: AppScope, endUserId: string): Promise
       .for("update");
     if (!lockedEndUser) throw notFound("End-user not found");
 
-    // Documents go through the ONE detach-or-delete primitive, exactly like a
-    // run set or a chat session. `documents.end_user_id` cascades, so relying on
+    // Files go through the ONE detach-or-delete primitive, exactly like a
+    // run set or a chat session. `files.end_user_id` cascades, so relying on
     // the FK (as this path used to) destroyed an `agent_output` a LIVE run still
-    // consumes — breaking the durability the `document://` URI promises and
+    // consumes — breaking the durability the `appfile://` URI promises and
     // amputating any later `rerun_from`. The primitive detaches those (dropping
     // only the attribution), deletes the rest, and owns their counter decrement
     // + outbox jobs.
-    await detachOrDeleteContainedDocuments({ endUserId, orgId: scope.orgId }, tx);
+    await detachOrDeleteContainedFiles({ endUserId, orgId: scope.orgId }, tx);
 
     const uploadRows = await tx
       .select({ storageKey: uploads.storageKey })

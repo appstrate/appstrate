@@ -2,7 +2,30 @@
 
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 
-export const runsPaths = {
+/**
+ * One entry of the run input-file manifest. Shared by the canonical `files`
+ * array and its deprecated `documents` twin so the two cannot describe
+ * different shapes; a TS const rather than a component `$ref` because it is an
+ * inline detail of one response, not a published contract object.
+ */
+const runFileManifestEntry = {
+  type: "object",
+  required: ["name", "workspace_name", "size"],
+  properties: {
+    name: {
+      type: "string",
+      description: "The file's human display name (may repeat across entries).",
+    },
+    workspace_name: {
+      type: "string",
+      description:
+        "Unique single path segment the agent writes the file to under `workspace/files/` and fetches its bytes by.",
+    },
+    size: { type: "integer" },
+  },
+} as const;
+
+const canonicalRunsPaths = {
   "/api/agents/{scope}/{name}/run": {
     post: {
       operationId: "runAgent",
@@ -16,11 +39,11 @@ export const runsPaths = {
         "PUTting them to the signed URL (see `createUpload` for the step-by-step recipe); or " +
         "(2) an inline RFC 2397 data URI `data:<mime>;name=<filename>;base64,<payload>` with up " +
         "to 4 MiB of decoded content (`name` is optional) — the single-call path for JSON-only " +
-        "clients such as MCP. Inline bytes are written to the run workspace as a document and " +
+        "clients such as MCP. Inline bytes are written to the run workspace as a file and " +
         "the payload is stripped from the persisted run input (the stored value keeps only a " +
         "`data:<mime>;name=<doc>;base64,` marker). Declared binary MIMEs are verified by " +
         "magic-byte sniffing in both forms. " +
-        "Send `rerun_from` instead of `input` to replay a previous run's input — same documents, " +
+        "Send `rerun_from` instead of `input` to replay a previous run's input — same files, " +
         "new overrides — without re-uploading. " +
         "The effective model is resolved at run creation with precedence: request `modelId` > " +
         "agent model setting > org default model > system default. Without an explicit `modelId`, " +
@@ -65,13 +88,13 @@ export const runsPaths = {
                   description:
                     "Run input values, validated against the agent's input schema. File fields " +
                     "take `upload://upl_xxx` references (from `createUpload`), " +
-                    "`document://doc_xxx` references (an existing document the caller can read), " +
+                    "`appfile://doc_xxx` references (an existing file the caller can read), " +
                     "or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded).",
                 },
                 rerun_from: {
                   type: "string",
                   description:
-                    "Run id whose persisted `input` to replay on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + application scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). Staged `upload://` inputs are materialized on the original run and rewritten in its persisted input as durable `document://` references, so later reruns reuse the same documents without depending on upload retention. Existing `document://` inputs remain unchanged. **Limitation:** inline `data:` inputs are NOT replayable — their bytes are materialized into the original run's workspace and stripped from the stored input (only a payload-less marker is persisted), so replaying a run whose input carried an inline file returns 409 `rerun_inline_input_unavailable`. Stage the file with `createUpload` when the input must be replayable.",
+                    "Run id whose persisted `input` to replay on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + application scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). Staged `upload://` inputs are materialized on the original run and rewritten in its persisted input as durable `appfile://` references, so later reruns reuse the same files without depending on upload retention. Existing `appfile://` inputs remain unchanged. **Limitation:** inline `data:` inputs are NOT replayable — their bytes are materialized into the original run's workspace and stripped from the stored input (only a payload-less marker is persisted), so replaying a run whose input carried an inline file returns 409 `rerun_inline_input_unavailable`. Stage the file with `createUpload` when the input must be replayable.",
                 },
                 modelId: {
                   type: "string",
@@ -173,7 +196,7 @@ export const runsPaths = {
                 schedule_name: null,
                 connections_used: null,
                 package_ephemeral: false,
-                document_counts: { input: 0, output: 0 },
+                file_counts: { input: 0, output: 0 },
               },
             },
           },
@@ -221,9 +244,9 @@ export const runsPaths = {
         "413": {
           description:
             "`payload_too_large` — an inline `data:` input file exceeds the per-file inline cap " +
-            "(4 MiB decoded), or the run's input documents together exceed " +
-            "`WORKSPACE_MAX_DOCS_BYTES`. Or `document_count_exceeded` — the run would carry more " +
-            "than `RUN_MAX_DOCUMENTS` input documents (uploads + inline + `document://` refs). " +
+            "(4 MiB decoded), or the run's input files together exceed " +
+            "`WORKSPACE_MAX_DOCS_BYTES`. Or `file_count_exceeded` — the run would carry more " +
+            "than `RUN_MAX_DOCUMENTS` input files (uploads + inline + `appfile://` refs). " +
             "Both are refused before the run launches, so nothing is charged and no workspace is " +
             'provisioned; distinct codes so a client can tell "one file too big" from "too ' +
             'many files".',
@@ -411,21 +434,21 @@ export const runsPaths = {
                   type: "object",
                   description:
                     "Run input validated against manifest.input.schema (AJV). File fields take " +
-                    "`upload://upl_xxx` references (from `createUpload`), `document://doc_xxx` " +
+                    "`upload://upl_xxx` references (from `createUpload`), `appfile://doc_xxx` " +
                     "references, or inline `data:<mime>;name=<filename>;base64,<payload>` URIs " +
                     "(≤4 MiB decoded) — same contract as `POST /agents/{scope}/{name}/run`.",
                 },
-                context_documents: {
+                context_files: {
                   type: "array",
                   items: { type: "string" },
                   description:
-                    "`document://doc_xxx` URIs to mount read-only into the run's `documents/` " +
+                    "`appfile://doc_xxx` URIs to mount read-only into the run's `files/` " +
                     "directory — fan-in by reference, without declaring a file field in the " +
-                    "manifest. The platform declares a reserved `_context_documents` input field " +
+                    "manifest. The platform declares a reserved `_context_files` input field " +
                     "for them, so they go through the same ACL, byte/count caps and " +
-                    "`document_links` chaining as any other document input, and are announced to " +
+                    "`file_links` chaining as any other file input, and are announced to " +
                     "the agent in its prompt. A manifest (or `input`) that already declares " +
-                    "`_context_documents` is rejected with a `400` — the name is reserved.",
+                    "`_context_files` is rejected with a `400` — the name is reserved.",
                 },
                 connection_overrides: {
                   type: "object",
@@ -448,14 +471,14 @@ export const runsPaths = {
             example: {
               manifest: {
                 $schema: "https://schemas.afps.dev/v0/agent.schema.json",
-                name: "@inline/summarize-attached-document",
-                display_name: "Summarize attached document",
+                name: "@inline/summarize-attached-file",
+                display_name: "Summarize attached file",
                 version: "0.0.0",
                 type: "agent",
                 schema_version: "0.1",
                 dependencies: {},
               },
-              prompt: "Summarize the attached document in three bullet points.",
+              prompt: "Summarize the attached file in three bullet points.",
               input: { docId: "doc_123" },
             },
           },
@@ -512,7 +535,7 @@ export const runsPaths = {
                 runner_name: null,
                 runner_kind: null,
                 agent_scope: "@inline",
-                agent_name: "Summarize attached document",
+                agent_name: "Summarize attached file",
                 runOrigin: "platform",
                 contextSnapshot: null,
                 modelCredentialId: "mpc_8h2k4m6n",
@@ -524,17 +547,17 @@ export const runsPaths = {
                 schedule_name: null,
                 connections_used: null,
                 package_ephemeral: true,
-                document_counts: { input: 0, output: 0 },
+                file_counts: { input: 0, output: 0 },
                 inline_manifest: {
                   $schema: "https://schemas.afps.dev/v0/agent.schema.json",
-                  name: "@inline/summarize-attached-document",
-                  display_name: "Summarize attached document",
+                  name: "@inline/summarize-attached-file",
+                  display_name: "Summarize attached file",
                   version: "0.0.0",
                   type: "agent",
                   schema_version: "0.1",
                   dependencies: {},
                 },
-                inline_prompt: "Summarize the attached document in three bullet points.",
+                inline_prompt: "Summarize the attached file in three bullet points.",
               },
             },
           },
@@ -563,9 +586,9 @@ export const runsPaths = {
         "413": {
           description:
             "`payload_too_large` — an inline `data:` input file exceeds the per-file inline cap " +
-            "(4 MiB decoded), or the run's input documents together exceed " +
-            "`WORKSPACE_MAX_DOCS_BYTES`. Or `document_count_exceeded` — the run would carry more " +
-            "than `RUN_MAX_DOCUMENTS` input documents (uploads + inline + `document://` refs). " +
+            "(4 MiB decoded), or the run's input files together exceed " +
+            "`WORKSPACE_MAX_DOCS_BYTES`. Or `file_count_exceeded` — the run would carry more " +
+            "than `RUN_MAX_DOCUMENTS` input files (uploads + inline + `appfile://` refs). " +
             "Both are refused before the run launches, so nothing is charged and no workspace is " +
             'provisioned; distinct codes so a client can tell "one file too big" from "too ' +
             'many files".',
@@ -637,12 +660,12 @@ export const runsPaths = {
                 },
                 prompt: { type: "string" },
                 input: { type: "object" },
-                context_documents: {
+                context_files: {
                   type: "array",
                   items: { type: "string" },
                   description:
                     "Same field as `POST /api/runs/inline` — validated here for shape and for the " +
-                    "reserved `_context_documents` name collision, never mounted.",
+                    "reserved `_context_files` name collision, never mounted.",
                 },
                 connection_overrides: {
                   type: "object",
@@ -884,7 +907,7 @@ export const runsPaths = {
                 schedule_name: "Weekday morning sort",
                 connections_used: null,
                 package_ephemeral: false,
-                document_counts: { input: 0, output: 0 },
+                file_counts: { input: 0, output: 0 },
               },
             },
           },
@@ -1049,7 +1072,7 @@ export const runsPaths = {
                 schedule_name: null,
                 connections_used: null,
                 package_ephemeral: false,
-                document_counts: { input: 0, output: 0 },
+                file_counts: { input: 0, output: 0 },
               },
             },
           },
@@ -1160,7 +1183,7 @@ export const runsPaths = {
                 input: {
                   type: "object",
                   description:
-                    "Run input, validated against the agent's input schema. File fields (`format: uri` + `contentMediaType`) accept ONLY inline `data:<mime>;name=<file>;base64,<payload>` URIs on remote runs — `upload://` and `document://` references are rejected (400), because the run executes on the caller's host, whose workspace the platform never provisions.",
+                    "Run input, validated against the agent's input schema. File fields (`format: uri` + `contentMediaType`) accept ONLY inline `data:<mime>;name=<file>;base64,<payload>` URIs on remote runs — `upload://` and `appfile://` references are rejected (400), because the run executes on the caller's host, whose workspace the platform never provisions.",
                 },
                 dependency_overrides: {
                   type: "object",
@@ -1513,7 +1536,7 @@ export const runsPaths = {
       tags: ["Runs"],
       summary: "Fetch the run bundle archive (HMAC)",
       description:
-        "Fetched by the agent runtime at startup to self-provision its `/workspace`. Returns the AFPS bundle (`agent-package.afps` = manifest + prompt + skills; itself a ZIP) verbatim — small and constant; the agent writes it straight to its workspace root. Input documents are NOT bundled here; the agent fetches them separately and streams each to disk (`GET /api/runs/{runId}/documents`). This pull-based delivery means workspace correctness no longer depends on a shared run volume's driver (a tmpfs-backed `local` volume is not shared between the seed helper and the agent — see issue #549). Same Standard Webhooks HMAC auth as the event routes: the signature covers the empty GET body. A 404 means no bundle was provisioned, which the runtime treats as a fatal provisioning fault (the platform always uploads the agent package).",
+        "Fetched by the agent runtime at startup to self-provision its `/workspace`. Returns the AFPS bundle (`agent-package.afps` = manifest + prompt + skills; itself a ZIP) verbatim — small and constant; the agent writes it straight to its workspace root. Input files are NOT bundled here; the agent fetches them separately and streams each to disk (`GET /api/runs/{runId}/files`). This pull-based delivery means workspace correctness no longer depends on a shared run volume's driver (a tmpfs-backed `local` volume is not shared between the seed helper and the agent — see issue #549). Same Standard Webhooks HMAC auth as the event routes: the signature covers the empty GET body. A 404 means no bundle was provisioned, which the runtime treats as a fatal provisioning fault (the platform always uploads the agent package).",
       parameters: [
         { name: "runId", in: "path", required: true, schema: { type: "string" } },
         { name: "webhook-id", in: "header", required: true, schema: { type: "string" } },
@@ -1537,13 +1560,13 @@ export const runsPaths = {
       },
     },
   },
-  "/api/runs/{runId}/documents": {
+  "/api/runs/{runId}/files": {
     get: {
-      operationId: "fetchRunDocumentsManifest",
+      operationId: "fetchRunFilesManifest",
       tags: ["Runs"],
-      summary: "List the run's input documents (HMAC)",
+      summary: "List the run's input files (HMAC)",
       description:
-        "Fetched by the agent runtime to enumerate the input documents it must provision. Returns the manifest of documents the run carries; the agent then fetches each via `GET /api/runs/{runId}/documents/{workspace_name}` and writes it to `workspace/documents/<workspace_name>`. Each entry carries `name` (the document's human display name) and `workspace_name` (the unique single-segment filename to write on disk — the platform disambiguates colliding display names, e.g. `report.pdf`, `report-2.pdf`, so two documents never overwrite each other). Same Standard Webhooks HMAC auth as the workspace route. A 404 means the run carries no input documents (the common case), which the runtime treats as an empty document set — not a fault. A 400 `duplicate_document_name` means the stored manifest is malformed (two identical workspace names).",
+        "Fetched by the agent runtime to enumerate the input files it must provision. Returns the manifest of files the run carries; the agent then fetches each via `GET /api/runs/{runId}/files/{workspace_name}` and writes it to `workspace/files/<workspace_name>`. Each entry carries `name` (the file's human display name) and `workspace_name` (the unique single-segment filename to write on disk — the platform disambiguates colliding display names, e.g. `report.pdf`, `report-2.pdf`, so two files never overwrite each other). Same Standard Webhooks HMAC auth as the workspace route. A 404 means the run carries no input files (the common case), which the runtime treats as an empty file set — not a fault. A 400 `duplicate_file_name` means the stored manifest is malformed (two identical workspace names).",
       parameters: [
         { name: "runId", in: "path", required: true, schema: { type: "string" } },
         { name: "webhook-id", in: "header", required: true, schema: { type: "string" } },
@@ -1553,32 +1576,23 @@ export const runsPaths = {
       security: [],
       responses: {
         "200": {
-          description: "Documents manifest",
+          description: "Files manifest",
           content: {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["documents"],
+                required: ["files", "documents"],
                 properties: {
+                  files: {
+                    type: "array",
+                    items: runFileManifestEntry,
+                  },
                   documents: {
                     type: "array",
-                    items: {
-                      type: "object",
-                      required: ["name", "workspace_name", "size"],
-                      properties: {
-                        name: {
-                          type: "string",
-                          description:
-                            "The document's human display name (may repeat across entries).",
-                        },
-                        workspace_name: {
-                          type: "string",
-                          description:
-                            "Unique single path segment the agent writes the document to under `workspace/documents/` and fetches its bytes by.",
-                        },
-                        size: { type: "integer" },
-                      },
-                    },
+                    deprecated: true,
+                    description:
+                      "DEPRECATED — the pre-#1177 spelling of `files`, carrying the SAME entries. Still emitted because the runtime image and the platform deploy independently: a container built before the rename reads this key, and a `files`-only manifest would give it zero input files with no error anywhere. Read `files`.",
+                    items: runFileManifestEntry,
                   },
                 },
               },
@@ -1586,37 +1600,45 @@ export const runsPaths = {
           },
         },
         "400": {
-          description:
-            "duplicate_document_name — the stored manifest has colliding workspace names",
+          description: "duplicate_file_name — the stored manifest has colliding workspace names",
         },
         "401": { description: "Signature verification failed" },
-        "404": { description: "run_not_found | no input documents" },
+        "404": { description: "run_not_found | no input files" },
         "410": { description: "run_sink_closed | run_sink_expired" },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
     post: {
-      operationId: "publishRunDocument",
+      operationId: "publishRunFile",
       tags: ["Runs"],
-      summary: "Publish an agent-produced document (HMAC, streaming)",
+      summary: "Publish an agent-produced file (HMAC, streaming)",
       description:
-        "Posted by the agent runtime — via the `publish_document` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` document attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `DOCUMENT_MAX_FILE_BYTES`, 100 MiB by default); metadata is carried in the `X-Document-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing document with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).",
+        "Posted by the agent runtime — via the `publish_file` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` file attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `DOCUMENT_MAX_FILE_BYTES`, 100 MiB by default); metadata is carried in the `X-File-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing file with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).",
       parameters: [
         { name: "runId", in: "path", required: true, schema: { type: "string" } },
         {
-          name: "X-Document-Name",
+          name: "X-File-Name",
           in: "header",
           required: true,
           schema: { type: "string" },
           description:
-            "Display name for the document, percent-encoded with `encodeURIComponent` (an HTTP header value cannot carry a raw non-ASCII filename). The server decodes it strictly and returns 400 on a malformed encoding, then sanitises the decoded name (path separators, control characters and `..` collapsed, 255 chars max).",
+            "Display name for the file, percent-encoded with `encodeURIComponent` (an HTTP header value cannot carry a raw non-ASCII filename). The server decodes it strictly and returns 400 on a malformed encoding, then sanitises the decoded name (path separators, control characters and `..` collapsed, 255 chars max). A request carrying only the deprecated `X-Document-Name` is still accepted; this header wins when both are present.",
+        },
+        {
+          name: "X-Document-Name",
+          in: "header",
+          required: false,
+          deprecated: true,
+          schema: { type: "string" },
+          description:
+            "DEPRECATED — the pre-#1177 spelling of `X-File-Name`, identical encoding rules. Still accepted because the runtime image and the platform deploy independently: a container built before the rename sends this header and it carries the deliverable's only name. Never emitted by a current runtime.",
         },
         {
           name: "Content-Type",
           in: "header",
           required: true,
           schema: { type: "string" },
-          description: "MIME type of the document bytes.",
+          description: "MIME type of the file bytes.",
         },
         { name: "webhook-id", in: "header", required: true, schema: { type: "string" } },
         { name: "webhook-timestamp", in: "header", required: true, schema: { type: "string" } },
@@ -1633,7 +1655,7 @@ export const runsPaths = {
       security: [],
       responses: {
         "201": {
-          description: "Document stored",
+          description: "File stored",
           content: {
             "application/json": {
               schema: {
@@ -1641,7 +1663,7 @@ export const runsPaths = {
                 required: ["id", "uri", "name", "mime", "size", "sha256"],
                 properties: {
                   id: { type: "string" },
-                  uri: { type: "string", description: "`document://<id>` durable URI." },
+                  uri: { type: "string", description: "`appfile://<id>` durable URI." },
                   name: { type: "string" },
                   mime: { type: "string" },
                   size: { type: "integer" },
@@ -1653,7 +1675,7 @@ export const runsPaths = {
         },
         "200": {
           description:
-            "Idempotent replay — an identical (run, sha256, name) document already existed; the existing document is returned.",
+            "Idempotent replay — an identical (run, sha256, name) file already existed; the existing file is returned.",
           content: {
             "application/json": {
               schema: {
@@ -1673,7 +1695,7 @@ export const runsPaths = {
         },
         "400": {
           description:
-            "X-Document-Name missing or not a valid percent-encoded filename / Content-Type header missing / empty body",
+            "X-File-Name missing or not a valid percent-encoded filename / Content-Type header missing / empty body",
         },
         "401": { description: "Signature verification failed" },
         "403": { description: "storage_limit_exceeded" },
@@ -1684,30 +1706,30 @@ export const runsPaths = {
             "`webhook-id` was already used for this run. Because the HMAC is verified over an " +
             "EMPTY body, one captured header set would otherwise authenticate an unbounded " +
             "number of DIFFERENT bodies inside the timestamp tolerance (distinct bytes defeat " +
-            "the (run, sha256, name) dedup), each spending the org quota and the run's document " +
+            "the (run, sha256, name) dedup), each spending the org quota and the run's file " +
             "budget. The id is therefore single-use for `REMOTE_RUN_REPLAY_WINDOW_SECONDS`. " +
             "The runtime signs a fresh `webhook-id` on every attempt, so retries are unaffected.",
         },
         "410": { description: "run_sink_closed | run_sink_expired" },
         "413": {
           description:
-            "`payload_too_large` — the document exceeds the per-file cap " +
+            "`payload_too_large` — the file exceeds the per-file cap " +
             "(`DOCUMENT_MAX_FILE_BYTES`) or the run's total output budget; the stream is cut " +
-            "mid-flight and any partial object deleted. Or `document_count_exceeded` — the run " +
-            "already holds `RUN_MAX_DOCUMENTS` documents. Distinct codes so a client can tell " +
+            "mid-flight and any partial object deleted. Or `file_count_exceeded` — the run " +
+            "already holds `RUN_MAX_DOCUMENTS` files. Distinct codes so a client can tell " +
             '"one file too big" from "too many files".',
         },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
   },
-  "/api/runs/{runId}/documents/{name}": {
+  "/api/runs/{runId}/files/{name}": {
     get: {
-      operationId: "fetchRunDocument",
+      operationId: "fetchRunFile",
       tags: ["Runs"],
-      summary: "Fetch a single run input document (HMAC)",
+      summary: "Fetch a single run input file (HMAC)",
       description:
-        "Fetched by the agent runtime for each entry in the documents manifest. The bytes are streamed straight from storage so neither the platform nor the agent buffers the whole document; the agent streams the response body to `documents/{name}` on disk. Same Standard Webhooks HMAC auth as the workspace route. A 404 on a document the manifest listed is a fatal provisioning fault.",
+        "Fetched by the agent runtime for each entry in the files manifest. The bytes are streamed straight from storage so neither the platform nor the agent buffers the whole file; the agent streams the response body to `files/{name}` on disk. Same Standard Webhooks HMAC auth as the workspace route. A 404 on a file the manifest listed is a fatal provisioning fault.",
       parameters: [
         { name: "runId", in: "path", required: true, schema: { type: "string" } },
         { name: "name", in: "path", required: true, schema: { type: "string" } },
@@ -1718,7 +1740,7 @@ export const runsPaths = {
       security: [],
       responses: {
         "200": {
-          description: "Document bytes",
+          description: "File bytes",
           content: {
             "application/octet-stream": {
               schema: { type: "string", format: "binary" },
@@ -1726,7 +1748,7 @@ export const runsPaths = {
           },
         },
         "401": { description: "Signature verification failed" },
-        "404": { description: "run_not_found | document not found" },
+        "404": { description: "run_not_found | file not found" },
         "410": { description: "run_sink_closed | run_sink_expired" },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
@@ -1784,3 +1806,41 @@ export const runsPaths = {
     },
   },
 } as const;
+
+/**
+ * Deprecated pre-#1177 `/api/runs/{runId}/documents…` aliases of the three
+ * run-scoped file endpoints. Same handlers, same HMAC — see the DEPRECATED
+ * ALIASES note in `routes/files.ts` for why they are registered AND documented
+ * rather than rewritten. Derived from the canonical entries so they cannot
+ * drift.
+ */
+const DEPRECATED_RUN_FILE_PATHS = [
+  "/api/runs/{runId}/files",
+  "/api/runs/{runId}/files/{name}",
+] as const;
+
+const deprecatedRunFilePaths = Object.fromEntries(
+  DEPRECATED_RUN_FILE_PATHS.map((canonicalPath) => {
+    const operations = canonicalRunsPaths[canonicalPath] as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const [method, op] of Object.entries(operations)) {
+      const operation = op as { operationId: string; summary?: string; description?: string };
+      out[method] = {
+        ...operation,
+        operationId: `${operation.operationId}Deprecated`,
+        deprecated: true,
+        summary: `${operation.summary ?? operation.operationId} (deprecated)`,
+        description:
+          `DEPRECATED — use \`${canonicalPath}\`. Pre-#1177 spelling of the same operation, ` +
+          `served by the same handler; a runtime image older than the platform still calls ` +
+          `it.\n\n${operation.description ?? ""}`,
+      };
+    }
+    return [canonicalPath.replace("/files", "/documents"), out];
+  }),
+);
+
+export const runsPaths = {
+  ...canonicalRunsPaths,
+  ...deprecatedRunFilePaths,
+};

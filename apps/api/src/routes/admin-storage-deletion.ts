@@ -64,7 +64,7 @@ const listQuerySchema = z.object({
   status: z.enum(["pending", "dead", "completed"]).default("pending"),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   // Stripe-style cursor: the id of the last row of the previous page, exactly
-  // as `/api/end-users` and the document gallery take it.
+  // as `/api/end-users` and the file gallery take it.
   startingAfter: z.string().optional(),
 });
 

@@ -14,6 +14,7 @@
  * field does not match the cookie.
  */
 
+import { canonicalPermission } from "@appstrate/core/permissions";
 import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
 import type { ResolvedAppBranding } from "../services/branding.ts";
@@ -32,7 +33,7 @@ export const SCOPE_DESCRIPTIONS_FR: Record<string, string> = {
   "agents:run": "Lancer des agents pour vous",
   "runs:read": "Consulter votre historique d'exécutions",
   "runs:cancel": "Annuler vos exécutions en cours",
-  "documents:read": "Consulter les documents produits par vos exécutions",
+  "files:read": "Consulter les fichiers produits par vos exécutions",
   "integrations:read": "Lister vos intégrations et connexions",
   "integrations:connect": "Ajouter des connexions en votre nom",
   "integrations:disconnect": "Retirer vos connexions",
@@ -56,7 +57,10 @@ export const SCOPE_DESCRIPTIONS_FR: Record<string, string> = {
  * for the dashboard's `oauthClients.scopeLabels.*` locale keys).
  */
 function describeScope(scope: string): string {
-  return SCOPE_DESCRIPTIONS_FR[scope] ?? scope;
+  // A client registered before #1177 still REQUESTS `documents:read`; the map is
+  // keyed on the canonical spelling only, so canonicalize before the lookup or
+  // the fallback shows the user a raw scope string to consent to.
+  return SCOPE_DESCRIPTIONS_FR[canonicalPermission(scope)] ?? scope;
 }
 
 interface ConsentPageProps {

@@ -34,11 +34,11 @@ const PROVISION_MAX_ATTEMPTS = 9;
 
 export interface ProvisionDeps {
   /** The run-scoped event sink URL (`…/api/runs/:id/events`). The workspace
-   *  and documents routes are derived by swapping the `/events` suffix. */
+   *  and files routes are derived by swapping the `/events` suffix. */
   sinkUrl: string;
   /** Run secret used to HMAC-sign each GET (Standard Webhooks). */
   sinkSecret: string;
-  /** Absolute workspace root the bundle + documents are written under. */
+  /** Absolute workspace root the bundle + files are written under. */
   workspace: string;
   /**
    * Fatal-error escalation. In production this posts an `appstrate.error`
@@ -124,73 +124,100 @@ export async function provisionWorkspace(deps: ProvisionDeps): Promise<void> {
   // The bundle is the `agent-package.afps` bytes (itself a ZIP the Pi runtime
   // reads). Buffer-then-write: the bundle is small + bounded, and passing the
   // fetch `Response` to `Bun.write` for streaming-consume busy-loops in the
-  // bundled runtime (see `provisionDocuments`).
+  // bundled runtime (see `provisionFiles`).
   await fs.mkdir(deps.workspace, { recursive: true });
   const bytes = new Uint8Array(await res.arrayBuffer());
   await Bun.write(path.join(deps.workspace, "agent-package.afps"), bytes);
 }
 
 /**
- * Self-provision the run's input documents, streaming each to
- * `workspace/documents/<name>`.
+ * Self-provision the run's input files, streaming each to
+ * `workspace/files/<name>`.
  *
- * Documents are delivered out-of-band from the bundle: large and variable,
+ * Files are delivered out-of-band from the bundle: large and variable,
  * they are fetched individually and streamed straight to disk, so the agent
  * never buffers the whole payload — peak memory stays bounded regardless of
  * upload size. The manifest enumerates them; a 404 on the manifest means the
- * run carries no documents (the common case) and is NOT a fault. A non-ok on a
- * document the manifest listed IS fatal, same reasoning as the bundle (#549).
+ * run carries no files (the common case) and is NOT a fault. A non-ok on a
+ * file the manifest listed IS fatal, same reasoning as the bundle (#549).
  */
-export async function provisionDocuments(deps: ProvisionDeps): Promise<void> {
-  const manifestUrl = deps.sinkUrl.replace(/\/events$/, "/documents");
+export async function provisionFiles(deps: ProvisionDeps): Promise<void> {
+  // PLATFORM SKEW: `/files` is the canonical path since issue #1177; a platform
+  // older than this image only serves `/documents`. A 404 is AMBIGUOUS there —
+  // it is also the legitimate "this run carries no input files" answer — so the
+  // legacy path is probed before concluding the run has none. Without the probe
+  // an older platform silently provisions zero files and the agent starts with
+  // an empty workspace, which is not an error anywhere.
+  let manifestUrl = deps.sinkUrl.replace(/\/events$/, "/files");
   let manifestRes: Response;
   try {
     manifestRes = await signedGetWithRetry(manifestUrl, deps);
+    if (manifestRes.status === 404) {
+      const legacyUrl = deps.sinkUrl.replace(/\/events$/, "/documents");
+      const legacyRes = await signedGetWithRetry(legacyUrl, deps);
+      if (legacyRes.ok) {
+        manifestUrl = legacyUrl;
+        manifestRes = legacyRes;
+      }
+    }
   } catch (err) {
-    return await deps.die(`Failed to fetch documents manifest: ${getErrorMessage(err)}`);
+    return await deps.die(`Failed to fetch files manifest: ${getErrorMessage(err)}`);
   }
-  if (manifestRes.status === 404) return; // run carries no input documents
+  if (manifestRes.status === 404) return; // run carries no input files
   if (!manifestRes.ok) {
-    return await deps.die(`Failed to fetch documents manifest: HTTP ${manifestRes.status}`);
+    return await deps.die(`Failed to fetch files manifest: HTTP ${manifestRes.status}`);
   }
 
   // The manifest carries a `name` (human display name) and a `workspace_name`
   // (the unique single-segment filename to write on disk); the platform
   // guarantees `workspace_name` is present and unique per run — its manifest
-  // reader rejects any entry without one — so two documents never overwrite
-  // each other here (see the platform's run-document-naming.ts). The runtime
+  // reader rejects any entry without one — so two files never overwrite
+  // each other here (see the platform's run-file-naming.ts). The runtime
   // still type-checks the field rather than trusting the JSON blindly.
+  // `documents` is the pre-#1177 key; a platform older than this image emits
+  // only that one.
   const manifest = (await manifestRes.json()) as {
+    files?: { workspace_name?: unknown }[];
     documents?: { workspace_name?: unknown }[];
   };
-  const names = (manifest.documents ?? [])
+  const names = (manifest.files ?? manifest.documents ?? [])
     .map((d) => d.workspace_name)
     .filter((n): n is string => typeof n === "string" && n.length > 0);
   if (names.length === 0) return;
 
-  const dir = path.join(deps.workspace, "documents");
+  // `files/` is the directory the platform prompt announces since issue #1177.
+  // `documents/` is symlinked onto it so a PLATFORM older than this image —
+  // whose prompt still says `./documents/` — points the agent at the same
+  // bytes. The symlink is best-effort: a filesystem that refuses it costs the
+  // legacy path, never the canonical one.
+  const dir = path.join(deps.workspace, "files");
   await fs.mkdir(dir, { recursive: true });
+  try {
+    await fs.symlink("files", path.join(deps.workspace, "documents"));
+  } catch {
+    // Already present, or unsupported — the canonical `files/` is what matters.
+  }
 
-  // Sequential: input-document sets are small (typically 1–few files), so
+  // Sequential: input-file sets are small (typically 1–few files), so
   // streaming each in turn bounds open connections and peak memory without a
   // concurrency primitive.
   for (const name of names) {
     // Defence-in-depth: the platform sanitises names to a single path segment,
     // but never write outside `dir` on a malformed manifest.
     if (path.basename(name) !== name || name === "." || name === "..") {
-      return await deps.die(`Refusing unsafe document name: ${name}`);
+      return await deps.die(`Refusing unsafe file name: ${name}`);
     }
     let docRes: Response;
     try {
       docRes = await signedGetWithRetry(`${manifestUrl}/${encodeURIComponent(name)}`, deps);
     } catch (err) {
-      return await deps.die(`Failed to fetch document ${name}: ${getErrorMessage(err)}`);
+      return await deps.die(`Failed to fetch file ${name}: ${getErrorMessage(err)}`);
     }
     if (!docRes.ok || !docRes.body) {
-      return await deps.die(`Failed to fetch document ${name}: HTTP ${docRes.status}`);
+      return await deps.die(`Failed to fetch file ${name}: HTTP ${docRes.status}`);
     }
     // Stream the response body to disk chunk-by-chunk — peak memory stays
-    // bounded regardless of document size (WORKSPACE_MAX_DOCS_BYTES allows up
+    // bounded regardless of file size (WORKSPACE_MAX_DOCS_BYTES allows up
     // to 256 MiB). We DO NOT use `Bun.write(path, docRes)` / `Bun.write(path,
     // docRes.body)`: handing the fetch `Response`/stream to `Bun.write` for
     // streaming-consume busy-loops at 100% CPU in the bundled runtime,
@@ -205,14 +232,14 @@ export async function provisionDocuments(deps: ProvisionDeps): Promise<void> {
         if (done) break;
         writer.write(value);
         // Apply backpressure so a fast upstream cannot queue unbounded chunks
-        // in the sink buffer — keeps peak memory flat for large documents.
+        // in the sink buffer — keeps peak memory flat for large files.
         await writer.flush();
       }
     } catch (err) {
       // A mid-stream read/write failure is fatal, same as a non-ok fetch: route
       // it through `die()` so the run gets an `appstrate.error` breadcrumb
       // rather than crashing out as an unhandled rejection.
-      return await deps.die(`Failed to stream document ${name}: ${getErrorMessage(err)}`);
+      return await deps.die(`Failed to stream file ${name}: ${getErrorMessage(err)}`);
     } finally {
       reader.releaseLock();
       await writer.end();

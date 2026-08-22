@@ -3,17 +3,17 @@
 // Shell wrapper for the chat module page — the UI itself lives in the
 // module package (`@appstrate/module-chat/ui`); this wrapper is the ONLY place
 // the shell imports the module, and it injects everything the module needs:
-// scoping headers, navigation, the document services (preview, authenticated
+// scoping headers, navigation, the file services (preview, authenticated
 // download, authenticated image preview, staged upload) and the translator.
 // Lazy-loaded behind `features.chat`.
 
 import { useCallback, useEffect, useReducer } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ChatPage, type OpenDocument } from "@appstrate/module-chat/ui";
+import { ChatPage, type OpenFile } from "@appstrate/module-chat/ui";
 import { buildScopingHeaders } from "../../lib/scoping-headers";
 import { useCollapsedGlobalSidebar } from "../../hooks/use-collapsed-global-sidebar";
-import { useDocumentDownload, useDocumentImageSrc } from "../../hooks/use-documents";
+import { useFileDownload, useFileImageSrc } from "../../hooks/use-files";
 import { useUploadClient } from "../../hooks/use-upload";
 import {
   INITIAL_CONVERSATION_SIDEBAR_STATE,
@@ -29,7 +29,7 @@ export function ChatModulePage() {
   const { conversationId } = useParams<{ conversationId?: string }>();
   const navigate = useNavigate();
   // Context starts closed on every viewport. Selecting a context tab or
-  // presenting any document (including the single file a run just produced)
+  // presenting any file (including the single file a run just produced)
   // expands it through the reducer's single action path.
   const [sidebarState, dispatchSidebar] = useReducer(
     conversationSidebarReducer,
@@ -66,10 +66,10 @@ export function ChatModulePage() {
   );
   // One presentation interface for both direct clicks and the automatic
   // presentation of a run's single produced file. There is intentionally no
-  // trigger/source policy here: selecting a document always opens the same
+  // trigger/source policy here: selecting a file always opens the same
   // Preview tab in the same sidebar.
-  const presentDocument = useCallback<OpenDocument>(
-    (document) => dispatchSidebar({ type: "show-document", document }),
+  const presentFile = useCallback<OpenFile>(
+    (file) => dispatchSidebar({ type: "show-file", file }),
     [],
   );
 
@@ -81,12 +81,12 @@ export function ChatModulePage() {
     window.addEventListener("popstate", onHistoryNavigation);
     return () => window.removeEventListener("popstate", onHistoryNavigation);
   }, []);
-  // Document services the module consumes instead of reimplementing: the typed
+  // File services the module consumes instead of reimplementing: the typed
   // download (reports failures with a toast) and the typed image preview.
-  const downloadDocument = useDocumentDownload();
-  const onDownloadDocument = useCallback(
-    (id: string, name: string) => void downloadDocument(id, name),
-    [downloadDocument],
+  const downloadFile = useFileDownload();
+  const onDownloadFile = useCallback(
+    (id: string, name: string) => void downloadFile(id, name),
+    [downloadFile],
   );
   // The very same uploader every SchemaForm file field uses — including its
   // refresh of the org storage gauge. The chat composer stages files through
@@ -107,12 +107,12 @@ export function ChatModulePage() {
           conversationId={conversationId ?? null}
           newChatKey={location.key}
           onConversationChange={onConversationChange}
-          onOpenDocument={presentDocument}
+          onOpenFile={presentFile}
           headerActions={
             <ConversationContextActions state={sidebarState} dispatch={dispatchSidebar} />
           }
-          downloadDocument={onDownloadDocument}
-          useDocumentImageSrc={useDocumentImageSrc}
+          downloadFile={onDownloadFile}
+          useFileImageSrc={useFileImageSrc}
           uploadFile={uploadFile}
           t={translate}
         />

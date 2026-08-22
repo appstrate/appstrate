@@ -7,7 +7,7 @@
  * it normalises and blocks IP-literal and known-internal hostnames, but does
  * NOT resolve DNS — so `https://evil.example/doc` whose A record points at
  * `169.254.169.254` or an RFC 1918 address passes it. For a fetch the platform
- * initiates against a client-controlled URL (the CIMD metadata-document fetch
+ * initiates against a client-controlled URL (the CIMD metadata-file fetch
  * is the only caller today), that residual rebinding-to-internal vector matters.
  *
  * The resolution layer itself lives in `@appstrate/core/ssrf`

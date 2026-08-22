@@ -107,7 +107,7 @@ export function planHttpDeliveryInjection(
  * Auth-type defaults for `delivery.http`. `valueFrom` names the credential
  * field to inject, using the **canonical snake_case storage keys** — the same
  * convention the OAuth2 strategy persists (`access_token`) and the AFPS spec
- * documents (`{{api_key}}`). Manifest `valueFrom` / template `{{var}}` refs
+ * files (`{{api_key}}`). Manifest `valueFrom` / template `{{var}}` refs
  * must match the stored field name exactly; there is no casing aliasing.
  *
  * Source: AFPS spec §4.1.3 (fields exposed implicitly by auth type).

@@ -166,7 +166,7 @@ describe("t() keys", () => {
  * failure is how a dead-key guard becomes decorative.
  */
 const DYNAMIC_KEY_PREFIXES = [
-  "filter.", // components/document-list-panel.tsx — t(`filter.${p}`)
+  "filter.", // components/file-list-panel.tsx — t(`filter.${p}`)
   "integration.auth.type.", // components/integration-connect/{inline-connect-button,integration-connection-picker}.tsx
   "integration.connect.fields.", // components/integration-connect/credential-fields.tsx
   "library.tab.", // pages/library-page.tsx — t(`library.tab.${tab}`)

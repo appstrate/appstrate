@@ -18,11 +18,11 @@ import { renderTemplate } from "../template/mustache.ts";
 /**
  * Upload surfaced to 1.2+ templates — a single file the agent can read
  * from the workspace filesystem. Shape matches what an agent template
- * typically renders when listing available documents.
+ * typically renders when listing available files.
  */
 export interface PromptViewUpload {
   name: string;
-  /** Relative path from the workspace root (e.g. `./documents/file.pdf`). */
+  /** Relative path from the workspace root (e.g. `./files/file.pdf`). */
   path: string;
   size: number;
   /** MIME type if known — e.g. `application/pdf`. */

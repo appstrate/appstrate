@@ -21,16 +21,11 @@ import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 import type { Actor } from "../lib/actor.ts";
 import { logger } from "../lib/logger.ts";
 import type { InlineRunPreflightResult } from "./inline-run-preflight.ts";
-import { collectMountedDocumentIds, type ParsedInput } from "./input-parser.ts";
+import { collectMountedFileIds, type ParsedInput } from "./input-parser.ts";
 import { prepareAndExecuteRun } from "./run-pipeline.ts";
 import { assertExplicitModelExists } from "./org-models.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import {
-  documentUri,
-  extractDocumentIdsFromText,
-  isDocumentUri,
-  parseDocumentUri,
-} from "@appstrate/core/document-uri";
+import { fileUri, extractFileIdsFromText, isFileUri, parseFileUri } from "@appstrate/core/file-uri";
 import { asJSONSchemaObject, type JSONSchemaObject } from "@appstrate/core/form";
 import { invalidRequest, validationFailed } from "../lib/errors.ts";
 
@@ -119,13 +114,13 @@ export function buildShadowLoadedPackage(
 }
 
 /**
- * Reject an inline run whose model-authored `prompt` references `document://`
+ * Reject an inline run whose model-authored `prompt` references `appfile://`
  * URIs the run cannot actually read.
  *
- * A run only receives a document when the manifest declares a file input field
- * AND the `document://` URI is passed through the top-level `input` in THAT
+ * A run only receives a file when the manifest declares a file input field
+ * AND the `appfile://` URI is passed through the top-level `input` in THAT
  * field — the platform then streams the file into the workspace under
- * `documents/`. A `document://` URI merely pasted into the sub-agent's prompt
+ * `documents/`. A `appfile://` URI merely pasted into the sub-agent's prompt
  * text — or dropped into a non-file input field — is inert: the runtime has no
  * way to fetch it, so the run launches against dead URIs and the sub-agent
  * silently sees nothing. The chat model has been observed doing exactly this.
@@ -133,77 +128,77 @@ export function buildShadowLoadedPackage(
  * fix, so the chat model self-corrects (its prompt already retries recoverable
  * field-validation errors) instead of shipping silent garbage.
  *
- * The covered set is therefore the mounted document ids only —
- * `collectMountedDocumentIds`, which walks the DECLARED file fields
+ * The covered set is therefore the mounted file ids only —
+ * `collectMountedFileIds`, which walks the DECLARED file fields
  * (`format:"uri"` + `contentMediaType`) via the same `collectFileRefs` logic the
- * consume path uses — not every `document://` string anywhere in the input JSON.
+ * consume path uses — not every `appfile://` string anywhere in the input JSON.
  * A URI in a plain string field counts as uncovered because it never mounts.
  *
- * `document://` only, by design: this runs AFTER `parseRequestInput`, which has
- * already rewritten any `upload://` input to a fresh `document://` id the model
+ * `appfile://` only, by design: this runs AFTER `parseRequestInput`, which has
+ * already rewritten any `upload://` input to a fresh `appfile://` id the model
  * never saw — so a symmetric `upload://` prompt-vs-input comparison would
  * false-positive on a correctly-declared upload field. There is also no
  * core-level canonical `upload://` text-scanner to reuse (the upload parser
  * lives in the apps/api uploads service), and the observed live failure is
- * `document://` URIs. Pure — exported for unit tests.
+ * `appfile://` URIs. Pure — exported for unit tests.
  */
-export function assertPromptDocumentsCoveredByInput(
+export function assertPromptFilesCoveredByInput(
   prompt: string,
   input: unknown,
   inputSchema: JSONSchemaObject | undefined,
 ): void {
-  const uncovered = uncoveredPromptDocumentIds(prompt, input, inputSchema);
+  const uncovered = uncoveredPromptFileIds(prompt, input, inputSchema);
   if (uncovered.length === 0) return;
-  throw promptDocumentsNotMountedError(uncovered);
+  throw promptFilesNotMountedError(uncovered);
 }
 
 /**
- * The `document://` ids a prompt names that the resolved input does NOT mount.
+ * The `appfile://` ids a prompt names that the resolved input does NOT mount.
  * Pure, no I/O — the detection primitive behind
- * {@link assertPromptDocumentsCoveredByInput}.
+ * {@link assertPromptFilesCoveredByInput}.
  */
-function uncoveredPromptDocumentIds(
+function uncoveredPromptFileIds(
   prompt: string,
   input: unknown,
   inputSchema: JSONSchemaObject | undefined,
 ): string[] {
-  const promptIds = extractDocumentIdsFromText(prompt);
+  const promptIds = extractFileIdsFromText(prompt);
   if (promptIds.length === 0) return [];
-  const covered = collectMountedDocumentIds(inputSchema, input);
+  const covered = collectMountedFileIds(inputSchema, input);
   return promptIds.filter((id) => !covered.has(id));
 }
 
-/** The recoverable 400 for prompt-named documents the run cannot be given. */
-function promptDocumentsNotMountedError(documentIds: readonly string[]): Error {
+/** The recoverable 400 for prompt-named files the run cannot be given. */
+function promptFilesNotMountedError(fileIds: readonly string[]): Error {
   return validationFailed([
     {
       field: "prompt",
-      code: "document_uri_in_prompt",
-      title: "Document URI In Prompt",
+      code: "file_uri_in_prompt",
+      title: "File URI In Prompt",
       message:
-        "The run prompt references document:// URIs the caller cannot read, so they cannot be " +
-        "mounted into the run. Pass only document:// URIs you have access to — either in " +
-        "`context_documents` or through a file input field declared in manifest.input.schema " +
+        "The run prompt references appfile:// URIs the caller cannot read, so they cannot be " +
+        "mounted into the run. Pass only appfile:// URIs you have access to — either in " +
+        "`context_files` or through a file input field declared in manifest.input.schema " +
         '({"type":"string","format":"uri","contentMediaType":"<mime>"}). Unresolvable: ' +
-        documentIds.map(documentUri).join(", "),
+        fileIds.map(fileUri).join(", "),
     },
   ]);
 }
 
 // ---------------------------------------------------------------------------
-// Reserved context-documents field (fan-in by reference)
+// Reserved context-files field (fan-in by reference)
 // ---------------------------------------------------------------------------
 
 /**
  * Reserved input-field name the platform synthesizes on an INLINE manifest to
- * mount caller-named `document://` URIs into the run's `documents/` directory.
+ * mount caller-named `appfile://` URIs into the run's `files/` directory.
  *
  * Reserved means: a caller-supplied manifest (or input) that already declares it
  * is rejected with a 400 rather than silently overwritten — the platform owns
  * this name. Inline only: a cataloged agent's `input.schema` is a versioned
  * contract and is never rewritten.
  */
-export const CONTEXT_DOCUMENTS_FIELD = "_context_documents";
+export const CONTEXT_FILES_FIELD = "_context_files";
 
 /**
  * The synthesized property. The wildcard media range on `contentMediaType` is
@@ -212,39 +207,38 @@ export const CONTEXT_DOCUMENTS_FIELD = "_context_documents";
  * never inspects the value, so the wildcard needs zero changes to the shared
  * predicate or to any of its consumers (SchemaForm, apps/api, afps-runtime). A
  * fan-in mixes json/md/csv/… so no single media type would do, and nothing
- * downstream compares a `document://` input's real MIME against the declared
+ * downstream compares an `appfile://` input's real MIME against the declared
  * `contentMediaType` (the magic-byte sniff covers `upload://` and `data:` only;
  * `validateInput` excludes file fields from AJV entirely).
  */
-function contextDocumentsProperty(): Record<string, unknown> {
+function contextFilesProperty(): Record<string, unknown> {
   return {
     type: "array",
-    description:
-      "Platform-managed: document:// URIs mounted read-only into ./documents/ for this run.",
+    description: "Platform-managed: appfile:// URIs mounted read-only into ./files/ for this run.",
     items: { type: "string", format: "uri", contentMediaType: "*/*" },
   };
 }
 
 /**
  * Reject a caller-supplied inline manifest / input that uses the reserved
- * {@link CONTEXT_DOCUMENTS_FIELD} name. Never overwrite caller data silently —
+ * {@link CONTEXT_FILES_FIELD} name. Never overwrite caller data silently —
  * a collision is a 400 the caller can act on by renaming their field.
  */
-export function assertContextDocumentsFieldAvailable(manifest: unknown, input: unknown): void {
+export function assertContextFilesFieldAvailable(manifest: unknown, input: unknown): void {
   const properties = manifestInputProperties(manifest);
-  if (properties && CONTEXT_DOCUMENTS_FIELD in properties) {
+  if (properties && CONTEXT_FILES_FIELD in properties) {
     throw invalidRequest(
-      `'${CONTEXT_DOCUMENTS_FIELD}' is a reserved input field name — rename the property in ` +
-        "manifest.input.schema and pass your document:// URIs in `context_documents` instead.",
-      `manifest.input.schema.properties.${CONTEXT_DOCUMENTS_FIELD}`,
+      `'${CONTEXT_FILES_FIELD}' is a reserved input field name — rename the property in ` +
+        "manifest.input.schema and pass your appfile:// URIs in `context_files` instead.",
+      `manifest.input.schema.properties.${CONTEXT_FILES_FIELD}`,
     );
   }
   if (input && typeof input === "object" && !Array.isArray(input)) {
-    if (CONTEXT_DOCUMENTS_FIELD in (input as Record<string, unknown>)) {
+    if (CONTEXT_FILES_FIELD in (input as Record<string, unknown>)) {
       throw invalidRequest(
-        `'${CONTEXT_DOCUMENTS_FIELD}' is a reserved input field name — pass your document:// ` +
-          "URIs in the top-level `context_documents` argument instead.",
-        `input.${CONTEXT_DOCUMENTS_FIELD}`,
+        `'${CONTEXT_FILES_FIELD}' is a reserved input field name — pass your appfile:// ` +
+          "URIs in the top-level `context_files` argument instead.",
+        `input.${CONTEXT_FILES_FIELD}`,
       );
     }
   }
@@ -267,8 +261,8 @@ function manifestInputProperties(manifest: unknown): Record<string, unknown> | u
     : undefined;
 }
 
-/** Result of {@link injectContextDocuments}. */
-interface ContextDocumentsInjection {
+/** Result of {@link injectContextFiles}. */
+interface ContextFilesInjection {
   /** Manifest with the reserved field declared. Unchanged when there is nothing to mount. */
   manifest: AgentManifest;
   /**
@@ -279,31 +273,31 @@ interface ContextDocumentsInjection {
 }
 
 /**
- * THE single synthesis point for context documents (B2): the caller's explicit
- * `context_documents` argument reduces to one list of `document://` URIs, so
+ * THE single synthesis point for context files (B2): the caller's explicit
+ * `context_files` argument reduces to one list of `appfile://` URIs, so
  * there is exactly one place that knows the field shape.
  *
  * Declaring the field is all the work: from here the URIs travel the NORMAL
- * file-ref path (`collectFileRefs` → `getDocumentForActor` ACL → byte/count caps
- * → stream into `documents/` → `document_links`), and the platform prompt
- * announces them like any other input document. Nothing is mounted by a side
+ * file-ref path (`collectFileRefs` → `getFileForActor` ACL → byte/count caps
+ * → stream into `documents/` → `file_links`), and the platform prompt
+ * announces them like any other input file. Nothing is mounted by a side
  * path, so nothing can be mounted unannounced or unchecked.
  *
  * Pure: returns a shallow-copied manifest, never mutates the caller's.
  */
-export function injectContextDocuments(
+export function injectContextFiles(
   manifest: AgentManifest,
   uris: readonly string[],
-): ContextDocumentsInjection {
-  // Dedupe by document id — the same document reachable through both entry
+): ContextFilesInjection {
+  // Dedupe by file id — the same file reachable through both entry
   // paths must be streamed (and counted against the caps) exactly once.
   const seen = new Set<string>();
   const unique: string[] = [];
   for (const uri of uris) {
-    const id = parseDocumentUri(uri);
+    const id = parseFileUri(uri);
     if (!id || seen.has(id)) continue;
     seen.add(id);
-    unique.push(documentUri(id));
+    unique.push(fileUri(id));
   }
   if (unique.length === 0) return { manifest, inputPatch: undefined };
 
@@ -316,34 +310,31 @@ export function injectContextDocuments(
       schema: {
         ...schema,
         type: "object",
-        properties: { ...properties, [CONTEXT_DOCUMENTS_FIELD]: contextDocumentsProperty() },
+        properties: { ...properties, [CONTEXT_FILES_FIELD]: contextFilesProperty() },
       },
     },
   } as AgentManifest;
 
-  return { manifest: nextManifest, inputPatch: { [CONTEXT_DOCUMENTS_FIELD]: unique } };
+  return { manifest: nextManifest, inputPatch: { [CONTEXT_FILES_FIELD]: unique } };
 }
 
 /**
- * Normalize the caller's `context_documents` argument into `document://` URIs.
- * Rejects anything that is not a `document://` URI with a 400 naming the
+ * Normalize the caller's `context_files` argument into `appfile://` URIs.
+ * Rejects anything that is not an `appfile://` URI with a 400 naming the
  * offending entry — an `upload://`/`https://` value would otherwise be mounted
- * under a contract that only promises durable, ACL-checked documents.
+ * under a contract that only promises durable, ACL-checked files.
  */
-export function normalizeContextDocumentUris(value: unknown): string[] {
+export function normalizeContextFileUris(value: unknown): string[] {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) {
-    throw invalidRequest(
-      "`context_documents` must be an array of document:// URIs",
-      "context_documents",
-    );
+    throw invalidRequest("`context_files` must be an array of appfile:// URIs", "context_files");
   }
   return value.map((entry) => {
-    if (!isDocumentUri(entry)) {
+    if (!isFileUri(entry)) {
       throw invalidRequest(
-        "`context_documents` entries must be document:// URIs (typically taken from a previous " +
-          `run's documents result) — got '${String(entry)}'`,
-        "context_documents",
+        "`context_files` entries must be appfile:// URIs (typically taken from a previous " +
+          `run's files result) — got '${String(entry)}'`,
+        "context_files",
       );
     }
     return entry;
@@ -355,7 +346,7 @@ export function normalizeContextDocumentUris(value: unknown): string[] {
  * the pipeline. The route owns the earlier stages — `runInlinePreflight`
  * (manifest shape, input, readiness) then `parseRequestInput` (file fields
  * resolved through the SAME parser as `POST /agents/:scope/:name/run`:
- * `upload://` / `document://` / inline `data:` URIs are ACL-checked, capped,
+ * `upload://` / `appfile://` / inline `data:` URIs are ACL-checked, capped,
  * and streamed into the pre-minted `runId`'s workspace) — so inline and
  * cataloged runs share one input contract.
  *
@@ -367,9 +358,9 @@ export async function triggerInlineRun(params: {
   orgId: string;
   applicationId: string;
   actor: Actor | null;
-  /** Pre-minted run id — input documents already live in its workspace namespace. */
+  /** Pre-minted run id — input files already live in its workspace namespace. */
   runId: string;
-  /** Preflight result the route computed BEFORE streaming any input document. */
+  /** Preflight result the route computed BEFORE streaming any input file. */
   preflight: InlineRunPreflightResult;
   /** Parsed run input (file fields resolved) from `parseRequestInput`. */
   parsed: ParsedInput;
@@ -386,13 +377,13 @@ export async function triggerInlineRun(params: {
   const effectiveInput = parsed.input ?? null;
 
   // Reject BEFORE any durable side effect (shadow row, pipeline) when the
-  // model-authored prompt names document:// URIs that the resolved input does
+  // model-authored prompt names appfile:// URIs that the resolved input does
   // not mount — a recoverable 400 the chat model can act on. The manifest's
-  // input schema tells the guard which fields actually mount a document.
+  // input schema tells the guard which fields actually mount a file.
   const inputSchema = manifest.input?.schema
     ? asJSONSchemaObject(manifest.input.schema)
     : undefined;
-  assertPromptDocumentsCoveredByInput(prompt, effectiveInput, inputSchema);
+  assertPromptFilesCoveredByInput(prompt, effectiveInput, inputSchema);
 
   // Reject an unknown/malformed explicit `modelId` with a clean 404 before we
   // mint a shadow package — avoids both a leaked shadow row and the downstream
@@ -412,14 +403,14 @@ export async function triggerInlineRun(params: {
       orgId,
       actor,
       input: effectiveInput,
-      // File metadata for prompt context — the document bytes were already
+      // File metadata for prompt context — the file bytes were already
       // streamed into the run workspace by `parseRequestInput`.
       files: parsed.uploadedFiles,
-      // Staged uploads to materialize into durable `documents` rows after the
-      // run row exists (input already rewritten to `document://` ids).
-      pendingDocuments: parsed.pendingDocuments,
-      // `document://` inputs to protect via `document_links` (chaining).
-      consumedDocumentIds: parsed.consumedDocumentIds,
+      // Staged uploads to materialize into durable `files` rows after the
+      // run row exists (input already rewritten to `appfile://` ids).
+      pendingFiles: parsed.pendingFiles,
+      // `appfile://` inputs to protect via `file_links` (chaining).
+      consumedFileIds: parsed.consumedFileIds,
       modelId: modelIdOverride,
       generationConfigOverride: parsed.generationConfigOverride ?? null,
       proxyId: proxyIdOverride,

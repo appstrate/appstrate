@@ -113,7 +113,7 @@ function list(values: string[]): string {
  * `drizzle-orm` is not resolvable from `scripts/` (it is a dependency of
  * `packages/db`, not of the repo root), so this script cannot build `where`
  * clauses of its own. Every table below is operator-scale — the same trade-off
- * `scripts/storage-orphans.ts` documents for its known-set: fine for a one-shot
+ * `scripts/storage-orphans.ts` files for its known-set: fine for a one-shot
  * run, not a hot path.
  */
 async function readSnapshot() {

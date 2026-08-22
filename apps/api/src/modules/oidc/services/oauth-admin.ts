@@ -45,6 +45,7 @@ import { oauthClient } from "@appstrate/db/schema";
 import { prefixedId } from "../../../lib/ids.ts";
 import { logger } from "../../../lib/logger.ts";
 import { getAppstrateScopeSet, OIDC_IDENTITY_SCOPES } from "../auth/scopes.ts";
+import { canonicalPermission } from "@appstrate/core/permissions";
 import { getModuleEndUserAllowedScopes } from "@appstrate/core/permissions";
 import { isValidRedirectUri } from "./redirect-uri.ts";
 
@@ -91,8 +92,12 @@ export class OAuthAdminValidationError extends Error {
 function assertValidScopes(scopes: readonly string[] | undefined): void {
   if (!scopes || scopes.length === 0) return;
   // OIDC owns its scope vocabulary directly (identity scopes + OIDC_ALLOWED_SCOPES).
+  // Retired spellings are canonicalized first: a client registered before #1177
+  // re-registering with `documents:read` must not be rejected for asking for a
+  // scope it already holds. Migration 0043 rewrites the stored strings; this
+  // covers the request side.
   const allowed = getAppstrateScopeSet();
-  const invalid = scopes.filter((s) => !allowed.has(s));
+  const invalid = scopes.filter((s) => !allowed.has(canonicalPermission(s)));
   if (invalid.length > 0) {
     throw new OAuthAdminValidationError(
       "scopes",

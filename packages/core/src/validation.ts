@@ -14,7 +14,7 @@ import {
 } from "@afps-spec/schema";
 import { integrationManifestSchema, type IntegrationManifest } from "./integration.ts";
 import { mcpServerManifestSchema, type McpServerManifest } from "./mcp-server.ts";
-import { SELECTABLE_RUNTIME_TOOLS, isSelectableRuntimeTool } from "./runtime-tools-catalog.ts";
+import { ACCEPTED_RUNTIME_TOOL_IDS, canonicalizeRuntimeToolIds } from "./runtime-tools-catalog.ts";
 import { findRetiredDependencyKeys } from "./dependencies.ts";
 
 export { integrationManifestSchema, type IntegrationManifest };
@@ -293,7 +293,16 @@ const agentManifestObjectSchema = afpsAgentManifestObjectSchema.extend({
   // `_meta`, because it is woven through the run pipeline (catalog
   // validation, prompt builder, sidecar tool registration) and namespacing
   // it would be disproportionate.
-  runtime_tools: z.array(z.enum(SELECTABLE_RUNTIME_TOOLS)).optional(),
+  // The enum is {@link ACCEPTED_RUNTIME_TOOL_IDS} (canonical ids PLUS the
+  // retired spellings), not the canonical list: `runtime_tools` is persisted
+  // inside manifests — published ZIPs included, which are immutable by
+  // construction — so a stored legacy id must PARSE, or every agent that
+  // selected the tool under its old name becomes unvalidatable. Resolving the
+  // legacy id to its canonical form is not done here (a Zod `.transform()`
+  // makes the field unrepresentable in the generated AFPS JSON Schema, erasing
+  // the enum): `validateManifest` canonicalizes structurally before parsing,
+  // so `manifest.runtime_tools` is always canonical on the way out.
+  runtime_tools: z.array(z.enum(ACCEPTED_RUNTIME_TOOL_IDS)).optional(),
 });
 
 /**
@@ -438,8 +447,17 @@ function parseWithSchema(
 }
 
 /**
- * Strip the `runtime_tools` entries the platform no longer knows how to build
- * from an ALREADY-STORED agent manifest.
+ * Canonicalize an ALREADY-STORED agent manifest's `runtime_tools`: resolve the
+ * retired spellings the platform still understands, and strip the entries it
+ * no longer knows how to build at all.
+ *
+ * **Aliasing comes first, and it is what makes a rename safe.** A tool that was
+ * RENAMED (`publish_document` → `publish_file`, #1177) is not retired: dropping
+ * it would silently strip a working tool from every agent that selected it
+ * under the old name, with nothing in any log. {@link LEGACY_RUNTIME_TOOL_ALIASES}
+ * maps it forward instead, and a manifest holding BOTH spellings collapses to
+ * one entry rather than registering the tool twice. Only an id that resolves to
+ * nothing — a tool removed outright, or an author's typo — is dropped.
  *
  * The runtime-tool set evolves, and a removal is not retroactive: manifests
  * persisted before it (DB drafts, and published ZIPs which are immutable by
@@ -487,15 +505,10 @@ export function dropRetiredRuntimeTools(manifest: Record<string, unknown>): {
   if (manifest.type !== "agent") return { manifest, dropped: [] };
   const raw = manifest.runtime_tools;
   if (!Array.isArray(raw)) return { manifest, dropped: [] };
-  const kept: unknown[] = [];
-  const dropped: string[] = [];
-  for (const entry of raw) {
-    if (isSelectableRuntimeTool(entry)) kept.push(entry);
-    else dropped.push(String(entry));
-  }
-  if (dropped.length === 0) return { manifest, dropped: [] };
+  const { ids, dropped, changed } = canonicalizeRuntimeToolIds(raw);
+  if (!changed) return { manifest, dropped: [] };
   const next = { ...manifest };
-  if (kept.length > 0) next.runtime_tools = kept;
+  if (ids.length > 0) next.runtime_tools = ids;
   else delete next.runtime_tools;
   return { manifest: next, dropped };
 }
@@ -599,12 +612,17 @@ export function validateManifest(
   // all root fields. Dispatch purely on the root `type` discriminator.
   if (type === "mcp-server") return parseWithSchema(mcpServerManifestSchema, raw);
   if (type === "agent") {
-    if (options?.retiredRuntimeTools !== "drop") {
-      // Author direction (default): the `runtime_tools` enum rejects, so a
-      // typo or a retired id surfaces as a field error the editor can render.
-      return parseWithSchema(agentManifestSchema, raw);
-    }
     const { manifest, dropped } = dropRetiredRuntimeTools(obj);
+    if (options?.retiredRuntimeTools !== "drop") {
+      // Author direction (default): an id that resolves to NOTHING must surface
+      // as a field error the editor can render, so the raw manifest is handed
+      // to Zod and the `runtime_tools` enum rejects it. A merely RENAMED id
+      // resolved cleanly above (`dropped` is empty), so the canonicalized
+      // manifest is what gets parsed and persisted — an author saving a
+      // manifest that still spells the tool the old way writes the new spelling.
+      if (dropped.length > 0) return parseWithSchema(agentManifestSchema, raw);
+      return parseWithSchema(agentManifestSchema, manifest);
+    }
     return parseWithSchema(agentManifestSchema, manifest, dropped);
   }
   if (type === "skill") return parseWithSchema(skillManifestSchema, raw);

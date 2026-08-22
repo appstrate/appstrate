@@ -25,7 +25,7 @@
  * ## Guard 2 — `{ type: "application/octet-stream" }`
  *
  * The bytes are author-controlled and the server may echo an uploader-supplied
- * MIME (`/api/documents/{id}/content` serves the stored `row.mime`, which can
+ * MIME (`/api/files/{id}/content` serves the stored `row.mime`, which can
  * be `text/html`). A `blob:` URL inherits the platform origin, so the type the
  * blob carries is what decides whether the browser would ever INTERPRET those
  * bytes as markup on our origin. Re-wrapping pins an inert type at the

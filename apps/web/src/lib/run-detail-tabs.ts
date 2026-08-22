@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-export const RUN_DETAIL_TABS = ["result", "logs", "memory", "documents", "info"] as const;
+export const RUN_DETAIL_TABS = ["result", "logs", "memory", "files", "info"] as const;
 
 export type RunDetailTab = (typeof RUN_DETAIL_TABS)[number];
 
@@ -8,9 +8,10 @@ export type RunDetailTab = (typeof RUN_DETAIL_TABS)[number];
  * Tab hashes that no longer exist but are still out there — in bookmarks, in
  * back-history, in a link someone pasted — mapped to the pane that replaced
  * them. `deliverable` was the run's single featured output; the file list now
- * features it (#1177), so that is where an old deep link lands.
+ * features it (#1177), so that is where an old deep link lands. `documents` is
+ * that same list under its pre-#1177 name.
  */
-const RETIRED_TAB_ALIASES = { deliverable: "documents" } as const satisfies Record<
+const RETIRED_TAB_ALIASES = { deliverable: "files", documents: "files" } as const satisfies Record<
   string,
   RunDetailTab
 >;
@@ -36,17 +37,17 @@ export interface RunTabAvailability {
    * file list leads: one file is a result the page should show, several are a
    * list the user picks from.
    */
-  hasFeaturedDocument: boolean;
+  hasFeaturedFile: boolean;
   hasResult: boolean;
   hasMemory: boolean;
 }
 
 /** Select the most useful page when a run is opened without an explicit hash. */
 export function initialRunDetailTab({
-  hasFeaturedDocument,
+  hasFeaturedFile,
   hasResult,
 }: RunTabAvailability): RunDetailTab {
-  if (hasFeaturedDocument) return "documents";
+  if (hasFeaturedFile) return "files";
   if (hasResult) return "result";
   return "logs";
 }
@@ -57,7 +58,7 @@ export function initialRunDetailTab({
  * content available, the bookmarked choice becomes visible automatically.
  *
  * A retired hash is redirected to its successor rather than clamped to the
- * default: `documents` is rendered unconditionally, so the redirect always
+ * default: `files` is rendered unconditionally, so the redirect always
  * lands on a real pane.
  */
 export function effectiveRunDetailTab(

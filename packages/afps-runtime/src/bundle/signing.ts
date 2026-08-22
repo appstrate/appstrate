@@ -4,7 +4,7 @@
 /**
  * AFPS bundle signing — Ed25519 detached signatures (Phase v1).
  *
- * Signature document layout (written as `signature.sig` at the bundle
+ * Signature file layout (written as `signature.sig` at the bundle
  * root, alongside `manifest.json`):
  *
  * ```json
@@ -147,7 +147,7 @@ export function keyIdFromPublicKey(publicKey: string | Uint8Array): string {
 }
 
 /**
- * Produce a detached signature document for the given bundle bytes.
+ * Produce a detached signature file for the given bundle bytes.
  *
  * The caller is responsible for writing the returned JSON back into the
  * bundle as `signature.sig` (repackaging the ZIP) — the runtime keeps
@@ -183,7 +183,7 @@ export function signBundle(bundleBytes: Uint8Array, opts: SignBundleOptions): Bu
  * `signature.sig` were absent*: it strips that file from the root
  * package, recomputes the root package's integrity, and recomputes
  * `bundle.integrity` over the adjusted packages map. The digest itself
- * is the UTF-8 encoding of the canonical JSON document:
+ * is the UTF-8 encoding of the canonical JSON file:
  *
  * ```
  * { "bundleFormatVersion": "1.0", "root": "@scope/name@1.0.0",
@@ -247,7 +247,7 @@ export function signChildKey(opts: SignChildKeyOptions): TrustChainEntry {
 }
 
 /**
- * Verify a detached signature document against bundle bytes and a
+ * Verify a detached signature file against bundle bytes and a
  * trust root. Returns a structured result — callers choose their own
  * failure policy (fail-closed, log-and-continue, etc.).
  */
@@ -282,7 +282,7 @@ export function verifyBundleSignature(
 /**
  * Read and parse `signature.sig` from a bundle's root package. Returns
  * `null` when no signature is present or the file is not a valid
- * signature document (callers who require signing should treat `null`
+ * signature file (callers who require signing should treat `null`
  * as "unsigned" and apply their policy).
  */
 export function readBundleSignature(bundle: Bundle): BundleSignature | null {
@@ -305,7 +305,7 @@ function parseSignatureDoc(
   raw: unknown,
 ): { ok: true; doc: BundleSignature } | { ok: false; reason: "malformed"; detail: string } {
   if (typeof raw !== "object" || raw === null) {
-    return { ok: false, reason: "malformed", detail: "signature document must be a JSON object" };
+    return { ok: false, reason: "malformed", detail: "signature file must be a JSON object" };
   }
   const obj = raw as Record<string, unknown>;
   if (

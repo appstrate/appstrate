@@ -248,16 +248,16 @@ interface BundleImportAuditRecord {
   after: {
     type: string | null;
     version: string | null;
-    via: "import:bundle" | "import:document";
+    via: "import:bundle" | "import:file";
     root: boolean;
-    document_id?: string;
+    file_id?: string;
   };
 }
 
-/** Pure audit projection shared by HTTP and MCP document import callers. */
+/** Pure audit projection shared by HTTP and MCP file import callers. */
 export function bundleImportAuditRecords(
   result: ImportBundleResult,
-  source: { via: "import:bundle" } | { via: "import:document"; documentId: string },
+  source: { via: "import:bundle" } | { via: "import:file"; fileId: string },
 ): BundleImportAuditRecord[] {
   return result.imported.flatMap((entry) => {
     if (entry.status !== "inserted") return [];
@@ -270,7 +270,7 @@ export function bundleImportAuditRecords(
           version: identity?.version ?? null,
           via: source.via,
           root: entry.identity === `${result.root_package_id}@${result.root_version}`,
-          ...(source.via === "import:document" ? { document_id: source.documentId } : {}),
+          ...(source.via === "import:file" ? { file_id: source.fileId } : {}),
         },
       },
     ];
@@ -609,7 +609,7 @@ async function assertBundleAgentsExposeCallableTools(bundle: Bundle, orgId: stri
 }
 
 /**
- * Pure-read import preflight shared by HTTP upload and document-backed MCP
+ * Pure-read import preflight shared by HTTP upload and file-backed MCP
  * tools. It performs the exact parse, callable-tool and conflict checks the
  * mutation will use, but writes nothing.
  */

@@ -11,7 +11,7 @@
  *   2. PATCH /:packageId/connections/:connectionId metadata authorization —
  *      owner edit (200), admin toggling sharedWithOrg on a row they don't own
  *      (403, owner-consent rule), unrelated member (403), foreign-app row (404).
- *   3. assertOrgAdmin defense-in-depth on admin writes — documents the
+ *   3. assertOrgAdmin defense-in-depth on admin writes — files the
  *      reachable behavior of the role/scope intersection model.
  *   4. connect/oauth2 reconnect scope-union (incremental consent) — the
  *      returned authorize URL never shrinks below the connection's

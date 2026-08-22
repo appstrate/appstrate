@@ -61,7 +61,7 @@ describe("executionContextSchema", () => {
     // The context carries run STATE only — never sink URLs, credential
     // endpoints, or secrets. The schema declares no such fields, and Zod's
     // default object behaviour strips unknown keys rather than failing. This
-    // documents the constraint in code form: even if a caller stuffs a secret
+    // files the constraint in code form: even if a caller stuffs a secret
     // into a `context.json`, it does not round-trip through the parsed object.
     const parsed = executionContextSchema.parse({
       runId: "run_x",

@@ -44,7 +44,7 @@ function makeRun(overrides: Partial<EnrichedRun> = {}): EnrichedRun {
     packageId: "@acme/reporter",
     started_at: STARTED_AT,
     duration: 4200,
-    document_counts: { input: 2, output: 1 },
+    file_counts: { input: 2, output: 1 },
     proxy_label: "eu-proxy",
     user_name: "Alice",
     package_ephemeral: true,
@@ -76,9 +76,9 @@ describe("RunRow variant=list (default)", () => {
     expect(html).toContain(STARTED_AT_LABEL);
   });
 
-  it("renders the input and output document counters", () => {
-    expect(html).toContain("2 document(s) en entrée");
-    expect(html).toContain("1 document(s) en sortie");
+  it("renders the input and output file counters", () => {
+    expect(html).toContain("2 fichier(s) en entrée");
+    expect(html).toContain("1 fichier(s) en sortie");
   });
 
   it("stays a navigable link and grows no details trigger", () => {
@@ -95,8 +95,8 @@ describe("RunRow variant=detail", () => {
     expect(html).not.toContain("Inline");
     expect(html).not.toContain("Alice");
     expect(html).not.toContain(STARTED_AT_LABEL);
-    expect(html).not.toContain("2 document(s) en entrée");
-    expect(html).not.toContain("1 document(s) en sortie");
+    expect(html).not.toContain("2 fichier(s) en entrée");
+    expect(html).not.toContain("1 fichier(s) en sortie");
   });
 
   it("renders a static row instead of a link", () => {
@@ -192,8 +192,8 @@ describe("RunRowDetails (the panel body)", () => {
     expect(html).toContain(agentsFr["runs.inlineBadge"]);
   });
 
-  it("groups the document counters into a single line", () => {
-    // The Documents tab badge shows a total; only the in/out split lives here.
+  it("groups the file counters into a single line", () => {
+    // The Files tab badge shows a total; only the in/out split lives here.
     expect(html).toContain("2 en entrée · 1 en sortie");
   });
 
@@ -253,12 +253,12 @@ describe("RunRowDetails (the panel body)", () => {
       <RunRowDetails
         run={makeRun({
           package_ephemeral: false,
-          document_counts: { input: 0, output: 0 },
+          file_counts: { input: 0, output: 0 },
         })}
       />,
     );
     expect(bare).not.toContain(agentsFr["runs.inlineBadge"]);
-    expect(bare).not.toContain(agentsFr["run.tabDocuments"]);
+    expect(bare).not.toContain(agentsFr["run.tabFiles"]);
     // The token total is structural — a run that consumed nothing still shows 0.
     expect(bare).toContain(agentsFr["run.usageTokensTotal"]);
   });

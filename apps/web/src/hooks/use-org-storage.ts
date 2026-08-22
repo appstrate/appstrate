@@ -6,7 +6,7 @@ import { useOrg } from "./use-org";
 /**
  * Single source of truth for the org storage gauge. Wraps the org-detail fetch
  * (`GET /api/orgs/{orgId}`) and the used/limit/percent math so every page that
- * shows storage usage (billing, org-settings general, documents) reads the same
+ * shows storage usage (billing, org-settings general, files) reads the same
  * numbers with the same clamping.
  *
  * `limitBytes` = effective_limit_bytes ?? null (null = unlimited). `percent` is

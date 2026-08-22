@@ -51,19 +51,19 @@ describe("SYSTEM_PROMPT invariants", () => {
     expect(SYSTEM_PROMPT).toContain("complete strict `output.schema`");
   });
 
-  it("keeps the fan-in-by-reference rule (context_documents, never a copy)", () => {
-    expect(SYSTEM_PROMPT).toContain("context_documents");
+  it("keeps the fan-in-by-reference rule (context_files, never a copy)", () => {
+    expect(SYSTEM_PROMPT).toContain("context_files");
     expect(SYSTEM_PROMPT).toMatch(/NEVER paste a previous run's content/);
     // The reason is load-bearing: a rule with a reason survives paraphrase.
     expect(SYSTEM_PROMPT).toMatch(/retyped by a model/);
   });
 
-  it("reads document content directly before considering a run", () => {
-    expect(SYSTEM_PROMPT).toMatch(/call `read_document` first/);
+  it("reads file content directly before considering a run", () => {
+    expect(SYSTEM_PROMPT).toMatch(/call `read_file` first/);
     expect(SYSTEM_PROMPT).toMatch(/answer directly from that content/);
     expect(SYSTEM_PROMPT).toMatch(/do NOT launch a run merely to read or analyse it/);
     expect(SYSTEM_PROMPT).toMatch(/metadata only or binary\/blob data/);
-    expect(SYSTEM_PROMPT).toMatch(/When a run is justified.*`context_documents`/s);
+    expect(SYSTEM_PROMPT).toMatch(/When a run is justified.*`context_files`/s);
   });
 
   it("keeps the fan-out deliverable contract (file in outputs/ AND a short output)", () => {
@@ -104,8 +104,8 @@ describe("SYSTEM_PROMPT invariants", () => {
     expect(SYSTEM_PROMPT).toMatch(/administrator must activate/);
   });
 
-  it("drops the stale claim that a prompt-pasted document:// URI gives no access", () => {
-    // `context_documents` made this half-false;
+  it("drops the stale claim that a prompt-pasted appfile:// URI gives no access", () => {
+    // `context_files` made this half-false;
     // the paragraph now points at the cheap path instead of the boilerplate.
     expect(SYSTEM_PROMPT).not.toContain("does NOT give it access");
     expect(SYSTEM_PROMPT).not.toContain("does NOT give access");

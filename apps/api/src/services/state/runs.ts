@@ -31,15 +31,15 @@ import {
   llmUsage,
   notifications,
   organizations,
-  documents,
-  documentLinks,
+  files,
+  fileLinks,
   chatSessions,
   activeRunStatusValues,
   terminalRunStatusValues,
   type RunStatus,
   type PricingStatus,
 } from "@appstrate/db/schema";
-import { extractDocumentIds } from "@appstrate/core/document-uri";
+import { extractFileIds } from "@appstrate/core/file-uri";
 import { getEnv } from "@appstrate/env";
 import { logger } from "../../lib/logger.ts";
 import { listResponse } from "../../lib/list-response.ts";
@@ -49,7 +49,7 @@ import { type Actor, actorFilter } from "../../lib/actor.ts";
 import { runMetadataSchema, runLogDataSchema } from "../../lib/jsonb-schemas.ts";
 import { ApiError, conflict, invalidRequest } from "../../lib/errors.ts";
 import { getPlatformRunLimits } from "../run-limits.ts";
-import { detachOrDeleteContainedDocuments } from "../documents.ts";
+import { detachOrDeleteContainedFiles } from "../files.ts";
 import { normalizeScope } from "@appstrate/core/naming";
 import type { LlmUsageLedgerRow, ModelCost } from "@appstrate/core/module";
 import type { AppScope, OrgScope } from "../../lib/scope.ts";
@@ -129,7 +129,7 @@ import { toISO } from "../../lib/date-helpers.ts";
 /**
  * The `runs` columns an enriched read actually needs — every column the wire
  * DTO projects, plus `resolvedConnections` (projected into `connections_used`)
- * and `input` (scanned for `document://` ids).
+ * and `input` (scanned for `appfile://` ids).
  *
  * Named explicitly rather than passing the whole `runs` table because the row
  * is WIDER than the DTO: `modelCost`, `resolvedIntegrationVersions`,
@@ -198,19 +198,19 @@ function enrichedRunSelect(actor: Actor | null) {
     scheduleName: schedules.name,
     packageEphemeral: packages.ephemeral,
     unread: unreadForActor(actor),
-    // OUTPUT document count — correlated scalar subquery over `documents`,
-    // served by the `idx_documents_run` (run_id-leading) index so the list
+    // OUTPUT file count — correlated scalar subquery over `files`,
+    // served by the `idx_files_run` (run_id-leading) index so the list
     // read stays a single query with no N+1. Coerced to Number in the mapper
     // (postgres.js returns count() as a numeric string).
     //
     // MUST filter on `purpose`: a run's materialized INPUT uploads carry the
     // same `run_id`, so an unfiltered count reported a file-input run that
-    // published nothing as `input: 1, output: 1` — the very same document,
+    // published nothing as `input: 1, output: 1` — the very same file,
     // counted twice, straight to the user. Every other count site filters the
     // same way.
-    outputDocumentCount: sql<number>`(
-      select count(*) from ${documents}
-      where ${documents.runId} = ${runs.id} and ${documents.purpose} = 'agent_output'
+    outputFileCount: sql<number>`(
+      select count(*) from ${files}
+      where ${files.runId} = ${runs.id} and ${files.purpose} = 'agent_output'
     )`,
   };
 }
@@ -250,7 +250,7 @@ type EnrichedRunRow = {
   scheduleName: string | null;
   packageEphemeral: boolean | null;
   unread: boolean;
-  outputDocumentCount: number;
+  outputFileCount: number;
 };
 
 /**
@@ -354,12 +354,12 @@ function mapEnrichedRun(r: EnrichedRunRow): EnrichedRun {
     connections_used: projectConnectionsUsed(r.run.resolvedConnections),
     package_ephemeral: r.packageEphemeral ?? false,
     unread: r.unread,
-    // INPUT = distinct `document://` ids referenced in the run's persisted
-    // input JSON (extractDocumentIds dedupes + tolerates null); OUTPUT =
-    // documents produced by the run (subquery column above).
-    document_counts: {
-      input: extractDocumentIds(r.run.input).length,
-      output: Number(r.outputDocumentCount),
+    // INPUT = distinct `appfile://` ids referenced in the run's persisted
+    // input JSON (extractFileIds dedupes + tolerates null); OUTPUT =
+    // files produced by the run (subquery column above).
+    file_counts: {
+      input: extractFileIds(r.run.input).length,
+      output: Number(r.outputFileCount),
     },
   };
 }
@@ -461,12 +461,12 @@ interface CreateRunParams {
   actor: Actor | null;
   input: Record<string, unknown> | null;
   /**
-   * Existing durable documents referenced by the run input. These rows are
+   * Existing durable files referenced by the run input. These rows are
    * locked, revalidated in the app scope, and linked to the new run inside the
    * same transaction as the run INSERT. This closes the resolve/create race:
-   * either every input document is protected by a link, or no run is created.
+   * either every input file is protected by a link, or no run is created.
    */
-  consumedDocumentIds?: string[];
+  consumedFileIds?: string[];
   scheduleId?: string;
   versionLabel?: string;
   versionRef?: string;
@@ -560,30 +560,30 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
   const { id, packageId, actor, input } = params;
 
   await db.transaction(async (tx) => {
-    const consumedDocumentIds = [...new Set(params.consumedDocumentIds ?? [])];
-    if (consumedDocumentIds.length > 0) {
+    const consumedFileIds = [...new Set(params.consumedFileIds ?? [])];
+    if (consumedFileIds.length > 0) {
       const available = await tx
-        .select({ id: documents.id })
-        .from(documents)
+        .select({ id: files.id })
+        .from(files)
         .where(
           and(
-            inArray(documents.id, consumedDocumentIds),
-            eq(documents.orgId, scope.orgId),
-            eq(documents.applicationId, scope.applicationId),
+            inArray(files.id, consumedFileIds),
+            eq(files.orgId, scope.orgId),
+            eq(files.applicationId, scope.applicationId),
           ),
         )
         .for("update");
-      if (available.length !== consumedDocumentIds.length) {
+      if (available.length !== consumedFileIds.length) {
         throw conflict(
-          "document_unavailable",
-          "One or more input documents were deleted before the run could be created",
+          "file_unavailable",
+          "One or more input files were deleted before the run could be created",
         );
       }
     }
 
     // Among the admission locks, order matters: acquire the per-org concurrency
     // lock before the per-package run_number lock (consistent ordering across
-    // callers → no deadlock). Input documents are locked first so deletion
+    // callers → no deadlock). Input files are locked first so deletion
     // cannot slip between validation and the atomic link insert below.
     await enforceOrgConcurrencyCap(tx, scope);
     await acquireRunNumberLock(tx, scope, packageId);
@@ -651,17 +651,17 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
         : {}),
     });
 
-    if (consumedDocumentIds.length > 0) {
+    if (consumedFileIds.length > 0) {
       await tx
-        .insert(documentLinks)
+        .insert(fileLinks)
         .values(
-          consumedDocumentIds.map((documentId) => ({
-            documentId,
+          consumedFileIds.map((fileId) => ({
+            fileId,
             consumerRunId: id,
             // Tenant column, enforced by the two composite FKs on
-            // `document_links`: the document AND the consuming run must both
+            // `file_links`: the file AND the consuming run must both
             // belong to this org, so a cross-tenant link — which would block the
-            // victim org from ever deleting its own document — cannot be written.
+            // victim org from ever deleting its own file — cannot be written.
             orgId: scope.orgId,
           })),
         )
@@ -1278,12 +1278,12 @@ export async function getRun(scope: AppScope, id: string) {
 }
 
 export async function deletePackageRuns(scope: AppScope, packageId: string): Promise<number> {
-  // Enumeration, documents teardown and the runs delete are ONE transaction,
-  // opened by locking the org row — the same serialization point every document
-  // write takes (`createDocumentFromStream`) and the same org-first order the
+  // Enumeration, files teardown and the runs delete are ONE transaction,
+  // opened by locking the org row — the same serialization point every file
+  // write takes (`createFileFromStream`) and the same org-first order the
   // organization / application / end-user cascades use.
   //
-  // Splitting it (teardown, commit, delete) left a window in which a document
+  // Splitting it (teardown, commit, delete) left a window in which a file
   // published by a still-live sidecar — or by an at-least-once retry of the
   // end-of-run publication sweep — landed on a run that had already been
   // enumerated. The runs delete then cascaded that fresh row away with NO outbox
@@ -1323,14 +1323,14 @@ export async function deletePackageRuns(scope: AppScope, packageId: string): Pro
     if (runRows.length === 0) return 0;
     const runIds = runRows.map((r) => r.id);
 
-    // Documents FIRST: the runs' FK cascade would otherwise destroy `documents`
-    // rows (and their `document_links`) a live consumer still needs, silently
+    // Files FIRST: the runs' FK cascade would otherwise destroy `files`
+    // rows (and their `file_links`) a live consumer still needs, silently
     // amputating a rerun's inputs.
-    await detachOrDeleteContainedDocuments({ runIds, orgId: scope.orgId }, tx);
+    await detachOrDeleteContainedFiles({ runIds, orgId: scope.orgId }, tx);
 
     // Scoped to the SELECTed ids — not the package predicate — so a run created
     // concurrently after the SELECT is left for the next delete call instead of
-    // being deleted without its documents going through detach-or-delete.
+    // being deleted without its files going through detach-or-delete.
     const deleted = await tx
       .delete(runs)
       .where(inArray(runs.id, runIds))

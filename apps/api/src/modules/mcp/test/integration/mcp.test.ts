@@ -102,7 +102,7 @@ describe("mcp discovery + auth gate", () => {
   });
 
   it("advertises an authorization_servers entry that byte-matches the live AS issuer (RFC 8414 §3.3)", async () => {
-    // Cross-document contract: the `authorization_servers` entry in the
+    // Cross-file contract: the `authorization_servers` entry in the
     // protected-resource metadata is an AS *issuer identifier*. A strict client
     // (the claude.ai connector) discovers the AS metadata from it and rejects
     // the handshake unless the `issuer` it reads back is byte-identical
@@ -183,7 +183,7 @@ describe("mcp discovery + auth gate", () => {
   it("rejects GET on the per-org endpoint with 405 for an authenticated caller", async () => {
     // Stateless transport (no session id, JSON response mode) does not serve a
     // standalone SSE stream, so GET is Method Not Allowed. This is the
-    // behaviour the OpenAPI spec documents; assert it rather than trust it.
+    // behaviour the OpenAPI spec files; assert it rather than trust it.
     const headers = await apiKeyHeaders(["mcp:read", "mcp:invoke"]);
     const res = await app.request(mcpPath(headers), {
       method: "GET",
@@ -256,11 +256,11 @@ describe("mcp tool round-trip", () => {
       "get_me",
       "get_runtime_capabilities",
       "invoke_operation",
-      "list_documents",
-      "read_document",
+      "list_files",
+      "read_file",
       "run_and_wait",
       "search_operations",
-      "validate_package_document",
+      "validate_package_file",
     ]);
     const runAndWait = tools.find((t) => t.name === "run_and_wait")!;
     expect((runAndWait.annotations as Record<string, unknown>).destructiveHint).toBe(true);

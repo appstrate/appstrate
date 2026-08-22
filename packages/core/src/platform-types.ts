@@ -205,7 +205,7 @@ export interface RunOrchestrator {
   /**
    * Create a workload (agent). Does NOT start it. The agent self-provisions
    * its workspace at startup by fetching from the platform (the AFPS bundle
-   * and any input documents), so workspace contents are not delivered through
+   * and any input files), so workspace contents are not delivered through
    * this spec.
    */
   createWorkload(spec: WorkloadSpec, boundary: IsolationBoundary): Promise<WorkloadHandle>;

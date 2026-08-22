@@ -69,12 +69,25 @@ export interface BillingPlanDetail {
   price: number;
   credit_quota: number;
   /**
-   * Durable-document storage the plan grants, in bytes. Optional: a cloud
+   * Durable-file storage the plan grants, in bytes. Optional: a cloud
    * module older than the release that added it omits the field, and a plan
    * card must still render — the storage line is dropped rather than showing
    * "0 B" for a plan that actually grants capacity.
+   *
+   * BOTH spellings are read (`planStorageBytes`). This field is minted by
+   * `@appstrate/cloud`, which lives in another repo and deploys on its own
+   * clock: #1177 renamed the concept here, but the module in front of this SPA
+   * today still sends `document_storage_bytes`. Reading only one name makes the
+   * storage line silently vanish — on one side of the rename or the other.
    */
+  file_storage_bytes?: number;
+  /** @deprecated pre-#1177 spelling of {@link file_storage_bytes}; still on the wire. */
   document_storage_bytes?: number;
+}
+
+/** The plan's storage entitlement under either wire spelling, or `undefined`. */
+export function planStorageBytes(plan: BillingPlanDetail): number | undefined {
+  return plan.file_storage_bytes ?? plan.document_storage_bytes;
 }
 
 interface BillingInfo {

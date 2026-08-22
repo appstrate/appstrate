@@ -15,7 +15,7 @@ import {
 import type { DroppedIntegration } from "./integration-spawn-resolver.ts";
 import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
 import { createRun, appendRunLog } from "./state/runs.ts";
-import { materializeRunUploads, type PendingUploadMaterialization } from "./documents.ts";
+import { materializeRunUploads, type PendingUploadMaterialization } from "./files.ts";
 import type { InstalledPackageSettings } from "./application-packages.ts";
 import { resolveModel } from "./org-models.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
@@ -81,19 +81,19 @@ interface RunPipelineParams {
   input?: Record<string, unknown> | null;
   files?: FileReference[];
   /**
-   * Staged uploads to materialize into durable `documents` rows once the run
+   * Staged uploads to materialize into durable `files` rows once the run
    * row exists (D1). The persisted `input` already references the pre-minted
-   * `document://` ids; the row insert is deferred here because `documents.run_id`
+   * `appfile://` ids; the row insert is deferred here because `files.run_id`
    * is a hard FK. Set by the POST /run route; unset for scheduler/inline runs.
    */
-  pendingDocuments?: PendingUploadMaterialization[];
+  pendingFiles?: PendingUploadMaterialization[];
   /**
-   * The `document://` ids this run consumes as input — written as `document_links`
+   * The `appfile://` ids this run consumes as input — written as `file_links`
    * rows after `createRun` (the run is the FK'd consumer). Chaining-protection
    * ledger: a consumed doc survives its producer container's deletion via detach.
    * Set by the run routes; unset for scheduler runs (no user input refs).
    */
-  consumedDocumentIds?: string[];
+  consumedFileIds?: string[];
   modelId?: string | null;
   /** Persisted agent defaults resolved by preflight. */
   generationConfig?: ModelGenerationSettings | null;
@@ -595,35 +595,35 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
         // Drop it for aliases; the operator audit trail already recorded the
         // create. Non-aliased runs keep it for the connections/credentials panel.
         modelCredentialId: plan.llmConfig.aliased ? null : (plan.llmConfig.credentialId ?? null),
-        consumedDocumentIds: params.consumedDocumentIds,
+        consumedFileIds: params.consumedFileIds,
       },
     ),
   );
   const createMs = Date.now() - createStart;
 
-  // Materialize the run's staged uploads into durable `documents` rows now the
-  // run row exists (deferred from the input-parser by the `documents.run_id`
-  // FK). NOT best-effort: the persisted run input references these document
+  // Materialize the run's staged uploads into durable `files` rows now the
+  // run row exists (deferred from the input-parser by the `files.run_id`
+  // FK). NOT best-effort: the persisted run input references these file
   // ids, so a materialization failure would leave a broken run —
   // `materializeRunUploads` rolls back the partial batch, fails the run loudly
   // (via `synthesiseFinalize`), and rethrows, so the caller surfaces the error.
-  if (params.pendingDocuments?.length) {
+  if (params.pendingFiles?.length) {
     if (actor) {
       await materializeRunUploads(
         { orgId, applicationId },
         actor,
         runId,
         agent.id,
-        params.pendingDocuments,
+        params.pendingFiles,
       );
     } else {
       // Invariant: an actor-less run should never carry pending uploads (the
       // input-parser only stages them for a real actor). Unreachable today, but
-      // silently skipping would strand the persisted `document://` references —
+      // silently skipping would strand the persisted `appfile://` references —
       // log loudly if it ever regresses.
-      logger.warn("pending documents dropped: run has no actor to attribute them to", {
+      logger.warn("pending files dropped: run has no actor to attribute them to", {
         runId,
-        pendingCount: params.pendingDocuments.length,
+        pendingCount: params.pendingFiles.length,
       });
     }
   }

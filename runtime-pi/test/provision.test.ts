@@ -3,13 +3,13 @@
 /**
  * Unit tests for the agent-container workspace provisioning
  * (`runtime-pi/provision.ts`) — the boot-critical path that fetches the AFPS
- * bundle + input documents from the platform and writes them to disk.
+ * bundle + input files from the platform and writes them to disk.
  *
- * Drives the real `provisionWorkspace` / `provisionDocuments` against a local
+ * Drives the real `provisionWorkspace` / `provisionFiles` against a local
  * HTTP server that VERIFIES the Standard-Webhooks HMAC (so signing correctness
- * is exercised, not mocked) and streams documents back chunked
+ * is exercised, not mocked) and streams files back chunked
  * (`transfer-encoding: chunked`, no content-length) — the exact shape the
- * platform's `/documents/:name` route serves. `die` is injected to throw, so
+ * platform's `/files/:name` route serves. `die` is injected to throw, so
  * fatal paths surface as rejections instead of `process.exit`.
  *
  * NOTE: the original production bug — `Bun.write(path, Response)` busy-looping
@@ -26,7 +26,7 @@ import path from "node:path";
 import { verify } from "@appstrate/afps-runtime/events";
 import {
   provisionWorkspace,
-  provisionDocuments,
+  provisionFiles,
   signedGetWithRetry,
   type ProvisionDeps,
 } from "../provision.ts";
@@ -39,7 +39,14 @@ interface ServerConfig {
   lastSigOk: boolean | null;
   /** Path-suffix → handler. Suffix matched against the URL pathname tail. */
   workspace: (req: Request) => Response | Promise<Response>;
-  documents: (req: Request) => Response | Promise<Response>;
+  files: (req: Request) => Response | Promise<Response>;
+  /**
+   * The pre-#1177 `/documents` manifest path. A platform older than this image
+   * serves ONLY that one, and a 404 on `/files` is ambiguous there — it is also
+   * the legitimate "no input files" answer — so the runtime probes this before
+   * concluding the run carries none.
+   */
+  legacyFiles: (req: Request) => Response | Promise<Response>;
   doc: (name: string, req: Request) => Response | Promise<Response>;
 }
 
@@ -78,8 +85,9 @@ beforeAll(() => {
         return new Response("bad signature", { status: 401 });
       }
       if (u.pathname.endsWith("/workspace")) return config.workspace(req);
-      if (u.pathname.endsWith("/documents")) return config.documents(req);
-      const m = u.pathname.match(/\/documents\/([^/]+)$/);
+      if (u.pathname.endsWith("/files")) return config.files(req);
+      if (u.pathname.endsWith("/documents")) return config.legacyFiles(req);
+      const m = u.pathname.match(/\/(?:files|documents)\/([^/]+)$/);
       if (m) return config.doc(decodeURIComponent(m[1]!), req);
       return new Response("not found", { status: 404 });
     },
@@ -94,7 +102,8 @@ beforeEach(() => {
     requireSig: false,
     lastSigOk: null,
     workspace: () => new Response("bundle-bytes", { status: 200 }),
-    documents: () => new Response("no docs", { status: 404 }),
+    files: () => new Response("no files", { status: 404 }),
+    legacyFiles: () => new Response("no files", { status: 404 }),
     doc: () => new Response("missing", { status: 404 }),
   };
 });
@@ -208,35 +217,35 @@ describe("provisionWorkspace", () => {
   });
 });
 
-describe("provisionDocuments", () => {
-  it("is a no-op when the manifest 404s (run carries no documents)", async () => {
-    config.documents = () => new Response("none", { status: 404 });
+describe("provisionFiles", () => {
+  it("is a no-op when the manifest 404s (run carries no files)", async () => {
+    config.files = () => new Response("none", { status: 404 });
     const ws = await tempWorkspace();
     const { die, messages } = makeDie();
 
-    await provisionDocuments(deps(ws, die));
+    await provisionFiles(deps(ws, die));
 
     expect(messages).toHaveLength(0);
-    expect(await exists(path.join(ws, "documents"))).toBe(false);
+    expect(await exists(path.join(ws, "files"))).toBe(false);
   });
 
   it("is a no-op when the manifest is empty", async () => {
-    config.documents = () => Response.json({ documents: [] });
+    config.files = () => Response.json({ files: [] });
     const ws = await tempWorkspace();
     const { die, messages } = makeDie();
 
-    await provisionDocuments(deps(ws, die));
+    await provisionFiles(deps(ws, die));
     expect(messages).toHaveLength(0);
   });
 
-  it("streams every manifest document to documents/<name> with exact bytes", async () => {
+  it("streams every manifest file to files/<name> with exact bytes", async () => {
     const files: Record<string, Uint8Array> = {
       "a.txt": new TextEncoder().encode("hello alpha"),
       "b.csv": new TextEncoder().encode("id,v\n1,2\n3,4\n"),
     };
-    config.documents = () =>
+    config.files = () =>
       Response.json({
-        documents: Object.entries(files).map(([name, b]) => ({
+        files: Object.entries(files).map(([name, b]) => ({
           name,
           workspace_name: name,
           size: b.byteLength,
@@ -246,24 +255,86 @@ describe("provisionDocuments", () => {
     const ws = await tempWorkspace();
     const { die, messages } = makeDie();
 
-    await provisionDocuments(deps(ws, die));
+    await provisionFiles(deps(ws, die));
 
     expect(messages).toHaveLength(0);
     for (const [name, bytes] of Object.entries(files)) {
-      const onDisk = await readFile(path.join(ws, "documents", name));
+      const onDisk = await readFile(path.join(ws, "files", name));
       expect(Buffer.compare(onDisk, Buffer.from(bytes))).toBe(0);
     }
   });
 
+  it("symlinks documents/ onto files/ for a platform older than this image", async () => {
+    // The prompt names the directory, and the platform builds the prompt. A
+    // pre-#1177 platform still says `./documents/`, so without the symlink the
+    // agent is pointed at a directory that does not exist — a prompt-level
+    // miss with the bytes sitting right next to it and nothing reporting a
+    // fault.
+    const bytes = new TextEncoder().encode("mounted");
+    config.files = () =>
+      Response.json({
+        files: [{ name: "m.txt", workspace_name: "m.txt", size: bytes.byteLength }],
+      });
+    config.doc = () => chunkedResponse(bytes);
+    const ws = await tempWorkspace();
+    const { die, messages } = makeDie();
+
+    await provisionFiles(deps(ws, die));
+
+    expect(messages).toHaveLength(0);
+    const viaLegacy = await readFile(path.join(ws, "documents", "m.txt"));
+    expect(Buffer.compare(viaLegacy, Buffer.from(bytes))).toBe(0);
+  });
+
+  it("reads the retired `documents` manifest key", async () => {
+    // A platform older than this image emits only that key. Reading `files`
+    // alone yields zero names, which this function treats as "no input files"
+    // and returns from silently.
+    const bytes = new TextEncoder().encode("legacy key");
+    config.files = () =>
+      Response.json({
+        documents: [{ name: "k.txt", workspace_name: "k.txt", size: bytes.byteLength }],
+      });
+    config.doc = () => chunkedResponse(bytes);
+    const ws = await tempWorkspace();
+    const { die, messages } = makeDie();
+
+    await provisionFiles(deps(ws, die));
+
+    expect(messages).toHaveLength(0);
+    expect(
+      Buffer.compare(await readFile(path.join(ws, "files", "k.txt")), Buffer.from(bytes)),
+    ).toBe(0);
+  });
+
+  it("falls back to the retired /documents manifest path on a 404", async () => {
+    const bytes = new TextEncoder().encode("legacy path");
+    config.files = () => new Response("not here", { status: 404 });
+    config.legacyFiles = () =>
+      Response.json({
+        documents: [{ name: "p.txt", workspace_name: "p.txt", size: bytes.byteLength }],
+      });
+    config.doc = () => chunkedResponse(bytes);
+    const ws = await tempWorkspace();
+    const { die, messages } = makeDie();
+
+    await provisionFiles(deps(ws, die));
+
+    expect(messages).toHaveLength(0);
+    expect(
+      Buffer.compare(await readFile(path.join(ws, "files", "p.txt")), Buffer.from(bytes)),
+    ).toBe(0);
+  });
+
   it("keys writes on workspace_name, not the (possibly colliding) display name", async () => {
-    // Two documents share the human display name `report.pdf` but the platform
+    // Two files share the human display name `report.pdf` but the platform
     // disambiguated their workspace names — the container must write BOTH,
     // under the distinct workspace names, never overwriting one with the other.
     const a = new TextEncoder().encode("first report");
     const b = new TextEncoder().encode("second report, longer");
-    config.documents = () =>
+    config.files = () =>
       Response.json({
-        documents: [
+        files: [
           { name: "report.pdf", workspace_name: "report.pdf", size: a.byteLength },
           { name: "report.pdf", workspace_name: "report-2.pdf", size: b.byteLength },
         ],
@@ -272,58 +343,58 @@ describe("provisionDocuments", () => {
     const ws = await tempWorkspace();
     const { die, messages } = makeDie();
 
-    await provisionDocuments(deps(ws, die));
+    await provisionFiles(deps(ws, die));
 
     expect(messages).toHaveLength(0);
     expect(
-      Buffer.compare(await readFile(path.join(ws, "documents", "report.pdf")), Buffer.from(a)),
+      Buffer.compare(await readFile(path.join(ws, "files", "report.pdf")), Buffer.from(a)),
     ).toBe(0);
     expect(
-      Buffer.compare(await readFile(path.join(ws, "documents", "report-2.pdf")), Buffer.from(b)),
+      Buffer.compare(await readFile(path.join(ws, "files", "report-2.pdf")), Buffer.from(b)),
     ).toBe(0);
   });
 
-  it("streams a large multi-chunk document byte-exact (reader loop + backpressure)", async () => {
+  it("streams a large multi-chunk file byte-exact (reader loop + backpressure)", async () => {
     // 1 MiB of deterministic bytes, served in 16-byte chunks → exercises the
     // chunk-by-chunk reader loop the fix relies on.
     const big = new Uint8Array(1024 * 1024);
     for (let i = 0; i < big.length; i++) big[i] = i % 251;
-    config.documents = () =>
+    config.files = () =>
       Response.json({
-        documents: [{ name: "big.bin", workspace_name: "big.bin", size: big.length }],
+        files: [{ name: "big.bin", workspace_name: "big.bin", size: big.length }],
       });
     config.doc = () => chunkedResponse(big, 16);
     const ws = await tempWorkspace();
     const { die } = makeDie();
 
-    await provisionDocuments(deps(ws, die));
+    await provisionFiles(deps(ws, die));
 
-    const onDisk = await readFile(path.join(ws, "documents", "big.bin"));
+    const onDisk = await readFile(path.join(ws, "files", "big.bin"));
     expect(onDisk.byteLength).toBe(big.byteLength);
     expect(Buffer.compare(onDisk, Buffer.from(big))).toBe(0);
   });
 
-  it("dies when a listed document fetch returns non-ok", async () => {
-    config.documents = () =>
-      Response.json({ documents: [{ name: "x.txt", workspace_name: "x.txt", size: 1 }] });
+  it("dies when a listed file fetch returns non-ok", async () => {
+    config.files = () =>
+      Response.json({ files: [{ name: "x.txt", workspace_name: "x.txt", size: 1 }] });
     config.doc = () => new Response("gone", { status: 404 });
     const ws = await tempWorkspace();
     const { die, messages } = makeDie();
 
-    await expect(provisionDocuments(deps(ws, die))).rejects.toBeInstanceOf(DieError);
+    await expect(provisionFiles(deps(ws, die))).rejects.toBeInstanceOf(DieError);
     expect(messages[0]).toContain("x.txt");
   });
 
-  it("dies (does not crash) when a document body errors mid-stream", async () => {
+  it("dies (does not crash) when a file body errors mid-stream", async () => {
     const ws = await tempWorkspace();
     const { die, messages } = makeDie();
-    // Inject the transport so the document body rejects on read deterministically
+    // Inject the transport so the file body rejects on read deterministically
     // (a server-side stream abort surfaces client-side as a clean EOF, not a
     // read error — so it can't exercise the write-loop catch).
     const fetchFn = (async (url: string | URL): Promise<Response> => {
-      if (String(url).endsWith("/documents")) {
+      if (String(url).endsWith("/files")) {
         return Response.json({
-          documents: [{ name: "partial.bin", workspace_name: "partial.bin", size: 9 }],
+          files: [{ name: "partial.bin", workspace_name: "partial.bin", size: 9 }],
         });
       }
       const body = new ReadableStream<Uint8Array>({
@@ -337,13 +408,12 @@ describe("provisionDocuments", () => {
       return new Response(body, { status: 200 });
     }) as unknown as typeof fetch;
 
-    await expect(provisionDocuments(deps(ws, die, { fetchFn }))).rejects.toBeInstanceOf(DieError);
-    expect(messages[0]).toContain("stream document partial.bin");
+    await expect(provisionFiles(deps(ws, die, { fetchFn }))).rejects.toBeInstanceOf(DieError);
+    expect(messages[0]).toContain("stream file partial.bin");
   });
 
-  it("refuses a path-traversal document name without fetching it", async () => {
-    config.documents = () =>
-      Response.json({ documents: [{ name: "../evil", workspace_name: "../evil" }] });
+  it("refuses a path-traversal file name without fetching it", async () => {
+    config.files = () => Response.json({ files: [{ name: "../evil", workspace_name: "../evil" }] });
     let docFetched = false;
     config.doc = () => {
       docFetched = true;
@@ -352,43 +422,43 @@ describe("provisionDocuments", () => {
     const ws = await tempWorkspace();
     const { die, messages } = makeDie();
 
-    await expect(provisionDocuments(deps(ws, die))).rejects.toBeInstanceOf(DieError);
-    expect(messages[0]).toContain("unsafe document name");
+    await expect(provisionFiles(deps(ws, die))).rejects.toBeInstanceOf(DieError);
+    expect(messages[0]).toContain("unsafe file name");
     expect(docFetched).toBe(false);
   });
 
   it("dies if the manifest itself errors with a non-404 status", async () => {
-    config.documents = () => new Response("boom", { status: 500 });
+    config.files = () => new Response("boom", { status: 500 });
     const ws = await tempWorkspace();
     const { die, messages } = makeDie();
 
-    await expect(provisionDocuments(deps(ws, die, { maxAttempts: 1 }))).rejects.toBeInstanceOf(
+    await expect(provisionFiles(deps(ws, die, { maxAttempts: 1 }))).rejects.toBeInstanceOf(
       DieError,
     );
-    expect(messages[0]).toContain("documents manifest");
+    expect(messages[0]).toContain("files manifest");
   });
 });
 
 describe("signedGetWithRetry", () => {
   it("does not retry a deterministic 4xx (returns it immediately)", async () => {
     let calls = 0;
-    config.documents = () => {
+    config.files = () => {
       calls += 1;
       return new Response("nope", { status: 403 });
     };
     const ws = await tempWorkspace();
     const { die } = makeDie();
-    const res = await signedGetWithRetry(`${base}/api/runs/run_test/documents`, deps(ws, die));
+    const res = await signedGetWithRetry(`${base}/api/runs/run_test/files`, deps(ws, die));
     expect(res.status).toBe(403);
     expect(calls).toBe(1); // 403 is non-retryable
   });
 
   it("signs every request (server-side HMAC verify passes)", async () => {
     config.requireSig = true;
-    config.documents = () => new Response("ok", { status: 200 });
+    config.files = () => new Response("ok", { status: 200 });
     const ws = await tempWorkspace();
     const { die } = makeDie();
-    const res = await signedGetWithRetry(`${base}/api/runs/run_test/documents`, deps(ws, die));
+    const res = await signedGetWithRetry(`${base}/api/runs/run_test/files`, deps(ws, die));
     expect(res.status).toBe(200);
     expect(config.lastSigOk).toBe(true);
   });

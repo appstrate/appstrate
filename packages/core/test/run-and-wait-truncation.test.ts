@@ -11,7 +11,7 @@
  *   - truncation is UNCONDITIONAL: it depends on nothing the platform had to
  *     write first, because the full payload is already durable in `runs.result`
  *     and `getRun` returns it. An earlier revision copied the payload into a
- *     dedicated document and skipped truncating whenever that best-effort copy
+ *     dedicated file and skipped truncating whenever that best-effort copy
  *     was missing — i.e. the guard stopped guarding exactly when a result was
  *     big enough to matter. These tests pin the absence of that hole.
  */
@@ -19,9 +19,9 @@
 import { describe, expect, it } from "bun:test";
 import {
   RUN_RESULT_INLINE_MAX_BYTES,
-  runAndWaitStepsWithDocuments,
+  runAndWaitStepsWithFiles,
   truncateRunAndWaitPayload,
-  type RunAndWaitDocument,
+  type RunAndWaitFile,
 } from "../src/run-and-wait-client.ts";
 
 /**
@@ -33,9 +33,9 @@ function resultOfExactlyBytes(bytes: number): { output: { text: string } } {
   return { output: { text: "x".repeat(bytes - envelope) } };
 }
 
-const reportDocument: RunAndWaitDocument = {
+const reportFile: RunAndWaitFile = {
   id: "doc_report001",
-  uri: "document://doc_report001",
+  uri: "appfile://doc_report001",
   name: "report.html",
   mime: "text/html",
   size: 22_846,
@@ -111,9 +111,7 @@ describe("truncateRunAndWaitPayload", () => {
 });
 
 describe("run_and_wait terminal step", () => {
-  async function terminalPayload(
-    documents: RunAndWaitDocument[],
-  ): Promise<Record<string, unknown>> {
+  async function terminalPayload(files: RunAndWaitFile[]): Promise<Record<string, unknown>> {
     const bigResult = resultOfExactlyBytes(RUN_RESULT_INLINE_MAX_BYTES * 2);
     const fetchImpl = (async (input: unknown) => {
       const url = String(input);
@@ -123,17 +121,17 @@ describe("run_and_wait terminal step", () => {
           headers: { "content-type": "application/json" },
         });
       if (url.endsWith("/run")) return json({ id: "run_1", status: "pending" });
-      if (url.includes("/api/documents")) {
-        // The list route reports each row's own container; `fetchRunDocuments`
+      if (url.includes("/api/files")) {
+        // The list route reports each row's own container; `fetchRunFiles`
         // keeps only the ones this run produced.
-        const data = documents.map((doc) => ({ ...doc, run_id: "run_1" }));
+        const data = files.map((doc) => ({ ...doc, run_id: "run_1" }));
         return json({ object: "list", data, hasMore: false });
       }
       return json({ id: "run_1", packageId: "@acme/writer", status: "success", result: bigResult });
     }) as unknown as typeof fetch;
 
     const payloads: Record<string, unknown>[] = [];
-    for await (const step of runAndWaitStepsWithDocuments(
+    for await (const step of runAndWaitStepsWithFiles(
       { kind: "agent", scope: "@acme", name: "writer" },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     )) {
@@ -142,18 +140,18 @@ describe("run_and_wait terminal step", () => {
     return payloads.at(-1)!;
   }
 
-  it("serves the truncated payload alongside the run's own documents", async () => {
-    const terminal = await terminalPayload([reportDocument]);
+  it("serves the truncated payload alongside the run's own files", async () => {
+    const terminal = await terminalPayload([reportFile]);
     expect(terminal.truncated).toBe(true);
     expect(terminal).not.toHaveProperty("result");
     // The agent's deliverable is still listed and is untouched by truncation.
-    expect(terminal.documents).toEqual([reportDocument]);
+    expect(terminal.files).toEqual([reportFile]);
   });
 
   it("truncates a run that published NOTHING — the case the old design missed", async () => {
     const terminal = await terminalPayload([]);
     expect(terminal.truncated).toBe(true);
     expect(terminal).not.toHaveProperty("result");
-    expect(terminal).not.toHaveProperty("documents");
+    expect(terminal).not.toHaveProperty("files");
   });
 });

@@ -28,7 +28,7 @@ const defaultInlineManifest = (overrides: Record<string, unknown>) => ({
   type: "agent",
   version: "1.0.0",
   dependencies: {},
-  runtime_tools: ["log", "output", "publish_document"],
+  runtime_tools: ["log", "output", "publish_file"],
   output: { schema: { type: "object", properties: {}, additionalProperties: true } },
   ...overrides,
 });
@@ -37,8 +37,8 @@ function makeRunAndWait(opts: {
   permissions?: string[];
   launch?: () => Response;
   getRun?: Response[];
-  /** Rows the stubbed `GET /api/documents?run_id=…` returns (published docs). */
-  documents?: Array<Record<string, unknown>>;
+  /** Rows the stubbed `GET /api/files?run_id=…` returns (published docs). */
+  files?: Array<Record<string, unknown>>;
 }): {
   tool: ReturnType<typeof buildMcpTools>[number];
   calls: Array<{ method: string; path: string; search: string; body: unknown }>;
@@ -65,9 +65,9 @@ function makeRunAndWait(opts: {
     if (req.method === "GET" && /\/api\/runs\/[^/]+$/.test(url.pathname)) {
       return getRuns.shift() ?? jsonResponse({ id: "run_1", status: "success" });
     }
-    // Post-completion document enrichment (fetchRunDocuments).
-    if (req.method === "GET" && url.pathname === "/api/documents") {
-      return jsonResponse({ object: "list", data: opts.documents ?? [], hasMore: false });
+    // Post-completion file enrichment (fetchRunFiles).
+    if (req.method === "GET" && url.pathname === "/api/files") {
+      return jsonResponse({ object: "list", data: opts.files ?? [], hasMore: false });
     }
     throw new Error(`unexpected dispatch: ${req.method} ${url.pathname}`);
   };
@@ -97,7 +97,7 @@ describe("run_and_wait", () => {
   it("describes inline defaults and exact manifest overrides", () => {
     const { tool } = makeRunAndWait({});
 
-    expect(tool.descriptor.description).toContain("publish_document");
+    expect(tool.descriptor.description).toContain("publish_file");
     expect(tool.descriptor.description).toContain("build a `.zip` or `.afps` archive");
     expect(tool.descriptor.description).not.toContain("publish_archive");
     expect(tool.descriptor.description).toMatch(/fields you omit/i);
@@ -120,11 +120,11 @@ describe("run_and_wait", () => {
     );
   });
 
-  it("describes package authoring with the remaining document publisher", () => {
+  it("describes package authoring with the remaining file publisher", () => {
     const instructions = buildServerInstructions(new Set(["mcp:read"]));
 
     expect(instructions).toContain("python3 -m zipfile -c package.afps");
-    expect(instructions).toContain("publish that archive with `publish_document`");
+    expect(instructions).toContain("publish that archive with `publish_file`");
     expect(instructions).not.toContain("publish_archive");
   });
 
@@ -179,7 +179,7 @@ describe("run_and_wait", () => {
     expect(calls.some((c) => c.method === "GET")).toBe(true);
   });
 
-  it("forwards `input` on an inline launch (document:// file fields reach the run)", async () => {
+  it("forwards `input` on an inline launch (appfile:// file fields reach the run)", async () => {
     const { tool, calls } = makeRunAndWait({
       launch: () => jsonResponse({ id: "run_inline", status: "pending" }),
       getRun: [jsonResponse({ id: "run_inline", status: "success" })],
@@ -190,7 +190,7 @@ describe("run_and_wait", () => {
         kind: "inline",
         manifest: { name: "tmp" },
         prompt: "do it",
-        input: { screenshot: "document://doc_abc12345" },
+        input: { screenshot: "appfile://doc_abc12345" },
       },
       noExtra,
     );
@@ -198,7 +198,7 @@ describe("run_and_wait", () => {
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({
       manifest: defaultInlineManifest({ name: "tmp" }),
       prompt: expect.stringContaining("do it"),
-      input: { screenshot: "document://doc_abc12345" },
+      input: { screenshot: "appfile://doc_abc12345" },
     });
   });
 
@@ -272,7 +272,7 @@ describe("run_and_wait", () => {
     });
   });
 
-  it("returns a resource_link block per document the run published", async () => {
+  it("returns a resource_link block per file the run published", async () => {
     const { tool } = makeRunAndWait({
       launch: () => jsonResponse({ id: "run_7", packageId: "@acme/writer", status: "pending" }),
       getRun: [
@@ -283,10 +283,10 @@ describe("run_and_wait", () => {
           result: { ok: true },
         }),
       ],
-      documents: [
+      files: [
         {
           id: "doc_abcd1234",
-          uri: "document://doc_abcd1234",
+          uri: "appfile://doc_abcd1234",
           name: "report.html",
           mime: "text/html",
           size: 120,
@@ -297,31 +297,31 @@ describe("run_and_wait", () => {
 
     const res = await tool.handler({ kind: "agent", scope: "@acme", name: "writer" }, noExtra);
 
-    // One resource_link per published document, alongside the text payload.
+    // One resource_link per published file, alongside the text payload.
     const links = res.content.filter((c) => c.type === "resource_link");
     expect(links).toHaveLength(1);
     expect(links[0]).toMatchObject({
       type: "resource_link",
-      uri: "document://doc_abcd1234",
+      uri: "appfile://doc_abcd1234",
       name: "report.html",
       mimeType: "text/html",
     });
-    // The text payload also echoes the documents (parity with the chat path).
-    const docs = (parseResult(res).documents as Array<Record<string, unknown>>) ?? [];
+    // The text payload also echoes the files (parity with the chat path).
+    const docs = (parseResult(res).files as Array<Record<string, unknown>>) ?? [];
     expect(docs).toHaveLength(1);
-    expect(docs[0]).toMatchObject({ uri: "document://doc_abcd1234" });
+    expect(docs[0]).toMatchObject({ uri: "appfile://doc_abcd1234" });
   });
 
-  it("returns only a text block when the run published no documents", async () => {
+  it("returns only a text block when the run published no files", async () => {
     const { tool } = makeRunAndWait({
       launch: () => jsonResponse({ id: "run_8", status: "pending" }),
       getRun: [jsonResponse({ id: "run_8", status: "success" })],
-      documents: [],
+      files: [],
     });
 
     const res = await tool.handler({ kind: "agent", scope: "@a", name: "b" }, noExtra);
     expect(res.content.every((c) => c.type === "text")).toBe(true);
-    expect(parseResult(res).documents).toBeUndefined();
+    expect(parseResult(res).files).toBeUndefined();
   });
 
   it("surfaces launch failures", async () => {

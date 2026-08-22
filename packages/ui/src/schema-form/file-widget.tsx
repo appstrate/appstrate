@@ -8,7 +8,7 @@ import { formatBytes as formatSize } from "@appstrate/core/format";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { Button, LABEL_CLASS } from "./primitives.tsx";
 import { cn } from "../cn.ts";
-import { isUploadUri } from "@appstrate/core/document-uri";
+import { isUploadUri } from "@appstrate/core/file-uri";
 import type { UploadFn } from "./upload-client.ts";
 import { fileMatchesAccept } from "./accept-match.ts";
 import type { SchemaFormContext } from "./context.ts";

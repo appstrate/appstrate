@@ -47,12 +47,12 @@ export const OIDC_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permission>(
   // Documents — the deliverables a run produced. Requestable for the same
   // reason `runs:read` is: an embedding app that may read a run must be able
   // to read what that run published, and `run_and_wait`'s document enrichment
-  // (`fetchRunDocuments`) is best-effort, so without this scope the list
+  // (`fetchRunFiles`) is best-effort, so without this scope the list
   // silently comes back EMPTY rather than erroring. Read-only and still
   // narrowed per row by the container ACL (an end-user only ever resolves its
-  // own runs' documents), so it carries no more reach than `runs:read`.
-  // Deleting stays out: `documents:delete` is admin/creator work.
-  "documents:read",
+  // own runs' files), so it carries no more reach than `runs:read`.
+  // Deleting stays out: `files:delete` is admin/creator work.
+  "files:read",
   "integrations:read",
   "integrations:connect",
   "integrations:disconnect",

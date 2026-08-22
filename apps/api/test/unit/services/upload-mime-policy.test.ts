@@ -18,7 +18,7 @@ import {
 } from "../../../src/services/mime-policy.ts";
 
 const XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.file";
 
 describe("sniffedMimeMatchesDeclared", () => {
   it("exact match passes", () => {
@@ -81,14 +81,14 @@ describe("sniffedMimeMatchesDeclared", () => {
   it("two specific container types never satisfy each other", () => {
     // Refinement is parent↔child only — when the sniffer DID identify the
     // concrete format, a different concrete declaration is a real mismatch.
-    // Notably keeps macro-enabled documents out of macro-free declarations.
+    // Notably keeps macro-enabled files out of macro-free declarations.
     expect(sniffedMimeMatchesDeclared(XLSX, DOCX)).toBe(false);
     expect(sniffedMimeMatchesDeclared(XLSX, "application/vnd.ms-excel.sheet.macroenabled.12")).toBe(
       false,
     );
-    expect(
-      sniffedMimeMatchesDeclared(DOCX, "application/vnd.ms-word.document.macroenabled.12"),
-    ).toBe(false);
+    expect(sniffedMimeMatchesDeclared(DOCX, "application/vnd.ms-word.file.macroenabled.12")).toBe(
+      false,
+    );
     expect(sniffedMimeMatchesDeclared("application/epub+zip", XLSX)).toBe(false);
   });
 });

@@ -369,7 +369,7 @@ createAuth(contributions.betterAuthPlugins as Parameters<typeof createAuth>[0]);
 // call `createRouter()` straight off the discovered module (issue #989), so
 // every module served requests against whatever degraded baseline its
 // no-context fallback supplied — for chat that meant the #968/#971 admission
-// gate answering `null` (fail-open) and the #965 document teardown resolving
+// gate answering `null` (fail-open) and the #965 file teardown resolving
 // to a no-op. Tests believed they exercised two post-incident guards that
 // were not wired at all, and would have kept passing if either were deleted.
 //

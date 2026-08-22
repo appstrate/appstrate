@@ -45,6 +45,7 @@ import {
   type OrgRole,
   getModuleRoleScopes,
   getModuleApiKeyScopes,
+  canonicalPermissions,
 } from "@appstrate/core/permissions";
 
 // ---------------------------------------------------------------------------
@@ -100,9 +101,9 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "runs:read",
   "runs:cancel",
   "runs:delete",
-  // Documents (read mirrors `runs:read`; delete is owner/admin or the doc's creator)
-  "documents:read",
-  "documents:delete",
+  // Files (read mirrors `runs:read`; delete is owner/admin or the doc's creator)
+  "files:read",
+  "files:delete",
   // MCP servers (AFPS §3.4 — browse/import/delete, no editor)
   "mcp-servers:read",
   "mcp-servers:write",
@@ -168,9 +169,9 @@ const MEMBER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   // Runs (read + cancel own)
   "runs:read",
   "runs:cancel",
-  // Documents (read only — deleting is owner/admin, or the creator via the
-  // per-document capability check, which needs no grant)
-  "documents:read",
+  // Files (read only — deleting is owner/admin, or the creator via the
+  // per-file capability check, which needs no grant)
+  "files:read",
   // Schedules (read only — creating/editing schedules, incl. choosing the
   // execution identity, is an admin/owner operation; #738).
   "schedules:read",
@@ -203,8 +204,8 @@ const VIEWER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "mcp-servers:read",
   "runs:read",
   // Aligned with `runs:read` — a viewer that can read a run can read the
-  // documents that run produced (the container ACL still applies per row).
-  "documents:read",
+  // files that run produced (the container ACL still applies per row).
+  "files:read",
   "schedules:read",
   "persistence:read",
   "models:read",
@@ -253,10 +254,10 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "runs:read",
   "runs:cancel",
   "runs:delete",
-  // Documents (read the gallery / download deliverables; delete via API key
+  // Files (read the gallery / download deliverables; delete via API key
   // for headless cleanup flows)
-  "documents:read",
-  "documents:delete",
+  "files:read",
+  "files:delete",
   // Schedules
   "schedules:read",
   "schedules:write",
@@ -347,7 +348,13 @@ export function roleScopes(role: OrgRole): ReadonlySet<string> {
 export function validateScopes(scopes: string[], creatorRole: OrgRole): Permission[] {
   const creatorPerms = roleScopes(creatorRole);
   const allowed = getApiKeyAllowedScopes();
-  return scopes.filter((s): s is Permission => allowed.has(s) && creatorPerms.has(s));
+  // Retired spellings are canonicalized first (`documents:read` → `files:read`,
+  // #1177). The filter DROPS what it does not recognise, so an un-normalized
+  // legacy scope would not error — it would silently mint a key narrower than
+  // the caller asked for.
+  return canonicalPermissions(scopes).filter(
+    (s): s is Permission => allowed.has(s) && creatorPerms.has(s),
+  );
 }
 
 /**
@@ -358,7 +365,10 @@ export function validateScopes(scopes: string[], creatorRole: OrgRole): Permissi
 export function resolveApiKeyPermissions(scopes: string[], creatorRole: OrgRole): Set<Permission> {
   const rolePerms = roleScopes(creatorRole);
   const effective = new Set<Permission>();
-  for (const scope of scopes) {
+  // Same reason as `validateScopes`: a key row minted before #1177 stores
+  // `documents:read`, which is no longer in any role's set — the loop would
+  // drop it and the key would 403 on a family it was granted.
+  for (const scope of canonicalPermissions(scopes)) {
     if (rolePerms.has(scope)) {
       effective.add(scope as Permission);
     }

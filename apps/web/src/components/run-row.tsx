@@ -43,7 +43,7 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
  *   - the four token buckets → same tab; only their SUM is here, because that
  *     is the figure #1046 demotes from the header and the tab never shows it
  *   - `#N` → the page title
- * The Documents tab badge shows a total, never the in/out split, so the split
+ * The Files tab badge shows a total, never the in/out split, so the split
  * stays.
  *
  * Exported as a testing affordance: the popover keeps its content unmounted
@@ -51,8 +51,8 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
  */
 export function RunRowDetails({ run }: { run: EnrichedRun }) {
   const { t } = useTranslation(["agents"]);
-  const inputDocs = run.document_counts.input;
-  const outputDocs = run.document_counts.output;
+  const inputFiles = run.file_counts.input;
+  const outputFiles = run.file_counts.output;
 
   return (
     <div className="space-y-2">
@@ -61,9 +61,9 @@ export function RunRowDetails({ run }: { run: EnrichedRun }) {
           {t("runs.inlineBadge")}
         </span>
       )}
-      {(inputDocs > 0 || outputDocs > 0) && (
-        <DetailRow label={t("run.tabDocuments")}>
-          {t("run.detailsDocuments", { input: inputDocs, output: outputDocs })}
+      {(inputFiles > 0 || outputFiles > 0) && (
+        <DetailRow label={t("run.tabFiles")}>
+          {t("run.detailsFiles", { input: inputFiles, output: outputFiles })}
         </DetailRow>
       )}
       <DetailRow label={t("run.usageTokensTotal")}>
@@ -133,10 +133,10 @@ export function RunRow({
   const isLive = isRunning && run.started_at != null;
   const finalDuration = run.duration ? formatDuration(run.duration) : "";
 
-  // `document_counts` is a non-optional field of the run DTO — every list and
+  // `file_counts` is a non-optional field of the run DTO — every list and
   // detail endpoint computes it — so read it straight.
-  const inputDocs = run.document_counts.input;
-  const outputDocs = run.document_counts.output;
+  const inputFiles = run.file_counts.input;
+  const outputFiles = run.file_counts.output;
 
   const content = (
     <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -181,23 +181,23 @@ export function RunRow({
         <Shield size={12} className="text-muted-foreground hidden shrink-0 sm:block" />
       )}
       <div className="ml-auto flex shrink-0 items-center gap-2">
-        {/* Document counts duplicate the Documents tab badge on the detail page. */}
-        {!isDetail && inputDocs > 0 && (
+        {/* File counts duplicate the Files tab badge on the detail page. */}
+        {!isDetail && inputFiles > 0 && (
           <span
             className="text-muted-foreground flex items-center gap-0.5 text-xs"
-            title={t("run.inputDocuments", { count: inputDocs })}
+            title={t("run.inputFiles", { count: inputFiles })}
           >
             <FileInput size={12} className="shrink-0" />
-            {inputDocs}
+            {inputFiles}
           </span>
         )}
-        {!isDetail && outputDocs > 0 && (
+        {!isDetail && outputFiles > 0 && (
           <span
             className="text-muted-foreground flex items-center gap-0.5 text-xs"
-            title={t("run.outputDocuments", { count: outputDocs })}
+            title={t("run.outputFiles", { count: outputFiles })}
           >
             <FileOutput size={12} className="shrink-0" />
-            {outputDocs}
+            {outputFiles}
           </span>
         )}
         {/* How long the run took is a primary figure, not a wide-viewport

@@ -31,8 +31,8 @@ const RUN_GET_WAIT_MAX_SECONDS = 55;
  * surface — nothing else caps how much of `runs.result` reaches a chat context.
  *
  * The pointer is the RUN, not a copy of it. An earlier revision spilled the full
- * payload into a dedicated `agent_output` document so the truncated result could
- * carry a `document://` URI. That duplicated bytes already durable in
+ * payload into a dedicated `agent_output` file so the truncated result could
+ * carry an `appfile://` URI. That duplicated bytes already durable in
  * `runs.result` and already readable through `getRun`, and locating the copy BY
  * NAME opened an impersonation hole (an agent publishing a decoy under the same
  * name) that then needed its own publish-boundary refusal to close. Pointing at
@@ -56,8 +56,8 @@ export interface RunAndWaitStep {
   isError?: boolean;
 }
 
-/** A published run document, projected for the tool result the model reads. */
-export interface RunAndWaitDocument {
+/** A published run file, projected for the tool result the model reads. */
+export interface RunAndWaitFile {
   id: string;
   uri: string;
   name: string;
@@ -150,7 +150,7 @@ function materializeInlineManifest(manifest: Record<string, unknown>): {
   if (!hasOwn("version")) defaults.version = "1.0.0";
   if (!hasOwn("dependencies")) defaults.dependencies = {};
   if (!hasOwn("runtime_tools")) {
-    defaults.runtime_tools = ["log", "output", "publish_document"];
+    defaults.runtime_tools = ["log", "output", "publish_file"];
     if (!hasOwn("output")) {
       defaults.output = {
         schema: { type: "object", properties: {}, additionalProperties: true },
@@ -162,7 +162,7 @@ function materializeInlineManifest(manifest: Record<string, unknown>): {
 }
 
 /**
- * The tool's `context_documents` argument, when the model actually supplied
+ * The tool's `context_files` argument, when the model actually supplied
  * entries. Shape/scheme validation stays server-side (the inline route answers
  * with a field-precise 400) — here we only decide whether to forward it.
  */
@@ -259,7 +259,7 @@ function serializedResultBytes(value: unknown): Uint8Array | null {
  *
  * No copy is made and no pointer can be missing: the full payload is already in
  * `runs.result`, durable before this ever runs, and `getRun` returns it. That is
- * what makes truncation unconditional here — the earlier spill-document design
+ * what makes truncation unconditional here — the earlier spill-file design
  * had to fall back to NOT truncating whenever its best-effort write failed,
  * which meant the guard silently stopped guarding exactly when a result was
  * large enough to be a problem.
@@ -396,21 +396,21 @@ export async function launchRunAndWait(
 
   let launchPath: string;
   let launchBody: Record<string, unknown> | undefined;
-  const contextDocuments = asNonEmptyArray(args.context_documents);
+  const contextFiles = asNonEmptyArray(args.context_files);
   if (kind === "agent") {
-    // `context_documents` works by synthesizing an input field on the manifest,
+    // `context_files` works by synthesizing an input field on the manifest,
     // which only an inline run owns. A published agent's `input.schema` is a
     // versioned contract the platform must not rewrite — reject explicitly
     // rather than dropping the argument, which would mount nothing and leave
-    // the model believing the documents were delivered.
-    if (contextDocuments) {
+    // the model believing the files were delivered.
+    if (contextFiles) {
       return {
         ok: false,
         step: {
           payload: {
             error:
-              "`context_documents` is only supported for kind:'inline'. To give a published " +
-              "agent a document, pass its document:// URI through one of the file fields " +
+              "`context_files` is only supported for kind:'inline'. To give a published " +
+              "agent a file, pass its appfile:// URI through one of the file fields " +
               'declared in the agent\'s own input schema (`format:"uri"` + `contentMediaType`), ' +
               "via the `input` argument.",
           },
@@ -500,8 +500,8 @@ export async function launchRunAndWait(
     launchBody = { manifest: materialized.manifest, prompt };
     if (asRecord(args.input)) launchBody.input = args.input;
     // Fan-in by reference: forwarded verbatim; the route resolves each URI
-    // through the document ACL and declares the reserved input field itself.
-    if (contextDocuments) launchBody.context_documents = contextDocuments;
+    // through the file ACL and declares the reserved input field itself.
+    if (contextFiles) launchBody.context_files = contextFiles;
   } else {
     return {
       ok: false,
@@ -631,31 +631,31 @@ export async function* runAndWaitSteps(
 }
 
 /**
- * List the agent-output documents a run published, projected to the `{ id, uri,
+ * List the agent-output files a run published, projected to the `{ id, uri,
  * name, mime, size }` shape the tool result embeds. Best-effort: any failure
- * (network, non-2xx, malformed body) yields an empty list — a missing document
+ * (network, non-2xx, malformed body) yields an empty list — a missing file
  * list must never turn a successful run into a tool error.
  *
- * `GET /api/documents?run_id=…` answers the run's whole document CONTAINER —
- * the documents it produced PLUS the ones mounted as its input (a chained
- * `document://` from an earlier run keeps `purpose: 'agent_output'`, so the
+ * `GET /api/files?run_id=…` answers the run's whole file CONTAINER —
+ * the files it produced PLUS the ones mounted as its input (a chained
+ * `appfile://` from an earlier run keeps `purpose: 'agent_output'`, so the
  * purpose filter alone does not exclude it). This list is the run's OUTPUT, so
  * rows are kept only when their own `run_id` is this run.
  */
-export async function fetchRunDocuments(
+export async function fetchRunFiles(
   runId: string,
   opts: RunAndWaitClientOptions,
-): Promise<RunAndWaitDocument[]> {
+): Promise<RunAndWaitFile[]> {
   try {
     const url = apiUrl(
       opts.origin,
-      `/api/documents?run_id=${encodeURIComponent(runId)}&purpose=agent_output&limit=100`,
+      `/api/files?run_id=${encodeURIComponent(runId)}&purpose=agent_output&limit=100`,
     );
     const res = await opts.fetch(url, { method: "GET", headers: new Headers(opts.headers) });
     if (!res.ok) return [];
     const data = asRecord(await readJsonResponse(res))?.data;
     if (!Array.isArray(data)) return [];
-    const out: RunAndWaitDocument[] = [];
+    const out: RunAndWaitFile[] = [];
     for (const raw of data) {
       const r = asRecord(raw);
       if (asString(r?.run_id) !== runId) continue;
@@ -679,27 +679,27 @@ export async function fetchRunDocuments(
 
 /**
  * Like {@link runAndWaitSteps}, but enriches the FINAL (terminal) step with the
- * run's published `documents` so the model sees `{ uri, name, … }` it can chain
+ * run's published `files` so the model sees `{ uri, name, … }` it can chain
  * into a follow-up run (D6). The extra fetch runs only once the run is terminal
  * and only when a run id exists; a run that published nothing keeps the payload
- * document-free. Used by the chat's `run_and_wait` tool.
+ * file-free. Used by the chat's `run_and_wait` tool.
  *
  * Truncation ({@link truncateRunAndWaitPayload}) is applied on the same terminal
- * step but is INDEPENDENT of the document list — an oversized result is cut back
+ * step but is INDEPENDENT of the file list — an oversized result is cut back
  * whether or not the run published anything.
  */
-export async function* runAndWaitStepsWithDocuments(
+export async function* runAndWaitStepsWithFiles(
   rawArgs: unknown,
   opts: RunAndWaitClientOptions,
 ): AsyncGenerator<RunAndWaitStep> {
   for await (const step of runAndWaitSteps(rawArgs, opts)) {
     const runId = asString(step.payload.id);
     if (step.payload.done === true && runId) {
-      const documents = await fetchRunDocuments(runId, opts);
+      const files = await fetchRunFiles(runId, opts);
       const payload = truncateRunAndWaitPayload(step.payload);
       yield {
         ...step,
-        payload: documents.length > 0 ? { ...payload, documents } : payload,
+        payload: files.length > 0 ? { ...payload, files } : payload,
       };
       continue;
     }

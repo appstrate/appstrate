@@ -49,8 +49,8 @@ interface RunLogStream {
   /**
    * True while the live SSE tail is connected. Flipped back to false only AFTER
    * the terminal final log sweep has been merged, so `isTerminalStatus(status)
-   * && !live` is the "this run's document set is complete" signal the card's
-   * auto-present rule waits for (see `autoPresentDocument`).
+   * && !live` is the "this run's file set is complete" signal the card's
+   * auto-present rule waits for (see `autoPresentFile`).
    */
   live: boolean;
 }
@@ -167,10 +167,10 @@ export function useRunLogStream(
       if (isTerminalStatus(update.status)) {
         // One final full history sweep catches log lines the trigger may have
         // emitted in the same tick as the terminal status (mergeLogs dedups the
-        // overlap) — including the last `document.published` frames of a run
+        // overlap) — including the last `file.published` frames of a run
         // that published several files at finalize. `closeLive()` runs only
         // after that sweep is merged, which is what makes `!live` mean "the
-        // document set is complete" for the auto-present rule.
+        // file set is complete" for the auto-present rule.
         void (async () => {
           try {
             const finalLogs = await fetch(

@@ -157,6 +157,33 @@ describe("resolveApiKeyPermissions", () => {
   });
 });
 
+describe("retired permission-resource spellings (#1177)", () => {
+  /**
+   * `documents:read` / `documents:delete` are persisted inside every API key
+   * and OAuth grant issued before the rename. Both functions below FILTER —
+   * they drop what they do not recognise rather than rejecting it — so an
+   * un-normalized legacy scope is not an error: it is a credential that
+   * silently does less than it was granted. Migration `0043` rewrites the
+   * stored strings; this is the read side, which has to keep working for a
+   * token minted before the migration ran.
+   */
+  it("resolveApiKeyPermissions canonicalizes a stored documents:* scope", () => {
+    const perms = resolveApiKeyPermissions(["documents:read", "documents:delete"], "owner");
+    expect(perms.has("files:read")).toBe(true);
+    expect(perms.has("files:delete")).toBe(true);
+    expect(perms.size).toBe(2);
+  });
+
+  it("validateScopes accepts and rewrites a retired scope at key creation", () => {
+    expect(validateScopes(["documents:read"], "owner")).toEqual(["files:read"]);
+  });
+
+  it("does not duplicate when both spellings are stored on one key", () => {
+    const perms = resolveApiKeyPermissions(["documents:read", "files:read"], "owner");
+    expect([...perms]).toEqual(["files:read"]);
+  });
+});
+
 describe("API_KEY_ALLOWED_SCOPES", () => {
   it("excludes session-only permissions", () => {
     const excluded = [

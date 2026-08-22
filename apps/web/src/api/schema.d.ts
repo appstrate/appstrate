@@ -402,7 +402,7 @@ export interface paths {
         put?: never;
         /**
          * Execute an agent
-         * @description Start an agent run (fire-and-forget — the response does not wait for execution). Returns `201` + the created run resource — same shape as `GET /runs/{id}` — including the resolved `model_label` / `model_source`. Rate-limited to 20/min. The body is JSON. File-typed input fields (`format: uri` + `contentMediaType` in the agent's input schema) accept either of two forms: (1) an `upload://upl_xxx` reference from `createUpload` — stage the bytes first by PUTting them to the signed URL (see `createUpload` for the step-by-step recipe); or (2) an inline RFC 2397 data URI `data:<mime>;name=<filename>;base64,<payload>` with up to 4 MiB of decoded content (`name` is optional) — the single-call path for JSON-only clients such as MCP. Inline bytes are written to the run workspace as a document and the payload is stripped from the persisted run input (the stored value keeps only a `data:<mime>;name=<doc>;base64,` marker). Declared binary MIMEs are verified by magic-byte sniffing in both forms. Send `rerun_from` instead of `input` to replay a previous run's input — same documents, new overrides — without re-uploading. The effective model is resolved at run creation with precedence: request `modelId` > agent model setting > org default model > system default. Without an explicit `modelId`, a change to the org default model between triggers applies to the next run — send `modelId` to pin a specific model per run. A run against a published version assembles its bundle from stored artifacts before the container starts, so a bad artifact fails the trigger rather than the run: `422 dependency_unresolved` (a pin with no published version), `422 bundle_invalid` (the stored archive cannot be assembled), `422 bundle_signature_invalid` (rejected by `AFPS_SIGNATURE_POLICY`), or `500 bundle_integrity_mismatch` (the stored bytes no longer match the integrity hash recorded at publish time — republish the package). No run row is created in any of those cases. The body is closed: an unknown field, or a field whose type does not match, is a `400` rather than a silently ignored value, and a malformed JSON body is a `400` rather than an input-less run. Send no body at all for a run whose input resolves entirely from stored values.
+         * @description Start an agent run (fire-and-forget — the response does not wait for execution). Returns `201` + the created run resource — same shape as `GET /runs/{id}` — including the resolved `model_label` / `model_source`. Rate-limited to 20/min. The body is JSON. File-typed input fields (`format: uri` + `contentMediaType` in the agent's input schema) accept either of two forms: (1) an `upload://upl_xxx` reference from `createUpload` — stage the bytes first by PUTting them to the signed URL (see `createUpload` for the step-by-step recipe); or (2) an inline RFC 2397 data URI `data:<mime>;name=<filename>;base64,<payload>` with up to 4 MiB of decoded content (`name` is optional) — the single-call path for JSON-only clients such as MCP. Inline bytes are written to the run workspace as a file and the payload is stripped from the persisted run input (the stored value keeps only a `data:<mime>;name=<doc>;base64,` marker). Declared binary MIMEs are verified by magic-byte sniffing in both forms. Send `rerun_from` instead of `input` to replay a previous run's input — same files, new overrides — without re-uploading. The effective model is resolved at run creation with precedence: request `modelId` > agent model setting > org default model > system default. Without an explicit `modelId`, a change to the org default model between triggers applies to the next run — send `modelId` to pin a specific model per run. A run against a published version assembles its bundle from stored artifacts before the container starts, so a bad artifact fails the trigger rather than the run: `422 dependency_unresolved` (a pin with no published version), `422 bundle_invalid` (the stored archive cannot be assembled), `422 bundle_signature_invalid` (rejected by `AFPS_SIGNATURE_POLICY`), or `500 bundle_integrity_mismatch` (the stored bytes no longer match the integrity hash recorded at publish time — republish the package). No run row is created in any of those cases. The body is closed: an unknown field, or a field whose type does not match, is a `400` rather than a silently ignored value, and a malformed JSON body is a `400` rather than an input-less run. Send no body at all for a run whose input resolves entirely from stored values.
          */
         post: operations["runAgent"];
         delete?: never;
@@ -1285,10 +1285,13 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List documents
-         * @description List the documents visible to the caller in the current application. Requires the `documents:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so members see their own documents (and system-owned ones) and end-users see only their own. Filter by `purpose`, `run_id`, `packageId`, `chat_session_id`, or a chat session's complete context; paginate with `startingAfter` + `limit`.
+         * List files (deprecated)
+         * @deprecated
+         * @description DEPRECATED — use `/api/files`. This path is the pre-#1177 spelling of the same operation, served by the same handler with the same authorization, and is kept for callers pinned to it.
+         *
+         *     List the files visible to the caller in the current application. Requires the `files:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so members see their own files (and system-owned ones) and end-users see only their own. Filter by `purpose`, `run_id`, `packageId`, `chat_session_id`, or a chat session's complete context; paginate with `startingAfter` + `limit`.
          */
-        get: operations["listDocuments"];
+        get: operations["listFilesDeprecated"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1305,17 +1308,23 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get document metadata
-         * @description Fetch a document's metadata, including the derived `downloadable` flag and — for a previewable document — a freshly minted `preview_url`. Requires the `documents:read` permission; on top of it access is inherited from the document's container, so an id the caller cannot read returns 404.
+         * Get file metadata (deprecated)
+         * @deprecated
+         * @description DEPRECATED — use `/api/files/{id}`. This path is the pre-#1177 spelling of the same operation, served by the same handler with the same authorization, and is kept for callers pinned to it.
+         *
+         *     Fetch a file's metadata, including the derived `downloadable` flag and — for a previewable file — a freshly minted `preview_url`. Requires the `files:read` permission; on top of it access is inherited from the file's container, so an id the caller cannot read returns 404.
          */
-        get: operations["getDocument"];
+        get: operations["getFileDeprecated"];
         put?: never;
         post?: never;
         /**
-         * Delete a document
-         * @description Delete a document (storage object + row) and release its quota. Allowed for a caller with the `documents:delete` permission (owner/admin) or the document's own creator. A document referenced by a run cannot be deleted until those consumer runs are removed.
+         * Delete a file (deprecated)
+         * @deprecated
+         * @description DEPRECATED — use `/api/files/{id}`. This path is the pre-#1177 spelling of the same operation, served by the same handler with the same authorization, and is kept for callers pinned to it.
+         *
+         *     Delete a file (storage object + row) and release its quota. Allowed for a caller with the `files:delete` permission (owner/admin) or the file's own creator. A file referenced by a run cannot be deleted until those consumer runs are removed.
          */
-        delete: operations["deleteDocument"];
+        delete: operations["deleteFileDeprecated"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1329,10 +1338,13 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Download document content
-         * @description Download the document bytes with `Content-Disposition: attachment`. Requires the `documents:read` permission. When object storage supports it (S3 with a public endpoint), responds `307` with a short-lived presigned `Location`; otherwise proxy-streams the bytes (`200`). Also gated by the per-document `downloadable` flag — a user upload is served only to its creator (403 otherwise).
+         * Download file content (deprecated)
+         * @deprecated
+         * @description DEPRECATED — use `/api/files/{id}/content`. This path is the pre-#1177 spelling of the same operation, served by the same handler with the same authorization, and is kept for callers pinned to it.
+         *
+         *     Download the file bytes with `Content-Disposition: attachment`. Requires the `files:read` permission. When object storage supports it (S3 with a public endpoint), responds `307` with a short-lived presigned `Location`; otherwise proxy-streams the bytes (`200`). Also gated by the per-file `downloadable` flag — a user upload is served only to its creator (403 otherwise).
          */
-        get: operations["getDocumentContent"];
+        get: operations["getFileContentDeprecated"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1351,10 +1363,13 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Keep a document (clear its expiry)
-         * @description Pin a document so it is never swept by the retention GC: clears its `expires_at` (sets it to null / permanent). Allowed for a caller with the `documents:delete` permission (owner/admin) or the document's own creator. Idempotent — keeping an already-permanent document is a no-op that returns 200 with the unchanged document. An id the caller cannot read returns 404.
+         * Keep a file (clear its expiry) (deprecated)
+         * @deprecated
+         * @description DEPRECATED — use `/api/files/{id}/keep`. This path is the pre-#1177 spelling of the same operation, served by the same handler with the same authorization, and is kept for callers pinned to it.
+         *
+         *     Pin a file so it is never swept by the retention GC: clears its `expires_at` (sets it to null / permanent). Allowed for a caller with the `files:delete` permission (owner/admin) or the file's own creator. Idempotent — keeping an already-permanent file is a no-op that returns 200 with the unchanged file. An id the caller cannot read returns 404.
          */
-        post: operations["keepDocument"];
+        post: operations["keepFileDeprecated"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1413,6 +1428,90 @@ export interface paths {
          * @description Update end-user name, email, externalId, or metadata.
          */
         patch: operations["updateEndUser"];
+        trace?: never;
+    };
+    "/api/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List files
+         * @description List the files visible to the caller in the current application. Requires the `files:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so members see their own files (and system-owned ones) and end-users see only their own. Filter by `purpose`, `run_id`, `packageId`, `chat_session_id`, or a chat session's complete context; paginate with `startingAfter` + `limit`.
+         */
+        get: operations["listFiles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/files/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get file metadata
+         * @description Fetch a file's metadata, including the derived `downloadable` flag and — for a previewable file — a freshly minted `preview_url`. Requires the `files:read` permission; on top of it access is inherited from the file's container, so an id the caller cannot read returns 404.
+         */
+        get: operations["getFile"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a file
+         * @description Delete a file (storage object + row) and release its quota. Allowed for a caller with the `files:delete` permission (owner/admin) or the file's own creator. A file referenced by a run cannot be deleted until those consumer runs are removed.
+         */
+        delete: operations["deleteFile"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/files/{id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download file content
+         * @description Download the file bytes with `Content-Disposition: attachment`. Requires the `files:read` permission. When object storage supports it (S3 with a public endpoint), responds `307` with a short-lived presigned `Location`; otherwise proxy-streams the bytes (`200`). Also gated by the per-file `downloadable` flag — a user upload is served only to its creator (403 otherwise).
+         */
+        get: operations["getFileContent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/files/{id}/keep": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Keep a file (clear its expiry)
+         * @description Pin a file so it is never swept by the retention GC: clears its `expires_at` (sets it to null / permanent). Allowed for a caller with the `files:delete` permission (owner/admin) or the file's own creator. Idempotent — keeping an already-permanent file is a no-op that returns 200 with the unchanged file. An id the caller cannot read returns 404.
+         */
+        post: operations["keepFile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/integrations": {
@@ -2637,7 +2736,7 @@ export interface paths {
         };
         /**
          * OpenAPI specification
-         * @description Returns the OpenAPI 3.1 specification as JSON. The response carries a strong `ETag` that is stable for the lifetime of the deployment — send it back as `If-None-Match` to revalidate a cached copy and get a `304 Not Modified` instead of the full document.
+         * @description Returns the OpenAPI 3.1 specification as JSON. The response carries a strong `ETag` that is stable for the lifetime of the deployment — send it back as `If-None-Match` to revalidate a cached copy and get a `304 Not Modified` instead of the full file.
          */
         get: operations["getOpenApiSpec"];
         put?: never;
@@ -3920,16 +4019,22 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List the run's input documents (HMAC)
-         * @description Fetched by the agent runtime to enumerate the input documents it must provision. Returns the manifest of documents the run carries; the agent then fetches each via `GET /api/runs/{runId}/documents/{workspace_name}` and writes it to `workspace/documents/<workspace_name>`. Each entry carries `name` (the document's human display name) and `workspace_name` (the unique single-segment filename to write on disk — the platform disambiguates colliding display names, e.g. `report.pdf`, `report-2.pdf`, so two documents never overwrite each other). Same Standard Webhooks HMAC auth as the workspace route. A 404 means the run carries no input documents (the common case), which the runtime treats as an empty document set — not a fault. A 400 `duplicate_document_name` means the stored manifest is malformed (two identical workspace names).
+         * List the run's input files (HMAC) (deprecated)
+         * @deprecated
+         * @description DEPRECATED — use `/api/runs/{runId}/files`. Pre-#1177 spelling of the same operation, served by the same handler; a runtime image older than the platform still calls it.
+         *
+         *     Fetched by the agent runtime to enumerate the input files it must provision. Returns the manifest of files the run carries; the agent then fetches each via `GET /api/runs/{runId}/files/{workspace_name}` and writes it to `workspace/files/<workspace_name>`. Each entry carries `name` (the file's human display name) and `workspace_name` (the unique single-segment filename to write on disk — the platform disambiguates colliding display names, e.g. `report.pdf`, `report-2.pdf`, so two files never overwrite each other). Same Standard Webhooks HMAC auth as the workspace route. A 404 means the run carries no input files (the common case), which the runtime treats as an empty file set — not a fault. A 400 `duplicate_file_name` means the stored manifest is malformed (two identical workspace names).
          */
-        get: operations["fetchRunDocumentsManifest"];
+        get: operations["fetchRunFilesManifestDeprecated"];
         put?: never;
         /**
-         * Publish an agent-produced document (HMAC, streaming)
-         * @description Posted by the agent runtime — via the `publish_document` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` document attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `DOCUMENT_MAX_FILE_BYTES`, 100 MiB by default); metadata is carried in the `X-Document-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing document with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).
+         * Publish an agent-produced file (HMAC, streaming) (deprecated)
+         * @deprecated
+         * @description DEPRECATED — use `/api/runs/{runId}/files`. Pre-#1177 spelling of the same operation, served by the same handler; a runtime image older than the platform still calls it.
+         *
+         *     Posted by the agent runtime — via the `publish_file` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` file attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `DOCUMENT_MAX_FILE_BYTES`, 100 MiB by default); metadata is carried in the `X-File-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing file with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).
          */
-        post: operations["publishRunDocument"];
+        post: operations["publishRunFileDeprecated"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3944,10 +4049,13 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Fetch a single run input document (HMAC)
-         * @description Fetched by the agent runtime for each entry in the documents manifest. The bytes are streamed straight from storage so neither the platform nor the agent buffers the whole document; the agent streams the response body to `documents/{name}` on disk. Same Standard Webhooks HMAC auth as the workspace route. A 404 on a document the manifest listed is a fatal provisioning fault.
+         * Fetch a single run input file (HMAC) (deprecated)
+         * @deprecated
+         * @description DEPRECATED — use `/api/runs/{runId}/files/{name}`. Pre-#1177 spelling of the same operation, served by the same handler; a runtime image older than the platform still calls it.
+         *
+         *     Fetched by the agent runtime for each entry in the files manifest. The bytes are streamed straight from storage so neither the platform nor the agent buffers the whole file; the agent streams the response body to `files/{name}` on disk. Same Standard Webhooks HMAC auth as the workspace route. A 404 on a file the manifest listed is a fatal provisioning fault.
          */
-        get: operations["fetchRunDocument"];
+        get: operations["fetchRunFileDeprecated"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4016,6 +4124,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{runId}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the run's input files (HMAC)
+         * @description Fetched by the agent runtime to enumerate the input files it must provision. Returns the manifest of files the run carries; the agent then fetches each via `GET /api/runs/{runId}/files/{workspace_name}` and writes it to `workspace/files/<workspace_name>`. Each entry carries `name` (the file's human display name) and `workspace_name` (the unique single-segment filename to write on disk — the platform disambiguates colliding display names, e.g. `report.pdf`, `report-2.pdf`, so two files never overwrite each other). Same Standard Webhooks HMAC auth as the workspace route. A 404 means the run carries no input files (the common case), which the runtime treats as an empty file set — not a fault. A 400 `duplicate_file_name` means the stored manifest is malformed (two identical workspace names).
+         */
+        get: operations["fetchRunFilesManifest"];
+        put?: never;
+        /**
+         * Publish an agent-produced file (HMAC, streaming)
+         * @description Posted by the agent runtime — via the `publish_file` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` file attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `DOCUMENT_MAX_FILE_BYTES`, 100 MiB by default); metadata is carried in the `X-File-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing file with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).
+         */
+        post: operations["publishRunFile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{runId}/files/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fetch a single run input file (HMAC)
+         * @description Fetched by the agent runtime for each entry in the files manifest. The bytes are streamed straight from storage so neither the platform nor the agent buffers the whole file; the agent streams the response body to `files/{name}` on disk. Same Standard Webhooks HMAC auth as the workspace route. A 404 on a file the manifest listed is a fatal provisioning fault.
+         */
+        get: operations["fetchRunFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/{runId}/sink/extend": {
         parameters: {
             query?: never;
@@ -4045,7 +4197,7 @@ export interface paths {
         };
         /**
          * Fetch the run bundle archive (HMAC)
-         * @description Fetched by the agent runtime at startup to self-provision its `/workspace`. Returns the AFPS bundle (`agent-package.afps` = manifest + prompt + skills; itself a ZIP) verbatim — small and constant; the agent writes it straight to its workspace root. Input documents are NOT bundled here; the agent fetches them separately and streams each to disk (`GET /api/runs/{runId}/documents`). This pull-based delivery means workspace correctness no longer depends on a shared run volume's driver (a tmpfs-backed `local` volume is not shared between the seed helper and the agent — see issue #549). Same Standard Webhooks HMAC auth as the event routes: the signature covers the empty GET body. A 404 means no bundle was provisioned, which the runtime treats as a fatal provisioning fault (the platform always uploads the agent package).
+         * @description Fetched by the agent runtime at startup to self-provision its `/workspace`. Returns the AFPS bundle (`agent-package.afps` = manifest + prompt + skills; itself a ZIP) verbatim — small and constant; the agent writes it straight to its workspace root. Input files are NOT bundled here; the agent fetches them separately and streams each to disk (`GET /api/runs/{runId}/files`). This pull-based delivery means workspace correctness no longer depends on a shared run volume's driver (a tmpfs-backed `local` volume is not shared between the seed helper and the agent — see issue #549). Same Standard Webhooks HMAC auth as the event routes: the signature covers the empty GET body. A 404 means no bundle was provisioned, which the runtime treats as a fatal provisioning fault (the platform always uploads the agent package).
          */
         get: operations["fetchRunWorkspace"];
         put?: never;
@@ -4800,8 +4952,8 @@ export interface components {
         } & {
             [key: string]: unknown;
         }) & {
-            /** @description Appstrate top-level extension: runtime tools the agent may use. Optional. */
-            runtime_tools?: ("output" | "log" | "note" | "pin" | "publish_document")[];
+            /** @description Appstrate top-level extension: runtime tools the agent may use. Optional. `publish_document` is the retired pre-#1177 spelling of `publish_file`: still accepted on input (a manifest published before the rename carries it) and normalized to the canonical id on save. */
+            runtime_tools?: ("output" | "log" | "note" | "pin" | "publish_file" | "publish_document")[];
         };
         AgentSkillRef: {
             id: string;
@@ -5142,9 +5294,9 @@ export interface components {
             slug?: string;
             /** Format: date-time */
             createdAt?: string;
-            /** @description Durable-document storage consumption for this organization. `used_bytes` is the running total of stored document bytes; `limit_bytes` is the raw per-org limit override (`documents_bytes_limit`), or null when no override is set; `effective_limit_bytes` is the limit the write path enforces — the override, else the global quota (`ORG_STORAGE_QUOTA_BYTES`), else null (unlimited). */
+            /** @description Durable-file storage consumption for this organization. `used_bytes` is the running total of stored file bytes; `limit_bytes` is the raw per-org limit override (`files_bytes_limit`), or null when no override is set; `effective_limit_bytes` is the limit the write path enforces — the override, else the global quota (`ORG_STORAGE_QUOTA_BYTES`), else null (unlimited). */
             storage?: {
-                /** @description Bytes of durable documents stored. */
+                /** @description Bytes of durable files stored. */
                 used_bytes: number;
                 /** @description Per-org limit override in bytes, or null when no override is set (falls back to the global quota). */
                 limit_bytes: number | null;
@@ -5408,13 +5560,13 @@ export interface components {
             input: {
                 [key: string]: unknown;
             } | null;
-            /** @description What the run produced: the structured output, and nothing else. Human-facing deliverables are documents (see the run's documents), not fields here. `null` while the run is in flight or when no output was emitted. */
+            /** @description What the run produced: the structured output, and nothing else. Human-facing deliverables are files (see the run's files), not fields here. `null` while the run is in flight or when no output was emitted. */
             result: {
                 /** @description Structured JSON emitted via the agent's `output` runtime tool. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped. */
                 output?: unknown;
                 /**
                  * @deprecated
-                 * @description HISTORICAL ONLY. Markdown left by the removed `report` runtime tool. The platform no longer writes this field — it is served verbatim on runs finalized before the removal. Agent reports are descriptively named markdown documents now (`outputs/<task-specific-name>.md`).
+                 * @description HISTORICAL ONLY. Markdown left by the removed `report` runtime tool. The platform no longer writes this field — it is served verbatim on runs finalized before the removal. Agent reports are descriptively named markdown files now (`outputs/<task-specific-name>.md`).
                  */
                 text?: string;
                 /**
@@ -5506,11 +5658,11 @@ export interface components {
             agent_name: string | null;
             /** @description Present on enriched run responses. True when the source package is an inline-run shadow (POST /api/runs/inline). */
             package_ephemeral: boolean;
-            /** @description Per-run document counts, always present on enriched list responses. Computed server-side: `input` from the distinct `document://` references in the run's persisted input, `output` from the count of documents the run produced. */
-            document_counts: {
-                /** @description Distinct documents referenced as input by the run. */
+            /** @description Per-run file counts, always present on enriched list responses. Computed server-side: `input` from the distinct `appfile://` references in the run's persisted input, `output` from the count of files the run produced. */
+            file_counts: {
+                /** @description Distinct files referenced as input by the run. */
                 input: number;
-                /** @description Documents produced by the run. */
+                /** @description Files produced by the run. */
                 output: number;
             };
             /** @description Inline runs only. Snapshot of the manifest submitted at run time. Null once the shadow has been compacted (see INLINE_RUN_LIMITS.retention_days). */
@@ -6216,7 +6368,7 @@ export interface operations {
                              * @example app_abc/doc_def/report.pdf
                              */
                             storage_key: string;
-                            /** @description Why the object is being purged (document_deleted | document_expired | org_deleted | application_deleted | end_user_deleted | run_workspace_deleted | upload_expired | materialization_failed). */
+                            /** @description Why the object is being purged (document_deleted | file_expired | org_deleted | application_deleted | end_user_deleted | run_workspace_deleted | upload_expired | materialization_failed). */
                             reason: string;
                             /** @description Delete attempts made so far. */
                             attempts: number;
@@ -6891,9 +7043,9 @@ export interface operations {
                  *     }
                  */
                 "application/json": {
-                    /** @description Run input values, validated against the agent's input schema. File fields take `upload://upl_xxx` references (from `createUpload`), `document://doc_xxx` references (an existing document the caller can read), or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded). */
+                    /** @description Run input values, validated against the agent's input schema. File fields take `upload://upl_xxx` references (from `createUpload`), `appfile://doc_xxx` references (an existing file the caller can read), or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded). */
                     input?: Record<string, never>;
-                    /** @description Run id whose persisted `input` to replay on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + application scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). Staged `upload://` inputs are materialized on the original run and rewritten in its persisted input as durable `document://` references, so later reruns reuse the same documents without depending on upload retention. Existing `document://` inputs remain unchanged. **Limitation:** inline `data:` inputs are NOT replayable — their bytes are materialized into the original run's workspace and stripped from the stored input (only a payload-less marker is persisted), so replaying a run whose input carried an inline file returns 409 `rerun_inline_input_unavailable`. Stage the file with `createUpload` when the input must be replayable. */
+                    /** @description Run id whose persisted `input` to replay on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + application scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). Staged `upload://` inputs are materialized on the original run and rewritten in its persisted input as durable `appfile://` references, so later reruns reuse the same files without depending on upload retention. Existing `appfile://` inputs remain unchanged. **Limitation:** inline `data:` inputs are NOT replayable — their bytes are materialized into the original run's workspace and stripped from the stored input (only a payload-less marker is persisted), so replaying a run whose input carried an inline file returns 409 `rerun_inline_input_unavailable`. Stage the file with `createUpload` when the input must be replayable. */
                     rerun_from?: string;
                     /** @description Model ID override for this run — a system model key or an org-model UUID. Pins THIS run to that model, taking priority over the full resolution cascade (request `modelId` > agent model setting > org default model > system default). Without it, the org default is resolved at run creation — not ahead of time — so changing the org default between triggers silently changes the model used by subsequent runs. Returns 404 when the referenced model does not exist. The response echoes the resolved `model_label` + `model_source` so callers can verify which model the run actually uses. */
                     modelId?: string;
@@ -6979,7 +7131,7 @@ export interface operations {
                      *       "schedule_name": null,
                      *       "connections_used": null,
                      *       "package_ephemeral": false,
-                     *       "document_counts": {
+                     *       "file_counts": {
                      *         "input": 0,
                      *         "output": 0
                      *       }
@@ -7037,7 +7189,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description `payload_too_large` — an inline `data:` input file exceeds the per-file inline cap (4 MiB decoded), or the run's input documents together exceed `WORKSPACE_MAX_DOCS_BYTES`. Or `document_count_exceeded` — the run would carry more than `RUN_MAX_DOCUMENTS` input documents (uploads + inline + `document://` refs). Both are refused before the run launches, so nothing is charged and no workspace is provisioned; distinct codes so a client can tell "one file too big" from "too many files". */
+            /** @description `payload_too_large` — an inline `data:` input file exceeds the per-file inline cap (4 MiB decoded), or the run's input files together exceed `WORKSPACE_MAX_DOCS_BYTES`. Or `file_count_exceeded` — the run would carry more than `RUN_MAX_DOCUMENTS` input files (uploads + inline + `appfile://` refs). Both are refused before the run launches, so nothing is charged and no workspace is provisioned; distinct codes so a client can tell "one file too big" from "too many files". */
             413: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -9816,20 +9968,20 @@ export interface operations {
             };
         };
     };
-    listDocuments: {
+    listFilesDeprecated: {
         parameters: {
             query?: {
-                /** @description Filter by document purpose. */
+                /** @description Filter by file purpose. */
                 purpose?: "user_upload" | "agent_output";
-                /** @description Filter to documents anchored to this run. */
+                /** @description Filter to files anchored to this run. */
                 run_id?: string;
-                /** @description Filter to documents produced by this agent package. */
+                /** @description Filter to files produced by this agent package. */
                 packageId?: string;
-                /** @description Filter to documents anchored to this chat session. */
+                /** @description Filter to files anchored to this chat session. */
                 chat_session_id?: string;
-                /** @description Filter to the private conversation context: direct attachments plus documents produced or consumed by runs launched from the session. */
+                /** @description Filter to the private conversation context: direct attachments plus files produced or consumed by runs launched from the session. */
                 context_chat_session_id?: string;
-                /** @description Keyset cursor — document id to page after (newest-first order). */
+                /** @description Keyset cursor — file id to page after (newest-first order). */
                 startingAfter?: string;
                 /** @description Page size (1–100, default 20). */
                 limit?: number;
@@ -9845,7 +9997,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description A page of documents. */
+            /** @description A page of files. */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -9858,10 +10010,10 @@ export interface operations {
                         object: "list";
                         data: {
                             /** @enum {string} */
-                            object: "document";
-                            /** @description Opaque document id (`doc_…`). */
+                            object: "file";
+                            /** @description Opaque file id (`doc_…`). */
                             id: string;
-                            /** @description Stable `document://doc_…` reference — pass in a run's file input field. */
+                            /** @description Stable `appfile://doc_…` reference — pass in a run's file input field. */
                             uri: string;
                             /** @enum {string} */
                             purpose: "user_upload" | "agent_output";
@@ -9872,7 +10024,7 @@ export interface operations {
                             chat_session_id: string | null;
                             /** @description Producing agent package id, or null. */
                             packageId: string | null;
-                            /** @description Display name. Degrades to the generic `"document"` when the caller lacks the `metadata` capability (a non-creator run reader of a `user_upload`) — the real filename is withheld. */
+                            /** @description Display name. Degrades to the generic `"file"` when the caller lacks the `metadata` capability (a non-creator run reader of a `user_upload`) — the real filename is withheld. */
                             name: string;
                             /** @description MIME type. Degrades to `application/octet-stream` when the caller lacks the `metadata` capability. */
                             mime: string;
@@ -9882,9 +10034,9 @@ export interface operations {
                             sha256?: string;
                             /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. Flat mirror of `capabilities.download`. */
                             downloadable: boolean;
-                            /** @description The caller's full access-capability set for this document — the single source the UI drives its download/preview/keep/delete affordances from. */
+                            /** @description The caller's full access-capability set for this file — the single source the UI drives its download/preview/keep/delete affordances from. */
                             capabilities: {
-                                /** @description The caller can resolve this document at all (container ACL). */
+                                /** @description The caller can resolve this file at all (container ACL). */
                                 visible: boolean;
                                 /** @description The caller may see the real name, mime and sha256. When false the row serves an opaque reference (generic name + mime, no sha256). */
                                 metadata: boolean;
@@ -9894,13 +10046,13 @@ export interface operations {
                                 preview: boolean;
                                 /** @description The caller may pin/clear the retention deadline. */
                                 keep: boolean;
-                                /** @description The caller may delete the document. */
+                                /** @description The caller may delete the file. */
                                 delete: boolean;
                             };
-                            /** @description Whether the caller can open an in-browser preview of this document (a readable document of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-document GET (below). */
+                            /** @description Whether the caller can open an in-browser preview of this file (a readable file of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-file GET (below). */
                             previewable: boolean;
                             /**
-                             * @description How this document previews, or null when not previewable: `html` (sandboxed iframe, active content), `image` (inline `<img>`), `pdf` (native-viewer iframe), `text` (plaintext). Present on every row.
+                             * @description How this file previews, or null when not previewable: `html` (sandboxed iframe, active content), `image` (inline `<img>`), `pdf` (native-viewer iframe), `text` (plaintext). Present on every row.
                              * @enum {string|null}
                              */
                             preview_kind: "html" | "image" | "pdf" | "text" | null;
@@ -9924,7 +10076,7 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
-    getDocument: {
+    getFileDeprecated: {
         parameters: {
             query?: never;
             header?: {
@@ -9940,7 +10092,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The document. */
+            /** @description The file. */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -9950,10 +10102,10 @@ export interface operations {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        object: "document";
-                        /** @description Opaque document id (`doc_…`). */
+                        object: "file";
+                        /** @description Opaque file id (`doc_…`). */
                         id: string;
-                        /** @description Stable `document://doc_…` reference — pass in a run's file input field. */
+                        /** @description Stable `appfile://doc_…` reference — pass in a run's file input field. */
                         uri: string;
                         /** @enum {string} */
                         purpose: "user_upload" | "agent_output";
@@ -9964,7 +10116,7 @@ export interface operations {
                         chat_session_id: string | null;
                         /** @description Producing agent package id, or null. */
                         packageId: string | null;
-                        /** @description Display name. Degrades to the generic `"document"` when the caller lacks the `metadata` capability (a non-creator run reader of a `user_upload`) — the real filename is withheld. */
+                        /** @description Display name. Degrades to the generic `"file"` when the caller lacks the `metadata` capability (a non-creator run reader of a `user_upload`) — the real filename is withheld. */
                         name: string;
                         /** @description MIME type. Degrades to `application/octet-stream` when the caller lacks the `metadata` capability. */
                         mime: string;
@@ -9974,9 +10126,9 @@ export interface operations {
                         sha256?: string;
                         /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. Flat mirror of `capabilities.download`. */
                         downloadable: boolean;
-                        /** @description The caller's full access-capability set for this document — the single source the UI drives its download/preview/keep/delete affordances from. */
+                        /** @description The caller's full access-capability set for this file — the single source the UI drives its download/preview/keep/delete affordances from. */
                         capabilities: {
-                            /** @description The caller can resolve this document at all (container ACL). */
+                            /** @description The caller can resolve this file at all (container ACL). */
                             visible: boolean;
                             /** @description The caller may see the real name, mime and sha256. When false the row serves an opaque reference (generic name + mime, no sha256). */
                             metadata: boolean;
@@ -9986,13 +10138,13 @@ export interface operations {
                             preview: boolean;
                             /** @description The caller may pin/clear the retention deadline. */
                             keep: boolean;
-                            /** @description The caller may delete the document. */
+                            /** @description The caller may delete the file. */
                             delete: boolean;
                         };
-                        /** @description Whether the caller can open an in-browser preview of this document (a readable document of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-document GET (below). */
+                        /** @description Whether the caller can open an in-browser preview of this file (a readable file of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-file GET (below). */
                         previewable: boolean;
                         /**
-                         * @description How this document previews, or null when not previewable: `html` (sandboxed iframe, active content), `image` (inline `<img>`), `pdf` (native-viewer iframe), `text` (plaintext). Present on every row.
+                         * @description How this file previews, or null when not previewable: `html` (sandboxed iframe, active content), `image` (inline `<img>`), `pdf` (native-viewer iframe), `text` (plaintext). Present on every row.
                          * @enum {string|null}
                          */
                         preview_kind: "html" | "image" | "pdf" | "text" | null;
@@ -10005,7 +10157,7 @@ export interface operations {
                         createdAt: string;
                         /**
                          * Format: uri
-                         * @description Absolute URL of a hardened, cookie-less preview (short-lived signed token in the query). Minted ONLY on this single-document GET — the list rows and the `keep` response carry `previewable` instead. Non-null only for a previewable document. Load in a `sandbox="allow-scripts"` iframe: for an `html` document that iframe is the ONLY context in which the markup is served as active HTML, whether or not the instance configures a separate `USERCONTENT_URL` preview origin. Any other loading context — a top-level navigation to the same URL above all — is served as inert `text/plain` source, because a top-level agent document can navigate itself and so cannot be contained. Minted on the `USERCONTENT_URL` origin when the instance configures a separate preview domain, else same-origin.
+                         * @description Absolute URL of a hardened, cookie-less preview (short-lived signed token in the query). Minted ONLY on this single-file GET — the list rows and the `keep` response carry `previewable` instead. Non-null only for a previewable file. Load in a `sandbox="allow-scripts"` iframe: for an `html` file that iframe is the ONLY context in which the markup is served as active HTML, whether or not the instance configures a separate `USERCONTENT_URL` preview origin. Any other loading context — a top-level navigation to the same URL above all — is served as inert `text/plain` source, because a top-level agent document can navigate itself and so cannot be contained. Minted on the `USERCONTENT_URL` origin when the instance configures a separate preview domain, else same-origin.
                          */
                         preview_url?: string | null;
                     };
@@ -10018,7 +10170,7 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
-    deleteDocument: {
+    deleteFileDeprecated: {
         parameters: {
             query?: never;
             header?: {
@@ -10046,7 +10198,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Document is still referenced by one or more consumer runs. */
+            /** @description File is still referenced by one or more consumer runs. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -10057,8 +10209,8 @@ export interface operations {
                      *       "type": "about:blank",
                      *       "title": "Conflict",
                      *       "status": 409,
-                     *       "detail": "This document is referenced by one or more runs and cannot be deleted",
-                     *       "code": "document_in_use",
+                     *       "detail": "This file is referenced by one or more runs and cannot be deleted",
+                     *       "code": "file_in_use",
                      *       "requestId": "req_abc123"
                      *     }
                      */
@@ -10068,7 +10220,7 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
-    getDocumentContent: {
+    getFileContentDeprecated: {
         parameters: {
             query?: never;
             header?: {
@@ -10084,14 +10236,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The document bytes (proxy-stream mode). `Content-Type` is the document's own stored MIME (never rewritten), served with `X-Content-Type-Options: nosniff` and an `attachment` disposition — hence the `*\/*` media type here rather than a fixed `application/octet-stream`. */
+            /** @description The file bytes (proxy-stream mode). `Content-Type` is the file's own stored MIME (never rewritten), served with `X-Content-Type-Options: nosniff` and an `attachment` disposition — hence the `*\/*` media type here rather than a fixed `application/octet-stream`. */
             200: {
                 headers: {
                     /** @description attachment; filename=… */
                     "Content-Disposition"?: string;
                     /** @description Always `nosniff` — the stored MIME is uploader-controlled, so the browser must never re-interpret the body as active content. */
                     "X-Content-Type-Options"?: "nosniff";
-                    /** @description RFC 9530 representation digest of the bytes, `sha-256=:<base64>:`. Present only when the caller has the document's `metadata` capability. */
+                    /** @description RFC 9530 representation digest of the bytes, `sha-256=:<base64>:`. Present only when the caller has the file's `metadata` capability. */
                     "Repr-Digest"?: string;
                     [name: string]: unknown;
                 };
@@ -10117,7 +10269,7 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
-    keepDocument: {
+    keepFileDeprecated: {
         parameters: {
             query?: never;
             header?: {
@@ -10133,7 +10285,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The document, with `expiresAt` now null. No `preview_url` is minted on this response — re-read `GET /api/documents/{id}` for a fresh one. */
+            /** @description The file, with `expiresAt` now null. No `preview_url` is minted on this response — re-read `GET /api/files/{id}` for a fresh one. */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -10143,10 +10295,10 @@ export interface operations {
                 content: {
                     "application/json": {
                         /** @enum {string} */
-                        object: "document";
-                        /** @description Opaque document id (`doc_…`). */
+                        object: "file";
+                        /** @description Opaque file id (`doc_…`). */
                         id: string;
-                        /** @description Stable `document://doc_…` reference — pass in a run's file input field. */
+                        /** @description Stable `appfile://doc_…` reference — pass in a run's file input field. */
                         uri: string;
                         /** @enum {string} */
                         purpose: "user_upload" | "agent_output";
@@ -10157,7 +10309,7 @@ export interface operations {
                         chat_session_id: string | null;
                         /** @description Producing agent package id, or null. */
                         packageId: string | null;
-                        /** @description Display name. Degrades to the generic `"document"` when the caller lacks the `metadata` capability (a non-creator run reader of a `user_upload`) — the real filename is withheld. */
+                        /** @description Display name. Degrades to the generic `"file"` when the caller lacks the `metadata` capability (a non-creator run reader of a `user_upload`) — the real filename is withheld. */
                         name: string;
                         /** @description MIME type. Degrades to `application/octet-stream` when the caller lacks the `metadata` capability. */
                         mime: string;
@@ -10167,9 +10319,9 @@ export interface operations {
                         sha256?: string;
                         /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. Flat mirror of `capabilities.download`. */
                         downloadable: boolean;
-                        /** @description The caller's full access-capability set for this document — the single source the UI drives its download/preview/keep/delete affordances from. */
+                        /** @description The caller's full access-capability set for this file — the single source the UI drives its download/preview/keep/delete affordances from. */
                         capabilities: {
-                            /** @description The caller can resolve this document at all (container ACL). */
+                            /** @description The caller can resolve this file at all (container ACL). */
                             visible: boolean;
                             /** @description The caller may see the real name, mime and sha256. When false the row serves an opaque reference (generic name + mime, no sha256). */
                             metadata: boolean;
@@ -10179,13 +10331,13 @@ export interface operations {
                             preview: boolean;
                             /** @description The caller may pin/clear the retention deadline. */
                             keep: boolean;
-                            /** @description The caller may delete the document. */
+                            /** @description The caller may delete the file. */
                             delete: boolean;
                         };
-                        /** @description Whether the caller can open an in-browser preview of this document (a readable document of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-document GET (below). */
+                        /** @description Whether the caller can open an in-browser preview of this file (a readable file of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-file GET (below). */
                         previewable: boolean;
                         /**
-                         * @description How this document previews, or null when not previewable: `html` (sandboxed iframe, active content), `image` (inline `<img>`), `pdf` (native-viewer iframe), `text` (plaintext). Present on every row.
+                         * @description How this file previews, or null when not previewable: `html` (sandboxed iframe, active content), `image` (inline `<img>`), `pdf` (native-viewer iframe), `text` (plaintext). Present on every row.
                          * @enum {string|null}
                          */
                         preview_kind: "html" | "image" | "pdf" | "text" | null;
@@ -10537,6 +10689,396 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listFiles: {
+        parameters: {
+            query?: {
+                /** @description Filter by file purpose. */
+                purpose?: "user_upload" | "agent_output";
+                /** @description Filter to files anchored to this run. */
+                run_id?: string;
+                /** @description Filter to files produced by this agent package. */
+                packageId?: string;
+                /** @description Filter to files anchored to this chat session. */
+                chat_session_id?: string;
+                /** @description Filter to the private conversation context: direct attachments plus files produced or consumed by runs launched from the session. */
+                context_chat_session_id?: string;
+                /** @description Keyset cursor — file id to page after (newest-first order). */
+                startingAfter?: string;
+                /** @description Page size (1–100, default 20). */
+                limit?: number;
+            };
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of files. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: {
+                            /** @enum {string} */
+                            object: "file";
+                            /** @description Opaque file id (`doc_…`). */
+                            id: string;
+                            /** @description Stable `appfile://doc_…` reference — pass in a run's file input field. */
+                            uri: string;
+                            /** @enum {string} */
+                            purpose: "user_upload" | "agent_output";
+                            applicationId: string;
+                            /** @description Run container, or null. */
+                            run_id: string | null;
+                            /** @description Chat-session container, or null. */
+                            chat_session_id: string | null;
+                            /** @description Producing agent package id, or null. */
+                            packageId: string | null;
+                            /** @description Display name. Degrades to the generic `"file"` when the caller lacks the `metadata` capability (a non-creator run reader of a `user_upload`) — the real filename is withheld. */
+                            name: string;
+                            /** @description MIME type. Degrades to `application/octet-stream` when the caller lacks the `metadata` capability. */
+                            mime: string;
+                            /** @description Size in bytes. */
+                            size: number;
+                            /** @description SHA-256 of the bytes (hex). OMITTED (absent) when the caller lacks the `metadata` capability, so a private upload's content hash is never disclosed to a non-creator. */
+                            sha256?: string;
+                            /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. Flat mirror of `capabilities.download`. */
+                            downloadable: boolean;
+                            /** @description The caller's full access-capability set for this file — the single source the UI drives its download/preview/keep/delete affordances from. */
+                            capabilities: {
+                                /** @description The caller can resolve this file at all (container ACL). */
+                                visible: boolean;
+                                /** @description The caller may see the real name, mime and sha256. When false the row serves an opaque reference (generic name + mime, no sha256). */
+                                metadata: boolean;
+                                /** @description The caller may fetch the bytes (`/content`). */
+                                download: boolean;
+                                /** @description The caller may render an in-browser preview (download + a previewable mime). */
+                                preview: boolean;
+                                /** @description The caller may pin/clear the retention deadline. */
+                                keep: boolean;
+                                /** @description The caller may delete the file. */
+                                delete: boolean;
+                            };
+                            /** @description Whether the caller can open an in-browser preview of this file (a readable file of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-file GET (below). */
+                            previewable: boolean;
+                            /**
+                             * @description How this file previews, or null when not previewable: `html` (sandboxed iframe, active content), `image` (inline `<img>`), `pdf` (native-viewer iframe), `text` (plaintext). Present on every row.
+                             * @enum {string|null}
+                             */
+                            preview_kind: "html" | "image" | "pdf" | "text" | null;
+                            /**
+                             * Format: date-time
+                             * @description Retention deadline, or null when permanent.
+                             */
+                            expiresAt: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
+                        }[];
+                        hasMore: boolean;
+                        limit?: number;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getFile: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "file";
+                        /** @description Opaque file id (`doc_…`). */
+                        id: string;
+                        /** @description Stable `appfile://doc_…` reference — pass in a run's file input field. */
+                        uri: string;
+                        /** @enum {string} */
+                        purpose: "user_upload" | "agent_output";
+                        applicationId: string;
+                        /** @description Run container, or null. */
+                        run_id: string | null;
+                        /** @description Chat-session container, or null. */
+                        chat_session_id: string | null;
+                        /** @description Producing agent package id, or null. */
+                        packageId: string | null;
+                        /** @description Display name. Degrades to the generic `"file"` when the caller lacks the `metadata` capability (a non-creator run reader of a `user_upload`) — the real filename is withheld. */
+                        name: string;
+                        /** @description MIME type. Degrades to `application/octet-stream` when the caller lacks the `metadata` capability. */
+                        mime: string;
+                        /** @description Size in bytes. */
+                        size: number;
+                        /** @description SHA-256 of the bytes (hex). OMITTED (absent) when the caller lacks the `metadata` capability, so a private upload's content hash is never disclosed to a non-creator. */
+                        sha256?: string;
+                        /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. Flat mirror of `capabilities.download`. */
+                        downloadable: boolean;
+                        /** @description The caller's full access-capability set for this file — the single source the UI drives its download/preview/keep/delete affordances from. */
+                        capabilities: {
+                            /** @description The caller can resolve this file at all (container ACL). */
+                            visible: boolean;
+                            /** @description The caller may see the real name, mime and sha256. When false the row serves an opaque reference (generic name + mime, no sha256). */
+                            metadata: boolean;
+                            /** @description The caller may fetch the bytes (`/content`). */
+                            download: boolean;
+                            /** @description The caller may render an in-browser preview (download + a previewable mime). */
+                            preview: boolean;
+                            /** @description The caller may pin/clear the retention deadline. */
+                            keep: boolean;
+                            /** @description The caller may delete the file. */
+                            delete: boolean;
+                        };
+                        /** @description Whether the caller can open an in-browser preview of this file (a readable file of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-file GET (below). */
+                        previewable: boolean;
+                        /**
+                         * @description How this file previews, or null when not previewable: `html` (sandboxed iframe, active content), `image` (inline `<img>`), `pdf` (native-viewer iframe), `text` (plaintext). Present on every row.
+                         * @enum {string|null}
+                         */
+                        preview_kind: "html" | "image" | "pdf" | "text" | null;
+                        /**
+                         * Format: date-time
+                         * @description Retention deadline, or null when permanent.
+                         */
+                        expiresAt: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                        /**
+                         * Format: uri
+                         * @description Absolute URL of a hardened, cookie-less preview (short-lived signed token in the query). Minted ONLY on this single-file GET — the list rows and the `keep` response carry `previewable` instead. Non-null only for a previewable file. Load in a `sandbox="allow-scripts"` iframe: for an `html` file that iframe is the ONLY context in which the markup is served as active HTML, whether or not the instance configures a separate `USERCONTENT_URL` preview origin. Any other loading context — a top-level navigation to the same URL above all — is served as inert `text/plain` source, because a top-level agent document can navigate itself and so cannot be contained. Minted on the `USERCONTENT_URL` origin when the instance configures a separate preview domain, else same-origin.
+                         */
+                        preview_url?: string | null;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    deleteFile: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description File is still referenced by one or more consumer runs. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "type": "about:blank",
+                     *       "title": "Conflict",
+                     *       "status": 409,
+                     *       "detail": "This file is referenced by one or more runs and cannot be deleted",
+                     *       "code": "file_in_use",
+                     *       "requestId": "req_abc123"
+                     *     }
+                     */
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getFileContent: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file bytes (proxy-stream mode). `Content-Type` is the file's own stored MIME (never rewritten), served with `X-Content-Type-Options: nosniff` and an `attachment` disposition — hence the `*\/*` media type here rather than a fixed `application/octet-stream`. */
+            200: {
+                headers: {
+                    /** @description attachment; filename=… */
+                    "Content-Disposition"?: string;
+                    /** @description Always `nosniff` — the stored MIME is uploader-controlled, so the browser must never re-interpret the body as active content. */
+                    "X-Content-Type-Options"?: "nosniff";
+                    /** @description RFC 9530 representation digest of the bytes, `sha-256=:<base64>:`. Present only when the caller has the file's `metadata` capability. */
+                    "Repr-Digest"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "*/*": Blob;
+                };
+            };
+            /** @description Redirect to a presigned GET URL (public-endpoint S3 mode). */
+            307: {
+                headers: {
+                    /** @description Presigned URL. */
+                    Location?: string;
+                    /** @description RFC 9530 representation digest of the bytes, `sha-256=:<base64>:` (carried on the redirect; present only when the caller has the `metadata` capability). */
+                    "Repr-Digest"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    keepFile: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file, with `expiresAt` now null. No `preview_url` is minted on this response — re-read `GET /api/files/{id}` for a fresh one. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "file";
+                        /** @description Opaque file id (`doc_…`). */
+                        id: string;
+                        /** @description Stable `appfile://doc_…` reference — pass in a run's file input field. */
+                        uri: string;
+                        /** @enum {string} */
+                        purpose: "user_upload" | "agent_output";
+                        applicationId: string;
+                        /** @description Run container, or null. */
+                        run_id: string | null;
+                        /** @description Chat-session container, or null. */
+                        chat_session_id: string | null;
+                        /** @description Producing agent package id, or null. */
+                        packageId: string | null;
+                        /** @description Display name. Degrades to the generic `"file"` when the caller lacks the `metadata` capability (a non-creator run reader of a `user_upload`) — the real filename is withheld. */
+                        name: string;
+                        /** @description MIME type. Degrades to `application/octet-stream` when the caller lacks the `metadata` capability. */
+                        mime: string;
+                        /** @description Size in bytes. */
+                        size: number;
+                        /** @description SHA-256 of the bytes (hex). OMITTED (absent) when the caller lacks the `metadata` capability, so a private upload's content hash is never disclosed to a non-creator. */
+                        sha256?: string;
+                        /** @description Whether `/content` will serve the bytes to the current caller: an agent output is downloadable by anyone who can read the container; a user upload only by its creator. Flat mirror of `capabilities.download`. */
+                        downloadable: boolean;
+                        /** @description The caller's full access-capability set for this file — the single source the UI drives its download/preview/keep/delete affordances from. */
+                        capabilities: {
+                            /** @description The caller can resolve this file at all (container ACL). */
+                            visible: boolean;
+                            /** @description The caller may see the real name, mime and sha256. When false the row serves an opaque reference (generic name + mime, no sha256). */
+                            metadata: boolean;
+                            /** @description The caller may fetch the bytes (`/content`). */
+                            download: boolean;
+                            /** @description The caller may render an in-browser preview (download + a previewable mime). */
+                            preview: boolean;
+                            /** @description The caller may pin/clear the retention deadline. */
+                            keep: boolean;
+                            /** @description The caller may delete the file. */
+                            delete: boolean;
+                        };
+                        /** @description Whether the caller can open an in-browser preview of this file (a readable file of a previewable kind — see `preview_kind`). Present on every row; the signed `preview_url` is minted only on the single-file GET (below). */
+                        previewable: boolean;
+                        /**
+                         * @description How this file previews, or null when not previewable: `html` (sandboxed iframe, active content), `image` (inline `<img>`), `pdf` (native-viewer iframe), `text` (plaintext). Present on every row.
+                         * @enum {string|null}
+                         */
+                        preview_kind: "html" | "image" | "pdf" | "text" | null;
+                        /**
+                         * Format: date-time
+                         * @description Retention deadline, or null when permanent.
+                         */
+                        expiresAt: string | null;
+                        /** Format: date-time */
+                        createdAt: string;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -15858,7 +16400,7 @@ export interface operations {
                     manifest: {
                         [key: string]: unknown;
                     };
-                    /** @description Primary package file content (manifest document). */
+                    /** @description Primary package file content (manifest file). */
                     content?: string;
                 };
             };
@@ -18079,14 +18621,14 @@ export interface operations {
                  * @example {
                  *       "manifest": {
                  *         "$schema": "https://schemas.afps.dev/v0/agent.schema.json",
-                 *         "name": "@inline/summarize-attached-document",
-                 *         "display_name": "Summarize attached document",
+                 *         "name": "@inline/summarize-attached-file",
+                 *         "display_name": "Summarize attached file",
                  *         "version": "0.0.0",
                  *         "type": "agent",
                  *         "schema_version": "0.1",
                  *         "dependencies": {}
                  *       },
-                 *       "prompt": "Summarize the attached document in three bullet points.",
+                 *       "prompt": "Summarize the attached file in three bullet points.",
                  *       "input": {
                  *         "docId": "doc_123"
                  *       }
@@ -18097,10 +18639,10 @@ export interface operations {
                     manifest: Record<string, never>;
                     /** @description Contents of prompt.md — the agent's system prompt. */
                     prompt: string;
-                    /** @description Run input validated against manifest.input.schema (AJV). File fields take `upload://upl_xxx` references (from `createUpload`), `document://doc_xxx` references, or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded) — same contract as `POST /agents/{scope}/{name}/run`. */
+                    /** @description Run input validated against manifest.input.schema (AJV). File fields take `upload://upl_xxx` references (from `createUpload`), `appfile://doc_xxx` references, or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded) — same contract as `POST /agents/{scope}/{name}/run`. */
                     input?: Record<string, never>;
-                    /** @description `document://doc_xxx` URIs to mount read-only into the run's `documents/` directory — fan-in by reference, without declaring a file field in the manifest. The platform declares a reserved `_context_documents` input field for them, so they go through the same ACL, byte/count caps and `document_links` chaining as any other document input, and are announced to the agent in its prompt. A manifest (or `input`) that already declares `_context_documents` is rejected with a `400` — the name is reserved. */
-                    context_documents?: string[];
+                    /** @description `appfile://doc_xxx` URIs to mount read-only into the run's `files/` directory — fan-in by reference, without declaring a file field in the manifest. The platform declares a reserved `_context_files` input field for them, so they go through the same ACL, byte/count caps and `file_links` chaining as any other file input, and are announced to the agent in its prompt. A manifest (or `input`) that already declares `_context_files` is rejected with a `400` — the name is reserved. */
+                    context_files?: string[];
                     /** @description Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor. */
                     connection_overrides?: {
                         [key: string]: string;
@@ -18161,7 +18703,7 @@ export interface operations {
                      *       "runner_name": null,
                      *       "runner_kind": null,
                      *       "agent_scope": "@inline",
-                     *       "agent_name": "Summarize attached document",
+                     *       "agent_name": "Summarize attached file",
                      *       "runOrigin": "platform",
                      *       "contextSnapshot": null,
                      *       "modelCredentialId": "mpc_8h2k4m6n",
@@ -18173,20 +18715,20 @@ export interface operations {
                      *       "schedule_name": null,
                      *       "connections_used": null,
                      *       "package_ephemeral": true,
-                     *       "document_counts": {
+                     *       "file_counts": {
                      *         "input": 0,
                      *         "output": 0
                      *       },
                      *       "inline_manifest": {
                      *         "$schema": "https://schemas.afps.dev/v0/agent.schema.json",
-                     *         "name": "@inline/summarize-attached-document",
-                     *         "display_name": "Summarize attached document",
+                     *         "name": "@inline/summarize-attached-file",
+                     *         "display_name": "Summarize attached file",
                      *         "version": "0.0.0",
                      *         "type": "agent",
                      *         "schema_version": "0.1",
                      *         "dependencies": {}
                      *       },
-                     *       "inline_prompt": "Summarize the attached document in three bullet points."
+                     *       "inline_prompt": "Summarize the attached file in three bullet points."
                      *     }
                      */
                     "application/json": components["schemas"]["Run"];
@@ -18222,7 +18764,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description `payload_too_large` — an inline `data:` input file exceeds the per-file inline cap (4 MiB decoded), or the run's input documents together exceed `WORKSPACE_MAX_DOCS_BYTES`. Or `document_count_exceeded` — the run would carry more than `RUN_MAX_DOCUMENTS` input documents (uploads + inline + `document://` refs). Both are refused before the run launches, so nothing is charged and no workspace is provisioned; distinct codes so a client can tell "one file too big" from "too many files". */
+            /** @description `payload_too_large` — an inline `data:` input file exceeds the per-file inline cap (4 MiB decoded), or the run's input files together exceed `WORKSPACE_MAX_DOCS_BYTES`. Or `file_count_exceeded` — the run would carry more than `RUN_MAX_DOCUMENTS` input files (uploads + inline + `appfile://` refs). Both are refused before the run launches, so nothing is charged and no workspace is provisioned; distinct codes so a client can tell "one file too big" from "too many files". */
             413: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -18277,8 +18819,8 @@ export interface operations {
                     manifest: Record<string, never>;
                     prompt: string;
                     input?: Record<string, never>;
-                    /** @description Same field as `POST /api/runs/inline` — validated here for shape and for the reserved `_context_documents` name collision, never mounted. */
-                    context_documents?: string[];
+                    /** @description Same field as `POST /api/runs/inline` — validated here for shape and for the reserved `_context_files` name collision, never mounted. */
+                    context_files?: string[];
                     /** @description Same field as `POST /api/runs/inline` — applied to the integration readiness check so a pick that clears `must_choose_connection` here clears it on the real launch too. Never persisted; no run is created. */
                     connection_overrides?: {
                         [key: string]: string;
@@ -18371,7 +18913,7 @@ export interface operations {
                         integrity?: string;
                     };
                     applicationId: string;
-                    /** @description Run input, validated against the agent's input schema. File fields (`format: uri` + `contentMediaType`) accept ONLY inline `data:<mime>;name=<file>;base64,<payload>` URIs on remote runs — `upload://` and `document://` references are rejected (400), because the run executes on the caller's host, whose workspace the platform never provisions. */
+                    /** @description Run input, validated against the agent's input schema. File fields (`format: uri` + `contentMediaType`) accept ONLY inline `data:<mime>;name=<file>;base64,<payload>` URIs on remote runs — `upload://` and `appfile://` references are rejected (400), because the run executes on the caller's host, whose workspace the platform never provisions. */
                     input?: Record<string, never>;
                     /** @description Per-run dependency version overrides (#666/#686). Flat map `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. `"draft"` opts that dependency into its working copy; any other value replaces the manifest pin. An unsatisfiable pin aborts the run with `dependency_unresolved` (422). */
                     dependency_overrides?: {
@@ -18544,7 +19086,7 @@ export interface operations {
                      *       "schedule_name": "Weekday morning sort",
                      *       "connections_used": null,
                      *       "package_ephemeral": false,
-                     *       "document_counts": {
+                     *       "file_counts": {
                      *         "input": 0,
                      *         "output": 0
                      *       }
@@ -18650,7 +19192,7 @@ export interface operations {
                      *       "schedule_name": null,
                      *       "connections_used": null,
                      *       "package_ephemeral": false,
-                     *       "document_counts": {
+                     *       "file_counts": {
                      *         "input": 0,
                      *         "output": 0
                      *       }
@@ -18731,7 +19273,7 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
-    fetchRunDocumentsManifest: {
+    fetchRunFilesManifestDeprecated: {
         parameters: {
             query?: never;
             header: {
@@ -18746,24 +19288,35 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Documents manifest */
+            /** @description Files manifest */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": {
-                        documents: {
-                            /** @description The document's human display name (may repeat across entries). */
+                        files: {
+                            /** @description The file's human display name (may repeat across entries). */
                             name: string;
-                            /** @description Unique single path segment the agent writes the document to under `workspace/documents/` and fetches its bytes by. */
+                            /** @description Unique single path segment the agent writes the file to under `workspace/files/` and fetches its bytes by. */
+                            workspace_name: string;
+                            size: number;
+                        }[];
+                        /**
+                         * @deprecated
+                         * @description DEPRECATED — the pre-#1177 spelling of `files`, carrying the SAME entries. Still emitted because the runtime image and the platform deploy independently: a container built before the rename reads this key, and a `files`-only manifest would give it zero input files with no error anywhere. Read `files`.
+                         */
+                        documents: {
+                            /** @description The file's human display name (may repeat across entries). */
+                            name: string;
+                            /** @description Unique single path segment the agent writes the file to under `workspace/files/` and fetches its bytes by. */
                             workspace_name: string;
                             size: number;
                         }[];
                     };
                 };
             };
-            /** @description duplicate_document_name — the stored manifest has colliding workspace names */
+            /** @description duplicate_file_name — the stored manifest has colliding workspace names */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -18777,7 +19330,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description run_not_found | no input documents */
+            /** @description run_not_found | no input files */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -18794,13 +19347,18 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
-    publishRunDocument: {
+    publishRunFileDeprecated: {
         parameters: {
             query?: never;
             header: {
-                /** @description Display name for the document, percent-encoded with `encodeURIComponent` (an HTTP header value cannot carry a raw non-ASCII filename). The server decodes it strictly and returns 400 on a malformed encoding, then sanitises the decoded name (path separators, control characters and `..` collapsed, 255 chars max). */
-                "X-Document-Name": string;
-                /** @description MIME type of the document bytes. */
+                /** @description Display name for the file, percent-encoded with `encodeURIComponent` (an HTTP header value cannot carry a raw non-ASCII filename). The server decodes it strictly and returns 400 on a malformed encoding, then sanitises the decoded name (path separators, control characters and `..` collapsed, 255 chars max). A request carrying only the deprecated `X-Document-Name` is still accepted; this header wins when both are present. */
+                "X-File-Name": string;
+                /**
+                 * @deprecated
+                 * @description DEPRECATED — the pre-#1177 spelling of `X-File-Name`, identical encoding rules. Still accepted because the runtime image and the platform deploy independently: a container built before the rename sends this header and it carries the deliverable's only name. Never emitted by a current runtime.
+                 */
+                "X-Document-Name"?: string;
+                /** @description MIME type of the file bytes. */
                 "Content-Type": string;
                 "webhook-id": string;
                 "webhook-timestamp": string;
@@ -18817,7 +19375,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Idempotent replay — an identical (run, sha256, name) document already existed; the existing document is returned. */
+            /** @description Idempotent replay — an identical (run, sha256, name) file already existed; the existing file is returned. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -18833,7 +19391,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Document stored */
+            /** @description File stored */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -18841,7 +19399,7 @@ export interface operations {
                 content: {
                     "application/json": {
                         id: string;
-                        /** @description `document://<id>` durable URI. */
+                        /** @description `appfile://<id>` durable URI. */
                         uri: string;
                         name: string;
                         mime: string;
@@ -18850,7 +19408,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description X-Document-Name missing or not a valid percent-encoded filename / Content-Type header missing / empty body */
+            /** @description X-File-Name missing or not a valid percent-encoded filename / Content-Type header missing / empty body */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -18878,7 +19436,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description `run_not_running` — the run is not in `running` state. Or `message_replayed` — this `webhook-id` was already used for this run. Because the HMAC is verified over an EMPTY body, one captured header set would otherwise authenticate an unbounded number of DIFFERENT bodies inside the timestamp tolerance (distinct bytes defeat the (run, sha256, name) dedup), each spending the org quota and the run's document budget. The id is therefore single-use for `REMOTE_RUN_REPLAY_WINDOW_SECONDS`. The runtime signs a fresh `webhook-id` on every attempt, so retries are unaffected. */
+            /** @description `run_not_running` — the run is not in `running` state. Or `message_replayed` — this `webhook-id` was already used for this run. Because the HMAC is verified over an EMPTY body, one captured header set would otherwise authenticate an unbounded number of DIFFERENT bodies inside the timestamp tolerance (distinct bytes defeat the (run, sha256, name) dedup), each spending the org quota and the run's file budget. The id is therefore single-use for `REMOTE_RUN_REPLAY_WINDOW_SECONDS`. The runtime signs a fresh `webhook-id` on every attempt, so retries are unaffected. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -18892,7 +19450,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description `payload_too_large` — the document exceeds the per-file cap (`DOCUMENT_MAX_FILE_BYTES`) or the run's total output budget; the stream is cut mid-flight and any partial object deleted. Or `document_count_exceeded` — the run already holds `RUN_MAX_DOCUMENTS` documents. Distinct codes so a client can tell "one file too big" from "too many files". */
+            /** @description `payload_too_large` — the file exceeds the per-file cap (`DOCUMENT_MAX_FILE_BYTES`) or the run's total output budget; the stream is cut mid-flight and any partial object deleted. Or `file_count_exceeded` — the run already holds `RUN_MAX_DOCUMENTS` files. Distinct codes so a client can tell "one file too big" from "too many files". */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -18902,7 +19460,7 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
-    fetchRunDocument: {
+    fetchRunFileDeprecated: {
         parameters: {
             query?: never;
             header: {
@@ -18918,7 +19476,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Document bytes */
+            /** @description File bytes */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -18934,7 +19492,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description run_not_found | document not found */
+            /** @description run_not_found | file not found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -19156,6 +19714,242 @@ export interface operations {
                 content?: never;
             };
             /** @description run_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description run_sink_closed | run_sink_expired */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    fetchRunFilesManifest: {
+        parameters: {
+            query?: never;
+            header: {
+                "webhook-id": string;
+                "webhook-timestamp": string;
+                "webhook-signature": string;
+            };
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Files manifest */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        files: {
+                            /** @description The file's human display name (may repeat across entries). */
+                            name: string;
+                            /** @description Unique single path segment the agent writes the file to under `workspace/files/` and fetches its bytes by. */
+                            workspace_name: string;
+                            size: number;
+                        }[];
+                        /**
+                         * @deprecated
+                         * @description DEPRECATED — the pre-#1177 spelling of `files`, carrying the SAME entries. Still emitted because the runtime image and the platform deploy independently: a container built before the rename reads this key, and a `files`-only manifest would give it zero input files with no error anywhere. Read `files`.
+                         */
+                        documents: {
+                            /** @description The file's human display name (may repeat across entries). */
+                            name: string;
+                            /** @description Unique single path segment the agent writes the file to under `workspace/files/` and fetches its bytes by. */
+                            workspace_name: string;
+                            size: number;
+                        }[];
+                    };
+                };
+            };
+            /** @description duplicate_file_name — the stored manifest has colliding workspace names */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Signature verification failed */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description run_not_found | no input files */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description run_sink_closed | run_sink_expired */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    publishRunFile: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description Display name for the file, percent-encoded with `encodeURIComponent` (an HTTP header value cannot carry a raw non-ASCII filename). The server decodes it strictly and returns 400 on a malformed encoding, then sanitises the decoded name (path separators, control characters and `..` collapsed, 255 chars max). A request carrying only the deprecated `X-Document-Name` is still accepted; this header wins when both are present. */
+                "X-File-Name": string;
+                /**
+                 * @deprecated
+                 * @description DEPRECATED — the pre-#1177 spelling of `X-File-Name`, identical encoding rules. Still accepted because the runtime image and the platform deploy independently: a container built before the rename sends this header and it carries the deliverable's only name. Never emitted by a current runtime.
+                 */
+                "X-Document-Name"?: string;
+                /** @description MIME type of the file bytes. */
+                "Content-Type": string;
+                "webhook-id": string;
+                "webhook-timestamp": string;
+                "webhook-signature": string;
+            };
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": Blob;
+            };
+        };
+        responses: {
+            /** @description Idempotent replay — an identical (run, sha256, name) file already existed; the existing file is returned. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        uri: string;
+                        name: string;
+                        mime: string;
+                        size: number;
+                        sha256: string;
+                    };
+                };
+            };
+            /** @description File stored */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        id: string;
+                        /** @description `appfile://<id>` durable URI. */
+                        uri: string;
+                        name: string;
+                        mime: string;
+                        size: number;
+                        sha256: string;
+                    };
+                };
+            };
+            /** @description X-File-Name missing or not a valid percent-encoded filename / Content-Type header missing / empty body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Signature verification failed */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description storage_limit_exceeded */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description run_not_found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `run_not_running` — the run is not in `running` state. Or `message_replayed` — this `webhook-id` was already used for this run. Because the HMAC is verified over an EMPTY body, one captured header set would otherwise authenticate an unbounded number of DIFFERENT bodies inside the timestamp tolerance (distinct bytes defeat the (run, sha256, name) dedup), each spending the org quota and the run's file budget. The id is therefore single-use for `REMOTE_RUN_REPLAY_WINDOW_SECONDS`. The runtime signs a fresh `webhook-id` on every attempt, so retries are unaffected. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description run_sink_closed | run_sink_expired */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `payload_too_large` — the file exceeds the per-file cap (`DOCUMENT_MAX_FILE_BYTES`) or the run's total output budget; the stream is cut mid-flight and any partial object deleted. Or `file_count_exceeded` — the run already holds `RUN_MAX_DOCUMENTS` files. Distinct codes so a client can tell "one file too big" from "too many files". */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    fetchRunFile: {
+        parameters: {
+            query?: never;
+            header: {
+                "webhook-id": string;
+                "webhook-timestamp": string;
+                "webhook-signature": string;
+            };
+            path: {
+                runId: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description File bytes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": Blob;
+                };
+            };
+            /** @description Signature verification failed */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description run_not_found | file not found */
             404: {
                 headers: {
                     [name: string]: unknown;

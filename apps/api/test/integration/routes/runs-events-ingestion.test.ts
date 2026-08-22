@@ -619,14 +619,14 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     }
   });
 
-  // Phase 2: a `document.published` event (emitted by the publish_document
-  // tool / outputs sweep once the documents row already exists) must persist a
-  // run_log so the published document streams over the run_log SSE and replays.
-  it("document.published events persist as run_logs(type='result', event='document')", async () => {
+  // Phase 2: a `file.published` event (emitted by the publish_file
+  // tool / outputs sweep once the files row already exists) must persist a
+  // run_log so the published file streams over the run_log SSE and replays.
+  it("file.published events persist as run_logs(type='result', event='file')", async () => {
     const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
     const payload = {
-      document_id: "doc_abc12345",
-      uri: "document://doc_abc12345",
+      file_id: "doc_abc12345",
+      uri: "appfile://doc_abc12345",
       name: "report.html",
       mime: "text/html",
       size: 1234,
@@ -636,7 +636,7 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
       // the field, never fail on it.
       presentation: "primary",
     };
-    const envelope = buildEnvelope(runId, "document.published", payload, 1);
+    const envelope = buildEnvelope(runId, "file.published", payload, 1);
     const res = await postEvent(runId, envelope);
     expect(res.status).toBe(200);
     expect(((await res.json()) as { outcome: string }).outcome).toBe("persisted");
@@ -644,12 +644,12 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     const docLogs = await db
       .select()
       .from(runLogs)
-      .where(and(eq(runLogs.runId, runId), eq(runLogs.event, "document")));
+      .where(and(eq(runLogs.runId, runId), eq(runLogs.event, "file")));
     expect(docLogs).toHaveLength(1);
     expect(docLogs[0]!.type).toBe("result");
     expect(docLogs[0]!.data).toMatchObject({
-      document_id: "doc_abc12345",
-      uri: "document://doc_abc12345",
+      file_id: "doc_abc12345",
+      uri: "appfile://doc_abc12345",
       name: "report.html",
       mime: "text/html",
       size: 1234,

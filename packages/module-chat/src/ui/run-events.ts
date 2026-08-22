@@ -20,7 +20,7 @@
 
 import { z } from "zod";
 import { runStatusValues, TERMINAL_RUN_STATUSES } from "@appstrate/db/run-status";
-import { documentUri, parseDocumentUri } from "@appstrate/core/document-uri";
+import { fileUri, parseFileUri } from "@appstrate/core/file-uri";
 import { asRecord, unwrapResult } from "./tool-result.ts";
 
 /** Operation ids whose result launches a run we can follow. */
@@ -35,7 +35,7 @@ export function isTerminalStatus(status: string | null | undefined): status is R
 /**
  * Automatic artefacts belong to a call that mounted live, never to completed
  * history. Capture this result once at card mount; later phase changes must not
- * revoke a live card's eligibility before its final document event arrives.
+ * revoke a live card's eligibility before its final file event arrives.
  */
 export function isRunAutoPresentEligible(
   phase: "pending" | "running" | "success" | "error",
@@ -274,7 +274,7 @@ export interface VisibleLogEntry {
  * card tickers through one entry at a time. ONLY `event === "log"` rows qualify:
  * those come from the agent's explicit `log` runtime tool (sink tags them so),
  * never the auto-emitted runtime lifecycle / tool-call breadcrumbs (which share
- * `type='progress'` but keep `event='progress'`), nor `output`/`document`/system
+ * `type='progress'` but keep `event='progress'`), nor `output`/`file`/system
  * rows. Keeps ascending `id` order (same as `mergeLogs`), so the last element is
  * the most recent line; `id` doubles as the React key the line animates on.
  */
@@ -297,11 +297,11 @@ export function visibleLogEntries(logs: readonly RunLogLine[]): VisibleLogEntry[
 }
 
 /**
- * A document surfaced in a run card: the stable id + uri (for chaining) plus a
+ * A file surfaced in a run card: the stable id + uri (for chaining) plus a
  * display name. `mime`/`size` are optional (present in the persisted tool
  * result, absent on some log frames).
  */
-export interface ChatRunDocument {
+export interface ChatRunFile {
   id: string;
   uri: string;
   name: string;
@@ -309,64 +309,74 @@ export interface ChatRunDocument {
   size?: number;
 }
 
-function asChatRunDocument(raw: unknown): ChatRunDocument | undefined {
+/**
+ * The run-log `event` values that carry a published file. `"file"` is what the
+ * sink writes today; `"document"` is the pre-#1177 spelling and stays readable
+ * FOREVER — a chat session opened today can replay logs written before the
+ * rename, and dropping the legacy tag would silently show a run with no files.
+ */
+const PUBLISHED_FILE_LOG_EVENTS: readonly string[] = ["file", "document"];
+
+function asChatRunFile(raw: unknown): ChatRunFile | undefined {
   const r = asRecord(raw);
   if (!r) return undefined;
-  // `id` in the tool result; `document_id` in the `document.published` log frame.
-  const id = nonEmptyString(r.id) ?? nonEmptyString(r.document_id);
-  const uri = nonEmptyString(r.uri) ?? (id ? documentUri(id) : undefined);
+  // `id` in the tool result; `file_id` in the `file.published` log frame; the
+  // pre-#1177 frames used `document_id` — read it too (see the event list above).
+  const id = nonEmptyString(r.id) ?? nonEmptyString(r.file_id) ?? nonEmptyString(r.document_id);
+  const uri = nonEmptyString(r.uri) ?? (id ? fileUri(id) : undefined);
   const name = nonEmptyString(r.name);
   if (!id || !uri || !name) return undefined;
-  const doc: ChatRunDocument = { id, uri, name };
+  const file: ChatRunFile = { id, uri, name };
   const mime = nonEmptyString(r.mime);
-  if (mime) doc.mime = mime;
-  if (typeof r.size === "number") doc.size = r.size;
-  return doc;
+  if (mime) file.mime = mime;
+  if (typeof r.size === "number") file.size = r.size;
+  return file;
 }
 
 /**
- * Pull the published `documents` list out of a persisted run_and_wait tool
- * result (`documents` at the top level, or nested under the invoke envelope's
+ * Pull the published `files` list out of a persisted run_and_wait tool
+ * result (`files` at the top level, or nested under the invoke envelope's
  * `body`). Empty when the run produced none — survives reload because it reads
  * the persisted message part, not live state.
  */
-export function extractRunDocuments(result: unknown): ChatRunDocument[] {
+export function extractRunFiles(result: unknown): ChatRunFile[] {
   const unwrapped = asRecord(unwrapResult(result));
   if (!unwrapped) return [];
-  const raw = Array.isArray(unwrapped.documents)
-    ? unwrapped.documents
-    : Array.isArray(asRecord(unwrapped.body)?.documents)
-      ? (asRecord(unwrapped.body)!.documents as unknown[])
+  const raw = Array.isArray(unwrapped.files)
+    ? unwrapped.files
+    : Array.isArray(asRecord(unwrapped.body)?.files)
+      ? (asRecord(unwrapped.body)!.files as unknown[])
       : [];
-  const out: ChatRunDocument[] = [];
+  const out: ChatRunFile[] = [];
   for (const item of raw) {
-    const doc = asChatRunDocument(item);
-    if (doc) out.push(doc);
+    const file = asChatRunFile(item);
+    if (file) out.push(file);
   }
   return out;
 }
 
 /**
- * Extract published documents from the live run log stream — the
- * `type='result' event='document'` frames the sink persists for each
- * `document.published` event. Lets the card show a chip the moment an agent
- * publishes, before the run terminates.
+ * Extract published files from the live run log stream — the
+ * `type='result' event='file'` frames the sink persists for each
+ * `file.published` event (and the legacy `event='document'` frames written
+ * before #1177). Lets the card show a chip the moment an agent publishes,
+ * before the run terminates.
  *
  * These frames are publications, i.e. files the agent PRODUCED: the only
- * emitters are the `publish_document` runtime tool and the end-of-run
+ * emitters are the `publish_file` runtime tool and the end-of-run
  * `outputs/` sweep. Input files a run merely consumed never appear here, so
  * this list is exactly the population the auto-present rule counts.
  *
  * Historical frames carry extra fields (notably the retired `presentation`);
  * only the known keys are read, so a legacy line parses like any other.
  */
-export function publishedDocumentsFromLogs(logs: readonly RunLogLine[]): ChatRunDocument[] {
-  const out: ChatRunDocument[] = [];
+export function publishedFilesFromLogs(logs: readonly RunLogLine[]): ChatRunFile[] {
+  const out: ChatRunFile[] = [];
   for (const line of logs) {
-    if (line.event !== "document") continue;
+    if (!line.event || !PUBLISHED_FILE_LOG_EVENTS.includes(line.event)) continue;
     if (!line.data || typeof line.data !== "object") continue;
-    const doc = asChatRunDocument(line.data);
-    if (doc) out.push(doc);
+    const file = asChatRunFile(line.data);
+    if (file) out.push(file);
   }
   return out;
 }
@@ -384,49 +394,46 @@ export function publishedDocumentsFromLogs(logs: readonly RunLogLine[]): ChatRun
  * publishes three files emits them one at a time: a mid-stream count of 1 is not
  * the final count, and opening on it would auto-present the first of three. The
  * hook flips `live` to false only after its final log sweep, so "terminal and no
- * longer live" is precisely "the document set is complete".
+ * longer live" is precisely "the file set is complete".
  */
-export function autoPresentDocument(args: {
-  documents: readonly ChatRunDocument[];
+export function autoPresentFile(args: {
+  files: readonly ChatRunFile[];
   status: RunStatus | undefined;
   live: boolean;
-}): ChatRunDocument | undefined {
+}): ChatRunFile | undefined {
   if (!isTerminalStatus(args.status) || args.live) return undefined;
-  return args.documents.length === 1 ? args.documents[0] : undefined;
+  return args.files.length === 1 ? args.files[0] : undefined;
 }
 
 /**
- * Merge two regular document lists, deduping by id while letting newer display
+ * Merge two regular file lists, deduping by id while letting newer display
  * metadata win. Every produced file is the same kind of thing — there is no
  * featured/secondary distinction to project.
  */
-export function mergeRunDocuments(
-  a: readonly ChatRunDocument[],
-  b: readonly ChatRunDocument[],
-): ChatRunDocument[] {
-  const byId = new Map<string, ChatRunDocument>();
-  for (const doc of [...a, ...b]) {
-    const previous = byId.get(doc.id);
-    byId.set(doc.id, previous ? { ...previous, ...doc } : doc);
+export function mergeRunFiles(a: readonly ChatRunFile[], b: readonly ChatRunFile[]): ChatRunFile[] {
+  const byId = new Map<string, ChatRunFile>();
+  for (const file of [...a, ...b]) {
+    const previous = byId.get(file.id);
+    byId.set(file.id, previous ? { ...previous, ...file } : file);
   }
   return [...byId.values()];
 }
 
 /**
- * An attachment's resolved content: a downloadable stored document, or an inert
+ * An attachment's resolved content: a downloadable stored file, or an inert
  * placeholder.
  *
  * The `@assistant-ui/react-ai-sdk` converter routes user `file` parts OUT of a
  * message's content and exposes them as `message.attachments` instead — the
  * wire URI ends up on the attachment's first content part (the `image` field
- * for an image part, `data` for a file part). Only a `document://` URI is
- * downloadable: the content route serves stored documents. A just-sent
- * optimistic `upload://` URI (materialized to `document://` only in the
+ * for an image part, `data` for a file part). Only an `appfile://` URI is
+ * downloadable: the content route serves stored files. A just-sent
+ * optimistic `upload://` URI (materialized to `appfile://` only in the
  * server-persisted copy), or anything unparseable, is inert — the raw URI is
  * carried along so the renderer can still resolve a local preview for it (the
  * staged-image cache is keyed by `upload://` URI).
  */
-type ResolvedAttachment = { kind: "document"; id: string } | { kind: "inert"; uri?: string };
+type ResolvedAttachment = { kind: "file"; id: string } | { kind: "inert"; uri?: string };
 
 /** Minimal structural view of an assistant-ui attachment content part. */
 interface AttachmentContentPart {
@@ -440,8 +447,8 @@ export function resolveAttachmentContent(
 ): ResolvedAttachment {
   const part = content?.[0];
   const uri = part?.type === "image" ? part.image : part?.type === "file" ? part.data : undefined;
-  const id = typeof uri === "string" ? parseDocumentUri(uri) : null;
-  if (id) return { kind: "document", id };
+  const id = typeof uri === "string" ? parseFileUri(uri) : null;
+  if (id) return { kind: "file", id };
   return typeof uri === "string" ? { kind: "inert", uri } : { kind: "inert" };
 }
 

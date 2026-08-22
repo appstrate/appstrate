@@ -58,15 +58,15 @@ export interface ChatPlatformDeps {
   /** Persist one metered `llm_usage` row for a completed chat turn. */
   recordChatUsage(record: ChatUsageRecord): Promise<void>;
   /**
-   * Resolve a chat composer file attachment (`upload://` or `document://`) to a
-   * durable `document://` URI, materializing the upload into a chat-session-scoped
-   * document server-side (the module has no DB access). Throws the platform's
+   * Resolve a chat composer file attachment (`upload://` or `appfile://`) to a
+   * durable `appfile://` URI, materializing the upload into a chat-session-scoped
+   * file server-side (the module has no DB access). Throws the platform's
    * quota/cap/not-found errors, which the stream route surfaces to the user.
    */
   resolveChatAttachment(request: ChatAttachmentRequest): Promise<ResolvedChatAttachment>;
   /**
-   * Detach-or-delete the documents contained by a chat session being deleted. A
-   * session document a run still consumes is detached (kept, container NULLed);
+   * Detach-or-delete the files contained by a chat session being deleted. A
+   * session file a run still consumes is detached (kept, container NULLed);
    * an unconsumed one is deleted (row + counter + storage). The module has no DB
    * or storage access, so this crosses through `ctx.services`. Called before the
    * session row is removed so the FK cascade cannot destroy the evidence first.
@@ -74,7 +74,7 @@ export interface ChatPlatformDeps {
    * Pass the SAME transaction that deletes the `chat_sessions` row so the two
    * commit atomically (closes the materialize-in-the-gap orphan window).
    */
-  cleanupSessionDocuments(chatSessionId: string, tx?: ChatDbTx): Promise<void>;
+  cleanupSessionFiles(chatSessionId: string, tx?: ChatDbTx): Promise<void>;
   /**
    * Admission gate for a turn — EVERY turn, on either binding (llm-proxy or
    * native OAuth subscription). The
@@ -108,7 +108,7 @@ export interface ChatPlatformDeps {
  * `ctx` is REQUIRED. It used to be optional, for the apps/api test harness,
  * which mounted this router without ever running `init()`. That fallback
  * silently degraded two post-incident guards — the #968/#971 admission gate
- * (fail-open `null`) and the #965 document teardown (no-op) — so any test that
+ * (fail-open `null`) and the #965 file teardown (no-op) — so any test that
  * believed it exercised them exercised nothing (issue #989). The harness now
  * runs the real `init()` pipeline, so nothing needs the degraded baseline and
  * a missing context can no longer be mistaken for a working one.
@@ -122,8 +122,7 @@ export function buildChatPlatformDeps(ctx: ModuleInitContext): ChatPlatformDeps 
       ctx.services.resolveSubscriptionChatModel(orgId, presetId),
     recordChatUsage: (record) => ctx.services.recordChatUsage(record),
     resolveChatAttachment: (request) => ctx.services.resolveChatAttachment(request),
-    cleanupSessionDocuments: (chatSessionId, tx) =>
-      ctx.services.cleanupSessionDocuments(chatSessionId, tx),
+    cleanupSessionFiles: (chatSessionId, tx) => ctx.services.cleanupSessionFiles(chatSessionId, tx),
     checkUsageAllowed: (args) => ctx.services.checkUsageAllowed(args),
   };
 }

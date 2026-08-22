@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Integration tests for `parseRequestInput`'s streamed document consume — the
+ * Integration tests for `parseRequestInput`'s streamed file consume — the
  * glue that pipes each staged upload straight from the uploads bucket into the
- * run workspace (no full buffer in API memory), writes the documents manifest,
- * and rolls the workspace back when a document fails validation.
+ * run workspace (no full buffer in API memory), writes the files manifest,
+ * and rolls the workspace back when a file fails validation.
  *
  * Drives `parseRequestInput` directly with a minimal fake Hono context so the
  * run-trigger pipeline (Docker, LLM) is not involved. Real Postgres + FS
@@ -19,14 +19,11 @@ import { eq } from "drizzle-orm";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, addOrgMember } from "../../helpers/auth.ts";
 import { parseRequestInput, isStrippedInlineMarker } from "../../../src/services/input-parser.ts";
-import {
-  createDocumentFromUpload,
-  createDocumentFromStream,
-} from "../../../src/services/documents.ts";
+import { createFileFromUpload, createFileFromStream } from "../../../src/services/files.ts";
 import { _resetCacheForTesting } from "@appstrate/env";
 import {
-  downloadRunDocumentStream,
-  downloadRunDocumentsManifest,
+  downloadRunFileStream,
+  downloadRunFilesManifest,
 } from "../../../src/services/run-workspace-storage.ts";
 import { processStorageDeletionJobs } from "../../../src/services/storage-deletion.ts";
 import { uploadFile as storagePut, fileExists as storageExists } from "@appstrate/db/storage";
@@ -67,7 +64,7 @@ async function seedUpload(
  * orgId/applicationId and the acting principal (end-user or dashboard user).
  * A principal is ALWAYS present: the parser resolves it with the strict
  * `getActor`, mirroring the fact that every route reaching it sits behind
- * authentication, and it gates both the document ACL and the staged-upload
+ * authentication, and it gates both the file ACL and the staged-upload
  * ownership check. Tests that need a specific owner pass one explicitly.
  */
 function fakeCtx(ctx: {
@@ -106,7 +103,7 @@ async function seedRun(
   });
 }
 
-describe("parseRequestInput — streamed document consume", () => {
+describe("parseRequestInput — streamed file consume", () => {
   beforeEach(async () => {
     await truncateAll();
   });
@@ -137,14 +134,14 @@ describe("parseRequestInput — streamed document consume", () => {
     });
     expect("buffer" in file).toBe(false);
 
-    // Document landed in the run workspace + manifest enumerates it.
-    const docStream = await downloadRunDocumentStream(runId, "file.pdf");
+    // File landed in the run workspace + manifest enumerates it.
+    const docStream = await downloadRunFileStream(runId, "file.pdf");
     expect(docStream).not.toBeNull();
     expect(new Uint8Array(await new Response(docStream!).arrayBuffer())).toEqual(
       new Uint8Array(PDF_BYTES),
     );
-    const manifest = await downloadRunDocumentsManifest(runId);
-    expect(manifest?.documents).toEqual([
+    const manifest = await downloadRunFilesManifest(runId);
+    expect(manifest?.files).toEqual([
       { name: "file.pdf", workspace_name: "file.pdf", size: PDF_BYTES.length },
     ]);
 
@@ -168,10 +165,10 @@ describe("parseRequestInput — streamed document consume", () => {
     ).rejects.toMatchObject({ status: 400 });
 
     // Workspace rolled back via the deletion outbox — draining the worker
-    // purges any streamed document + manifest (no orphaned object).
+    // purges any streamed file + manifest (no orphaned object).
     await processStorageDeletionJobs();
-    expect(await downloadRunDocumentStream(runId, "file.pdf")).toBeNull();
-    expect(await downloadRunDocumentsManifest(runId)).toBeNull();
+    expect(await downloadRunFileStream(runId, "file.pdf")).toBeNull();
+    expect(await downloadRunFilesManifest(runId)).toBeNull();
     // Claim released so the client can re-upload + retry.
     const [row] = await db.select().from(uploads).where(eq(uploads.id, id)).limit(1);
     expect(row?.consumedAt).toBeNull();
@@ -195,8 +192,8 @@ describe("parseRequestInput — streamed document consume", () => {
     // Workspace rolled back, claim released — same guarantees as any rejection
     // (the rollback purge runs through the deletion outbox).
     await processStorageDeletionJobs();
-    expect(await downloadRunDocumentStream(runId, "file.pdf")).toBeNull();
-    expect(await downloadRunDocumentsManifest(runId)).toBeNull();
+    expect(await downloadRunFileStream(runId, "file.pdf")).toBeNull();
+    expect(await downloadRunFilesManifest(runId)).toBeNull();
     const [row] = await db.select().from(uploads).where(eq(uploads.id, id)).limit(1);
     expect(row?.consumedAt).toBeNull();
   });
@@ -228,12 +225,12 @@ describe("parseRequestInput — streamed document consume", () => {
     expect((thrown as ApiError).status).toBe(400);
     // Rollback purge runs through the deletion outbox — drain it, then gone.
     await processStorageDeletionJobs();
-    expect(await downloadRunDocumentStream(runId, "file.pdf")).toBeNull();
-    expect(await downloadRunDocumentsManifest(runId)).toBeNull();
+    expect(await downloadRunFileStream(runId, "file.pdf")).toBeNull();
+    expect(await downloadRunFilesManifest(runId)).toBeNull();
   });
 });
 
-describe("parseRequestInput — document:// cross-actor ACL (S2)", () => {
+describe("parseRequestInput — appfile:// cross-actor ACL (S2)", () => {
   beforeEach(async () => {
     await truncateAll();
   });
@@ -261,12 +258,9 @@ describe("parseRequestInput — document:// cross-actor ACL (S2)", () => {
     const runId = `run_${crypto.randomUUID()}`;
     await seedRunningRun(scope, runId);
     await seedUpload(scope, { id: "upl_s2_up", bytes: PDF_BYTES });
-    const docA = await createDocumentFromUpload(
-      scope,
-      { type: "user", id: ctx.user.id },
-      "upl_s2_up",
-      { runId },
-    );
+    const docA = await createFileFromUpload(scope, { type: "user", id: ctx.user.id }, "upl_s2_up", {
+      runId,
+    });
 
     // Member B references A's private upload — org-wide run visibility resolves
     // the container, but the creator-only gate rejects it as not-found.
@@ -274,7 +268,7 @@ describe("parseRequestInput — document:// cross-actor ACL (S2)", () => {
     await expect(
       parseRequestInput(
         fakeCtx({ ...scope, user: { id: memberB.id } }),
-        { input: { doc: `document://${docA.id}` } },
+        { input: { doc: `appfile://${docA.id}` } },
         newRunId,
         fileSchema,
       ),
@@ -287,7 +281,7 @@ describe("parseRequestInput — document:// cross-actor ACL (S2)", () => {
     const runId = `run_${crypto.randomUUID()}`;
     await seedRunningRun(scope, runId);
     await seedUpload(scope, { id: "upl_s2_own", bytes: PDF_BYTES });
-    const docA = await createDocumentFromUpload(
+    const docA = await createFileFromUpload(
       scope,
       { type: "user", id: ctx.user.id },
       "upl_s2_own",
@@ -297,7 +291,7 @@ describe("parseRequestInput — document:// cross-actor ACL (S2)", () => {
     const newRunId = `run_${crypto.randomUUID()}`;
     const result = await parseRequestInput(
       fakeCtx({ ...scope, user: { id: ctx.user.id } }),
-      { input: { doc: `document://${docA.id}` } },
+      { input: { doc: `appfile://${docA.id}` } },
       newRunId,
       fileSchema,
     );
@@ -312,7 +306,7 @@ describe("parseRequestInput — document:// cross-actor ACL (S2)", () => {
 
     const runId = `run_${crypto.randomUUID()}`;
     await seedRunningRun(scope, runId);
-    const { row: agentDoc } = await createDocumentFromStream(
+    const { row: agentDoc } = await createFileFromStream(
       scope,
       runId,
       { userId: ctx.user.id, endUserId: null },
@@ -323,7 +317,7 @@ describe("parseRequestInput — document:// cross-actor ACL (S2)", () => {
     const newRunId = `run_${crypto.randomUUID()}`;
     const result = await parseRequestInput(
       fakeCtx({ ...scope, user: { id: memberB.id } }),
-      { input: { doc: `document://${agentDoc.id}` } },
+      { input: { doc: `appfile://${agentDoc.id}` } },
       newRunId,
       fileSchema,
     );
@@ -336,7 +330,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     await truncateAll();
   });
 
-  it("replays a cancelled run's upload:// input — re-consumed, rewritten to document://", async () => {
+  it("replays a cancelled run's upload:// input — re-consumed, rewritten to appfile://", async () => {
     const ctx = await createTestContext({ orgSlug: "org-rerun-ok" });
     const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
     const id = "upl_rerun_ok_1";
@@ -356,7 +350,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     );
 
     // upload:// stays replayable (backward compat) — re-consumed into the new
-    // workspace and rewritten to a durable document:// reference (with a pending
+    // workspace and rewritten to a durable appfile:// reference (with a pending
     // materialization the run pipeline commits once the run row exists).
     expect(result.uploadedFiles).toHaveLength(1);
     expect(result.uploadedFiles![0]).toMatchObject({
@@ -364,22 +358,22 @@ describe("parseRequestInput — rerun_from (#634)", () => {
       name: "file.pdf",
       size: PDF_BYTES.length,
     });
-    expect(result.input!.doc as string).toStartWith("document://doc_");
-    expect(result.pendingDocuments).toHaveLength(1);
-    // The replayed document landed in the NEW run's workspace.
-    const docStream = await downloadRunDocumentStream(newRunId, "file.pdf");
+    expect(result.input!.doc as string).toStartWith("appfile://doc_");
+    expect(result.pendingFiles).toHaveLength(1);
+    // The replayed file landed in the NEW run's workspace.
+    const docStream = await downloadRunFileStream(newRunId, "file.pdf");
     expect(docStream).not.toBeNull();
     expect(new Uint8Array(await new Response(docStream!).arrayBuffer())).toEqual(
       new Uint8Array(PDF_BYTES),
     );
   });
 
-  it("resolves a document:// input into the run workspace; 404 cross-org and cross-app", async () => {
+  it("resolves an appfile:// input into the run workspace; 404 cross-org and cross-app", async () => {
     const ctx = await createTestContext({ orgSlug: "org-docref" });
     const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
     const actor = { type: "user" as const, id: ctx.user.id };
 
-    // Materialize a durable document from a staged upload on a run.
+    // Materialize a durable file from a staged upload on a run.
     const id = "upl_docref_1";
     await seedUpload(scope, { id, bytes: PDF_BYTES });
     const runId = `run_${crypto.randomUUID()}`;
@@ -389,25 +383,25 @@ describe("parseRequestInput — rerun_from (#634)", () => {
       applicationId: scope.applicationId,
       status: "running",
     });
-    const doc = await createDocumentFromUpload(scope, actor, id, { runId });
+    const doc = await createFileFromUpload(scope, actor, id, { runId });
 
-    // A new run references it by document:// — resolved into the new workspace.
+    // A new run references it by appfile:// — resolved into the new workspace.
     const newRunId = `run_${crypto.randomUUID()}`;
     const result = await parseRequestInput(
       fakeCtx({ ...scope, user: { id: ctx.user.id } }),
-      { input: { doc: `document://${doc.id}` } },
+      { input: { doc: `appfile://${doc.id}` } },
       newRunId,
       fileSchema,
     );
     expect(result.uploadedFiles).toHaveLength(1);
-    expect(result.pendingDocuments).toBeUndefined(); // document:// is not re-materialized
-    const docStream = await downloadRunDocumentStream(newRunId, "file.pdf");
+    expect(result.pendingFiles).toBeUndefined(); // appfile:// is not re-materialized
+    const docStream = await downloadRunFileStream(newRunId, "file.pdf");
     expect(docStream).not.toBeNull();
     expect(new Uint8Array(await new Response(docStream!).arrayBuffer())).toEqual(
       new Uint8Array(PDF_BYTES),
     );
 
-    // Cross-org: another org's run cannot resolve the document → 404.
+    // Cross-org: another org's run cannot resolve the file → 404.
     const other = await createTestContext({ orgSlug: "org-docref-other" });
     await expect(
       parseRequestInput(
@@ -416,7 +410,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
           applicationId: other.defaultAppId,
           user: { id: other.user.id },
         }),
-        { input: { doc: `document://${doc.id}` } },
+        { input: { doc: `appfile://${doc.id}` } },
         `run_${crypto.randomUUID()}`,
         fileSchema,
       ),
@@ -426,7 +420,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     await expect(
       parseRequestInput(
         fakeCtx({ orgId: ctx.orgId, applicationId: "app_not_this_one", user: { id: ctx.user.id } }),
-        { input: { doc: `document://${doc.id}` } },
+        { input: { doc: `appfile://${doc.id}` } },
         `run_${crypto.randomUUID()}`,
         fileSchema,
       ),
@@ -453,7 +447,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
           fileSchema,
         ),
       ).rejects.toMatchObject({ status: 403, code: "storage_limit_exceeded" });
-      // The upload was never consumed (rejected pre-stream) and no document exists.
+      // The upload was never consumed (rejected pre-stream) and no file exists.
       const [uploadRow] = await db.select().from(uploads).where(eq(uploads.id, id));
       expect(uploadRow!.consumedAt).toBeNull();
     } finally {
@@ -615,7 +609,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
   });
 });
 
-describe("parseRequestInput — colliding document names (workspace-name hardening)", () => {
+describe("parseRequestInput — colliding file names (workspace-name hardening)", () => {
   beforeEach(async () => {
     await truncateAll();
   });
@@ -631,7 +625,7 @@ describe("parseRequestInput — colliding document names (workspace-name hardeni
     },
   };
 
-  it("gives colliding upload/document/inline inputs unique workspace names, preserving display names", async () => {
+  it("gives colliding upload/file/inline inputs unique workspace names, preserving display names", async () => {
     const ctx = await createTestContext({ orgSlug: "org-collide" });
     const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
     const actor = { type: "user" as const, id: ctx.user.id };
@@ -640,7 +634,7 @@ describe("parseRequestInput — colliding document names (workspace-name hardeni
     const uploadId = "upl_collide_1";
     await seedUpload(scope, { id: uploadId, bytes: PDF_BYTES, name: "report.pdf" });
 
-    // A durable agent_output document ALSO named report.pdf.
+    // A durable agent_output file ALSO named report.pdf.
     const producerRunId = `run_${crypto.randomUUID()}`;
     await db.insert(runs).values({
       id: producerRunId,
@@ -648,7 +642,7 @@ describe("parseRequestInput — colliding document names (workspace-name hardeni
       applicationId: scope.applicationId,
       status: "running",
     });
-    const { row: doc } = await createDocumentFromStream(
+    const { row: doc } = await createFileFromStream(
       scope,
       producerRunId,
       { userId: ctx.user.id, endUserId: null },
@@ -662,31 +656,27 @@ describe("parseRequestInput — colliding document names (workspace-name hardeni
     const runId = `run_${crypto.randomUUID()}`;
     const result = await parseRequestInput(
       fakeCtx({ ...scope, user: { id: actor.id } }),
-      { input: { docs: [`upload://${uploadId}`, `document://${doc.id}`, inlineUri] } },
+      { input: { docs: [`upload://${uploadId}`, `appfile://${doc.id}`, inlineUri] } },
       runId,
       arrayFileSchema,
     );
 
-    // All three documents surfaced, all keeping their human display name.
+    // All three files surfaced, all keeping their human display name.
     expect(result.uploadedFiles).toHaveLength(3);
     expect(result.uploadedFiles!.every((f) => f.name === "report.pdf")).toBe(true);
 
     // The manifest served to the container carries three UNIQUE workspace names,
     // display names preserved — no silent overwrite.
-    const manifest = await downloadRunDocumentsManifest(runId);
-    expect(manifest?.documents).toHaveLength(3);
-    expect(manifest!.documents.map((d) => d.name)).toEqual([
-      "report.pdf",
-      "report.pdf",
-      "report.pdf",
-    ]);
-    const workspaceNames = manifest!.documents.map((d) => d.workspace_name);
+    const manifest = await downloadRunFilesManifest(runId);
+    expect(manifest?.files).toHaveLength(3);
+    expect(manifest!.files.map((d) => d.name)).toEqual(["report.pdf", "report.pdf", "report.pdf"]);
+    const workspaceNames = manifest!.files.map((d) => d.workspace_name);
     expect(new Set(workspaceNames).size).toBe(3);
     expect(workspaceNames).toEqual(["report.pdf", "report-2.pdf", "report-3.pdf"]);
 
-    // Each document is independently fetchable at its own workspace name.
+    // Each file is independently fetchable at its own workspace name.
     for (const name of workspaceNames) {
-      const stream = await downloadRunDocumentStream(runId, name);
+      const stream = await downloadRunFileStream(runId, name);
       expect(stream).not.toBeNull();
       expect(new Uint8Array(await new Response(stream!).arrayBuffer())).toEqual(
         new Uint8Array(PDF_BYTES),

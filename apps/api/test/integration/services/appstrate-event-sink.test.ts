@@ -86,7 +86,7 @@ describe("persistRunEvent", () => {
   });
 
   // The `report` runtime tool was removed in favour of durable `outputs/`
-  // documents. A stale runner still emitting its event must be dropped by
+  // files. A stale runner still emitting its event must be dropped by
   // the dispatcher's `default:` branch — no run_logs row, no throw.
   it("drops the retired report.appended event entirely", async () => {
     await persist(event("report.appended", { content: "# First" }));

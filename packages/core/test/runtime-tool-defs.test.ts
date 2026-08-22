@@ -2,12 +2,14 @@
 
 import { describe, it, expect } from "bun:test";
 import {
-  buildPublishDocumentDef,
+  buildPublishFileDef,
   buildRuntimeToolDefs,
-  documentPublishedEvent,
+  CANONICAL_RUNTIME_TOOL_EVENT_TYPES,
+  LEGACY_RUNTIME_TOOL_EVENT_TYPES,
+  filePublishedEvent,
   reEmitRuntimeToolEvents,
   RUNTIME_TOOL_EVENTS_META_KEY,
-  type PublishedDocument,
+  type PublishedFile,
   type RuntimeToolEvent,
 } from "../src/runtime-tool-defs.ts";
 
@@ -113,10 +115,10 @@ describe("reEmitRuntimeToolEvents", () => {
   });
 });
 
-describe("buildPublishDocumentDef", () => {
-  const publishedDocument: PublishedDocument = {
+describe("buildPublishFileDef", () => {
+  const publishedFile: PublishedFile = {
     id: "doc_primary",
-    uri: "document://doc_primary",
+    uri: "appfile://doc_primary",
     name: "Final report.html",
     mime: "text/html",
     size: 42,
@@ -124,7 +126,7 @@ describe("buildPublishDocumentDef", () => {
   };
 
   it("declares only `path` and `name`, and says nothing about how files are displayed", () => {
-    const def = buildPublishDocumentDef(async () => publishedDocument);
+    const def = buildPublishFileDef(async () => publishedFile);
     const schema = def.descriptor.inputSchema;
     const properties = schema.properties as Record<string, Record<string, unknown>>;
 
@@ -136,15 +138,15 @@ describe("buildPublishDocumentDef", () => {
     expect(def.descriptor.description).not.toContain("presentation");
     expect(def.descriptor.description).not.toMatch(/primary/i);
     // What the description must still carry.
-    expect(def.descriptor.description).toContain("document://");
+    expect(def.descriptor.description).toContain("appfile://");
     expect(def.descriptor.description).toContain("./outputs/");
   });
 
   it("uploads with (path, name) only", async () => {
     const requests: Array<[string, string | undefined]> = [];
-    const def = buildPublishDocumentDef(async (path, name) => {
+    const def = buildPublishFileDef(async (path, name) => {
       requests.push([path, name]);
-      return publishedDocument;
+      return publishedFile;
     });
 
     const result = await def.handler({
@@ -155,17 +157,17 @@ describe("buildPublishDocumentDef", () => {
     expect(requests).toEqual([["outputs/final.html", "Final report.html"]]);
     expect(eventsOf(result._meta)).toEqual([
       {
-        ...documentPublishedEvent(publishedDocument),
+        ...filePublishedEvent(publishedFile),
         timestamp: expect.any(Number),
       },
     ]);
   });
 
-  it("emits a document.published event with no presentation field", () => {
-    expect(documentPublishedEvent(publishedDocument)).toEqual({
-      type: "document.published",
-      document_id: "doc_primary",
-      uri: "document://doc_primary",
+  it("emits a file.published event with no presentation field", () => {
+    expect(filePublishedEvent(publishedFile)).toEqual({
+      type: "file.published",
+      file_id: "doc_primary",
+      uri: "appfile://doc_primary",
       name: "Final report.html",
       mime: "text/html",
       size: 42,
@@ -178,9 +180,9 @@ describe("buildPublishDocumentDef", () => {
     // system prompt) may still pass `presentation`. The deliverable must be
     // published anyway — a retired argument is never an error.
     const requests: Array<[string, string | undefined]> = [];
-    const def = buildPublishDocumentDef(async (path, name) => {
+    const def = buildPublishFileDef(async (path, name) => {
       requests.push([path, name]);
-      return publishedDocument;
+      return publishedFile;
     });
 
     const result = await def.handler({
@@ -194,9 +196,45 @@ describe("buildPublishDocumentDef", () => {
   });
 
   it("still rejects a missing path", async () => {
-    const def = buildPublishDocumentDef(async () => publishedDocument);
+    const def = buildPublishFileDef(async () => publishedFile);
     const result = await def.handler({ presentation: "primary" });
     expect(result.isError).toBe(true);
     expect(result.content[0]!.text).toContain("non-empty `path`");
+  });
+
+  it("is named publish_file and never mentions the retired vocabulary", () => {
+    const def = buildPublishFileDef(async () => publishedFile);
+    expect(def.descriptor.name).toBe("publish_file");
+    expect(def.descriptor.description).not.toContain("publish_document");
+    expect(def.descriptor.description).not.toContain("document://");
+  });
+});
+
+describe("run-event type compatibility (#1177)", () => {
+  it("file.published is canonical; document.published is accepted, not emitted", () => {
+    expect([...CANONICAL_RUNTIME_TOOL_EVENT_TYPES]).toContain("file.published");
+    expect([...CANONICAL_RUNTIME_TOOL_EVENT_TYPES]).not.toContain("document.published" as never);
+    expect([...LEGACY_RUNTIME_TOOL_EVENT_TYPES]).toEqual(["document.published"]);
+  });
+
+  it("reEmitRuntimeToolEvents forwards a legacy document.published from an older image", () => {
+    // Runtime image and platform deploy independently: an image built before
+    // the rename still hands this host `document.published`. Dropping it at the
+    // trust boundary would silently lose a published file.
+    const emitted: unknown[] = [];
+    reEmitRuntimeToolEvents(
+      {
+        [RUNTIME_TOOL_EVENTS_META_KEY]: [
+          { type: "document.published", document_id: "doc_legacy" },
+          { type: "file.published", file_id: "doc_new" },
+          { type: "forged.event", x: 1 },
+        ],
+      },
+      (e) => emitted.push(e),
+    );
+    expect(emitted).toEqual([
+      { type: "document.published", document_id: "doc_legacy" },
+      { type: "file.published", file_id: "doc_new" },
+    ]);
   });
 });

@@ -158,7 +158,7 @@ export function flattenVisibleRows(
 ): TreeRow[] {
   const rows: TreeRow[] = [];
   // Pre-order traversal: siblings are pushed in reverse so the stack pops them
-  // back in document order.
+  // back in file order.
   const stack: TreeRow[] = [];
   const pushLevel = (siblings: readonly TreeNode[], depth: number) => {
     for (let i = siblings.length - 1; i >= 0; i--) {

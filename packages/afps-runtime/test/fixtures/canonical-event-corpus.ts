@@ -10,7 +10,7 @@
  * only list of accept/reject cases for it; `test/types/canonical-events.test.ts`
  * runs every fixture through the guard and asserts the `valid` label.
  *
- * A second reader used to exist — the JSON Schema documents generated from a
+ * A second reader used to exist — the JSON Schema files generated from a
  * Zod payload table in `src/events/canonical-event-schemas.ts`, run through
  * ajv — and the corpus was unified so the two could not restate each other.
  * That generator has been removed: its artifacts were never published to the
@@ -26,7 +26,7 @@
  *
  * There was a `violates` field restating that in machine-readable form. It
  * drove a mechanical coverage guard: the schema suite derived the constrained
- * field paths from the generated documents (every subschema carrying `type` or
+ * field paths from the generated files (every subschema carrying `type` or
  * `enum`) and failed unless each was named by a fixture — which is how
  * `durationMs`, `usage`'s inner counters and `progress`/`error`'s `data` were
  * caught going un-exercised. With no machine-readable schema left, that set
@@ -359,7 +359,7 @@ export const NON_CANONICAL_EVENTS: readonly { label: string; event: RunEvent }[]
   },
   {
     // `report.appended` was canonical until the report tool was retired in
-    // favour of durable `outputs/` documents — a stale emitter is now
+    // favour of durable `outputs/` files — a stale emitter is now
     // third-party as far as the runtime is concerned.
     label: "retired report.appended",
     event: { ...base, type: "report.appended", content: "# Report" },

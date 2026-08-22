@@ -11,7 +11,7 @@
  *
  * Platform-specific divergences (by design):
  *   - `platformName`: "Appstrate" / "Appstrate CLI" / caller-defined
- *   - `## Documents` section: only the platform has DB-backed uploads
+ *   - `## Files` section: only the platform has DB-backed uploads
  *
  * Anything else that diverges is a regression. A new contributor who
  * adds a section to `renderPlatformPrompt` without threading it through
@@ -114,12 +114,12 @@ function canonicalize(prompt: string): string {
     prompt
       // normalize the platform identity line
       .replace(/running on the [^\n]* platform\./g, "running on the <PLATFORM> platform.")
-      // strip the `## Documents` section (platform-only, DB-backed)
-      .replace(/## Documents\n[\s\S]*?(?=\n## |\n---|$)/g, "")
+      // strip the `## Files` section (platform-only, DB-backed)
+      .replace(/## Files\n[\s\S]*?(?=\n## |\n---|$)/g, "")
       // strip the uploads-related sentence in the Workspace bullet
       // (platform-only when uploads are wired; CLI paths omit it)
       .replace(
-        /Input documents are available under `\.\/documents\/` \(relative to cwd\) and listed in the `## Documents` section below\. /g,
+        /Input files are available under `\.\/files\/` \(relative to cwd\) and listed in the `## Files` section below\. /g,
         "",
       )
       // collapse repeated blank lines left by section removal
@@ -139,7 +139,7 @@ describe("cross-path prompt parity", () => {
       // via the runtime-wired `run_history` tool instead so the prompt
       // never mentions the sidecar URL.
       uploads: [
-        { name: "brief.pdf", path: "./documents/brief.pdf", size: 12345, type: "application/pdf" },
+        { name: "brief.pdf", path: "./files/brief.pdf", size: 12345, type: "application/pdf" },
       ],
     }),
   );
@@ -188,7 +188,7 @@ describe("cross-path prompt parity", () => {
   });
 
   it("platform prompt matches CLI prompts modulo the documented divergences", () => {
-    // Platform: includes the Documents section. Canonicalize strips that
+    // Platform: includes the Files section. Canonicalize strips that
     // platform-only section so the residue must match the CLI render
     // byte-for-byte.
     expect(canonicalize(platformPrompt)).toEqual(canonicalize(externalRunPrompt));
@@ -203,11 +203,11 @@ describe("cross-path prompt parity", () => {
     }
   });
 
-  it("only the platform path emits the Documents section", () => {
-    expect(platformPrompt).toContain("## Documents");
+  it("only the platform path emits the Files section", () => {
+    expect(platformPrompt).toContain("## Files");
     expect(platformPrompt).toContain("**brief.pdf**");
-    expect(externalRunPrompt).not.toContain("## Documents");
-    expect(appstrateRunPrompt).not.toContain("## Documents");
+    expect(externalRunPrompt).not.toContain("## Files");
+    expect(appstrateRunPrompt).not.toContain("## Files");
   });
 
   it("no prompt path mentions the sidecar URL (zero-knowledge invariant)", () => {

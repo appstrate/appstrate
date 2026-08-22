@@ -3,7 +3,7 @@
 /**
  * Snapshot file parsing for `appstrate run --snapshot <path>`.
  *
- * A snapshot is a small JSON document that seeds the run's
+ * A snapshot is a small JSON file that seeds the run's
  * {@link ExecutionContext} with prior memories / conversation history
  * / persisted checkpoint — the same shape a real platform run would inherit
  * from previous runs. Only the three seedable keys are honoured; extra

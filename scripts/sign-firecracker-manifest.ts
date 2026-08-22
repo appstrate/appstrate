@@ -46,7 +46,7 @@ const SECRET_ENV = "FIRECRACKER_MANIFEST_SIGNING_KEY";
 
 /**
  * PKCS#8 DER prefix for an Ed25519 private key (RFC 8410). Appending the raw
- * 32-byte seed yields a complete DER document node:crypto can import — this
+ * 32-byte seed yields a complete DER file node:crypto can import — this
  * is what lets the GitHub secret be a plain base64 seed instead of PEM.
  */
 const PKCS8_ED25519_PREFIX = Buffer.from("302e020100300506032b657004220420", "hex");

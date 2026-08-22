@@ -1,0 +1,171 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * Canonical `appfile://` (and companion `upload://`) URI contract.
+ *
+ * The durable file store addresses every stored file by an opaque, stable
+ * `appfile://doc_xxx` URI; a staged (not-yet-materialized) upload carries the
+ * ephemeral `upload://upl_xxx` form. Both the platform (apps/api files/uploads
+ * services + MCP router) and the chat module validate/parse these URIs, so the
+ * pure, dependency-free helpers live here — one source of truth for the prefix
+ * + id shape — rather than being re-implemented per consumer (the earlier
+ * state: four near-identical copies of the prefix literals and id regex).
+ *
+ * ## Why `appfile://` and not `file://`
+ *
+ * `file://` is already taken: it means the local filesystem, and MCP uses it
+ * for local resources. An opaque platform id under that scheme is ambiguous to
+ * the model and to every MCP client, so the platform claims its own scheme.
+ *
+ * ## Why `document://` is still read
+ *
+ * The scheme was `document://` until issue #1177. Historical `runs.input` rows,
+ * persisted chat attachments and model-authored prompts are full of it, and
+ * those runs must stay re-runnable forever. So: **write `appfile://`, read
+ * both.** Every parser/extractor below accepts either prefix; only
+ * {@link fileUri} decides what gets written, and it only ever emits the
+ * canonical one.
+ *
+ * The row id prefix stays `doc_` — it is already in every stored row and
+ * carries no vocabulary weight; re-minting it would be a data migration for
+ * zero gain.
+ *
+ * Dependency-free on purpose (no DB/storage imports) so the MCP tool layer,
+ * the chat module, and the runtime can import it without pulling in the files
+ * service's graph.
+ */
+
+/** `appfile://doc_xxx` — the opaque, stable URI form of a stored file. */
+export const FILE_URI_PREFIX = "appfile://";
+
+/**
+ * `document://doc_xxx` — the pre-#1177 spelling of {@link FILE_URI_PREFIX}.
+ * **Read-only**: accepted by every parser here, never emitted. Live in
+ * historical `runs.input`, chat attachments and run prompts.
+ */
+export const LEGACY_DOCUMENT_URI_PREFIX = "document://";
+
+/**
+ * Every accepted spelling of a stored-file URI, canonical first. The single
+ * list every accept-path below iterates — adding a spelling here is the only
+ * edit needed to make it parse everywhere.
+ */
+export const ACCEPTED_FILE_URI_PREFIXES = [FILE_URI_PREFIX, LEGACY_DOCUMENT_URI_PREFIX] as const;
+
+/** `upload://upl_xxx` — the ephemeral URI form of a staged (not-yet-materialized) upload. */
+export const UPLOAD_URI_PREFIX = "upload://";
+
+/**
+ * Strict file id shape: `doc_` + ≥8 id chars. `prefixedId("doc")` is well
+ * above this, so the bound is safely below the real minimum. Rejects malformed
+ * input before it reaches any database SELECT. Mirrors the service-side
+ * validator (`apps/api/src/services/files.ts`).
+ */
+export const FILE_ID_RE = /^doc_[A-Za-z0-9_-]{8,}$/;
+
+/** Strict upload id shape: `upl_` + ≥8 id chars. Mirrors the uploads service validator. */
+export const UPLOAD_ID_RE = /^upl_[A-Za-z0-9_-]{8,}$/;
+
+/**
+ * Is this value a stored-file reference — `appfile://…` or the legacy
+ * `document://…` (prefix only, id not validated)?
+ */
+export function isFileUri(value: unknown): value is string {
+  return typeof value === "string" && ACCEPTED_FILE_URI_PREFIXES.some((p) => value.startsWith(p));
+}
+
+/** Is this value an `upload://…` reference (prefix only, id not validated)? */
+export function isUploadUri(value: unknown): value is string {
+  return typeof value === "string" && value.startsWith(UPLOAD_URI_PREFIX);
+}
+
+/**
+ * Does `value` carry an accepted chat-attachment scheme (`upload://`,
+ * `appfile://`, or the legacy `document://`)? Attachments flow only through the
+ * file store, never inline (`data:`) or as arbitrary URLs.
+ */
+export function isAttachmentUri(value: unknown): value is string {
+  return isUploadUri(value) || isFileUri(value);
+}
+
+/**
+ * Extract the file id from an `appfile://doc_xxx` (or legacy
+ * `document://doc_xxx`) URI, validating the id shape. Returns null if no
+ * accepted prefix is present or the id is malformed.
+ */
+export function parseFileUri(uri: string): string | null {
+  if (typeof uri !== "string") return null;
+  for (const prefix of ACCEPTED_FILE_URI_PREFIXES) {
+    if (!uri.startsWith(prefix)) continue;
+    const id = uri.slice(prefix.length);
+    return FILE_ID_RE.test(id) ? id : null;
+  }
+  return null;
+}
+
+/**
+ * Scans a free-form text blob for an embedded stored-file URI under ANY
+ * accepted prefix. Derived from {@link ACCEPTED_FILE_URI_PREFIXES} so a new
+ * spelling is picked up here too; `doc_` + ≥1 id char keeps the boundary scan
+ * permissive, with the strict `{8,}` length enforced by {@link parseFileUri}.
+ */
+const EMBEDDED_FILE_URI_SCAN = new RegExp(
+  `(?:${ACCEPTED_FILE_URI_PREFIXES.map((p) => p.replace("://", "")).join("|")})://doc_[A-Za-z0-9_-]+`,
+  "g",
+);
+
+/** The canonical `appfile://` URI for a file id. Never emits the legacy form. */
+export function fileUri(id: string): string {
+  return `${FILE_URI_PREFIX}${id}`;
+}
+
+/**
+ * Walk an arbitrary JSON value (a run's persisted `input`, tool args, …) and
+ * collect the set of file ids referenced by any `appfile://doc_xxx` /
+ * `document://doc_xxx` string anywhere within it — nested objects and arrays
+ * included. De-duplicated, insertion-order stable. Every candidate string is
+ * validated through {@link parseFileUri}, so a malformed URI is silently
+ * skipped (never yields a bogus id). Pure and dependency-free — the single
+ * place that turns a blob of input JSON into the file ids it consumes (e.g. so
+ * a run's file listing can surface the inputs it was launched with, not only
+ * the outputs it produced).
+ */
+export function extractFileIds(value: unknown): string[] {
+  const ids = new Set<string>();
+  const walk = (node: unknown): void => {
+    if (typeof node === "string") {
+      const id = parseFileUri(node);
+      if (id) ids.add(id);
+    } else if (Array.isArray(node)) {
+      for (const item of node) walk(item);
+    } else if (node !== null && typeof node === "object") {
+      for (const item of Object.values(node)) walk(item);
+    }
+  };
+  walk(value);
+  return [...ids];
+}
+
+/**
+ * Finds `appfile://doc_xxx` / `document://doc_xxx` occurrences embedded
+ * ANYWHERE inside a free-form text blob (e.g. a model-authored run prompt) —
+ * not only when the whole string is a bare URI, which is all
+ * {@link extractFileIds} matches on a leaf string. Each candidate is
+ * re-validated through {@link parseFileUri}, so a too-short / malformed id
+ * after the scheme is silently skipped. De-duplicated, insertion-order stable.
+ *
+ * Companion to {@link extractFileIds}: that one turns structured input JSON
+ * into the file ids it consumes; this one turns prose into the file ids it
+ * *mentions* — the difference the inline-run guard uses to catch a URI pasted
+ * into a sub-agent's prompt (inert — the runtime cannot fetch it) instead of
+ * passed through a declared input file field (mounted into the workspace).
+ */
+export function extractFileIdsFromText(text: string): string[] {
+  if (typeof text !== "string" || text.length === 0) return [];
+  const ids = new Set<string>();
+  for (const match of text.matchAll(EMBEDDED_FILE_URI_SCAN)) {
+    const id = parseFileUri(match[0]);
+    if (id) ids.add(id);
+  }
+  return [...ids];
+}

@@ -120,7 +120,7 @@ describe("triggerBlobDownload", () => {
   });
 
   it("pins an inert blob type regardless of the type the response carried", () => {
-    // `/api/documents/{id}/content` serves the stored, uploader-controlled
+    // `/api/files/{id}/content` serves the stored, uploader-controlled
     // `row.mime`. A `blob:` URL inherits the platform origin, so the type the
     // blob carries is the one that would decide whether those bytes are ever
     // interpreted — it is re-pinned here, never forwarded.

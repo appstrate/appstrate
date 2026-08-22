@@ -13,7 +13,7 @@ import type { UploadFile } from "./runtime-context.ts";
  * `upload://` URI → local object URL for images staged this session. Sent-message
  * attachments are rebuilt from the message's file parts by the react-ai-sdk
  * converter, so the picked `File` is no longer reachable at render time — this
- * cache is the only way to show a just-sent image before its `document://` form
+ * cache is the only way to show a just-sent image before its `appfile://` form
  * lands on reload. Session-scoped by design: a handful of object URLs, reclaimed
  * with the page (an upload URI is single-shot, so entries are never re-keyed).
  */

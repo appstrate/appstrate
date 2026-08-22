@@ -215,7 +215,7 @@ export const TOKEN_USAGE_COUNTERS = [
  * serialization. The shared fixture corpus
  * (`test/fixtures/canonical-event-corpus.ts`) pins the equality on every
  * other constrained field, and a coverage assertion derived from the
- * generated JSON Schema documents fails if a new constrained field appears
+ * generated JSON Schema files fails if a new constrained field appears
  * without a fixture exercising it.
  */
 export function isCanonicalRunEvent(event: RunEvent): event is CanonicalRunEvent {

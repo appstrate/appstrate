@@ -118,12 +118,12 @@ export function toSlug(value: string, maxLen?: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// Filenames (documents / uploads)
+// Filenames (files / uploads)
 // ---------------------------------------------------------------------------
 
 /**
  * Ceiling on a stored filename. One constant so every producer and consumer of
- * a document/upload `name` truncates at the same point.
+ * a file/upload `name` truncates at the same point.
  */
 export const MAX_FILENAME_LEN = 255;
 
@@ -142,8 +142,8 @@ export const MAX_FILENAME_LEN = 255;
  * the presign path's quote-stripping alone does not cover).
  *
  * Lives in core (not in `apps/api`) because BOTH ends of the run-to-platform
- * document channel must apply the exact same rule: the API sanitizes the
- * incoming `X-Document-Name` before it becomes `documents.name`, and therefore
+ * file channel must apply the exact same rule: the API sanitizes the
+ * incoming `X-File-Name` before it becomes `files.name`, and therefore
  * part of the `(run_id, sha256, name)` dedup identity, while the agent
  * container has to PREDICT that stored name to build a matching dedup key. When
  * the rule was only reachable from the server, the two keys silently diverged
@@ -207,7 +207,7 @@ export function decodeFilenameHeader(raw: string): string | null {
 
 /**
  * Canonical MIME → filename-extension table for the text-shaped and common
- * document formats the platform names files after. Values carry no leading dot.
+ * file formats the platform names files after. Values carry no leading dot.
  *
  * ONE table because the same question is asked on both sides of the run
  * boundary: the platform names an unnamed inline `data:` input
@@ -272,7 +272,7 @@ export function extensionForMime(mime: string | undefined): string | null {
  *    Compliant clients prefer it, so an accented or CJK name downloads intact.
  *
  * Lives here — next to {@link sanitizeFilename}, which is what keeps a CR/LF out
- * of the stored name in the first place — because the platform serves a document
+ * of the stored name in the first place — because the platform serves a file
  * through TWO code paths: the proxy stream sets this header itself, and the S3
  * backend binds it into the presigned GET as `response-content-disposition`.
  * When each path built its own value, the presigned branch degraded a non-ASCII

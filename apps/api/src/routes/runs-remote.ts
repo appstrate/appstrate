@@ -144,7 +144,7 @@ const ExtendSinkBodySchema = z
 
 /**
  * Reject platform-stored file inputs on remote runs. `upload://` and
- * `document://` file-field values reference bytes the platform holds; a remote
+ * `appfile://` file-field values reference bytes the platform holds; a remote
  * run executes on the caller's host, whose workspace the platform never
  * provisions — those bytes can never be delivered there, so the remote agent
  * would silently find no file. Fail loud and early instead. `data:` URIs are
@@ -157,7 +157,7 @@ function assertNoPlatformFileRefs(
   input: Record<string, unknown>,
 ): void {
   for (const ref of collectFileRefs(inputSchema, input)) {
-    if (ref.kind === "upload" || ref.kind === "document") {
+    if (ref.kind === "upload" || ref.kind === "file") {
       throw invalidRequest(
         `Field '${ref.fieldName}' references a platform-stored file (${ref.kind}://) which is ` +
           "not supported on remote runs — the run executes on the caller's host, whose workspace " +
@@ -308,7 +308,7 @@ export function createRunsRemoteRouter() {
         return buildShadowLoadedPackage(shadowId, preflight.manifest, preflight.prompt);
       }
 
-      // Reject platform-stored file inputs (upload:// / document://) that can
+      // Reject platform-stored file inputs (upload:// / appfile://) that can
       // never reach a remote host's workspace. Applies to both source shapes:
       // `agentForRun.manifest` is the resolved manifest in either branch.
       const fileInputSchema = agentForRun.manifest.input?.schema;

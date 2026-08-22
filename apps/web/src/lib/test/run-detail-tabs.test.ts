@@ -9,9 +9,9 @@ import {
 } from "../run-detail-tabs";
 
 const available = (
-  overrides: Partial<{ hasFeaturedDocument: boolean; hasResult: boolean; hasMemory: boolean }> = {},
+  overrides: Partial<{ hasFeaturedFile: boolean; hasResult: boolean; hasMemory: boolean }> = {},
 ) => ({
-  hasFeaturedDocument: false,
+  hasFeaturedFile: false,
   hasResult: false,
   hasMemory: false,
   ...overrides,
@@ -25,28 +25,28 @@ describe("run detail tabs", () => {
   });
 
   it("leads with the file list when the run produced exactly one file", () => {
-    expect(initialRunDetailTab(available({ hasFeaturedDocument: true, hasResult: true }))).toBe(
-      "documents",
+    expect(initialRunDetailTab(available({ hasFeaturedFile: true, hasResult: true }))).toBe(
+      "files",
     );
     expect(initialRunDetailTab(available({ hasResult: true }))).toBe("result");
     expect(initialRunDetailTab(available())).toBe("logs");
   });
 
   it("sends a retired deliverable link to the tab that lists the run's files", () => {
-    // Unconditionally: `documents` always renders, so the redirect can never
+    // Unconditionally: `files` always renders, so the redirect can never
     // land on a blank pane — including for a run that produced several files
     // (or none), whose list is exactly what the old link was after.
-    expect(effectiveRunDetailTab("deliverable", available())).toBe("documents");
-    expect(effectiveRunDetailTab("deliverable", available({ hasResult: true }))).toBe("documents");
-    expect(effectiveRunDetailTab("deliverable", available({ hasFeaturedDocument: true }))).toBe(
-      "documents",
+    expect(effectiveRunDetailTab("deliverable", available())).toBe("files");
+    expect(effectiveRunDetailTab("deliverable", available({ hasResult: true }))).toBe("files");
+    expect(effectiveRunDetailTab("deliverable", available({ hasFeaturedFile: true }))).toBe(
+      "files",
     );
   });
 
   it("clamps unavailable deep links without discarding their requested hash", () => {
     expect(effectiveRunDetailTab("result", available())).toBe("logs");
     expect(effectiveRunDetailTab("result", available({ hasResult: true }))).toBe("result");
-    expect(effectiveRunDetailTab("documents", available())).toBe("documents");
+    expect(effectiveRunDetailTab("files", available())).toBe("files");
   });
 
   it("clamps a stale memory hash when the optional trigger is absent", () => {

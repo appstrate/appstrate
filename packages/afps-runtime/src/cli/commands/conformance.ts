@@ -18,7 +18,7 @@ Usage:
 Options:
   --levels <list>   Comma-separated level filter (default: all built-in)
   --only <list>     Comma-separated case IDs (takes precedence over --levels)
-  --json            Emit the report as a single JSON document
+  --json            Emit the report as a single JSON file
 
 Exit codes:
   0   all selected cases passed (skipped cases do not fail)

@@ -36,7 +36,7 @@ import {
   runWithSpan,
   recordRunDuration,
   recordRunTerminal,
-  recordDocumentPartialPublication,
+  recordFilePartialPublication,
 } from "@appstrate/core/telemetry";
 import { persistRunEvent, writeRunnerLedgerRow } from "./run-launcher/appstrate-event-sink.ts";
 import {
@@ -447,8 +447,8 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   }
 
   // 4. Build the persisted result payload — structured output only. Anything
-  //    the agent means for a human is a durable document (`outputs/` sweep or
-  //    `publish_document`), never a field on this row.
+  //    the agent means for a human is a durable file (`outputs/` sweep or
+  //    `publish_file`), never a field on this row.
   //
   //    Zod boundary on the persisted payload (`runResultSchema`: closed shape,
   //    JSON-safe values, 512 KiB cap). `output` is runner-controlled, so the
@@ -614,7 +614,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // A partial artifacts summary means the run lost at least one deliverable
   // (over-cap/quota/conflict/upload-failed) — a health signal independent of the
   // run's own terminal status. Emitted on the CAS winner only (exactly-once).
-  if (result.artifacts?.status === "partial") recordDocumentPartialPublication();
+  if (result.artifacts?.status === "partial") recordFilePartialPublication();
 
   // The run's workspace provisioning archive (the AFPS bundle + input docs the
   // agent fetched at startup) was enqueued for deletion INSIDE the CAS

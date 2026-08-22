@@ -253,14 +253,14 @@ describe("encodeFilenameHeader / decodeFilenameHeader", () => {
     //    retryable network fault: 3 attempts, backoff, then the deliverable is
     //    permanently lost as `upload_failed`.
     for (const name of ["报告.md", "\u{1f4ca}.png"]) {
-      expect(() => new Headers({ "X-Document-Name": name })).toThrow();
-      expect(() => new Headers({ "X-Document-Name": encodeFilenameHeader(name) })).not.toThrow();
+      expect(() => new Headers({ "X-File-Name": name })).toThrow();
+      expect(() => new Headers({ "X-File-Name": encodeFilenameHeader(name) })).not.toThrow();
     }
     // 2. Inside Latin-1 (a French accent) it is ACCEPTED, which is worse: the
     //    value survives the send and is silently mojibaked by the UTF-8 write /
     //    Latin-1 read round-trip on the way in. Encoding removes the ambiguity.
     const accented = "rapport-été.md";
-    expect(() => new Headers({ "X-Document-Name": accented })).not.toThrow();
+    expect(() => new Headers({ "X-File-Name": accented })).not.toThrow();
     expect(encodeFilenameHeader(accented)).not.toBe(accented);
   });
 

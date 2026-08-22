@@ -42,7 +42,7 @@
 
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import { isPlainObject } from "@appstrate/core/safe-json";
-import { documentUri } from "@appstrate/core/document-uri";
+import { fileUri } from "@appstrate/core/file-uri";
 import type { Db } from "@appstrate/db/client";
 import { modelCostSchema, type ModelCost } from "@appstrate/core/module";
 import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
@@ -111,24 +111,33 @@ export async function persistRunEvent(
       return null;
     }
 
-    case "document.published": {
-      // A run document was stored on the platform (via the `publish_document`
-      // tool or the entrypoint outputs sweep). The `documents` row already
-      // exists (created by the POST /api/runs/:id/documents route) — this
+    // `document.published` (with a `document_id` payload key) is the pre-#1177
+    // spelling. Both are accepted forever: the runtime-pi image and the
+    // platform deploy independently, so a container built before the rename
+    // still emits the old shape, and an unmatched event type falls through to
+    // `default` — i.e. the file would be stored but never appear in the run
+    // log, with nothing anywhere saying why. Only `file.published` /`file_id`
+    // are ever EMITTED (see `filePublishedEvent()` in @appstrate/core).
+    case "document.published":
+    case "file.published": {
+      // A run file was stored on the platform (via the `publish_file`
+      // tool or the entrypoint outputs sweep). The `files` row already
+      // exists (created by the POST /api/runs/:id/files route) — this
       // event carries no new DB state, it only persists a run_log so the
-      // published document streams over the existing run_log SSE and replays.
-      // Stored as `type='result' event='document'`, mirroring output.
-      const documentId = typeof event.document_id === "string" ? event.document_id : null;
-      if (documentId) {
+      // published file streams over the existing run_log SSE and replays.
+      // Stored as `type='result' event='file'`, mirroring output.
+      const rawFileId = event.file_id ?? event.document_id;
+      const fileId = typeof rawFileId === "string" ? rawFileId : null;
+      if (fileId) {
         await appendRunLog(
           scope,
           runId,
           "result",
-          "document",
+          "file",
           null,
           {
-            document_id: documentId,
-            uri: typeof event.uri === "string" ? event.uri : documentUri(documentId),
+            file_id: fileId,
+            uri: typeof event.uri === "string" ? event.uri : fileUri(fileId),
             name: typeof event.name === "string" ? event.name : null,
             mime: typeof event.mime === "string" ? event.mime : null,
             size: typeof event.size === "number" ? event.size : null,

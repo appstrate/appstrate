@@ -49,11 +49,11 @@ import { stagedImagePreviewUrl } from "./upload.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
 import {
-  DocumentAttachment,
+  FileAttachment,
   isImageMime,
   ATTACHMENT_CHIP_CLASS,
   ATTACHMENT_IMAGE_CLASS,
-} from "./document-attachment.tsx";
+} from "./file-attachment.tsx";
 
 export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
   return (
@@ -100,7 +100,7 @@ const WELCOME_SUGGESTIONS = [
   "Que peux-tu faire ?",
   "Quels agents puis-je lancer ?",
   "Montre-moi mes derniers runs",
-  "Cherche dans mes documents",
+  "Cherche dans mes files",
 ];
 
 function ThreadWelcome({ composerSlot }: { composerSlot?: React.ReactNode }) {
@@ -110,7 +110,7 @@ function ThreadWelcome({ composerSlot }: { composerSlot?: React.ReactNode }) {
         <div className="text-center">
           <p className="text-lg font-medium">Appstrate Chat</p>
           <p className="text-muted-foreground mt-1 text-sm">
-            Demandez à lancer un agent, inspecter un run, ou chercher dans vos documents.
+            Demandez à lancer un agent, inspecter un run, ou chercher dans vos files.
           </p>
         </div>
         <Composer slot={composerSlot} />
@@ -187,7 +187,7 @@ function FileAttachmentPart(props: { filename?: string }) {
   return (
     <div className="bg-background text-foreground mt-1 inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs">
       <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
-      <span className="max-w-52 truncate font-medium">{props.filename ?? "document"}</span>
+      <span className="max-w-52 truncate font-medium">{props.filename ?? "file"}</span>
     </div>
   );
 }
@@ -204,17 +204,17 @@ function InertAttachmentChip({ name }: { name: string }) {
   return (
     <div className={ATTACHMENT_CHIP_CLASS}>
       <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
-      <span className="truncate font-medium">{name || "document"}</span>
+      <span className="truncate font-medium">{name || "file"}</span>
     </div>
   );
 }
 
 /**
- * One sent attachment on a user message. A `document://` (server-persisted, or a
+ * One sent attachment on a user message. An `appfile://` (server-persisted, or a
  * reloaded conversation) is interactive: image mime → thumbnail, else a
  * download chip. An `upload://` (just-sent optimistic, not yet materialized) or
  * unparseable URI shows the local File as a thumbnail when it's an image still
- * held by the runtime, else an inert chip — the content route serves documents
+ * held by the runtime, else an inert chip — the content route serves files
  * only.
  */
 function SentAttachmentChip() {
@@ -225,20 +225,20 @@ function SentAttachmentChip() {
   const content = useAuiState((s) => s.attachment.content);
   const resolved = React.useMemo(() => resolveAttachmentContent(content), [content]);
 
-  if (resolved.kind !== "document") {
+  if (resolved.kind !== "file") {
     // Just-sent optimistic attachment (`upload://`, not yet materialized): the
     // staged-image cache still holds a local preview of the picked file. Not
-    // interactive — there is no document id to preview or download yet; the
-    // persisted `document://` part takes over on reload.
+    // interactive — there is no file id to preview or download yet; the
+    // persisted `appfile://` part takes over on reload.
     const localSrc = resolved.uri ? stagedImagePreviewUrl(resolved.uri) : undefined;
     if (localSrc && isImageMime(contentType))
       return <img src={localSrc} alt={name || "image"} className={ATTACHMENT_IMAGE_CLASS} />;
     return <InertAttachmentChip name={name} />;
   }
 
-  // A resolved `document://` is interactive: the unified renderer shows an image
+  // A resolved `appfile://` is interactive: the unified renderer shows an image
   // thumbnail or a download/preview chip, resolving the opener-vs-download action.
-  return <DocumentAttachment doc={{ id: resolved.id, name, mime: contentType }} />;
+  return <FileAttachment file={{ id: resolved.id, name, mime: contentType }} />;
 }
 
 function Composer({ slot }: { slot?: React.ReactNode }) {

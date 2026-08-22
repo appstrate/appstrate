@@ -36,7 +36,7 @@ export function OrgSettingsGeneralPage() {
   const orgId = currentOrg?.id;
 
   // Single source of truth for the storage gauge (shared with billing +
-  // documents). `limitBytes` null = unlimited (per-org override ?? global quota).
+  // files). `limitBytes` null = unlimited (per-org override ?? global quota).
   const { storage, limitBytes: storageLimit, percent: storagePercent } = useOrgStorage();
   // The heads-up banner fires at the shared WARN threshold — the same point the
   // bar turns yellow — so the user is warned well before uploads get rejected.

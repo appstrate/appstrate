@@ -77,7 +77,7 @@ async function seedPublishedAgent(ctx: TestContext, version = "1.2.3") {
 /**
  * Manifest with a single file input field (`format: "uri"` + `contentMediaType`).
  * Used to exercise the remote file-input gate: platform-stored URIs
- * (`upload://` / `document://`) are rejected because a remote run executes on
+ * (`upload://` / `appfile://`) are rejected because a remote run executes on
  * the caller's host, whose workspace the platform never provisions.
  */
 function fileInputManifest(version = "3.0.0") {
@@ -87,7 +87,7 @@ function fileInputManifest(version = "3.0.0") {
       schema: {
         type: "object",
         properties: {
-          document: { type: "string", format: "uri", contentMediaType: "application/pdf" },
+          file: { type: "string", format: "uri", contentMediaType: "application/pdf" },
         },
       },
     },
@@ -583,19 +583,19 @@ describe("POST /api/runs/remote — kind: registry", () => {
     expect(run!.dependencyOverrides).toEqual({ "@acme/helper": "draft" });
   });
 
-  it("rejects a document:// file input with an explanatory 400", async () => {
+  it("rejects an appfile:// file input with an explanatory 400", async () => {
     await seedFileInputAgent(ctx, "3.0.0");
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: "3.0.0" },
       applicationId: ctx.defaultAppId,
-      input: { document: "document://doc_abc123" },
+      input: { file: "appfile://doc_abc123" },
     });
 
     expect(res.status).toBe(400);
     const body = (await res.json()) as { code?: string; detail?: string; param?: string };
     expect(body.code).toBe("invalid_request");
-    expect(body.param).toBe("document");
+    expect(body.param).toBe("file");
     // The message must explain WHY (remote host) and point at the fix (data:).
     expect(body.detail).toContain("not supported on remote runs");
     expect(body.detail).toContain("data:");
@@ -607,13 +607,13 @@ describe("POST /api/runs/remote — kind: registry", () => {
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: "3.0.0" },
       applicationId: ctx.defaultAppId,
-      input: { document: "upload://upl_abc123" },
+      input: { file: "upload://upl_abc123" },
     });
 
     expect(res.status).toBe(400);
     const body = (await res.json()) as { code?: string; detail?: string; param?: string };
     expect(body.code).toBe("invalid_request");
-    expect(body.param).toBe("document");
+    expect(body.param).toBe("file");
     expect(body.detail).toContain("not supported on remote runs");
   });
 
@@ -623,7 +623,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: "3.0.0" },
       applicationId: ctx.defaultAppId,
-      input: { document: "data:application/pdf;name=report.pdf;base64,JVBERi0=" },
+      input: { file: "data:application/pdf;name=report.pdf;base64,JVBERi0=" },
     });
 
     // `data:` is self-contained (the remote runner materializes it itself), so

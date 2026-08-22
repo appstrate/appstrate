@@ -63,7 +63,7 @@ const config: KnipConfig = {
     ".": {
       entry: [
         ...TEST_ENTRY,
-        // Operator backstops, documented in docs/architecture/DOCUMENTS.md and
+        // Operator backstops, documented in docs/architecture/FILES.md and
         // CHANGELOG.md respectively. Run by hand, never imported.
         "scripts/storage-orphans.ts",
         "scripts/audit-empty-integration-selections.ts",

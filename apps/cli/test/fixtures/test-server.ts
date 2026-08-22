@@ -107,7 +107,7 @@ export async function startTestServer(
         }
         case "/redirect/307": {
           // 307 with a ZERO-byte body — the exact shape of
-          // `GET /api/documents/{id}/content` when S3 has a public
+          // `GET /api/files/{id}/content` when S3 has a public
           // endpoint (Hono's `c.redirect()` sends no body). Reproduces
           // the "0 bytes, exit 0, no warning" papercut (#1021).
           calls.push(log);
