@@ -22,7 +22,8 @@ import {
   useKeepDocument,
   type DocumentDto,
 } from "../hooks/use-documents";
-import { LoadingState, ErrorState, EmptyState } from "./page-states";
+import { ErrorState, EmptyState } from "./page-states";
+import { CardGrid } from "./card-grid";
 import { DocumentTile } from "./document-tile";
 import { DocumentPreview } from "./document-preview";
 import { ConfirmModal } from "./confirm-modal";
@@ -158,36 +159,42 @@ export function DocumentListPanel({
         ))}
       </div>
 
-      {isLoading ? (
-        <LoadingState />
-      ) : error ? (
-        <ErrorState message={getErrorMessage(error)} />
-      ) : documents.length === 0 ? (
-        <EmptyState
-          message={empty.message}
-          hint={empty.hint}
-          compact={empty.compact}
-          icon={FileText}
+      <div className="flex flex-col gap-3">
+        {/* The gallery is a card grid and always was — it just drew its own,
+            with the states above it in the wrong order (loading before failure,
+            so a 500 under a stale page showed a spinner). `min` is 10rem here:
+            these cards are thumbnails, and the family's 20rem default would
+            make each one a poster. */}
+        <CardGrid
+          items={documents}
+          min="10rem"
+          itemKey={(doc) => doc.id}
+          isLoading={isLoading}
+          isError={Boolean(error)}
+          error={<ErrorState message={getErrorMessage(error)} compact />}
+          empty={
+            <EmptyState
+              message={empty.message}
+              hint={empty.hint}
+              compact={empty.compact}
+              icon={FileText}
+            />
+          }
+          renderCard={(doc) => (
+            <DocumentTile
+              doc={doc}
+              onDownload={download}
+              onDelete={onDelete}
+              onKeep={onKeep}
+              onPreview={(d) => setPreviewParam(d.id)}
+              showRunLink={showRunLink}
+              direction={runId ? (doc.run_id === runId ? "output" : "input") : undefined}
+            />
+          )}
         />
-      ) : (
-        <div className="flex flex-col gap-3">
-          <div className="grid [grid-template-columns:repeat(auto-fill,minmax(10rem,1fr))] gap-3">
-            {documents.map((doc) => (
-              <DocumentTile
-                key={doc.id}
-                doc={doc}
-                onDownload={download}
-                onDelete={onDelete}
-                onKeep={onKeep}
-                onPreview={(d) => setPreviewParam(d.id)}
-                showRunLink={showRunLink}
-                direction={runId ? (doc.run_id === runId ? "output" : "input") : undefined}
-              />
-            ))}
-          </div>
-          {footer}
-        </div>
-      )}
+        {/* "Load more" belongs to a list that has rows to extend. */}
+        {documents.length > 0 && footer}
+      </div>
 
       <ConfirmModal
         open={!!pendingDelete}

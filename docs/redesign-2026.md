@@ -1007,11 +1007,10 @@ included (`lib/list-params.ts`).
    seeing that is the whole of what this entry now says. Read and LOOKED AT on
    22 August, once the fixtures made the three reachable at all:
 
-   - **Documents is a CARD GRID**, not a third body. It draws
+   - **Documents is a CARD GRID**, not a third body. It drew
      `repeat(auto-fill, minmax(10rem, 1fr))` by hand — the same technique
-     `CardGrid` already owns, at a smaller floor. It joins the grid the day
-     that floor becomes a prop, which is one prop with a default, and it stops
-     being a third of this problem.
+     `CardGrid` already owns, at a smaller floor. DONE 22 August: the floor is
+     a prop and the gallery is on the family's grid.
    - **Memory is the third body.** Rows stacked, one row a self-contained
      BLOCK rather than cells aligned into columns, in two tiers (pinned slots
      over the archive) inside collapsible sections that carry their own count.
@@ -1031,8 +1030,12 @@ included (`lib/list-params.ts`).
    wherever they mean what it means.
 
    **The third body landed the same day** (`components/item-list.tsx`) — see
-   "The list" below. What is left of A.2 is the documents grid and the picker's
-   states.
+   "The list" below — **and the documents grid with it**: `CardGrid` took a
+   `min` prop (the column floor, 20rem by default, 10rem for thumbnails, the
+   only thing that varied between the two grids) and the gallery moved onto it.
+   That grid had been answering the states in the WRONG ORDER — loading before
+   failure, so a 500 under a stale page drew a spinner rather than saying
+   anything had broken. What is left of A.2 is the connection picker's states.
 
 3. Then B, loading in one pass.
 

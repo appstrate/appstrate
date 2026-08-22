@@ -35,7 +35,7 @@
  *   rather than as a page that failed to render.
  */
 
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { collectionVerdict, type CollectionState } from "./collection";
 import { ErrorState } from "./page-states";
@@ -46,11 +46,20 @@ export function CardGrid<T>({
   items,
   renderCard,
   itemKey,
+  min = "20rem",
   ...state
 }: {
   items: T[];
   renderCard: (item: T) => ReactNode;
   itemKey: (item: T) => string;
+  /**
+   * The narrowest a card may be before the grid drops a column. The default is
+   * the width a card carrying a description needs to be readable; the document
+   * gallery passes `10rem`, because its cards are thumbnails and a 20rem
+   * thumbnail is a poster. It is the ONLY thing that varies between the grids,
+   * which is why it is the only prop here.
+   */
+  min?: string;
 } & CollectionState) {
   const verdict = collectionVerdict(state, items.length);
 
@@ -59,7 +68,7 @@ export function CardGrid<T>({
   if (verdict === "error") return <Frame>{state.error ?? <ErrorState compact />}</Frame>;
   if (verdict === "loading") {
     return (
-      <Grid>
+      <Grid min={min}>
         {Array.from({ length: SKELETON_CARDS }, (_, i) => (
           <Skeleton key={i} className="h-28 rounded-lg" />
         ))}
@@ -69,7 +78,7 @@ export function CardGrid<T>({
   if (verdict === "empty") return <Frame>{state.empty}</Frame>;
 
   return (
-    <Grid>
+    <Grid min={min}>
       {items.map((item) => (
         // The cell fills its row and the card fills the cell. Without the
         // second half, a card with one line of description sits short beside
@@ -84,11 +93,16 @@ export function CardGrid<T>({
   );
 }
 
-function Grid({ children }: { children: ReactNode }) {
+function Grid({ min, children }: { min: string; children: ReactNode }) {
   return (
-    // 20rem is the narrowest a card may be before the grid drops a column;
-    // `min(…, 100%)` keeps it from overflowing a container narrower than that.
-    <div className="grid grid-cols-[repeat(auto-fill,minmax(min(20rem,100%),1fr))] gap-3">
+    // `min(…, 100%)` keeps a card from overflowing a container narrower than
+    // the floor itself. The track goes through a custom property rather than an
+    // interpolated class name because Tailwind reads class names as literals in
+    // the source and would never generate `minmax(min(10rem,100%),1fr)`.
+    <div
+      className="grid grid-cols-[repeat(auto-fill,minmax(min(var(--card-min),100%),1fr))] gap-3"
+      style={{ "--card-min": min } as CSSProperties}
+    >
       {children}
     </div>
   );
