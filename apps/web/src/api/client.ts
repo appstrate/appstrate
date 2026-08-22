@@ -80,29 +80,40 @@ const orgContext: Middleware = {
   },
 };
 
+/**
+ * Normalizes a non-2xx response into the error the caller sees. A body with an
+ * RFC 9457 `code` becomes an `ApiError` carrying the problem details; anything
+ * else (an HTML error page, a bare status) degrades to a plain `Error` whose
+ * message is the `detail`, the `statusText`, or the status itself — never an
+ * unhelpful parse failure.
+ */
+export async function toApiError(response: Response): Promise<Error> {
+  const body: Partial<ProblemDetail> = await response
+    .clone()
+    .json()
+    .catch(() => ({ detail: response.statusText }));
+  if (body.code) {
+    return new ApiError(
+      body.code,
+      body.detail || `API Error: ${response.status}`,
+      response.status,
+      // `ApiError.details` is intentionally an open record: the spec models
+      // `errors` as a typed array, but runtime problem bodies are polymorphic
+      // by `code` (validation → array of field errors; conflict codes →
+      // code-specific object), so consumers narrow per `code`. The cast
+      // bridges the spec's array type to that open shape.
+      body.errors as unknown as Record<string, unknown> | undefined,
+      body.requestId,
+      body.param,
+    );
+  }
+  return new Error(body.detail || `API Error: ${response.status}`);
+}
+
 const problemDetailErrors: Middleware = {
   async onResponse({ response }) {
     if (response.ok) return response;
-    const body: Partial<ProblemDetail> = await response
-      .clone()
-      .json()
-      .catch(() => ({ detail: response.statusText }));
-    if (body.code) {
-      throw new ApiError(
-        body.code,
-        body.detail || `API Error: ${response.status}`,
-        response.status,
-        // `ApiError.details` is intentionally an open record: the spec models
-        // `errors` as a typed array, but runtime problem bodies are polymorphic
-        // by `code` (validation → array of field errors; conflict codes →
-        // code-specific object), so consumers narrow per `code`. The cast
-        // bridges the spec's array type to that open shape.
-        body.errors as unknown as Record<string, unknown> | undefined,
-        body.requestId,
-        body.param,
-      );
-    }
-    throw new Error(body.detail || `API Error: ${response.status}`);
+    throw await toApiError(response);
   },
 };
 
