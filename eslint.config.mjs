@@ -111,6 +111,31 @@ export default tseslint.config(
     },
   },
   {
+    // Unguarded-spinner guard (issue #1180). A clack spinner paints from a
+    // `setInterval` that only `stop()` clears, so a `start()` whose body throws
+    // leaks a writer for the rest of the process — invisible in the shipped CLI
+    // (the error exits it), fatal under `bun test`, where one process runs every
+    // suite and the frames land in someone else's capture. `withSpinner`
+    // (src/lib/ui.ts) owns the start/stop pair; `ui.ts` itself is where the one
+    // remaining `clack.spinner()` call lives.
+    //
+    // Re-declares `no-restricted-syntax` for a subset of the Zod block above,
+    // which fully REPLACES its options here — hence the explicit spread.
+    files: ["apps/cli/src/**/*.ts"],
+    ignores: ["apps/cli/src/lib/ui.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        ...ZOD4_STRING_FORMAT_BANS,
+        {
+          selector: "CallExpression[callee.object.name='clack'][callee.property.name='spinner']",
+          message:
+            "Use `withSpinner` from lib/ui.ts — it stops the spinner on every exit path. A raw `clack.spinner()` leaks its paint interval when the body throws (issue #1180). For a conditional start, use `spinner()` from lib/ui.ts and stop it in a `finally`.",
+        },
+      ],
+    },
+  },
+  {
     // Global-stream capture guard (issue #1180): tests used to assert on output
     // by swapping the *global* `process.stdout.write` / `process.stderr.write`
     // / `process.exit` for the duration of a call. The whole repo runs in one

@@ -129,11 +129,58 @@ export async function select<T>(
   return value as T;
 }
 
+/**
+ * A spinner whose `start` / `stop` the caller drives itself.
+ *
+ * Prefer `withSpinner` — a caller that owns the pair owns the obligation to
+ * stop it on **every** path, and the frames come from a `setInterval` nothing
+ * else clears. Reach for this only when the start is conditional (the
+ * self-update download starts on the first byte-tick), and stop it in a
+ * `finally`.
+ */
 export function spinner(io: CommandIO = DEFAULT_IO): {
   start(msg: string): void;
+  message(msg: string): void;
   stop(msg?: string): void;
 } {
   return clack.spinner({ output: clackOutput(io) });
+}
+
+/**
+ * Run `fn` with a started spinner, stopping it on **every** exit path.
+ *
+ * A clack spinner paints from a `setInterval` that only `stop()` clears, so a
+ * body that throws past it leaves the frames painting for the rest of the
+ * process. In the shipped CLI that is invisible — the error unwinds to
+ * `exitWithError` and the process exits — but `bun test` runs the whole repo
+ * in one process, where the leak outlives its test: `runner.test.ts` exercised
+ * exactly such a path and its frames landed in another suite's capture
+ * (issue #1180, `Received: "◒  Enabling systemd unit..."` on `whoami`). With
+ * an injected `io` the frames go to that test's own sink instead — quieter,
+ * but an unbounded buffer growing every 80ms for the rest of the run.
+ *
+ * `stopLabel` may be a callback when the success line quotes the result (the
+ * dev server's pid). `errorLabel` defaults to `startLabel`: the frame closes
+ * on what it was doing, and the thrown error is the report. Pass it when the
+ * failure has a name of its own ("Docker not found").
+ */
+export async function withSpinner<T>(
+  startLabel: string,
+  fn: (spin: { message(msg: string): void }) => Promise<T>,
+  stopLabel: string | ((value: T) => string),
+  opts: { io?: CommandIO; errorLabel?: string } = {},
+): Promise<T> {
+  const spin = clack.spinner({ output: clackOutput(opts.io ?? DEFAULT_IO) });
+  spin.start(startLabel);
+  let value: T;
+  try {
+    value = await fn(spin);
+  } catch (err) {
+    spin.stop(opts.errorLabel ?? startLabel);
+    throw err;
+  }
+  spin.stop(typeof stopLabel === "function" ? stopLabel(value) : stopLabel);
+  return value;
 }
 
 /**

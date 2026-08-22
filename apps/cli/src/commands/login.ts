@@ -31,7 +31,7 @@ import {
   outro,
   askText,
   select,
-  spinner,
+  withSpinner,
   formatUserCode,
   exitWithError,
 } from "../lib/ui.ts";
@@ -189,10 +189,12 @@ async function runLogin(
   io: CommandIO,
 ): Promise<void> {
   // Step 1 — device code.
-  const s = spinner(io);
-  s.start("Requesting device code");
-  const code = await startDeviceFlow(instance, CLI_CLIENT_ID, CLI_SCOPE);
-  s.stop(`Code received — expires in ${Math.round(code.expiresIn / 60)}m`);
+  const code = await withSpinner(
+    "Requesting device code",
+    () => startDeviceFlow(instance, CLI_CLIENT_ID, CLI_SCOPE),
+    (issued) => `Code received — expires in ${Math.round(issued.expiresIn / 60)}m`,
+    { io },
+  );
 
   const display = formatUserCode(code.userCode);
 
@@ -207,14 +209,17 @@ async function runLogin(
   defaultOpenUrl(code.verificationUriComplete).catch(() => {});
 
   // Step 4 — poll until approval or terminal error.
-  const pollSpinner = spinner(io);
-  pollSpinner.start("Waiting for approval in your browser");
-  const token = await pollDeviceFlow(instance, code.deviceCode, CLI_CLIENT_ID, {
-    interval: code.interval,
-    expiresIn: code.expiresIn,
-    deviceName: opts.deviceName,
-  });
-  pollSpinner.stop("Approved");
+  const token = await withSpinner(
+    "Waiting for approval in your browser",
+    () =>
+      pollDeviceFlow(instance, code.deviceCode, CLI_CLIENT_ID, {
+        interval: code.interval,
+        expiresIn: code.expiresIn,
+        deviceName: opts.deviceName,
+      }),
+    "Approved",
+    { io },
+  );
 
   // Step 5 — extract identity from the access token claims. The JWT
   // minted by /api/auth/cli/token carries `sub` (BA user id), `email`,

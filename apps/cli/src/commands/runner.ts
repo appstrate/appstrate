@@ -19,7 +19,7 @@
 
 import * as clack from "@clack/prompts";
 import { dirname, isAbsolute, normalize } from "node:path";
-import { intro, outro, askText, confirm, exitWithError } from "../lib/ui.ts";
+import { intro, outro, askText, confirm, exitWithError, withSpinner } from "../lib/ui.ts";
 import { CLI_VERSION, DEV_CLI_VERSION } from "../lib/version.ts";
 import {
   RUNNER_BIN_PATH,
@@ -373,39 +373,6 @@ export async function promoteStagedDaemon(d: { fs: RunnerFs }, stagedPath: strin
     await d.fs.remove(stagedPath).catch(() => {});
     throw err;
   }
-}
-
-/**
- * Run `fn` with a started clack spinner, stopping it on **every** exit path.
- *
- * A clack spinner paints its frames from a `setInterval`. A body that throws
- * past `stop()` leaves that interval running for the rest of the process,
- * writing to the global stdout forever. In the shipped CLI the error unwinds
- * to `exitWithError` and the process exits, so the leak is invisible — but
- * `bun test` runs the whole repo in one process, where those frames land in
- * whatever another suite happens to be reading and fail it (issue #1180:
- * `Received: "◒  Enabling systemd unit..."` on an innocent `whoami` test).
- *
- */
-async function withSpinner<T>(
-  startLabel: string,
-  fn: (spin: ReturnType<typeof clack.spinner>) => Promise<T>,
-  stopLabel: string,
-): Promise<T> {
-  const spin = clack.spinner();
-  spin.start(startLabel);
-  let value: T;
-  try {
-    value = await fn(spin);
-  } catch (err) {
-    // clack's `stop()` takes no status code in this version, so the frame
-    // closes on the start label. What matters is that it closes at all: the
-    // interval is cleared and the error message that follows is the report.
-    spin.stop(startLabel);
-    throw err;
-  }
-  spin.stop(stopLabel);
-  return value;
 }
 
 async function downloadAndInstallBinaries(

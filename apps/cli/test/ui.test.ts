@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { askText, confirm, intro, outro, spinner } from "../src/lib/ui.ts";
+import { askText, confirm, intro, outro, spinner, withSpinner } from "../src/lib/ui.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
 import { runIsolated } from "./helpers/isolated-process.ts";
 
@@ -96,5 +96,63 @@ describe("intro / outro / spinner io seam", () => {
     expect(before.stdout).not.toBe("");
     expect(after.stdout).toBe(before.stdout);
     expect(after.stderr).toBe("");
+  });
+});
+
+describe("withSpinner", () => {
+  it("returns the body's value and renders the stop frame into the injected sink", async () => {
+    const { io, stdout } = createMemoryIO();
+    const value = await withSpinner("Working", async () => 42, "Done", { io });
+    expect(value).toBe(42);
+    // Only the stop frame is asserted: a body that resolves immediately gives
+    // the paint interval no tick, so the start label never reaches the sink.
+    expect(stdout()).toContain("Done");
+  });
+
+  it("rethrows the body's error after closing the frame", async () => {
+    const { io, stdout } = createMemoryIO();
+    await expect(
+      withSpinner(
+        "Working",
+        async () => {
+          throw new Error("boom");
+        },
+        "Done",
+        { io, errorLabel: "Failed" },
+      ),
+    ).rejects.toThrow("boom");
+    expect(stdout()).toContain("Failed");
+    expect(stdout()).not.toContain("Done");
+  });
+
+  /**
+   * The defect this helper exists for. A clack spinner paints from a
+   * `setInterval` that only `stop()` clears; every site that hand-rolled
+   * start/await/stop leaked that interval when the body threw, and under
+   * `bun test` — one process for the whole repo — the frames kept landing in
+   * whatever suite ran next. That is the `Received: "◒  Enabling systemd
+   * unit..."` on an innocent `whoami` test in issue #1180.
+   *
+   * Observing "nothing paints after the throw" means observing a real stdout,
+   * so a child process owns it: this suite must not touch the globals it is
+   * proving clean. The window after MARKER is what a live interval would paint
+   * into. Control: the same snippet with a raw `clack.spinner()` fills that
+   * window with frames.
+   */
+  it("clears the paint interval when the body throws (issue #1180)", async () => {
+    const { stdout } = await runIsolated(`
+      const { withSpinner } = await import(${UI_MODULE});
+      await withSpinner("Working", async () => { throw new Error("boom"); }, "Done")
+        .catch(() => {});
+      process.stdout.write("MARKER");
+      await Bun.sleep(400);
+      process.stdout.write("END");
+    `);
+    const tail = stdout.split("MARKER")[1] ?? "";
+    expect(stdout).toContain("MARKER");
+    expect(tail).toContain("END");
+    // A live interval paints a frame every ~80ms, so 400ms of silence is the
+    // falsifiable claim.
+    expect(tail).not.toMatch(/[◒◐◓◑]/);
   });
 });
