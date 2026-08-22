@@ -155,7 +155,11 @@ Tier 0 (zero-install) requires only Bun.
   every entry/ignore: `knip.config.ts`. An entry must say _what reaches the file_; an ignore must
   say _why knip is structurally blind_. Public exports of the **published** packages
   (`@appstrate/core`, `@appstrate/afps-runtime`, `@appstrate/module-*`) are out of scope by design —
-  their readers live out of tree.
+  their readers live out of tree. **Inside a `git worktree` knip is falsely red** (~161 "unused
+  exports", including those same published ones) while a plain `git clone` of the identical commit
+  is clean — never un-export anything on that signal, and verify from a clone instead of pushing
+  with `--no-verify`. Full measurement and the other false green/red signals of the gate:
+  `AGENTS.md` → **Quality Gate — and the signals it lies with**.
 - **Tests**: `bun test` from root runs all packages in one process. See **Testing** below.
 
 ### Frontend

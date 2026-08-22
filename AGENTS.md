@@ -245,6 +245,76 @@ describe("GET /api/my-resource", () => {
 });
 ```
 
+## Quality Gate — and the signals it lies with
+
+`bun run check` is the gate. It is honest in CI and in a plain clone; several of
+its steps report false green or false red locally, and each one below has cost
+real time. Establish which you are looking at BEFORE changing code.
+
+### `verify:dead-code` (knip) is falsely red inside a git worktree
+
+In a `git worktree`, knip reports ~161 "unused exports", ~284 "unused exported
+types" and 6 "unused files" — including public exports of `packages/ui` and
+`@appstrate/core`. The same commit is **clean** in a plain `git clone`. Since
+`pre-push` runs `bun run check`, this blocks every push from a worktree.
+
+Measured on one commit, three environments:
+
+| environment                                          | knip               |
+| ---------------------------------------------------- | ------------------ |
+| `git clone` of the commit                            | clean, exit 0      |
+| `git worktree add` + `bun install --frozen-lockfile` | 161 unused exports |
+| main checkout with a dirty tree                      | clean, exit 0      |
+
+Ruled out by experiment, so do not re-investigate these: bun version drift
+(`--frozen-lockfile` in the worktree changes nothing), a missing
+`@appstrate/cloud` link (161 → 160), and the turbo cache (both measurements were
+direct knip calls). The mechanism itself was NOT established — the likeliest
+candidate is that in a worktree `.git` is a _file_ rather than a directory, which
+appears to stop knip treating the files in a published package's `exports` map as
+entries, so their public exports read as dead. Treat that as a hypothesis; the
+clone-vs-worktree result above is the part that is measured.
+
+**Never un-export a symbol because of this report.** `knip.config.ts` states
+outright that it does not judge whether a _published_ package's public export
+still has a reader (`@appstrate/core`, `@appstrate/afps-runtime`,
+`@appstrate/module-*`), so any finding aimed at one is a false positive by
+construction.
+
+To get a true verdict — and a push that passes `pre-push` honestly, with no
+`--no-verify`:
+
+```sh
+git clone --no-hardlinks --quiet --branch <branch> <worktree-path> /tmp/verify
+cd /tmp/verify && cp <worktree-path>/.env .env && bun install --frozen-lockfile
+BETTER_AUTH_SECRET=ci-dummy-secret bun run check   # expect 34/34, Cached: 0
+git remote set-url origin <github url> && git push
+```
+
+Without a clone, diff the worktree's knip output against the same command on the
+base commit: only symbols absent from the base are real.
+
+### Other false signals from the same chain
+
+| signal                                                  | why it lies                                                                                            | what to do instead                                                |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| `turbo` prints `Cached: N` for `typecheck`              | nothing was re-checked                                                                                 | `bunx tsc --noEmit -p <pkg>/tsconfig.json`, per package, no turbo |
+| `bunx turbo …` fails with `Could not resolve workspace` | it resolves a _global_ turbo, and rewrites `bun.lock` on the way                                       | `./node_modules/.bin/turbo`                                       |
+| a backgrounded `cmd > log; echo $?` reports 0           | that is the exit code of `echo`                                                                        | read the `Tasks: N/M` line in the log, not the reported status    |
+| `bun test` passes but types are broken                  | tests do not typecheck                                                                                 | re-run `tsc` after any mechanical rename                          |
+| `codecov/patch` is red                                  | coverage arrives from two jobs; the status is computed after the first and recomputed after the second | wait for the `integration` upload before drawing any conclusion   |
+| a PR shows "no checks reported"                         | usually `mergeable: CONFLICTING`, not a slow CI                                                        | `gh pr view <n> --json mergeable,mergeStateStatus`                |
+
+### Migrations
+
+`bun run db:generate` needs a TTY and collides on index numbers when two
+branches both add the next one. Hand-write the `.sql`, the `meta/_journal.json`
+entry and the `meta/NNNN_snapshot.json`, then prove the snapshot rather than
+trusting it: copy it aside and run `bunx drizzle-kit generate` — a correct
+snapshot yields `No schema changes, nothing to migrate`. Tier-0 tests replay the
+whole chain from `0000` under PGlite, so a malformed migration fails there
+loudly.
+
 ## Workspace Imports
 
 Import from workspace packages using their published subpaths:
