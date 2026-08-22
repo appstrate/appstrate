@@ -20,6 +20,7 @@ import { useRunColumns } from "../runs-table.tsx";
 import { useScheduleColumns } from "../schedules-table.tsx";
 import { usePackageColumns } from "../packages-table.tsx";
 import { useProxyColumns } from "../../pages/org-settings/proxies.tsx";
+import { useCredentialColumns, useModelColumns } from "../../pages/org-settings/model-columns.tsx";
 import { render } from "./run-fixture.tsx";
 
 /**
@@ -66,6 +67,31 @@ const SETS = {
   runs: () => columnsFrom(() => useRunColumns({ agentName: () => "Compta trimestrielle" })),
   schedules: () => columnsFrom(() => useScheduleColumns({ agentName: () => "Wiki-brain" })),
   packages: () => columnsFrom(() => usePackageColumns()),
+  models: () =>
+    columnsFrom(() =>
+      useModelColumns({
+        registry: undefined,
+        testingId: null,
+        testResults: {},
+        onTest: () => {},
+        onEdit: () => {},
+        onDelete: () => {},
+        onSetDefault: () => {},
+      }),
+    ),
+  credentials: () =>
+    columnsFrom(() =>
+      useCredentialColumns({
+        registry: undefined,
+        testingId: null,
+        testResults: {},
+        onTest: () => {},
+        onEdit: () => {},
+        onDelete: () => {},
+        onRename: () => {},
+        onConnectOAuth: () => {},
+      }),
+    ),
   proxies: () =>
     columnsFrom(() =>
       useProxyColumns({

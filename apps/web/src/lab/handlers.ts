@@ -47,6 +47,19 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   },
   {
     method: "GET",
+    pattern: /^\/api\/models$/,
+    handler: (_u, s) => ({ status: 200, body: { ...f.models, data: list(f.models.data, s) } }),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/model-provider-credentials$/,
+    handler: (_u, s) => ({
+      status: 200,
+      body: { ...f.modelCredentials, data: list(f.modelCredentials.data, s) },
+    }),
+  },
+  {
+    method: "GET",
     pattern: /^\/api\/proxies$/,
     handler: (_u, s) => ({
       status: 200,

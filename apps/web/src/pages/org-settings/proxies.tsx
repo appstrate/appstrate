@@ -3,10 +3,11 @@
 import { useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Globe, Pencil, Trash2 } from "lucide-react";
+import { Globe, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { DataTable, type DataColumn } from "../../components/data-table";
+import { TOOLBAR_ACTION } from "../../lib/toolbar-button";
 import { usePermissions } from "../../hooks/use-permissions";
 import {
   useProxies,
@@ -51,31 +52,23 @@ export function useProxyColumns({
 
   return [
     {
-      id: "source",
-      header: t("proxies.col.source"),
-      width: "minmax(120px,0.8fr)",
-      // On a phone what matters is which proxy and what to do with it; where it
-      // came from is an attribute. Tier one has to fit 390px and the action
-      // column alone is 168 of them.
-      tier: 2,
-      cell: (p) => (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <SourceBadge source={p.source} />
-          {p.source !== "built-in" && !p.enabled && (
-            <Badge variant="secondary" className="opacity-60">
-              {t("proxies.disabled")}
-            </Badge>
-          )}
-        </div>
-      ),
-    },
-    {
       id: "proxy",
       header: t("proxies.col.proxy"),
-      width: "minmax(160px,1.6fr)",
+      width: "minmax(180px,1.6fr)",
       cell: (p) => (
         <div className="min-w-0">
-          <div className="truncate text-sm font-medium">{p.label}</div>
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <span className="truncate text-sm font-medium">{p.label}</span>
+            {/* The badges belong with the name, like the models table: they are
+                attributes of one proxy, not a dimension read down the table,
+                and a column of their own does not fit the settings modal. */}
+            <SourceBadge source={p.source} />
+            {p.source !== "built-in" && !p.enabled && (
+              <Badge variant="secondary" className="opacity-60">
+                {t("proxies.disabled")}
+              </Badge>
+            )}
+          </div>
           <div className="text-muted-foreground truncate font-mono text-[0.65rem]">
             {p.urlPrefix}
           </div>
@@ -86,10 +79,7 @@ export function useProxyColumns({
       id: "default",
       header: t("proxies.col.default"),
       width: "120px",
-      // Tier 3, not 2: with a 168px action column the tier-2 floors come to
-      // 648px against a 576px threshold. `column-tiers.test.tsx` is what says
-      // so — the arithmetic is not obvious by eye.
-      tier: 3,
+      tier: 2,
       cell: (p) => (
         <DefaultCell
           isDefault={p.is_default}
@@ -192,8 +182,14 @@ export function OrgSettingsProxiesPage() {
 
   return (
     <>
+      {/* The page's own action, in the treatment every list bar uses: a white
+          surface, not a filled blue. A screen whose table now looks like every
+          other table cannot keep the one button that does not. */}
       <div className="mb-4 flex items-center justify-end gap-2">
-        <Button onClick={onCreate}>{t("proxies.add")}</Button>
+        <Button variant="outline" size="sm" className={TOOLBAR_ACTION} onClick={onCreate}>
+          <Plus />
+          {t("proxies.add")}
+        </Button>
       </div>
 
       <DataTable

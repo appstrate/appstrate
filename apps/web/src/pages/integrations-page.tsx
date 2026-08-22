@@ -22,6 +22,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { PageHeader } from "../components/page-header";
 import { CardGrid } from "../components/card-grid";
+import { TOOLBAR_ACTION } from "../lib/toolbar-button";
 import { ErrorState, EmptyState } from "../components/page-states";
 import { useIntegrations, type IntegrationSummaryWire } from "../hooks/use-integrations";
 import { usePermissions } from "../hooks/use-permissions";
@@ -102,8 +103,9 @@ export function IntegrationsPage() {
         actions={
           isAdmin ? (
             <Link to="/integrations/new">
-              <Button>
-                <Plus size={14} />
+              {/* Same treatment as every other collection's own action. */}
+              <Button variant="outline" size="sm" className={TOOLBAR_ACTION}>
+                <Plus />
                 {t("integrations.create")}
               </Button>
             </Link>

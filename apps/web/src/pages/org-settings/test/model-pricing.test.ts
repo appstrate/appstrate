@@ -69,8 +69,10 @@ describe("unpriced badge wiring", () => {
     return readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf-8");
   }
 
-  it("the models page decides through isModelUnpriced, not a restated condition", () => {
-    const source = read("../models.tsx");
+  it("the model column set decides through isModelUnpriced, not a restated condition", () => {
+    // The badge moved with the column set when the page went onto `DataTable`;
+    // the rule it must not restate moved with it.
+    const source = read("../model-columns.tsx");
     expect(source).toContain("isModelUnpriced(m)");
     // A second copy of the rule in the JSX is exactly the drift this split
     // was made to prevent — the exclusions would only be pinned on one of them.
