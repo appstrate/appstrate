@@ -17,11 +17,11 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, Pencil, Trash2, X } from "lucide-react";
+import { Trash2 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
-import { Input } from "@appstrate/ui/components/input";
 import { ConfirmModal } from "../components/confirm-modal";
+import { InlineEditableLabel } from "../components/inline-editable-label";
 import { ConnectionStatusBadge } from "../components/integration-connect/connection-status-badge";
 import { InlineConnectButton } from "../components/integration-connect/inline-connect-button";
 import { connectionDisplayLabel } from "../components/integration-connect/connection-label";
@@ -33,8 +33,18 @@ import {
 import { useDisconnectIntegrationConnection } from "../hooks/use-me-connections";
 
 /**
- * The account, renamed in place. Renaming is owner OR org admin — the same rule
- * the route enforces — while sharing and deleting are strictly the owner's.
+ * The account, renamed in place.
+ *
+ * Renaming is owner OR org admin — the same rule the route enforces — while
+ * sharing and deleting are strictly the owner's.
+ *
+ * It used to be a pencil that swapped the label for an input, which is the Edit
+ * button the product owner ruled out ("Direct manipulation in forms. No Edit
+ * button revealing a field"), and it left the app with two rename affordances:
+ * click-to-edit on the credentials table, pencil-then-field here. One now, the
+ * shared `InlineEditableLabel`, which grew truncation and a clearable value to
+ * take this caller — clearing matters here because a connection with no label
+ * falls back to its account id.
  */
 export function AccountCell({
   connection,
@@ -49,97 +59,25 @@ export function AccountCell({
 }) {
   const { t } = useTranslation("settings");
   const updateConnection = useUpdateIntegrationConnection();
-  const [editing, setEditing] = useState(false);
-  const [draftLabel, setDraftLabel] = useState(connection.label ?? "");
   // `label` is the single source of truth (set at creation to the identity or
   // "Connexion N"); render it verbatim.
   const name = connectionDisplayLabel(connection);
 
-  const cancelEdit = () => {
-    setEditing(false);
-    setDraftLabel(connection.label ?? "");
-  };
-  const submitLabel = () => {
-    const next = draftLabel.trim();
-    if (next === (connection.label ?? "")) {
-      setEditing(false);
-      return;
-    }
-    updateConnection.mutate(
-      {
-        params: { path: { packageId, connectionId: connection.id } },
-        body: { label: next === "" ? null : next },
-      },
-      { onSuccess: () => setEditing(false) },
-    );
-  };
-
-  if (editing) {
-    return (
-      <div className="flex min-w-0 items-center gap-1">
-        <Input
-          value={draftLabel}
-          onChange={(e) => setDraftLabel(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") submitLabel();
-            if (e.key === "Escape") cancelEdit();
-          }}
-          placeholder={t("integration.connection.labelPlaceholder")}
-          className="h-7 min-w-0 text-sm"
-          autoFocus
-          data-testid={`label-input-${connection.id}`}
-        />
-        <Button
-          size="icon"
-          variant="ghost"
-          className="size-7 shrink-0"
-          onClick={submitLabel}
-          disabled={updateConnection.isPending}
-          title={t("integration.connection.labelSave")}
-          data-testid={`label-save-${connection.id}`}
-        >
-          <Check className="size-3.5" />
-        </Button>
-        <Button
-          size="icon"
-          variant="ghost"
-          className="size-7 shrink-0"
-          onClick={cancelEdit}
-          disabled={updateConnection.isPending}
-          title={t("integration.connection.labelCancel")}
-        >
-          <X className="size-3.5" />
-        </Button>
-      </div>
-    );
-  }
-
   return (
-    // Two lines, like the models table's identity cell, and for a reason a
-    // measurement gave: whose connection it is used to be a badge BESIDE the
-    // name, and a badge that refuses to shrink takes the whole column — at a
-    // 390px window the account name, the only thing naming the row, rendered at
-    // zero width while "Partagée par Pierre" kept every pixel. The name owns
-    // line one; the owner is what it is, provenance, and reads under it.
     <div className="min-w-0">
-      <div className="flex min-w-0 items-center gap-1">
-        <span className="truncate font-medium">{name}</span>
-        {(isOwn || isAdmin) && (
-          <Button
-            size="icon"
-            variant="ghost"
-            className="size-6 shrink-0"
-            onClick={() => {
-              setDraftLabel(connection.label ?? "");
-              setEditing(true);
-            }}
-            title={t("integration.connection.labelEdit")}
-            data-testid={`label-edit-${connection.id}`}
-          >
-            <Pencil className="size-3" />
-          </Button>
-        )}
-      </div>
+      <InlineEditableLabel
+        value={name}
+        editable={isOwn || isAdmin}
+        allowEmpty
+        placeholder={t("integration.connection.labelPlaceholder")}
+        testId={`label-edit-${connection.id}`}
+        onSave={(next) =>
+          updateConnection.mutate({
+            params: { path: { packageId, connectionId: connection.id } },
+            body: { label: next === "" ? null : next },
+          })
+        }
+      />
       {!isOwn && (
         <div
           className="text-muted-foreground truncate text-[0.65rem]"

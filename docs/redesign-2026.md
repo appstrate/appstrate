@@ -1239,6 +1239,26 @@ So the strategy the reference itself suggests:
   168px to 132px, with the test result truncating instead of taking room from
   the row's identity.
 
+- ~~**Two rename affordances, one of them the Edit button the product owner
+  ruled out.**~~ Closed 22 August. (This entry was dropped from the doc by
+  accident earlier the same day, while the tier-budget bullet above it was
+  being rewritten — a reminder that a scripted edit which replaces a RANGE
+  takes whatever else was standing in it.) `InlineEditableLabel` is the app's
+  one rename now: click the name, type, Enter or blur to save, Escape to
+  cancel. The pencil that swapped the label for an input is gone from the
+  connections table, which is what "Direct manipulation in forms. No Edit
+  button revealing a field" says to do.
+
+  The shared component grew the two things that had kept the second caller
+  away, and both are worth knowing. It **truncates** — it sits in a table cell
+  whose column has a floor, and a name that refuses to shrink eats the column,
+  which is precisely how that table lost the name it was naming rows with a day
+  earlier. And it can be **cleared** (`allowEmpty`), because a connection with
+  no label falls back to its account id, so emptying the field is a real
+  operation there; a credential has no such fallback, so clearing stays opt-in
+  rather than becoming the rule. Its input also lost `min-w-40`, which in a
+  132px column is an input wider than the cell holding it.
+
 - **The browser pass is DONE (21 August).** Every list screen (`/runs`,
   `/schedules`, `/agents`, `/skills`, `/mcp-servers`) was walked on the four
   scenarios at 1440 / 1024 / 640, plus a width sweep measuring the real DOM at
