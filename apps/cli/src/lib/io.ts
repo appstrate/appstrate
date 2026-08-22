@@ -29,11 +29,13 @@ export interface CommandIO {
   /** Hook so tests assert exit codes without terminating the runner. */
   exit: (code: number) => never;
   /**
-   * Optional terminal-error renderer. Production uses `clack.cancel` so the
-   * message keeps its styled treatment; tests supply a plain sink. When
-   * absent, `exitWithError` falls back to `stderr.write`.
+   * Terminal-error renderer. Production uses `clack.cancel` so the message
+   * keeps its styled treatment; a test sink supplies a plain writer on the
+   * same channel. Required, not optional: every sink in the CLI supplies one,
+   * so an optional member would only buy `exitWithError` a fallback branch
+   * that nothing but its own test could reach.
    */
-  cancel?: (message: string) => void;
+  cancel: (message: string) => void;
 }
 
 /**

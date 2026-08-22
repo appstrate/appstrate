@@ -129,6 +129,9 @@ function makeIO(overrides?: { stdinStream?: ApiCommandIO["stdinStream"] }): Capt
       exitCode.value = code;
       throw new ExitSentinel(code);
     },
+    // Production `cancel` is `clack.cancel`, a stdout writer — the capture
+    // keeps that channel so an assertion on stdout stays truthful.
+    cancel: (message) => void stdout.push(toBytes(`${message}\n`)),
     onSigint: (cb) => {
       sigintCb = cb;
     },

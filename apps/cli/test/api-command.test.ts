@@ -137,6 +137,9 @@ function makeIO(): {
       // `return io.exit(…)`, so throwing short-circuits cleanly.
       throw new ExitSentinel(code);
     },
+    // Production `cancel` is `clack.cancel`, a stdout writer — the capture
+    // keeps that channel so an assertion on stdout stays truthful.
+    cancel: (message) => void stdout.push(toBytes(`${message}\n`)),
     onSigint: () => {},
   };
   return { io, stdout, stderr, exitCode };
@@ -635,6 +638,7 @@ describe("apiCommand — redirect + TLS flags", () => {
       exit: () => {
         throw new Error("should not reach exit — sync throw must bypass io.exit");
       },
+      cancel: () => {},
       onSigint: () => {},
     };
 

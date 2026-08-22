@@ -111,7 +111,7 @@ describe("exitWithError", () => {
     }
   });
 
-  it("renders through `cancel` when the io supplies one", () => {
+  it("routes the message through `cancel`, never through stderr", () => {
     const rendered: string[] = [];
     const io: CommandIO = {
       stdout: { write: () => {} },
@@ -130,23 +130,6 @@ describe("exitWithError", () => {
     expect(() => exitWithError(new Error("styled"), io)).toThrow(ExitError);
     // `cancel` owns its own framing, so the message arrives without a newline.
     expect(rendered).toEqual(["styled"]);
-  });
-
-  it("falls back to stderr when the io supplies no `cancel`", () => {
-    const chunks: string[] = [];
-    const io: CommandIO = {
-      stdout: {
-        write: () => {
-          throw new Error("errors must not reach stdout on the fallback path");
-        },
-      },
-      stderr: { write: (chunk) => void chunks.push(String(chunk)) },
-      exit: (code) => {
-        throw new ExitError(code);
-      },
-    };
-    expect(() => exitWithError(new Error("plain"), io)).toThrow(ExitError);
-    expect(chunks.join("")).toBe("plain\n");
   });
 
   it("applies `formatError` before handing the message to the io", () => {
