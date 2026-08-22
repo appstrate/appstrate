@@ -634,6 +634,7 @@
   "applications.create": "Nouvel espace de travail",
   "applications.createTitle": "Nouvel espace de travail",
   "applications.nameLabel": "Nom",
+  "applications.settingsTitle": "Espace de travail",
   "applications.namePlaceholder": "Mon espace de prod",
   "applications.redirectDomains": "Domaines de redirection OAuth",
   "applications.redirectDomainsHint": "Domaines autorisés pour les retours OAuth des end-users",

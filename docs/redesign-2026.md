@@ -1339,9 +1339,21 @@ So the strategy the reference itself suggests:
   run carries `cost`, `token_usage`, `model_label`, `user_name`, `agent_name`,
   so a v1 aggregates client-side. That does NOT scale past a few thousand runs;
   a server-side aggregate endpoint comes after the shape is agreed.
-- **Remaining settings screens** to the form pattern: storage, MCP connect,
-  danger zone, and the workspace OAuth-domains form which still has its own
-  Save button.
+- **Remaining settings screens** to the form pattern. The **workspace** screen
+  is done (22 August), and it was the one the entry named twice: its name field
+  is an `InlineTextSetting`, its OAuth redirect domains commit on blur and on
+  removal, and its danger zone is a `SettingRow` with a destructive control
+  rather than a red-bordered card that read as a different kind of screen. **The
+  Save button is gone**, which was the last one in the settings surfaces — it
+  made the workspace the one screen where a change was not a change until you
+  pressed something else.
+
+  One rule came out of the multi-value field: **adding a row does not save**. An
+  empty input is the residue of editing, not a value, so it commits when it is
+  filled and left, and empty rows are dropped on the way out.
+
+  Left: storage and MCP connect.
+
 - **Per-org colour and LOGO** — the design gives each org a colour; the data
   model has neither. Deferred by decision, twice. The shape is decided for when
   it comes back: a dedicated column (identity read on every render, and

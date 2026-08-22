@@ -4,12 +4,10 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { AppWindow, Plus, X } from "lucide-react";
-import { useAppForm } from "../../../hooks/use-app-form";
 import { usePermissions } from "../../../hooks/use-permissions";
 import { ConfirmModal } from "../../../components/confirm-modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
 import {
   useApplication,
   useUpdateApplication,
@@ -18,11 +16,9 @@ import {
 import { useCurrentApplicationId } from "../../../hooks/use-current-application";
 import { LoadingState, ErrorState, EmptyState } from "../../../components/page-states";
 import { Spinner } from "../../../components/spinner";
+import { SettingsGroup, SettingRow } from "../../../components/settings/setting-row";
+import { InlineTextSetting } from "../../../components/settings/inline-text-setting";
 import { getErrorMessage } from "@appstrate/core/errors";
-
-interface SettingsFormData {
-  name: string;
-}
 
 export function OrgSettingsAppGeneralPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -61,36 +57,49 @@ function GeneralForm({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const activeDomains = editedDomains ?? domains;
 
-  const { register, handleSubmit, showError } = useAppForm<SettingsFormData>({
-    values: { name: application.name },
-  });
-
-  const onSubmit = (data: SettingsFormData) => {
+  // Each control commits on its own — "the control IS the setting". The Save
+  // button that used to sit under this form was the last one in the settings
+  // surfaces, and it made the workspace the one screen where a change was not
+  // a change until you pressed something else.
+  const save = (patch: { name?: string; domains?: string[] }) =>
     updateMutation.mutate({
       params: { path: { id: applicationId } },
-      body: { name: data.name.trim(), settings: { allowedRedirectDomains: activeDomains } },
+      body: {
+        name: (patch.name ?? application.name).trim(),
+        settings: { allowedRedirectDomains: patch.domains ?? activeDomains },
+      },
     });
+
+  const commitDomains = (next: string[]) => {
+    // Empty rows are the residue of editing, not a value: a domain nobody typed
+    // has no business being sent, and an empty string is not one.
+    const cleaned = next.map((d) => d.trim()).filter(Boolean);
+    setEditedDomains(next);
+    save({ domains: cleaned });
   };
 
   return (
     <>
-      <form onSubmit={handleSubmit(onSubmit)} className="max-w-xl space-y-6">
-        <div className="space-y-2">
-          <Label htmlFor="app-name">{t("applications.nameLabel")}</Label>
-          <Input
-            id="app-name"
-            type="text"
-            {...register("name", { required: true })}
+      <SettingsGroup title={t("applications.settingsTitle")}>
+        <SettingRow label={t("applications.nameLabel")}>
+          <InlineTextSetting
+            value={application.name}
+            disabled={updateMutation.isPending}
+            aria-label={t("applications.nameLabel")}
+            className="w-64"
             placeholder={t("applications.namePlaceholder")}
+            onCommit={(name) => save({ name })}
           />
-          {showError("name") && (
-            <p className="text-destructive text-sm">{t("validation.required", { ns: "common" })}</p>
-          )}
-        </div>
+          {updateMutation.isPending && <Spinner />}
+        </SettingRow>
 
-        <div className="space-y-2">
-          <Label>{t("applications.redirectDomains")}</Label>
-          <p className="text-muted-foreground text-sm">{t("applications.redirectDomainsHint")}</p>
+        <SettingRow
+          label={t("applications.redirectDomains")}
+          description={t("applications.redirectDomainsHint")}
+          // A list does not fit the row's right edge: it grows downward, so the
+          // row stacks instead of pretending one line is enough.
+          className="flex-col items-stretch gap-3"
+        >
           <div className="flex flex-col gap-2">
             {activeDomains.map((domain, index) => (
               <div key={index} className="flex items-center gap-2">
@@ -102,60 +111,60 @@ function GeneralForm({
                       (prev ?? domains).map((d, i) => (i === index ? e.target.value : d)),
                     )
                   }
+                  // Commits when you leave the field, like every other setting
+                  // here; Enter is the same answer for a single-line input.
+                  onBlur={() => commitDomains(activeDomains)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") e.currentTarget.blur();
+                  }}
                   placeholder="example.com"
                 />
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  onClick={() =>
-                    setEditedDomains((prev) => (prev ?? domains).filter((_, i) => i !== index))
-                  }
+                  aria-label={t("btn.delete", { ns: "common" })}
+                  onClick={() => commitDomains(activeDomains.filter((_, i) => i !== index))}
                 >
                   <X size={16} />
                 </Button>
               </div>
             ))}
+            {/* Adding one does not save: an empty row is not a domain. It
+                commits when the field it opened is filled and left. */}
             <Button
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => setEditedDomains((prev) => [...(prev ?? domains), ""])}
+              className="self-start"
+              onClick={() => setEditedDomains([...(activeDomains ?? []), ""])}
             >
               <Plus size={14} className="mr-1.5" />
               {t("applications.addDomain")}
             </Button>
           </div>
-        </div>
+        </SettingRow>
+      </SettingsGroup>
 
-        <Button type="submit" disabled={updateMutation.isPending}>
-          {updateMutation.isPending ? <Spinner /> : t("btn.save")}
-        </Button>
-      </form>
-
+      {/* The danger zone is a settings group like any other. Its exception is
+          the CONTROL — a button that opens a confirm — which is what the row
+          pattern says a destructive setting looks like, rather than a red-bordered
+          card that reads as a different kind of screen. */}
       {!application.isDefault && (
-        <>
-          <div className="text-muted-foreground mt-8 mb-4 text-sm font-medium">
-            {t("applications.dangerZone")}
-          </div>
-          <div className="border-destructive bg-card max-w-xl rounded-lg border p-5">
-            <div className="flex items-center gap-3">
-              <div className="flex-1">
-                <h3 className="text-sm font-semibold">{t("applications.deleteTitle")}</h3>
-                <span className="text-muted-foreground text-sm">
-                  {t("applications.deleteDesc")}
-                </span>
-              </div>
-              <Button
-                variant="destructive"
-                disabled={deleteMutation.isPending}
-                onClick={() => setConfirmOpen(true)}
-              >
-                {deleteMutation.isPending ? t("applications.deleting") : t("btn.delete")}
-              </Button>
-            </div>
-          </div>
-        </>
+        <SettingsGroup title={t("applications.dangerZone")}>
+          <SettingRow
+            label={t("applications.deleteTitle")}
+            description={t("applications.deleteDesc")}
+          >
+            <Button
+              variant="destructive"
+              disabled={deleteMutation.isPending}
+              onClick={() => setConfirmOpen(true)}
+            >
+              {deleteMutation.isPending ? t("applications.deleting") : t("btn.delete")}
+            </Button>
+          </SettingRow>
+        </SettingsGroup>
       )}
 
       <ConfirmModal

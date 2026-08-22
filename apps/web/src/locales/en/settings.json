@@ -634,6 +634,7 @@
   "applications.create": "New workspace",
   "applications.createTitle": "New workspace",
   "applications.nameLabel": "Name",
+  "applications.settingsTitle": "Workspace",
   "applications.namePlaceholder": "My prod workspace",
   "applications.redirectDomains": "OAuth redirect domains",
   "applications.redirectDomainsHint": "Allowed domains for end-user OAuth callbacks",
