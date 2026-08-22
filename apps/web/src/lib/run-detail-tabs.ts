@@ -1,20 +1,50 @@
 // SPDX-License-Identifier: Apache-2.0
 
-export const RUN_DETAIL_TABS = ["result", "logs", "memory", "files", "info"] as const;
+/**
+ * The run-detail page's four panes, in reading order. The set is FIXED: every
+ * tab renders for every run, so the strip has the same shape whichever run is
+ * open, and no deep link can ever land on a pane that is not there.
+ *
+ *   - `outcome`       — what the run produced: its `output` value, the files it
+ *                       produced, the memory it wrote.
+ *   - `files`         — every file attached to the run, imported AND produced.
+ *   - `execution`     — how it ran: logs, usage, timings, identifiers, inputs.
+ *   - `configuration` — how it was set up: agent, version, trigger, connections.
+ *
+ * The previous set (result / logs / memory / files / info) grew by accretion
+ * and mixed those three questions across five panes; two of them appeared and
+ * disappeared per run.
+ */
+export const RUN_DETAIL_TABS = ["outcome", "files", "execution", "configuration"] as const;
 
 export type RunDetailTab = (typeof RUN_DETAIL_TABS)[number];
 
 /**
  * Tab hashes that no longer exist but are still out there — in bookmarks, in
- * back-history, in a link someone pasted — mapped to the pane that replaced
- * them. `deliverable` was the run's single featured output; the file list now
- * features it (#1177), so that is where an old deep link lands. `documents` is
- * that same list under its pre-#1177 name.
+ * back-history, in a link pasted into an old chat message — mapped to the pane
+ * that absorbed them. Nothing is dropped from this table: a hash removed from
+ * it stops resolving and silently falls back to the default pane, which is
+ * exactly the "my link stopped working" nobody reports.
+ *
+ *   - `deliverable` was the run's single featured output, and `result` the
+ *     `output` tool's value; both are sections of `outcome` now.
+ *   - `memory` is a section of `outcome` too — memory is something the run
+ *     produced, not something it was configured with.
+ *   - `documents` is the file list under its pre-#1177 name.
+ *   - `logs` and `info` both described how the run ran; `execution` is the pane
+ *     that answers that question, and it owns the logs, the usage figures, the
+ *     timings and the identifiers the Info tab used to hold. The handful of
+ *     setup facts that moved to `configuration` instead are one click away —
+ *     landing on the diagnostics pane is the better default for both hashes.
  */
-const RETIRED_TAB_ALIASES = { deliverable: "files", documents: "files" } as const satisfies Record<
-  string,
-  RunDetailTab
->;
+const RETIRED_TAB_ALIASES = {
+  deliverable: "outcome",
+  documents: "files",
+  result: "outcome",
+  memory: "outcome",
+  logs: "execution",
+  info: "execution",
+} as const satisfies Record<string, RunDetailTab>;
 
 type RetiredRunDetailTab = keyof typeof RETIRED_TAB_ALIASES;
 
@@ -23,7 +53,7 @@ type RetiredRunDetailTab = keyof typeof RETIRED_TAB_ALIASES;
  * still resolves. Accepting the retired value is what keeps an old link on a
  * real pane instead of silently dropping it back to the default.
  */
-type RunDetailTabHash = RunDetailTab | RetiredRunDetailTab;
+export type RunDetailTabHash = RunDetailTab | RetiredRunDetailTab;
 
 export const RUN_DETAIL_TAB_HASHES: readonly RunDetailTabHash[] = [
   ...RUN_DETAIL_TABS,
@@ -32,44 +62,47 @@ export const RUN_DETAIL_TAB_HASHES: readonly RunDetailTabHash[] = [
 
 export interface RunTabAvailability {
   /**
-   * The run produced exactly ONE file. Derived client-side from the count of
-   * produced files (#1177) — no agent-declared "primary" — and the reason the
-   * file list leads: one file is a result the page should show, several are a
-   * list the user picks from.
+   * How many files the run PRODUCED. Inputs it merely consumed are not counted
+   * and nothing the agent declared takes part — the count is the whole of the
+   * derived presentation rule (#1177): 0 features nothing, exactly 1 is
+   * featured and opened, several are listed for the user to pick from.
    */
-  hasFeaturedFile: boolean;
-  hasResult: boolean;
+  producedFileCount: number;
+  /** The `output` tool emitted a value. */
+  hasOutput: boolean;
+  /** The run wrote or touched at least one memory row. */
   hasMemory: boolean;
 }
 
-/** Select the most useful page when a run is opened without an explicit hash. */
+/**
+ * Select the most useful pane when a run is opened without an explicit hash.
+ *
+ * Anything the run produced — a file, an output value, a memory write — leads
+ * with `outcome`, because that is the question a finished run is opened to
+ * answer. A run that produced nothing leads with `execution`, where the logs
+ * say why.
+ */
 export function initialRunDetailTab({
-  hasFeaturedFile,
-  hasResult,
+  producedFileCount,
+  hasOutput,
+  hasMemory,
 }: RunTabAvailability): RunDetailTab {
-  if (hasFeaturedFile) return "files";
-  if (hasResult) return "result";
-  return "logs";
+  if (producedFileCount > 0 || hasOutput || hasMemory) return "outcome";
+  return "execution";
 }
 
 /**
- * Keep explicit deep links in the URL but avoid rendering a blank pane while
- * their optional content is unavailable. If realtime data later makes that
- * content available, the bookmarked choice becomes visible automatically.
+ * Map a hash carried by the URL onto the pane that renders it.
  *
- * A retired hash is redirected to its successor rather than clamped to the
- * default: `files` is rendered unconditionally, so the redirect always
- * lands on a real pane.
+ * No clamping any more, and none needed: all four panes render for every run,
+ * so a deep link is either a live tab or a retired one this table redirects.
+ * The old model gated `result` and `memory` on their content being present and
+ * had to bounce those hashes to the logs when it was not — a redirect the user
+ * could not tell apart from a broken link.
  */
-export function effectiveRunDetailTab(
-  requested: RunDetailTabHash,
-  availability: RunTabAvailability,
-): RunDetailTab {
+export function effectiveRunDetailTab(requested: RunDetailTabHash): RunDetailTab {
   if (requested in RETIRED_TAB_ALIASES) {
     return RETIRED_TAB_ALIASES[requested as RetiredRunDetailTab];
   }
-  const tab = requested as RunDetailTab;
-  if (tab === "result" && !availability.hasResult) return "logs";
-  if (tab === "memory" && !availability.hasMemory) return "logs";
-  return tab;
+  return requested as RunDetailTab;
 }

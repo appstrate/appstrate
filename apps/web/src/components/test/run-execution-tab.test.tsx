@@ -2,8 +2,8 @@
 
 /**
  * `TurnsTable` normalization tests (#1046), driven through its only public
- * surface `RunInfoTab` — the table is a private child, and exporting it just to
- * test it would widen the module boundary for the test's convenience.
+ * surface `RunExecutionTab` — the table is a private child, and exporting it
+ * just to test it would widen the module boundary for the test's convenience.
  *
  * Same no-DOM harness as `run-row.test.tsx`.
  */
@@ -18,12 +18,19 @@ import agentsFr from "../../locales/fr/agents.json";
 import i18n, { i18nReady } from "../../i18n.ts";
 import type { RunTurnRow } from "../log-utils.ts";
 import { formatWindowPercent } from "../run-context.ts";
-import { RunInfoTab } from "../run-info-tab.tsx";
+import { RunExecutionTab } from "../run-execution-tab.tsx";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
 
 const WINDOW = 200_000;
+
+/**
+ * Bars are asserted on the FULL `style="width:N%"` attribute, never the bare
+ * substring: the pane renders the log viewer above the table, whose virtualizer
+ * emits `style="height:0;width:100%;position:relative"` — which satisfies a
+ * bare `"width:100%"` and would make the peak-relative assertions vacuous.
+ */
 
 /**
  * A turn as the runner emits it: it states the window it ran against, which is
@@ -76,7 +83,7 @@ function render(node: ReactElement): string {
 }
 
 describe("TurnsTable with a known context window", () => {
-  const html = render(<RunInfoTab run={makeRun()} turns={TURNS} />);
+  const html = render(<RunExecutionTab run={makeRun()} logs={[]} turns={TURNS} />);
 
   it("renders the `%` column with each turn's share of the WINDOW", () => {
     // The window is read off the turns, by the same `readRunContext` call the
@@ -88,9 +95,9 @@ describe("TurnsTable with a known context window", () => {
   });
 
   it("normalizes the bars on the window, so the widest is NOT automatically full", () => {
-    expect(html).toContain("width:25%");
-    expect(html).toContain("width:50%");
-    expect(html).not.toContain("width:100%");
+    expect(html).toContain('style="width:25%"');
+    expect(html).toContain('style="width:50%"');
+    expect(html).not.toContain('style="width:100%"');
   });
 
   it("shows no fallback notice, and tints the bars with the window accent", () => {
@@ -103,8 +110,9 @@ describe("TurnsTable with a known context window", () => {
     // read 90 % and 19 %; against the one in force they read 100 % (clamped)
     // and 95 %. The table follows the header because both call `readRunContext`.
     const swapped = render(
-      <RunInfoTab
+      <RunExecutionTab
         run={makeRun()}
+        logs={[]}
         turns={[
           { ...turn(0, 900_000), contextWindow: 1_000_000 },
           { ...turn(1, 190_000), contextWindow: 200_000 },
@@ -113,12 +121,12 @@ describe("TurnsTable with a known context window", () => {
     );
     expect(swapped).toContain(formatWindowPercent(0.95, i18n.language));
     expect(swapped).not.toContain(formatWindowPercent(0.19, i18n.language));
-    expect(swapped).toContain("width:95%");
+    expect(swapped).toContain('style="width:95%"');
   });
 });
 
 describe("TurnsTable without a context window", () => {
-  const html = render(<RunInfoTab run={makeRun()} turns={WINDOWLESS_TURNS} />);
+  const html = render(<RunExecutionTab run={makeRun()} logs={[]} turns={WINDOWLESS_TURNS} />);
 
   it("omits the `%` column rather than inventing a 200k denominator", () => {
     expect(html).not.toContain(agentsFr["run.turnContextShare"]);
@@ -126,8 +134,8 @@ describe("TurnsTable without a context window", () => {
   });
 
   it("falls back to the peak-relative bar so the breakdown stays readable", () => {
-    expect(html).toContain("width:50%");
-    expect(html).toContain("width:100%");
+    expect(html).toContain('style="width:50%"');
+    expect(html).toContain('style="width:100%"');
   });
 
   it("still lists the absolute token counts the header gauge had to drop", () => {

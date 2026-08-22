@@ -6,6 +6,7 @@ import {
   fileExpiryInfo,
   fileRunHref,
   featuredRunFile,
+  producedRunFiles,
   isImageMime,
   isMarkdownFile,
   isPublishedFileLogEvent,
@@ -166,6 +167,37 @@ describe("featuredRunFile", () => {
     expect(featuredRunFile(mixed)?.id).toBe("doc_out");
     // Conversely, inputs never make up the "exactly one" count on their own.
     expect(featuredRunFile([uploaded("doc_in_1")])).toBeUndefined();
+  });
+});
+
+/**
+ * What the Outcome pane lists. The Fichiers tab shows imported AND produced
+ * files; Outcome shows only what the run PRODUCED, and this is the single
+ * place that distinction is made.
+ */
+describe("producedRunFiles", () => {
+  const produced = (id: string) => ({ ...file({ purpose: "agent_output", run_id: "run_1" }), id });
+  const uploaded = (id: string) => ({ ...file({ purpose: "user_upload", run_id: "run_1" }), id });
+
+  it("keeps the produced files, in order, and drops every upload", () => {
+    const mixed = [
+      uploaded("doc_in_1"),
+      produced("doc_1"),
+      uploaded("doc_in_2"),
+      produced("doc_2"),
+    ];
+    expect(producedRunFiles(mixed).map((f) => f.id)).toEqual(["doc_1", "doc_2"]);
+  });
+
+  it("returns nothing for a run whose only files were uploads", () => {
+    expect(producedRunFiles([uploaded("doc_in_1"), uploaded("doc_in_2")])).toEqual([]);
+    expect(producedRunFiles([])).toEqual([]);
+  });
+
+  it("is what the featured rule counts, so the two cannot disagree", () => {
+    const one = [uploaded("doc_in_1"), produced("doc_out")];
+    expect(producedRunFiles(one)).toHaveLength(1);
+    expect(featuredRunFile(one)?.id).toBe("doc_out");
   });
 });
 

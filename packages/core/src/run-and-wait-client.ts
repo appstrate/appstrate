@@ -162,12 +162,54 @@ function materializeInlineManifest(manifest: Record<string, unknown>): {
 }
 
 /**
- * The tool's `context_files` argument, when the model actually supplied
- * entries. Shape/scheme validation stays server-side (the inline route answers
- * with a field-precise 400) — here we only decide whether to forward it.
+ * The tool's file argument (fan-in by reference), under either spelling and
+ * checked for a shape the launch body can carry.
+ *
+ * Two silent-drop hazards live here, and both end the same way: the launch body
+ * is built from an ALLOWLIST, so anything this function does not return never
+ * reaches the route — which means the route cannot answer with its field-precise
+ * 400 either. The launch succeeds, the run starts with nothing mounted, and no
+ * layer says a file was discarded. The model reads a normal success and reports
+ * the work done on a file the run never had.
+ *
+ *  1. **The legacy spelling.** `context_documents` is the pre-#1177 name, and
+ *     `POST /runs/inline` accepts it forever (`body.context_files ??
+ *     body.context_documents`). A model reaches for it from its own transcript —
+ *     an earlier turn of the same conversation, made before the upgrade — or
+ *     from a tool listing taken before it: the MCP server advertises
+ *     `tools.listChanged: false`, so a client that calls the old shape
+ *     afterwards is behaving correctly. Reading only the canonical name here
+ *     defeated a compatibility promise the route already keeps.
+ *  2. **A wrong-typed value.** The MCP transport does not validate tool
+ *     arguments, so a single URI passed bare, or a JSON-encoded array, used to
+ *     be dropped on the floor exactly like an unknown field. It is refused
+ *     instead — the same treatment {@link connectionOverridesArgument} gives the
+ *     same mistake, for the same reason: this is the only place that signal can
+ *     exist.
+ *
+ * An empty array is not a mistake — it carries nothing to mount and forwards
+ * nothing, as before.
  */
-function asNonEmptyArray(value: unknown): unknown[] | undefined {
-  return Array.isArray(value) && value.length > 0 ? value : undefined;
+function contextFilesArgument(args: Record<string, unknown>): {
+  uris?: unknown[];
+  error?: string;
+} {
+  const canonical = args.context_files !== undefined && args.context_files !== null;
+  const value = canonical ? args.context_files : args.context_documents;
+  if (value === undefined || value === null) return {};
+  const name = canonical ? "context_files" : "context_documents";
+  if (!Array.isArray(value)) {
+    return {
+      error:
+        `\`${name}\` must be a JSON array of appfile:// URIs (e.g. ` +
+        '`["appfile://doc_abc123"]`)' +
+        (typeof value === "string"
+          ? " — pass the array itself, not a single URI and not a JSON-encoded string."
+          : ".") +
+        " Omit the argument entirely when the run needs no file.",
+    };
+  }
+  return value.length > 0 ? { uris: value } : {};
 }
 
 /**
@@ -394,9 +436,17 @@ export async function launchRunAndWait(
     };
   }
 
+  const contextFilesArg = contextFilesArgument(args);
+  if (contextFilesArg.error) {
+    return {
+      ok: false,
+      step: { payload: { error: contextFilesArg.error }, isError: true },
+    };
+  }
+
   let launchPath: string;
   let launchBody: Record<string, unknown> | undefined;
-  const contextFiles = asNonEmptyArray(args.context_files);
+  const contextFiles = contextFilesArg.uris;
   if (kind === "agent") {
     // `context_files` works by synthesizing an input field on the manifest,
     // which only an inline run owns. A published agent's `input.schema` is a
@@ -499,8 +549,11 @@ export async function launchRunAndWait(
     launchPath = "/api/runs/inline";
     launchBody = { manifest: materialized.manifest, prompt };
     if (asRecord(args.input)) launchBody.input = args.input;
-    // Fan-in by reference: forwarded verbatim; the route resolves each URI
-    // through the file ACL and declares the reserved input field itself.
+    // Fan-in by reference: entries forwarded verbatim; the route resolves each
+    // URI through the file ACL and declares the reserved input field itself.
+    // Always under the CANONICAL name — a legacy `context_documents` argument
+    // is canonicalized here rather than relayed, so the wire carries one
+    // spelling however the model spelled it.
     if (contextFiles) launchBody.context_files = contextFiles;
   } else {
     return {

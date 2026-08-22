@@ -53,6 +53,13 @@ describe("SYSTEM_PROMPT invariants", () => {
 
   it("keeps the fan-in-by-reference rule (context_files, never a copy)", () => {
     expect(SYSTEM_PROMPT).toContain("context_files");
+    // The "exact shape" line is where the model copies argument NAMES from, so
+    // it must list the two that carry a file and no retired one: `config` died
+    // with #1179, and `run-and-wait-client` builds the launch body from an
+    // allowlist — an argument under any other name is dropped before the HTTP
+    // call, so the run starts with no file and nothing reports it.
+    expect(SYSTEM_PROMPT).toContain('{ kind:"inline", manifest, prompt, input?, context_files? }');
+    expect(SYSTEM_PROMPT).not.toContain("prompt, config?");
     expect(SYSTEM_PROMPT).toMatch(/NEVER paste a previous run's content/);
     // The reason is load-bearing: a rule with a reason survives paraphrase.
     expect(SYSTEM_PROMPT).toMatch(/retyped by a model/);

@@ -588,6 +588,108 @@ describe("launchRunAndWait launch body", () => {
     });
   });
 
+  // The pre-#1177 spelling. `POST /runs/inline` accepts it forever, so the
+  // client that builds the launch body must too: reading only the canonical
+  // name dropped the argument BEFORE the HTTP call, and the route never got the
+  // chance to answer with its field-precise 400 — the run launched with nothing
+  // mounted and every layer reported success. A model reaches for the old name
+  // from its own transcript, or from a tool listing taken before the upgrade
+  // (`tools.listChanged: false`).
+  it("kind:inline canonicalizes the legacy context_documents spelling", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "compile",
+        context_documents: ["appfile://doc_abc12345"],
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    const body = captured()?.body as Record<string, unknown>;
+    expect(body).toMatchObject({ context_files: ["appfile://doc_abc12345"] });
+    // One spelling on the wire, whatever the model spelled.
+    expect(body).not.toHaveProperty("context_documents");
+  });
+
+  it("kind:inline prefers context_files when both spellings are present", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "compile",
+        context_files: ["appfile://doc_abc12345"],
+        context_documents: ["appfile://doc_def67890"],
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(captured()?.body).toMatchObject({ context_files: ["appfile://doc_abc12345"] });
+  });
+
+  // A wrong-typed argument used to be indistinguishable from an absent one:
+  // dropped on the floor, run launched with no file, nothing anywhere saying so.
+  it("refuses a context_files that is not an array instead of dropping it", async () => {
+    for (const value of ["appfile://doc_abc12345", '["appfile://doc_abc12345"]', 42]) {
+      const { fetchImpl, captured } = captureLaunch();
+
+      const result = await launchRunAndWait(
+        { kind: "inline", manifest: { name: "tmp" }, prompt: "compile", context_files: value },
+        { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+      );
+
+      expect(result.ok).toBe(false);
+      expect(
+        String((result as { step: { payload: { error?: string } } }).step.payload.error),
+      ).toMatch(/`context_files` must be a JSON array of appfile:\/\/ URIs/);
+      // Nothing was launched — the model gets the signal, not a fileless run.
+      expect(captured()).toBeUndefined();
+    }
+  });
+
+  it("names the legacy spelling in its own shape refusal", async () => {
+    const { fetchImpl } = captureLaunch();
+
+    const result = await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "compile",
+        context_documents: "appfile://doc_abc12345",
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(
+      String((result as { step: { payload: { error?: string } } }).step.payload.error),
+    ).toMatch(/`context_documents` must be a JSON array/);
+  });
+
+  it("kind:agent rejects the legacy spelling too (never silently drops it)", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    const result = await launchRunAndWait(
+      {
+        kind: "agent",
+        scope: "@acme",
+        name: "writer",
+        context_documents: ["appfile://doc_abc12345"],
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(
+      String((result as { step: { payload: { error?: string } } }).step.payload.error),
+    ).toMatch(/only supported for kind:'inline'/);
+    expect(captured()).toBeUndefined();
+  });
+
   it("kind:agent rejects context_files before dispatch (never silently drops it)", async () => {
     const { fetchImpl, captured } = captureLaunch();
 

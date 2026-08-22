@@ -17,8 +17,8 @@ import {
  *
  * The hash is validated against `RUN_DETAIL_TAB_HASHES` (live tabs + retired
  * ones), and `effectiveRunDetailTab` maps a retired hash onto the pane that
- * replaced it — dropping it from the list instead would silently send every old
- * `#deliverable` link back to the default tab.
+ * absorbed it — dropping it from the list instead would silently send every old
+ * `#deliverable`, `#result` or `#logs` link back to the default tab.
  */
 export function RunDetailTabsController({
   availability,
@@ -32,7 +32,7 @@ export function RunDetailTabsController({
 }) {
   const [defaultTab] = useState(() => initialRunDetailTab(availability));
   const [requestedTab, setActiveTab] = useTabWithHash(RUN_DETAIL_TAB_HASHES, defaultTab);
-  const activeTab = effectiveRunDetailTab(requestedTab, availability);
+  const activeTab = effectiveRunDetailTab(requestedTab);
 
   return children({ activeTab, setActiveTab });
 }

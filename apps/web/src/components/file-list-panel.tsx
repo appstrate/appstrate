@@ -42,8 +42,14 @@ export function FileListPanel({
   files: FileDto[];
   isLoading: boolean;
   error: unknown;
-  purpose: PurposeFilter;
-  onPurposeChange: (p: PurposeFilter) => void;
+  /**
+   * The active purpose filter, and the callback that changes it. BOTH optional,
+   * and the strip renders only when they are given: the Outcome pane shows one
+   * purpose by construction (what the run produced), so a filter offering to
+   * widen it back to the uploads would contradict the pane it sits in.
+   */
+  purpose?: PurposeFilter;
+  onPurposeChange?: (p: PurposeFilter) => void;
   empty: { message: string; hint?: string; compact?: boolean };
   /** Gallery tiles link to the producing run. */
   showRunLink?: boolean;
@@ -140,18 +146,20 @@ export function FileListPanel({
 
   return (
     <>
-      <div className="mb-4 flex items-center gap-1">
-        {PURPOSE_TABS.map((p) => (
-          <Button
-            key={p}
-            variant={purpose === p ? "secondary" : "ghost"}
-            size="sm"
-            onClick={() => onPurposeChange(p)}
-          >
-            {t(`filter.${p}`)}
-          </Button>
-        ))}
-      </div>
+      {onPurposeChange && (
+        <div className="mb-4 flex items-center gap-1">
+          {PURPOSE_TABS.map((p) => (
+            <Button
+              key={p}
+              variant={purpose === p ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => onPurposeChange(p)}
+            >
+              {t(`filter.${p}`)}
+            </Button>
+          ))}
+        </div>
+      )}
 
       {isLoading ? (
         <LoadingState />

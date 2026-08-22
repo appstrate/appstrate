@@ -1,7 +1,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
+/**
+ * Run-detail "Exécution" pane — HOW the run ran, and nothing about what it
+ * produced or how it was set up:
+ *
+ *   - the logs, which are the bulk of it;
+ *   - the run's identifiers and timings (run id, runner, proxy, duration, start
+ *     and end), the facts a support conversation asks for first;
+ *   - usage: cost, model, token buckets, and the per-turn breakdown;
+ *   - the input PAYLOAD the run was launched with;
+ *   - the run metadata.
+ *
+ * "Inputs" here is deliberately the launch payload, not a second file list: the
+ * Fichiers tab already shows every file the run consumed, and a pane repeating
+ * that list under another name is how a reader stops trusting either. The
+ * payload — the parameter values the run actually received — has no other home,
+ * and reads as part of "how it ran" rather than "how it was configured", since
+ * it varies per launch while the configuration does not.
+ */
+
 import { useTranslation } from "react-i18next";
-import { Coins, FileCode2 } from "lucide-react";
+import { Coins } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { formatDuration } from "@appstrate/core/format";
 import {
@@ -14,16 +33,19 @@ import {
 } from "@appstrate/ui/components/table";
 import { JsonView } from "./json-view";
 import { SectionCard } from "./section-card";
+import { InfoCard } from "./run-info-card";
 import { EmptyState } from "./page-states";
-import { RunTrigger } from "./run-trigger";
+import { LogViewer } from "./log-viewer";
 import { RunCostReadout } from "./run-cost-readout";
 import { formatDateField } from "../lib/format-date";
 import { fractionOfWindow, formatWindowPercent, readRunContext } from "./run-context";
-import type { RunTurnRow } from "./log-utils";
+import type { ExecutionEntry, RunTurnRow } from "./log-utils";
 import { ACTIVE_RUN_STATUSES, type EnrichedRun, type TokenUsage } from "@appstrate/shared-types";
 
-interface RunInfoTabProps {
+interface RunExecutionTabProps {
   run: EnrichedRun;
+  /** Log entries, already projected by `buildLogEntries` in the page. */
+  logs: ExecutionEntry[];
   /**
    * Per-turn breakdown, projected from the run's logs by `buildTurnRows`.
    * Passed down rather than fetched here — `run-detail.tsx` already holds the
@@ -31,15 +53,6 @@ interface RunInfoTabProps {
    * Empty (or absent) for every run predating the turn breadcrumb.
    */
   turns?: RunTurnRow[];
-}
-
-function InfoCard({ label, value }: { label: string; value: React.ReactNode }) {
-  return (
-    <div className="border-border bg-muted/30 rounded-lg border p-4">
-      <p className="text-muted-foreground mb-1 text-xs">{label}</p>
-      <p className="text-sm font-medium">{value}</p>
-    </div>
-  );
 }
 
 /**
@@ -171,12 +184,11 @@ function formatTimestamp(value: string | Date | null | undefined): string | null
   return formatDateField(d, "datetime");
 }
 
-export function RunInfoTab({ run, turns }: RunInfoTabProps) {
+export function RunExecutionTab({ run, logs, turns }: RunExecutionTabProps) {
   const { t } = useTranslation(["agents", "settings"]);
   const input = run.input as Record<string, unknown> | null;
   const usage = run.token_usage as TokenUsage | null;
   const metadata = run.metadata as Record<string, unknown> | null;
-  const connectionsUsed = run.connections_used ?? null;
   const hasUsage =
     run.cost != null || run.cost_pricing_status != null || usage != null || run.model_label != null;
   const runnerOriginLabel =
@@ -192,49 +204,37 @@ export function RunInfoTab({ run, turns }: RunInfoTabProps) {
 
   return (
     <div className="space-y-4">
-      {/* Version + Trigger — inline runs are not versioned, so the grid
-          collapses to a single column when the Version card is hidden. */}
-      <div className={cn("grid gap-4", !run.package_ephemeral && "sm:grid-cols-2")}>
-        {!run.package_ephemeral && (
-          <InfoCard
-            label={t("run.infoVersion")}
-            value={
-              <span className={cn("font-mono", run.version_ref === "draft" && "italic")}>
-                {/* version_ref is unambiguous (#636): a concrete semver when the
-                    run executed a published definition, "draft" otherwise. For
-                    draft runs, surface the published base version when known. */}
-                {run.version_ref !== "draft"
-                  ? `v${run.version_ref}`
-                  : run.version_label && run.version_label !== "draft"
-                    ? `${t("run.draft")} (v${run.version_label} ${t("run.versionModified")})`
-                    : t("run.draft")}
-              </span>
-            }
-          />
-        )}
-        <InfoCard label={t("run.infoTrigger")} value={<RunTrigger run={run} />} />
-      </div>
+      {/* The logs lead: they are what this pane is opened for. Rendered bare —
+          `LogViewer` already draws its own bordered card with a toolbar, so a
+          SectionCard around it would only double the border. The heading
+          carries the entry count the Logs TAB used to carry as a badge; on a
+          tab labelled "Exécution" a bare number would not say what it counts. */}
+      <section>
+        <h3 className="text-muted-foreground mb-2 flex items-center gap-2 text-xs font-semibold tracking-wide uppercase">
+          {t("run.sectionLogs")}
+          {logs.length > 0 && (
+            <span className="bg-primary/15 text-primary inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none font-medium">
+              {logs.length}
+            </span>
+          )}
+        </h3>
+        <LogViewer entries={logs} />
+      </section>
 
-      {/* Input */}
-      {input && Object.keys(input).length > 0 && (
-        <SectionCard title={t("run.infoInput")}>
-          <JsonView data={input} />
-        </SectionCard>
-      )}
-
-      {/* Execution — who ran it, when, and with which wiring. Always shown:
-          runner origin + startedAt are populated for every run. */}
-      <SectionCard title={t("run.infoExecution")}>
+      {/* Identifiers + timings. Always shown: the run id, the runner origin and
+          `startedAt` are populated for every run. */}
+      <SectionCard title={t("run.sectionRunDetails")}>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <InfoCard
+            label={t("run.infoRunId")}
+            value={<span className="font-mono text-xs break-all">{run.id}</span>}
+          />
           <InfoCard label={t("run.infoRunner")} value={runnerLabel} />
           {run.duration != null && (
             <InfoCard label={t("run.infoDuration")} value={formatDuration(run.duration)} />
           )}
           {startedAt && <InfoCard label={t("run.infoStartedAt")} value={startedAt} />}
           {completedAt && <InfoCard label={t("run.infoCompletedAt")} value={completedAt} />}
-          {run.model_label != null && (
-            <InfoCard label={t("run.usageModel")} value={run.model_label} />
-          )}
           {run.proxy_label != null && (
             <InfoCard label={t("run.infoProxy")} value={run.proxy_label} />
           )}
@@ -267,6 +267,9 @@ export function RunInfoTab({ run, turns }: RunInfoTabProps) {
                 label={t("run.usageCost")}
                 value={<RunCostReadout cost={run.cost} pricingStatus={run.cost_pricing_status} />}
               />
+            )}
+            {run.model_label != null && (
+              <InfoCard label={t("run.usageModel")} value={run.model_label} />
             )}
             {usage?.input_tokens != null && (
               <InfoCard
@@ -309,29 +312,11 @@ export function RunInfoTab({ run, turns }: RunInfoTabProps) {
         </SectionCard>
       )}
 
-      {/* Connexions — connections resolved for this run, denormalized at
-          kickoff so the panel survives a connection rename/deletion. */}
-      {connectionsUsed && connectionsUsed.length > 0 && (
-        <SectionCard title={t("run.infoConnections")}>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {connectionsUsed.map((c) => (
-              <InfoCard
-                key={c.integration_id}
-                label={c.integration_id}
-                value={
-                  <span className="flex flex-col">
-                    <span>{c.label ?? c.account_id ?? "—"}</span>
-                    {c.label && c.account_id && (
-                      <span className="text-muted-foreground text-xs">{c.account_id}</span>
-                    )}
-                    <span className="text-muted-foreground text-xs">
-                      {t(`run.connSource.${c.source}`, { defaultValue: c.source })}
-                    </span>
-                  </span>
-                }
-              />
-            ))}
-          </div>
+      {/* The launch payload — the parameter VALUES this run received, not the
+          files it consumed (those are the Fichiers tab's, in full). */}
+      {input && Object.keys(input).length > 0 && (
+        <SectionCard title={t("run.sectionInputPayload")}>
+          <JsonView data={input} />
         </SectionCard>
       )}
 
@@ -340,27 +325,6 @@ export function RunInfoTab({ run, turns }: RunInfoTabProps) {
         <SectionCard title={t("run.infoMetadata")}>
           <JsonView data={metadata} />
         </SectionCard>
-      )}
-
-      {/* Inline run — prompt + manifest snapshot (null after compaction) */}
-      {run.package_ephemeral && (
-        <>
-          {run.inline_prompt ? (
-            <SectionCard title={t("run.tabPrompt")}>
-              <pre className="bg-muted/30 overflow-x-auto rounded-md p-4 font-mono text-xs whitespace-pre-wrap">
-                {run.inline_prompt}
-              </pre>
-            </SectionCard>
-          ) : null}
-          {run.inline_manifest ? (
-            <SectionCard title={t("run.tabManifest")}>
-              <JsonView data={run.inline_manifest} />
-            </SectionCard>
-          ) : null}
-          {!run.inline_prompt && !run.inline_manifest && (
-            <EmptyState message={t("runs.detailsExpired")} icon={FileCode2} compact />
-          )}
-        </>
       )}
     </div>
   );

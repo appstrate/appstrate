@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import { Badge } from "./status-badge";
 import { RunTrigger } from "./run-trigger";
 import { RunTokensReadout } from "./run-tokens-readout";
+import { RunTypeBadge } from "./run-type-badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { cn } from "@appstrate/ui/cn";
@@ -35,15 +36,17 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
 }
 
 /**
- * The three facts the `detail` variant drops from its always-visible line that
- * have nowhere else to live. Deliberately NOT here — the Info tab is their sole
+ * The facts the `detail` variant drops from its always-visible line that have
+ * nowhere else to live. Deliberately NOT here — another pane is their sole
  * owner, and duplicating them was the crowding this pass removes:
- *   - trigger, start date, proxy → `run-info-tab.tsx` (`run.infoTrigger`,
- *     `run.infoStartedAt`, `run.infoProxy`)
- *   - the four token buckets → same tab; only their SUM is here, because that
- *     is the figure #1046 demotes from the header and the tab never shows it
+ *   - trigger → `run-configuration-tab.tsx` (`run.infoTrigger`)
+ *   - start date, proxy → `run-execution-tab.tsx` (`run.infoStartedAt`,
+ *     `run.infoProxy`)
+ *   - the four token buckets → same pane; only their SUM is here, because that
+ *     is the figure #1046 demotes from the header and the pane never shows it
  *   - `#N` → the page title
- * The Files tab badge shows a total, never the in/out split, so the split
+ *   - the run TYPE → the top line itself, in both variants, via `RunTypeBadge`
+ * The Fichiers tab badge shows a total, never the in/out split, so the split
  * stays.
  *
  * Exported as a testing affordance: the popover keeps its content unmounted
@@ -56,11 +59,6 @@ export function RunRowDetails({ run }: { run: EnrichedRun }) {
 
   return (
     <div className="space-y-2">
-      {run.package_ephemeral === true && (
-        <span className="border-border text-muted-foreground inline-block rounded border px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase">
-          {t("runs.inlineBadge")}
-        </span>
-      )}
       {(inputFiles > 0 || outputFiles > 0) && (
         <DetailRow label={t("run.tabFiles")}>
           {t("run.detailsFiles", { input: inputFiles, output: outputFiles })}
@@ -147,11 +145,13 @@ export function RunRow({
       )}
       {agentName && <span className="truncate font-medium">{agentName}</span>}
       <Badge status={run.status} compact unread={isUnread} />
-      {!isDetail && isInline && (
-        <span className="border-border text-muted-foreground shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase">
-          {t("runs.inlineBadge")}
-        </span>
-      )}
+      {/* Run TYPE — inline vs catalogued agent. Always on the detail page's top
+          bar: nothing else there tells the two apart, and they behave
+          differently (no version, no re-run for an inline run). In a list the
+          chip is inline-only, as before — every row of an agent's run list
+          saying "AGENT" is noise, while an inline row among them is the
+          exception worth marking. */}
+      {(isDetail || isInline) && <RunTypeBadge run={run} />}
       {/* These two stay inline in BOTH variants: they are the reason the
           Re-run / Cancel buttons beside them are missing. Hiding them behind a
           click would leave that absence unexplained. */}

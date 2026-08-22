@@ -27,6 +27,16 @@ export interface FileLike {
 }
 
 /**
+ * The files a run PRODUCED, out of everything attached to it. A file the run
+ * merely consumed as input is not one of them — that distinction is what the
+ * Outcome pane is built on, and what separates it from the Fichiers tab, whose
+ * job is the complete list.
+ */
+export function producedRunFiles<T extends Pick<FileLike, "purpose">>(files: readonly T[]): T[] {
+  return files.filter((file) => file.purpose === "agent_output");
+}
+
+/**
  * The derived presentation rule (#1177), shared by the run page and the chat:
  * a run that produced exactly ONE file features it; zero or several feature
  * nothing — several are just listed, and the user picks.
@@ -38,7 +48,7 @@ export interface FileLike {
 export function featuredRunFile<T extends Pick<FileLike, "purpose">>(
   files: readonly T[],
 ): T | undefined {
-  const produced = files.filter((file) => file.purpose === "agent_output");
+  const produced = producedRunFiles(files);
   return produced.length === 1 ? produced[0] : undefined;
 }
 

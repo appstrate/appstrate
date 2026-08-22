@@ -82,7 +82,7 @@ describe("cost readout wiring", () => {
   });
 
   it("both surfaces delegate to the shared readout instead of formatting a cost", () => {
-    for (const relative of ["../../pages/run-detail.tsx", "../run-info-tab.tsx"]) {
+    for (const relative of ["../../pages/run-detail.tsx", "../run-execution-tab.tsx"]) {
       const source = read(relative);
       expect(source).toContain("<RunCostReadout");
       expect(source).toContain("pricingStatus={run.cost_pricing_status}");
