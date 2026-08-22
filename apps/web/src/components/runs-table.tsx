@@ -204,6 +204,7 @@ export function RunsTable({
   agentName,
   isLoading,
   isError,
+  error,
   empty,
   banner,
 }: {
@@ -214,6 +215,8 @@ export function RunsTable({
   isLoading?: boolean;
   /** The request failed — which is not the same thing as an empty list. */
   isError?: boolean;
+  /** Says WHY it failed. `DataTable` draws a default when no caller does. */
+  error?: ReactNode;
   /** Replaces the default "no runs" state, for a surface that can say more. */
   empty?: ReactNode;
   /** Pinned above the first row (e.g. a scheduled next run). */
@@ -232,6 +235,7 @@ export function RunsTable({
       // "Aucun run". The two travel as separate props now, so no caller can
       // fold one into the other again.
       isError={isError}
+      error={error}
       empty={empty ?? <EmptyState message={t("detail.emptyRuns")} icon={PlayCircle} compact />}
       banner={banner}
       rowKey={(run) => run.id}

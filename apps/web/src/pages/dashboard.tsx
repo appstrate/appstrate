@@ -7,7 +7,7 @@ import { useAgents } from "../hooks/use-packages";
 import { useUnreadCountsByAgent } from "../hooks/use-notifications";
 import { useAllSchedules } from "../hooks/use-schedules";
 import { usePaginatedRuns } from "../hooks/use-paginated-runs";
-import { LoadingState, ErrorState } from "../components/page-states";
+import { ErrorState } from "../components/page-states";
 import { PackageCard } from "../components/package-card";
 import { ScheduleCard } from "../components/schedule-card";
 import { RunsTable, useRunColumns } from "../components/runs-table";
@@ -41,9 +41,6 @@ export function DashboardPage() {
 
   const isLoading = runsLoading || agentsLoading;
   const error = runsError || agentsError;
-
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
 
   const runs = runsData?.data ?? [];
 
@@ -175,10 +172,17 @@ export function DashboardPage() {
             with it a second `COUNT` + enriched page read, for rows the 15 above
             already contain. The table takes rows, never a query, which is what
             makes that possible. */}
+        {/* The states live in the table, not above the page. An early return
+            here took the welcome line and every section with it, so the whole
+            dashboard blinked out and back on every refetch; the table knows the
+            shape of what is coming and holds it. */}
         <RunsTable
           runs={runs.slice(0, RECENT_RUNS_COUNT)}
           columns={runColumns}
           agentName={agentName}
+          isLoading={isLoading}
+          isError={Boolean(error)}
+          error={<ErrorState message={error?.message} compact />}
         />
       </section>
     </div>
