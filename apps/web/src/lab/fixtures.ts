@@ -597,6 +597,256 @@ export const billing = {
 };
 
 /* -------------------------------------------------------------------------- */
+/* Skills and MCP servers — the two lists the guard found unserved             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * These two screens were believed to be showing an EMPTY list in every
+ * scenario — the doc said so — and they were showing a failed request: neither
+ * endpoint had a handler, so `/api/packages/skills` and
+ * `/api/packages/mcp-servers` both 404'd and the screens rendered their error
+ * state. Nobody noticed, because "no rows" and "the request died" look alike
+ * from across the room. `e2e/lab/shots.mjs` is what caught it, by listening for
+ * `[lab] no fixture` rather than by looking.
+ */
+export const skills: Json200<"/api/packages/skills", "get"> = {
+  object: "list",
+  hasMore: false,
+  data: [
+    {
+      id: "@tractr/compta-references",
+      name: "compta-references",
+      description:
+        "Références et scripts de la comptabilité Tractr : année fiscale, règles d'extraction BNC, mapping des marchands.",
+      source: "local",
+      created_by: USER_ID,
+      created_by_name: "Olivier Tarbès",
+      used_by_agents: 2,
+      version: "1.4.0",
+      auto_installed: false,
+      forked_from: null,
+      createdAt: ago(120_000),
+      updatedAt: ago(3_000),
+    },
+    {
+      id: "@default/triage-sentiment",
+      name: "triage-sentiment",
+      description: "Classe un message entrant par intention et par urgence, puis le route.",
+      source: "system",
+      orgId: null,
+      created_by: null,
+      used_by_agents: 1,
+      version: "0.3.1",
+      auto_installed: true,
+      forked_from: null,
+      createdAt: ago(200_000),
+      updatedAt: ago(90_000),
+    },
+    {
+      id: "@tractr/wiki-brain-method",
+      name: "wiki-brain-method",
+      description: "Mémoire proactive par personne : quoi retenir, quand le rappeler.",
+      source: "local",
+      created_by: USER_ID,
+      created_by_name: "Olivier Tarbès",
+      used_by_agents: 0,
+      version: "0.9.0",
+      auto_installed: false,
+      forked_from: "@default/triage-sentiment",
+      createdAt: ago(40_000),
+      updatedAt: ago(1_500),
+    },
+  ],
+};
+
+export const mcpServers: Json200<"/api/packages/mcp-servers", "get"> = {
+  object: "list",
+  hasMore: false,
+  data: [
+    {
+      id: "@appstrate/gdrive-mcp",
+      name: "gdrive-mcp",
+      description: "Serveur MCP Google Drive : recherche, lecture, dépôt de fichiers.",
+      source: "system",
+      orgId: null,
+      created_by: null,
+      used_by_agents: 3,
+      version: "2.1.0",
+      auto_installed: true,
+      forked_from: null,
+      createdAt: ago(200_000),
+      updatedAt: ago(60_000),
+    },
+    {
+      id: "@tractr/qbo-mcp",
+      name: "qbo-mcp",
+      description: "QuickBooks Online, lecture seule : 69 outils comptables.",
+      source: "local",
+      created_by: USER_ID,
+      created_by_name: "Olivier Tarbès",
+      used_by_agents: 1,
+      version: "1.0.0",
+      auto_installed: false,
+      forked_from: null,
+      createdAt: ago(30_000),
+      updatedAt: ago(800),
+    },
+  ],
+};
+
+/* -------------------------------------------------------------------------- */
+/* Documents                                                                   */
+/* -------------------------------------------------------------------------- */
+
+type LabDocument = Json200<"/api/documents", "get">["data"][number];
+
+/** Everything a tile can draw: an image, a spreadsheet, a PDF, and an upload. */
+const documentRows: LabDocument[] = [
+  {
+    object: "document",
+    id: "doc_lab_1",
+    uri: "document://doc_lab_1",
+    purpose: "agent_output",
+    presentation: "primary",
+    applicationId: APP_ID,
+    run_id: "run_lab_1",
+    chat_session_id: null,
+    packageId: "@tractr/compta-trimestrielle",
+    name: "recapitulatif-2026-Q2.xlsx",
+    mime: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    size: 184_320,
+    sha256: "9f2c4d1a8b7e6f5c4d3b2a1908f7e6d5c4b3a2918f7e6d5c4b3a29180f7e6d5c",
+    downloadable: true,
+    capabilities: {
+      visible: true,
+      metadata: true,
+      download: true,
+      preview: false,
+      keep: true,
+      delete: true,
+    },
+    previewable: false,
+    preview_kind: null,
+    expiresAt: ago(-60_000),
+    createdAt: ago(2_400),
+  },
+  {
+    object: "document",
+    id: "doc_lab_2",
+    uri: "document://doc_lab_2",
+    purpose: "agent_output",
+    presentation: null,
+    applicationId: APP_ID,
+    run_id: "run_lab_1",
+    chat_session_id: null,
+    packageId: "@tractr/compta-trimestrielle",
+    name: "releve-mastercard-juin.pdf",
+    mime: "application/pdf",
+    size: 512_000,
+    sha256: "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809",
+    downloadable: true,
+    capabilities: {
+      visible: true,
+      metadata: true,
+      download: true,
+      preview: true,
+      keep: true,
+      delete: true,
+    },
+    previewable: true,
+    preview_kind: "pdf",
+    expiresAt: null,
+    createdAt: ago(2_600),
+  },
+  {
+    object: "document",
+    id: "doc_lab_3",
+    uri: "document://doc_lab_3",
+    purpose: "user_upload",
+    presentation: null,
+    applicationId: APP_ID,
+    run_id: null,
+    chat_session_id: null,
+    packageId: null,
+    name: "logo-tractr.png",
+    mime: "image/png",
+    size: 24_576,
+    sha256: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+    downloadable: true,
+    capabilities: {
+      visible: true,
+      metadata: true,
+      download: true,
+      preview: true,
+      keep: true,
+      delete: true,
+    },
+    previewable: true,
+    preview_kind: "image",
+    expiresAt: ago(-4_000),
+    createdAt: ago(9_000),
+  },
+  {
+    // A document the caller may see but not read: the metadata capability is
+    // off, so the name and mime degrade the way the API degrades them. It is
+    // the one row that proves the tile does not assume it may show everything.
+    object: "document",
+    id: "doc_lab_4",
+    uri: "document://doc_lab_4",
+    purpose: "user_upload",
+    presentation: null,
+    applicationId: APP_ID,
+    run_id: "run_lab_2",
+    chat_session_id: null,
+    packageId: null,
+    name: "document",
+    mime: "application/octet-stream",
+    size: 71_680,
+    downloadable: false,
+    capabilities: {
+      visible: true,
+      metadata: false,
+      download: false,
+      preview: false,
+      keep: false,
+      delete: false,
+    },
+    previewable: false,
+    preview_kind: null,
+    expiresAt: null,
+    createdAt: ago(15_000),
+  },
+];
+
+export const documents: Json200<"/api/documents", "get"> = {
+  object: "list",
+  data: documentRows,
+  hasMore: false,
+  limit: 25,
+};
+
+/**
+ * The bytes a thumbnail is made of: a 64×64 flat-blue PNG, base64.
+ *
+ * Small enough to sit in the source, real enough to decode — the tile fetches
+ * the content as a BLOB and makes an object URL of it, so a JSON stand-in
+ * silently becomes a placeholder and the gallery reads as broken.
+ */
+const THUMBNAIL_PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAT0lEQVR42u3PQQkAAAgEsCtjMuNbwgi+hcEKLNXzWgQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQELguYZjFanhwbHAAAAABJRU5ErkJggg==";
+
+export function thumbnailPng(): Uint8Array {
+  const binary = atob(THUMBNAIL_PNG_BASE64);
+  return Uint8Array.from(binary, (c) => c.charCodeAt(0));
+}
+
+/** Enough to make the gallery's "load more" reachable. */
+export const heavyDocuments: LabDocument[] = Array.from({ length: 60 }, (_, i) => {
+  const base = documentRows[i % documentRows.length]!;
+  return { ...base, id: `doc_lab_h${i + 1}`, name: `${i + 1}-${base.name}` };
+});
+
+/* -------------------------------------------------------------------------- */
 /* Organisation detail                                                         */
 /* -------------------------------------------------------------------------- */
 

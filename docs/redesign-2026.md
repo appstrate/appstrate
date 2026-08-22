@@ -124,6 +124,48 @@ one script then walks every screen × scenario × width unattended. Measuring th
 DOM (`getBoundingClientRect` per cell across a sweep of widths) is what found the
 crushed columns; a screenshot at 1440 shows nothing wrong.
 
+**That script is in the repo now** (22 August), because eleven of them had been
+written into session scratchpads over three days and every one was thrown away,
+so each session rewrote the method from this paragraph and no sub-agent could
+run it at all:
+
+```bash
+bun run lab:shots     # screens × scenarios × widths → PNGs, and the guard below
+bun run lab:measure   # one table's real geometry across a sweep of widths
+```
+
+`e2e/lab/`, not `apps/web/scripts/`, for one boring reason: `@playwright/test`
+resolves from the `e2e` workspace and nowhere else, and putting it under
+`apps/web` would mean a dependency and a lockfile edit on a fifty-commit
+branch. Parameters are environment variables (`LAB_URL`, `LAB_SCREENS`,
+`LAB_SCENARIOS`, `LAB_WIDTHS`, `LAB_ROUTE`, `LAB_SELECTOR`, `LAB_OUT`). It is
+not application code, it never ships, and it deserves no abstraction.
+
+**`lab:shots` is also the FIXTURE GUARD.** `mock-fetch` already logs
+`[lab] no fixture for GET /api/…`; the script listens for that line and exits
+non-zero, naming the endpoint and what to do. Six times in three days a screen
+was migrated, opened, and found showing an error instead of a rendering, and
+every time a human had to notice. On its first run it found three more, and one
+of them had already been MISREAD into this document as fact (see "Open").
+
+The guard watches the browser rather than scanning the source, and that is the
+whole design. The obvious version greps the hooks for their endpoint strings;
+it does not hold, because the SPA reaches the API in FOUR shapes and only two
+name their path in the source. `$api.useQuery("get", "/api/x")` and
+`client.GET("/api/x")` do; the template-literal form in `hooks/use-packages.ts`
+builds its path from a variable, and better-auth fetches
+`/api/auth/get-session` from inside its own client, where the SPA never writes
+the string — and that one is the first request the app makes. A scan misses
+both. Watching the fetch misses neither, and needs no hand-maintained list of
+endpoints, which is the thing that would drift. The one list it does carry is
+of SCREENS (`e2e/lab/screens.mjs`), which
+is a coverage claim a human makes on purpose, not a mirror of the API.
+
+`lab:measure` has a blind spot that a defect walked straight through on the day
+it was committed: it measures COLUMNS, not what is inside them. A cell whose
+content refuses to shrink can eat a column that measures perfectly. **Measure
+AND look.**
+
 The `error` scenario used to 500 EVERY endpoint, the session included, so it
 landed on the login form and no inner screen ever showed its error state — the
 scenario was unusable for the thing it exists for. Identity, orgs and
@@ -748,7 +790,21 @@ On how the work goes:
 - Its findings need checking, not applying. On the first run it read the
   design's `:root` default instead of the saved state, counted decisions taken
   later in the session as missing requirements, and called the lab harness scope
-  creep. It also found a failing test nobody had run.
+  creep. It also found a failing test nobody had run. On the integration tables
+  it was right four times out of six: it caught an `ErrorState` drawn without
+  its reason, a `disabled` lost in a move, and two comments claiming more than
+  the code did; it was wrong about a width that a measurement contradicts, and
+  proposed a shared component that would have undone the truncation fix.
+- **It reads the DOC as the spec, so every rule written here becomes something
+  the review can check.** That is a reason to write decisions down beyond
+  remembering them: the last report is visibly better than the first ones, and
+  the difference is that it had rules to cite.
+- **It does not look at the screen** — not from inability (its sub-agents run
+  `bun test`, `tsc` and `eslint` quite happily) but because its brief is to
+  read a diff in 400 words. The review and the DOM measurement cover two
+  disjoint halves: everything found on the integration tables by the review was
+  textual or structural, and both visual defects came from measuring and
+  looking. Do not try to merge them.
 
 ## The grammar — component types, not pages
 
@@ -781,7 +837,7 @@ At the time of writing:
   packages). **4 used the raw shadcn `Table`**: library, models, proxies,
   integration detail — all four are done as of 22 August, and only the LIBRARY
   still draws a raw one, on purpose, because it is a matrix (below). Plus the
-  lists-inside-a-panel (documents, connections, memory), each its own way.
+  compact lists (documents, connections, memory), each its own way.
 - **Only THREE of those four are collections.** The library is a MATRIX —
   packages down, workspaces across, a checkbox at every crossing — and it stays
   on the raw table on purpose. `DataTable`'s contract is that a column is an
@@ -825,10 +881,20 @@ At the time of writing:
 
 ### The four families
 
-1. **Collection** — a table, a grid of cards, a compact list inside a panel,
-   and later the alternative views (an agenda). The table is done; the CARD
-   GRID is done (`components/card-grid.tsx`, 21 August); the list-in-a-panel is
-   not a component yet.
+1. **Collection** — a table, a grid of cards, a compact LIST, and later the
+   alternative views (an agenda). The table is done; the CARD GRID is done
+   (`components/card-grid.tsx`, 21 August); the list is not a component yet.
+
+   It was called "the list-in-a-panel" here until 22 August, and the name was
+   wrong in a way worth recording: NONE of the three is in a panel. Two are
+   tabs on a detail page and one is a dropdown. `PanelDialog` exists and its
+   only consumer is the settings surface. What the three share is not a
+   container, it is a SHAPE — one row is a self-contained block rather than
+   cells aligned into columns, which is the whole difference from the table.
+   The component is named at extraction, not before: if reading the three shows
+   they are two shapes and not one, the name has to say that, and forcing them
+   into a component baptised in advance is the mistake the `grid-cols-`
+   miscount already made once.
 
    **What makes the two bodies one family is `components/collection.ts`**, and
    it is the part worth keeping: a `CollectionState` (`isLoading`, `isError`,
@@ -858,8 +924,8 @@ At the time of writing:
 
 **A. Finish the Collection family.** _(22 August — mostly done. What is left is
 named at the end of this bullet.)_ The card grid became a component, the raw
-tables that are collections moved onto `DataTable`, and the list-in-a-panel
-has not been touched. It went first because family 3 depends on it: a
+tables that are collections moved onto `DataTable`, and the compact list has
+not been touched. It went first because family 3 depends on it: a
 collection cannot live in a modal until a collection is a thing.
 
 Done: `CardGrid` and the three grids that were one (package list, package
@@ -877,8 +943,16 @@ included (`lib/list-params.ts`).
    integration detail" below. It is the last raw table that was a collection,
    so the Collection family now has one body for every list in the app bar the
    library matrix and the lists-in-a-panel.
-2. **The list-in-a-panel** (documents, connections, memory), three ways of
-   doing one thing, and the last shape of the Collection family.
+2. **The compact list** (documents, connections, memory), three ways of doing
+   one thing, and the last shape of the Collection family. What is actually
+   there, read 22 August: documents draws a hand-rolled tile grid that is not
+   `CardGrid` and answers loading→error→empty, the reverse of the family's
+   order; connections is a DROPDOWN acting as a picker, with five hand-written
+   state branches and no `EmptyState`; memory is two stacks of rows in
+   collapsible sections with **no loading and no error state at all**, so a
+   failed request reads as "there is nothing here" — the exact lie
+   `collection.ts` exists to stop, already fixed twice elsewhere on this
+   branch.
 3. Then B, loading in one pass.
 
 The browser pass handed A four inconsistencies to settle, all of them the same
@@ -1079,11 +1153,19 @@ So the strategy the reference itself suggests:
       and comes back up as soon as the next threshold frees room. Nothing to
       arbitrate: moving the thresholds earlier does not widen a capped field, it
       only widens the gap in the middle of the bar.
-    - "No scenario shows an empty list" — `/skills` and `/mcp-servers` are empty
-      in all four. What is genuinely unreachable is an empty TABLE (`/runs` and
-      `/schedules` never are), so the trio of empty state + count + pagination
-      has never been seen together. Smaller hole, still a hole, and it belongs
-      to A.
+    - "No scenario shows an empty list" — this said `/skills` and `/mcp-servers`
+      "are empty in all four", and **that was wrong, which the fixture guard
+      proved on its first run (22 August)**: neither endpoint had a lab handler
+      at all, so both 404'd and both screens were drawing a FAILED REQUEST that
+      a previous pass read as an empty list. They have fixtures now, and rows.
+      The observation underneath survives: an empty TABLE is still unreachable
+      (`/runs` and `/schedules` never are), so the trio of empty state + count +
+      pagination has never been seen together. It belongs to A.
+
+      Worth keeping for what it says about method. "Nothing here" and "the
+      request died" look alike from across the room, which is why a screen with
+      no fixture does not merely go unlooked-at: it gets looked at and
+      MISREAD, and the misreading is then written down as fact.
 
 - **The API gained three things** for the toolbar, all tested: `GET /api/runs`
   takes several statuses at once (`?status=failed,timeout` → `IN (…)`), a free

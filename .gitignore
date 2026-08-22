@@ -80,3 +80,6 @@ playwright-report/
 
 # Conformance harness — live tool-surface snapshots (uploaded as CI artifacts)
 conformance-snapshot/
+
+# Lab harness output (e2e/lab/shots.mjs) — captures, never committed
+lab-shots/

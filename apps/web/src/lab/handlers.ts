@@ -18,6 +18,13 @@ export type LabResponse = {
   delayMs?: number;
   /** Server-sent events instead of JSON (the realtime channel). */
   stream?: boolean;
+  /**
+   * Answer with BYTES under this content type instead of JSON. Only the
+   * document content route needs it: a thumbnail is fetched as a blob and
+   * turned into an object URL, so JSON cannot stand in for it — the tile falls
+   * back to a placeholder and the gallery is a wall of grey squares.
+   */
+  contentType?: string;
 };
 
 type Handler = (url: URL, scenario: Scenario, headers: Headers) => LabResponse;
@@ -241,6 +248,53 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
       status: 200,
       body: { ...f.agents, data: list(f.agents.data, s, f.heavyAgents) },
     }),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/packages\/skills$/,
+    handler: (_u, s) => ({ status: 200, body: { ...f.skills, data: list(f.skills.data, s) } }),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/packages\/mcp-servers$/,
+    handler: (_u, s) => ({
+      status: 200,
+      body: { ...f.mcpServers, data: list(f.mcpServers.data, s) },
+    }),
+  },
+  {
+    // The gallery pages with `limit` + an accumulator on the caller's side, so
+    // the handler has to honour the query or "load more" asks forever.
+    method: "GET",
+    pattern: /^\/api\/documents$/,
+    handler: (url, s) => {
+      const all = list(f.documents.data, s, f.heavyDocuments);
+      const limit = Number(url.searchParams.get("limit") ?? 25);
+      const offset = Number(url.searchParams.get("offset") ?? 0);
+      const page = all.slice(offset, offset + limit);
+      return {
+        status: 200,
+        body: {
+          object: "list" as const,
+          data: page,
+          hasMore: offset + page.length < all.length,
+          limit,
+        },
+      };
+    },
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/documents\/[^/]+\/content$/,
+    handler: (url) => {
+      const id = /\/documents\/([^/]+)\/content$/.exec(url.pathname)?.[1] ?? "";
+      const row = [...f.documents.data, ...f.heavyDocuments].find((d) => d.id === id);
+      // The real route echoes the stored mime and refuses a row the caller may
+      // not download; both matter here, since that is what the tile branches on.
+      if (!row || !row.capabilities.download) return { status: 403, body: {} };
+      if (!row.mime.startsWith("image/")) return { status: 200, body: {} };
+      return { status: 200, body: f.thumbnailPng(), contentType: row.mime };
+    },
   },
   {
     method: "GET",
