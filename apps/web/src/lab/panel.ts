@@ -8,7 +8,6 @@
  * a tool sitting next to the app, not part of it.
  */
 import { SCENARIOS, getScenario, setScenario, type Scenario } from "./scenario";
-import { DEPTHS, applyDepth, getDepth, type Depth } from "./canvas-depth";
 
 const LABELS: Record<Scenario, string> = {
   nominal: "Nominal",
@@ -44,27 +43,6 @@ export function mountLabPanel(): void {
     host.append(pill(LABELS[value], value === scenario, () => setScenario(value)));
   }
 
-  host.append(separator(), label("GRIS"));
-
-  // The grey buttons restyle themselves in place: switching depth must not
-  // reload, or the comparison the dial exists for is lost with the scroll.
-  const depths = new Map<Depth, HTMLButtonElement>();
-  const paint = (chosen: Depth) => {
-    for (const [key, button] of depths) style(button, key === chosen);
-  };
-  for (const key of Object.keys(DEPTHS) as Depth[]) {
-    const button = pill(key, false, () => {
-      applyDepth(key);
-      paint(key);
-    });
-    button.title = DEPTHS[key].note;
-    depths.set(key, button);
-    host.append(button);
-  }
-  const depth = getDepth();
-  applyDepth(depth);
-  paint(depth);
-
   document.body.append(host);
 }
 
@@ -72,12 +50,6 @@ function label(text: string): HTMLSpanElement {
   const span = document.createElement("span");
   span.textContent = text;
   span.style.cssText = "opacity:.5;letter-spacing:.08em;font-weight:600;margin:0 3px";
-  return span;
-}
-
-function separator(): HTMLSpanElement {
-  const span = document.createElement("span");
-  span.style.cssText = "width:1px;align-self:stretch;margin:0 4px;background:rgba(255,255,255,.18)";
   return span;
 }
 

@@ -67,15 +67,15 @@ on — without it the chat, billing and webhooks surfaces are invisible in the l
 A missing fixture logs `[lab] no fixture for GET /api/… → 404`. That is the
 console telling you about a hole, not a bug.
 
-**The panel carries a second dial: GRIS (A / B / C).** It moves `--canvas`
-(and the sidebar with it) between the shipped 1.5%-off-white and two deeper
-greys, in place and without a reload, and the choice survives one — so a value
-can be carried across scenarios and widths while the eye decides. It exists
-because one number settles three separate questions at once (the two toolbar
-button treatments, the view toggle's track, every white card against the page)
-and none of them can be judged from a screenshot. It is an INSTRUMENT: when a
-depth is picked it becomes the token in `styles.css` and `lab/canvas-depth.ts`
-is deleted.
+**The panel is the place for a dial when one number has to be JUDGED rather
+than reasoned about.** The grey depth was settled that way on 21 August: three
+values in the panel, applied in place without a reload (a reload loses the
+scroll, and with it the comparison), carried across scenarios and widths until
+the eye decided. Then the dial was deleted with the decision — it was an
+instrument, not a setting, and the answer lives in "Judgments the product owner
+has already made". Two things it taught, for the next one: apply WITHOUT a
+reload, and read the rendered hex off a canvas pixel rather than converting
+oklch by hand, which was several points out both times it was tried.
 
 **Looking at it when the MCP browser is taken.** That lock belongs to whichever
 session grabbed Chrome Beta first, and waiting for it is what kept every screen
@@ -531,6 +531,12 @@ something that contradicts one.
   on a single-group surface repeats the head, but removing it made the three
   settings surfaces stop looking like the same system. The label stays. A
   group-count rule was tried and reverted for exactly this.
+- **The canvas stays #FAFAFA.** Judged on 21 August against two deeper greys
+  (#F6F6F6 and #F1F1F1) in the lab, on the real screens rather than on
+  screenshots: the gap between the grey and the white of the cards and the
+  actions reads well enough as it is. So the two toolbar treatments and the view
+  toggle's track are settled with it, and none of the three is reopened without
+  a reason that is not taste. 2% off white is quiet ON PURPOSE.
 - **A concept has to be visible to be learned.** The workspace level shows even
   when an org has one, because a level nobody ever sees is a level nobody
   learns. Its menu ends on a way to create one rather than a dead end.
@@ -852,23 +858,28 @@ So the strategy the reference itself suggests:
   **the footer** renders correctly, count left, "Page 1 sur 14" and the arrows
   right.
 
-  Left open by that pass, for the product owner rather than for the code:
+  What that pass raised and how it closed:
 
-  - **The two button treatments are nearly indistinguishable on the canvas.**
-    `bg-transparent` on #FAFAFA against white-with-a-shadow is a 2% difference;
-    the rule is right, the canvas is too shallow to carry it. Same cause as
-    "Grey depth" below — one token decides both.
-  - **The view toggle's track has the same problem.** Close up, the white chip
-    on `bg-accent` is perfectly legible; at reading distance the track barely
-    separates from the canvas, so the control does not read as a segmented one.
-  - **The search takes all the squeeze.** Between 1440 and 900 the bar loses
-    500px and the search field absorbs every one of them (715px → 207px) before
-    a single label steps aside. Nothing breaks; but the field is the one control
-    there that a person types into, and it is the first one to be starved.
-  - **An empty LIST cannot be looked at in any scenario.** `empty` lands on
-    onboarding, which is what it is for, so the list empty states are only
-    reachable through a search that matches nothing. Worth a fixture rather than
-    a fifth scenario.
+  - **The two button treatments, and the view toggle's track** — both rest on
+    the same 2% gap between the canvas and white, so both were put to the
+    product owner on the lab's grey dial, at A / B / C, on the real screens.
+    Answer: the gap reads well enough, the canvas stays #FAFAFA. Settled, and
+    now recorded under "Judgments the product owner has already made". The dial
+    was deleted with the decision.
+  - **Two findings of that pass were WRONG, and both from reading the wrong
+    number.** Worth keeping, because the same mistake is one measurement away:
+    - "The search field is starved from 715px to 207px" — that was the width of
+      the bar's LEFT SLOT, not of the field. The field is capped at 250px
+      (`max-w-[250px]`) and does not move at all between 1440 and 960. It dips
+      under the cap in exactly two windows (207px around 900, 237px around 660)
+      and comes back up as soon as the next threshold frees room. Nothing to
+      arbitrate: moving the thresholds earlier does not widen a capped field, it
+      only widens the gap in the middle of the bar.
+    - "No scenario shows an empty list" — `/skills` and `/mcp-servers` are empty
+      in all four. What is genuinely unreachable is an empty TABLE (`/runs` and
+      `/schedules` never are), so the trio of empty state + count + pagination
+      has never been seen together. Smaller hole, still a hole, and it belongs
+      to A.
 
 - **The API gained three things** for the toolbar, all tested: `GET /api/runs`
   takes several statuses at once (`?status=failed,timeout` → `IN (…)`), a free
@@ -893,8 +904,6 @@ So the strategy the reference itself suggests:
 - **Remaining settings screens** to the form pattern: storage, MCP connect,
   danger zone, and the workspace OAuth-domains form which still has its own
   Save button.
-- **Grey depth.** #FAFAFA is 2% off white, faithful to the design but very
-  quiet. One token if it should be deeper.
 - **Per-org colour and LOGO** — the design gives each org a colour; the data
   model has neither. Deferred by decision, twice. The shape is decided for when
   it comes back: a dedicated column (identity read on every render, and
