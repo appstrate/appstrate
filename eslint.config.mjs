@@ -111,19 +111,23 @@ export default tseslint.config(
     },
   },
   {
-    // Global-stream capture guard (issue #1180): CLI tests used to assert on
-    // output by swapping the *global* `process.stdout.write` /
-    // `process.stderr.write` / `process.exit` for the duration of a test. The
-    // whole repo runs in one `bun test` process, so that buffer is not owned by
-    // the test writing to it — `expect(captured).toBe("")` was a coin flip that
-    // blamed whichever command happened to be running. Commands take a
-    // `CommandIO` (src/lib/io.ts); tests build a private sink with
-    // `createMemoryIO()` (test/helpers/memory-io.ts).
+    // Global-stream capture guard (issue #1180): tests used to assert on output
+    // by swapping the *global* `process.stdout.write` / `process.stderr.write`
+    // / `process.exit` for the duration of a call. The whole repo runs in one
+    // `bun test` process, so that buffer is not owned by the test writing to it
+    // — `expect(captured).toBe("")` was a coin flip that blamed whichever
+    // command happened to be running, and a reader that parses its capture
+    // (the sidecar's JSON log lines) got a hard `SyntaxError` instead.
+    //
+    // Every package, not just `apps/cli`: they share the one process, so a
+    // global capture anywhere is a capture of everything. Inject a sink the
+    // test owns — `createMemoryIO()` (apps/cli/test/helpers/memory-io.ts) for
+    // CLI commands, `_setLogSinkForTesting()` for the sidecar logger.
     //
     // This re-declares `no-restricted-syntax` for a subset of the block above,
     // which fully REPLACES its options here — hence the explicit spread of the
-    // Zod 4 bans, so they keep firing in `apps/cli/test/**` too.
-    files: ["apps/cli/test/**/*.ts"],
+    // Zod 4 bans, so they keep firing in `**/test/**` too.
+    files: ["**/test/**/*.ts"],
     rules: {
       "no-restricted-syntax": [
         "error",

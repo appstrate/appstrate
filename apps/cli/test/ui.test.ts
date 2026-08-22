@@ -81,26 +81,17 @@ describe("intro / outro / spinner io seam", () => {
     expect(stderr()).toBe("");
   });
 
-  // The two comparisons below are the "flake fix, not a UX change" guard for
-  // the rendering wrappers: handing clack an explicit `output` must not move
-  // a byte or a colour. Each asserts non-empty output first — a child that
-  // fails to boot writes nothing, and two empty buffers compare equal.
+  // The comparison below is the "flake fix, not a UX change" guard for the
+  // rendering wrappers: handing clack an explicit `output` must not move a
+  // byte or a colour. One wrapper is enough — `intro`, `outro` and `spinner`
+  // share the single `clackOutput` adapter, so the property is the adapter's,
+  // not each wrapper's. It asserts non-empty output first: a child that fails
+  // to boot writes nothing, and two empty buffers compare equal.
   it("renders intro byte-for-byte as bare clack did before the seam", async () => {
     const message = JSON.stringify(`Appstrate login — profile "default"`);
     const [before, after] = await Promise.all([
       runIsolated(`const c = await import("@clack/prompts"); c.intro(${message});`),
       runIsolated(`const u = await import(${UI_MODULE}); u.intro(${message});`),
-    ]);
-    expect(before.stdout).not.toBe("");
-    expect(after.stdout).toBe(before.stdout);
-    expect(after.stderr).toBe("");
-  });
-
-  it("renders outro byte-for-byte as bare clack did before the seam", async () => {
-    const message = JSON.stringify(`Logged in as alice@example.com to "Acme" (org_1)`);
-    const [before, after] = await Promise.all([
-      runIsolated(`const c = await import("@clack/prompts"); c.outro(${message});`),
-      runIsolated(`const u = await import(${UI_MODULE}); u.outro(${message});`),
     ]);
     expect(before.stdout).not.toBe("");
     expect(after.stdout).toBe(before.stdout);
