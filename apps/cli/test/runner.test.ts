@@ -52,6 +52,7 @@ import {
   resolveUninstallDataDir,
   promoteStagedDaemon,
 } from "../src/commands/runner.ts";
+import { runIsolated } from "./helpers/isolated-process.ts";
 import type { RunnerExec, RunnerFs, RunnerHttp } from "../src/lib/runner/exec.ts";
 
 // ─── fakes ───────────────────────────────────────────────────────────────
@@ -753,6 +754,37 @@ describe("enableService", () => {
     await expect(enableService(deps(exec))).rejects.toThrow(
       /restart appstrate-runner failed: boom/,
     );
+  });
+
+  /**
+   * The failing path above used to leave the clack spinner running: its frames
+   * come from a `setInterval` that only `stop()` clears, and `stop()` sat after
+   * the `throw`. In the shipped CLI the leak is invisible (the error unwinds to
+   * `exitWithError` and the process exits), but `bun test` runs the whole repo
+   * in one process, so the frames kept painting into the global stdout for the
+   * rest of the run and failed whichever suite was reading it — that is the
+   * `Received: "◒  Enabling systemd unit..."` in issue #1180.
+   *
+   * Asserting "nothing paints after the rejection" means observing the real
+   * stdout, so a child process owns it: this suite must not touch the globals
+   * it is proving clean. The tail after MARKER is the window a leaked interval
+   * would paint into.
+   */
+  it("stops the spinner when the systemctl call fails (issue #1180)", async () => {
+    const { stdout } = await runIsolated(`
+      const { enableService } = await import(${JSON.stringify(`${import.meta.dir}/../src/commands/runner.ts`)});
+      const fail = async () => ({ ok: false, exitCode: 1, stdout: "", stderr: "boom" });
+      await enableService({ exec: { run: fail } }).catch(() => {});
+      process.stdout.write("MARKER");
+      await Bun.sleep(400);
+      process.stdout.write("END");
+    `);
+    const tail = stdout.split("MARKER")[1] ?? "";
+    expect(stdout).toContain("MARKER");
+    expect(tail).toContain("END");
+    // Spinner frame glyphs. A live interval paints one every ~80ms, so 400ms
+    // of silence is the falsifiable claim.
+    expect(tail).not.toMatch(/[◒◐◓◑]/);
   });
 });
 
