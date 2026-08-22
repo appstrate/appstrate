@@ -83,7 +83,9 @@ export class RedisEventBuffer implements EventBuffer {
 
   async peekLowest(runId: string): Promise<BufferedEvent | null> {
     const redis = getRedisConnection();
-    const pair = await redis.zrange(this.key(runId), 0, 0, "WITHSCORES");
+    // Range bounds go over the wire as strings; ioredis only types the `start`
+    // parameter as accepting a number, so pass both as strings.
+    const pair = await redis.zrange(this.key(runId), "0", "0", "WITHSCORES");
     if (pair.length === 0) return null;
     const raw = pair[0]!;
     // Members are written by `put` as `${sequence}|${json}`. Strip the prefix.

@@ -42,7 +42,7 @@
     "fflate": "^0.8.3",
     "file-type": "^22.0.1",
     "hono": "^4.12.33",
-    "ioredis": "^5.11.1",
+    "ioredis": "^6.0.0",
     "jose": "^6.2.7",
     "nodemailer": "^9.0.3",
     "rate-limiter-flexible": "^11.2.0",
