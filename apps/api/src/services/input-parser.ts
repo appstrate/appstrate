@@ -226,7 +226,7 @@ function toFileRef(key: string, value: unknown, index?: number): InputFileRef {
     return { fieldName: key, uri: value, kind: "data", ...(index !== undefined ? { index } : {}) };
   }
   throw invalidRequest(
-    `Field '${key}' must be an 'upload://<id>' URI, a 'appfile://<id>' URI, or an inline ` +
+    `Field '${key}' must be an 'upload://<id>' URI, an 'appfile://<id>' URI, or an inline ` +
       "'data:<mime>;base64,<payload>' URI",
     key,
   );
@@ -639,7 +639,7 @@ export async function parseRequestInput(
       });
 
     // Resolve every file URI to a file id up front (same eager-fail as
-    // uploads). A `appfile://` reference points at an already-durable file
+    // uploads). An `appfile://` reference points at an already-durable file
     // (a prior materialized upload or an agent output); it is streamed into the
     // run workspace like an upload but never re-materialized.
     const docRefs = refs
@@ -812,7 +812,8 @@ export async function parseRequestInput(
         );
         const fileWorkspaceNames = workspaceNames.slice(resolved.length + inline.length);
         // Storage keys for rollback — the workspace names are the on-disk /
-        // object-store segments (`{runId}/files/<workspaceName>`).
+        // object-store segments (`{runId}/documents/<workspaceName>` — see
+        // `runWorkspaceFileKey`, whose `documents/` is storage layout, not vocabulary).
         docNames = workspaceNames;
 
         // Stream each upload straight from the uploads bucket into the run
@@ -1020,7 +1021,7 @@ export async function parseRequestInput(
   // for a `rerun_from` replay of an already-empty input too: replaying nothing
   // means the same thing. No reader distinguishes `{}` from NULL — the prompt
   // builder normalizes both to `{}` (run-context-builder), the run DTO hides
-  // the input card for both (run-info-tab), and `resolveRerunInput` coalesces
+  // the input card for both (run-execution-tab), and `resolveRerunInput` coalesces
   // NULL back to `{}` on the next replay.
   const normalizedInput = Object.keys(input).length > 0 ? input : undefined;
 

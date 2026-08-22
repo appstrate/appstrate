@@ -41,7 +41,7 @@ export function _resetServerReadyForTesting(): void {
  *
  * `/health` is answered from HERE while starting, not by the router below: the
  * real checks would otherwise report on state that is still being built. Every
- * other path gets an RFC 9457 `starting` problem file.
+ * other path gets an RFC 9457 `starting` problem document.
  *
  * INVARIANT: this gate does NOT make deferring route registration safe. Hono
  * throws `Can not add a route since the matcher is already built` on any route

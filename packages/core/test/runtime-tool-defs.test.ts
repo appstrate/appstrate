@@ -195,6 +195,23 @@ describe("buildPublishFileDef", () => {
     expect(eventsOf(result._meta)).toHaveLength(1);
   });
 
+  it("normalizes an empty `name` to undefined on the way to the uploader", async () => {
+    // A model that has nothing better to send fills the optional field with the
+    // empty string rather than omitting it. `""` must reach the uploader as
+    // `undefined` so the uploader falls back to the on-disk file name; passing
+    // `""` through names the deliverable the empty string.
+    const requests: Array<[string, string | undefined]> = [];
+    const def = buildPublishFileDef(async (path, name) => {
+      requests.push([path, name]);
+      return publishedFile;
+    });
+
+    const result = await def.handler({ path: "outputs/notes.md", name: "" });
+
+    expect(result.isError).toBeUndefined();
+    expect(requests).toEqual([["outputs/notes.md", undefined]]);
+  });
+
   it("still rejects a missing path", async () => {
     const def = buildPublishFileDef(async () => publishedFile);
     const result = await def.handler({ presentation: "primary" });

@@ -18,7 +18,7 @@
  *    token) never leaks via the Referer header.
  *  - `src` is the server-minted `preview_url` on a cookie-less route hardened
  *    with a strict CSP + injected meta CSP (see `file-preview.ts` on the API).
- *  - Where this frame may NAVIGATE is bounded by the SPA file's own CSP,
+ *  - Where this frame may NAVIGATE is bounded by the SPA document's own CSP,
  *    which the API sends on the `index.html` response: `frame-src <preview
  *    origin>` and nothing else (`buildSpaCsp()` in `apps/api/src/routes/spa.ts`).
  *    Neither the `sandbox` attribute nor the preview response's CSP can close

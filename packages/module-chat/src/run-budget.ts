@@ -104,7 +104,7 @@ export function decideRunAndWaitBudget(
   // is granted, silently. A "tight budget" warn used to sit here, keyed on a
   // 3-minute threshold nothing derived and nothing consumed — no alert, no
   // dashboard, no runbook — and it could not have fired on the incident above
-  // this file files (22 s left is a refusal, not a warn).
+  // this file documents (22 s left is a refusal, not a warn).
   return { launch: true, maxMs: budget.maxMs };
 }
 

@@ -85,7 +85,7 @@ describe("refusalCode", () => {
     expect(refusalCode(problem({ status: 500, code: "unexpected" }))).toBeUndefined();
   });
 
-  it("declines anything that is not a problem file", () => {
+  it("declines anything that is not a problem document", () => {
     expect(refusalCode("Upstream model error (status 503)")).toBeUndefined();
     expect(refusalCode("{not json")).toBeUndefined();
     expect(refusalCode(undefined)).toBeUndefined();

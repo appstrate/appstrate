@@ -116,7 +116,7 @@ describe("POST /mcp — api_call resource spillover", () => {
       params: {
         name: "test__api_call",
         arguments: {
-          target: "https://api.example.com/file.pdf",
+          target: "https://api.example.com/document.pdf",
         },
       },
     });
@@ -474,7 +474,7 @@ describe("POST /mcp — resources/list + resources/read", () => {
       params: {
         name: "test__api_call",
         arguments: {
-          target: "https://api.example.com/file.pdf",
+          target: "https://api.example.com/document.pdf",
         },
       },
     });

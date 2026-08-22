@@ -47,7 +47,7 @@ describe("isTextLikeMimeType", () => {
     "image/png",
     "application/zip",
     XLSX,
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.file",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/vnd.ms-excel.sheet.macroenabled.12",
     "application/vnd.oasis.opendocument.spreadsheet",
     "application/epub+zip",

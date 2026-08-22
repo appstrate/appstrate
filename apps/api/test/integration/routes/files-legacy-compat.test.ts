@@ -43,7 +43,11 @@ import { createFileFromStream } from "../../../src/services/files.ts";
 import { getRunFull } from "../../../src/services/state/runs.ts";
 import { seedDefaultOrgModel } from "../../helpers/run-connection-fixtures.ts";
 import { readBundleFromBuffer } from "@appstrate/afps-runtime/bundle";
-import type { LoadedPackage } from "../../../src/types/index.ts";
+import { validateInlineManifest } from "../../../src/services/inline-manifest-validation.ts";
+import { getInlineRunLimits } from "../../../src/services/run-limits.ts";
+import { insertShadowPackage, buildShadowLoadedPackage } from "../../../src/services/inline-run.ts";
+import { streamRunFile } from "../../../src/services/run-workspace-storage.ts";
+import type { LoadedPackage, AgentManifest } from "../../../src/types/index.ts";
 
 const app = getTestApp();
 
@@ -155,6 +159,45 @@ describe("#1177 compatibility — an older runtime image", () => {
       const problem = (await res.json()) as { detail?: string };
       expect(problem.detail).toContain("no input files");
     }
+  });
+
+  it("streams a single input file through the retired GET /documents/:name path", async () => {
+    const runId = await seedRunWithSink(ctx);
+    // Provision one workspace input file, exactly as upload-consume does before
+    // the container starts.
+    await streamRunFile(
+      runId,
+      "brief.md",
+      new Response("# brief bytes").body as ReadableStream<Uint8Array>,
+    );
+
+    const bodies: string[] = [];
+    for (const path of [
+      `/api/runs/${runId}/files/brief.md`,
+      `/api/runs/${runId}/documents/brief.md`,
+    ]) {
+      const res = await app.request(path, { method: "GET", headers: signedHeaders("") });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toBe("application/octet-stream");
+      bodies.push(await res.text());
+    }
+    // Same handler, same bytes — the retired spelling is an alias, not a
+    // second implementation that could drift.
+    expect(bodies[0]).toBe("# brief bytes");
+    expect(bodies[1]).toBe(bodies[0]);
+  });
+
+  it("404s on the retired GET /documents/:name path for an absent file", async () => {
+    const runId = await seedRunWithSink(ctx);
+    // Routed, not swallowed by the unknown-API catch-all: the 404 comes from
+    // the handler and names the run.
+    const res = await app.request(`/api/runs/${runId}/documents/missing.md`, {
+      method: "GET",
+      headers: signedHeaders(""),
+    });
+    expect(res.status).toBe(404);
+    const problem = (await res.json()) as { detail?: string };
+    expect(problem.detail).toBe(`file missing.md not found for run ${runId}`);
   });
 
   it("ingests a retired document.published event carrying a document_id", async () => {
@@ -584,5 +627,47 @@ describe("#1177 compatibility — a manifest that names publish_document", () =>
     ]);
 
     await assertPublishToolSurvivesLaunch(resolved.agent, resolved.overrideVersionLabel);
+  });
+
+  it("keeps the publish tool on the inline / run_and_wait launch path", async () => {
+    await seedDefaultOrgModel(ctx);
+    // Inline has no stored package to repair: `POST /api/runs/inline` — and the
+    // MCP `run_and_wait` shortcut behind it — takes the manifest off the
+    // REQUEST BODY on every call. A caller pinned to the pre-#1177 vocabulary
+    // (a saved curl, a CI job, a model that learned the old id) keeps sending
+    // `publish_document` forever, so this path has to canonicalize on each
+    // request rather than once at save time.
+    const rawManifest = {
+      name: "@inline/legacy-tools",
+      version: "0.1.0",
+      type: "agent",
+      schema_version: "0.1",
+      display_name: "Inline Legacy",
+      description: "Inline manifest authored before #1177",
+      runtime_tools: ["log", "publish_document"],
+    };
+    const validated = validateInlineManifest({
+      manifest: rawManifest,
+      prompt: "Do the thing.",
+      limits: getInlineRunLimits(),
+    });
+    expect(validated.valid).toBe(true);
+    // Pre-condition, mirroring the stored cases: the bytes the caller sent
+    // still carry the legacy spelling.
+    expect(rawManifest.runtime_tools).toEqual(["log", "publish_document"]);
+
+    // From here on this is verbatim what `runInlineAgent` does: mint the
+    // ephemeral shadow row from the validated manifest, wrap it as the
+    // `LoadedPackage` the pipeline receives, and launch.
+    const manifest = validated.manifest as AgentManifest;
+    const shadowId = await insertShadowPackage({
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      manifest,
+      prompt: "Do the thing.",
+    });
+    const shadowAgent = buildShadowLoadedPackage(shadowId, manifest, "Do the thing.");
+
+    await assertPublishToolSurvivesLaunch(shadowAgent);
   });
 });

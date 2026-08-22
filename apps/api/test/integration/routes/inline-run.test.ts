@@ -167,7 +167,12 @@ describe("POST /api/runs/inline — input file fields (parseRequestInput wiring)
     });
     expect(res.status).toBe(404);
     const body = (await res.json()) as { detail?: string };
-    expect(body.detail ?? "").toMatch(/file/i);
+    // Pin the actual cause: "file" alone is a substring of half this API's 404
+    // details, so it would still match if the request failed for an unrelated
+    // reason. `notFound("File '<id>' not found")` — input-parser.ts.
+    expect(body.detail ?? "").toMatch(
+      /^File 'doc_00000000-0000-0000-0000-000000000000' not found$/,
+    );
   });
 
   it("returns 400 when a file field carries a non-URI value", async () => {

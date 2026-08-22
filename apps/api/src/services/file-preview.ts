@@ -98,7 +98,7 @@ export function verifyPreviewToken(
 }
 
 /**
- * Is `mime` an HTML file? Tolerates a parameterized value
+ * Is `mime` an HTML document? Tolerates a parameterized value
  * (`text/html; charset=utf-8`) — only the type/subtype matters for the preview
  * gate. Retained as a focused, tested utility; the DTO and route classify via
  * {@link previewKind} (of which HTML is one kind).
@@ -254,7 +254,7 @@ interface PreviewCsp {
  * like a control while blocking nothing, and is deliberately absent.
  *
  * The embedding iframe declares the SAME token set (`PREVIEW_IFRAME_SANDBOX` in
- * `apps/web/src/components/file-preview.tsx`) and the two sandboxes
+ * `apps/web/src/components/file-viewer.tsx`) and the two sandboxes
  * INTERSECT, so the sets must move together or not at all. The header copy is
  * not redundant with the attribute: `frame-ancestors` lets ANY page on the app
  * origin frame the preview, so the header is what still applies if a future

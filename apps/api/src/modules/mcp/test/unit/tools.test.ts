@@ -112,25 +112,39 @@ describe("retired pre-#1177 tool names", () => {
   });
 
   it("forwards a retired name to the canonical handler", async () => {
-    const { byName } = makeTools(["mcp:read"]);
-    const viaRetired = await byName.get("list_documents")!.handler({}, noExtra);
-    const viaCanonical = await byName.get("list_files")!.handler({}, noExtra);
-    expect(parseResult(viaRetired)).toEqual(parseResult(viaCanonical));
+    const { byName, calls } = makeTools(["mcp:read"]);
+    await byName.get("list_documents")!.handler({}, noExtra);
+    await byName.get("list_files")!.handler({}, noExtra);
+    // `dispatch` is a stub that echoes a constant for every request, so
+    // comparing the two RESULTS proves nothing — an alias wired to the wrong
+    // canonical tool would compare equal. Assert the request each one actually
+    // dispatched instead.
+    expect(calls).toHaveLength(2);
+    expect(new URL(calls[0]!.url).pathname).toBe("/api/files");
+    expect(calls[0]!.url).toBe(calls[1]!.url);
+    expect(calls[0]!.method).toBe(calls[1]!.method);
   });
 
   it("renames the retired document_uri argument on the way in", async () => {
-    const { byName, calls } = makeTools(["mcp:read", "mcp:invoke", "agents:write"]);
+    const { byName } = makeTools(["mcp:read", "mcp:invoke", "agents:write"]);
     // `validate_package_file` reads `file_uri`; a caller pinned to the old
     // vocabulary sends `document_uri`. Without the rename the tool answers
     // "file_uri is required" for an argument the caller did supply.
+    // Reaching the URI-PARSE failure is the whole signal: it can only happen
+    // once the argument has been renamed (`doc_x` is too short for FILE_ID_RE,
+    // so the parse rejects before any DB lookup — this stays a pure unit test).
     await expect(
       byName
         .get("validate_package_document")!
         .handler({ document_uri: "appfile://doc_x" }, noExtra),
-    ).rejects.toThrow(/not found|file/i);
-    // The point is that it got PAST the "required" guard — an unrenamed arg
-    // throws InvalidParams before any lookup happens.
-    expect(calls).toBeDefined();
+    ).rejects.toThrow(/Not a file URI/);
+    // Negative control: the canonical tool gets no rename, so the very same
+    // arguments stop at the "required" guard before any lookup happens. If this
+    // stopped holding, the assertion above would no longer distinguish a working
+    // rename from a missing one.
+    await expect(
+      byName.get("validate_package_file")!.handler({ document_uri: "appfile://doc_x" }, noExtra),
+    ).rejects.toThrow(/file_uri is required/);
   });
 });
 

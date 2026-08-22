@@ -405,7 +405,7 @@ function buildDescribeTool(ctx: McpToolContext): AppstrateToolDefinition {
     const operationId = asString(args.operation_id);
     // Structural protocol errors (-32602 InvalidParams): a missing required
     // argument or an unknown operationId is a malformed call, not a failed
-    // execution — the MCP spec documents these under protocol errors. Execution
+    // execution — the MCP spec files these under protocol errors. Execution
     // failures (upstream HTTP errors, …) stay `isError` tool results so the
     // model sees them and can self-correct.
     if (!operationId) {
@@ -1193,7 +1193,7 @@ function buildReadFileTool(ctx: McpToolContext): AppstrateToolDefinition {
       additionalProperties: false,
       required: ["uri"],
       properties: {
-        uri: { type: "string", description: "A appfile:// URI returned by list_files." },
+        uri: { type: "string", description: "An appfile:// URI returned by list_files." },
       },
     },
   };

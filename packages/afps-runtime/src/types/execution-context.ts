@@ -73,7 +73,7 @@ export type MemorySnapshot = z.infer<typeof memorySnapshotSchema>;
 export type HistoryEntry = z.infer<typeof historyEntrySchema>;
 
 /**
- * Seedable snapshot file accepted by `afps render --snapshot` and
+ * Seedable snapshot document accepted by `afps render --snapshot` and
  * `appstrate run --snapshot`: the subset of {@link ExecutionContext} a
  * caller may pre-seed (prior memories / conversation history / persisted
  * checkpoint). Extra keys are ignored by loaders so the format can evolve

@@ -78,7 +78,7 @@ function fileMessage(id: string, uri: string, name: string, mime = "text/plain")
     id,
     role: "user",
     parts: [
-      { type: "text", text: "Résume ce file" },
+      { type: "text", text: "Résume ce document" },
       { type: "file", url: uri, mediaType: mime, filename: name },
     ],
   } as UIMessage;

@@ -190,17 +190,17 @@ describe("buildInertPreviewCsp", () => {
 });
 
 describe("mayServeActiveHtml", () => {
-  it("is active ONLY for a proven nested-file load", () => {
+  it("is active ONLY for a proven nested-document load", () => {
     expect(mayServeActiveHtml("iframe")).toBe(true);
   });
 
   it("fails closed on a top-level navigation, a bare fetch, and a missing header", () => {
-    // `file` is the shared-link / new-tab case the whole gate exists for: a
+    // `document` is the shared-link / new-tab case the whole gate exists for: a
     // top-level agent document can navigate ITSELF (the sandbox flags only gate
     // navigating an ancestor), so it can be a fake login form that carries the
     // typed-in credentials out in a navigation URL. Refusing the render is the
     // only control over that channel.
-    for (const dest of ["file", "empty", "object", "embed", "frame", "", null, "IFRAME"]) {
+    for (const dest of ["document", "empty", "object", "embed", "frame", "", null, "IFRAME"]) {
       expect(mayServeActiveHtml(dest)).toBe(false);
     }
   });

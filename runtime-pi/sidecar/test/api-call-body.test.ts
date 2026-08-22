@@ -354,7 +354,7 @@ describe("POST /mcp — api_call body silent-drop guard", () => {
 });
 
 describe("POST /mcp — api_call descriptor advertises JSON-object body", () => {
-  it("lists a JSON-object variant and files Content-Type defaulting", async () => {
+  it("lists a JSON-object variant and documents Content-Type defaulting", async () => {
     const app = await makeApp();
     const res = await rpc(app, { method: "tools/list" });
     const result = res.json.result as {

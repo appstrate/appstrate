@@ -290,7 +290,7 @@ function createInstruments(m: Meter): void {
     description: "Pending storage-deletion jobs past the dead-letter attempt threshold.",
   }).addCallback((result) => result.observe(storageDeletionDeadLetters));
 
-  // Files lifecycle counters (files-hardening). Created/deleted track
+  // Files lifecycle counters (documents-hardening). Created/deleted track
   // the durable-file population churn; storage_limit_rejections + partial_publications
   // are the health signals (a write refused for want of quota; a run that lost a
   // deliverable at finalize). `purpose` on `created` is a 2-value dimension

@@ -340,12 +340,12 @@ describe("package storage: deletion outbox + orphan reconciliation", () => {
   it("maps run-workspace objects back to their run and never orphans an unparseable key", async () => {
     expect(runWorkspaceOwner("run_abc.afps")).toBe("run_abc");
     expect(runWorkspaceOwner("run_abc/manifest.json")).toBe("run_abc");
-    expect(runWorkspaceOwner("run_abc/files/a.txt")).toBe("run_abc");
+    expect(runWorkspaceOwner("run_abc/documents/a.txt")).toBe("run_abc");
     expect(runWorkspaceOwner("stray-object")).toBeNull();
 
     const diff = await diffBucket(
       "run-workspace",
-      objects(["run_live/files/a.txt", 100], ["run_dead/manifest.json", 100], ["stray", 100]),
+      objects(["run_live/documents/a.txt", 100], ["run_dead/manifest.json", 100], ["stray", 100]),
       new Set(["run_live"]),
       { cutoffMs: Date.now() - 24 * 60 * 60 * 1000, identityOf: runWorkspaceOwner },
     );

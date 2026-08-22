@@ -11,10 +11,10 @@
  * attribute. That stamping is wire behaviour and the only reason this module
  * exists.
  *
- * ## The URIs are identifiers, not files — and nothing serves them
+ * ## The URIs are identifiers, not documents — and nothing serves them
  *
  * This module used to be the generator for a set of JSON Schema 2020-12
- * files: a Zod payload table, `buildCanonicalEventJsonSchema(s)`,
+ * documents: a Zod payload table, `buildCanonicalEventJsonSchema(s)`,
  * `serializeCanonicalEventJsonSchema`, seven committed artifacts under
  * `schemas/v0/events/`, a `schemas:generate` package script, and a
  * byte-compare drift test. All of it is gone. **Do not rebuild it without
@@ -26,11 +26,11 @@
  *    2026-08). The afps-spec Pages job copies `packages/schema/v0/*.schema.json`
  *    flat, with no `events/` subdirectory, so nothing ever reached the host.
  *  - `schemas.appstrate.dev` — the intended vendor host for the `appstrate.*`
- *    files — was never stood up either.
+ *    documents — was never stood up either.
  *  - `schemas:generate` was in no workflow, so the artifacts were regenerated
  *    only by hand.
  *
- * A `dataschema` URI is a stable identifier first and a fetchable file
+ * A `dataschema` URI is a stable identifier first and a fetchable document
  * second — CloudEvents 1.0 §3.1 does not require it to dereference, and
  * consumers are expected to treat a 404 as "schema not mirrored". Keeping the
  * URIs while dropping ~550 lines of unpublished generation machinery costs
@@ -40,7 +40,7 @@
  * reader is `isCanonicalRunEvent` (`../types/canonical-events.ts`), which is
  * what actually gates the attribute, and it is exercised against the shared
  * fixture corpus in `test/fixtures/canonical-event-corpus.ts`. If the
- * files are ever genuinely wanted, regenerate from that guard — and wire
+ * documents are ever genuinely wanted, regenerate from that guard — and wire
  * the Pages job in the same change.
  *
  * Specification: CloudEvents 1.0 §3.1 (`dataschema`).

@@ -56,7 +56,7 @@ const ZIP_CONTAINER_MIMES = new Set([
   // OOXML
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // xlsx
   "application/vnd.openxmlformats-officedocument.spreadsheetml.template", // xltx
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.file", // docx
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // docx
   "application/vnd.openxmlformats-officedocument.wordprocessingml.template", // dotx
   "application/vnd.openxmlformats-officedocument.presentationml.presentation", // pptx
   "application/vnd.openxmlformats-officedocument.presentationml.slideshow", // ppsx
@@ -64,7 +64,7 @@ const ZIP_CONTAINER_MIMES = new Set([
   // OOXML macro-enabled
   "application/vnd.ms-excel.sheet.macroenabled.12", // xlsm
   "application/vnd.ms-excel.template.macroenabled.12", // xltm
-  "application/vnd.ms-word.file.macroenabled.12", // docm
+  "application/vnd.ms-word.document.macroenabled.12", // docm
   "application/vnd.ms-word.template.macroenabled.12", // dotm
   "application/vnd.ms-powerpoint.presentation.macroenabled.12", // pptm
   "application/vnd.ms-powerpoint.slideshow.macroenabled.12", // ppsm

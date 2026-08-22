@@ -616,7 +616,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
     });
     // The kernel/rootfs are hardlinked into every VM's chroot and read
     // by unprivileged per-VM uids → they must be root:root 0644. They
-    // are not secret (public release artifacts); enforce, don't file.
+    // are not secret (public release artifacts); enforce, don't document.
     for (const artifact of [
       resolve(fcEnv.FIRECRACKER_KERNEL_PATH),
       resolve(fcEnv.FIRECRACKER_ROOTFS_PATH),

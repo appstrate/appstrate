@@ -590,7 +590,7 @@ describe("buildEnrichedPrompt — provider dimension fully removed", () => {
   });
 });
 
-// ─── Files/files ────────────────────────────────────────
+// ─── Files ──────────────────────────────────────────────────
 
 describe("buildEnrichedPrompt — files", () => {
   it("includes files section when files provided", async () => {

@@ -66,9 +66,18 @@ describe("runtime-tool legacy aliases", () => {
   });
 
   it("the accepted-id list is canonical ids plus every legacy spelling", () => {
+    // Spelled out literally on purpose: recomposing the expectation from the
+    // same two expressions the source composes it from passes even when the
+    // alias table is empty or wrong. This is the list the Zod `runtime_tools`
+    // enum and the generated AFPS JSON Schema are built from — a persisted
+    // manifest carrying an id missing here stops validating.
     expect([...ACCEPTED_RUNTIME_TOOL_IDS] as string[]).toEqual([
-      ...SELECTABLE_RUNTIME_TOOLS,
-      ...Object.keys(LEGACY_RUNTIME_TOOL_ALIASES),
+      "output",
+      "log",
+      "note",
+      "pin",
+      "publish_file",
+      "publish_document",
     ]);
   });
 

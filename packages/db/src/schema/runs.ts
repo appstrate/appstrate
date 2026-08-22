@@ -118,7 +118,7 @@ export const runs = pgTable(
     status: runStatusEnum("status").notNull().default("pending"),
     input: jsonb("input"),
     result: jsonb("result").$type<RunResultPayload>(),
-    // Terminal summary of the end-of-run `outputs/` sweep (#files-hardening):
+    // Terminal summary of the end-of-run `outputs/` sweep (#documents-hardening):
     // how many deliverables the container published and which were LOST. NULL
     // until finalize writes it, and NULL forever for older containers that do
     // not report the summary. A `status: "partial"` value coexists with a
@@ -142,7 +142,7 @@ export const runs = pgTable(
     // (PiRunner emits `input_tokens` / `output_tokens` / … directly from
     // the Pi SDK), the AFPS `tokenUsageSchema` validated on ingestion in
     // `apps/api/src/services/adapters/types.ts`, and the frontend reader
-    // in `run-info-tab.tsx`. Do NOT rename to camelCase without a data
+    // in `run-execution-tab.tsx`. Do NOT rename to camelCase without a data
     // migration and a coordinated wire-schema bump — the JSONB payloads
     // already in production use snake_case.
     tokenUsage: jsonb("token_usage").$type<TokenUsage>(),

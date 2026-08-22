@@ -18,7 +18,7 @@ import {
 } from "../../../src/services/mime-policy.ts";
 
 const XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.file";
+const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 describe("sniffedMimeMatchesDeclared", () => {
   it("exact match passes", () => {
@@ -86,9 +86,9 @@ describe("sniffedMimeMatchesDeclared", () => {
     expect(sniffedMimeMatchesDeclared(XLSX, "application/vnd.ms-excel.sheet.macroenabled.12")).toBe(
       false,
     );
-    expect(sniffedMimeMatchesDeclared(DOCX, "application/vnd.ms-word.file.macroenabled.12")).toBe(
-      false,
-    );
+    expect(
+      sniffedMimeMatchesDeclared(DOCX, "application/vnd.ms-word.document.macroenabled.12"),
+    ).toBe(false);
     expect(sniffedMimeMatchesDeclared("application/epub+zip", XLSX)).toBe(false);
   });
 });
