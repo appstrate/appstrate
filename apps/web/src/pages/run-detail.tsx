@@ -42,6 +42,17 @@ import type { RunDetailTab } from "../lib/run-detail-tabs";
 /** Wire shape of a persisted log row (spec `RunLog`); `createdAt` is an ISO string. */
 type RunLogEntry = components["schemas"]["RunLog"];
 
+/**
+ * Has this React Query subscription reached a state that will not change on its
+ * own? Either it answered (data or error, so no longer `pending`), or it is
+ * disabled and will never run (`pending` with an idle fetch). A query still
+ * `fetching` — including the very first render, where v5 already reports the
+ * optimistic `fetching` — has not.
+ */
+function isQuerySettled(query: { isPending: boolean; fetchStatus: string }): boolean {
+  return !query.isPending || query.fetchStatus === "idle";
+}
+
 export function RunDetailPage() {
   const { t } = useTranslation(["agents", "common"]);
   const { scope, name, runId } = useParams<{ scope: string; name: string; runId: string }>();
@@ -112,9 +123,14 @@ export function RunDetailPage() {
   const allLogs = historicalLogs;
 
   // Run-level memory rows (only those touched during this run).
-  const { data: runMemories } = useRunMemories(packageId, runId);
-  const { data: runPinned } = useRunPinned(packageId, runId);
-  const runMemoryCount = (runMemories?.length ?? 0) + (runPinned?.length ?? 0);
+  const runMemoriesQuery = useRunMemories(packageId, runId);
+  const runPinnedQuery = useRunPinned(packageId, runId);
+  const runMemoryCount = (runMemoriesQuery.data?.length ?? 0) + (runPinnedQuery.data?.length ?? 0);
+  // These two resolve independently of `useRun`, so `runMemoryCount` is 0 for a
+  // while on a run that DID write memory. The tab controller captures its
+  // default pane once and must not capture it from that transient 0 — hand it
+  // the settled flag rather than the count alone.
+  const memorySettled = isQuerySettled(runMemoriesQuery) && isQuerySettled(runPinnedQuery);
 
   // File count for the tab badge — read off the run DTO the page already
   // has (same field `run-row.tsx` renders). Listing the run's files just to
@@ -281,6 +297,7 @@ export function RunDetailPage() {
           hasOutput,
           hasMemory: runMemoryCount > 0,
         }}
+        memorySettled={memorySettled}
       >
         {({ activeTab, setActiveTab }) => (
           <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as RunDetailTab)}>
@@ -362,6 +379,7 @@ export function RunDetailPage() {
                   packageId={packageId}
                   output={finalOutput}
                   memoryCount={runMemoryCount}
+                  producedFileCount={outputFileCount}
                 />
               )}
             </TabsContent>

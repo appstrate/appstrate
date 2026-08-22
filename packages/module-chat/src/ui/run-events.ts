@@ -309,6 +309,19 @@ export interface ChatRunFile {
   size?: number;
 }
 
+/**
+ * Display name for a publication that carries none. The sink writes
+ * `name: null` whenever the emitter omitted it
+ * (`appstrate-event-sink.ts` → `file.published`), so a nameless frame is
+ * reachable, not hypothetical. Dropping such a frame would be the worse
+ * failure by far: the count of produced files IS the auto-present rule, so one
+ * missing file turns a two-file run into a single-file run and opens the wrong
+ * thing. A chip with a generic label still opens, still downloads, and — once
+ * the run is terminal — is relabelled by the authoritative `/api/files` read.
+ * Matches the fallback the thread already renders for a nameless attachment.
+ */
+const UNNAMED_FILE = "file";
+
 function asChatRunFile(raw: unknown): ChatRunFile | undefined {
   const r = asRecord(raw);
   if (!r) return undefined;
@@ -317,8 +330,8 @@ function asChatRunFile(raw: unknown): ChatRunFile | undefined {
   // `event` tag stays accepted: persisted frames are immutable once written).
   const id = nonEmptyString(r.id) ?? nonEmptyString(r.file_id) ?? nonEmptyString(r.document_id);
   const uri = nonEmptyString(r.uri) ?? (id ? fileUri(id) : undefined);
-  const name = nonEmptyString(r.name);
-  if (!id || !uri || !name) return undefined;
+  const name = nonEmptyString(r.name) ?? UNNAMED_FILE;
+  if (!id || !uri) return undefined;
   const file: ChatRunFile = { id, uri, name };
   const mime = nonEmptyString(r.mime);
   if (mime) file.mime = mime;
@@ -391,6 +404,118 @@ export function publishedFilesFromLogs(logs: readonly RunLogLine[]): ChatRunFile
 }
 
 /**
+ * One page of `GET /api/files?run_id=…&purpose=agent_output`, narrowed to what
+ * this run PRODUCED.
+ */
+export interface ProducedFileList {
+  /** The rows on this page that this run produced. */
+  files: ChatRunFile[];
+  /**
+   * The server holds rows beyond this page (`hasMore` on the list envelope).
+   * The route clamps `limit` to 100 and exposes no cursor field — paging is
+   * `startingAfter=<last id>` — so a run that produced more than 100 files is
+   * silently truncated here unless the caller says so.
+   *
+   * This does NOT endanger the auto-present rule: a truncated page holds at
+   * least 100 entries, never exactly 1, so {@link autoPresentFile} answers
+   * `undefined` either way. It is a display concern only — do not build a
+   * pager for it.
+   */
+  hasMore: boolean;
+}
+
+/**
+ * The run's produced files, read from `GET /api/files?run_id=…` — the same
+ * endpoint (and the same predicate) the run page's Outcome pane uses. This is
+ * the AUTHORITATIVE set: the log stream is a truncatable window
+ * (`?limit=1000`, ascending, cursor never followed), and the end-of-run
+ * `file.published` frames are the last rows a run writes, so a chatty run
+ * pushes exactly the frames this card needs out of the page.
+ *
+ * Returns `undefined` — NOT an empty page — when `payload` is not a list
+ * envelope at all (an error body, a truncated response, anything unparseable).
+ * The two are opposite kinds of answer and the completion signal turns on
+ * telling them apart: an envelope listing zero rows is a run that produced
+ * nothing, which is a complete answer; a body that is not an envelope is no
+ * answer at all. See {@link shouldRaiseSweepDone}.
+ *
+ * Both halves of the filter are load-bearing and `purpose` alone is NOT
+ * enough: the endpoint answers the run's whole CONTAINER, so a file chained in
+ * as INPUT from an earlier run is listed here while still carrying
+ * `purpose: "agent_output"` — it was produced by that earlier run. Ownership is
+ * decided by the row's own `run_id`.
+ *
+ * The produced-by-this-run predicate exists in THREE places and they must not
+ * drift: `producedRunFiles()` in `apps/web/src/lib/files.ts` (the run page),
+ * this function (the chat card), and `fetchRunFiles()` in
+ * `@appstrate/core/run-and-wait-client` (the server-side `run_and_wait`
+ * payload). All three agree with the server's own predicate. The duplication is
+ * deliberate: `@appstrate/module-chat` is an optional package the web shell
+ * consumes, and a package may not import from `apps/web`.
+ */
+export function producedFilesFromFileList(
+  payload: unknown,
+  runId: string,
+): ProducedFileList | undefined {
+  const envelope = asRecord(payload);
+  const rows = envelope?.data;
+  if (!Array.isArray(rows)) return undefined;
+  const out: ChatRunFile[] = [];
+  for (const row of rows) {
+    const r = asRecord(row);
+    if (!r) continue;
+    if (r.purpose !== "agent_output" || r.run_id !== runId) continue;
+    const file = asChatRunFile(r);
+    if (file) out.push(file);
+  }
+  return { files: out, hasMore: envelope?.hasMore === true };
+}
+
+/**
+ * How one of the reads the completion signal depends on turned out.
+ * `"not-attempted"` is not a failure: it says this settle path never claimed
+ * that read in the first place.
+ */
+export type SweepRead = "ok" | "failed" | "not-attempted";
+
+/**
+ * Should `sweepDone` — "this run's produced-file set is complete and
+ * trustworthy" — be raised, given how the reads that back the claim turned out?
+ *
+ * The invariant, and the whole reason this is a function and not an inlined
+ * `finally`: **no evidence, no flag; and no flag means nothing is presented,
+ * never an error and never a spinner.** A read that merely FINISHED is not
+ * evidence — the previous shape swallowed a 500 from `/api/files` and raised
+ * the flag anyway, which is how a two-file run whose second publication frame
+ * fell outside the log window auto-opened the first of its two files.
+ *
+ *  - `status` must be terminal: `sweepDone` says the read finished, the status
+ *    says the run is over. Both are required.
+ *  - `producedFileRead` must be `"ok"`: the response was 2xx AND the payload
+ *    parsed as the list envelope. An envelope listing ZERO files IS `"ok"` —
+ *    a run that produced nothing is a legitimate, complete answer.
+ *  - `logSweep` blocks only when it was attempted and FAILED. The card's set is
+ *    the UNION of the log frames and the authoritative read, and the
+ *    authoritative half alone already covers everything the run produced, so a
+ *    frame the sweep missed can only delay a chip, never remove one. But a
+ *    sweep that errored yields `[]`, which is indistinguishable from "this run
+ *    wrote no frames", and the tail path attempts one precisely because frames
+ *    can land in the same tick as the terminal status. Withholding there costs
+ *    nothing (no flag ⇒ nothing presented, card unchanged) and is the only
+ *    reading that keeps "no evidence, no flag" literal. The no-tail path never
+ *    attempts a final sweep and reports `"not-attempted"`.
+ */
+export function shouldRaiseSweepDone(args: {
+  status: string | null | undefined;
+  producedFileRead: SweepRead;
+  logSweep: SweepRead;
+}): boolean {
+  if (!isTerminalStatus(args.status)) return false;
+  if (args.producedFileRead !== "ok") return false;
+  return args.logSweep !== "failed";
+}
+
+/**
  * The derived auto-present rule (issue #1177). Nothing the agent declares takes
  * part in it: the run either produced exactly ONE file — which is then opened
  * for the user — or it did not, and the card just lists what there is.
@@ -399,18 +524,28 @@ export function publishedFilesFromLogs(logs: readonly RunLogLine[]): ChatRunFile
  *  - exactly 1         → that one.
  *  - N > 1             → nothing; the user picks from the chips.
  *
- * Gated on a SETTLED run (terminal status, live tail closed) because a run that
- * publishes three files emits them one at a time: a mid-stream count of 1 is not
- * the final count, and opening on it would auto-present the first of three. The
- * hook flips `live` to false only after its final log sweep, so "terminal and no
- * longer live" is precisely "the file set is complete".
+ * Gated on a SETTLED run because a run that publishes three files emits them one
+ * at a time: a mid-stream count of 1 is not the final count, and opening on it
+ * would auto-present the first of three.
+ *
+ * "Settled" is asserted by a POSITIVE signal, `sweepDone` — raised by
+ * `useRunLogStream` only after it has actually completed a full read of the
+ * run's produced-file set (final log sweep + the authoritative
+ * `GET /api/files` read). The absence of a live tail is NOT that signal and
+ * must not be used as one: the hook's `live` starts `false` and only turns true
+ * on the SSE handshake, which loses a race against the two plain GETs the same
+ * effect fires, and stays false forever when no SSE can be opened at all. Under
+ * a `!live` gate both cases read as "settled" on a set nothing ever completed.
+ *
+ * Terminal status is still required on top: `sweepDone` says the read finished,
+ * the status says the run is over.
  */
 export function autoPresentFile(args: {
   files: readonly ChatRunFile[];
   status: RunStatus | undefined;
-  live: boolean;
+  sweepDone: boolean;
 }): ChatRunFile | undefined {
-  if (!isTerminalStatus(args.status) || args.live) return undefined;
+  if (!isTerminalStatus(args.status) || !args.sweepDone) return undefined;
   return args.files.length === 1 ? args.files[0] : undefined;
 }
 

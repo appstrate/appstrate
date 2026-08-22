@@ -13,11 +13,17 @@ export function useTabWithHash<T extends string>(
   const hash = location.hash.replace(/^#/, "");
   const activeTab = validTabs.includes(hash as T) ? (hash as T) : defaultTab;
 
+  // `search` is passed explicitly: a partial path descriptor goes through
+  // react-router's `resolvePath`, which defaults every omitted field to `""`,
+  // so a bare `{ hash }` silently DROPS the query string. The run-detail route
+  // carries none today, but this hook has seven call sites and the retired-hash
+  // rewrite now fires automatically on load rather than only on a tab click.
+  const search = location.search;
   const setActiveTab = useCallback(
     (tab: T) => {
-      navigate({ hash: tab === defaultTab ? "" : tab }, { replace: true });
+      navigate({ search, hash: tab === defaultTab ? "" : tab }, { replace: true });
     },
-    [navigate, defaultTab],
+    [navigate, defaultTab, search],
   );
 
   return [activeTab, setActiveTab];

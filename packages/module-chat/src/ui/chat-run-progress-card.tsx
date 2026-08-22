@@ -114,7 +114,16 @@ export function ChatRunProgressCard({
   agentLabel?: string;
   runHref?: string;
   initialPackageId?: string;
-  /** Files from the persisted tool result — survive reload; merged with live ones. */
+  /**
+   * Files from the persisted tool result — survive reload; merged with the live
+   * and authoritative lists. MUST be referentially stable across renders: a
+   * fresh array here defeats the `files` memo, makes `autoPresented` a new
+   * object, and re-fires the auto-present effect. The caller
+   * (`RunLaunchCard` in `tool-uis.tsx`) memoizes it for that reason — its own
+   * renders are driven by assistant-ui, once per stream chunk. The card's
+   * internal 500 ms `useLogTicker` is not involved: that state lives here, and
+   * it never re-invokes the parent's extraction.
+   */
   initialFiles?: ChatRunFile[];
   phase: ToolPhase;
   /** Launch-failure message shown on line 2 when the tool errored without a run id. */
@@ -122,18 +131,29 @@ export function ChatRunProgressCard({
   modalTitle: React.ReactNode;
   details: React.ReactNode;
 }) {
-  const { logs, status, packageId, startedAt, completedAt, duration, live } = useRunLogStream(
-    runId,
-    initialStatus,
-    initialPackageId,
-  );
+  const {
+    logs,
+    status,
+    packageId,
+    startedAt,
+    completedAt,
+    duration,
+    producedFiles,
+    producedFilesTruncated,
+    sweepDone,
+  } = useRunLogStream(runId, initialStatus, initialPackageId);
 
-  // Files: the persisted tool-result list (reload-safe) merged with any
-  // that arrive live over the log stream (`file.published` frames). Both
-  // sources hold only files the run PRODUCED — the population the rule counts.
+  // Files: the persisted tool-result list (reload-safe), the frames that arrive
+  // live over the log stream (`file.published` — chips appear the moment an
+  // agent publishes), and the authoritative `/api/files` read the hook performs
+  // once the run is terminal. All three hold only files the run PRODUCED — the
+  // population the rule counts — and they are UNIONED: the authoritative read
+  // comes last so its full metadata wins, but it can never remove a chip the
+  // log frames already showed.
   const files = React.useMemo(
-    () => mergeRunFiles(initialFiles ?? [], publishedFilesFromLogs(logs)),
-    [initialFiles, logs],
+    () =>
+      mergeRunFiles(mergeRunFiles(initialFiles ?? [], publishedFilesFromLogs(logs)), producedFiles),
+    [initialFiles, logs, producedFiles],
   );
   const effectiveStatus =
     status ?? (isTerminalStatus(initialStatus) ? (initialStatus as RunStatus) : undefined);
@@ -159,8 +179,8 @@ export function ChatRunProgressCard({
   );
   // The whole rule, derived from what the run produced (see `autoPresentFile`).
   const autoPresented = React.useMemo(
-    () => autoPresentFile({ files, status: effectiveStatus, live }),
-    [files, effectiveStatus, live],
+    () => autoPresentFile({ files, status: effectiveStatus, sweepDone }),
+    [files, effectiveStatus, sweepDone],
   );
   // Opener-only on purpose: `fileActivation()` (the chips' single
   // opener-vs-download decision) falls back to a DOWNLOAD when the host has no
@@ -258,9 +278,14 @@ export function ChatRunProgressCard({
       </div>
 
       {/* Downloadable file chips (z-10 so they sit above the full-card click
-          target and stay individually clickable). */}
+          target and stay individually clickable). The authoritative read is one
+          page of at most 100 rows and this card does not page; a run that
+          produced more says so rather than showing a silently short list. */}
       <div className="relative z-10">
         <FileChips files={files} />
+        {producedFilesTruncated ? (
+          <p className="text-muted-foreground px-3 pb-2 text-xs">{t("run.filesTruncated")}</p>
+        ) : null}
       </div>
 
       {open ? (

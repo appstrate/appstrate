@@ -100,7 +100,7 @@ const WELCOME_SUGGESTIONS = [
   "Que peux-tu faire ?",
   "Quels agents puis-je lancer ?",
   "Montre-moi mes derniers runs",
-  "Cherche dans mes files",
+  "Cherche dans mes fichiers",
 ];
 
 function ThreadWelcome({ composerSlot }: { composerSlot?: React.ReactNode }) {
@@ -110,7 +110,7 @@ function ThreadWelcome({ composerSlot }: { composerSlot?: React.ReactNode }) {
         <div className="text-center">
           <p className="text-lg font-medium">Appstrate Chat</p>
           <p className="text-muted-foreground mt-1 text-sm">
-            Demandez à lancer un agent, inspecter un run, ou chercher dans vos files.
+            Demandez à lancer un agent, inspecter un run, ou chercher dans vos fichiers.
           </p>
         </div>
         <Composer slot={composerSlot} />

@@ -74,14 +74,20 @@ export interface BillingPlanDetail {
    * card must still render — the storage line is dropped rather than showing
    * "0 B" for a plan that actually grants capacity.
    *
-   * BOTH spellings are read (`planStorageBytes`). This field is minted by
-   * `@appstrate/cloud`, which lives in another repo and deploys on its own
-   * clock: #1177 renamed the concept here, but the module in front of this SPA
-   * today still sends `document_storage_bytes`. Reading only one name makes the
-   * storage line silently vanish — on one side of the rename or the other.
+   * FORWARD-COMPAT: no producer emits this name yet. `@appstrate/cloud` lives
+   * in another repo and deploys on its own clock — #1177 renamed the concept
+   * here, but the module in front of this SPA still sends
+   * `document_storage_bytes` (see below), which is why BOTH spellings are read
+   * (`planStorageBytes`). Reading only one name makes the storage line
+   * silently vanish — on one side of the rename or the other.
    */
   file_storage_bytes?: number;
-  /** @deprecated pre-#1177 spelling of {@link file_storage_bytes}; still on the wire. */
+  /**
+   * The spelling actually on the wire TODAY: `@appstrate/cloud` still mints
+   * `document_storage_bytes` and nothing emits `file_storage_bytes` yet. Not
+   * deprecated — it is the live field, and it stays the one that answers until
+   * the cloud release carrying the rename ships.
+   */
   document_storage_bytes?: number;
 }
 

@@ -22,7 +22,9 @@ import {
   parseRunLogFrame,
   parseRunResource,
   parseRunUpdateFrame,
+  producedFilesFromFileList,
   publishedFilesFromLogs,
+  shouldRaiseSweepDone,
   resolveAttachmentContent,
   safeJsonParse,
   runStatusLineKey,
@@ -294,8 +296,8 @@ describe("autoPresentFile", () => {
     uri: `appfile://${id}`,
     name: `${id}.md`,
   });
-  /** A settled run: terminal status, live tail already closed after its sweep. */
-  const settled = { status: "success" as const, live: false };
+  /** A settled run: terminal status, and the produced-file sweep completed. */
+  const settled = { status: "success" as const, sweepDone: true };
 
   it("presents nothing when the run produced no file", () => {
     expect(autoPresentFile({ files: [], ...settled })).toBeUndefined();
@@ -311,20 +313,25 @@ describe("autoPresentFile", () => {
   });
 
   it("waits for the run to settle: a mid-stream count of 1 is not the final count", () => {
-    // Same first file, three moments of the same run. Only the last one — the
-    // terminal status WITH the live tail closed, i.e. the final log sweep
-    // merged — may present anything.
+    // Same first file, four moments of the same run. Only the last one — the
+    // terminal status WITH the produced-file sweep completed — may present
+    // anything.
     const one = [file("doc_1")];
-    expect(autoPresentFile({ files: one, status: "running", live: true })).toBeUndefined();
-    expect(autoPresentFile({ files: one, status: undefined, live: true })).toBeUndefined();
+    expect(autoPresentFile({ files: one, status: "running", sweepDone: false })).toBeUndefined();
+    expect(autoPresentFile({ files: one, status: undefined, sweepDone: false })).toBeUndefined();
     // Terminal, but the sweep that would reveal files 2 and 3 has not landed.
-    expect(autoPresentFile({ files: one, status: "success", live: true })).toBeUndefined();
-    expect(autoPresentFile({ files: one, status: "success", live: false })).toEqual(file("doc_1"));
+    // This is the exact window the old `!live` gate mistook for "settled": the
+    // one-shot `GET /runs/:id` answers `success` while the SSE is still
+    // handshaking, so `live` was still its initial `false`.
+    expect(autoPresentFile({ files: one, status: "success", sweepDone: false })).toBeUndefined();
+    expect(autoPresentFile({ files: one, status: "success", sweepDone: true })).toEqual(
+      file("doc_1"),
+    );
   });
 
   it("still presents the single file of a run that failed", () => {
     // A failed run that nonetheless published one file has a result to show.
-    expect(autoPresentFile({ files: [file("doc_1")], status: "failed", live: false })).toEqual(
+    expect(autoPresentFile({ files: [file("doc_1")], status: "failed", sweepDone: true })).toEqual(
       file("doc_1"),
     );
   });
@@ -380,12 +387,213 @@ describe("autoPresentFile", () => {
       fileURLToPath(new URL("../src/ui/chat-run-progress-card.tsx", import.meta.url)),
       "utf8",
     );
-    expect(card).toContain("autoPresentFile({ files, status: effectiveStatus, live })");
+    expect(card).toContain("autoPresentFile({ files, status: effectiveStatus, sweepDone })");
+    // The counted set unions the authoritative `/api/files` read on top of the
+    // log frames — the log window is capped and drops a chatty run's
+    // end-of-run publications.
+    expect(card).toContain("producedFiles");
     expect(card).toContain("if (hasAutoPresented.current) return;");
     expect(card).toContain("hasAutoPresented.current = true;");
     // The retired agent-declared selection has no reader left anywhere.
     expect(card).not.toContain("primary");
     expect(card).not.toContain("presentation:");
+  });
+});
+
+/**
+ * The authoritative produced-file source (issue #1177 follow-up). The log
+ * window is capped and ascending, so the end-of-run publication frames of a
+ * chatty run fall outside it; `GET /api/files?run_id=…` is the source that
+ * cannot be truncated away, and it is what the run page reads too.
+ */
+describe("producedFilesFromFileList", () => {
+  const row = (over: Record<string, unknown>) => ({
+    id: "doc_x",
+    name: "x.md",
+    mime: "text/markdown",
+    size: 3,
+    purpose: "agent_output",
+    run_id: "run_1",
+    ...over,
+  });
+
+  it("maps the list rows to chips, deriving the canonical uri from the id", () => {
+    const payload = { object: "list", data: [row({ id: "doc_a", name: "a.md" })] };
+    expect(producedFilesFromFileList(payload, "run_1")).toEqual({
+      files: [
+        { id: "doc_a", uri: "appfile://doc_a", name: "a.md", mime: "text/markdown", size: 3 },
+      ],
+      hasMore: false,
+    });
+  });
+
+  it("reports a truncated page instead of hiding it", () => {
+    // The route clamps `limit` to 100 and answers `hasMore` with no cursor
+    // field. Discarding it truncated a >100-file run's chips row silently.
+    // It never endangers the auto-present rule — a truncated page holds at
+    // least 100 rows, never exactly 1 — so surfacing it is the whole fix.
+    const payload = { object: "list", data: [row({ id: "doc_a" })], hasMore: true };
+    expect(producedFilesFromFileList(payload, "run_1")?.hasMore).toBe(true);
+  });
+
+  it("drops a file the run only CONSUMED, even though it is `agent_output`", () => {
+    // `GET /api/files?run_id=X` answers the run's whole container: a file
+    // chained in from an earlier run via `appfile://` is listed here and still
+    // carries `purpose: "agent_output"` — it was produced by that earlier run.
+    // Counting it would make a one-file run look like a two-file run and
+    // silently switch the auto-present rule off.
+    const payload = {
+      data: [
+        row({ id: "doc_in", run_id: "run_0" }),
+        row({ id: "doc_out" }),
+        row({ id: "doc_upload", purpose: "user_upload" }),
+      ],
+    };
+    expect(producedFilesFromFileList(payload, "run_1")?.files.map((f) => f.id)).toEqual([
+      "doc_out",
+    ]);
+  });
+
+  it("answers `undefined` on a malformed or errored payload — no evidence at all", () => {
+    // Union-never-subtract: nothing is added to the card, which stays on its
+    // log-derived chips. And `undefined` is NOT an empty page: the completion
+    // signal turns on telling "the run produced nothing" apart from "the read
+    // did not answer" (see `shouldRaiseSweepDone`).
+    expect(producedFilesFromFileList(undefined, "run_1")).toBeUndefined();
+    expect(producedFilesFromFileList({ error: "boom" }, "run_1")).toBeUndefined();
+    expect(producedFilesFromFileList({ data: "nope" }, "run_1")).toBeUndefined();
+  });
+
+  it("treats an envelope listing ZERO files as a real, complete answer", () => {
+    // A run that produced nothing is a legitimate outcome, not a failure.
+    expect(producedFilesFromFileList({ object: "list", data: [] }, "run_1")).toEqual({
+      files: [],
+      hasMore: false,
+    });
+  });
+});
+
+/**
+ * A publication frame with no name. The sink writes `name: null` whenever the
+ * emitter omitted one (`appstrate-event-sink.ts` → `file.published`), so this
+ * is a shape that exists on the wire, not a hypothetical.
+ */
+describe("nameless publication frames", () => {
+  it("keeps the file, with a placeholder name, instead of dropping it", () => {
+    const logs: RunLogLine[] = [
+      { id: 1, type: "result", event: "file", data: { file_id: "doc_1", name: null } },
+      { id: 2, type: "result", event: "file", data: { file_id: "doc_2", name: "b.md" } },
+    ];
+    const files = publishedFilesFromLogs(logs);
+    // Two produced files, so nothing is auto-presented. Dropping the nameless
+    // one would leave a count of 1 and open the WRONG file.
+    expect(files.map((f) => f.id)).toEqual(["doc_1", "doc_2"]);
+    expect(files[0]?.name).toBe("file");
+    expect(autoPresentFile({ files, status: "success", sweepDone: true })).toBeUndefined();
+  });
+
+  it("still refuses a frame with no id at all — there is nothing to open", () => {
+    expect(publishedFilesFromLogs([{ id: 1, event: "file", data: { name: "orphan.md" } }])).toEqual(
+      [],
+    );
+  });
+});
+
+/**
+ * The completion signal the auto-present rule waits on.
+ *
+ * The decision itself — "given how the authoritative read and the log sweep
+ * turned out, and the run status, may the flag be raised?" — is
+ * `shouldRaiseSweepDone`, and it is tested here against real inputs, failures
+ * included. It used to be an inlined `finally` in `use-run-log-stream.ts` that
+ * could only be pinned by grepping that file's SOURCE TEXT; those assertions
+ * were not coverage. They passed unchanged for a hook that swallowed a 500 from
+ * `/api/files` and raised the flag anyway, and one of them (`setSweepDone(true)`
+ * appears exactly twice) actively blocked the fix.
+ */
+describe("shouldRaiseSweepDone", () => {
+  const settled = { status: "success", producedFileRead: "ok", logSweep: "ok" } as const;
+
+  it("raises the flag when the run is over and both reads answered", () => {
+    expect(shouldRaiseSweepDone(settled)).toBe(true);
+  });
+
+  it("refuses to settle when the authoritative read did not answer", () => {
+    // THE defect this rule exists for. `/api/files` answering 500 or 401 is an
+    // ordinary transient failure, and the read that swallowed it still
+    // "finished" — which is not the same as having produced evidence.
+    expect(shouldRaiseSweepDone({ ...settled, producedFileRead: "failed" })).toBe(false);
+    expect(shouldRaiseSweepDone({ ...settled, producedFileRead: "not-attempted" })).toBe(false);
+  });
+
+  it("refuses to settle when the final log sweep was attempted and failed", () => {
+    // An errored sweep yields `[]`, indistinguishable from a run that wrote no
+    // frames — and the card's set is the UNION of the frames and the read.
+    expect(shouldRaiseSweepDone({ ...settled, logSweep: "failed" })).toBe(false);
+  });
+
+  it("does not require a log sweep the settle path never attempted", () => {
+    // The no-tail path (no org/app context, or no EventSource) reads
+    // `/api/files` and nothing else; the authoritative read IS the evidence
+    // there, and demanding a sweep that was never fired would leave that path
+    // permanently unsettled.
+    expect(shouldRaiseSweepDone({ ...settled, logSweep: "not-attempted" })).toBe(true);
+  });
+
+  it("never settles a run that is not over", () => {
+    // A mid-stream count of 1 is not the final count: a run publishing three
+    // files emits them one at a time.
+    expect(shouldRaiseSweepDone({ ...settled, status: "running" })).toBe(false);
+    expect(shouldRaiseSweepDone({ ...settled, status: undefined })).toBe(false);
+  });
+
+  it("does not settle a two-file run on the one file the log window kept", () => {
+    // End to end, the reachable failure: a run publishes 2 files, the second
+    // `file.published` frame falls outside the capped log window, and
+    // `/api/files` — the read that exists to cover exactly that case — answers
+    // 500. Settling here auto-opens the FIRST of two files.
+    const fromLogs = publishedFilesFromLogs([
+      { id: 1, type: "result", event: "file", data: { file_id: "doc_1", name: "a.md" } },
+    ]);
+    expect(fromLogs).toHaveLength(1);
+    const sweepDone = shouldRaiseSweepDone({
+      status: "success",
+      producedFileRead: "failed",
+      logSweep: "ok",
+    });
+    expect(sweepDone).toBe(false);
+    expect(autoPresentFile({ files: fromLogs, status: "success", sweepDone })).toBeUndefined();
+  });
+});
+
+/**
+ * The two guards that survive as source-text greps. There is NO DOM harness in
+ * this repo (no jsdom, no happy-dom, no testing-library), so `useRunLogStream`
+ * cannot be instantiated and these two facts have no other observer. Every
+ * POSITIVE assertion this block used to carry is gone: asserting that a source
+ * file contains `await readProducedFiles();` passed for the defect above and
+ * failed on a rename — the opposite of coverage.
+ */
+describe("useRunLogStream source guards", () => {
+  const hook = readFileSync(
+    fileURLToPath(new URL("../src/ui/use-run-log-stream.ts", import.meta.url)),
+    "utf8",
+  );
+
+  it("no longer exposes a liveness flag anything could mistake for settlement", () => {
+    // `live` started `false`, flipped only on the SSE handshake (losing the
+    // race against the two plain GETs fired in the same tick) and never flipped
+    // at all when no SSE was opened. Nothing but a grep can see it come back.
+    expect(hook).not.toContain("setLive");
+    expect(hook).not.toContain("es.onopen");
+  });
+
+  it("reads the produced-file set from the authoritative endpoint, filtered", () => {
+    // The URL the hook builds is invisible to a unit test. Dropping `purpose`
+    // (or the `run_id` this list is keyed on) would list files the run merely
+    // CONSUMED and silently switch the auto-present rule off.
+    expect(hook).toContain("purpose=agent_output");
+    expect(hook).toContain("run_id=${encodeURIComponent(runId)}");
   });
 });
 
@@ -398,7 +606,7 @@ describe("autoPresentFile", () => {
  * files at all, and nothing anywhere would report an error.
  */
 describe("legacy `document` wire shapes", () => {
-  const settled = { status: "success" as const, live: false };
+  const settled = { status: "success" as const, sweepDone: true };
 
   it('still produces a chip from a pre-rename `event: "document"` log frame', () => {
     const logs: RunLogLine[] = [

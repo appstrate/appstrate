@@ -179,6 +179,22 @@ const PreferencesDevicesPage = lazy(() =>
 );
 
 /** Suspense boundary for lazy route elements — same fallback as module pages. */
+/**
+ * `/documents` → `/files`, carrying the query string and the hash across.
+ *
+ * A bare string `to` is `parsePath`'d by react-router, which defaults `search`
+ * and `hash` to `""` — so the redirect dropped exactly the deep links it exists
+ * to keep. The gallery preview is url-addressable (`file-list-panel.tsx` puts
+ * the open file in `?preview=`), so `/documents?preview=doc_123` was a
+ * shareable link that landed on the gallery with nothing open.
+ */
+function LegacyDocumentsRedirect() {
+  const location = useLocation();
+  return (
+    <Navigate to={{ pathname: "/files", search: location.search, hash: location.hash }} replace />
+  );
+}
+
 function LazyRoute({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<LoadingState />}>{children}</Suspense>;
 }
@@ -635,7 +651,7 @@ export function App() {
              * elsewhere, and without this it falls through to the catch-all and
              * lands the user on the dashboard with no explanation.
              */}
-            <Route path="/documents" element={<Navigate to="/files" replace />} />
+            <Route path="/documents" element={<LegacyDocumentsRedirect />} />
             <Route
               path="/schedules"
               element={

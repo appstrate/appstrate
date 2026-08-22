@@ -114,6 +114,7 @@
   "run.sectionMemory": "Memory",
   "run.sectionOutput": "Output",
   "run.sectionProducedFiles": "Produced files",
+  "run.producedFilesTruncated": "Only the first 100 files are shown.",
   "run.outcomeEmpty": "This run produced nothing",
   "run.outcomeEmptyHint": "No output value, no file, no memory. The Execution tab says why.",
   "run.memoryEmpty": "No memory was written or updated during this run",

@@ -40,12 +40,34 @@ interface RunOutcomeProps {
   output: Record<string, unknown> | null;
   /** Memory rows written or touched by this run — the section's badge. */
   memoryCount: number;
+  /**
+   * How many files the run produced, read off the run DTO's `file_counts.output`
+   * (the server counts `run_id = this run AND purpose = 'agent_output'` — the
+   * same predicate as {@link producedRunFiles}). It is what decides whether the
+   * Fichiers card appears AT ALL, so the card never paints a spinner on a run
+   * that produced nothing, and an errored `/api/files` never leaves a permanent
+   * empty card there.
+   */
+  producedFileCount: number;
 }
 
 /** Fetches the run's files and hands them to the view. */
 export function RunOutcomeTab(props: RunOutcomeProps) {
   const { data, isLoading, error } = useFiles({ runId: props.runId, limit: 100 });
-  return <RunOutcomeView {...props} files={data?.data ?? []} isLoading={isLoading} error={error} />;
+  return (
+    <RunOutcomeView
+      {...props}
+      files={data?.data ?? []}
+      // The route clamps `limit` to 100 and answers `hasMore` with no cursor
+      // field (paging is `startingAfter=<last id>`). Discarding it truncated a
+      // >100-file run's list with nothing on screen saying so. Surfaced, not
+      // paged — and it never endangers the derived presentation rule (#1177):
+      // a truncated page holds at least 100 rows, never exactly 1.
+      hasMore={data?.hasMore ?? false}
+      isLoading={isLoading}
+      error={error}
+    />
+  );
 }
 
 /**
@@ -61,11 +83,15 @@ export function RunOutcomeView({
   packageId,
   output,
   memoryCount,
+  producedFileCount,
   files,
+  hasMore,
   isLoading,
   error,
 }: RunOutcomeProps & {
   files: FileDto[];
+  /** The list query's page was capped — the run has files beyond it. */
+  hasMore?: boolean;
   isLoading: boolean;
   error: unknown;
 }) {
@@ -83,7 +109,14 @@ export function RunOutcomeView({
   const featured = useMemo(() => featuredRunFile(files, runId), [files, runId]);
 
   const hasOutput = !!output && Object.keys(output).length > 0;
-  const hasFiles = isLoading || !!error || produced.length > 0;
+  // Decided by the run DTO's own count, not by the list query's phase. Reading
+  // `isLoading || error` here painted the card — spinner and all — on every run
+  // with an `output` value and no file, then removed it a moment later (a layout
+  // jump on every open), and left it standing forever when `/api/files` errored
+  // on a run that had produced nothing at all. `produced.length` is still ORed
+  // in so a file that lands while the page is open (SSE invalidates the list)
+  // cannot be hidden by a stale count.
+  const hasFiles = producedFileCount > 0 || produced.length > 0;
   const hasMemory = memoryCount > 0;
 
   if (!hasOutput && !hasFiles && !hasMemory) {
@@ -116,6 +149,9 @@ export function RunOutcomeView({
             empty={{ message: t("run.empty", { ns: "files" }), compact: true }}
             runId={runId}
           />
+          {hasMore && (
+            <p className="text-muted-foreground mt-2 text-xs">{t("run.producedFilesTruncated")}</p>
+          )}
         </SectionCard>
       )}
 

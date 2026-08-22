@@ -71,7 +71,16 @@ function render(node: ReactElement): string {
 
 function outcome(
   files: FileDto[],
-  extra: { output?: Record<string, unknown> | null; memoryCount?: number } = {},
+  extra: {
+    output?: Record<string, unknown> | null;
+    memoryCount?: number;
+    /** Overrides the run DTO's `file_counts.output` (defaults to the truth). */
+    producedFileCount?: number;
+    /** The list query reported rows beyond its page. */
+    hasMore?: boolean;
+    isLoading?: boolean;
+    error?: unknown;
+  } = {},
 ): string {
   return render(
     <RunOutcomeView
@@ -79,9 +88,14 @@ function outcome(
       packageId="@acme/reporter"
       output={extra.output ?? null}
       memoryCount={extra.memoryCount ?? 0}
+      producedFileCount={
+        extra.producedFileCount ??
+        files.filter((f) => f.purpose === "agent_output" && f.run_id === RUN_ID).length
+      }
       files={files}
-      isLoading={false}
-      error={null}
+      hasMore={extra.hasMore ?? false}
+      isLoading={extra.isLoading ?? false}
+      error={extra.error ?? null}
     />,
   );
 }
@@ -101,6 +115,54 @@ describe("Outcome shows what the run PRODUCED, and only that", () => {
     expect(html).toContain(agentsFr["run.outcomeEmpty"]);
     expect(html).not.toContain(agentsFr["run.sectionProducedFiles"]);
     expect(html).not.toContain("brief.pdf");
+  });
+
+  it("does not flash a Fichiers card while the list loads on a run that produced none", () => {
+    // The card's presence is decided by the run DTO's own count, not by the
+    // query's phase: painting it during `isLoading` made every run with an
+    // `output` value and no file jump as the card appeared and left again.
+    const html = outcome([], { output: { verdict: "ok" }, producedFileCount: 0, isLoading: true });
+    expect(html).not.toContain(agentsFr["run.sectionProducedFiles"]);
+    expect(html).toContain(agentsFr["run.sectionOutput"]);
+  });
+
+  it("does not leave a permanent empty Fichiers card when the list request fails", () => {
+    const html = outcome([], {
+      output: { verdict: "ok" },
+      producedFileCount: 0,
+      error: new Error("boom"),
+    });
+    expect(html).not.toContain(agentsFr["run.sectionProducedFiles"]);
+  });
+
+  it("shows a file that landed while the page was open, under a stale count of 0", () => {
+    // `producedFileCount` rides the run DTO; the list is invalidated by the
+    // SSE `file.published` frame and can therefore hold a file the cached
+    // count does not know about yet. Without the `|| produced.length > 0`
+    // clause the card — and the file in it — would stay hidden until the run
+    // resource refetched.
+    const html = outcome([file({ name: "rapport.md" })], { producedFileCount: 0 });
+    expect(html).toContain(agentsFr["run.sectionProducedFiles"]);
+    expect(html).toContain("rapport.md");
+    expect(html).not.toContain(agentsFr["run.outcomeEmpty"]);
+  });
+
+  it("says so when the file page was truncated, instead of showing a short list", () => {
+    // `GET /api/files` clamps `limit` to 100 and answers `hasMore`; discarding
+    // it truncated a >100-file run with nothing on screen saying so.
+    expect(outcome([file({ name: "rapport.md" })], { hasMore: true })).toContain(
+      agentsFr["run.producedFilesTruncated"],
+    );
+    expect(outcome([file({ name: "rapport.md" })])).not.toContain(
+      agentsFr["run.producedFilesTruncated"],
+    );
+  });
+
+  it("still shows the card while loading when the run DID produce files", () => {
+    // The count says there is something to wait for, so the section is there
+    // from the first paint and the list fills in underneath it.
+    const html = outcome([], { producedFileCount: 2, isLoading: true });
+    expect(html).toContain(agentsFr["run.sectionProducedFiles"]);
   });
 
   it("offers no purpose filter — the pane is one purpose by construction", () => {

@@ -106,3 +106,51 @@ export function effectiveRunDetailTab(requested: RunDetailTabHash): RunDetailTab
   }
   return requested as RunDetailTab;
 }
+
+/**
+ * The hash the address bar should be rewritten to, or `undefined` when the URL
+ * already carries the canonical one.
+ *
+ * Rendering the right pane for a retired hash is not enough: the user copies
+ * the URL they see, and a dead `#documents` keeps propagating. The rewrite runs
+ * from an effect, which is exactly the construct that loops in production, so
+ * the decision is pulled out here where its TERMINATION can be tested instead
+ * of assumed. It holds because {@link effectiveRunDetailTab} is idempotent —
+ * `f(f(x)) === f(x)` for every hash, live or retired — so the rewritten hash is
+ * always a fixed point and answers `undefined` on the next pass.
+ */
+export function runDetailTabHashRewrite(requested: RunDetailTabHash): RunDetailTab | undefined {
+  const effective = effectiveRunDetailTab(requested);
+  return effective === requested ? undefined : effective;
+}
+
+/**
+ * The default pane the run-detail tab controller should hold.
+ *
+ * `null` means "not decided yet" — the controller renders a provisional answer
+ * and asks again on the next render. Two rules, and both are load-bearing:
+ *
+ *  - Once captured, the answer is FROZEN. A file published while the page is
+ *    open must not move the user to another tab mid-read, so a non-null
+ *    `captured` is returned verbatim and `availability` is not consulted again.
+ *  - The capture waits for settled inputs. `hasMemory` rides two persistence
+ *    queries that resolve independently of the run, so at first render a run
+ *    that only wrote memory still looks like a run that produced nothing, and
+ *    capturing then froze it on «Exécution» non-deterministically. `hasOutput`
+ *    and `producedFileCount` both ride the run DTO the page already has: when
+ *    either says `outcome`, memory cannot change the answer and there is
+ *    nothing to wait for — that short-circuit is why a run with an output value
+ *    captures immediately rather than blocking on unrelated queries.
+ */
+export function capturedRunDetailTab(args: {
+  /** What this controller has already captured, or `null` if nothing yet. */
+  captured: RunDetailTab | null;
+  availability: RunTabAvailability;
+  /** The memory queries feeding `availability.hasMemory` have answered. */
+  memorySettled: boolean;
+}): RunDetailTab | null {
+  if (args.captured !== null) return args.captured;
+  const settled =
+    args.memorySettled || args.availability.hasOutput || args.availability.producedFileCount > 0;
+  return settled ? initialRunDetailTab(args.availability) : null;
+}

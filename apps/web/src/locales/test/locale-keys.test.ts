@@ -176,7 +176,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "models.generation.levels.", // packages/ui — model-generation-labels.ts buildGenerationLabels()
   "models.generation.levelsShort.", // packages/ui — model-generation-labels.ts buildGenerationLabels()
   "run.artifacts.code.", // components/run-artifacts.ts — artifactFailureCodeKey()
-  "run.connSource.", // components/run-info-tab.tsx — t(`run.connSource.${c.source}`)
+  "run.connSource.", // components/run-configuration-tab.tsx — t(`run.connSource.${c.source}`)
   "run.status.", // packages/module-chat/src/ui/run-events.ts — runStatusLineKey()
   "status.", // components/status-badge.tsx — t(`status.${status}`)
 ];
