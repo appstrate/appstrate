@@ -31,7 +31,7 @@ export const INITIAL_CONVERSATION_SIDEBAR_STATE: ConversationSidebarState = {
 
 /**
  * State behind the chat's one context surface. `show-document` deliberately
- * carries no source: a click and a newly published primary document are the
+ * carries no source: a click and the single file a run just produced are the
  * exact same event once they cross the module boundary.
  */
 export function conversationSidebarReducer(

@@ -34,17 +34,11 @@ function signedEmptyBody(secret: string): Record<string, string> {
   return { ...sign({ msgId, timestampSec, body: "", secret }) };
 }
 
-function docHeaders(
-  secret: string,
-  name: string,
-  mime = "text/plain",
-  presentation?: "primary",
-): Record<string, string> {
+function docHeaders(secret: string, name: string, mime = "text/plain"): Record<string, string> {
   return {
     ...signedEmptyBody(secret),
     "X-Document-Name": name,
     "Content-Type": mime,
-    ...(presentation ? { "X-Document-Presentation": presentation } : {}),
   };
 }
 
@@ -121,7 +115,6 @@ describe("POST /api/runs/:runId/documents — agent-output ingestion", () => {
       mime: string;
       size: number;
       sha256: string;
-      presentation: "primary" | null;
     };
     expect(body.id).toMatch(/^doc_/);
     expect(body.uri).toBe(`document://${body.id}`);
@@ -129,7 +122,6 @@ describe("POST /api/runs/:runId/documents — agent-output ingestion", () => {
     expect(body.mime).toBe("text/html");
     expect(body.size).toBe(bytes.byteLength);
     expect(body.sha256).toBe(sha256Hex(bytes));
-    expect(body.presentation).toBeNull();
 
     const [row] = await db.select().from(documents).where(eq(documents.id, body.id));
     expect(row).toBeDefined();
@@ -138,79 +130,6 @@ describe("POST /api/runs/:runId/documents — agent-output ingestion", () => {
     expect(row!.orgId).toBe(ctx.orgId);
     expect(row!.size).toBe(bytes.byteLength);
     expect(await orgBytesUsed(ctx.orgId)).toBe(bytes.byteLength);
-  });
-
-  it("makes the last successful primary publication the sole featured document", async () => {
-    const runId = await seedRun(ctx);
-
-    const first = await postDoc(
-      runId,
-      docHeaders(RUN_SECRET, "first.html", "text/html", "primary"),
-      "<html>first</html>",
-    );
-    expect(first.status).toBe(201);
-    const firstBody = (await first.json()) as { id: string; presentation: "primary" | null };
-    expect(firstBody.presentation).toBe("primary");
-
-    // An ordinary publication leaves the current selection unchanged.
-    const ordinary = await postDoc(runId, docHeaders(RUN_SECRET, "notes.txt"), "notes");
-    expect(ordinary.status).toBe(201);
-    expect(((await ordinary.json()) as { presentation: "primary" | null }).presentation).toBeNull();
-
-    const second = await postDoc(
-      runId,
-      docHeaders(RUN_SECRET, "second.html", "text/html", "primary"),
-      "<html>second</html>",
-    );
-    expect(second.status).toBe(201);
-    const secondBody = (await second.json()) as { id: string; presentation: "primary" | null };
-    expect(secondBody.presentation).toBe("primary");
-
-    const rows = await db
-      .select({ id: documents.id, presentation: documents.presentation })
-      .from(documents)
-      .where(eq(documents.runId, runId));
-    expect(rows.filter((row) => row.presentation === "primary")).toEqual([
-      { id: secondBody.id, presentation: "primary" },
-    ]);
-    expect(rows.find((row) => row.id === firstBody.id)?.presentation).toBeNull();
-  });
-
-  it("promotes an existing dedup winner without storing or counting it twice", async () => {
-    const runId = await seedRun(ctx);
-    const bytes = new TextEncoder().encode("same report");
-
-    const first = await postDoc(runId, docHeaders(RUN_SECRET, "report.txt"), bytes);
-    expect(first.status).toBe(201);
-    const firstBody = (await first.json()) as { id: string; presentation: "primary" | null };
-    expect(firstBody.presentation).toBeNull();
-
-    const promoted = await postDoc(
-      runId,
-      docHeaders(RUN_SECRET, "report.txt", "text/plain", "primary"),
-      bytes,
-    );
-    expect(promoted.status).toBe(200);
-    const promotedBody = (await promoted.json()) as {
-      id: string;
-      presentation: "primary" | null;
-    };
-    expect(promotedBody).toMatchObject({ id: firstBody.id, presentation: "primary" });
-
-    const rows = await db.select().from(documents).where(eq(documents.runId, runId));
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.presentation).toBe("primary");
-    expect(await orgBytesUsed(ctx.orgId)).toBe(bytes.byteLength);
-
-    // The dedup replay changed user-visible state, so it is audited in
-    // addition to the original publication. A no-op replay remains silent.
-    const audits = await db
-      .select()
-      .from(auditEvents)
-      .where(
-        and(eq(auditEvents.action, "document.published"), eq(auditEvents.resourceId, firstBody.id)),
-      );
-    expect(audits).toHaveLength(2);
   });
 
   it("dedups an identical (sha256, name) re-publish: 200, existing row, single count", async () => {
@@ -271,20 +190,25 @@ describe("POST /api/runs/:runId/documents — agent-output ingestion", () => {
     expect(body.param).toBe("X-Document-Name");
   });
 
-  it("rejects an unsupported X-Document-Presentation value with 400", async () => {
+  it("IGNORES a legacy X-Document-Presentation header instead of rejecting it", async () => {
+    // Version skew (issue #1177): the runtime-pi image deploys independently of
+    // the platform, so an older image still sends this retired header. It must
+    // never turn a deliverable into a 400 — the value is simply not read.
     const runId = await seedRun(ctx);
-    const res = await postDoc(
-      runId,
-      {
-        ...docHeaders(RUN_SECRET, "x.txt"),
-        "X-Document-Presentation": "featured",
-      },
-      "x",
-    );
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { param?: string };
-    expect(body.param).toBe("X-Document-Presentation");
-    expect(await db.select().from(documents).where(eq(documents.runId, runId))).toHaveLength(0);
+    for (const value of ["primary", "featured"]) {
+      const res = await postDoc(
+        runId,
+        {
+          ...docHeaders(RUN_SECRET, `${value}.txt`),
+          "X-Document-Presentation": value,
+        },
+        value,
+      );
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as Record<string, unknown>;
+      expect(body).not.toHaveProperty("presentation");
+    }
+    expect(await db.select().from(documents).where(eq(documents.runId, runId))).toHaveLength(2);
   });
 
   it("cuts an over-per-file-cap upload mid-stream: 413, no row, no counter, no partial", async () => {

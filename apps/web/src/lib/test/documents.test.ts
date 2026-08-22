@@ -5,6 +5,7 @@ import { File as FileIcon, FileArchive, FileCode, FileImage, FileText } from "lu
 import {
   documentExpiryInfo,
   documentRunHref,
+  featuredRunDocument,
   isImageMime,
   isMarkdownDoc,
   mimeIconFor,
@@ -132,5 +133,37 @@ describe("isMarkdownDoc", () => {
     expect(isMarkdownDoc("text/html", "page.html")).toBe(false);
     expect(isMarkdownDoc("application/pdf", "doc.pdf")).toBe(false);
     expect(isMarkdownDoc("image/png", "shot.png")).toBe(false);
+  });
+});
+
+/**
+ * The derived presentation rule (#1177): the run page features a run's single
+ * produced file, and features nothing at all otherwise.
+ */
+describe("featuredRunDocument", () => {
+  const produced = (id: string) => ({ ...doc({ purpose: "agent_output", run_id: "run_1" }), id });
+  const uploaded = (id: string) => ({ ...doc({ purpose: "user_upload", run_id: "run_1" }), id });
+
+  it("features nothing when the run produced no file", () => {
+    expect(featuredRunDocument([])).toBeUndefined();
+    expect(featuredRunDocument([uploaded("doc_in_1"), uploaded("doc_in_2")])).toBeUndefined();
+  });
+
+  it("features the single produced file", () => {
+    expect(featuredRunDocument([produced("doc_out")])?.id).toBe("doc_out");
+  });
+
+  it("features nothing when the run produced several files — they are just listed", () => {
+    const three = [produced("doc_1"), produced("doc_2"), produced("doc_3")];
+    expect(featuredRunDocument(three)).toBeUndefined();
+  });
+
+  it("never counts the files the run consumed as input", () => {
+    // Two inputs + one output is still a single-file run, and one output among
+    // several inputs stays the featured one.
+    const mixed = [uploaded("doc_in_1"), produced("doc_out"), uploaded("doc_in_2")];
+    expect(featuredRunDocument(mixed)?.id).toBe("doc_out");
+    // Conversely, inputs never make up the "exactly one" count on their own.
+    expect(featuredRunDocument([uploaded("doc_in_1")])).toBeUndefined();
   });
 });

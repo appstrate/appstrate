@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import {
-  RUN_DETAIL_TABS,
+  RUN_DETAIL_TAB_HASHES,
   effectiveRunDetailTab,
   initialRunDetailTab,
   type RunDetailTab,
@@ -13,7 +13,12 @@ import {
 /**
  * Owns the URL-backed run tab selection. This component mounts only after the
  * run has resolved, so its lazy state captures the correct initial priority once
- * and does not change when realtime publication adds a primary document later.
+ * and does not change when a file published later makes another tab lead.
+ *
+ * The hash is validated against `RUN_DETAIL_TAB_HASHES` (live tabs + retired
+ * ones), and `effectiveRunDetailTab` maps a retired hash onto the pane that
+ * replaced it — dropping it from the list instead would silently send every old
+ * `#deliverable` link back to the default tab.
  */
 export function RunDetailTabsController({
   availability,
@@ -26,7 +31,7 @@ export function RunDetailTabsController({
   }) => ReactNode;
 }) {
   const [defaultTab] = useState(() => initialRunDetailTab(availability));
-  const [requestedTab, setActiveTab] = useTabWithHash(RUN_DETAIL_TABS, defaultTab);
+  const [requestedTab, setActiveTab] = useTabWithHash(RUN_DETAIL_TAB_HASHES, defaultTab);
   const activeTab = effectiveRunDetailTab(requestedTab, availability);
 
   return children({ activeTab, setActiveTab });

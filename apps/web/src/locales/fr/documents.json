@@ -8,6 +8,7 @@
   "filter.user_upload": "Importés",
   "run.empty": "Aucun document",
   "run.emptyHint": "Ce run n'a ni fichier importé ni fichier produit.",
+  "run.featuredLabel": "Fichier produit",
   "row.download": "Télécharger",
   "row.preview": "Aperçu",
   "row.keep": "Conserver",

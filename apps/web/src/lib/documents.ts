@@ -27,6 +27,22 @@ export interface DocumentLike {
 }
 
 /**
+ * The derived presentation rule (#1177), shared by the run page and the chat:
+ * a run that produced exactly ONE file features it; zero or several feature
+ * nothing — several are just listed, and the user picks.
+ *
+ * Only what the agent PRODUCED counts (`purpose: "agent_output"`). A file the
+ * run merely consumed as input never makes a run "single-file", and no
+ * agent-declared field takes part: presentation was never the model's call.
+ */
+export function featuredRunDocument<T extends Pick<DocumentLike, "purpose">>(
+  documents: readonly T[],
+): T | undefined {
+  const produced = documents.filter((doc) => doc.purpose === "agent_output");
+  return produced.length === 1 ? produced[0] : undefined;
+}
+
+/**
  * True for an `image/*` mime — the only content shown as a thumbnail (gallery
  * tiles, run-tab tiles, chat attachments). Lives in the shell because the
  * documents surfaces are core: an optional module consumes the shell's helpers,

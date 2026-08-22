@@ -447,13 +447,10 @@ export function createRunsEventsRouter() {
     const name = sanitizeFilename(decodedName);
     const mime = c.req.header("Content-Type");
     if (!mime) throw invalidRequest("Content-Type header is required", "Content-Type");
-    const rawPresentation = c.req.header("X-Document-Presentation");
-    if (rawPresentation !== undefined && rawPresentation !== "primary") {
-      throw invalidRequest(
-        "X-Document-Presentation must be 'primary' when provided",
-        "X-Document-Presentation",
-      );
-    }
+    // `X-Document-Presentation` is RETIRED (issue #1177). A runtime-pi image
+    // older than the platform still sends it; the header is read by nobody and
+    // must never be a 400 — the deliverable matters, its retired presentation
+    // hint does not.
 
     const body = c.req.raw.body;
     if (!body) throw invalidRequest("request body is required");
@@ -461,19 +458,18 @@ export function createRunsEventsRouter() {
     // Attribution is copied from the run row (never trusted from the agent):
     // the run's creator + end-user, and the run's producing package.
     const attribution = await getRunAttribution(run.orgId, run.id);
-    const { row, deduped, presentationChanged } = await createDocumentFromStream(
+    const { row, deduped } = await createDocumentFromStream(
       { orgId: run.orgId, applicationId: run.applicationId },
       run.id,
       { userId: attribution?.userId ?? null, endUserId: attribution?.endUserId ?? null },
       runRow.packageId,
-      { name, mime, body, presentation: rawPresentation },
+      { name, mime, body },
     );
 
-    // Audit a genuinely new publish and a dedup replay that changed the
-    // featured document. A no-op replay remains silent.
+    // Audit a genuinely new publish. A dedup replay remains silent.
     // No request context here (HMAC-run-authenticated, no user session), so
     // this is the direct-service `recordAudit`, attributed to the run's actor.
-    if (!deduped || presentationChanged) {
+    if (!deduped) {
       const actor = actorFromIds(attribution?.userId ?? null, attribution?.endUserId ?? null);
       await recordAudit({
         orgId: run.orgId,
@@ -488,7 +484,6 @@ export function createRunsEventsRouter() {
           size: row.size,
           mime: row.mime,
           runId: run.id,
-          presentation: row.presentation,
         },
       });
     }
@@ -501,7 +496,6 @@ export function createRunsEventsRouter() {
         mime: row.mime,
         size: row.size,
         sha256: row.sha256,
-        presentation: row.presentation,
       },
       deduped ? 200 : 201,
     );

@@ -114,82 +114,89 @@ describe("reEmitRuntimeToolEvents", () => {
 });
 
 describe("buildPublishDocumentDef", () => {
-  const primaryDocument: PublishedDocument = {
+  const publishedDocument: PublishedDocument = {
     id: "doc_primary",
     uri: "document://doc_primary",
     name: "Final report.html",
     mime: "text/html",
     size: 42,
     sha256: "abc123",
-    presentation: "primary",
   };
 
-  it("declares the primary-only presentation schema", () => {
-    const def = buildPublishDocumentDef(async () => primaryDocument);
-    const properties = def.descriptor.inputSchema.properties as Record<
-      string,
-      Record<string, unknown>
-    >;
+  it("declares only `path` and `name`, and says nothing about how files are displayed", () => {
+    const def = buildPublishDocumentDef(async () => publishedDocument);
+    const schema = def.descriptor.inputSchema;
+    const properties = schema.properties as Record<string, Record<string, unknown>>;
 
-    expect(properties.presentation).toEqual({
-      type: "string",
-      enum: ["primary"],
-      description: expect.stringContaining("last successful"),
-    });
-    expect(def.descriptor.description).toContain("finish editing it first");
-    expect(def.descriptor.description).toContain("last successful primary publication");
-    expect(def.descriptor.description).toMatch(/one clearly main user-facing file/i);
-    expect(def.descriptor.description).toMatch(/no file/i);
-    expect(def.descriptor.description).toMatch(/several peer files/i);
-    expect(def.descriptor.description).toMatch(/never infer.*file count/i);
+    expect(Object.keys(properties).sort()).toEqual(["name", "path"]);
+    expect(schema.required).toEqual(["path"]);
+    // The retired `presentation` concept must not resurface anywhere in the
+    // tool surface — the model no longer decides anything about presentation.
+    expect(JSON.stringify(schema)).not.toContain("presentation");
+    expect(def.descriptor.description).not.toContain("presentation");
+    expect(def.descriptor.description).not.toMatch(/primary/i);
+    // What the description must still carry.
+    expect(def.descriptor.description).toContain("document://");
+    expect(def.descriptor.description).toContain("./outputs/");
   });
 
-  it("passes presentation through the backward-compatible uploader signature", async () => {
-    const requests: Array<[string, string | undefined, "primary" | undefined]> = [];
-    const def = buildPublishDocumentDef(async (path, name, presentation) => {
-      requests.push([path, name, presentation]);
-      return primaryDocument;
+  it("uploads with (path, name) only", async () => {
+    const requests: Array<[string, string | undefined]> = [];
+    const def = buildPublishDocumentDef(async (path, name) => {
+      requests.push([path, name]);
+      return publishedDocument;
     });
 
     const result = await def.handler({
       path: "outputs/final.html",
       name: "Final report.html",
-      presentation: "primary",
     });
 
-    expect(requests).toEqual([["outputs/final.html", "Final report.html", "primary"]]);
+    expect(requests).toEqual([["outputs/final.html", "Final report.html"]]);
     expect(eventsOf(result._meta)).toEqual([
       {
-        ...documentPublishedEvent(primaryDocument),
+        ...documentPublishedEvent(publishedDocument),
         timestamp: expect.any(Number),
       },
     ]);
   });
 
-  it("keeps legacy two-argument uploaders valid and normalizes absent presentation", async () => {
+  it("emits a document.published event with no presentation field", () => {
+    expect(documentPublishedEvent(publishedDocument)).toEqual({
+      type: "document.published",
+      document_id: "doc_primary",
+      uri: "document://doc_primary",
+      name: "Final report.html",
+      mime: "text/html",
+      size: 42,
+      sha256: "abc123",
+    });
+  });
+
+  it("IGNORES a retired `presentation` argument instead of rejecting the call", async () => {
+    // Version skew: an agent running against a cached manifest (or an older
+    // system prompt) may still pass `presentation`. The deliverable must be
+    // published anyway — a retired argument is never an error.
     const requests: Array<[string, string | undefined]> = [];
-    const ordinaryDocument: PublishedDocument = {
-      id: "doc_legacy",
-      uri: "document://doc_legacy",
-      name: "notes.md",
-      mime: "text/markdown",
-      size: 12,
-      sha256: "legacy-sha",
-    };
-    // This is the exact public uploader shape accepted before presentation was
-    // introduced. Fewer parameters remain assignable and work unchanged.
     const def = buildPublishDocumentDef(async (path, name) => {
       requests.push([path, name]);
-      return ordinaryDocument;
+      return publishedDocument;
     });
 
     const result = await def.handler({
-      path: "outputs/notes.md",
-      name: "",
+      path: "outputs/final.html",
       presentation: "primary",
     });
 
-    expect(requests).toEqual([["outputs/notes.md", undefined]]);
-    expect(eventsOf(result._meta)[0]?.presentation).toBeNull();
+    expect(result.isError).toBeUndefined();
+    expect(requests).toEqual([["outputs/final.html", undefined]]);
+    expect(eventsOf(result._meta)).toHaveLength(1);
+  });
+
+  it("still rejects a missing path", async () => {
+    const def = buildPublishDocumentDef(async () => publishedDocument);
+    const result = await def.handler({ presentation: "primary" });
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("non-empty `path`");
   });
 });

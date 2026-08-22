@@ -3927,7 +3927,7 @@ export interface paths {
         put?: never;
         /**
          * Publish an agent-produced document (HMAC, streaming)
-         * @description Posted by the agent runtime — via the `publish_document` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` document attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `DOCUMENT_MAX_FILE_BYTES`, 100 MiB by default); metadata is carried in the `X-Document-Name`, optional `X-Document-Presentation`, and `Content-Type` headers. `X-Document-Presentation: primary` atomically makes this the run's featured deliverable; the last successful primary publication wins, while an ordinary publication never changes the selection. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing document with 200 instead of storing it twice, and can still promote that existing document. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).
+         * @description Posted by the agent runtime — via the `publish_document` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` document attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `DOCUMENT_MAX_FILE_BYTES`, 100 MiB by default); metadata is carried in the `X-Document-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing document with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).
          */
         post: operations["publishRunDocument"];
         delete?: never;
@@ -5513,8 +5513,6 @@ export interface components {
                 /** @description Documents produced by the run. */
                 output: number;
             };
-            /** @description Document id of the run's explicitly selected primary deliverable, or null. The referenced document remains part of the ordinary run document list. */
-            primary_document_id: string | null;
             /** @description Inline runs only. Snapshot of the manifest submitted at run time. Null once the shadow has been compacted (see INLINE_RUN_LIMITS.retention_days). */
             inline_manifest?: {
                 [key: string]: unknown;
@@ -6984,8 +6982,7 @@ export interface operations {
                      *       "document_counts": {
                      *         "input": 0,
                      *         "output": 0
-                     *       },
-                     *       "primary_document_id": null
+                     *       }
                      *     }
                      */
                     "application/json": components["schemas"]["Run"];
@@ -9868,11 +9865,6 @@ export interface operations {
                             uri: string;
                             /** @enum {string} */
                             purpose: "user_upload" | "agent_output";
-                            /**
-                             * @description User-facing presentation role selected by the producing agent. `primary` identifies the run's featured deliverable; null means the document remains a regular output.
-                             * @enum {string|null}
-                             */
-                            presentation: "primary" | null;
                             applicationId: string;
                             /** @description Run container, or null. */
                             run_id: string | null;
@@ -9965,11 +9957,6 @@ export interface operations {
                         uri: string;
                         /** @enum {string} */
                         purpose: "user_upload" | "agent_output";
-                        /**
-                         * @description User-facing presentation role selected by the producing agent. `primary` identifies the run's featured deliverable; null means the document remains a regular output.
-                         * @enum {string|null}
-                         */
-                        presentation: "primary" | null;
                         applicationId: string;
                         /** @description Run container, or null. */
                         run_id: string | null;
@@ -10163,11 +10150,6 @@ export interface operations {
                         uri: string;
                         /** @enum {string} */
                         purpose: "user_upload" | "agent_output";
-                        /**
-                         * @description User-facing presentation role selected by the producing agent. `primary` identifies the run's featured deliverable; null means the document remains a regular output.
-                         * @enum {string|null}
-                         */
-                        presentation: "primary" | null;
                         applicationId: string;
                         /** @description Run container, or null. */
                         run_id: string | null;
@@ -18195,7 +18177,6 @@ export interface operations {
                      *         "input": 0,
                      *         "output": 0
                      *       },
-                     *       "primary_document_id": null,
                      *       "inline_manifest": {
                      *         "$schema": "https://schemas.afps.dev/v0/agent.schema.json",
                      *         "name": "@inline/summarize-attached-document",
@@ -18566,8 +18547,7 @@ export interface operations {
                      *       "document_counts": {
                      *         "input": 0,
                      *         "output": 0
-                     *       },
-                     *       "primary_document_id": null
+                     *       }
                      *     }
                      */
                     "application/json": components["schemas"]["Run"];
@@ -18673,8 +18653,7 @@ export interface operations {
                      *       "document_counts": {
                      *         "input": 0,
                      *         "output": 0
-                     *       },
-                     *       "primary_document_id": null
+                     *       }
                      *     }
                      */
                     "application/json": components["schemas"]["Run"];
@@ -18821,8 +18800,6 @@ export interface operations {
             header: {
                 /** @description Display name for the document, percent-encoded with `encodeURIComponent` (an HTTP header value cannot carry a raw non-ASCII filename). The server decodes it strictly and returns 400 on a malformed encoding, then sanitises the decoded name (path separators, control characters and `..` collapsed, 255 chars max). */
                 "X-Document-Name": string;
-                /** @description Set to `primary` to feature this document on the run page. The last successful primary publication wins atomically. Omit for an ordinary output. */
-                "X-Document-Presentation"?: "primary";
                 /** @description MIME type of the document bytes. */
                 "Content-Type": string;
                 "webhook-id": string;
@@ -18853,8 +18830,6 @@ export interface operations {
                         mime: string;
                         size: number;
                         sha256: string;
-                        /** @enum {string|null} */
-                        presentation: "primary" | null;
                     };
                 };
             };
@@ -18872,12 +18847,10 @@ export interface operations {
                         mime: string;
                         size: number;
                         sha256: string;
-                        /** @enum {string|null} */
-                        presentation: "primary" | null;
                     };
                 };
             };
-            /** @description X-Document-Name missing or not a valid percent-encoded filename / X-Document-Presentation has an unsupported value / Content-Type header missing / empty body */
+            /** @description X-Document-Name missing or not a valid percent-encoded filename / Content-Type header missing / empty body */
             400: {
                 headers: {
                     [name: string]: unknown;

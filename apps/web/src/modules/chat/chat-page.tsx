@@ -29,7 +29,7 @@ export function ChatModulePage() {
   const { conversationId } = useParams<{ conversationId?: string }>();
   const navigate = useNavigate();
   // Context starts closed on every viewport. Selecting a context tab or
-  // presenting any document (including a newly published primary output)
+  // presenting any document (including the single file a run just produced)
   // expands it through the reducer's single action path.
   const [sidebarState, dispatchSidebar] = useReducer(
     conversationSidebarReducer,
@@ -64,9 +64,10 @@ export function ChatModulePage() {
     (key: string, params?: Record<string, string | number>) => t(key, params ?? {}),
     [t],
   );
-  // One presentation interface for both direct clicks and automatic primary
-  // outputs. There is intentionally no trigger/source policy here: selecting a
-  // document always opens the same Preview tab in the same sidebar.
+  // One presentation interface for both direct clicks and the automatic
+  // presentation of a run's single produced file. There is intentionally no
+  // trigger/source policy here: selecting a document always opens the same
+  // Preview tab in the same sidebar.
   const presentDocument = useCallback<OpenDocument>(
     (document) => dispatchSidebar({ type: "show-document", document }),
     [],

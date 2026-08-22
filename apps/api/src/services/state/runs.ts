@@ -212,17 +212,6 @@ function enrichedRunSelect(actor: Actor | null) {
       select count(*) from ${documents}
       where ${documents.runId} = ${runs.id} and ${documents.purpose} = 'agent_output'
     )`,
-    // The presentation role lives on the produced document so its lifecycle
-    // remains the single source of truth. The partial unique index on
-    // documents(run_id) WHERE presentation = 'primary' makes this scalar
-    // lookup deterministic and cheap.
-    primaryDocumentId: sql<string | null>`(
-      select ${documents.id} from ${documents}
-      where ${documents.runId} = ${runs.id}
-        and ${documents.purpose} = 'agent_output'
-        and ${documents.presentation} = 'primary'
-      limit 1
-    )`,
   };
 }
 
@@ -262,7 +251,6 @@ type EnrichedRunRow = {
   packageEphemeral: boolean | null;
   unread: boolean;
   outputDocumentCount: number;
-  primaryDocumentId: string | null;
 };
 
 /**
@@ -373,7 +361,6 @@ function mapEnrichedRun(r: EnrichedRunRow): EnrichedRun {
       input: extractDocumentIds(r.run.input).length,
       output: Number(r.outputDocumentCount),
     },
-    primary_document_id: r.primaryDocumentId ?? null,
   };
 }
 

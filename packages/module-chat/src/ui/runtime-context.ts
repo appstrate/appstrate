@@ -58,9 +58,9 @@ export function useSelectConversation(): SelectConversation | null {
 
 /**
  * Presents a document through the host's in-app viewer. The same small interface
- * serves direct clicks and automatic primary-output presentation. The host does
- * not need to know why it was called: both interactions select the document in
- * the same conversation context panel.
+ * serves direct clicks and the automatic presentation of a run's single produced
+ * file. The host does not need to know why it was called: both interactions
+ * select the document in the same conversation context panel.
  *
  * The module owns no preview component — dependency direction is web →
  * module-chat, so the host injects an opener and the chat delegates to it.

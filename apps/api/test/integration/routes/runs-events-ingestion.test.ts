@@ -631,6 +631,9 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
       mime: "text/html",
       size: 1234,
       sha256: "f".repeat(64),
+      // Version skew (issue #1177): an older runtime-pi image still emits the
+      // retired `presentation` field. Ingestion must accept the event and drop
+      // the field, never fail on it.
       presentation: "primary",
     };
     const envelope = buildEnvelope(runId, "document.published", payload, 1);
@@ -650,8 +653,8 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
       name: "report.html",
       mime: "text/html",
       size: 1234,
-      presentation: "primary",
     });
+    expect(docLogs[0]!.data).not.toHaveProperty("presentation");
   });
 });
 

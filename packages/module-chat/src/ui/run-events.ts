@@ -37,7 +37,7 @@ export function isTerminalStatus(status: string | null | undefined): status is R
  * history. Capture this result once at card mount; later phase changes must not
  * revoke a live card's eligibility before its final document event arrives.
  */
-export function isPrimaryAutoPresentationEligible(
+export function isRunAutoPresentEligible(
   phase: "pending" | "running" | "success" | "error",
   initialStatus: string | null | undefined,
 ): boolean {
@@ -102,16 +102,6 @@ const runUpdateLiteSchema = z.object({
 type RunUpdateLite = z.infer<typeof runUpdateLiteSchema>;
 
 /**
- * The one extra field the full run resource carries beyond realtime updates.
- * It is the authoritative CURRENT primary selection, unlike append-only
- * `document.published` logs which also retain superseded selections.
- */
-const runResourceLiteSchema = runUpdateLiteSchema.extend({
-  primary_document_id: z.string().nullable().optional(),
-});
-type RunResourceLite = z.infer<typeof runResourceLiteSchema>;
-
-/**
  * Pull the launched run id out of a tool-call result. The invoke-operation
  * envelope is `{ status, body }` (the run resource lives in `body`); the
  * bundled `run_and_wait` tool returns the run resource at the top level. Try
@@ -174,8 +164,11 @@ export function parseRunUpdateFrame(raw: string): RunUpdateLite | undefined {
  * transient launch status (`pending`), so without this the card would read
  * "Lancement" for an already-running run until the first live frame arrives.
  */
-export function parseRunResource(body: unknown): RunResourceLite | undefined {
-  const parsed = runResourceLiteSchema.safeParse(body);
+export function parseRunResource(body: unknown): RunUpdateLite | undefined {
+  // Same lifecycle subset as a `run_update` frame. Zod strips every other key,
+  // so a server still sending retired fields (`primary_document_id`) parses
+  // unchanged — they are ignored, never asserted away.
+  const parsed = runUpdateLiteSchema.safeParse(body);
   return parsed.success ? parsed.data : undefined;
 }
 
@@ -358,6 +351,14 @@ export function extractRunDocuments(result: unknown): ChatRunDocument[] {
  * `type='result' event='document'` frames the sink persists for each
  * `document.published` event. Lets the card show a chip the moment an agent
  * publishes, before the run terminates.
+ *
+ * These frames are publications, i.e. files the agent PRODUCED: the only
+ * emitters are the `publish_document` runtime tool and the end-of-run
+ * `outputs/` sweep. Input files a run merely consumed never appear here, so
+ * this list is exactly the population the auto-present rule counts.
+ *
+ * Historical frames carry extra fields (notably the retired `presentation`);
+ * only the known keys are read, so a legacy line parses like any other.
  */
 export function publishedDocumentsFromLogs(logs: readonly RunLogLine[]): ChatRunDocument[] {
   const out: ChatRunDocument[] = [];
@@ -370,22 +371,34 @@ export function publishedDocumentsFromLogs(logs: readonly RunLogLine[]): ChatRun
   return out;
 }
 
-/** The last primary publication in an ordered log list (last-successful-wins). */
-export function primaryDocumentFromLogs(logs: readonly RunLogLine[]): ChatRunDocument | undefined {
-  let primary: ChatRunDocument | undefined;
-  for (const line of logs) {
-    if (line.event !== "document" || !line.data || typeof line.data !== "object") continue;
-    if (asRecord(line.data)?.presentation !== "primary") continue;
-    const doc = asChatRunDocument(line.data);
-    if (doc) primary = doc;
-  }
-  return primary;
+/**
+ * The derived auto-present rule (issue #1177). Nothing the agent declares takes
+ * part in it: the run either produced exactly ONE file — which is then opened
+ * for the user — or it did not, and the card just lists what there is.
+ *
+ *  - 0 produced files  → nothing to present.
+ *  - exactly 1         → that one.
+ *  - N > 1             → nothing; the user picks from the chips.
+ *
+ * Gated on a SETTLED run (terminal status, live tail closed) because a run that
+ * publishes three files emits them one at a time: a mid-stream count of 1 is not
+ * the final count, and opening on it would auto-present the first of three. The
+ * hook flips `live` to false only after its final log sweep, so "terminal and no
+ * longer live" is precisely "the document set is complete".
+ */
+export function autoPresentDocument(args: {
+  documents: readonly ChatRunDocument[];
+  status: RunStatus | undefined;
+  live: boolean;
+}): ChatRunDocument | undefined {
+  if (!isTerminalStatus(args.status) || args.live) return undefined;
+  return args.documents.length === 1 ? args.documents[0] : undefined;
 }
 
 /**
  * Merge two regular document lists, deduping by id while letting newer display
- * metadata win. Presentation is intentionally not projected into this type:
- * `primary` is only an automatic-open signal, never a different document kind.
+ * metadata win. Every produced file is the same kind of thing — there is no
+ * featured/secondary distinction to project.
  */
 export function mergeRunDocuments(
   a: readonly ChatRunDocument[],

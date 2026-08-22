@@ -33,11 +33,11 @@ import { formatDuration } from "@appstrate/core/format";
 import { useLiveElapsedMs } from "./use-elapsed.ts";
 import { useChatHost } from "./runtime-context.ts";
 import {
+  autoPresentDocument,
   buildRunPageHref,
-  isPrimaryAutoPresentationEligible,
+  isRunAutoPresentEligible,
   isTerminalStatus,
   mergeRunDocuments,
-  primaryDocumentFromLogs,
   publishedDocumentsFromLogs,
   runStatusLineKey,
   visibleLogEntries,
@@ -122,40 +122,18 @@ export function ChatRunProgressCard({
   modalTitle: React.ReactNode;
   details: React.ReactNode;
 }) {
-  const {
-    logs,
-    status,
-    packageId,
-    startedAt,
-    completedAt,
-    duration,
-    primaryDocumentId: authoritativePrimaryDocumentId,
-  } = useRunLogStream(runId, initialStatus, initialPackageId);
+  const { logs, status, packageId, startedAt, completedAt, duration, live } = useRunLogStream(
+    runId,
+    initialStatus,
+    initialPackageId,
+  );
 
   // Documents: the persisted tool-result list (reload-safe) merged with any
-  // that arrive live over the log stream (`document.published` frames).
+  // that arrive live over the log stream (`document.published` frames). Both
+  // sources hold only files the run PRODUCED — the population the rule counts.
   const documents = React.useMemo(
     () => mergeRunDocuments(initialDocuments ?? [], publishedDocumentsFromLogs(logs)),
     [initialDocuments, logs],
-  );
-  const loggedPrimaryDocument = React.useMemo(() => primaryDocumentFromLogs(logs), [logs]);
-  // `undefined` means the run resource has not answered yet, so the latest log
-  // is a useful fallback. `null` is authoritative and deliberately suppresses
-  // stale historical primary events (deleted/expired/detached output).
-  const primaryDocumentId =
-    authoritativePrimaryDocumentId === undefined
-      ? loggedPrimaryDocument?.id
-      : authoritativePrimaryDocumentId;
-  const primaryDocument = React.useMemo(
-    () =>
-      primaryDocumentId
-        ? (documents.find((doc) => doc.id === primaryDocumentId) ?? {
-            id: primaryDocumentId,
-            uri: `document://${primaryDocumentId}`,
-            name: "",
-          })
-        : undefined,
-    [documents, primaryDocumentId],
   );
   const effectiveStatus =
     status ?? (isTerminalStatus(initialStatus) ? (initialStatus as RunStatus) : undefined);
@@ -174,25 +152,31 @@ export function ChatRunProgressCard({
   const current = useLogTicker(visibleLogEntries(logs));
   const { openDocument, t } = useChatHost();
   // A card that mounted already complete belongs to history: never let N old
-  // runs fight over the panel. A card mounted for a live call may present every
-  // NEW primary id once through the exact same opener as a direct document click.
-  const [autoPresentationEligible] = React.useState(() =>
-    isPrimaryAutoPresentationEligible(phase, initialStatus),
+  // runs fight over the panel. A card mounted for a live call presents through
+  // the exact same host opener as a direct document click.
+  const [autoPresentEligible] = React.useState(() =>
+    isRunAutoPresentEligible(phase, initialStatus),
   );
-  const presentedPrimaryId = React.useRef<string | null>(null);
+  // The whole rule, derived from what the run produced (see `autoPresentDocument`).
+  const autoPresented = React.useMemo(
+    () => autoPresentDocument({ documents, status: effectiveStatus, live }),
+    [documents, effectiveStatus, live],
+  );
+  // Opener-only on purpose: `documentActivation()` (the chips' single
+  // opener-vs-download decision) falls back to a DOWNLOAD when the host has no
+  // viewer, and a file landing in the user's Downloads folder unasked is not a
+  // presentation. No opener ⇒ no automatic presentation, as documented on
+  // `OpenDocument`.
+  // Fires AT MOST ONCE per card. A file published after the panel already
+  // opened does not close it, swap it, or re-open anything: the user is reading
+  // what they were handed, and the newcomer is one click away in the chips row.
+  const hasAutoPresented = React.useRef(false);
   React.useEffect(() => {
-    if (
-      !autoPresentationEligible ||
-      !openDocument ||
-      !runId ||
-      !primaryDocument ||
-      presentedPrimaryId.current === primaryDocument.id
-    ) {
-      return;
-    }
-    presentedPrimaryId.current = primaryDocument.id;
-    openDocument({ id: primaryDocument.id, name: primaryDocument.name });
-  }, [autoPresentationEligible, openDocument, primaryDocument, runId]);
+    if (!autoPresentEligible || !openDocument || !runId || !autoPresented) return;
+    if (hasAutoPresented.current) return;
+    hasAutoPresented.current = true;
+    openDocument({ id: autoPresented.id, name: autoPresented.name });
+  }, [autoPresentEligible, openDocument, autoPresented, runId]);
   // Before any log line: "starting" while the run is still coming up (no status
   // yet, or pending), then "running" once it is — up until the first log
   // replaces it.

@@ -354,12 +354,10 @@ export function buildRuntimeToolDefs(opts: BuildRuntimeToolDefsOptions): Runtime
 /**
  * Durable document metadata returned by a successful upload. Extends the
  * {@link RunAndWaitDocument} projection (`{ id, uri, name, mime, size }` — the
- * shape the run_and_wait tool result embeds) with upload integrity and the
- * optional presentation selected by `publish_document`.
+ * shape the run_and_wait tool result embeds) with upload integrity.
  */
 export interface PublishedDocument extends RunAndWaitDocument {
   sha256: string;
-  presentation?: "primary" | null;
 }
 
 /** The canonical `document.published` run event for a stored document. */
@@ -371,7 +369,6 @@ export interface DocumentPublishedEvent extends RuntimeToolEvent {
   mime: string;
   size: number;
   sha256: string;
-  presentation: "primary" | null;
 }
 
 /**
@@ -390,10 +387,6 @@ export function documentPublishedEvent(doc: PublishedDocument): DocumentPublishe
     mime: doc.mime,
     size: doc.size,
     sha256: doc.sha256,
-    // A third-party uploader compiled against the previous public interface
-    // may omit the newly-added field. Keep its event wire-compatible by
-    // normalizing absence to the same explicit null the platform returns.
-    presentation: doc.presentation === "primary" ? "primary" : null,
   };
 }
 
@@ -402,11 +395,7 @@ export function documentPublishedEvent(doc: PublishedDocument): DocumentPublishe
  * metadata. Injected into {@link buildPublishDocumentDef} by the runtime
  * entrypoint (which holds the run's HMAC sink signer).
  */
-export type DocumentUploader = (
-  path: string,
-  name?: string,
-  presentation?: "primary",
-) => Promise<PublishedDocument>;
+export type DocumentUploader = (path: string, name?: string) => Promise<PublishedDocument>;
 
 /**
  * Build the `publish_document` runtime tool def around an injected
@@ -428,12 +417,7 @@ export function buildPublishDocumentDef(uploader: DocumentUploader): RuntimeTool
         "another tool — or to see an upload failure in time to react. Files written under " +
         "`./outputs/` are published automatically at the end of the run, which is enough for a " +
         "plain end-of-run deliverable, but that happens after you are done: you never get their " +
-        "URIs. Primary selection is an explicit semantic choice: never infer primary status from " +
-        "file count, filename, MIME type, or placement under `./outputs/`. If this run produces one " +
-        "clearly main user-facing file, finish editing it first, then publish it with " +
-        '`presentation: "primary"`; do not edit that file after publishing it. If the run produces ' +
-        "no file, or several peer files with no obvious main deliverable, do not select a primary. " +
-        "The last successful primary publication wins.",
+        "URIs.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
@@ -447,35 +431,26 @@ export function buildPublishDocumentDef(uploader: DocumentUploader): RuntimeTool
             type: "string",
             description: "Optional display name for the document (defaults to the file name).",
           },
-          presentation: {
-            type: "string",
-            enum: ["primary"],
-            description:
-              "Set to `primary` to feature this document as the run's main deliverable. " +
-              "Call only after the file's final edit; the last successful primary publication wins.",
-          },
         },
       },
     },
     handler: async (rawArgs) => {
-      const { path, name, presentation } = (rawArgs ?? {}) as {
+      // Only the declared arguments are read. `additionalProperties: false`
+      // already keeps a schema-validating caller from sending anything else;
+      // for a caller that skips validation, an extra key (notably the retired
+      // `presentation`) is silently ignored rather than rejected — the tool has
+      // no notion of presentation any more, and refusing the call would lose a
+      // real deliverable over a dead argument.
+      const { path, name } = (rawArgs ?? {}) as {
         path?: unknown;
         name?: unknown;
-        presentation?: unknown;
       };
       if (typeof path !== "string" || path.length === 0) {
         return toolError("publish_document requires a non-empty `path`.");
       }
-      if (presentation !== undefined && presentation !== "primary") {
-        return toolError("publish_document `presentation` must be `primary` when provided.");
-      }
       let doc: PublishedDocument;
       try {
-        doc = await uploader(
-          path,
-          typeof name === "string" && name.length > 0 ? name : undefined,
-          presentation === "primary" ? presentation : undefined,
-        );
+        doc = await uploader(path, typeof name === "string" && name.length > 0 ? name : undefined);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         return toolError(`Failed to publish '${path}': ${message}`);

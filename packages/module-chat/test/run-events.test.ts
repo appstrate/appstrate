@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
+  autoPresentDocument,
   buildRunPageHref,
   buildRunSseUrl,
   extractAgentLabel,
@@ -9,7 +12,7 @@ import {
   extractRunId,
   extractRunPackageId,
   extractRunStatus,
-  isPrimaryAutoPresentationEligible,
+  isRunAutoPresentEligible,
   isRunLaunchOp,
   isTerminalStatus,
   mergeLogs,
@@ -19,7 +22,6 @@ import {
   parseRunLogFrame,
   parseRunResource,
   parseRunUpdateFrame,
-  primaryDocumentFromLogs,
   publishedDocumentsFromLogs,
   resolveAttachmentContent,
   safeJsonParse,
@@ -39,10 +41,10 @@ describe("run-events helpers", () => {
     expect(isTerminalStatus("failed")).toBe(true);
     expect(isTerminalStatus("running")).toBe(false);
     expect(isTerminalStatus(undefined)).toBe(false);
-    expect(isPrimaryAutoPresentationEligible("pending", "pending")).toBe(true);
-    expect(isPrimaryAutoPresentationEligible("running", "running")).toBe(true);
-    expect(isPrimaryAutoPresentationEligible("success", "success")).toBe(false);
-    expect(isPrimaryAutoPresentationEligible("running", "success")).toBe(false);
+    expect(isRunAutoPresentEligible("pending", "pending")).toBe(true);
+    expect(isRunAutoPresentEligible("running", "running")).toBe(true);
+    expect(isRunAutoPresentEligible("success", "success")).toBe(false);
+    expect(isRunAutoPresentEligible("running", "success")).toBe(false);
 
     // Keys, not sentences — the host translator renders them (no literal text
     // ships from this module).
@@ -111,6 +113,8 @@ describe("run-events helpers", () => {
       startedAt: "2026-06-30T00:00:00Z",
       completedAt: null,
       duration: null,
+      // Retired field a not-yet-deployed server may still send (#1177): dropped
+      // like any other extra, never a parse failure.
       primary_document_id: "doc_primary",
       agentScope: "@inline",
       cost: 0,
@@ -118,7 +122,7 @@ describe("run-events helpers", () => {
     expect(run?.status).toBe("running");
     expect(run?.packageId).toBe("@inline/run");
     expect(run?.startedAt).toBe("2026-06-30T00:00:00Z");
-    expect(run?.primary_document_id).toBe("doc_primary");
+    expect(run).not.toHaveProperty("primary_document_id");
     // Malformed body (no status) → undefined, so the seed is skipped.
     expect(parseRunResource({ id: "run_1" })).toBeUndefined();
     expect(parseRunResource(null)).toBeUndefined();
@@ -190,6 +194,8 @@ describe("run-events helpers", () => {
           name: "out.csv",
           mime: "text/csv",
           size: 40,
+          // Legacy field on historical log lines (#1177) — read past, never
+          // projected into the document and never a parse failure.
           presentation: "primary",
         },
       },
@@ -204,10 +210,9 @@ describe("run-events helpers", () => {
         size: 40,
       },
     ]);
-    expect(primaryDocumentFromLogs(logs)?.id).toBe("doc_9");
   });
 
-  it("merges regular document lists without projecting primary presentation", () => {
+  it("merges regular document lists without projecting any featured flag", () => {
     const persisted = [{ id: "doc_1", uri: "document://doc_1", name: "report" }];
     const live = [
       {
@@ -226,22 +231,6 @@ describe("run-events helpers", () => {
       name: "report.html",
       mime: "text/html",
     });
-  });
-
-  it("uses the last primary log when a run replaces its featured output", () => {
-    const logs: RunLogLine[] = [
-      {
-        id: 1,
-        event: "document",
-        data: { document_id: "doc_a", name: "a.md", presentation: "primary" },
-      },
-      {
-        id: 2,
-        event: "document",
-        data: { document_id: "doc_b", name: "b.md", presentation: "primary" },
-      },
-    ];
-    expect(primaryDocumentFromLogs(logs)?.id).toBe("doc_b");
   });
 
   it("resolves a sent attachment's content to a downloadable document or inert", () => {
@@ -291,5 +280,113 @@ describe("run-events helpers", () => {
       orgId: "o2",
       applicationId: "a2",
     });
+  });
+});
+
+/**
+ * The derived presentation rule that replaced the agent-declared
+ * `presentation: "primary"` (issue #1177). The count of files the run PRODUCED
+ * is the whole rule — nothing the model says takes part in it.
+ */
+describe("autoPresentDocument", () => {
+  const doc = (id: string): { id: string; uri: string; name: string } => ({
+    id,
+    uri: `document://${id}`,
+    name: `${id}.md`,
+  });
+  /** A settled run: terminal status, live tail already closed after its sweep. */
+  const settled = { status: "success" as const, live: false };
+
+  it("presents nothing when the run produced no file", () => {
+    expect(autoPresentDocument({ documents: [], ...settled })).toBeUndefined();
+  });
+
+  it("presents the single produced file, with nothing declared by the agent", () => {
+    expect(autoPresentDocument({ documents: [doc("doc_1")], ...settled })).toEqual(doc("doc_1"));
+  });
+
+  it("presents nothing when the run produced several files — the user picks", () => {
+    const three = [doc("doc_1"), doc("doc_2"), doc("doc_3")];
+    expect(autoPresentDocument({ documents: three, ...settled })).toBeUndefined();
+  });
+
+  it("waits for the run to settle: a mid-stream count of 1 is not the final count", () => {
+    // Same first file, three moments of the same run. Only the last one — the
+    // terminal status WITH the live tail closed, i.e. the final log sweep
+    // merged — may present anything.
+    const one = [doc("doc_1")];
+    expect(autoPresentDocument({ documents: one, status: "running", live: true })).toBeUndefined();
+    expect(autoPresentDocument({ documents: one, status: undefined, live: true })).toBeUndefined();
+    // Terminal, but the sweep that would reveal files 2 and 3 has not landed.
+    expect(autoPresentDocument({ documents: one, status: "success", live: true })).toBeUndefined();
+    expect(autoPresentDocument({ documents: one, status: "success", live: false })).toEqual(
+      doc("doc_1"),
+    );
+  });
+
+  it("still presents the single file of a run that failed", () => {
+    // A failed run that nonetheless published one file has a result to show.
+    expect(
+      autoPresentDocument({ documents: [doc("doc_1")], status: "failed", live: false }),
+    ).toEqual(doc("doc_1"));
+  });
+
+  it("ignores a legacy `presentation` field on the log line", () => {
+    // Three files, one of them flagged primary by an old runtime image. The
+    // flag changes nothing: three produced files present nothing.
+    const logs: RunLogLine[] = [
+      { id: 1, event: "document", data: { document_id: "doc_a", name: "a.md" } },
+      {
+        id: 2,
+        event: "document",
+        data: { document_id: "doc_b", name: "b.md", presentation: "primary" },
+      },
+      { id: 3, event: "document", data: { document_id: "doc_c", name: "c.md" } },
+    ];
+    const documents = publishedDocumentsFromLogs(logs);
+    expect(documents.map((d) => d.id)).toEqual(["doc_a", "doc_b", "doc_c"]);
+    expect(autoPresentDocument({ documents, ...settled })).toBeUndefined();
+
+    // And a lone file flagged `primary` is presented because it is the ONLY
+    // one, not because it was flagged.
+    const lone = publishedDocumentsFromLogs([logs[1]!]);
+    expect(autoPresentDocument({ documents: lone, ...settled })?.id).toBe("doc_b");
+  });
+
+  it("counts only publications: a run's input attachments are not produced files", () => {
+    // Input documents reach a run through its `input` payload, never as a
+    // `document.published` frame — only the publish tool and the `outputs/`
+    // sweep emit those. A run that consumed two inputs and produced one file
+    // is a single-file run.
+    const logs: RunLogLine[] = [
+      { id: 1, event: "input", data: { document_id: "doc_in_1", name: "brief.pdf" } },
+      { id: 2, event: "log", message: "reading doc_in_2" },
+      { id: 3, event: "document", data: { document_id: "doc_out", name: "report.md" } },
+    ];
+    const documents = publishedDocumentsFromLogs(logs);
+    expect(documents.map((d) => d.id)).toEqual(["doc_out"]);
+    expect(autoPresentDocument({ documents, ...settled })?.id).toBe("doc_out");
+
+    // A run that only consumed inputs produced nothing to present.
+    expect(
+      autoPresentDocument({ documents: publishedDocumentsFromLogs(logs.slice(0, 2)), ...settled }),
+    ).toBeUndefined();
+  });
+
+  it("is the card's only auto-presentation path, fired at most once", () => {
+    // No DOM in this runner, so the wiring is asserted on the source: the card
+    // must derive its candidate from the rule (not from a server field), must
+    // present through the host opener only, and must keep the once-only ref —
+    // a file published after the panel opened never closes or swaps it.
+    const card = readFileSync(
+      fileURLToPath(new URL("../src/ui/chat-run-progress-card.tsx", import.meta.url)),
+      "utf8",
+    );
+    expect(card).toContain("autoPresentDocument({ documents, status: effectiveStatus, live })");
+    expect(card).toContain("if (hasAutoPresented.current) return;");
+    expect(card).toContain("hasAutoPresented.current = true;");
+    // The retired agent-declared selection has no reader left anywhere.
+    expect(card).not.toContain("primary");
+    expect(card).not.toContain("presentation:");
   });
 });

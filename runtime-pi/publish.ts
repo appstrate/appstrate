@@ -182,7 +182,7 @@ export interface RunDocumentUploaderDeps {
 }
 
 /**
- * Build the `uploadRunDocument(path, name?, presentation?)` function the `publish_document`
+ * Build the `uploadRunDocument(path, name?)` function the `publish_document`
  * tool and the outputs sweep both call. It streams the file straight to
  * `POST /api/runs/:id/documents` (never buffering it), records the returned
  * `${sha256}:${name}` identity and the canonical source's published digest, then
@@ -199,7 +199,7 @@ export function createRunDocumentUploader(deps: RunDocumentUploaderDeps): Docume
   const sleep = deps.sleepFn ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const url = deps.sinkUrl.replace(/\/events$/, "/documents");
 
-  return async (relPath, name, presentation) => {
+  return async (relPath, name) => {
     // `publish_document` promises a workspace-relative path. Keep that
     // contract narrower than api_call/api_upload: absolute `/tmp` paths are
     // not publishable, and symlinks may not escape the workspace.
@@ -244,9 +244,6 @@ export function createRunDocumentUploader(deps: RunDocumentUploaderDeps): Docume
         "Content-Type": contentType,
         "X-Document-Name": encodedName,
       };
-      if (presentation !== undefined) {
-        headers["X-Document-Presentation"] = presentation;
-      }
 
       let res: Response;
       try {
@@ -270,16 +267,9 @@ export function createRunDocumentUploader(deps: RunDocumentUploaderDeps): Docume
       }
 
       if (res.ok) {
-        const rawDoc = (await res.json()) as Omit<PublishedDocument, "presentation"> & {
-          presentation?: unknown;
-        };
-        // Older platform versions did not return `presentation`. Normalizing
-        // the absent field to null preserves mixed-version compatibility while
-        // ensuring every runtime event has the complete canonical shape.
-        const doc: PublishedDocument = {
-          ...rawDoc,
-          presentation: rawDoc.presentation === "primary" ? "primary" : null,
-        };
+        // A platform newer or older than this image may return extra fields
+        // (e.g. the retired `presentation`); they are simply not read.
+        const doc = (await res.json()) as PublishedDocument;
         // Record the server-authoritative identity (its sanitized name +
         // sha256), matching the server dedup index exactly. Also remember the
         // canonical source file's returned digest: the outputs sweep must not
@@ -468,7 +458,7 @@ export async function sweepOutputs(deps: SweepOutputsDeps): Promise<SweepResult>
     if (deps.publishedSourceHashes.get(canonicalAbs) === sha) {
       // This exact, unchanged workspace file was already published explicitly.
       // Its display name may differ from the basename the sweep would choose;
-      // source identity prevents that presentation choice creating a duplicate.
+      // source identity prevents that naming choice creating a duplicate.
       result.skipped.push({ name: rel, reason: "already_published" });
       return;
     }
@@ -494,9 +484,6 @@ export async function sweepOutputs(deps: SweepOutputsDeps): Promise<SweepResult>
     deps.publishedKeys.add(key);
     let doc: PublishedDocument;
     try {
-      // The implicit outputs sweep never changes the primary selection.
-      // Only an explicit `publish_document({ presentation: "primary" })` call
-      // may carry that intent to the platform.
       doc = await deps.uploader(path.join("outputs", rel), documentName);
     } catch (err) {
       deps.publishedKeys.delete(key);

@@ -224,13 +224,9 @@ export interface DocumentRow {
   mime: string;
   size: number;
   sha256: string;
-  presentation: DocumentPresentation | null;
   expiresAt: Date | null;
   createdAt: Date;
 }
-
-/** The optional run-page role an agent can assign to a published output. */
-export type DocumentPresentation = "primary";
 
 /**
  * The full access-capability set for one document + caller — the single source
@@ -518,8 +514,6 @@ interface DocumentDto {
    * to a non-creator reader.
    */
   sha256?: string;
-  /** Optional run-page presentation role assigned by the producing agent. */
-  presentation: DocumentPresentation | null;
   downloadable: boolean;
   /**
    * The full access-capability set for this caller ({@link DocumentCapabilities}).
@@ -622,7 +616,6 @@ export function toDocumentDto(
     mime: view.mime,
     size: row.size,
     ...(view.sha256 !== undefined ? { sha256: view.sha256 } : {}),
-    presentation: row.presentation,
     downloadable: capabilities.download,
     capabilities,
     previewable,
@@ -727,7 +720,6 @@ export async function createDocumentFromUpload(
 interface CommittedDocumentRow {
   row: DocumentRow;
   deduped: boolean;
-  presentationChanged: boolean;
 }
 
 /**
@@ -753,7 +745,6 @@ async function commitDocumentRow(params: {
   mime: string;
   byteCount: number;
   sha256: string;
-  presentation?: DocumentPresentation;
   expiresAt: Date | null;
   /**
    * Per-run output ceiling ({@link createDocumentFromStream} only). When set,
@@ -794,8 +785,7 @@ async function commitDocumentRow(params: {
       // Re-check dedup AFTER acquiring the serialization lock and BEFORE every
       // quota/cap gate. Two identical concurrent publishes can both miss the
       // optimistic pre-commit lookup; the loser must still resolve to the
-      // winner even when that winner has just filled the run/org quota. When
-      // requested, promotion happens in this same transaction.
+      // winner even when that winner has just filled the run/org quota.
       if (params.runId && params.purpose === "agent_output") {
         const existing = await findDedupDocument(
           tx,
@@ -805,15 +795,7 @@ async function commitDocumentRow(params: {
           params.name,
         );
         if (existing) {
-          if (params.presentation === "primary" && existing.presentation !== "primary") {
-            const promoted = await promoteRunDocument(tx, scope, params.runId, existing.id);
-            return {
-              row: promoted,
-              deduped: true,
-              presentationChanged: true,
-            };
-          }
-          return { row: existing, deduped: true, presentationChanged: false };
+          return { row: existing, deduped: true };
         }
       }
 
@@ -846,12 +828,6 @@ async function commitDocumentRow(params: {
           }
         }
       }
-      if (params.presentation === "primary") {
-        // Switching the featured output is part of the publication transaction:
-        // any later insert failure rolls this update back and preserves the
-        // previous primary. The org lock above serializes competing switches.
-        await clearRunPrimary(tx, scope, params.runId!);
-      }
       const inserted = await tx
         .insert(documents)
         .values({
@@ -869,7 +845,6 @@ async function commitDocumentRow(params: {
           mime: params.mime,
           size: byteCount,
           sha256: params.sha256,
-          presentation: params.presentation ?? null,
           expiresAt: params.expiresAt,
         })
         .returning();
@@ -877,11 +852,7 @@ async function commitDocumentRow(params: {
         .update(organizations)
         .set({ documentsBytesUsed: sql`${organizations.documentsBytesUsed} + ${byteCount}` })
         .where(eq(organizations.id, scope.orgId));
-      return {
-        row: inserted[0] as DocumentRow,
-        deduped: false,
-        presentationChanged: params.presentation === "primary",
-      };
+      return { row: inserted[0] as DocumentRow, deduped: false };
     });
     if (committed.deduped) {
       await dropDocumentObject(storagePath, "dedup_duplicate");
@@ -965,8 +936,6 @@ interface CreatedDocumentFromStream {
   row: DocumentRow;
   /** True when an identical (run, sha256, name) document already existed. */
   deduped: boolean;
-  /** True when this call changed which document is featured for the run. */
-  presentationChanged: boolean;
 }
 
 /**
@@ -1014,87 +983,6 @@ async function findDedupDocument(
   return (existing as DocumentRow) ?? null;
 }
 
-/** Clear the featured output for one run inside the caller's transaction. */
-async function clearRunPrimary(executor: DbOrTx, scope: AppScope, runId: string): Promise<void> {
-  await executor
-    .update(documents)
-    .set({ presentation: null })
-    .where(
-      and(
-        eq(documents.runId, runId),
-        eq(documents.orgId, scope.orgId),
-        eq(documents.applicationId, scope.applicationId),
-        eq(documents.presentation, "primary"),
-      ),
-    );
-}
-
-/**
- * Make an existing run output primary. The clear + promote pair stays behind
- * this transaction-local seam so every dedup path applies the same invariant.
- */
-async function promoteRunDocument(
-  executor: DbOrTx,
-  scope: AppScope,
-  runId: string,
-  documentId: string,
-): Promise<DocumentRow> {
-  await clearRunPrimary(executor, scope, runId);
-  const [promoted] = await executor
-    .update(documents)
-    .set({ presentation: "primary" })
-    .where(eq(documents.id, documentId))
-    .returning(documentSelect);
-  if (!promoted) {
-    throw new Error(`Document ${documentId} vanished while selecting the run primary`);
-  }
-  return promoted as DocumentRow;
-}
-
-/**
- * Promote an already-committed dedup winner without creating a second object.
- * Uses the same org-first lock as fresh document commits so promotion races and
- * run teardown share one ordering. Returns null only if the candidate vanished
- * after the caller's optimistic dedup lookup, in which case ingestion can
- * continue with the freshly streamed object.
- */
-async function promoteExistingDocument(
-  scope: AppScope,
-  runId: string,
-  documentId: string,
-): Promise<{ row: DocumentRow; changed: boolean } | null> {
-  return db.transaction(async (tx) => {
-    await tx
-      .select({ id: organizations.id })
-      .from(organizations)
-      .where(eq(organizations.id, scope.orgId))
-      .for("update")
-      .limit(1);
-
-    const [candidate] = await tx
-      .select(documentSelect)
-      .from(documents)
-      .where(
-        and(
-          eq(documents.id, documentId),
-          eq(documents.runId, runId),
-          eq(documents.orgId, scope.orgId),
-          eq(documents.applicationId, scope.applicationId),
-          eq(documents.purpose, "agent_output"),
-        ),
-      )
-      .for("update")
-      .limit(1);
-    if (!candidate) return null;
-    if (candidate.presentation === "primary") {
-      return { row: candidate as DocumentRow, changed: false };
-    }
-
-    const promoted = await promoteRunDocument(tx, scope, runId, documentId);
-    return { row: promoted, changed: true };
-  });
-}
-
 /**
  * Ingest an agent-published document from a run's streaming request body into a
  * durable `agent_output` document. Mirrors {@link createDocumentFromUpload} but
@@ -1125,7 +1013,6 @@ export async function createDocumentFromStream(
     name: string;
     mime: string;
     body: ReadableStream<Uint8Array>;
-    presentation?: DocumentPresentation;
   },
 ): Promise<CreatedDocumentFromStream> {
   const env = getEnv();
@@ -1171,28 +1058,8 @@ export async function createDocumentFromStream(
   // POST. Drop the freshly-written object and return the existing row.
   const existing = await findDedupDocument(db, scope, runId, sha256, input.name);
   if (existing) {
-    let selected: { row: DocumentRow; changed: boolean } | null;
-    try {
-      selected =
-        input.presentation === "primary"
-          ? await promoteExistingDocument(scope, runId, existing.id)
-          : { row: existing, changed: false };
-    } catch (err) {
-      // The duplicate bytes already landed under a fresh object key, but a
-      // failed promotion creates no row that could own or later GC them.
-      // Preserve the write path's drop-on-error invariant before surfacing the
-      // database failure.
-      await dropDocumentObject(storagePath, "dedup_promotion_failure");
-      throw err;
-    }
-    if (selected) {
-      await dropDocumentObject(storagePath, "dedup_duplicate");
-      return {
-        row: selected.row,
-        deduped: true,
-        presentationChanged: selected.changed,
-      };
-    }
+    await dropDocumentObject(storagePath, "dedup_duplicate");
+    return { row: existing, deduped: true };
   }
 
   try {
@@ -1210,7 +1077,6 @@ export async function createDocumentFromStream(
       mime: storedMime,
       byteCount,
       sha256,
-      presentation: input.presentation,
       expiresAt: retentionExpiry(env.DOCUMENT_RETENTION_DAYS),
       // Authoritative (and only) per-run cap checks — re-summed/re-counted under
       // the org `FOR UPDATE` lock inside commitDocumentRow. Enforced here, not
@@ -1228,17 +1094,7 @@ export async function createDocumentFromStream(
     if (isUniqueViolation(err)) {
       const winner = await findDedupDocument(db, scope, runId, sha256, input.name);
       if (winner) {
-        const selected =
-          input.presentation === "primary"
-            ? await promoteExistingDocument(scope, runId, winner.id)
-            : { row: winner, changed: false };
-        if (selected) {
-          return {
-            row: selected.row,
-            deduped: true,
-            presentationChanged: selected.changed,
-          };
-        }
+        return { row: winner, deduped: true };
       }
     }
     throw err;
@@ -1354,7 +1210,6 @@ const documentSelect = {
   mime: documents.mime,
   size: documents.size,
   sha256: documents.sha256,
-  presentation: documents.presentation,
   expiresAt: documents.expiresAt,
   createdAt: documents.createdAt,
 } as const;
@@ -1792,17 +1647,12 @@ export async function detachOrDeleteContainedDocuments(
     const detachIds = containedIds.filter((id) => protectedSet.has(id));
     const deleteIds = containedIds.filter((id) => !protectedSet.has(id));
 
-    // Protected → detach. A run-detached document cannot stay featured on the
-    // deleted run's page, so clear its presentation role in the same update.
+    // Protected → detach.
     if (detachIds.length > 0) {
       await exec
         .update(documents)
         .set(
-          runIds
-            ? { runId: null, presentation: null }
-            : chatSessionId
-              ? { chatSessionId: null }
-              : { endUserId: null },
+          runIds ? { runId: null } : chatSessionId ? { chatSessionId: null } : { endUserId: null },
         )
         .where(inArray(documents.id, detachIds));
     }

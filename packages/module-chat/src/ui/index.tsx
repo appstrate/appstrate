@@ -108,10 +108,10 @@ export interface ChatPageProps {
    */
   onConversationChange?: SelectConversation;
   /**
-   * Presents a clicked chat document or a live run's primary output through the
-   * host's in-app viewer. Optional: without it direct clicks fall back to
-   * `downloadDocument` and automatic presentation is skipped. Delivered to deep
-   * tool UIs via context, not props.
+   * Presents a clicked chat document — or the single file a live run produced —
+   * through the host's in-app viewer. Optional: without it direct clicks fall
+   * back to `downloadDocument` and automatic presentation is skipped. Delivered
+   * to deep tool UIs via context, not props.
    */
   onOpenDocument?: OpenDocument;
   /** Optional host-owned actions displayed beside the conversation title. */

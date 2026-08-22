@@ -799,8 +799,7 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       "goal is a downloadable file (report, CSV, image…), instruct the run's `prompt` to write it " +
       "into `outputs/` with a descriptive, task-specific filename that remains understandable " +
       "outside this run; never use context-free names such as `report.md`, `summary.md`, or " +
-      "`output.md`. When selected (by default, or explicitly), `publish_document`'s own " +
-      "description defines when and how the run should select a primary deliverable. " +
+      "`output.md`. " +
       "For several files or an executable package, instruct the run to build a `.zip` or `.afps` " +
       "archive with its normal shell tools, then publish that single archive with " +
       "`publish_document`. " +

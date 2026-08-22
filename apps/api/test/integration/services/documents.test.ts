@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   documents,
@@ -156,14 +156,12 @@ function publishStream(
     endUserId: null,
   },
   mime = "text/plain",
-  presentation?: "primary",
 ) {
   const bytes = new TextEncoder().encode(content);
   return createDocumentFromStream(scope, runId, attribution, null, {
     name,
     mime,
     body: new Blob([bytes]).stream(),
-    presentation,
   });
 }
 
@@ -847,7 +845,7 @@ describe("documents service + routes", () => {
     expect([r1.deduped, r2.deduped].filter(Boolean)).toHaveLength(1);
   });
 
-  it("dedups and promotes an identical concurrent primary before exact run caps reject it", async () => {
+  it("dedups an identical concurrent publish before exact run caps reject it", async () => {
     const runId = await seedRunRow(scope);
     const content = "fills-cap";
 
@@ -878,7 +876,7 @@ describe("documents service + routes", () => {
 
         const pending = Promise.all([
           publishStream(scope, runId, "same.html", content),
-          publishStream(scope, runId, "same.html", content, undefined, "text/html", "primary"),
+          publishStream(scope, runId, "same.html", content, undefined, "text/html"),
         ]);
 
         // Each publish writes its unique temporary object before trying to take
@@ -896,142 +894,15 @@ describe("documents service + routes", () => {
         releaseOrgLock();
         await blocker;
 
-        const [ordinary, primary] = await pending;
-        expect([ordinary.deduped, primary.deduped].filter(Boolean)).toHaveLength(1);
-        expect(ordinary.row.id).toBe(primary.row.id);
-        expect(primary.presentationChanged).toBe(true);
-        expect(primary.row.presentation).toBe("primary");
+        const [first, second] = await pending;
+        expect([first.deduped, second.deduped].filter(Boolean)).toHaveLength(1);
+        expect(first.row.id).toBe(second.row.id);
 
         const rows = await db.select().from(documents).where(eq(documents.runId, runId));
         expect(rows).toHaveLength(1);
-        expect(rows[0]!.presentation).toBe("primary");
         expect(await orgBytesUsed(ctx.orgId)).toBe(content.length);
       });
     });
-  });
-
-  it("serializes concurrent primary publications and leaves exactly one winner", async () => {
-    const runId = await seedRunRow(scope);
-    const [a, b] = await Promise.all([
-      publishStream(scope, runId, "a.html", "<html>a</html>", undefined, "text/html", "primary"),
-      publishStream(scope, runId, "b.html", "<html>b</html>", undefined, "text/html", "primary"),
-    ]);
-
-    expect(a.presentationChanged).toBe(true);
-    expect(b.presentationChanged).toBe(true);
-    const rows = await db
-      .select({ id: documents.id, presentation: documents.presentation })
-      .from(documents)
-      .where(eq(documents.runId, runId));
-    const primary = rows.filter((row) => row.presentation === "primary");
-    expect(primary).toHaveLength(1);
-    expect([a.row.id, b.row.id]).toContain(primary[0]!.id);
-  });
-
-  it("queues the duplicate object for deletion when dedup promotion fails", async () => {
-    const runId = await seedRunRow(scope);
-    const first = await publishStream(scope, runId, "report.txt", "same bytes");
-    const prefix = `${scope.applicationId}/`;
-    const keysBefore = await documentObjectKeys(prefix);
-    expect(keysBefore).toHaveLength(1);
-
-    await db.execute(
-      sql.raw(`
-        CREATE FUNCTION test_reject_primary_promotion() RETURNS trigger AS $$
-        BEGIN
-          IF NEW.presentation = 'primary' AND OLD.presentation IS DISTINCT FROM NEW.presentation THEN
-            RAISE EXCEPTION 'forced primary promotion failure';
-          END IF;
-          RETURN NEW;
-        END;
-        $$ LANGUAGE plpgsql
-      `),
-    );
-    await db.execute(
-      sql.raw(`
-        CREATE TRIGGER test_reject_primary_promotion
-        BEFORE UPDATE OF presentation ON documents
-        FOR EACH ROW EXECUTE FUNCTION test_reject_primary_promotion()
-      `),
-    );
-
-    let promotionError: unknown;
-    try {
-      await publishStream(
-        scope,
-        runId,
-        "report.txt",
-        "same bytes",
-        undefined,
-        "text/plain",
-        "primary",
-      );
-    } catch (err) {
-      promotionError = err;
-    } finally {
-      await db.execute(sql.raw("DROP TRIGGER test_reject_primary_promotion ON documents"));
-      await db.execute(sql.raw("DROP FUNCTION test_reject_primary_promotion()"));
-    }
-    expect(promotionError).toBeDefined();
-    const messages: string[] = [];
-    let current: unknown = promotionError;
-    for (let depth = 0; current && typeof current === "object" && depth < 5; depth++) {
-      if ("message" in current && typeof current.message === "string")
-        messages.push(current.message);
-      current = "cause" in current ? current.cause : undefined;
-    }
-    expect(messages.join(" ")).toContain("forced primary promotion failure");
-
-    const [job] = await db
-      .select({
-        reason: storageDeletionJobs.reason,
-        storageKey: storageDeletionJobs.storageKey,
-      })
-      .from(storageDeletionJobs)
-      .where(eq(storageDeletionJobs.reason, "dedup_promotion_failure"));
-    expect(job).toBeDefined();
-    expect(job!.storageKey).not.toBe(first.row.storageKey.replace(/^documents\//, ""));
-
-    await processStorageDeletionJobs();
-    expect(await documentObjectKeys(prefix)).toEqual(keysBefore);
-    const [stored] = await db
-      .select({ presentation: documents.presentation })
-      .from(documents)
-      .where(eq(documents.id, first.row.id));
-    expect(stored?.presentation).toBeNull();
-  });
-
-  it("keeps the previous primary when a replacement publication fails", async () => {
-    const runId = await seedRunRow(scope);
-    const first = await publishStream(
-      scope,
-      runId,
-      "first.html",
-      "<html>first</html>",
-      undefined,
-      "text/html",
-      "primary",
-    );
-
-    await withEnv("RUN_MAX_OUTPUT_BYTES", String(first.row.size), async () => {
-      await expect(
-        publishStream(
-          scope,
-          runId,
-          "second.html",
-          "<html>second</html>",
-          undefined,
-          "text/html",
-          "primary",
-        ),
-      ).rejects.toMatchObject({ status: 413 });
-    });
-
-    const [selected] = await db
-      .select({ id: documents.id })
-      .from(documents)
-      .where(and(eq(documents.runId, runId), eq(documents.presentation, "primary")));
-    expect(selected?.id).toBe(first.row.id);
   });
 
   it("GET /content: 403 for a member who is not the upload's creator, 200 for an agent_output", async () => {
@@ -1352,15 +1223,7 @@ describe("documents service + routes", () => {
     await seedPackage({ id: "@chain/consumer", orgId: ctx.orgId });
     const runA = await seedRunRow(scope, { packageId: "@chain/producer" });
     const runB = await seedRunRow(scope, { packageId: "@chain/consumer" });
-    const { row: docX } = await publishStream(
-      scope,
-      runA,
-      "shared.txt",
-      "shared bytes",
-      undefined,
-      "text/plain",
-      "primary",
-    );
+    const { row: docX } = await publishStream(scope, runA, "shared.txt", "shared bytes");
     await db
       .insert(documentLinks)
       .values({ documentId: docX.id, consumerRunId: runB, orgId: ctx.orgId });
@@ -1377,7 +1240,6 @@ describe("documents service + routes", () => {
     expect(row).toBeDefined();
     expect(row!.runId).toBeNull();
     expect(row!.chatSessionId).toBeNull();
-    expect(row!.presentation).toBeNull();
     expect(await orgBytesUsed(ctx.orgId)).toBe(usedBefore);
     const resolved = await getDocumentForActor(scope, userActor, docX.id);
     expect(resolved?.row.id).toBe(docX.id);
@@ -1625,71 +1487,6 @@ describe("documents service + routes", () => {
     const cause = (error as { cause?: { message?: string; constraint?: string } }).cause;
     const text = `${(error as Error).message} ${cause?.message ?? ""} ${cause?.constraint ?? ""}`;
     expect(text).toContain("chk_documents_single_container");
-  });
-
-  it("enforces primary presentation purpose, value, and one-per-run invariants in PostgreSQL", async () => {
-    const runId = await seedRunRow(scope);
-    await publishStream(scope, runId, "a.txt", "a");
-    await publishStream(scope, runId, "b.txt", "b");
-
-    // Bypassing the service cannot create two featured documents for one run.
-    let uniqueError: unknown;
-    try {
-      await db.update(documents).set({ presentation: "primary" }).where(eq(documents.runId, runId));
-    } catch (err) {
-      uniqueError = err;
-    }
-    expect(uniqueError).toBeDefined();
-    const uniqueCause = (uniqueError as { cause?: { message?: string; constraint?: string } })
-      .cause;
-    expect(
-      `${(uniqueError as Error).message} ${uniqueCause?.message ?? ""} ${uniqueCause?.constraint ?? ""}`,
-    ).toContain("uq_documents_run_primary");
-
-    // Presentation is not valid on a materialized user upload.
-    const uploadId = await stageUpload(
-      scope,
-      ctx.user.id,
-      "input.txt",
-      new TextEncoder().encode("input"),
-    );
-    const upload = await createDocumentFromUpload(scope, userActor, uploadId, { runId });
-    let purposeError: unknown;
-    try {
-      await db
-        .update(documents)
-        .set({ presentation: "primary" })
-        .where(eq(documents.id, upload.id));
-    } catch (err) {
-      purposeError = err;
-    }
-    expect(purposeError).toBeDefined();
-    const purposeCause = (purposeError as { cause?: { message?: string; constraint?: string } })
-      .cause;
-    expect(
-      `${(purposeError as Error).message} ${purposeCause?.message ?? ""} ${purposeCause?.constraint ?? ""}`,
-    ).toContain("chk_documents_presentation");
-
-    // The TypeScript literal prevents this through typed code; the CHECK also
-    // rejects an unknown role from raw SQL or an older client.
-    const [output] = await db
-      .select({ id: documents.id })
-      .from(documents)
-      .where(and(eq(documents.runId, runId), eq(documents.purpose, "agent_output")))
-      .limit(1);
-    let valueError: unknown;
-    try {
-      await db.execute(
-        sql`UPDATE "documents" SET "presentation" = 'featured' WHERE "id" = ${output!.id}`,
-      );
-    } catch (err) {
-      valueError = err;
-    }
-    expect(valueError).toBeDefined();
-    const valueCause = (valueError as { cause?: { message?: string; constraint?: string } }).cause;
-    expect(
-      `${(valueError as Error).message} ${valueCause?.message ?? ""} ${valueCause?.constraint ?? ""}`,
-    ).toContain("chk_documents_presentation");
   });
 
   it("createRun atomically records consumption links", async () => {

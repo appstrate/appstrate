@@ -24,7 +24,6 @@ import {
   mergeLogs,
   orgAppFromHeaders,
   parseLogListResponse,
-  primaryDocumentFromLogs,
   parseRunLogFrame,
   parseRunResource,
   parseRunUpdateFrame,
@@ -47,9 +46,12 @@ interface RunLogStream {
    * runner supplied its own execution-window `durationMs` at finalize.
    */
   duration: number | undefined;
-  /** Current primary output id; `null` means the run authoritatively has none. */
-  primaryDocumentId: string | null | undefined;
-  /** True while the live SSE tail is connected (run not yet terminal). */
+  /**
+   * True while the live SSE tail is connected. Flipped back to false only AFTER
+   * the terminal final log sweep has been merged, so `isTerminalStatus(status)
+   * && !live` is the "this run's document set is complete" signal the card's
+   * auto-present rule waits for (see `autoPresentDocument`).
+   */
   live: boolean;
 }
 
@@ -73,7 +75,6 @@ export function useRunLogStream(
   const [startedAt, setStartedAt] = useState<string | undefined>(undefined);
   const [completedAt, setCompletedAt] = useState<string | undefined>(undefined);
   const [duration, setDuration] = useState<number | undefined>(undefined);
-  const [primaryDocumentId, setPrimaryDocumentId] = useState<string | null | undefined>(undefined);
   const [live, setLive] = useState(false);
 
   useEffect(() => {
@@ -123,13 +124,6 @@ export function useRunLogStream(
         if (run.completedAt) setCompletedAt((prev) => prev ?? run.completedAt ?? undefined);
         if (typeof run.duration === "number")
           setDuration((prev) => prev ?? run.duration ?? undefined);
-        // The run resource is the current-state authority. Do not derive this
-        // from history: append-only logs retain superseded primary selections.
-        if (run.primary_document_id !== undefined) {
-          setPrimaryDocumentId((prev) =>
-            prev === undefined ? (run.primary_document_id ?? null) : prev,
-          );
-        }
       } catch {
         // ignore — SSE remains the source of truth
       }
@@ -159,13 +153,7 @@ export function useRunLogStream(
 
     es.addEventListener("run_log", (e) => {
       const line = parseRunLogFrame((e as MessageEvent).data);
-      if (line) {
-        apply([line]);
-        // A primary publication is already committed before this event exists,
-        // so it may replace the run-resource snapshot immediately.
-        const primary = primaryDocumentFromLogs([line]);
-        if (primary) setPrimaryDocumentId(primary.id);
-      }
+      if (line) apply([line]);
     });
 
     es.addEventListener("run_update", (e) => {
@@ -179,34 +167,20 @@ export function useRunLogStream(
       if (isTerminalStatus(update.status)) {
         // One final full history sweep catches log lines the trigger may have
         // emitted in the same tick as the terminal status (mergeLogs dedups the
-        // overlap). Refresh the run resource alongside it: the one-shot seed may
-        // have observed `primary_document_id: null` before the document was
-        // published, and SSE intentionally has no replay after a reconnect.
+        // overlap) — including the last `document.published` frames of a run
+        // that published several files at finalize. `closeLive()` runs only
+        // after that sweep is merged, which is what makes `!live` mean "the
+        // document set is complete" for the auto-present rule.
         void (async () => {
           try {
-            const [finalLogs, finalRun] = await Promise.all([
-              fetch(`/api/runs/${encodeURIComponent(runId)}/logs?limit=1000`, {
-                headers,
-                credentials: "include",
-              })
-                .then(async (res) => (res.ok ? parseLogListResponse(await res.json()) : []))
-                .catch(() => []),
-              fetch(`/api/runs/${encodeURIComponent(runId)}`, {
-                headers,
-                credentials: "include",
-              })
-                .then(async (res) => (res.ok ? parseRunResource(await res.json()) : undefined))
-                .catch(() => undefined),
-            ]);
+            const finalLogs = await fetch(
+              `/api/runs/${encodeURIComponent(runId)}/logs?limit=1000`,
+              { headers, credentials: "include" },
+            )
+              .then(async (res) => (res.ok ? parseLogListResponse(await res.json()) : []))
+              .catch(() => []);
             if (cancelled) return;
             apply(finalLogs);
-            if (finalRun?.primary_document_id !== undefined) {
-              setPrimaryDocumentId(finalRun.primary_document_id ?? null);
-            } else {
-              // Best-effort fallback when the resource refresh alone failed.
-              const primary = primaryDocumentFromLogs(finalLogs);
-              if (primary) setPrimaryDocumentId(primary.id);
-            }
           } finally {
             closeLive();
           }
@@ -235,7 +209,6 @@ export function useRunLogStream(
     startedAt,
     completedAt,
     duration,
-    primaryDocumentId,
     live,
   };
 }

@@ -20,7 +20,6 @@ import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
 import { RunInfoTab } from "../components/run-info-tab";
 import { RunDocumentsTab } from "../components/run-documents-tab";
-import { RunDeliverableTab } from "../components/run-deliverable-tab";
 import { RunDetailTabsController } from "../components/run-detail-tabs-controller";
 import { invalidateOrgStorage } from "../hooks/use-documents";
 import { RunRow } from "../components/run-row";
@@ -111,19 +110,6 @@ export function RunDetailPage() {
     structuredOutput || (execResult?.output as Record<string, unknown> | undefined) || null;
   const hasOutput = !!finalOutput && Object.keys(finalOutput).length > 0;
   const allLogs = historicalLogs;
-  const primaryDocumentId = run?.primary_document_id ?? null;
-  const hasDeliverable = !!primaryDocumentId;
-  const handlePrimaryDocumentUnavailable = useCallback(
-    (documentId: string) => {
-      const key = runKeys.detail(orgId, applicationId, runId);
-      qc.setQueryData<EnrichedRun>(key, (previous) => {
-        if (!previous || previous.primary_document_id !== documentId) return previous;
-        return { ...previous, primary_document_id: null };
-      });
-      void qc.invalidateQueries({ queryKey: key });
-    },
-    [applicationId, orgId, qc, runId],
-  );
 
   // Run-level memory rows (only those touched during this run).
   const { data: runMemories } = useRunMemories(packageId, runId);
@@ -135,7 +121,13 @@ export function RunDetailPage() {
   // has (same field `run-row.tsx` renders). Listing the run's documents just to
   // count them cost a request on every run page and silently saturated at the
   // page size; the list query now runs only when the tab is actually opened.
-  const documentCount = (run?.document_counts.input ?? 0) + (run?.document_counts.output ?? 0);
+  const inputDocumentCount = run?.document_counts.input ?? 0;
+  const outputDocumentCount = run?.document_counts.output ?? 0;
+  const documentCount = inputDocumentCount + outputDocumentCount;
+  // The derived presentation rule (#1177): a run that PRODUCED exactly one file
+  // leads with the tab that shows it. Inputs the run consumed never count, and
+  // nothing the agent declared takes part — the count is the whole rule.
+  const hasFeaturedDocument = outputDocumentCount === 1;
 
   // Per-run SSE for log inserts + live metric updates. Status patches
   // come from `useGlobalRunSync` (mounted in MainLayout), which writes
@@ -284,7 +276,7 @@ export function RunDetailPage() {
 
       <RunDetailTabsController
         key={runId}
-        availability={{ hasDeliverable, hasResult: hasOutput, hasMemory: hasRunMemory }}
+        availability={{ hasFeaturedDocument, hasResult: hasOutput, hasMemory: hasRunMemory }}
       >
         {({ activeTab, setActiveTab }) => (
           <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as RunDetailTab)}>
@@ -295,9 +287,6 @@ export function RunDetailPage() {
             <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
               <div className="max-w-full min-w-0 overflow-x-auto pb-1">
                 <TabsList className="w-max">
-                  {hasDeliverable && (
-                    <TabsTrigger value="deliverable">{t("run.tabDeliverable")}</TabsTrigger>
-                  )}
                   {hasOutput && <TabsTrigger value="result">{t("run.tabResultGroup")}</TabsTrigger>}
                   <TabsTrigger value="logs">
                     {t("run.tabLogs")}
@@ -370,15 +359,6 @@ export function RunDetailPage() {
                 )}
               </div>
             </div>
-
-            {hasDeliverable && primaryDocumentId && (
-              <TabsContent value="deliverable" className="mt-0">
-                <RunDeliverableTab
-                  documentId={primaryDocumentId}
-                  onUnavailable={handlePrimaryDocumentUnavailable}
-                />
-              </TabsContent>
-            )}
 
             {hasOutput && (
               <TabsContent value="result" className="mt-0">
