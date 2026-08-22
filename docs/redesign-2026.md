@@ -1177,31 +1177,32 @@ So the strategy the reference itself suggests:
 
 ## Open
 
-- **The tier-one budget is the window MINUS the shell's gutter, and the test
-  says the window** (found 22 August, migrating the integration tables). At a
-  390px window every table in the app measures 348px — the gutter takes the
-  other 42 — so `column-tiers.test.tsx` is checking against a number 42px too
-  generous. Three sets are already over the real one: `packages` at 388,
-  `models` and `proxies` at 384. It is not theoretical for the first of them —
-  **the packages table clips 28px of its last column at a 390px window**, on
-  `/agents`, `/skills` and `/mcp-servers` in table view, because the frame is
-  `overflow-hidden`. Not fixed here: tightening the constant fails three sets
-  this change was not about, and each is a product decision about which column
-  gives up room. The comment on that assertion carries the number and points
-  back here. The two integration sets were SIZED against 348 — by construction,
-  since nothing in the test enforces it.
-- **Two rename affordances, and one of them is the Edit button the product
-  owner ruled out.** The credentials table renames by clicking the label
-  (`InlineEditableLabel`, whose docstring already claims the other settings
-  tables); the connections table reveals an `Input` behind a pencil. The second
-  is what "Direct manipulation in forms. No Edit button revealing a field" says
-  not to do, and it was carried over verbatim in the migration rather than
-  introduced by it. Not converted on the spot because the shared component would
-  have to grow two things first — `truncate`, without which a long account name
-  blows out the column that was just fixed for exactly that, and a way to CLEAR
-  a label back to null, which a connection supports (it falls back to the
-  account id) and a credential does not. Both are small; deciding whether every
-  rename in the app becomes click-to-edit is not, which is why it is here.
+- ~~**The tier-one budget is the window, and it should be the container.**~~
+  Closed 22 August, and it was worth the detour. The test asserted 390 (the
+  window) where the real numbers are 348 on a page and 340 in the settings
+  dialog, so three sets lived in the gap and the packages table clipped 28px of
+  its last column at a 390px window, inside a frame that is `overflow-hidden`.
+  The test now asserts the measured 340, the tighter of the two containers, so
+  a set that passes is safe in both.
+
+  The measurement then found something better than the bug it was sent for.
+  **The worst container in the app was not a phone, it was a tablet**: at
+  exactly `sm`, the settings dialog is `100vw - 4rem` = 576px and its 224px
+  rail took 39% of that, leaving the table 304px — LESS than the 342px the same
+  table gets at a 390px window, where the dialog goes full screen and the rail
+  is gone. It clipped 72 pixels there, the widest overflow measured anywhere.
+  The rail steps aside below `md` now, and that one class took the container
+  from 304px to 524px. **Fix the container before crushing the columns**: three
+  of the four sets would have had to give up a column for a defect that was
+  never theirs.
+
+  What the four sets did give up, once the container was honest: the packages
+  table's `state` column waits for 36rem (it carries a badge only while a run
+  is in flight and an em dash the rest of the time, which is not what 104px on
+  a phone is for), and the three settings tables' action columns went from
+  168px to 132px, with the test result truncating instead of taking room from
+  the row's identity.
+
 - **The browser pass is DONE (21 August).** Every list screen (`/runs`,
   `/schedules`, `/agents`, `/skills`, `/mcp-servers`) was walked on the four
   scenarios at 1440 / 1024 / 640, plus a width sweep measuring the real DOM at

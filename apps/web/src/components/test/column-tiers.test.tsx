@@ -135,21 +135,22 @@ describe.each(Object.entries(SETS))("the %s column set", (_name, load) => {
   const columns = load();
 
   /**
-   * KNOWN TOO GENEROUS: the tier-one budget asserted below is 390, the WINDOW,
-   * and the real one is 348 — measured 22 August, at a 390px window every table
-   * in the app is 348px wide, because the shell's own gutter takes the other 42.
-   * Three sets are already between the two numbers (`packages` at 388, `models`
-   * and `proxies` at 384), and it is not theoretical: the packages table clips
-   * 28px of its last column at a 390px window, inside a frame that is
-   * `overflow-hidden`. Tightening the assertion is what should happen; it is not
-   * done here because it fails three sets that this change was not about, and
-   * each is a product decision about which column gives up room. Recorded in
-   * `docs/redesign-2026.md` under "Open" as the next thing to take. The two
-   * integration sets were SIZED against 348 (308 and 340) — by construction, not
-   * because anything below enforces it.
+   * The narrowest container a table of this family is actually given, MEASURED
+   * (22 August) rather than assumed. It used to say 390 — the window — and that
+   * was 42px too generous, because the shell's gutter takes the difference: at
+   * a 390px window every table on a page is 348px wide, and one inside the
+   * settings dialog is 340. Three sets were living in that gap, and it was not
+   * theoretical — the packages table clipped 28px of its last column at 390,
+   * inside a frame that is `overflow-hidden`.
+   *
+   * One number for both containers, the tighter of the two. A set that fits 340
+   * is safe on a page and in the dialog, and nobody has to remember which is
+   * which.
    */
-  it("fits its tier-one floors on a phone", () => {
-    expect(widthOf(columns, 1)).toBeLessThanOrEqual(390);
+  const TIER_ONE_BUDGET = 340;
+
+  it("fits its tier-one floors in the narrowest container it is given", () => {
+    expect(widthOf(columns, 1)).toBeLessThanOrEqual(TIER_ONE_BUDGET);
   });
 
   it.each([2, 3] as const)("fits the tier-%i floors inside the tier-%i threshold", (tier) => {

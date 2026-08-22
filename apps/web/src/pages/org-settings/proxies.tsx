@@ -54,7 +54,7 @@ export function useProxyColumns({
     {
       id: "proxy",
       header: t("proxies.col.proxy"),
-      width: "minmax(180px,1.6fr)",
+      width: "minmax(160px,1.6fr)",
       cell: (p) => (
         <div className="min-w-0">
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
@@ -93,7 +93,9 @@ export function useProxyColumns({
     {
       id: "actions",
       header: "",
-      width: "168px",
+      // See `model-columns.tsx`: 132 is what tier one can spare in a 340px
+      // dialog once the proxy's name has what it needs.
+      width: "132px",
       align: "end",
       cell: (p) => (
         <div className="relative z-10 flex items-center justify-end gap-1">

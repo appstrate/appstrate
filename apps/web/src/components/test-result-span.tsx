@@ -19,11 +19,18 @@ export function TestResultSpan({
   failedKey: string;
 }) {
   const { t } = useTranslation(["settings"]);
+  const message = result.ok
+    ? t(successKey, { latency: result.latency })
+    : t(failedKey, { message: result.message });
   return (
-    <span className={`text-sm ${result.ok ? "text-green-500" : "text-destructive"}`}>
-      {result.ok
-        ? t(successKey, { latency: result.latency })
-        : t(failedKey, { message: result.message })}
+    // Truncating, and titled: this sits in an actions cell beside buttons, and
+    // a failure message is as long as the server made it. Left to grow it
+    // squeezed the controls it is reporting on.
+    <span
+      className={`min-w-0 truncate text-sm ${result.ok ? "text-green-500" : "text-destructive"}`}
+      title={message}
+    >
+      {message}
     </span>
   );
 }

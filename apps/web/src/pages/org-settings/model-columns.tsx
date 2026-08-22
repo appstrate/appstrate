@@ -66,7 +66,7 @@ export function useModelColumns({
     {
       id: "model",
       header: t("models.col.model"),
-      width: "minmax(180px,1.6fr)",
+      width: "minmax(160px,1.6fr)",
       cell: (m) => {
         const ProviderIcon = getModelIcon(m, registry ?? []);
         return (
@@ -126,7 +126,11 @@ export function useModelColumns({
     {
       id: "actions",
       header: "",
-      width: "168px",
+      // 132, not 168: this table lives in a dialog that is 340px wide on a
+      // phone, and tier one has to fit inside that with the model's name. The
+      // test result is what needed the extra room, and it truncates now
+      // instead of taking it from the row's identity.
+      width: "132px",
       align: "end",
       cell: (m) => (
         <div className="relative z-10 flex items-center justify-end gap-1">
@@ -283,7 +287,11 @@ export function useCredentialColumns({
     {
       id: "actions",
       header: "",
-      width: "168px",
+      // 132, not 168: this table lives in a dialog that is 340px wide on a
+      // phone, and tier one has to fit inside that with the model's name. The
+      // test result is what needed the extra room, and it truncates now
+      // instead of taking it from the row's identity.
+      width: "132px",
       align: "end",
       cell: (pk) => (
         <div className="relative z-10 flex items-center justify-end gap-1">

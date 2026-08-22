@@ -94,6 +94,11 @@ export function usePackageColumns(): DataColumn<CardItem>[] {
       id: "state",
       header: t("list.column.state"),
       width: "104px",
+      // Waits for a 36rem table. It carries a badge only while a run is in
+      // flight and an em dash the rest of the time, so at tier one it was a
+      // column of dashes taking 104px from the two things a phone needs here:
+      // which package this is, and the button that runs it.
+      tier: 2,
       cell: (item) =>
         item.type === "agent" && !!item.runningRuns && item.runningRuns > 0 ? (
           <Badge status="running" compact />

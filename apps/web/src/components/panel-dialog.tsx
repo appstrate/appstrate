@@ -44,13 +44,22 @@ export function PanelDialog({ title, rail, mobileNav, children, onClose }: Panel
         ].join(" ")}
       >
         <DialogTitle className="sr-only">{title}</DialogTitle>
-        <aside className="bg-sidebar border-sidebar-border w-56 shrink-0 overflow-y-auto border-r max-sm:hidden">
+        {/* The rail steps aside below `md`, not below `sm`.
+            At `sm` exactly, the dialog is `100vw - 4rem` = 576px and a 224px
+            rail took 39% of it: the content pane was left 304px, LESS than the
+            342px the same pane gets at a 390px window where the dialog goes
+            full screen and the rail is gone. A settings table was therefore at
+            its most cramped on a tablet rather than on a phone, and clipped 72
+            pixels there — the widest overflow measured anywhere in the app.
+            Below `md` the nav becomes the select at the top of the content,
+            which is the same answer the phone already gave. */}
+        <aside className="bg-sidebar border-sidebar-border w-56 shrink-0 overflow-y-auto border-r max-md:hidden">
           {rail}
         </aside>
         <div className="min-w-0 flex-1 overflow-y-auto p-6">
           {/* `pr-10` clears the dialog's own close button, which is absolutely
               positioned top-right and would otherwise sit on the selector. */}
-          {mobileNav && <div className="mb-4 pr-10 sm:hidden">{mobileNav}</div>}
+          {mobileNav && <div className="mb-4 pr-10 md:hidden">{mobileNav}</div>}
           {children}
         </div>
       </DialogContent>
