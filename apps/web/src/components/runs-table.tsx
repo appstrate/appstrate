@@ -92,7 +92,7 @@ export function useRunColumns({
       id: "num",
       header: t("runs.column.num"),
       width: "56px",
-      secondary: true,
+      tier: 2,
       cell: (run) =>
         run.runNumber == null ? null : (
           <span className="text-muted-foreground font-mono text-xs">#{run.runNumber}</span>
@@ -101,7 +101,7 @@ export function useRunColumns({
     {
       id: "agent",
       header: t("runs.column.agent"),
-      width: "minmax(0,1.3fr)",
+      width: "minmax(112px,1.3fr)",
       cell: (run) => (
         <>
           <span className="truncate font-medium">{agentName(run)}</span>
@@ -130,8 +130,8 @@ export function useRunColumns({
     {
       id: "trigger",
       header: t("runs.column.trigger"),
-      width: "minmax(0,0.8fr)",
-      secondary: true,
+      width: "minmax(80px,0.8fr)",
+      tier: 3,
       cell: (run) => (
         <>
           <RunTrigger run={run} />
@@ -151,8 +151,8 @@ export function useRunColumns({
     {
       id: "result",
       header: t("runs.column.result"),
-      width: "minmax(0,1.5fr)",
-      secondary: true,
+      width: "minmax(120px,1.5fr)",
+      tier: 3,
       cell: (run) =>
         run.error ? (
           <span
@@ -169,7 +169,7 @@ export function useRunColumns({
       id: "docs",
       header: t("runs.column.docs"),
       width: "60px",
-      secondary: true,
+      tier: 3,
       cell: (run) => <DocumentCounts run={run} />,
     },
     {
@@ -186,7 +186,7 @@ export function useRunColumns({
       header: t("runs.column.date"),
       width: "132px",
       align: "end",
-      secondary: true,
+      tier: 2,
       cell: (run) => (
         <span className="text-muted-foreground truncate text-xs">
           {run.started_at ? formatDateField(run.started_at) : ""}
@@ -226,7 +226,7 @@ export function RunsTable({
   // telling a user their history is empty when the truth is that it could not
   // be read.
   const fallback = isError ? (
-    <ErrorState />
+    <ErrorState compact />
   ) : (
     (empty ?? <EmptyState message={t("detail.emptyRuns")} icon={PlayCircle} compact />)
   );

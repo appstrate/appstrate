@@ -5,8 +5,8 @@
  *
  * Three of its rules are invisible in a screenshot and easy to undo by
  * accident, so they are pinned here: the ARIA roles a grid-displayed `<table>`
- * loses, the two column templates that must stay in step with the `secondary`
- * flags, and where the row's link lives.
+ * loses, the three column templates that must stay in step with the `tier`
+ * each column declares, and where the row's link lives.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -25,14 +25,14 @@ const ROWS: Row[] = [
 ];
 
 const COLUMNS: DataColumn<Row>[] = [
-  { id: "num", header: "#", width: "56px", secondary: true, cell: (r) => <span>{r.id}</span> },
-  { id: "name", header: "Nom", width: "minmax(0,1fr)", cell: (r) => <span>{r.name}</span> },
+  { id: "num", header: "#", width: "56px", tier: 2, cell: (r) => <span>{r.id}</span> },
+  { id: "name", header: "Nom", width: "minmax(120px,1fr)", cell: (r) => <span>{r.name}</span> },
   {
     id: "when",
     header: "Date",
     width: "96px",
     align: "end",
-    secondary: true,
+    tier: 3,
     cell: (r) => <span>{r.when}</span>,
   },
 ];
@@ -74,40 +74,50 @@ describe("roles", () => {
 describe("column templates", () => {
   const html = table();
 
-  it("declares one track per column, and one per surviving column below md", () => {
-    // Both templates are read off the rendered custom properties rather than
-    // recomputed here: the point is that the narrow one drops exactly the
-    // `secondary` tracks, no more and no less.
-    const wide = /--dt-cols-md:\s*([^;"]+)/.exec(html)?.[1];
-    const narrow = /--dt-cols:\s*([^;"]+)/.exec(html)?.[1];
-    expect(wide?.split(" ")).toHaveLength(COLUMNS.length);
-    expect(narrow?.split(" ")).toHaveLength(COLUMNS.filter((c) => !c.secondary).length);
-    expect(narrow).toBe("minmax(0,1fr)");
+  it("declares one track per tier, each holding exactly the columns it shows", () => {
+    // The three templates are read off the rendered custom properties rather
+    // than recomputed here: the point is that each one drops exactly the
+    // columns above its tier, no more and no less.
+    const tier3 = /--dt-cols-3:\s*([^;"]+)/.exec(html)?.[1];
+    const tier2 = /--dt-cols-2:\s*([^;"]+)/.exec(html)?.[1];
+    const tier1 = /--dt-cols:\s*([^;"]+)/.exec(html)?.[1];
+    expect(tier3?.split(" ")).toHaveLength(COLUMNS.length);
+    expect(tier2?.split(" ")).toHaveLength(COLUMNS.filter((c) => c.tier !== 3).length);
+    expect(tier1?.split(" ")).toHaveLength(COLUMNS.filter((c) => !c.tier).length);
+    expect(tier1).toBe("minmax(120px,1fr)");
   });
 
-  it("hides the secondary CELLS as well as their tracks", () => {
+  it("hides a tiered column's CELL as well as its track", () => {
     // A track dropped without its cell shifts every column after it by one.
-    const secondaryCells = [...html.matchAll(/hidden md:(flex|block)/g)];
-    const secondaryCount = COLUMNS.filter((c) => c.secondary).length;
-    // Head cells plus body cells.
-    expect(secondaryCells).toHaveLength(secondaryCount * (1 + ROWS.length));
+    // Head cell plus one body cell per row, for each tiered column.
+    for (const [tier, query] of [
+      [2, "@xl/table"],
+      [3, "@4xl/table"],
+    ] as const) {
+      const cells = [...html.matchAll(new RegExp(`hidden ${query}:(flex|block)`, "g"))];
+      const count = COLUMNS.filter((c) => c.tier === tier).length;
+      expect(cells).toHaveLength(count * (1 + ROWS.length));
+    }
   });
 
-  it("uses no content-dependent track", () => {
+  it("uses no content-dependent track, and no elastic one without a floor", () => {
     // Each row is its own grid container, so an `auto` track is measured per
     // row and the columns stop lining up — the one thing the table is for.
+    // And `minmax(0,…)` tells the browser it may take the column away
+    // entirely: that is how the agent name, the only thing naming a run,
+    // measured 6px at a 900px window before the tiers existed.
     for (const col of COLUMNS) {
       expect(col.width).not.toContain("auto");
-      expect(col.width).toMatch(/^(\d+px|minmax\(0,[\d.]+fr\)|[\d.]+fr)$/);
+      expect(col.width).toMatch(/^(\d+px|minmax\([1-9]\d*px,[\d.]+fr\))$/);
     }
   });
 });
 
 describe("the row's link", () => {
-  it("sits in the first column that survives the narrow breakpoint", () => {
+  it("sits in the first column of tier one", () => {
     const html = table();
-    // `num` is secondary: a link parked there leaves the row unclickable on a
-    // phone. It belongs to `name`.
+    // `num` waits for a wider table: a link parked there leaves the row
+    // unclickable on a phone. It belongs to `name`.
     expect(html).toMatch(/<a[^>]*href="\/rows\/a"[^>]*>\s*<span>Alpha<\/span>\s*<\/a>/);
     expect(html).not.toMatch(/<a[^>]*>\s*<span>a<\/span>/);
   });

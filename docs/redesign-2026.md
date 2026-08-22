@@ -8,9 +8,9 @@ stylesheet exported out of Claude Design and kept outside the repo at
 says where things stand, why the non-obvious calls were made, and what is still
 open — so the work can be picked up cold.
 
-**Picking it up cold, read in this order:** "Open" first (it opens on the one
-piece of debt that blocks everything), then "The grammar", which is what the
-next stretch of work IS. The sections in between describe what is already
+**Picking it up cold, read in this order:** "Open" first (it opens on what the
+browser pass found and what it left to arbitrate), then "The grammar", which is
+what the next stretch of work IS. The sections in between describe what is already
 built, and are reference rather than reading.
 
 ## Running it
@@ -66,6 +66,16 @@ on — without it the chat, billing and webhooks surfaces are invisible in the l
 
 A missing fixture logs `[lab] no fixture for GET /api/… → 404`. That is the
 console telling you about a hole, not a bug.
+
+**Looking at it when the MCP browser is taken.** That lock belongs to whichever
+session grabbed Chrome Beta first, and waiting for it is what kept every screen
+since the table unseen. It is not the only way in: Playwright drives Google
+Chrome STABLE with a throwaway profile (`chromium.launch({ channel: "chrome" })`),
+which shares nothing with the locked profile. The scenario is `localStorage`
+(`appstrate-lab-scenario`), so `addInitScript` sets it before the app boots, and
+one script then walks every screen × scenario × width unattended. Measuring the
+DOM (`getBoundingClientRect` per cell across a sweep of widths) is what found the
+crushed columns; a screenshot at 1440 shows nothing wrong.
 
 The `error` scenario used to 500 EVERY endpoint, the session included, so it
 landed on the login form and no inner screen ever showed its error state — the
@@ -189,25 +199,44 @@ carrying its width, its breakpoint behaviour, its alignment and its content, so
 adding a column is one edit rather than the same id typed into five parallel
 maps (it was, briefly).
 
-- **Grid tracks, not table layout.** `minmax(0,1fr)` says "take what is left"
-  where `table-layout: fixed` needs percentages recomputed at every change.
-  **Every track must be content-independent** (px or fr): each row is its own
-  grid container, so an `auto` track is measured per row and the columns stop
-  lining up — the one thing the table is for.
+- **Grid tracks, not table layout.** `minmax(<floor>,1fr)` says "take what is
+  left, but never less than this" where `table-layout: fixed` needs percentages
+  recomputed at every change. **Every track must be content-independent** (px or
+  fr): each row is its own grid container, so an `auto` track is measured per
+  row and the columns stop lining up — the one thing the table is for.
+- **Every elastic track carries a FLOOR, and `minmax(0,…)` is banned.** A zero
+  minimum tells the browser it may take the column away entirely, and it does:
+  measured in the lab, the agent name — the only thing that names a run — was
+  6px wide at a 900px window and 0px at 840, while `docs` (60px) and `date`
+  (132px) kept every pixel they had asked for. A test refuses a `minmax(0,…)`
+  now.
 - **The markup stays a real `<table>`, and every ARIA role is re-declared.**
   Overriding `display` on table elements DROPS their implicit roles in Chrome
   and Firefox; without `role="table"`/`"row"`/`"cell"` a grid-displayed table
   announces as a pile of divs.
-- **The row is a LINK**, in the first column that survives the narrow
-  breakpoint (a link parked in `#131`, which is secondary, leaves the row
-  unclickable on a phone), stretched over the row with `after:inset-0`. That
+- **The row is a LINK**, in the first column of tier one (a link parked in
+  `#131`, which waits for a wider table, leaves the row unclickable on a
+  phone), stretched over the row with `after:inset-0`. That
   overlay is also the trap: it paints over the other cells and takes the HOVER
   with the click, so a native `title` stops firing. Anything that answers to
   the pointer raises itself (`relative z-10`) — the titled ELEMENT, not its
   cell, so the dead zone is the size of the text.
-- **Secondary columns drop with their track** below `md`. Both templates ride
-  as custom properties on the table; dropping a cell without its track shifts
-  every column after it.
+- **THREE tiers, on the width of the TABLE, not of the window.** A column
+  declares the room it needs (`tier: 2` waits for a 36rem table, `tier: 3` for
+  56rem, unset is the row's identity and is always drawn), and the three
+  templates ride as custom properties; dropping a cell without its track shifts
+  every column after it. The threshold is a container query (`@container/table`)
+  because the table sits beside a 256px sidebar: a `md:` WINDOW breakpoint let
+  eight columns crush into 700px of table, and it was upside down — at a 768px
+  window the table has 464px and shows three columns, at 720px (sidebar gone) it
+  has 675px and shows five.
+- **A tier is a promise, and the promise is arithmetic**: the sum of its floors,
+  its gaps and its padding has to fit inside its own threshold. Nothing in the
+  type system checks that, so `column-tiers.test.tsx` does, on the three real
+  column sets. It is what forced `cron` out of the schedules tier one — name,
+  state and a raw cron expression do not fit 390px together, and on a phone the
+  name and the on/off are what a schedule is. That is a product decision a test
+  surfaced, not one it took.
 - Naming is not the table's business: `use-run-agent-name.ts` resolves what to
   call the agent a run executed and ALWAYS returns a name. Hiding the COLUMN
   must not blank the name — the row's accessible label is built from it.
@@ -664,6 +693,22 @@ drawn sixteen times), the four raw tables move onto `DataTable`, the
 list-in-a-panel becomes a type. It goes first because family 3 depends on it:
 a collection cannot live in a modal until a collection is a thing.
 
+The browser pass handed A four inconsistencies to settle, all of them the same
+shape — the apparatus is the TABLE's, not the collection's:
+
+- **The count is table-only.** `/runs` has a footer at every moment; `/schedules`
+  never has one; the card grids only get one while a search is running. Three
+  answers to "how many of these are there".
+- **The bar vanishes when the list is empty**, and the empty state re-creates
+  the same two actions as icon-only buttons with no label — in the one state
+  where the reader least knows what to do. Compare `/agents` full ("Importer",
+  "Nouvel agent" in the bar) with `/skills` empty (two unlabelled squares).
+- **`/schedules` has no search and no filters**, so its bar is nine-tenths empty
+  space with two buttons at the right end, while it does have an Actif /
+  Désactivé state that is a filter dimension waiting to be declared.
+- **The card grid is two columns at any width**, so at 1440 a card holds a
+  40-character description across 700px.
+
 **B. Loading, in one pass.** One rule — a skeleton for a collection, because we
 know the shape of what is coming and the layout should not jump; a spinner for
 an action in flight. Forty-five files, one line each.
@@ -768,22 +813,52 @@ So the strategy the reference itself suggests:
 
 ## Open
 
-- **NOTHING SINCE THE TABLE HAS BEEN SEEN IN A BROWSER.** The toolbar was
-  rebuilt several times over — filters behind a disclosure, the two button
-  treatments, the view toggle moved and restyled, the count moved to a footer,
-  the icon-only degradation — and the lab was unavailable for all of it (the
-  MCP browser belonged to another session). Tests and the gate are green, which
-  says nothing about what it looks like. **First thing on resuming: open
-  `/runs`, `/schedules`, `/agents` in the lab, on all four scenarios, and at a
-  narrow width.** Specifically to check: the container-query thresholds on the
-  bar (`@xl/bar` for the utility labels, `@lg/bar` for the action labels) were
-  chosen on paper; whether the filter row pushing the table down reads well;
-  whether the view toggle's grey track shows enough on the grey canvas; and the
-  table footer, which has never been on screen at all.
+- **The browser pass is DONE (21 August).** Every list screen (`/runs`,
+  `/schedules`, `/agents`, `/skills`, `/mcp-servers`) was walked on the four
+  scenarios at 1440 / 1024 / 640, plus a width sweep measuring the real DOM at
+  sixteen window widths. What it found, and what was done:
 
-  This is the step before A of "The grammar": everything the next stretch
-  harmonises TOWARDS is what was built in these last commits, so it had better
-  be right first.
+  - **The table crushed its columns between 768 and 1100px** — the one real
+    defect, and a bad one: the agent name measured 6px at a 900px window and 0px
+    at 840, with the INLINE badge painting over the status badge, while the
+    fixed columns kept every pixel. Fixed by the tiers and the floors — see "The
+    table". Verified by re-measuring: the name never goes under 112px at any
+    width down to 390.
+  - **The footer said "0 run" on a 500**, and while the first page was loading.
+    `data?.total ?? 0` — the same lie the empty state had already been cured of,
+    reappearing one component down. The count now renders only for an answer we
+    have.
+  - **The error state was a bare sentence in an empty card**, next to an empty
+    state with rings and a badge: the state a screen shows when something IS
+    wrong was the one nobody had designed. It reuses the empty state's treatment
+    now, with a red glyph — without the colour the only difference between
+    "nothing here" and "this failed" is the shape of a 24px icon.
+
+  The three things the bullet asked about, and were found RIGHT: **the filter
+  row** reads as a line you opened (the button takes `bg-accent`, the row is
+  clearly its own line, it does not wrap at 640); **the bar's thresholds** work
+  in the ordered way they were meant to (the utility labels go at a 576px bar,
+  the action labels at 512px, nothing ever wraps) — with one reservation below;
+  **the footer** renders correctly, count left, "Page 1 sur 14" and the arrows
+  right.
+
+  Left open by that pass, for the product owner rather than for the code:
+
+  - **The two button treatments are nearly indistinguishable on the canvas.**
+    `bg-transparent` on #FAFAFA against white-with-a-shadow is a 2% difference;
+    the rule is right, the canvas is too shallow to carry it. Same cause as
+    "Grey depth" below — one token decides both.
+  - **The view toggle's track has the same problem.** Close up, the white chip
+    on `bg-accent` is perfectly legible; at reading distance the track barely
+    separates from the canvas, so the control does not read as a segmented one.
+  - **The search takes all the squeeze.** Between 1440 and 900 the bar loses
+    500px and the search field absorbs every one of them (715px → 207px) before
+    a single label steps aside. Nothing breaks; but the field is the one control
+    there that a person types into, and it is the first one to be starved.
+  - **An empty LIST cannot be looked at in any scenario.** `empty` lands on
+    onboarding, which is what it is for, so the list empty states are only
+    reachable through a search that matches nothing. Worth a fixture rather than
+    a fifth scenario.
 
 - **The API gained three things** for the toolbar, all tested: `GET /api/runs`
   takes several statuses at once (`?status=failed,timeout` → `IN (…)`), a free

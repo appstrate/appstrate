@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
+import { TriangleAlert } from "lucide-react";
 import { Spinner } from "./spinner";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
@@ -13,13 +14,30 @@ export function LoadingState() {
   );
 }
 
-export function ErrorState({ message }: { message?: string }) {
+/**
+ * The request failed — drawn the way the empty state is drawn.
+ *
+ * It used to be a bare sentence floating in an empty card, which on a list
+ * screen read as a rendering failure rather than as an answer: the state a
+ * screen shows most often when something IS wrong was the one state nobody had
+ * designed. Same rings, same badge, one different glyph — so a reader tells the
+ * two apart by the icon and the words, not by one state looking finished and
+ * the other looking broken.
+ *
+ * What it still lacks is a way out (a Retry), which needs a refetch its 60-odd
+ * callers do not hand it. That belongs to the pass that takes the state family
+ * as a whole.
+ */
+export function ErrorState({ message, compact }: { message?: string; compact?: boolean }) {
   const { t } = useTranslation();
   return (
-    <div className="text-muted-foreground flex flex-col items-center justify-center py-16">
-      <p>{t("error.generic")}</p>
-      {message && <p className="mt-1 text-sm">{message}</p>}
-    </div>
+    <EmptyState
+      message={t("error.generic")}
+      hint={message}
+      icon={TriangleAlert}
+      tone="danger"
+      compact={compact}
+    />
   );
 }
 
@@ -36,18 +54,25 @@ export function ErrorState({ message }: { message?: string }) {
  * `compact` is for an empty state inside a frame that is already an answer
  * (a list card, a tab body); the full one is for a page that has nothing else
  * on it.
+ *
+ * `tone` colours the glyph, and it is the one thing that tells a 500 apart from
+ * an empty list at a glance: same rings, same badge, same layout, so without it
+ * the only difference between "nothing here" and "this failed" is the shape of
+ * a 24px icon.
  */
 export function EmptyState({
   message,
   hint,
   compact,
   icon: Icon,
+  tone = "neutral",
   children,
 }: {
   message: string;
   hint?: React.ReactNode;
   compact?: boolean;
   icon: LucideIcon;
+  tone?: "neutral" | "danger";
   children?: React.ReactNode;
 }) {
   return (
@@ -72,7 +97,12 @@ export function EmptyState({
             compact ? "size-14" : "size-16",
           )}
         >
-          <Icon className="text-muted-foreground size-6" />
+          <Icon
+            className={cn(
+              "size-6",
+              tone === "danger" ? "text-destructive" : "text-muted-foreground",
+            )}
+          />
         </div>
       </div>
       <p className={cn("font-semibold tracking-tight", compact ? "text-[0.98rem]" : "text-base")}>

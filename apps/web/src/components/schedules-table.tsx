@@ -36,7 +36,7 @@ export function useScheduleColumns({
     {
       id: "name",
       header: t("schedules.column.name"),
-      width: "minmax(0,1.4fr)",
+      width: "minmax(160px,1.4fr)",
       cell: (schedule) => (
         <div className="flex min-w-0 flex-col">
           <span className="flex min-w-0 items-center gap-1.5">
@@ -58,6 +58,7 @@ export function useScheduleColumns({
       id: "cron",
       header: t("schedules.column.cron"),
       width: "128px",
+      tier: 2,
       cell: (schedule) => (
         <span
           className="bg-primary-soft text-primary relative z-10 truncate rounded px-1.5 py-0.5 font-mono text-[0.72rem]"
@@ -86,8 +87,8 @@ export function useScheduleColumns({
     {
       id: "next",
       header: t("schedules.column.next"),
-      width: "minmax(0,1fr)",
-      secondary: true,
+      width: "minmax(110px,1fr)",
+      tier: 3,
       cell: (schedule) =>
         // A disabled schedule keeps a `next_run_at` in the database; showing it
         // would promise a run that is not coming.
@@ -100,8 +101,8 @@ export function useScheduleColumns({
     {
       id: "last",
       header: t("schedules.column.last"),
-      width: "minmax(0,1fr)",
-      secondary: true,
+      width: "minmax(110px,1fr)",
+      tier: 3,
       cell: (schedule) =>
         schedule.last_run_at ? (
           <span className="text-muted-foreground truncate text-xs">
@@ -118,7 +119,7 @@ export function useScheduleColumns({
       id: "actor",
       header: t("schedules.column.actor"),
       width: "132px",
-      secondary: true,
+      tier: 3,
       cell: (schedule) => (
         <ActorLabel
           actor_type={schedule.actor_type}
@@ -156,7 +157,7 @@ export function SchedulesTable({
       isLoading={isLoading}
       empty={
         isError ? (
-          <ErrorState />
+          <ErrorState compact />
         ) : (
           (empty ?? <EmptyState message={t("schedules.empty")} icon={Calendar} compact />)
         )

@@ -107,8 +107,10 @@ export function RunList({
   });
 
   const runs: EnrichedRun[] = data?.data ?? [];
-  const total = data?.total ?? 0;
-  const totalPages = Math.ceil(total / pageSize);
+  // Undefined until the request answers — the count and the pager both read
+  // it, and `?? 0` here used to tell the footer there were zero runs on a 500.
+  const total = data?.total;
+  const totalPages = total === undefined ? 0 : Math.ceil(total / pageSize);
 
   // Only the first page shows a placeholder; paging keeps the previous rows.
   const showLoading = isLoading && page === 0;
@@ -127,7 +129,10 @@ export function RunList({
         banner={page === 0 ? firstPageBanner : undefined}
       />
 
-      <ListFooter count={countLabel?.(total)}>
+      {/* The count speaks only for an answer we actually have: it read "0 run"
+          while the first page was still loading and, worse, on a 500 — the same
+          lie the empty state had to be cured of. */}
+      <ListFooter count={total === undefined ? undefined : countLabel?.(total)}>
         {paginated && totalPages > 1 && (
           <>
             <span>

@@ -31,7 +31,7 @@ export function usePackageColumns(): DataColumn<CardItem>[] {
     {
       id: "name",
       header: t("list.column.name"),
-      width: "minmax(0,1.6fr)",
+      width: "minmax(188px,1.6fr)",
       cell: (item) => (
         <div className="flex min-w-0 flex-col">
           <span className="flex min-w-0 items-center gap-1.5">
@@ -54,7 +54,7 @@ export function usePackageColumns(): DataColumn<CardItem>[] {
       id: "source",
       header: t("list.column.source"),
       width: "112px",
-      secondary: true,
+      tier: 2,
       cell: (item) => (
         <>
           {item.source === "system" && (
@@ -73,8 +73,8 @@ export function usePackageColumns(): DataColumn<CardItem>[] {
     {
       id: "keywords",
       header: t("list.column.keywords"),
-      width: "minmax(0,1fr)",
-      secondary: true,
+      width: "minmax(140px,1fr)",
+      tier: 3,
       cell: (item) => {
         const used =
           item.type !== "agent" && item.usedByAgents

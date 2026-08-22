@@ -31,9 +31,15 @@
  *   to be RAISED above it (`relative z-10`) or the row swallows the hover with
  *   the click. Raise the titled element itself, not its cell: the dead zone is
  *   then the size of the text rather than the size of the column.
- * - **Secondary columns drop with their track.** `secondary: true` hides the
- *   cell AND removes the track below `md`; the two have to happen together or
- *   the row keeps a gap where the column was.
+ * - **Columns drop with their track, on the TABLE's width.** A column declares
+ *   the room it needs (`tier`), and its cell AND its track go together or the
+ *   row keeps a gap where the column was. The threshold is a container query on
+ *   the table, not a window breakpoint: this table sits beside a 256px sidebar,
+ *   so `md:` let eight columns crush into 700px of table — the agent name, the
+ *   only thing that names the row, measured 6px at a 900px window and 0 at 840.
+ *   Which is also why every elastic track carries a FLOOR (`minmax(120px,1fr)`,
+ *   never `minmax(0,…)`): a `0` minimum tells the browser it may take the
+ *   column away entirely, and it does.
  */
 
 import type { CSSProperties, ReactNode } from "react";
@@ -50,8 +56,13 @@ export interface DataColumn<T> {
   width: string;
   /** Numbers, durations and dates read against the right edge. */
   align?: "end";
-  /** Dropped, track and all, below `md`. */
-  secondary?: boolean;
+  /**
+   * How much room the column needs, and therefore when it appears.
+   * Unset is the row's identity — always drawn. `2` waits for a 36rem table,
+   * `3` for a 56rem one. Each tier's floors have to fit inside its own
+   * threshold; `column-tiers.test.tsx` is what checks that they do.
+   */
+  tier?: 2 | 3;
   cell: (row: T) => ReactNode;
 }
 
@@ -101,6 +112,18 @@ export function visibleColumns<T>(columns: DataColumn<T>[], hidden: string[]): D
 
 const SKELETON_ROWS = 3;
 
+/**
+ * When a column's cell is drawn. Written out rather than interpolated because
+ * Tailwind reads these class names as literals in the source.
+ */
+function tierClass<T>(col: DataColumn<T>, display: "block" | "flex"): string | undefined {
+  if (col.tier === 2)
+    return display === "block" ? "hidden @xl/table:block" : "hidden @xl/table:flex";
+  if (col.tier === 3)
+    return display === "block" ? "hidden @4xl/table:block" : "hidden @4xl/table:flex";
+  return undefined;
+}
+
 function trackList<T>(columns: DataColumn<T>[]): string {
   return columns.map((c) => c.width).join(" ");
 }
@@ -117,27 +140,32 @@ export function DataTable<T>({
   banner,
   label,
 }: DataTableProps<T>) {
-  // Two templates, one per breakpoint: narrow keeps only the columns that
-  // carry the row's identity, `md` and up gets them all.
+  // Three templates, one per tier: narrow keeps only the columns that carry the
+  // row's identity, and each step up adds the ones the width can now hold.
   const tracks = {
-    "--dt-cols": trackList(columns.filter((c) => !c.secondary)),
-    "--dt-cols-md": trackList(columns),
+    "--dt-cols": trackList(columns.filter((c) => !c.tier)),
+    "--dt-cols-2": trackList(columns.filter((c) => !c.tier || c.tier === 2)),
+    "--dt-cols-3": trackList(columns),
   } as CSSProperties;
 
-  // The link goes in the first column that survives the narrow breakpoint, not
-  // in column zero: a run list leads with `#131`, which is `secondary`, so a
-  // link parked there would leave the row unclickable on a phone.
-  const linkColumn = columns.findIndex((c) => !c.secondary);
+  // The link goes in the first column of tier one, not in column zero: a run
+  // list leads with `#131`, which is a tier-two column, so a link parked there
+  // would leave the row unclickable on a phone.
+  const linkColumn = columns.findIndex((c) => !c.tier);
 
   const rowGrid =
-    "grid items-center gap-3 px-3 [grid-template-columns:var(--dt-cols)] md:gap-4 md:px-4 md:[grid-template-columns:var(--dt-cols-md)]";
+    "grid items-center gap-3 px-3 [grid-template-columns:var(--dt-cols)] @xl/table:gap-4 @xl/table:px-4 @xl/table:[grid-template-columns:var(--dt-cols-2)] @4xl/table:[grid-template-columns:var(--dt-cols-3)]";
 
   if (!isLoading && rows.length === 0 && empty) {
-    return <div className="bg-card overflow-hidden rounded-lg border shadow-sm">{empty}</div>;
+    return (
+      <div className="bg-card @container/table overflow-hidden rounded-lg border shadow-sm">
+        {empty}
+      </div>
+    );
   }
 
   return (
-    <div className="bg-card overflow-hidden rounded-lg border shadow-sm">
+    <div className="bg-card @container/table overflow-hidden rounded-lg border shadow-sm">
       <table role="table" aria-label={label} className="block w-full text-sm" style={tracks}>
         <thead role="rowgroup" className="block">
           <tr role="row" className={cn(rowGrid, "border-border h-10 border-b")}>
@@ -148,7 +176,7 @@ export function DataTable<T>({
                 className={cn(
                   "text-muted-foreground min-w-0 truncate text-[0.68rem] font-semibold tracking-[0.05em] uppercase",
                   col.align === "end" ? "text-right" : "text-left",
-                  col.secondary && "hidden md:block",
+                  tierClass(col, "block"),
                 )}
               >
                 {col.header}
@@ -173,11 +201,7 @@ export function DataTable<T>({
                   className={cn(rowGrid, "border-border/60 h-12 border-b last:border-b-0")}
                 >
                   {columns.map((col) => (
-                    <td
-                      role="cell"
-                      key={col.id}
-                      className={cn("min-w-0", col.secondary && "hidden md:block")}
-                    >
+                    <td role="cell" key={col.id} className={cn("min-w-0", tierClass(col, "block"))}>
                       <Skeleton className="h-3.5 w-full" />
                     </td>
                   ))}
@@ -202,7 +226,7 @@ export function DataTable<T>({
                         className={cn(
                           "flex min-w-0 items-center gap-1.5",
                           col.align === "end" && "justify-end",
-                          col.secondary && "hidden md:flex",
+                          tierClass(col, "flex"),
                         )}
                       >
                         {/* The link belongs to the first cell and covers the row
