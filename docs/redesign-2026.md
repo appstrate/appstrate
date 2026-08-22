@@ -674,9 +674,23 @@ At the time of writing:
 
 - **Collections.** 3 screens go through our `DataTable` (runs, schedules,
   packages). **4 use the raw shadcn `Table`**: library, models, proxies,
-  integration detail. **16 files draw a card grid by hand** with `grid-cols-`.
-  Plus the lists-inside-a-panel (documents, connections, memory), each its own
-  way.
+  integration detail. Plus the lists-inside-a-panel (documents, connections,
+  memory), each its own way.
+- **The card grid is drawn FOUR times, not sixteen** (re-counted 21 August).
+  Sixteen files match `grid-cols-`, and that is the number this section used to
+  carry, but most of them are LAYOUT: two-column forms, `[auto_1fr]` label and
+  value pairs, a sidebar's `[8rem_minmax(0,1fr)]`. A grid that maps a list of
+  entities onto cards happens in exactly four places — the integration
+  catalogue (1/2/3 columns), the package list and the package detail's agents
+  (both `grid-cols-1 gap-3 md:grid-cols-2`, character for character), and the
+  billing plans (a fixed 3). So the case for making it a component is NOT the
+  duplication, which is two identical lines. It is that a collection has to be
+  a thing before it can carry its own apparatus, or live inside a modal.
+- **A second pattern hides in that miscount: the FACT grid.** `run-info-tab`,
+  `manifest-fact` and the connections panel all draw label-and-value pairs,
+  three different ways. It is not a collection (there is no entity, no row, no
+  empty state) and it is not in the four families. Worth naming before someone
+  files it under Collection because it is made of cards.
 - **States.** `EmptyState` is shared across 31 files — the one thing already
   harmonised. Loading is the opposite: `LoadingState` in 35 files, **`Spinner`
   dropped in directly in 45**, and `Skeleton` in **3**. Three treatments
