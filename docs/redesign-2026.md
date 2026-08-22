@@ -148,6 +148,14 @@ was migrated, opened, and found showing an error instead of a rendering, and
 every time a human had to notice. On its first run it found three more, and one
 of them had already been MISREAD into this document as fact (see "Open").
 
+**Its screen list grew the same day** to the two DETAIL pages, because the
+compact lists live on them and nowhere else: an agent's Connexions and Mémoire
+tabs, and a run's. Both were entirely unfixtured — eleven endpoints between the
+two, the agent package itself included — so the memory panel and the connection
+picker had never once been seen with anything in them. The reading that
+reframed step A.2 was only possible after that, and it found three different
+things where the plan said one.
+
 The guard watches the browser rather than scanning the source, and that is the
 whole design. The obvious version greps the hooks for their endpoint strings;
 it does not hold, because the SPA reaches the API in FOUR shapes and only two
@@ -943,16 +951,34 @@ included (`lib/list-params.ts`).
    integration detail" below. It is the last raw table that was a collection,
    so the Collection family now has one body for every list in the app bar the
    library matrix and the lists-in-a-panel.
-2. **The compact list** (documents, connections, memory), three ways of doing
-   one thing, and the last shape of the Collection family. What is actually
-   there, read 22 August: documents draws a hand-rolled tile grid that is not
-   `CardGrid` and answers loading→error→empty, the reverse of the family's
-   order; connections is a DROPDOWN acting as a picker, with five hand-written
-   state branches and no `EmptyState`; memory is two stacks of rows in
-   collapsible sections with **no loading and no error state at all**, so a
-   failed request reads as "there is nothing here" — the exact lie
-   `collection.ts` exists to stop, already fixed twice elsewhere on this
-   branch.
+2. **The compact list.** It was written here as "documents, connections,
+   memory, three ways of doing one thing". **They are not one thing**, and
+   seeing that is the whole of what this entry now says. Read and LOOKED AT on
+   22 August, once the fixtures made the three reachable at all:
+
+   - **Documents is a CARD GRID**, not a third body. It draws
+     `repeat(auto-fill, minmax(10rem, 1fr))` by hand — the same technique
+     `CardGrid` already owns, at a smaller floor. It joins the grid the day
+     that floor becomes a prop, which is one prop with a default, and it stops
+     being a third of this problem.
+   - **Memory is the third body.** Rows stacked, one row a self-contained
+     BLOCK rather than cells aligned into columns, in two tiers (pinned slots
+     over the archive) inside collapsible sections that carry their own count.
+     It has **no loading and no error state at all**, so a failed request reads
+     as "there is nothing here" — the exact lie `collection.ts` exists to stop,
+     already fixed twice elsewhere on this branch.
+   - **Connections is not a collection.** It is a form CONTROL: a dropdown that
+     picks one connection out of a resolved cascade, whose items happen to be a
+     list. It owes the family its STATES, not its body, and dragging it into a
+     collection component would be the `grid-cols-` miscount all over again —
+     made of rows is not the same as being a collection.
+
+   So the work is three smaller things, not one extraction: a floor prop on
+   `CardGrid` and the documents grid onto it; the third body, out of the memory
+   panel, which is the only real new component here; and the connection
+   picker's five hand-written state branches answered by `collection.ts`
+   wherever they mean what it means.
+
 3. Then B, loading in one pass.
 
 The browser pass handed A four inconsistencies to settle, all of them the same

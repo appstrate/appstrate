@@ -31,6 +31,14 @@ export const SCREENS = [
   },
   { path: "/documents", name: "documents" },
   { path: "/library", name: "library" },
+  // The two detail pages that host the compact lists: an agent's Connexions
+  // and Mémoire tabs, and a run's Documents and Mémoire tabs. They are here
+  // because the third body of a collection lives on them and nowhere else.
+  { path: "/agents/@tractr/compta-trimestrielle", name: "agent-detail" },
+  { path: "/agents/@tractr/compta-trimestrielle#connections", name: "agent-connections" },
+  { path: "/agents/@tractr/compta-trimestrielle#memory", name: "agent-memory" },
+  { path: "/agents/@tractr/compta-trimestrielle/runs/run_01", name: "run-detail" },
+  { path: "/agents/@tractr/compta-trimestrielle/runs/run_01#memory", name: "run-memory" },
 ];
 
 /** The four the scenario switcher offers. `empty` lands on onboarding by design. */

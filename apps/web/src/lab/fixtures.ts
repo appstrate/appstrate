@@ -709,7 +709,7 @@ const documentRows: LabDocument[] = [
     purpose: "agent_output",
     presentation: "primary",
     applicationId: APP_ID,
-    run_id: "run_lab_1",
+    run_id: "run_01",
     chat_session_id: null,
     packageId: "@tractr/compta-trimestrielle",
     name: "recapitulatif-2026-Q2.xlsx",
@@ -737,7 +737,7 @@ const documentRows: LabDocument[] = [
     purpose: "agent_output",
     presentation: null,
     applicationId: APP_ID,
-    run_id: "run_lab_1",
+    run_id: "run_01",
     chat_session_id: null,
     packageId: "@tractr/compta-trimestrielle",
     name: "releve-mastercard-juin.pdf",
@@ -796,7 +796,7 @@ const documentRows: LabDocument[] = [
     purpose: "user_upload",
     presentation: null,
     applicationId: APP_ID,
-    run_id: "run_lab_2",
+    run_id: "run_03",
     chat_session_id: null,
     packageId: null,
     name: "document",
@@ -845,6 +845,243 @@ export const heavyDocuments: LabDocument[] = Array.from({ length: 60 }, (_, i) =
   const base = documentRows[i % documentRows.length]!;
   return { ...base, id: `doc_lab_h${i + 1}`, name: `${i + 1}-${base.name}` };
 });
+
+/* -------------------------------------------------------------------------- */
+/* Agent detail, run detail, and agent memory                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The agent behind the runs, so its detail page can be looked at.
+ *
+ * It is here for the two tabs that host a compact list and could not be reached
+ * at all before: Connexions (which reads `dependencies.integrations` and then
+ * asks the integration endpoints, already fixtured) and Mémoire.
+ */
+export const agentDetail: Json200<"/api/packages/agents/{scope}/{name}", "get"> = {
+  id: "@tractr/compta-trimestrielle",
+  display_name: "Compta trimestrielle",
+  description:
+    "Pipeline de comptabilité trimestrielle : renomme les relevés BNC, extrait les transactions, concilie les factures et génère le récapitulatif Excel.",
+  source: "local",
+  scope: "@tractr",
+  version: "1.4.0",
+  updatedAt: ago(3_000),
+  lock_version: 12,
+  config: { schema: {}, current: {} },
+  dependencies: {
+    skills: [{ id: "@tractr/compta-references", version: "1.4.0" }],
+    mcp_servers: [{ id: "@appstrate/gdrive-mcp", version: "2.1.0" }],
+    integrations: [
+      { id: "@appstrate/google-drive", version: "2.1.0", tools: ["drive_search", "drive_upload"] },
+    ],
+  },
+  last_run: { id: "run_01", status: "running", started_at: ago(2), duration: null },
+  running_runs: 1,
+  version_count: 6,
+  forked_from: null,
+  has_unarchived_changes: true,
+  effective_timeout_seconds: 1_800,
+};
+
+/** A handful of log lines, so a run detail is not an empty console. */
+export const runLogs: Json200<"/api/runs/{id}/logs", "get"> = {
+  object: "list",
+  hasMore: false,
+  data: [
+    {
+      id: 1,
+      runId: "run_01",
+      type: "system",
+      level: "info",
+      event: "run.started",
+      message: "Démarrage du conteneur d'exécution.",
+      createdAt: ago(2),
+    },
+    {
+      id: 2,
+      runId: "run_01",
+      type: "agent",
+      level: "info",
+      event: "tool.call",
+      message: "drive_search : 42 relevés trouvés dans finances/2026-Q2.",
+      createdAt: ago(2),
+    },
+    {
+      id: 3,
+      runId: "run_01",
+      type: "agent",
+      level: "warn",
+      event: "tool.call",
+      message: "Deux marchands sans mapping : SQ *TIM HORTONS, AMZN MKTP CA.",
+      createdAt: ago(1),
+    },
+  ],
+};
+
+type Persistence = Json200<"/api/agents/{scope}/{name}/persistence", "get">;
+
+/**
+ * The agent's memory, which is the surface this fixture mainly exists for: the
+ * panel had no fixture, so it could only ever be seen empty, and it draws
+ * neither a loading nor an error state — meaning a failed request has always
+ * read as "there is nothing here". Both tiers are represented, because the
+ * panel's whole shape is pinned slots above archive memories.
+ */
+export const agentPersistence: Persistence = {
+  pinned: [
+    {
+      id: 1,
+      key: "persona",
+      content:
+        "Comptable méthodique. Ne devine jamais un montant : si une pièce manque, le signaler plutôt que d'estimer.",
+      runId: null,
+      actor_type: "shared",
+      actor_id: null,
+      createdAt: ago(120_000),
+      updatedAt: ago(40_000),
+    },
+    {
+      id: 2,
+      key: "checkpoint",
+      content: {
+        trimestre: "2026-Q2",
+        etape: "conciliation",
+        releves_traites: 42,
+        factures_en_attente: 3,
+      },
+      runId: "run_01",
+      actor_type: "user",
+      actor_id: USER_ID,
+      createdAt: ago(2),
+      updatedAt: ago(1),
+    },
+  ],
+  memories: [
+    {
+      id: 11,
+      content:
+        "Les relevés Mastercard de mai 2026 arrivent avec deux jours de retard chez BNC : ne pas conclure à une pièce manquante avant le 5 du mois.",
+      runId: "run_02",
+      actor_type: "shared",
+      actor_id: null,
+      createdAt: ago(46),
+    },
+    {
+      id: 12,
+      content:
+        "SQ *TIM HORTONS se classe en « Repas et représentation », pas en « Fournitures de bureau ». Corrigé à la main deux trimestres de suite.",
+      runId: "run_02",
+      actor_type: "user",
+      actor_id: USER_ID,
+      createdAt: ago(2_800),
+    },
+    {
+      id: 13,
+      content:
+        "L'année fiscale Tractr va du 1er septembre au 31 août : un trimestre nommé Q2 couvre décembre à février, jamais avril à juin.",
+      runId: null,
+      actor_type: "shared",
+      actor_id: null,
+      createdAt: ago(90_000),
+    },
+  ],
+};
+
+/**
+ * What the agent's Connexions tab reads: which connection each declared
+ * integration would actually use, and why.
+ *
+ * The picker's whole subject is the CASCADE (admin pin > enforced org default >
+ * member pin > the only candidate), so a fixture with one healthy candidate
+ * proves nothing. Two candidates here, one of them another member's shared
+ * connection, with the status left at `must_choose` — the state that makes the
+ * picker draw a choice rather than a fait accompli.
+ */
+export const agentConnectionReadiness: Json200<
+  "/api/agents/{scope}/{name}/connection-readiness",
+  "get"
+> = {
+  blocks_run: false,
+  errors: [],
+  integrations: [
+    {
+      integration_id: "@appstrate/google-drive",
+      run_blocking: false,
+      resolution: {
+        status: "must_choose",
+        resolved_connection_id: null,
+        resolved_missing_scopes: [],
+        resolved_owned_by_actor: false,
+        admin_pinned_connection_id: null,
+        member_pinned_connection_id: null,
+        org_default_connection_id: null,
+        org_default_enforced: false,
+        can_add_connection: true,
+        candidates: [
+          {
+            id: "conn_lab_1",
+            auth_key: "drive",
+            account_id: "108453099102",
+            label: "olivier@tractr.net",
+            owner_user_id: USER_ID,
+            owner_end_user_id: null,
+            owner_name: "Olivier Tarbès",
+            scopes_granted: [
+              "https://www.googleapis.com/auth/drive.readonly",
+              "https://www.googleapis.com/auth/drive.file",
+            ],
+            shared_with_org: true,
+            needs_reconnection: false,
+            missing_scopes: [],
+            is_own: true,
+          },
+          {
+            id: "conn_lab_3",
+            auth_key: "drive",
+            account_id: "119003471228",
+            label: "compta@tractr.net",
+            owner_user_id: "user_lab_2",
+            owner_end_user_id: null,
+            owner_name: "Pierre",
+            scopes_granted: ["https://www.googleapis.com/auth/drive"],
+            shared_with_org: true,
+            needs_reconnection: false,
+            // Under-scoped on purpose: the amber warning under a candidate is a
+            // state of this picker that nothing else in the lab reaches.
+            missing_scopes: ["https://www.googleapis.com/auth/drive.file"],
+            is_own: false,
+          },
+        ],
+      },
+    },
+  ],
+};
+
+/** Latest published version + the draft the editor is on. */
+export const agentVersionInfo: Json200<"/api/packages/agents/{scope}/{name}/versions/info", "get"> =
+  {
+    latest_published_version: "1.4.0",
+    active_version: "1.4.0",
+  };
+
+/** The version the selector resolves `latest` to. */
+export const agentLatestVersion: components["schemas"]["PackageVersionDetail"] = {
+  id: 6,
+  version: "1.4.0",
+  manifest: { name: "@tractr/compta-trimestrielle", version: "1.4.0", type: "agent" },
+  yanked: false,
+  yanked_reason: null,
+  integrity: "sha256-3f9a1c8e7d6b5a4938271605f4e3d2c1b0a9f8e7d6c5b4a3928170f6e5d4c3b2",
+  artifact_size: 48_120,
+  createdAt: ago(3_000),
+  dist_tags: ["latest"],
+};
+
+/** The agent's model override: none, so the org default decides. */
+export const agentModel: Json200<"/api/agents/{scope}/{name}/model", "get"> = {
+  modelId: null,
+  generation: null,
+};
 
 /* -------------------------------------------------------------------------- */
 /* Organisation detail                                                         */

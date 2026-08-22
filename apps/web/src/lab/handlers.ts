@@ -298,6 +298,84 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   },
   {
     method: "GET",
+    pattern: /^\/api\/packages\/agents\/[^/]+\/[^/]+$/,
+    handler: () => ({ status: 200, body: f.agentDetail }),
+  },
+  {
+    // Served out of the same array the run LIST answers from, so a run cannot
+    // say one thing in the table and another on its own page.
+    method: "GET",
+    pattern: /^\/api\/runs\/[^/]+$/,
+    handler: (url) => {
+      const id = url.pathname.split("/").pop() ?? "";
+      const run = [...f.runs, ...f.heavyRuns].find((r) => r.id === id);
+      return run ? { status: 200, body: run } : { status: 404, body: {} };
+    },
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/runs\/[^/]+\/logs$/,
+    handler: (_u, s) => ({ status: 200, body: { ...f.runLogs, data: list(f.runLogs.data, s) } }),
+  },
+  {
+    // `?kind=pinned` and `?kind=memory` are two calls against one endpoint, and
+    // the panel fires both. Answering the whole body to each would show the
+    // archive under the pinned heading.
+    method: "GET",
+    pattern: /^\/api\/agents\/[^/]+\/[^/]+\/persistence$/,
+    handler: (url, s) => {
+      const kind = url.searchParams.get("kind");
+      const pinned = list(f.agentPersistence.pinned ?? [], s);
+      const memories = list(f.agentPersistence.memories ?? [], s);
+      if (kind === "pinned") return { status: 200, body: { pinned } };
+      if (kind === "memory") return { status: 200, body: { memories } };
+      return { status: 200, body: { pinned, memories } };
+    },
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/agents\/[^/]+\/[^/]+\/connection-readiness$/,
+    handler: () => ({ status: 200, body: f.agentConnectionReadiness }),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/agents\/[^/]+\/[^/]+\/model$/,
+    handler: () => ({ status: 200, body: f.agentModel }),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/agents\/[^/]+\/[^/]+\/runs$/,
+    handler: (url, s) => {
+      const all = list(f.runs, s, f.heavyRuns);
+      const offset = Number(url.searchParams.get("offset") ?? 0);
+      const limit = Number(url.searchParams.get("limit") ?? 12);
+      const page = all.slice(offset, offset + limit);
+      return {
+        status: 200,
+        body: {
+          object: "list" as const,
+          data: page,
+          total: all.length,
+          hasMore: offset + page.length < all.length,
+        },
+      };
+    },
+  },
+  {
+    // The version selector asks for both on mount, and they are two different
+    // shapes: `info` is the pair of version STRINGS, `latest` is a version
+    // resolved through `/versions/{version}`.
+    method: "GET",
+    pattern: /^\/api\/packages\/agents\/[^/]+\/[^/]+\/versions\/info$/,
+    handler: () => ({ status: 200, body: f.agentVersionInfo }),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/packages\/agents\/[^/]+\/[^/]+\/versions\/[^/]+$/,
+    handler: () => ({ status: 200, body: f.agentLatestVersion }),
+  },
+  {
+    method: "GET",
     pattern: /^\/api\/schedules$/,
     handler: (_u, s) => ({
       status: 200,
