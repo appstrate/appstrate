@@ -174,6 +174,15 @@ it was committed: it measures COLUMNS, not what is inside them. A cell whose
 content refuses to shrink can eat a column that measures perfectly. **Measure
 AND look.**
 
+**The `error` scenario now lets a DETAIL page stand** (22 August). It already
+spared identity, orgs and applications so the shell would survive; the same
+reasoning goes one level in, and the resource a detail page is ABOUT survives
+too. Without that, the page itself 500s and you get its page-level error, so no
+panel on it ever draws its own — the memory panel's failure state was
+unreachable in the very scenario that exists to show failure, and so was the
+OAuth clients table's. Now the header stands and each tab shows what broke
+inside it.
+
 The `error` scenario used to 500 EVERY endpoint, the session included, so it
 landed on the login form and no inner screen ever showed its error state — the
 scenario was unusable for the thing it exists for. Identity, orgs and
@@ -605,6 +614,48 @@ the detail page found no summary for itself, said "Non activée", and the
 scenario meant to load the table with volume never drew one. The first row
 keeps its real id now.
 
+## The list
+
+`components/item-list.tsx`, the third body, extracted from the memory panel
+where it already existed without a name.
+
+**The order it was built in was wrong, and the product owner said so.** It was
+planned last, behind the table and the grid, on the reasoning that it was the
+least worked-out. The right reasoning is the opposite: of the three bodies it
+is the only one that asks NOTHING of its container. The table wants width and
+alignment across rows, and clips when it does not get them; the grid wants
+20rem before it will take a second column. The list works in a panel, in a
+modal, in a tab beside a sidebar, on a phone. **It is the universal fallback,
+so it should have been the first thing built** and the other two the refinements
+a screen opts into when its width and its content justify them.
+
+What makes an item an item rather than a table row: the item is a
+self-contained BLOCK that carries its own border and decides its own internal
+layout, so nothing has to line up with the item above it. A table makes the
+opposite bargain — alignment across rows, paid for in width.
+
+It takes `CardGrid`'s contract verbatim and answers the states from
+`collection.ts` in the same order. It is deliberately NOT `CardGrid` with one
+column: the two are one line of CSS apart today, and merging them would mean
+three props (a column floor, a gap, a skeleton shape) configuring a component
+instead of a component being used, with call sites that no longer say which
+shape they meant. If a third arrangement turns up, merge them then.
+
+**What it fixed on arrival.** The memory panel had a single early return on the
+counts — `pinned.length + memories.length === 0` — and no loading or failure
+branch at all. Two queries that had failed both counted zero, so a 500 drew
+"no memory yet": a collection claiming to be empty when nobody knew that. Both
+tiers now answer failure, then loading, then emptiness, each in its own body.
+The section headings lost their own empty sentence to the body, and their count
+pills now render **only for an answer we have** — a pill reading "0" above a
+body reading "this failed" is the same lie the run list's footer had to be
+cured of, one level down.
+
+The panel keeps its ringed empty state for the case where BOTH tiers are empty,
+and each tier keeps a quiet italic line for its own emptiness. Two ringed
+states stacked on one screen read as two failures rather than as one calm
+answer.
+
 ## Tokens
 
 - **`--background` stays WHITE.** In shadcn it is the COMPONENT surface —
@@ -890,8 +941,8 @@ At the time of writing:
 ### The four families
 
 1. **Collection** — a table, a grid of cards, a compact LIST, and later the
-   alternative views (an agenda). The table is done; the CARD GRID is done
-   (`components/card-grid.tsx`, 21 August); the list is not a component yet.
+   alternative views (an agenda). All three bodies exist as of 22 August:
+   `data-table.tsx`, `card-grid.tsx`, `item-list.tsx`.
 
    It was called "the list-in-a-panel" here until 22 August, and the name was
    wrong in a way worth recording: NONE of the three is in a panel. Two are
@@ -978,6 +1029,10 @@ included (`lib/list-params.ts`).
    panel, which is the only real new component here; and the connection
    picker's five hand-written state branches answered by `collection.ts`
    wherever they mean what it means.
+
+   **The third body landed the same day** (`components/item-list.tsx`) — see
+   "The list" below. What is left of A.2 is the documents grid and the picker's
+   states.
 
 3. Then B, loading in one pass.
 

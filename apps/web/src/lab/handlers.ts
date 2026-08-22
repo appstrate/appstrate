@@ -465,6 +465,14 @@ const ERROR_SCENARIO_SURVIVORS = [
   /^\/api\/profile$/,
   /^\/api\/orgs$/,
   /^\/api\/applications$/,
+  // The same reasoning, one level in: on a DETAIL page the resource the page is
+  // ABOUT survives, and everything hanging off it fails. Without this the page
+  // itself 500s and you get its page-level error, so no panel on it ever draws
+  // its own — the memory panel's failure state was unreachable in the very
+  // scenario that exists to show failure. Now the shell stands, the header
+  // stands, and each tab shows what broke inside it.
+  /^\/api\/packages\/(agents|skills|mcp-servers|integrations)\/[^/]+\/[^/]+$/,
+  /^\/api\/integrations\/[^/]+\/[^/]+$/,
 ];
 
 export function resolveHandler(
