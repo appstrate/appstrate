@@ -8,6 +8,7 @@
  * a tool sitting next to the app, not part of it.
  */
 import { SCENARIOS, getScenario, setScenario, type Scenario } from "./scenario";
+import { DEPTHS, applyDepth, getDepth, type Depth } from "./canvas-depth";
 
 const LABELS: Record<Scenario, string> = {
   nominal: "Nominal",
@@ -36,29 +37,67 @@ export function mountLabPanel(): void {
     "backdrop-filter:blur(6px)",
   ].join(";");
 
-  const tag = document.createElement("span");
-  tag.textContent = "LAB";
-  tag.style.cssText = "opacity:.5;letter-spacing:.08em;font-weight:600;margin-right:3px";
-  host.append(tag);
+  host.append(label("LAB"));
 
-  const current = getScenario();
-  for (const scenario of SCENARIOS) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = LABELS[scenario];
-    const active = scenario === current;
-    button.style.cssText = [
-      "all:unset",
-      "cursor:pointer",
-      "padding:4px 8px",
-      "border-radius:6px",
-      `background:${active ? "#fff" : "transparent"}`,
-      `color:${active ? "#141417" : "rgba(255,255,255,.7)"}`,
-      active ? "font-weight:600" : "font-weight:400",
-    ].join(";");
-    button.addEventListener("click", () => setScenario(scenario));
-    host.append(button);
+  const scenario = getScenario();
+  for (const value of SCENARIOS) {
+    host.append(pill(LABELS[value], value === scenario, () => setScenario(value)));
   }
 
+  host.append(separator(), label("GRIS"));
+
+  // The grey buttons restyle themselves in place: switching depth must not
+  // reload, or the comparison the dial exists for is lost with the scroll.
+  const depths = new Map<Depth, HTMLButtonElement>();
+  const paint = (chosen: Depth) => {
+    for (const [key, button] of depths) style(button, key === chosen);
+  };
+  for (const key of Object.keys(DEPTHS) as Depth[]) {
+    const button = pill(key, false, () => {
+      applyDepth(key);
+      paint(key);
+    });
+    button.title = DEPTHS[key].note;
+    depths.set(key, button);
+    host.append(button);
+  }
+  const depth = getDepth();
+  applyDepth(depth);
+  paint(depth);
+
   document.body.append(host);
+}
+
+function label(text: string): HTMLSpanElement {
+  const span = document.createElement("span");
+  span.textContent = text;
+  span.style.cssText = "opacity:.5;letter-spacing:.08em;font-weight:600;margin:0 3px";
+  return span;
+}
+
+function separator(): HTMLSpanElement {
+  const span = document.createElement("span");
+  span.style.cssText = "width:1px;align-self:stretch;margin:0 4px;background:rgba(255,255,255,.18)";
+  return span;
+}
+
+function pill(text: string, active: boolean, onClick: () => void): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = text;
+  button.addEventListener("click", onClick);
+  style(button, active);
+  return button;
+}
+
+function style(button: HTMLButtonElement, active: boolean): void {
+  button.style.cssText = [
+    "all:unset",
+    "cursor:pointer",
+    "padding:4px 8px",
+    "border-radius:6px",
+    `background:${active ? "#fff" : "transparent"}`,
+    `color:${active ? "#141417" : "rgba(255,255,255,.7)"}`,
+    active ? "font-weight:600" : "font-weight:400",
+  ].join(";");
 }

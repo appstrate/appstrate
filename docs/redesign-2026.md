@@ -67,6 +67,16 @@ on — without it the chat, billing and webhooks surfaces are invisible in the l
 A missing fixture logs `[lab] no fixture for GET /api/… → 404`. That is the
 console telling you about a hole, not a bug.
 
+**The panel carries a second dial: GRIS (A / B / C).** It moves `--canvas`
+(and the sidebar with it) between the shipped 1.5%-off-white and two deeper
+greys, in place and without a reload, and the choice survives one — so a value
+can be carried across scenarios and widths while the eye decides. It exists
+because one number settles three separate questions at once (the two toolbar
+button treatments, the view toggle's track, every white card against the page)
+and none of them can be judged from a screenshot. It is an INSTRUMENT: when a
+depth is picked it becomes the token in `styles.css` and `lab/canvas-depth.ts`
+is deleted.
+
 **Looking at it when the MCP browser is taken.** That lock belongs to whichever
 session grabbed Chrome Beta first, and waiting for it is what kept every screen
 since the table unseen. It is not the only way in: Playwright drives Google
