@@ -13,7 +13,8 @@ import {
   useUpdateMeIntegrationConnection,
 } from "../../hooks/use-me-connections";
 import { formatDateField } from "../../lib/markdown";
-import { LoadingState, EmptyState } from "../../components/page-states";
+import { EmptyState, ErrorState } from "../../components/page-states";
+import { ItemList } from "../../components/item-list";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { ConnectionStatusBadge } from "../../components/integration-connect/connection-status-badge";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
@@ -296,7 +297,7 @@ function SourceGroupCard({
 
 export function PreferencesConnectionsPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { data: groups, isLoading } = useMyConnections();
+  const { data: groups, isLoading, isError } = useMyConnections();
 
   const disconnectIntegration = useDisconnectIntegrationConnection();
   const updateIntegration = useUpdateMeIntegrationConnection();
@@ -319,8 +320,6 @@ export function PreferencesConnectionsPage() {
     () => (groups ?? []).reduce((s, g) => s + g.total_connections, 0),
     [groups],
   );
-
-  if (isLoading) return <LoadingState />;
 
   const toggle = (key: string) => {
     setExpanded((prev) => {
@@ -351,65 +350,68 @@ export function PreferencesConnectionsPage() {
         </p>
       </div>
 
-      {(groups ?? []).length === 0 ? (
-        <EmptyState
-          message={t("connections.noConnections")}
-          hint={t("connections.noConnectionsHint")}
-          icon={Unplug}
-        >
-          <Link to="/integrations">
-            <Button variant="outline">{t("connections.goToConnections")}</Button>
-          </Link>
-        </EmptyState>
-      ) : (
-        <div className="flex flex-col gap-3">
-          {(groups ?? []).map((group) => {
-            const key = `${group.kind}:${group.source_id}`;
-            return (
-              <SourceGroupCard
-                key={key}
-                group={group}
-                expanded={expanded.has(key)}
-                onToggle={() => toggle(key)}
-                renderRow={(conn) => (
-                  <ConnectionRow
-                    conn={conn}
-                    disconnecting={disconnectIntegration.isPending}
-                    updating={updateIntegration.isPending}
-                    onDisconnect={() =>
-                      setConfirmState({
-                        kind: "integration",
-                        displayName: group.display_name,
-                        identity: conn.identity,
-                        connectionId: conn.connection_id,
-                        reused_by_agents: conn.reused_by_agents ?? 0,
-                      })
-                    }
-                    onUpdateLabel={(label) =>
-                      updateIntegration.mutate({
-                        packageId: group.source_id,
-                        connectionId: conn.connection_id,
-                        orgId: conn.org.id,
-                        applicationId: conn.application.id,
-                        label,
-                      })
-                    }
-                    onToggleShare={(next) =>
-                      updateIntegration.mutate({
-                        packageId: group.source_id,
-                        connectionId: conn.connection_id,
-                        orgId: conn.org.id,
-                        applicationId: conn.application.id,
-                        sharedWithOrg: next,
-                      })
-                    }
-                  />
-                )}
-              />
-            );
-          })}
-        </div>
-      )}
+      <ItemList
+        items={groups ?? []}
+        itemKey={(group) => `${group.kind}:${group.source_id}`}
+        isLoading={isLoading}
+        isError={isError}
+        error={<ErrorState compact />}
+        empty={
+          <EmptyState
+            message={t("connections.noConnections")}
+            hint={t("connections.noConnectionsHint")}
+            icon={Unplug}
+          >
+            <Link to="/integrations">
+              <Button variant="outline">{t("connections.goToConnections")}</Button>
+            </Link>
+          </EmptyState>
+        }
+        renderItem={(group) => {
+          const key = `${group.kind}:${group.source_id}`;
+          return (
+            <SourceGroupCard
+              group={group}
+              expanded={expanded.has(key)}
+              onToggle={() => toggle(key)}
+              renderRow={(conn) => (
+                <ConnectionRow
+                  conn={conn}
+                  disconnecting={disconnectIntegration.isPending}
+                  updating={updateIntegration.isPending}
+                  onDisconnect={() =>
+                    setConfirmState({
+                      kind: "integration",
+                      displayName: group.display_name,
+                      identity: conn.identity,
+                      connectionId: conn.connection_id,
+                      reused_by_agents: conn.reused_by_agents ?? 0,
+                    })
+                  }
+                  onUpdateLabel={(label) =>
+                    updateIntegration.mutate({
+                      packageId: group.source_id,
+                      connectionId: conn.connection_id,
+                      orgId: conn.org.id,
+                      applicationId: conn.application.id,
+                      label,
+                    })
+                  }
+                  onToggleShare={(next) =>
+                    updateIntegration.mutate({
+                      packageId: group.source_id,
+                      connectionId: conn.connection_id,
+                      orgId: conn.org.id,
+                      applicationId: conn.application.id,
+                      sharedWithOrg: next,
+                    })
+                  }
+                />
+              )}
+            />
+          );
+        }}
+      />
 
       <ConfirmModal
         open={!!confirmState}

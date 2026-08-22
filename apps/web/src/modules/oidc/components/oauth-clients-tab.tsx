@@ -15,7 +15,8 @@ import { toast } from "sonner";
 import { Plus, Pencil, Trash2, RotateCcw, Power, KeyRound, ShieldCheck } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
-import { LoadingState, ErrorState, EmptyState } from "@/components/page-states";
+import { ErrorState, EmptyState } from "@/components/page-states";
+import { ItemList } from "@/components/item-list";
 import { Spinner } from "@/components/spinner";
 import { Modal } from "@/components/modal";
 import { SecretRevealModal } from "@/components/secret-reveal-modal";
@@ -50,10 +51,6 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
     setModalOpen(true);
   };
 
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
-  if (!data) return <ErrorState />;
-
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -69,19 +66,21 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
         </Button>
       </div>
 
-      {data.length === 0 ? (
-        <EmptyState message={t("settings:oauthClients.empty")} icon={KeyRound}>
-          <Button size="sm" onClick={openCreate}>
-            <Plus className="h-4 w-4" /> {t("settings:oauthClients.createBtn")}
-          </Button>
-        </EmptyState>
-      ) : (
-        <ul className="space-y-3">
-          {data.map((client) => (
-            <OAuthClientRow key={client.clientId} client={client} onEdit={() => openEdit(client)} />
-          ))}
-        </ul>
-      )}
+      <ItemList
+        items={data ?? []}
+        itemKey={(client) => client.clientId}
+        isLoading={isLoading}
+        isError={Boolean(error)}
+        error={<ErrorState message={getErrorMessage(error)} compact />}
+        empty={
+          <EmptyState message={t("settings:oauthClients.empty")} icon={KeyRound}>
+            <Button size="sm" onClick={openCreate}>
+              <Plus className="h-4 w-4" /> {t("settings:oauthClients.createBtn")}
+            </Button>
+          </EmptyState>
+        }
+        renderItem={(client) => <OAuthClientRow client={client} onEdit={() => openEdit(client)} />}
+      />
 
       <OAuthClientFormModal
         open={modalOpen}
@@ -147,7 +146,10 @@ function OAuthClientRow({ client, onEdit }: { client: OAuthClient; onEdit: () =>
   }
 
   return (
-    <li className="border-border bg-card space-y-3 rounded-lg border p-4">
+    // A `div`, not an `li`: the row is an item of `ItemList`, which stacks
+    // blocks rather than marking up a `ul`, so an `li` here would be a list
+    // item with no list around it.
+    <div className="border-border bg-card space-y-3 rounded-lg border p-4">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
@@ -307,6 +309,6 @@ function OAuthClientRow({ client, onEdit }: { client: OAuthClient; onEdit: () =>
       >
         <p className="text-muted-foreground text-sm">{t("settings:oauthClients.deleteConfirm")}</p>
       </Modal>
-    </li>
+    </div>
   );
 }

@@ -1090,12 +1090,24 @@ Counted 22 August: `LoadingState` in 30 files, `<Spinner>` in 45, `Skeleton` in 
 them needs no new code — it needs its early return DELETED and `isLoading`
 passed down.
 
-Done so far, all five the same way (early returns gone, `ItemList`, states in
+Done so far, all nine the same way (early returns gone, `ItemList`, states in
 the family's order, action button standing throughout): API keys, applications,
-devices, webhooks, members. Each was a `flex flex-col gap-3` + `.map()` — the
-third body, written by hand, five times.
+devices, webhooks, members, CLI sessions, webhook deliveries, OAuth clients,
+and the personal connections page. Each was a `flex flex-col gap-3` or a
+`space-y-2` around a `.map()` — the third body, written by hand, nine times.
 
-**Left: 20 early returns.** Roughly half are lists that can take the same
+Two things they taught:
+
+- **Not every `<LoadingState />` is a request state.** The CLI sessions page
+  guards on `!orgId`, and its query is DISABLED until there is one, so
+  `isLoading` is false and a body would call the empty list an ANSWER. That
+  guard keeps its spinner: it waits for context, which is what a spinner is
+  for.
+- **An item is a block, not an `<li>`.** The OAuth clients row rendered one,
+  which was correct inside the `<ul>` it used to sit in and is a list item with
+  no list around it inside `ItemList`.
+
+**Left: 16 early returns.** Roughly half are lists that can take the same
 treatment; the rest are DETAIL pages, where the shape of what is coming is a
 whole page rather than a list, and a page-shaped skeleton drifts from the page
 it imitates. Those keep a spinner, which is the honest answer when the shape is

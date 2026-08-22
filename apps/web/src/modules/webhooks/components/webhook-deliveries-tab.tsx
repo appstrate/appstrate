@@ -3,7 +3,8 @@
 import { useTranslation } from "react-i18next";
 import { Send } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
-import { LoadingState, ErrorState, EmptyState } from "@/components/page-states";
+import { ErrorState, EmptyState } from "@/components/page-states";
+import { ItemList } from "@/components/item-list";
 import { useWebhookDeliveries } from "../hooks/use-webhooks";
 import type { WebhookDelivery } from "../hooks/use-webhooks";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -38,19 +39,18 @@ export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
   const { t } = useTranslation(["settings", "common"]);
   const { data: deliveries, isLoading, error } = useWebhookDeliveries(webhookId);
 
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
-
-  if (!deliveries || deliveries.length === 0) {
-    return <EmptyState message={t("settings:webhooks.noDeliveries")} icon={Send} compact />;
-  }
-
   return (
-    <div className="space-y-2">
-      {deliveries.map((d) => {
+    <ItemList
+      items={deliveries ?? []}
+      itemKey={(d) => d.id}
+      isLoading={isLoading}
+      isError={Boolean(error)}
+      error={<ErrorState message={getErrorMessage(error)} compact />}
+      empty={<EmptyState message={t("settings:webhooks.noDeliveries")} icon={Send} compact />}
+      renderItem={(d) => {
         const variant = deliveryStatusVariant(d);
         return (
-          <div key={d.id} className="border-border bg-card rounded-lg border p-3">
+          <div className="border-border bg-card rounded-lg border p-3">
             <div className="mb-1 flex items-center gap-2">
               <span className="text-muted-foreground truncate font-mono text-xs">{d.eventId}</span>
               <span className="font-mono text-sm">{d.eventType}</span>
@@ -64,7 +64,7 @@ export function WebhookDeliveriesTab({ webhookId }: { webhookId: string }) {
             {d.error && <p className="text-destructive mt-1 text-xs">{d.error}</p>}
           </div>
         );
-      })}
-    </div>
+      }}
+    />
   );
 }

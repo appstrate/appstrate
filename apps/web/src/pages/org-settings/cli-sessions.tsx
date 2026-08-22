@@ -6,6 +6,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Laptop } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
+import { ItemList } from "../../components/item-list";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { CliSessionCard } from "../../components/cli-session-card";
 import { $api } from "../../api/client";
@@ -49,9 +50,10 @@ export function OrgSettingsCliSessionsPage() {
 
   const [pendingRevoke, setPendingRevoke] = useState<AdminCliSession | null>(null);
 
+  // Not a request state: without an org id the query never runs, so `isLoading`
+  // is false and the body would call an empty list an ANSWER. This waits for
+  // context, which is what a spinner is for.
   if (!orgId) return <LoadingState />;
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
 
   const sessions = data ?? [];
 
@@ -64,27 +66,30 @@ export function OrgSettingsCliSessionsPage() {
         </p>
       </div>
 
-      {sessions.length === 0 ? (
-        <EmptyState
-          icon={Laptop}
-          message={t("orgCliSessions.emptyTitle")}
-          hint={t("orgCliSessions.emptyDescription")}
-        />
-      ) : (
-        <div className="flex flex-col gap-3">
-          {sessions.map((s) => (
-            <CliSessionCard
-              key={s.familyId}
-              session={s}
-              meta={<span className="text-muted-foreground text-xs">· {memberLabel(s)}</span>}
-              revokeDisabled={
-                revoke.isPending && revoke.variables?.params.path.familyId === s.familyId
-              }
-              onRevoke={() => setPendingRevoke(s)}
-            />
-          ))}
-        </div>
-      )}
+      <ItemList
+        items={sessions}
+        itemKey={(s) => s.familyId}
+        isLoading={isLoading}
+        isError={Boolean(error)}
+        error={<ErrorState message={getErrorMessage(error)} compact />}
+        empty={
+          <EmptyState
+            icon={Laptop}
+            message={t("orgCliSessions.emptyTitle")}
+            hint={t("orgCliSessions.emptyDescription")}
+          />
+        }
+        renderItem={(s) => (
+          <CliSessionCard
+            session={s}
+            meta={<span className="text-muted-foreground text-xs">· {memberLabel(s)}</span>}
+            revokeDisabled={
+              revoke.isPending && revoke.variables?.params.path.familyId === s.familyId
+            }
+            onRevoke={() => setPendingRevoke(s)}
+          />
+        )}
+      />
 
       <ConfirmModal
         open={pendingRevoke !== null}
