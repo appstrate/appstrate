@@ -451,7 +451,7 @@ describe("fieldsToSchema — JSON Schema purity", () => {
         key: "doc",
         type: "string",
         isFile: true,
-        description: "Document",
+        description: "File",
         required: false,
         accept: ".pdf",
         maxSize: "5242880",
@@ -595,7 +595,7 @@ describe("getRuntimeTools", () => {
   });
 
   // Non-regression: `report` was a real runtime tool until it was replaced by
-  // durable `outputs/` documents. Agents saved back then still carry the id;
+  // durable `outputs/` files. Agents saved back then still carry the id;
   // the editor must ignore it, never render a phantom checkbox for it, and
   // never surface a validation error to the user because of it.
   it("drops a retired tool id (`report`) it can no longer render", () => {
@@ -732,7 +732,7 @@ describe("writers emit canonical AFPS keys", () => {
         key: "doc",
         type: "string",
         isFile: true,
-        description: "Document",
+        description: "File",
         required: false,
         accept: ".pdf",
         maxSize: "10485760",

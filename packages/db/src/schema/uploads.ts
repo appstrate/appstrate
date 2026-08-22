@@ -54,7 +54,7 @@ export const uploads = pgTable(
      * `x-amz-checksum-sha256` header (S3/MinIO verify on PUT), the proxy sink
      * re-hashes the streamed bytes, and consume/materialization compares the
      * hashed stream against it — a mismatch is rejected (400 `checksum_mismatch`)
-     * before the object becomes visible or a document is committed. NULL = no
+     * before the object becomes visible or a file is committed. NULL = no
      * client integrity claim (behaviour identical to before this column existed).
      */
     sha256: text("sha256"),

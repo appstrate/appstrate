@@ -3,13 +3,13 @@
 import { eq, asc, desc } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@appstrate/db/client";
-import { applications, documents, uploads, runs, organizations } from "@appstrate/db/schema";
+import { applications, files, uploads, runs, organizations } from "@appstrate/db/schema";
 import { invalidRequest, notFound } from "../lib/errors.ts";
 import { prefixedId } from "../lib/ids.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 import type { AppScope } from "../lib/scope.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
-import { decrementOrgDocumentBytes, storageKeyToDeletionJob } from "./documents.ts";
+import { decrementOrgFileBytes, storageKeyToDeletionJob } from "./files.ts";
 import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 
 export const appSettingsSchema = z.object({
@@ -118,7 +118,7 @@ export async function updateApplication(
 /** Delete an application. Throws 400 if default, 404 if not found. */
 export async function deleteApplication(orgId: string, applicationId: string) {
   await db.transaction(async (tx) => {
-    // Use the same org-first lock order as document/upload writes, then lock the
+    // Use the same org-first lock order as file/upload writes, then lock the
     // parent application before enumerating its children. The parent lock
     // prevents a concurrent FK insert from being cascade-deleted without a
     // matching outbox job.
@@ -140,9 +140,9 @@ export async function deleteApplication(orgId: string, applicationId: string) {
     if (app.isDefault) throw invalidRequest("Cannot delete default application");
 
     const docRows = await tx
-      .select({ storageKey: documents.storageKey, size: documents.size })
-      .from(documents)
-      .where(eq(documents.applicationId, applicationId));
+      .select({ storageKey: files.storageKey, size: files.size })
+      .from(files)
+      .where(eq(files.applicationId, applicationId));
     const uploadRows = await tx
       .select({ storageKey: uploads.storageKey })
       .from(uploads)
@@ -168,7 +168,7 @@ export async function deleteApplication(orgId: string, applicationId: string) {
     await enqueueStorageDeletion(tx, storageJobs);
 
     const bytes = docRows.reduce((sum, row) => sum + row.size, 0);
-    if (bytes > 0) await decrementOrgDocumentBytes(tx, orgId, bytes);
+    if (bytes > 0) await decrementOrgFileBytes(tx, orgId, bytes);
 
     const deleted = await tx
       .delete(applications)

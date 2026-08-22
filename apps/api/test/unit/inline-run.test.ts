@@ -12,19 +12,19 @@ import {
   isInlineShadowPackageId,
   generateShadowPackageId,
   buildShadowLoadedPackage,
-  assertPromptDocumentsCoveredByInput,
+  assertPromptFilesCoveredByInput,
 } from "../../src/services/inline-run.ts";
 import { ApiError } from "../../src/lib/errors.ts";
 import type { AgentManifest } from "../../src/types/index.ts";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 
-const DOC_A = "document://doc_aaaaaaaa";
-const DOC_B = "document://doc_bbbbbbbb";
+const DOC_A = "appfile://doc_aaaaaaaa";
+const DOC_B = "appfile://doc_bbbbbbbb";
 
 // A manifest input schema declaring `file` (and `also`) as FILE fields
-// (`format:"uri"` + `contentMediaType`) — the only fields whose `document://`
+// (`format:"uri"` + `contentMediaType`) — the only fields whose `appfile://`
 // values are mounted into the run workspace. Any other property is a plain
-// string field whose `document://` value never mounts.
+// string field whose `appfile://` value never mounts.
 const FILE_SCHEMA = {
   type: "object",
   properties: {
@@ -112,11 +112,11 @@ describe("inline-run helpers", () => {
     });
   });
 
-  describe("assertPromptDocumentsCoveredByInput", () => {
-    it("rejects a prompt document:// URI absent from the input", () => {
+  describe("assertPromptFilesCoveredByInput", () => {
+    it("rejects a prompt appfile:// URI absent from the input", () => {
       let caught: unknown;
       try {
-        assertPromptDocumentsCoveredByInput(`Read the file at ${DOC_A} please.`, null, undefined);
+        assertPromptFilesCoveredByInput(`Read the file at ${DOC_A} please.`, null, undefined);
       } catch (err) {
         caught = err;
       }
@@ -124,7 +124,7 @@ describe("inline-run helpers", () => {
       const apiErr = caught as ApiError;
       expect(apiErr.status).toBe(400);
       expect(apiErr.code).toBe("validation_failed");
-      expect(apiErr.fieldErrors?.[0]?.code).toBe("document_uri_in_prompt");
+      expect(apiErr.fieldErrors?.[0]?.code).toBe("file_uri_in_prompt");
       // The offending URI is named so the model knows what to move into input.
       expect(apiErr.fieldErrors?.[0]?.message).toContain(DOC_A);
     });
@@ -132,7 +132,7 @@ describe("inline-run helpers", () => {
     it("names every uncovered URI when several are pasted into the prompt", () => {
       let caught: unknown;
       try {
-        assertPromptDocumentsCoveredByInput(`Images: ${DOC_A} and ${DOC_B}`, null, undefined);
+        assertPromptFilesCoveredByInput(`Images: ${DOC_A} and ${DOC_B}`, null, undefined);
       } catch (err) {
         caught = err;
       }
@@ -143,23 +143,19 @@ describe("inline-run helpers", () => {
 
     it("passes when the prompt URI is mounted through a declared file field", () => {
       expect(() =>
-        assertPromptDocumentsCoveredByInput(`Read ${DOC_A}`, { file: DOC_A }, FILE_SCHEMA),
+        assertPromptFilesCoveredByInput(`Read ${DOC_A}`, { file: DOC_A }, FILE_SCHEMA),
       ).not.toThrow();
     });
 
     it("passes when every prompt URI is covered even if input carries extra file fields", () => {
       expect(() =>
-        assertPromptDocumentsCoveredByInput(
-          `Read ${DOC_A}`,
-          { file: DOC_A, also: DOC_B },
-          FILE_SCHEMA,
-        ),
+        assertPromptFilesCoveredByInput(`Read ${DOC_A}`, { file: DOC_A, also: DOC_B }, FILE_SCHEMA),
       ).not.toThrow();
     });
 
     it("rejects when only some prompt URIs are mounted by file fields", () => {
       expect(() =>
-        assertPromptDocumentsCoveredByInput(`${DOC_A} and ${DOC_B}`, { file: DOC_A }, FILE_SCHEMA),
+        assertPromptFilesCoveredByInput(`${DOC_A} and ${DOC_B}`, { file: DOC_A }, FILE_SCHEMA),
       ).toThrow(ApiError);
     });
 
@@ -169,25 +165,25 @@ describe("inline-run helpers", () => {
     it("rejects a prompt URI whose only input occurrence is a non-file field", () => {
       let caught: unknown;
       try {
-        assertPromptDocumentsCoveredByInput(`Read ${DOC_A}`, { note: DOC_A }, FILE_SCHEMA);
+        assertPromptFilesCoveredByInput(`Read ${DOC_A}`, { note: DOC_A }, FILE_SCHEMA);
       } catch (err) {
         caught = err;
       }
       expect(caught).toBeInstanceOf(ApiError);
-      expect((caught as ApiError).fieldErrors?.[0]?.code).toBe("document_uri_in_prompt");
+      expect((caught as ApiError).fieldErrors?.[0]?.code).toBe("file_uri_in_prompt");
       expect((caught as ApiError).fieldErrors?.[0]?.message).toContain(DOC_A);
     });
 
     // With no schema, nothing mounts — every prompt URI is uncovered.
     it("rejects a prompt URI when the manifest declares no input schema", () => {
       expect(() =>
-        assertPromptDocumentsCoveredByInput(`Read ${DOC_A}`, { file: DOC_A }, undefined),
+        assertPromptFilesCoveredByInput(`Read ${DOC_A}`, { file: DOC_A }, undefined),
       ).toThrow(ApiError);
     });
 
-    it("passes for a prompt with no document:// URIs", () => {
+    it("passes for a prompt with no appfile:// URIs", () => {
       expect(() =>
-        assertPromptDocumentsCoveredByInput("Summarise the user's recent emails.", null, undefined),
+        assertPromptFilesCoveredByInput("Summarise the user's recent emails.", null, undefined),
       ).not.toThrow();
     });
   });

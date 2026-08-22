@@ -62,7 +62,7 @@ const oidcLikeStrategy: AuthStrategy = {
       applicationId: currentCtx.defaultAppId,
       // Deliberately generous: the point is that NO scope set substitutes for
       // an authentic platform session on this surface.
-      permissions: ["org:read", "runs:read", "documents:read", "documents:delete"],
+      permissions: ["org:read", "runs:read", "files:read", "files:delete"],
     };
   },
 };
@@ -84,7 +84,7 @@ describe("GET/POST /api/admin/storage-deletion-jobs — platform operator guard"
     await truncateAll();
     currentCtx = await createTestContext({ orgSlug: "adminops" });
     // The allowlist is read through the cached env, so set it AFTER the user
-    // exists and reset the cache — same idiom as the documents suite.
+    // exists and reset the cache — same idiom as the files suite.
     process.env.AUTH_PLATFORM_ADMIN_EMAILS = currentCtx.user.email;
     _resetCacheForTesting();
   });

@@ -258,7 +258,7 @@ export function buildLogEntries(
       Object.assign(output, log.data);
     } else if (log.event === "report" && log.type === "result") {
       // Dead channel: the `report` runtime tool was replaced by durable
-      // `outputs/` documents. Rows written before the removal stay in the DB
+      // `outputs/` files. Rows written before the removal stay in the DB
       // but are skipped here — falling through to the generic branch would
       // render them as a truncated, contextless log line.
     } else if (log.event === "run_completed") {

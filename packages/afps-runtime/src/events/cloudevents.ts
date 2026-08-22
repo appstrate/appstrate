@@ -11,7 +11,7 @@
  * `pinned.set`, or any third-party `@scope/tool.verb`.
  *
  * Canonical events additionally carry `dataschema`, a stable versioned
- * IDENTIFIER for the shape of their `data` payload. No document is served
+ * IDENTIFIER for the shape of their `data` payload. No file is served
  * at those URIs and none ever was — see `./canonical-event-schemas.ts`,
  * which documents why, and which is where the URIs live.
  *

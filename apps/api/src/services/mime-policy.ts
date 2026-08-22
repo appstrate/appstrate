@@ -10,8 +10,8 @@
  *  - Staged-upload consume (`services/uploads.ts` → run workspace / durable doc)
  *  - Proxy-upload sink (`routes/uploads.ts` — signed-vs-declared Content-Type)
  *  - Inline `data:` URI input (`services/input-parser.ts`)
- *  - Agent-output ingestion (`services/documents.ts` → `POST /runs/:id/documents`)
- *  - Document preview classification (`services/document-preview.ts`)
+ *  - Agent-output ingestion (`services/files.ts` → `POST /runs/:id/files`)
+ *  - File preview classification (`services/file-preview.ts`)
  *  - MCP `resources/read` inlining (`modules/mcp/tools.ts`)
  *
  * Leaf module: no DB, no storage, no HTTP — so the MCP tool layer and the
@@ -46,7 +46,7 @@ import { isTextShapedMime, normalizeMime } from "@appstrate/core/mime";
  * archive ([Content_Types].xml, mimetype) sits beyond the sample window — the
  * normal layout for openpyxl/LibreOffice/Google-exported files — it falls back
  * to plain `application/zip`. Treating that fallback as a mismatch would
- * reject legitimate office documents, so declared-vs-sniffed comparison uses
+ * reject legitimate office files, so declared-vs-sniffed comparison uses
  * Marcel/Tika-style subtype refinement: a declared member of this family is
  * compatible with a sniffed `application/zip` (and vice versa). A declaration
  * outside the family (application/pdf, image/png, …) still requires an exact
@@ -56,7 +56,7 @@ const ZIP_CONTAINER_MIMES = new Set([
   // OOXML
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // xlsx
   "application/vnd.openxmlformats-officedocument.spreadsheetml.template", // xltx
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // docx
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.file", // docx
   "application/vnd.openxmlformats-officedocument.wordprocessingml.template", // dotx
   "application/vnd.openxmlformats-officedocument.presentationml.presentation", // pptx
   "application/vnd.openxmlformats-officedocument.presentationml.slideshow", // ppsx
@@ -64,7 +64,7 @@ const ZIP_CONTAINER_MIMES = new Set([
   // OOXML macro-enabled
   "application/vnd.ms-excel.sheet.macroenabled.12", // xlsm
   "application/vnd.ms-excel.template.macroenabled.12", // xltm
-  "application/vnd.ms-word.document.macroenabled.12", // docm
+  "application/vnd.ms-word.file.macroenabled.12", // docm
   "application/vnd.ms-word.template.macroenabled.12", // dotm
   "application/vnd.ms-powerpoint.presentation.macroenabled.12", // pptm
   "application/vnd.ms-powerpoint.slideshow.macroenabled.12", // ppsm
@@ -108,7 +108,7 @@ const CONTAINER_FAMILIES: ReadonlyArray<{ generic: string; members: Set<string> 
  * container family's generic type (declared xlsx / sniffed application/zip,
  * declared application/zip / sniffed xlsx). Two SPECIFIC container types never
  * satisfy each other — declared xlsx with sniffed docm/xlsm stays a mismatch,
- * so a macro-enabled document cannot ride in under a macro-free declaration
+ * so a macro-enabled file cannot ride in under a macro-free declaration
  * when the sniffer DID identify it. Exact-match outside the families requires
  * the sniffed value to equal the declared one.
  */
@@ -134,7 +134,7 @@ export function shouldEnforceSniffedMime(declared: string): boolean {
 }
 
 /**
- * The mime an AGENT-produced document should be STORED under. Agent outputs are
+ * The mime an AGENT-produced file should be STORED under. Agent outputs are
  * never rejected on a mismatch (an agent legitimately emits a PNG under a
  * `text/plain` Content-Type it never thought about); instead the label is made
  * honest: when the bytes sniff to a concrete type that does not match the

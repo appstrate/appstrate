@@ -1451,32 +1451,33 @@ export interface PlatformServices {
    */
   recordChatUsage(record: ChatUsageRecord): Promise<void>;
   /**
-   * Resolve a chat composer file attachment to a durable `document://` URI:
-   * materialize an `upload://` staged upload into a chat-session-scoped document
-   * (purpose `user_upload`), or validate that an existing `document://` is
-   * readable by the session owner. The chat module has no DB access, so
-   * materialization + the container-inherited ACL check cross through here.
-   * Rejections (over-cap, over-limit, not-found/foreign document) are thrown as
+   * Resolve a chat composer file attachment to a durable `appfile://` URI:
+   * materialize an `upload://` staged upload into a chat-session-scoped file
+   * (purpose `user_upload`), or validate that an existing `appfile://` (or the
+   * legacy `document://`) is readable by the session owner. The chat module has
+   * no DB access, so materialization + the container-inherited ACL check cross
+   * through here.
+   * Rejections (over-cap, over-limit, not-found/foreign file) are thrown as
    * the platform's RFC 9457 errors, which the chat route surfaces to the user.
    */
   resolveChatAttachment(request: ChatAttachmentRequest): Promise<ResolvedChatAttachment>;
   /**
-   * Detach-or-delete the documents contained by a chat session being deleted. A
-   * session document a run still consumes is detached (`chat_session_id = NULL`)
+   * Detach-or-delete the files contained by a chat session being deleted. A
+   * session file a run still consumes is detached (`chat_session_id = NULL`)
    * so the run's rerun still resolves it; an unconsumed one is deleted (row +
    * org counter + storage object). The chat module has DB access but no storage
-   * access and no documents-service surface, so this crosses through here. Called
+   * access and no files-service surface, so this crosses through here. Called
    * by the DELETE session route BEFORE removing the `chat_sessions` row, so the
    * FK cascade cannot destroy the evidence first.
    *
    * `tx` is the caller's open DB transaction handle (opaque here — core carries
    * no Drizzle dependency). The chat module passes the SAME transaction it uses
-   * to delete the `chat_sessions` row, so the document teardown and the row
-   * delete commit atomically: a document materializing in the gap can no longer
+   * to delete the `chat_sessions` row, so the file teardown and the row
+   * delete commit atomically: a file materializing in the gap can no longer
    * be cascade-deleted without a storage-deletion outbox job. Omitted → the
    * platform opens its own transaction (the legacy, non-atomic single call).
    */
-  cleanupSessionDocuments(chatSessionId: string, tx?: unknown): Promise<void>;
+  cleanupSessionFiles(chatSessionId: string, tx?: unknown): Promise<void>;
   /**
    * Chat admission gate — the chat-surface entry point into the `beforeUsage`
    * hook. The chat module calls this before starting ANY turn, and the platform
@@ -1516,12 +1517,12 @@ export interface PlatformServices {
     subscription: boolean;
   }): Promise<UsageRejection | null>;
   /**
-   * Set (or clear) an organization's per-org document storage limit — the
-   * technical byte ceiling the platform enforces on durable-document writes.
+   * Set (or clear) an organization's per-org file storage limit — the
+   * technical byte ceiling the platform enforces on durable-file writes.
    * A metering module pilots per-org storage by mapping whatever entitlement
    * it owns onto a byte value and writing it here; the platform then enforces
-   * `documents_bytes_limit ?? ORG_STORAGE_QUOTA_BYTES ?? unlimited` on every
-   * document write.
+   * `files_bytes_limit ?? ORG_STORAGE_QUOTA_BYTES ?? unlimited` (the env var
+   * keeps its legacy name on purpose) on every file write.
    *
    *  - `bytes` a non-negative safe integer → the org's override.
    *  - `bytes` null → clears the override (back to the env default).
@@ -1530,5 +1531,5 @@ export interface PlatformServices {
    * Throws the platform's RFC 9457 errors — a 404 for an unknown `orgId`, a
    * 400 for a negative / non-integer `bytes`.
    */
-  setDocumentStorageLimit(orgId: string, bytes: number | null): Promise<void>;
+  setFileStorageLimit(orgId: string, bytes: number | null): Promise<void>;
 }

@@ -19,11 +19,19 @@
  * loop so a bucket can never silently miss the grace window or the `_system/`
  * carve-out):
  *
- *   documents        ← documents.storage_key
+ *   documents        ← files.storage_key
  *   uploads          ← uploads.storage_key
  *   agent-packages   ← package_versions  (published version artifacts)
  *   library-packages ← packages          (library item artifacts, incl. _system/)
- *   run-workspace    ← runs.id           (bundle + manifest + input documents)
+ *   run-workspace    ← runs.id           (bundle + manifest + input files)
+ *
+ * The `documents` bucket is NOT a typo and there is no `files` bucket. #1177
+ * renamed the TABLE `documents` → `files`; the S3 bucket / key prefix stayed
+ * `documents` because every stored `storage_key` already starts with
+ * `documents/` and those are live bytes. So this one line reconciles the
+ * `documents/` object namespace against `files.storage_key` values that all
+ * begin with `documents/`. Same for the run-workspace bucket, whose per-run
+ * input objects are keyed `{runId}/documents/<name>`.
  *
  * SYSTEM packages (`packages.org_id IS NULL`, objects under `_system/`) are
  * part of the known-set by construction — the queries apply no org filter — so

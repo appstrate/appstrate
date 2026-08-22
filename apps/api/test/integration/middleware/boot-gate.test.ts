@@ -13,7 +13,7 @@
  *
  *   - `/health` reports `status: "starting"` with 503 + `Retry-After`, so a
  *     readiness probe never routes traffic to a half-built process.
- *   - Every other path gets an RFC 9457 `starting` problem document, NOT the
+ *   - Every other path gets an RFC 9457 `starting` problem file, NOT the
  *     handler — routes must never run before their dependencies exist.
  *   - Once `markServerReady()` fires, the gate is transparent: requests reach
  *     the real handlers, `/health` runs its real checks.
@@ -70,7 +70,7 @@ describe("boot gate", () => {
     expect(body.checks).toBeUndefined();
   });
 
-  it("refuses application routes with an RFC 9457 `starting` problem document", async () => {
+  it("refuses application routes with an RFC 9457 `starting` problem file", async () => {
     const app = buildGatedApp();
 
     const res = await app.request("/api/agents");

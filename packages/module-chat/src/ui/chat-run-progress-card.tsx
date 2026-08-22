@@ -33,33 +33,33 @@ import { formatDuration } from "@appstrate/core/format";
 import { useLiveElapsedMs } from "./use-elapsed.ts";
 import { useChatHost } from "./runtime-context.ts";
 import {
+  autoPresentFile,
   buildRunPageHref,
-  isPrimaryAutoPresentationEligible,
+  isRunAutoPresentEligible,
   isTerminalStatus,
-  mergeRunDocuments,
-  primaryDocumentFromLogs,
-  publishedDocumentsFromLogs,
+  mergeRunFiles,
+  publishedFilesFromLogs,
   runStatusLineKey,
   visibleLogEntries,
-  type ChatRunDocument,
+  type ChatRunFile,
   type RunStatus,
 } from "./run-events.ts";
-import { DocumentAttachment } from "./document-attachment.tsx";
+import { FileAttachment } from "./file-attachment.tsx";
 import type { ToolPhase } from "./tool-result.ts";
 
 /**
- * Row of document attachments surfaced under a run card — the same unified
+ * Row of file attachments surfaced under a run card — the same unified
  * renderer the thread uses for sent attachments: an image shows a square
  * thumbnail, anything else a chip. With a host opener (web shell) it opens the
  * in-app preview; without one (embedded mounts) it falls back to the
  * authenticated download.
  */
-function DocumentChips({ documents }: { documents: ChatRunDocument[] }) {
-  if (documents.length === 0) return null;
+function FileChips({ files }: { files: ChatRunFile[] }) {
+  if (files.length === 0) return null;
   return (
     <div className="pointer-events-auto flex flex-wrap gap-1.5 px-3 pb-2">
-      {documents.map((doc) => (
-        <DocumentAttachment key={doc.id} doc={{ id: doc.id, name: doc.name, mime: doc.mime }} />
+      {files.map((file) => (
+        <FileAttachment key={file.id} file={{ id: file.id, name: file.name, mime: file.mime }} />
       ))}
     </div>
   );
@@ -103,7 +103,7 @@ export function ChatRunProgressCard({
   agentLabel,
   runHref,
   initialPackageId,
-  initialDocuments,
+  initialFiles,
   phase,
   errorText,
   modalTitle,
@@ -114,48 +114,26 @@ export function ChatRunProgressCard({
   agentLabel?: string;
   runHref?: string;
   initialPackageId?: string;
-  /** Documents from the persisted tool result — survive reload; merged with live ones. */
-  initialDocuments?: ChatRunDocument[];
+  /** Files from the persisted tool result — survive reload; merged with live ones. */
+  initialFiles?: ChatRunFile[];
   phase: ToolPhase;
   /** Launch-failure message shown on line 2 when the tool errored without a run id. */
   errorText?: string;
   modalTitle: React.ReactNode;
   details: React.ReactNode;
 }) {
-  const {
-    logs,
-    status,
-    packageId,
-    startedAt,
-    completedAt,
-    duration,
-    primaryDocumentId: authoritativePrimaryDocumentId,
-  } = useRunLogStream(runId, initialStatus, initialPackageId);
-
-  // Documents: the persisted tool-result list (reload-safe) merged with any
-  // that arrive live over the log stream (`document.published` frames).
-  const documents = React.useMemo(
-    () => mergeRunDocuments(initialDocuments ?? [], publishedDocumentsFromLogs(logs)),
-    [initialDocuments, logs],
+  const { logs, status, packageId, startedAt, completedAt, duration, live } = useRunLogStream(
+    runId,
+    initialStatus,
+    initialPackageId,
   );
-  const loggedPrimaryDocument = React.useMemo(() => primaryDocumentFromLogs(logs), [logs]);
-  // `undefined` means the run resource has not answered yet, so the latest log
-  // is a useful fallback. `null` is authoritative and deliberately suppresses
-  // stale historical primary events (deleted/expired/detached output).
-  const primaryDocumentId =
-    authoritativePrimaryDocumentId === undefined
-      ? loggedPrimaryDocument?.id
-      : authoritativePrimaryDocumentId;
-  const primaryDocument = React.useMemo(
-    () =>
-      primaryDocumentId
-        ? (documents.find((doc) => doc.id === primaryDocumentId) ?? {
-            id: primaryDocumentId,
-            uri: `document://${primaryDocumentId}`,
-            name: "",
-          })
-        : undefined,
-    [documents, primaryDocumentId],
+
+  // Files: the persisted tool-result list (reload-safe) merged with any
+  // that arrive live over the log stream (`file.published` frames). Both
+  // sources hold only files the run PRODUCED — the population the rule counts.
+  const files = React.useMemo(
+    () => mergeRunFiles(initialFiles ?? [], publishedFilesFromLogs(logs)),
+    [initialFiles, logs],
   );
   const effectiveStatus =
     status ?? (isTerminalStatus(initialStatus) ? (initialStatus as RunStatus) : undefined);
@@ -172,27 +150,33 @@ export function ChatRunProgressCard({
   // rather than flashing straight to the last one. `current` carries a stable
   // `id` so the line element remounts on change and re-runs its enter animation.
   const current = useLogTicker(visibleLogEntries(logs));
-  const { openDocument, t } = useChatHost();
+  const { openFile, t } = useChatHost();
   // A card that mounted already complete belongs to history: never let N old
-  // runs fight over the panel. A card mounted for a live call may present every
-  // NEW primary id once through the exact same opener as a direct document click.
-  const [autoPresentationEligible] = React.useState(() =>
-    isPrimaryAutoPresentationEligible(phase, initialStatus),
+  // runs fight over the panel. A card mounted for a live call presents through
+  // the exact same host opener as a direct file click.
+  const [autoPresentEligible] = React.useState(() =>
+    isRunAutoPresentEligible(phase, initialStatus),
   );
-  const presentedPrimaryId = React.useRef<string | null>(null);
+  // The whole rule, derived from what the run produced (see `autoPresentFile`).
+  const autoPresented = React.useMemo(
+    () => autoPresentFile({ files, status: effectiveStatus, live }),
+    [files, effectiveStatus, live],
+  );
+  // Opener-only on purpose: `fileActivation()` (the chips' single
+  // opener-vs-download decision) falls back to a DOWNLOAD when the host has no
+  // viewer, and a file landing in the user's Downloads folder unasked is not a
+  // presentation. No opener ⇒ no automatic presentation, as documented on
+  // `OpenFile`.
+  // Fires AT MOST ONCE per card. A file published after the panel already
+  // opened does not close it, swap it, or re-open anything: the user is reading
+  // what they were handed, and the newcomer is one click away in the chips row.
+  const hasAutoPresented = React.useRef(false);
   React.useEffect(() => {
-    if (
-      !autoPresentationEligible ||
-      !openDocument ||
-      !runId ||
-      !primaryDocument ||
-      presentedPrimaryId.current === primaryDocument.id
-    ) {
-      return;
-    }
-    presentedPrimaryId.current = primaryDocument.id;
-    openDocument({ id: primaryDocument.id, name: primaryDocument.name });
-  }, [autoPresentationEligible, openDocument, primaryDocument, runId]);
+    if (!autoPresentEligible || !openFile || !runId || !autoPresented) return;
+    if (hasAutoPresented.current) return;
+    hasAutoPresented.current = true;
+    openFile({ id: autoPresented.id, name: autoPresented.name });
+  }, [autoPresentEligible, openFile, autoPresented, runId]);
   // Before any log line: "starting" while the run is still coming up (no status
   // yet, or pending), then "running" once it is — up until the first log
   // replaces it.
@@ -273,10 +257,10 @@ export function ChatRunProgressCard({
         </div>
       </div>
 
-      {/* Downloadable document chips (z-10 so they sit above the full-card click
+      {/* Downloadable file chips (z-10 so they sit above the full-card click
           target and stay individually clickable). */}
       <div className="relative z-10">
-        <DocumentChips documents={documents} />
+        <FileChips files={files} />
       </div>
 
       {open ? (

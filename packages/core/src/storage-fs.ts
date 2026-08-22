@@ -42,7 +42,7 @@ export interface FileSystemStorageConfig {
 
 /**
  * HMAC domain separator for upload tokens. The upload keyring
- * (`UPLOAD_SIGNING_SECRET`) also signs document-preview tokens, so binding each
+ * (`UPLOAD_SIGNING_SECRET`) also signs file-preview tokens, so binding each
  * signature to its purpose is what makes the two non-interchangeable in BOTH
  * directions — a preview token can never be replayed at the upload sink, and an
  * upload token can never be replayed at the preview route.

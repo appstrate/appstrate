@@ -56,7 +56,7 @@ describe("run log cache invalidation", () => {
 });
 
 describe("run detail cache invalidation", () => {
-  it("marks a cached run stale when deleting one of its documents", async () => {
+  it("marks a cached run stale when deleting one of its files", async () => {
     const qc = seededClient();
     await invalidateRunDetails(qc);
     expect(isInvalidated(qc, runKeys.detail(ORG, APP, RUN))).toBe(true);

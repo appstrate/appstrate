@@ -8,7 +8,7 @@
  * This is NOT an AFPS contract — callers choose whether to prepend it.
  * External runners happy with the raw template alone (`renderPrompt`)
  * can skip this helper. The sections it builds (System / Environment /
- * Tools / Skills / User Input / Documents / Checkpoint / Memory /
+ * Tools / Skills / User Input / Files / Checkpoint / Memory /
  * Run History) represent one reasonable convention for an
  * AFPS-style agent; platforms and CLIs may compose it as-is or override
  * specific option fields.
@@ -117,13 +117,13 @@ export interface PlatformPromptOptions {
    * weaker models routinely call `output({})` before the correct shape.
    */
   outputSchema?: Record<string, unknown>;
-  /** Uploaded documents surfaced in `## Documents`. */
+  /** Uploaded files surfaced in `## Files`. */
   uploads?: ReadonlyArray<PromptViewUpload>;
 
   /**
    * Opt-in `## Deliverables` section (platform runs only): tells the agent to
    * write anything it produces for the user under `./outputs/`, which the
-   * platform sweeps and publishes as durable run documents at finalize. Off by
+   * platform sweeps and publishes as durable run files at finalize. Off by
    * default so the `appstrate run` CLI (no publish target) omits it. Rendered
    * as a platform-managed section BEFORE the raw prompt.
    */
@@ -180,16 +180,16 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
         "Work efficiently and output your result promptly.",
     );
   }
-  // Workspace bullet — only mention `./documents/` when uploads are actually
+  // Workspace bullet — only mention `./files/` when uploads are actually
   // wired. Surfacing it unconditionally caused agents with no file fields to
   // burn tokens listing an empty directory and hypothesising about missing
-  // attachments. The matching `## Documents` section below is also gated on
+  // attachments. The matching `## Files` section below is also gated on
   // `opts.uploads`, so the two stay consistent.
   const hasUploads = (opts.uploads?.length ?? 0) > 0;
   sections.push(
     "- **Workspace**: Your current working directory is the agent workspace. " +
       (hasUploads
-        ? "Input documents are available under `./documents/` (relative to cwd) and listed in the `## Documents` section below. "
+        ? "Input files are available under `./files/` (relative to cwd) and listed in the `## Files` section below. "
         : "") +
       "You may use the filesystem for temporary processing during this run only.",
   );
@@ -341,21 +341,19 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
     sections.push("");
   }
 
-  // --- Input documents ---
-  // Neutral wording on purpose: a document reaching a run is not necessarily an
+  // --- Input files ---
+  // Neutral wording on purpose: a file reaching a run is not necessarily an
   // upload from a human — it can be a sibling run's deliverable mounted by
-  // reference (`context_documents`). Saying "uploaded" would be wrong there.
+  // reference (`context_files`). Saying "uploaded" would be wrong there.
   if (opts.uploads && opts.uploads.length > 0) {
-    sections.push("## Documents\n");
-    sections.push("The following documents are available on the local filesystem:\n");
+    sections.push("## Files\n");
+    sections.push("The following files are available on the local filesystem:\n");
     for (const file of opts.uploads) {
       sections.push(
         `- **${file.name}** (${file.type || "unknown"}, ${formatFileSize(file.size)}) → \`${file.path}\``,
       );
     }
-    sections.push(
-      "\nRead the documents directly from the filesystem (paths are relative to cwd).\n",
-    );
+    sections.push("\nRead the files directly from the filesystem (paths are relative to cwd).\n");
   }
 
   // --- Checkpoint ---
@@ -420,19 +418,19 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   // --- Deliverables (platform-managed, opt-in) ---
   // One concise line so the agent knows where to place anything it produces
   // for the user; the platform sweeps `./outputs/` at finalize and publishes
-  // each file as a durable run document. Rendered here — before the raw prompt
+  // each file as a durable run file. Rendered here — before the raw prompt
   // (and before Output Format) — so the raw user prompt stays strictly last.
   if (opts.deliverables) {
     sections.push("## Deliverables\n");
     sections.push(
       "Write any file you produce for the user (generated documents, exports, data files) " +
         "under `./outputs/` — everything there is published automatically as a downloadable " +
-        "document when the run ends. Hidden files (dotfiles, and anything under a hidden " +
+        "file when the run ends. Hidden files (dotfiles, and anything under a hidden " +
         "directory) are ignored by this automatic publish. Give every deliverable a concise, " +
         "descriptive, task-specific kebab-case filename in the user's language, including enough " +
         "subject or scope to remain understandable outside this run (for example, " +
         "`./outputs/analyse-concurrents-restaurants-lyon.md`). Never use context-free names such " +
-        "as `report.md`, `summary.md`, `output.md`, `result.md`, or `document.md`. If the user " +
+        "as `report.md`, `summary.md`, `output.md`, `result.md`, `document.md`, or `file.md`. If the user " +
         "expects a written report or summary without specifying a format, use markdown with such " +
         "a descriptive filename.\n",
     );

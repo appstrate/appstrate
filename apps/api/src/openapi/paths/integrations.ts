@@ -361,7 +361,7 @@ const integrationDetailSchema = {
  *
  * Module-local const, NOT a `#/components/responses/*` $ref: the spread is
  * inlined at serialization time, so the emitted spec stays byte-identical to
- * the hand-written pair it replaces. Same technique as `paths/documents.ts`'s
+ * the hand-written pair it replaces. Same technique as `paths/files.ts`'s
  * `pipelineResponses`.
  */
 const connectRunResponses = {

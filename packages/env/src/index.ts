@@ -523,11 +523,15 @@ const envSchema = z
     // to the local volume driver (host disk, no built-in quota).
     WORKSPACE_TMPFS_SIZE_MB: z.coerce.number().int().min(0).max(8192).default(512),
 
-    // Ceiling on the total bytes of input documents a single run may carry
-    // into its workspace. Each document is delivered out-of-band (fetched
+    // Ceiling on the total bytes of input files a single run may carry
+    // into its workspace. Each file is delivered out-of-band (fetched
     // and streamed to disk by the agent), so this is a policy limit, not a
     // memory-safety floor — but it also bounds what the platform buffers
     // while consuming uploads. Default 256 MiB.
+    // NAME IS LEGACY: issue #1177 renamed the entity from `document` to
+    // `file` everywhere except the env vars. Renaming an env var is an ops
+    // migration on every deployment for no user-visible gain, so the four
+    // `*DOCUMENT*` / `*DOCS*` variables keep their spelling.
     WORKSPACE_MAX_DOCS_BYTES: z.coerce
       .number()
       .int()
@@ -563,17 +567,25 @@ const envSchema = z
       .positive()
       .default(2 * 1024 * 1024 * 1024),
 
-    // Max number of documents a single run may reference as input (uploads +
-    // inline + document:// refs) AND publish as output (agent_output rows).
-    // Bounds the per-run document COUNT the byte caps do not (thousands of
+    // Max number of files a single run may reference as input (uploads +
+    // inline + appfile:// refs) AND publish as output (agent_output rows).
+    // Bounds the per-run file COUNT the byte caps do not (thousands of
     // tiny files). Enforced platform-side at input-parse (413) and at
     // agent-output commit under the org FOR UPDATE lock (413
-    // `document_count_exceeded`). Default 200.
+    // `file_count_exceeded`). Default 200.
+    // NAME IS LEGACY: issue #1177 renamed the entity from `document` to
+    // `file` everywhere except the env vars. Renaming an env var is an ops
+    // migration on every deployment for no user-visible gain, so the four
+    // `*DOCUMENT*` / `*DOCS*` variables keep their spelling.
     RUN_MAX_DOCUMENTS: z.coerce.number().int().positive().default(200),
 
-    // Per-file ceiling on a durable document (materialized upload or agent
+    // Per-file ceiling on a durable file (materialized upload or agent
     // output). Enforced synchronously at write time — over-cap writes 413.
     // Default 100 MiB, aligned with the staged-upload absolute ceiling.
+    // NAME IS LEGACY: issue #1177 renamed the entity from `document` to
+    // `file` everywhere except the env vars. Renaming an env var is an ops
+    // migration on every deployment for no user-visible gain, so the four
+    // `*DOCUMENT*` / `*DOCS*` variables keep their spelling.
     DOCUMENT_MAX_FILE_BYTES: z.coerce
       .number()
       .int()
@@ -581,12 +593,12 @@ const envSchema = z
       .default(100 * 1024 * 1024),
 
     // Per-org durable-storage quota in bytes. Checked synchronously against
-    // `organizations.documents_bytes_used` before a document write (403
+    // `organizations.files_bytes_used` before a file write (403
     // `storage_limit_exceeded` on over-cap). Absent ⇒ unlimited (OSS default);
     // Cloud sets a plan value in the same column.
     ORG_STORAGE_QUOTA_BYTES: z.coerce.number().int().positive().optional(),
 
-    // Ceiling on the total bytes of documents a single run may publish as
+    // Ceiling on the total bytes of files a single run may publish as
     // output (Phase 2 ingestion). Default 256 MiB.
     RUN_MAX_OUTPUT_BYTES: z.coerce
       .number()
@@ -594,10 +606,14 @@ const envSchema = z
       .positive()
       .default(256 * 1024 * 1024),
 
-    // Default retention for durable documents, in days. Applied as `expires_at`
+    // Default retention for durable files, in days. Applied as `expires_at`
     // at creation time so the operator sets an instance-wide policy (GitLab
-    // pattern). Absent ⇒ permanent (documents never auto-expire) — the OSS
+    // pattern). Absent ⇒ permanent (files never auto-expire) — the OSS
     // default; livrable expiry is the #1 complaint, so this stays opt-in.
+    // NAME IS LEGACY: issue #1177 renamed the entity from `document` to
+    // `file` everywhere except the env vars. Renaming an env var is an ops
+    // migration on every deployment for no user-visible gain, so the four
+    // `*DOCUMENT*` / `*DOCS*` variables keep their spelling.
     DOCUMENT_RETENTION_DAYS: z.coerce.number().int().positive().optional(),
 
     // Poll cadence for the transactional storage-deletion worker (the outbox
@@ -608,7 +624,7 @@ const envSchema = z
     STORAGE_DELETION_WORKER_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
 
     // Separate origin for serving untrusted agent-generated HTML previews
-    // (Phase 4 / D5). When set, `GET /api/documents/:id` mints its
+    // (Phase 4 / D5). When set, `GET /api/files/:id` mints its
     // `preview_url` on THIS origin instead of `APP_URL` — the operator points a
     // second registrable domain (eTLD+1) at the same server. A distinct
     // registrable domain is the strongest isolation: the browser gives the
@@ -631,7 +647,7 @@ const envSchema = z
     // claimed. A proxy stripping the response CSP does not put agent script on
     // the app's host with the SPA's localStorage and cookies: the only context
     // that renders active HTML is the SPA's `<iframe sandbox="allow-scripts">`,
-    // and that ATTRIBUTE survives header stripping, so the document stays
+    // and that ATTRIBUTE survives header stripping, so the file stays
     // opaque-origin either way. The residuals that are actually real, and that a
     // separate host is the only remaining layer against:
     //  - a user agent that ignores sandboxing altogether — it would ignore the
@@ -899,7 +915,7 @@ const envSchema = z
     },
     {
       message:
-        "USERCONTENT_URL must be a DIFFERENT host than APP_URL — a copy of APP_URL (or the same host on another port/scheme) is not isolation. The document-preview route serves agent-authored HTML as ACTIVE content only for a proven iframe load, in every mode, so a configured value buys no extra execution context; what it buys is the isolation of the execution that does happen. Today that execution happens in the SPA's `<iframe sandbox=\"allow-scripts\">`, whose sandbox attribute holds even if the response CSP is stripped in transit — so the host separation is not about a stripped header. It is about the cases where nothing else is left: a user agent that ignores sandboxing altogether (it ignores the attribute too), and a future app-origin page that frames the preview WITHOUT the attribute — `frame-ancestors` permits any app-origin embedder, so there the response header is the only control, and untrusted inline script that escapes it is then executing with a real origin on the app's own host. A separate host also buys the ordinary partition: its own cookie jar, storage and process. Enforced at boot rather than merely recommended because none of it is verifiable at runtime. Point it at a separate domain resolving to the same server (ideally a separate registrable domain / eTLD+1, e.g. appstrate-usercontent.example vs app.example.com), or leave it unset to serve previews same-origin.",
+        "USERCONTENT_URL must be a DIFFERENT host than APP_URL — a copy of APP_URL (or the same host on another port/scheme) is not isolation. The file-preview route serves agent-authored HTML as ACTIVE content only for a proven iframe load, in every mode, so a configured value buys no extra execution context; what it buys is the isolation of the execution that does happen. Today that execution happens in the SPA's `<iframe sandbox=\"allow-scripts\">`, whose sandbox attribute holds even if the response CSP is stripped in transit — so the host separation is not about a stripped header. It is about the cases where nothing else is left: a user agent that ignores sandboxing altogether (it ignores the attribute too), and a future app-origin page that frames the preview WITHOUT the attribute — `frame-ancestors` permits any app-origin embedder, so there the response header is the only control, and untrusted inline script that escapes it is then executing with a real origin on the app's own host. A separate host also buys the ordinary partition: its own cookie jar, storage and process. Enforced at boot rather than merely recommended because none of it is verifiable at runtime. Point it at a separate domain resolving to the same server (ideally a separate registrable domain / eTLD+1, e.g. appstrate-usercontent.example vs app.example.com), or leave it unset to serve previews same-origin.",
       path: ["USERCONTENT_URL"],
     },
   )

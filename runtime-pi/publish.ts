@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Agent-container document publishing — the run→platform outbound channel.
+ * Agent-container file publishing — the run→platform outbound channel.
  *
  * Two consumers share this module:
- *   - the `publish_document` runtime tool, which calls {@link createRunDocumentUploader}
+ *   - the `publish_file` runtime tool, which calls {@link createRunFileUploader}
  *     to upload a single workspace file the agent chose to publish; and
  *   - the end-of-run {@link sweepOutputs} pass, which auto-publishes every file
  *     the agent wrote under `workspace/outputs/`.
@@ -13,8 +13,8 @@
  * side effects, so it can't be imported) exactly like `provision.ts`, so the
  * signing + streaming + dedup paths are unit-testable against a local server.
  *
- * Auth mirrors the workspace/documents GET provisioning fetches: a Standard
- * Webhooks HMAC over an EMPTY body keyed on the run secret. The document bytes
+ * Auth mirrors the workspace/files GET provisioning fetches: a Standard
+ * Webhooks HMAC over an EMPTY body keyed on the run secret. The file bytes
  * are not part of the signature (they stream, unbuffered) — the run secret
  * proves the caller is the run, the server returns the sha256 for integrity.
  */
@@ -25,9 +25,9 @@ import { randomUUID } from "node:crypto";
 import { sign } from "@appstrate/afps-runtime/events";
 import { resolveWorkspaceFile } from "@appstrate/afps-runtime/resolvers";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { documentPublishedEvent } from "@appstrate/core/runtime-tool-defs";
+import { filePublishedEvent } from "@appstrate/core/runtime-tool-defs";
 import { encodeFilenameHeader, sanitizeFilename } from "@appstrate/core/naming";
-import type { DocumentUploader, PublishedDocument } from "@appstrate/core/runtime-tool-defs";
+import type { FileUploader, PublishedFile } from "@appstrate/core/runtime-tool-defs";
 import type { RunArtifactsSummary } from "@appstrate/afps-runtime/runner";
 
 /**
@@ -37,7 +37,7 @@ import type { RunArtifactsSummary } from "@appstrate/afps-runtime/runner";
  * This is the INVERSE direction of the platform's canonical MIME→extension
  * table (`@appstrate/core/naming`), not a copy of it, and it is NOT redundant
  * with the server's magic-byte sniffing: `resolveAgentOutputMime` relabels a
- * published document only when `file-type` actually recognises the bytes, and
+ * published file only when `file-type` actually recognises the bytes, and
  * returns the declared mime untouched otherwise. Every entry below is therefore
  * load-bearing whenever the sniff fails — always for the text-shaped formats
  * (html, txt, md, csv, json, xml, svg, yaml), and for the binary ones (png/
@@ -99,7 +99,7 @@ function backoffMs(attempt: number): number {
 const RETRY_AFTER_CAP_MS = 30_000;
 
 /**
- * Stable, machine-readable classification of an abandoned document upload,
+ * Stable, machine-readable classification of an abandoned file upload,
  * carried on {@link UploadError.code} so the sweep records WHY a deliverable was
  * lost without parsing a human message:
  *   - `file_too_large`  — server 413 (over the per-file / per-run cap).
@@ -110,10 +110,10 @@ const RETRY_AFTER_CAP_MS = 30_000;
 export type UploadFailureCode = "file_too_large" | "quota_exceeded" | "conflict" | "upload_failed";
 
 /**
- * A document upload the uploader definitively abandoned. Carries a typed
+ * A file upload the uploader definitively abandoned. Carries a typed
  * {@link UploadFailureCode} so the sweep (and the artifacts summary) can report
  * the failure category, not just a string. Extends `Error` so the
- * `publish_document` tool keeps surfacing `.message` unchanged.
+ * `publish_file` tool keeps surfacing `.message` unchanged.
  */
 export class UploadError extends Error {
   readonly code: UploadFailureCode;
@@ -126,7 +126,7 @@ export class UploadError extends Error {
 
 /**
  * Map a definitive (non-retryable) HTTP status to a typed failure code. The
- * document endpoint's 4xx vocabulary is narrow: 413 cap, 403 org quota, 409
+ * file endpoint's 4xx vocabulary is narrow: 413 cap, 403 org quota, 409
  * run-not-running; anything else (401 signature, unexpected 4xx) is a generic
  * `upload_failed`.
  */
@@ -147,8 +147,8 @@ function parseRetryAfterMs(header: string | null): number | undefined {
   return undefined;
 }
 
-export interface RunDocumentUploaderDeps {
-  /** The run-scoped event sink URL (`…/api/runs/:id/events`). `/events` is swapped for `/documents`. */
+export interface RunFileUploaderDeps {
+  /** The run-scoped event sink URL (`…/api/runs/:id/events`). `/events` is swapped for `/files`. */
   sinkUrl: string;
   /** Run secret used to HMAC-sign each POST (Standard Webhooks, empty body). */
   sinkSecret: string;
@@ -157,14 +157,14 @@ export interface RunDocumentUploaderDeps {
   /**
    * Dedup identities already published by this run, keyed `${sha256}:${name}` to
    * MATCH the server dedup identity `(runId, sha256, name)` (the partial unique
-   * index `uq_documents_run_output_dedup`). Every successful upload records its
-   * key here so the outputs sweep can skip a file the `publish_document` tool
+   * index `uq_files_run_output_dedup`). Every successful upload records its
+   * key here so the outputs sweep can skip a file the `publish_file` tool
    * (or a prior sweep entry) already stored — while two files with identical
    * bytes but DIFFERENT names still BOTH publish (distinct keys). Shared between
    * the tool + sweep.
    *
    * `name` is always the SANITIZED name (`sanitizeFilename`), because that is
-   * what the server stores in `documents.name` and indexes on. Uploads record
+   * what the server stores in `files.name` and indexes on. Uploads record
    * the name straight off the server response; the sweep sanitizes the basename
    * itself before reserving its key.
    */
@@ -182,11 +182,11 @@ export interface RunDocumentUploaderDeps {
 }
 
 /**
- * Build the `uploadRunDocument(path, name?, presentation?)` function the `publish_document`
+ * Build the `uploadRunFile(path, name?)` function the `publish_file`
  * tool and the outputs sweep both call. It streams the file straight to
- * `POST /api/runs/:id/documents` (never buffering it), records the returned
+ * `POST /api/runs/:id/files` (never buffering it), records the returned
  * `${sha256}:${name}` identity and the canonical source's published digest, then
- * returns the durable document metadata. Retryable failures (network error,
+ * returns the durable file metadata. Retryable failures (network error,
  * per-attempt timeout, 5xx, 429 — honouring `Retry-After`) are retried up to
  * {@link MAX_UPLOAD_ATTEMPTS} times with jittered backoff; a definitive 4xx
  * (413/409/401/403) fails fast. Throws a typed {@link UploadError} (with a
@@ -194,35 +194,35 @@ export interface RunDocumentUploaderDeps {
  * missing file or a path resolving outside the workspace — so the tool surfaces
  * it as a tool error and the sweep records the failure category.
  */
-export function createRunDocumentUploader(deps: RunDocumentUploaderDeps): DocumentUploader {
+export function createRunFileUploader(deps: RunFileUploaderDeps): FileUploader {
   const fetchFn = deps.fetchFn ?? fetch;
   const sleep = deps.sleepFn ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const url = deps.sinkUrl.replace(/\/events$/, "/documents");
+  const url = deps.sinkUrl.replace(/\/events$/, "/files");
 
-  return async (relPath, name, presentation) => {
-    // `publish_document` promises a workspace-relative path. Keep that
+  return async (relPath, name) => {
+    // `publish_file` promises a workspace-relative path. Keep that
     // contract narrower than api_call/api_upload: absolute `/tmp` paths are
     // not publishable, and symlinks may not escape the workspace.
     const { absPath, stat } = await resolveWorkspaceFile(deps.workspace, relPath);
     // The resolver already lstat'd the path; use it. A directory (the plausible
-    // `publish_document({ path: "outputs" })` mistake) or any other non-regular
+    // `publish_file({ path: "outputs" })` mistake) or any other non-regular
     // entry has no bytes to stream: fail HERE with a message that names the
     // problem, instead of letting the request die inside the fetch try where it
     // would be classified as a retryable network fault and burn 3 attempts plus
     // backoff before surfacing an opaque `upload_failed`.
     if (!stat.isFile()) {
       throw new Error(
-        `'${relPath}' is not a regular file (publish_document takes a workspace-relative FILE path)`,
+        `'${relPath}' is not a regular file (publish_file takes a workspace-relative FILE path)`,
       );
     }
-    const documentName = name ?? path.basename(absPath);
+    const fileName = name ?? path.basename(absPath);
     // Percent-encoded for the wire (see `encodeFilenameHeader`): a raw
     // non-ASCII name either makes `Headers` throw inside the fetch try (where
     // it is misread as a retryable network fault, so the deliverable is lost
     // after 3 attempts) or survives the ISO-8859-1 header round-trip as
     // mojibake. Computed ONCE, outside the retry loop, so an unencodable name
     // fails fast rather than three times.
-    const encodedName = encodeFilenameHeader(documentName);
+    const encodedName = encodeFilenameHeader(fileName);
     const contentType = guessMime(absPath);
     // Size the per-attempt timeout from the payload once — the file is not
     // re-read between attempts (the body stream is rebuilt each try).
@@ -242,11 +242,8 @@ export function createRunDocumentUploader(deps: RunDocumentUploaderDeps): Docume
           secret: deps.sinkSecret,
         }),
         "Content-Type": contentType,
-        "X-Document-Name": encodedName,
+        "X-File-Name": encodedName,
       };
-      if (presentation !== undefined) {
-        headers["X-Document-Presentation"] = presentation;
-      }
 
       let res: Response;
       try {
@@ -270,16 +267,9 @@ export function createRunDocumentUploader(deps: RunDocumentUploaderDeps): Docume
       }
 
       if (res.ok) {
-        const rawDoc = (await res.json()) as Omit<PublishedDocument, "presentation"> & {
-          presentation?: unknown;
-        };
-        // Older platform versions did not return `presentation`. Normalizing
-        // the absent field to null preserves mixed-version compatibility while
-        // ensuring every runtime event has the complete canonical shape.
-        const doc: PublishedDocument = {
-          ...rawDoc,
-          presentation: rawDoc.presentation === "primary" ? "primary" : null,
-        };
+        // A platform newer or older than this image may return extra fields
+        // (e.g. the retired `presentation`); they are simply not read.
+        const doc = (await res.json()) as PublishedFile;
         // Record the server-authoritative identity (its sanitized name +
         // sha256), matching the server dedup index exactly. Also remember the
         // canonical source file's returned digest: the outputs sweep must not
@@ -332,8 +322,8 @@ async function fileSha256(abs: string): Promise<string> {
 }
 
 interface SweepOutputsDeps {
-  /** The uploader from {@link createRunDocumentUploader}. */
-  uploader: DocumentUploader;
+  /** The uploader from {@link createRunFileUploader}. */
+  uploader: FileUploader;
   /** Absolute workspace root — the sweep scans `<workspace>/outputs/`. */
   workspace: string;
   /** Shared dedup set (same instance handed to the uploader). */
@@ -342,8 +332,8 @@ interface SweepOutputsDeps {
   publishedSourceHashes: Map<string, string>;
   /** Per-file ceiling; files above it are skipped with a warning (server also caps). */
   maxFileBytes: number;
-  /** Emits the canonical `document.published` event for each swept file. */
-  emit: (event: { type: "document.published"; [k: string]: unknown }) => void | Promise<void>;
+  /** Emits the canonical `file.published` event for each swept file. */
+  emit: (event: { type: "file.published"; [k: string]: unknown }) => void | Promise<void>;
   /** Structured warning logger (non-fatal — the sweep never blocks finalize). */
   logWarn?: (message: string, data?: Record<string, unknown>) => void;
 }
@@ -381,22 +371,22 @@ const SWEEP_CONCURRENCY = 3;
 /**
  * Auto-publish every file the agent wrote under `workspace/outputs/` that was
  * not already published by this run. Runs after the agent session ends but
- * BEFORE the finalize event, so the published documents surface as run events.
+ * BEFORE the finalize event, so the published files surface as run events.
  *
  * Bounded: a file larger than `maxFileBytes` is recorded as `oversized`
  * (a LOST deliverable — see {@link summarizeArtifacts}); an unchanged canonical
- * source recorded by `publish_document`, or a file whose `${sha}:${name}` key is
+ * source recorded by `publish_file`, or a file whose `${sha}:${name}` key is
  * already in `publishedKeys`, is `already_published`. Per-file upload errors are
  * COLLECTED into {@link SweepResult.failed} — never swallowed — so the caller can
  * report which deliverables were dropped, yet a single failure still never
  * blocks or fails the run's finalize.
  *
- * Naming: the published document `name` is `path.basename(rel)` — the sweep
+ * Naming: the published file `name` is `path.basename(rel)` — the sweep
  * deliberately FLATTENS the relative path and does NOT recreate the folder
  * structure server-side. Two files with the same basename but DIFFERENT content
  * both publish (different sha256 → different `(sha, name)` identity). Two files
  * with the same basename AND identical content (e.g. `a/report.md` and
- * `b/report.md` byte-for-byte) collapse to ONE document — identical bytes under
+ * `b/report.md` byte-for-byte) collapse to ONE file — identical bytes under
  * the same name are the same deliverable by the server's dedup identity. This
  * is intentional and deterministic; the `SweepResult` still lists each source
  * path under its own `name` (the workspace-relative `rel`) so reporting stays
@@ -418,7 +408,7 @@ export async function sweepOutputs(deps: SweepOutputsDeps): Promise<SweepResult>
     // Skip hidden files by default: any path segment starting with `.`
     // (a dotfile like `.env`/`.netrc`, or anything under a hidden dir like
     // `.git/`). The implicit sweep must not exfiltrate these as org-visible
-    // documents — only the explicit `publish_document` tool may publish them.
+    // files — only the explicit `publish_file` tool may publish them.
     if (rel.split(path.sep).some((seg) => seg.startsWith("."))) {
       deps.logWarn?.("outputs sweep skipped hidden file", { file: rel });
       result.skipped.push({ name: rel, reason: "hidden" });
@@ -464,25 +454,25 @@ export async function sweepOutputs(deps: SweepOutputsDeps): Promise<SweepResult>
 
     const canonicalAbs = await fs.realpath(abs);
     const sha = await fileSha256(canonicalAbs);
-    const documentName = path.basename(rel);
+    const fileName = path.basename(rel);
     if (deps.publishedSourceHashes.get(canonicalAbs) === sha) {
       // This exact, unchanged workspace file was already published explicitly.
       // Its display name may differ from the basename the sweep would choose;
-      // source identity prevents that presentation choice creating a duplicate.
+      // source identity prevents that naming choice creating a duplicate.
       result.skipped.push({ name: rel, reason: "already_published" });
       return;
     }
     // Key on the SANITIZED name. The server stores `sanitizeFilename(name)` in
-    // `documents.name`, and that is both what its `(run_id, sha256, name)` dedup
+    // `files.name`, and that is both what its `(run_id, sha256, name)` dedup
     // index matches on and what the uploader records back from the response.
     // Keying on the RAW basename made the two diverge for every name the
     // sanitizer rewrites (accented names are untouched, but a control char, a
     // separator, `..`, or a name over 255 chars is not): no duplicate row (the
     // partial unique index still caught it) but a full re-stream of an
     // already-stored file, up to the per-file cap, plus rate-limit budget.
-    const key = `${sha}:${sanitizeFilename(documentName)}`;
+    const key = `${sha}:${sanitizeFilename(fileName)}`;
     if (deps.publishedKeys.has(key)) {
-      // Already published by this run (the `publish_document` tool or a prior
+      // Already published by this run (the `publish_file` tool or a prior
       // sweep entry with the same content + name).
       result.skipped.push({ name: rel, reason: "already_published" });
       return;
@@ -492,12 +482,9 @@ export async function sweepOutputs(deps: SweepOutputsDeps): Promise<SweepResult>
     // above and publish twice. Rolled back on failure so a dropped file is not
     // remembered as published.
     deps.publishedKeys.add(key);
-    let doc: PublishedDocument;
+    let doc: PublishedFile;
     try {
-      // The implicit outputs sweep never changes the primary selection.
-      // Only an explicit `publish_document({ presentation: "primary" })` call
-      // may carry that intent to the platform.
-      doc = await deps.uploader(path.join("outputs", rel), documentName);
+      doc = await deps.uploader(path.join("outputs", rel), fileName);
     } catch (err) {
       deps.publishedKeys.delete(key);
       // Best-effort: a single file's failure must not abort the sweep or the
@@ -520,11 +507,11 @@ export async function sweepOutputs(deps: SweepOutputsDeps): Promise<SweepResult>
     // OUTSIDE the upload's failure path. Inside it, an emit failure rolled back
     // the dedup key and recorded the file as `failed` even though the server had
     // already stored and counted it: a false negative in the artifacts summary,
-    // plus a re-upload of a document that is already durable.
+    // plus a re-upload of a file that is already durable.
     try {
-      await deps.emit(documentPublishedEvent(doc));
+      await deps.emit(filePublishedEvent(doc));
     } catch (err) {
-      deps.logWarn?.("outputs sweep published a document but could not emit its event", {
+      deps.logWarn?.("outputs sweep published a file but could not emit its event", {
         file: rel,
         error: getErrorMessage(err),
       });

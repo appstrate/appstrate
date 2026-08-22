@@ -8,16 +8,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 Breaking, batched per the release policy in `.github/workflows/publish-core.yml`:
-these removals accumulate here until a deliberate major. `7.0.0` is already
-published without them, so the version in `package.json` does not move. Neither
-out-of-tree consumer is affected — `cloud` and `connect-helper` import only
-`module`, `logger`, `api-errors`, `telemetry`, `permissions` and
-`pairing-token`, and none of the names below.
+these changes accumulate here until a deliberate major. `7.0.0` is already
+published without them, so the version in `package.json` does not move.
+
+**Out-of-tree consumers.** The config removals below touch nothing `cloud` or
+`connect-helper` import. The `document` → `file` rename (#1177) does: both
+consume `module`, `api-errors`, `telemetry` and `permissions`, and the rename
+lands on all four (`PlatformServices.cleanupSessionDocuments` /
+`setDocumentStorageLimit`, `documentCountExceeded`, `recordDocument*`,
+`CoreResources.documents`). Neither is broken today — both stay pinned to the
+published `7.0.0` — but the eventual major release of this branch requires a
+matching change in each, not just a version bump.
 
 An AFPS agent manifest used to declare TWO parameter schemas — `input` (asked
 per run) and `config` (set once at setup). AFPS 0.3 removed `config`; whether a
 value is asked every time or stored once is a deployment policy, not a property
 of the package. Core no longer reads `manifest.config` at all.
+
+`document` is a false friend: the entity is any file an agent produced —
+Markdown, HTML, source code, a PDF, an image — but the word promises a Word or
+PDF document to every reader, the model included. The concept is renamed to
+`file` throughout (#1177). Every wire-visible and persisted spelling keeps a
+read alias; only what gets WRITTEN changes. Environment variables are
+deliberately NOT renamed (`DOCUMENT_MAX_FILE_BYTES`, `RUN_MAX_DOCUMENTS`,
+`DOCUMENT_RETENTION_DAYS`, …): renaming one is an ops migration on every
+deployment for zero user-visible gain.
 
 ### Added
 
@@ -31,6 +46,85 @@ of the package. Core no longer reads `manifest.config` at all.
 - **`validateAgainstSchema` / `SchemaValidationResult`** (`./schema-validation`)
   — `validateConfig` / `ConfigValidationResult` under a name that describes
   what they do. Same signature, same verdict.
+- **`./file-uri`** — the URI helpers, renamed from `./document-uri`. Writes
+  `appfile://<id>`; reads `appfile://` **and** `document://` forever (historical
+  `runs.input` rows are full of the old scheme). Deliberately NOT `file://` —
+  that scheme already means the local filesystem and MCP uses it for local
+  resources, so an opaque platform id under it is ambiguous to the model and to
+  every MCP client. Exports `FILE_URI_PREFIX`, `LEGACY_DOCUMENT_URI_PREFIX`,
+  `ACCEPTED_FILE_URI_PREFIXES`, `FILE_ID_RE`, `isFileUri`, `parseFileUri`,
+  `fileUri`, `extractFileIds`, `extractFileIdsFromText` (plus the unchanged
+  `upload://` helpers). The row id prefix stays `doc_` — it is in every stored
+  row and every live storage key.
+- **`PUBLISHED_FILE_LOG_EVENTS`** (`./file-uri`) — every `run_logs.event` tag
+  that announces a published file, canonical first: `["file", "document"]`. It
+  lives beside `ACCEPTED_FILE_URI_PREFIXES` because it is the same kind of
+  thing — pure data about a wire spelling that two independent readers (the web
+  shell's run page and the chat module's run card) must agree on. Two copies of
+  a compatibility list is how one of them silently stops matching and a file
+  list never refreshes, with no error anywhere. The old tag stays readable
+  forever: a persisted log line is immutable once written, and the emitter
+  behind it — a runtime image — deploys on its own clock.
+- **`LEGACY_RUNTIME_TOOL_ALIASES`, `LegacyRuntimeToolId`,
+  `LEGACY_RUNTIME_TOOL_IDS`, `ACCEPTED_RUNTIME_TOOL_IDS`,
+  `AcceptedRuntimeToolId`, `canonicalRuntimeToolId`,
+  `canonicalizeRuntimeToolIds`** (`./runtime-tools-catalog`) — the single alias
+  table for retired `runtime_tools` spellings, and the helpers that resolve
+  them. `runtime_tools` is persisted inside agent manifests (published ZIPs
+  included, which are immutable by construction), and the read path drops ids it
+  does not recognise — so a bare rename would not error, it would silently strip
+  the tool from every agent that already selected it. Read stored ids through
+  `canonicalRuntimeToolId` / `canonicalizeRuntimeToolIds`, never through
+  `isSelectableRuntimeTool`, which answers "may the editor offer this?" and is
+  canonical-only by design.
+- **`LEGACY_RUNTIME_TOOL_EVENT_TYPES`** (`./runtime-tool-defs`) — retired
+  run-event spellings `reEmitRuntimeToolEvents` still forwards but never emits.
+  The runtime image and the platform deploy independently, so an image built
+  before the rename still hands the host a `document.published` event.
+- **`LEGACY_PERMISSION_RESOURCE_ALIASES`, `canonicalPermission`,
+  `canonicalPermissions`** (`./permissions`) — retired permission-resource
+  spellings and the normalizer for stored scope strings. A `resource:action`
+  string is persisted on API keys, OIDC grants and role snapshots; renaming a
+  resource without an alias silently demotes every principal granted under the
+  old spelling, and the only symptom is an unexplained 403.
+  `makePermissionGuard` additionally accepts a retired spelling directly, so
+  forgetting to normalize on read is not an authorization regression.
+
+### Changed
+
+- **`./document-uri` → `./file-uri`**, with the symbol renames listed above.
+  No deprecated subpath alias is kept: the module is consumed in-tree only, and
+  both out-of-tree consumers stay on the published version.
+- **`publish_document` → `publish_file`** — the runtime tool id, with
+  `buildPublishDocumentDef` → `buildPublishFileDef`, `DocumentUploader` →
+  `FileUploader`, `PublishedDocument` → `PublishedFile`,
+  `DocumentPublishedEvent` → `FilePublishedEvent` (field `document_id` →
+  `file_id`), `documentPublishedEvent` → `filePublishedEvent`, and the canonical
+  event `document.published` → `file.published`. The legacy tool id is accepted
+  on any persisted manifest and normalized to the canonical one by
+  `validateManifest` / `dropRetiredRuntimeTools`; a manifest saved afterwards
+  writes only `publish_file`, and a manifest naming both collapses to one entry.
+- **`CoreResources.documents` → `CoreResources.files`** (`./permissions`), with
+  `documents` removed from `CORE_RESOURCE_NAMES`. A stored `documents:read` /
+  `documents:delete` scope still grants.
+- **`documentCountExceeded` → `fileCountExceeded`** (`./api-errors`), problem
+  code `document_count_exceeded` → `file_count_exceeded`.
+- **`recordDocumentCreated`, `recordDocumentDeleted`,
+  `recordDocumentStorageLimitRejection`, `recordDocumentPartialPublication` →
+  `recordFile*`** (`./telemetry`), metrics `appstrate.documents.*` →
+  `appstrate.files.*`. Same rename on the `TelemetryProvider` interface.
+- **`PlatformServices.cleanupSessionDocuments` → `cleanupSessionFiles`** and
+  **`PlatformServices.setDocumentStorageLimit` → `setFileStorageLimit`**
+  (`./module`).
+- **`RunAndWaitDocument` → `RunAndWaitFile`**, **`fetchRunDocuments` →
+  `fetchRunFiles`**, **`runAndWaitStepsWithDocuments` →
+  `runAndWaitStepsWithFiles`** (`./run-and-wait-client`). The tool argument
+  `context_documents` becomes `context_files`, the terminal payload key
+  `documents` becomes `files`, the inline default `runtime_tools` selects
+  `publish_file`, and the client calls `GET /api/files`.
+- **`schema/agent.schema.json`** — the `runtime_tools` enum accepts BOTH
+  `publish_file` and `publish_document`, so a persisted manifest carrying
+  either validates.
 
 ### Removed
 
@@ -48,6 +142,19 @@ of the package. Core no longer reads `manifest.config` at all.
   renamed, see Added.
 - **`InlineRunBody.config`** (`./platform-types`) — the inline-run routes no
   longer accept the field.
+- **`publish_document.presentation`** (`./runtime-tool-defs`) — the
+  `presentation: "primary"` argument, the `presentation` field on
+  `PublishedDocument` / `DocumentPublishedEvent` (now `PublishedFile` /
+  `FilePublishedEvent`), and the primary-selection rule the tool description
+  carried. It conflated how important a file is with whether the UI opens it,
+  allowed at most one per run, and made the producing agent arbitrate a
+  presentation decision that was never its call — an agent writing three peer
+  files had to crown one or leave the run looking empty. Which file a run
+  features is now derived by the consumer from what the run produced (0 → none,
+  exactly 1 → that one, N → none), so core neither declares nor transports it.
+  `buildPublishFileDef` reads only `path` and `name`; an undeclared key, the
+  retired `presentation` included, is ignored rather than rejected — losing a
+  real deliverable over a dead argument would be the worse failure.
 
 ## [7.0.0] — 2026-08-21
 

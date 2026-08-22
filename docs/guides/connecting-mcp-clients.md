@@ -145,7 +145,21 @@ otherwise get wrong.
 | `describe_operation` | `mcp:read`   | Full input schema for one operation (only needed when `best_match` didn't cover it).                                                        |
 | `invoke_operation`   | `mcp:invoke` | Execute one operation (validated + authorized exactly as the equivalent REST call).                                                         |
 | `run_and_wait`       | `mcp:invoke` | **Launch and wait.** Starts an agent run (`kind:"agent"`) or an inline run (`kind:"inline"`) and returns when it reaches a terminal status. |
-| `list_documents`     | `mcp:read`   | List documents visible to the caller (uploads + agent outputs), each with a `document://` URI.                                              |
+| `list_files`         | `mcp:read`   | List files visible to the caller (uploads + agent outputs), each with an `appfile://` URI.                                                  |
+
+**Retired tool names still answer.** `list_documents`, `read_document`,
+`validate_package_document` and `import_package_document` are the pre-#1177
+spellings of `list_files`, `read_file`, `validate_package_file` and
+`import_package_file`. They are withheld from `tools/list` but remain callable
+on the canonical handler, and a `document_uri` argument is renamed to `file_uri`
+on the way in. The server advertises `tools: { listChanged: false }`, which tells
+a client its list is stable for the life of the session — so a client that listed
+before an upgrade and calls the old name afterwards is behaving correctly, and
+would otherwise get `-32602 Unknown tool` mid-conversation. They stay hidden
+because the point of the rename is what the model sees: two entries for one
+capability, one of them named after a thing the tool does not do, is the problem
+being fixed. Likewise `document://` URIs are still parsed everywhere
+`appfile://` is; only `appfile://` is ever emitted.
 
 Prefer `run_and_wait` when you need a newly launched run's progress or terminal
 result. `runAgent` / `runInline` remain fully discoverable and invokable for
@@ -157,7 +171,7 @@ For `kind:"inline"`, `manifest` is a partial canonical AFPS manifest. A normal
 call can provide only a task-specific `display_name` plus its dependencies and
 integration configuration; `run_and_wait` derives `name` and defaults the
 omitted AFPS boilerplate, `runtime_tools` (`log`, `output`,
-`publish_document`), and an open object output schema. Defaults fill absent top-level
+`publish_file`), and an open object output schema. Defaults fill absent top-level
 fields only. Every supplied field is preserved as an exact
 replacement—arrays and nested objects are not merged, and
 `runtime_tools: []` remains empty. Clients can therefore provide a complete

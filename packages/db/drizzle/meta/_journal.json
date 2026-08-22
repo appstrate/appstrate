@@ -295,6 +295,27 @@
       "when": 1787351722893,
       "tag": "0041_restore_squash_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1787400000000,
+      "tag": "0042_drop_document_presentation",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1787460000000,
+      "tag": "0043_documents_to_files",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1787470000000,
+      "tag": "0044_documents_scope_strings",
+      "breakpoints": true
     }
   ]
 }

@@ -74,7 +74,7 @@ export type SubscriptionChatResolution =
   | { subscription: true; model: SubscriptionChatModel };
 
 /**
- * A chat composer file attachment to resolve to a durable document. The chat
+ * A chat composer file attachment to resolve to a durable file. The chat
  * module has no DB access, so it hands these plain fields across `ctx.services`
  * and the platform builds the scope/actor + materializes/validates server-side.
  */
@@ -83,21 +83,24 @@ export interface ChatAttachmentRequest {
   applicationId: string;
   /** The chat session owner (chat sessions are per dashboard user). */
   userId: string;
-  /** Container the materialized document is anchored to (session-scoped ACL). */
+  /** Container the materialized file is anchored to (session-scoped ACL). */
   chatSessionId: string;
-  /** `upload://upl_x` (materialize) or `document://doc_x` (validate access). */
+  /**
+   * `upload://upl_x` (materialize) or `appfile://doc_x` (validate access) — the
+   * legacy `document://doc_x` spelling is still accepted.
+   */
   uri: string;
 }
 
 /**
- * A chat attachment resolved to its stable `document://` URI + metadata. An
- * `upload://` was materialized into a chat-session-scoped document; an existing
- * `document://` was validated as readable by the session owner. The URI is what
- * the message persists (stable for the session's lifetime) and what the model
- * is told the attached document is addressed by.
+ * A chat attachment resolved to its stable `appfile://` URI + metadata. An
+ * `upload://` was materialized into a chat-session-scoped file; an existing
+ * `appfile://` (or legacy `document://`) was validated as readable by the
+ * session owner. The URI is what the message persists (stable for the session's
+ * lifetime) and what the model is told the attached file is addressed by.
  */
 export interface ResolvedChatAttachment {
-  /** `document://doc_x` — the durable, stable URI. */
+  /** `appfile://doc_x` — the durable, stable URI, always in canonical form. */
   uri: string;
   name: string;
   mime: string;

@@ -283,7 +283,17 @@ export async function buildRunContext(params: {
 
   // AFPS: snake_case. The editor writes `runtime_tools`; reading the wrong key
   // here would silently drop every author's runtime-tool selection.
-  const manifestRuntimeTools = (agent.manifest as { runtime_tools?: unknown }).runtime_tools;
+  //
+  // Read it off the BUNDLE root manifest, not `agent.manifest`: the stored
+  // manifest may still name a retired spelling (`publish_document`, #1177) and
+  // `buildAgentPackage` canonicalizes it on the way into the bundle. That
+  // bundle is the exact byte stream the container loads and gates its tool
+  // registration on, so deriving the plan from the same bytes is what keeps
+  // the platform-side plan and the container-side gate from disagreeing about
+  // which tools the agent has.
+  const bundleRootManifest = bundle.packages.get(bundle.root)?.manifest as
+    { runtime_tools?: unknown } | undefined;
+  const manifestRuntimeTools = bundleRootManifest?.runtime_tools;
   const runtimeTools = Array.isArray(manifestRuntimeTools)
     ? manifestRuntimeTools.filter((t): t is string => typeof t === "string")
     : undefined;

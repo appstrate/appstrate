@@ -41,14 +41,14 @@ import {
 import type {
   ChatHost,
   ChatTranslate,
-  DownloadDocument,
+  DownloadFile,
   GetHeaders,
-  OpenDocument,
+  OpenFile,
   SelectConversation,
   UploadFile,
-  UseDocumentImageSrc,
+  UseFileImageSrc,
 } from "./runtime-context.ts";
-export type { OpenDocument } from "./runtime-context.ts";
+export type { OpenFile } from "./runtime-context.ts";
 import { ThreadList, ActiveConversationTitle } from "./thread-list.tsx";
 import { ModelSelect } from "./model-select.tsx";
 import { fetchModels, type OrgModelOption } from "./models-data.ts";
@@ -108,12 +108,12 @@ export interface ChatPageProps {
    */
   onConversationChange?: SelectConversation;
   /**
-   * Presents a clicked chat document or a live run's primary output through the
-   * host's in-app viewer. Optional: without it direct clicks fall back to
-   * `downloadDocument` and automatic presentation is skipped. Delivered to deep
-   * tool UIs via context, not props.
+   * Presents a clicked chat file — or the single file a live run produced —
+   * through the host's in-app viewer. Optional: without it direct clicks fall
+   * back to `downloadFile` and automatic presentation is skipped. Delivered
+   * to deep tool UIs via context, not props.
    */
-  onOpenDocument?: OpenDocument;
+  onOpenFile?: OpenFile;
   /** Optional host-owned actions displayed beside the conversation title. */
   headerActions?: ReactNode;
   /**
@@ -121,8 +121,8 @@ export interface ChatPageProps {
    * `runtime-context.ts`): the authenticated download, the authenticated image
    * preview hook, the staged uploader, and the translator for user-facing text.
    */
-  downloadDocument: DownloadDocument;
-  useDocumentImageSrc: UseDocumentImageSrc;
+  downloadFile: DownloadFile;
+  useFileImageSrc: UseFileImageSrc;
   uploadFile: UploadFile;
   t: ChatTranslate;
 }
@@ -132,10 +132,10 @@ export function ChatPage({
   conversationId,
   newChatKey,
   onConversationChange,
-  onOpenDocument,
+  onOpenFile,
   headerActions,
-  downloadDocument,
-  useDocumentImageSrc,
+  downloadFile,
+  useFileImageSrc,
   uploadFile,
   t,
 }: ChatPageProps) {
@@ -220,17 +220,17 @@ export function ChatPage({
   // between renders and consumers re-render no more than with a context each.
   const host = useMemo<ChatHost>(
     () => ({
-      openDocument: onOpenDocument ?? null,
-      downloadDocument,
-      useDocumentImageSrc,
+      openFile: onOpenFile ?? null,
+      downloadFile,
+      useFileImageSrc,
       t,
     }),
-    [onOpenDocument, downloadDocument, useDocumentImageSrc, t],
+    [onOpenFile, downloadFile, useFileImageSrc, t],
   );
 
   // File attachments: the composer stages picked files through the HOST uploader
   // and sends them as `upload://` file parts the server materializes into
-  // durable documents. Built HERE (where the host props land) and handed down as
+  // durable files. Built HERE (where the host props land) and handed down as
   // a single prop — its only consumer is the runtime mounted two components
   // below, in this same file, so it needs no context hop.
   const attachments = useMemo(

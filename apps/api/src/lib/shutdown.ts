@@ -19,7 +19,7 @@ import { stopRunWatchdog } from "../services/run-watchdog.ts";
 import { stopRuntimeImageWarmer } from "../services/orchestrator/runtime-image-warmer.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { stopUploadGc } from "../services/uploads.ts";
-import { stopDocumentGc } from "../services/documents.ts";
+import { stopFileGc } from "../services/files.ts";
 import { stopStorageDeletionWorker } from "../services/storage-deletion.ts";
 import { shutdownTelemetry } from "@appstrate/core/telemetry";
 
@@ -66,7 +66,7 @@ export function createShutdownHandler(setShuttingDown: () => void): () => Promis
 
     logger.info("Shutdown initiated, stopping container orchestrator...");
     stopUploadGc();
-    stopDocumentGc();
+    stopFileGc();
     stopStorageDeletionWorker();
     await getOrchestrator().shutdown();
 

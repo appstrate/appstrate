@@ -86,7 +86,7 @@
     "./jwt": "./src/jwt.ts",
     "./dedupe-label": "./src/dedupe-label.ts",
     "./chat-contract": "./src/chat-contract.ts",
-    "./document-uri": "./src/document-uri.ts",
+    "./file-uri": "./src/file-uri.ts",
     "./chat-turn-metadata": "./src/chat-turn-metadata.ts",
     "./bearer": "./src/bearer.ts",
     "./oauth-bearer-swap": "./src/oauth-bearer-swap.ts",

@@ -14,7 +14,7 @@ import {
   orgInvitations,
   notifications,
   schedules,
-  documents,
+  files,
   uploads,
 } from "@appstrate/db/schema";
 import { and, eq, inArray, notInArray, count, sql } from "drizzle-orm";
@@ -37,19 +37,19 @@ interface OrgResult {
   createdAt: string;
   updatedAt: string;
   /**
-   * Running total of durable document bytes stored by this org
-   * (`organizations.documents_bytes_used`) — the value the synchronous
+   * Running total of durable file bytes stored by this org
+   * (`organizations.files_bytes_used`) — the value the synchronous
    * `ORG_STORAGE_QUOTA_BYTES` gate is checked against. Surfaced so the org
    * settings screen can show consumption against the quota.
    */
-  documentsBytesUsed: number;
+  filesBytesUsed: number;
   /**
-   * Per-org durable-document storage limit override in bytes
-   * (`organizations.documents_bytes_limit`), or null when no override is set (the
+   * Per-org durable-file storage limit override in bytes
+   * (`organizations.files_bytes_limit`), or null when no override is set (the
    * org falls back to the global `ORG_STORAGE_QUOTA_BYTES`). Surfaced so the org
    * detail endpoint can report the raw override alongside the effective limit.
    */
-  documentsBytesLimit: number | null;
+  filesBytesLimit: number | null;
 }
 
 function toOrgResult(row: typeof organizations.$inferSelect): OrgResult {
@@ -60,8 +60,8 @@ function toOrgResult(row: typeof organizations.$inferSelect): OrgResult {
     createdBy: row.createdBy ?? "",
     createdAt: toISORequired(row.createdAt),
     updatedAt: toISORequired(row.updatedAt),
-    documentsBytesUsed: row.documentsBytesUsed,
-    documentsBytesLimit: row.documentsBytesLimit,
+    filesBytesUsed: row.filesBytesUsed,
+    filesBytesLimit: row.filesBytesLimit,
   };
 }
 
@@ -458,15 +458,15 @@ export async function deleteOrganization(orgId: string): Promise<void> {
     // Enumerate every storage object this org owns BEFORE the FK cascade drops
     // the rows, and enqueue its physical deletion into the transactional outbox
     // (same transaction). Without this the cascade would silently orphan the
-    // org's documents / uploads / run-workspace / package objects in S3/FS. The
-    // worker expands each run manifest into its document keys and deletes the
+    // org's files / uploads / run-workspace / package objects in S3/FS. The
+    // worker expands each run manifest into its file keys and deletes the
     // manifest last, so this transaction does no storage I/O and cleanup remains
     // replayable. (Queries are sequential — a Drizzle tx multiplexes one
     // connection, so concurrent queries on `tx` are unsafe.)
     const docRows = await tx
-      .select({ storageKey: documents.storageKey })
-      .from(documents)
-      .where(eq(documents.orgId, orgId));
+      .select({ storageKey: files.storageKey })
+      .from(files)
+      .where(eq(files.orgId, orgId));
     const uploadRows = await tx
       .select({ storageKey: uploads.storageKey })
       .from(uploads)

@@ -129,17 +129,21 @@ test.describe("MCP over an API key (full stack)", () => {
     const names = ((list.envelope.result?.tools as Array<{ name: string }>) ?? [])
       .map((t) => t.name)
       .sort();
+    // The pre-#1177 names (`list_documents`, `read_document`,
+    // `validate_package_document`, `import_package_document`) are registered as
+    // HIDDEN aliases — callable via `tools/call`, deliberately absent here so
+    // the model never sees two entries for one capability.
     expect(names).toEqual([
       "describe_operation",
       "get_me",
       "get_runtime_capabilities",
-      "import_package_document",
+      "import_package_file",
       "invoke_operation",
-      "list_documents",
-      "read_document",
+      "list_files",
+      "read_file",
       "run_and_wait",
       "search_operations",
-      "validate_package_document",
+      "validate_package_file",
     ]);
 
     const search = await mcpRpc(request, url, headers, {

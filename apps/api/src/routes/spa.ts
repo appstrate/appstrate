@@ -54,7 +54,7 @@ const INDEX_HTML = "./apps/web/dist/index.html";
  *    302 — measured in Chrome — so an open redirect on the app origin cannot
  *    launder the navigation back out to an attacker's host.
  *
- * A path-scoped `frame-src <appOrigin>/preview/documents/` would tighten the
+ * A path-scoped `frame-src <appOrigin>/preview/files/` would tighten the
  * default mode further. Deliberately not taken: `'self'` tracks whatever origin
  * actually served this document, while a path source expression has to spell out
  * a scheme + host, so it silently stops matching — and the preview frame silently

@@ -323,7 +323,7 @@ describe("FS upload token keyring rotation", () => {
   it("throws when signing with an empty keyring", () => {
     // Message comes from the shared keyring codec
     // (`@appstrate/afps-shared/signed-token`), which every capability token
-    // — upload, document preview, connect session — now signs through.
+    // — upload, file preview, connect session — now signs through.
     expect(() => signFsUploadToken(payload(), [])).toThrow(
       "signKeyringToken requires at least one signing key",
     );

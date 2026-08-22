@@ -10,9 +10,9 @@
  *
  *  - the serialization is computed ONCE per process (the spec is immutable
  *    once modules are initialized at boot), instead of re-running
- *    `JSON.stringify` over the whole document on every request;
+ *    `JSON.stringify` over the whole file on every request;
  *  - the response carries a strong `ETag`, so a client that already has the
- *    document revalidates with `If-None-Match` and gets an empty `304`.
+ *    file revalidates with `If-None-Match` and gets an empty `304`.
  *    `apps/cli` already sends the header — before this it could never hit.
  */
 
@@ -41,7 +41,7 @@ export function createOpenApiSpecRouter(buildSpec: () => unknown) {
   router.get("/api/openapi.json", (c) => {
     const { body, etag } = getPayload();
     c.header("ETag", etag);
-    // Always revalidate: the document changes across deployments, and the
+    // Always revalidate: the file changes across deployments, and the
     // ETag makes that check free for both sides.
     c.header("Cache-Control", "public, max-age=0, must-revalidate");
     if (ifNoneMatchSatisfied(c.req.header("If-None-Match"), etag)) return c.body(null, 304);

@@ -63,7 +63,7 @@ export const STD_RESPONSE_HEADERS = {
 } as const;
 
 /**
- * Tracing id alone — the set declared by the responses that document no version
+ * Tracing id alone — the set declared by the responses that file no version
  * header, in practice the `204 No Content` bodies plus a scattering of 4xx
  * errors. Kept as its own const rather than folded into `STD_RESPONSE_HEADERS`
  * so this pass stays a pure deduplication: whether those responses *should*

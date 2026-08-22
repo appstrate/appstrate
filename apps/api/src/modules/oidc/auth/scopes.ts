@@ -8,7 +8,7 @@
  * import when a core Bearer JWT request only needs to filter scopes.
  */
 
-import { getModuleEndUserAllowedScopes } from "@appstrate/core/permissions";
+import { canonicalPermission, getModuleEndUserAllowedScopes } from "@appstrate/core/permissions";
 import type { Permission } from "../../../lib/permissions.ts";
 
 /**
@@ -47,12 +47,12 @@ export const OIDC_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permission>(
   // Documents — the deliverables a run produced. Requestable for the same
   // reason `runs:read` is: an embedding app that may read a run must be able
   // to read what that run published, and `run_and_wait`'s document enrichment
-  // (`fetchRunDocuments`) is best-effort, so without this scope the list
+  // (`fetchRunFiles`) is best-effort, so without this scope the list
   // silently comes back EMPTY rather than erroring. Read-only and still
   // narrowed per row by the container ACL (an end-user only ever resolves its
-  // own runs' documents), so it carries no more reach than `runs:read`.
-  // Deleting stays out: `documents:delete` is admin/creator work.
-  "documents:read",
+  // own runs' files), so it carries no more reach than `runs:read`.
+  // Deleting stays out: `files:delete` is admin/creator work.
+  "files:read",
   "integrations:read",
   "integrations:connect",
   "integrations:disconnect",
@@ -103,4 +103,53 @@ export function getAppstrateScopes(): readonly string[] {
 /** O(1) membership check on the full vocabulary. Materialized per call (cheap). */
 export function getAppstrateScopeSet(): ReadonlySet<string> {
   return new Set(getAppstrateScopes());
+}
+
+/**
+ * Rewrite a set of REQUESTED scopes onto the canonical spelling, dropping the
+ * duplicate the rewrite creates when a caller sends both spellings.
+ *
+ * The read-side alias (`canonicalPermission` in `claims.ts`) is not enough on
+ * its own: Better Auth's oauth-provider validates the requested scopes against
+ * `client.scopes ?? opts.scopes` and HARD-FAILS anything outside that set —
+ * `/oauth2/authorize` redirects with `error=invalid_scope`, `/oauth2/token`
+ * and `/oauth2/register` throw a 400. Both sides of that comparison are
+ * canonical (this module's vocabulary, and `oauth_clients.scopes` after
+ * migration 0044), so a client that still sends a retired spelling is refused
+ * outright before any claim is built.
+ *
+ * A scope string is not only persisted, it is also SENT — hardcoded in the
+ * config of every satellite, embedded app and MCP client that integrated
+ * before the rename, none of which redeploys when the platform does. So the
+ * alias has to be applied to the request too, and this is the one helper that
+ * does it. Unknown scopes are passed through UNCHANGED so the plugin's own
+ * filter still rejects them: this canonicalizes, it never widens.
+ */
+export function canonicalizeScopes(scopes: readonly string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const scope of scopes) {
+    const canonical = canonicalPermission(scope);
+    if (seen.has(canonical)) continue;
+    seen.add(canonical);
+    out.push(canonical);
+  }
+  return out;
+}
+
+/**
+ * {@link canonicalizeScopes} over a space-delimited OAuth `scope` parameter.
+ *
+ * Returns `null` when nothing needed rewriting — the overwhelmingly common
+ * case — so the caller can leave the request context untouched rather than
+ * rebuilding it on every authorize.
+ */
+export function canonicalizeScopeParam(raw: unknown): string | null {
+  if (typeof raw !== "string" || raw.length === 0) return null;
+  const requested = raw.split(" ").filter((s) => s.length > 0);
+  const canonical = canonicalizeScopes(requested);
+  if (canonical.length === requested.length && canonical.every((s, i) => s === requested[i])) {
+    return null;
+  }
+  return canonical.join(" ");
 }

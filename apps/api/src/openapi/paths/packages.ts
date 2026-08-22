@@ -1739,7 +1739,7 @@ export const packagesPaths = {
                 },
                 content: {
                   type: "string",
-                  description: "Primary package file content (manifest document).",
+                  description: "Primary package file content (manifest file).",
                 },
               },
             },

@@ -68,7 +68,7 @@ export const modelIdSchema = z.object({
  * `values` are layer 2 of the input resolution (editor defaults, partial by
  * design); `locked_fields` names the input fields no caller may set at
  * launch. Both are full replacements, not patches: the editor form owns the
- * whole document, so an omitted key means "cleared", never "unchanged".
+ * whole file, so an omitted key means "cleared", never "unchanged".
  *
  * Both members are therefore MANDATORY and the object is `.strict()`: a body
  * that omits one, or that carries an unknown key, is a 400 rather than a
@@ -221,7 +221,7 @@ export function createAgentsRouter() {
         agent.manifest.input?.schema ?? { type: "object" as const, properties: {} },
       );
 
-      // `values` is the WHOLE stored document, and the editor form that owns it
+      // `values` is the WHOLE stored file, and the editor form that owns it
       // only ever renders the properties `input.schema` declares. A key naming
       // no declared property is therefore invisible in the UI and un-removable:
       // the settings form re-submits what it was handed, and the launch form
@@ -229,7 +229,7 @@ export function createAgentsRouter() {
       //
       // This is NOT the "silent drop of a caller value" `assertFieldsUnlocked`
       // refuses: that rule protects a value a CALLER sent for a field that
-      // exists. Here the editor is replacing the entire stored document, and a
+      // exists. Here the editor is replacing the entire stored file, and a
       // key that matches no declared property has nothing to resolve into —
       // keeping it only poisons every launch.
       //

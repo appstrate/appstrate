@@ -30,7 +30,7 @@ describe("piFailureChunks", () => {
       abortReason: undefined,
       stepCount: 0,
       stepCapReached: false,
-      lastToolName: "read_document",
+      lastToolName: "read_file",
       newId: () => "assistant-before-start",
     });
 
@@ -47,7 +47,7 @@ describe("piFailureChunks", () => {
       toolStepBudget: 15,
       toolStepBudgetReached: false,
       maxStepsReached: false,
-      lastToolName: "read_document",
+      lastToolName: "read_file",
     });
     expect(JSON.stringify(message)).not.toContain("leaked detail");
   });

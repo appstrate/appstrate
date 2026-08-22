@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the agent-container document publishing path
- * (`runtime-pi/publish.ts`) + the `publish_document` runtime tool def.
+ * Unit tests for the agent-container file publishing path
+ * (`runtime-pi/publish.ts`) + the `publish_file` runtime tool def.
  *
- * Drives the real `createRunDocumentUploader` / `sweepOutputs` against a local
+ * Drives the real `createRunFileUploader` / `sweepOutputs` against a local
  * HTTP server that VERIFIES the Standard-Webhooks HMAC over an EMPTY body (the
- * exact shape `POST /api/runs/:id/documents` expects) and returns a 201 with the
+ * exact shape `POST /api/runs/:id/files` expects) and returns a 201 with the
  * server-computed sha256 — so signing + streaming + dedup are exercised for
  * real, not mocked.
  */
@@ -17,26 +17,27 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { sign, verify } from "@appstrate/afps-runtime/events";
-import { buildPublishDocumentDef } from "@appstrate/core/runtime-tool-defs";
+import { buildPublishFileDef } from "@appstrate/core/runtime-tool-defs";
 import { decodeFilenameHeader, sanitizeFilename } from "@appstrate/core/naming";
 import {
-  createRunDocumentUploader,
+  createRunFileUploader,
   sweepOutputs,
   summarizeArtifacts,
   uploadTimeoutMs,
   UploadError,
 } from "../publish.ts";
-import type { RunDocumentUploaderDeps, UploadFailureCode } from "../publish.ts";
+import type { RunFileUploaderDeps, UploadFailureCode } from "../publish.ts";
 
 const SECRET = "test-run-secret-0123456789";
 
 interface Received {
-  /** Sanitized name the server would store, i.e. `documents.name`. */
+  /** Sanitized name the server would store, i.e. `files.name`. */
   name: string;
-  /** The raw `X-Document-Name` wire value, before decoding. */
+  /** The raw `X-File-Name` wire value, before decoding. */
   rawHeader: string;
   contentType: string | null;
-  presentation: string | null;
+  /** Every request header name seen, lower-cased — proves what is NOT sent. */
+  headerNames: string[];
   sha256: string;
   size: number;
 }
@@ -52,8 +53,8 @@ interface ServerConfig {
 }
 
 let server: ReturnType<typeof Bun.serve>;
-let sinkUrl: string; // .../api/runs/:id/events (uploader swaps to /documents)
-let documentsUrl: string; // the same URL with /events swapped for /documents
+let sinkUrl: string; // .../api/runs/:id/events (uploader swaps to /files)
+let filesUrl: string; // the same URL with /events swapped for /files
 let config: ServerConfig;
 
 function sha256Hex(bytes: Uint8Array): string {
@@ -73,20 +74,20 @@ beforeAll(() => {
         signatureHeader: req.headers.get("webhook-signature") ?? "",
       });
       if (!sig.ok) return new Response("bad signature", { status: 401 });
-      if (!u.pathname.endsWith("/documents")) return new Response("not found", { status: 404 });
+      if (!u.pathname.endsWith("/files")) return new Response("not found", { status: 404 });
 
       const bytes = new Uint8Array(await req.arrayBuffer());
       const sha256 = sha256Hex(bytes);
-      // Mirrors `POST /api/runs/:runId/documents` in
+      // Mirrors `POST /api/runs/:runId/files` in
       // `apps/api/src/routes/runs-events.ts`: the name header is a
       // percent-encoded UTF-8 filename, decoded STRICTLY (a malformed or
       // un-encoded value is a typed 400, never a guess) and then sanitized into
-      // the value stored as `documents.name`.
-      const rawHeader = req.headers.get("x-document-name");
+      // the value stored as `files.name`.
+      const rawHeader = req.headers.get("x-file-name");
       const decoded = rawHeader === null ? null : decodeFilenameHeader(rawHeader);
       if (rawHeader === null || decoded === null) {
         return Response.json(
-          { error: { code: "invalid_request", param: "X-Document-Name" } },
+          { error: { code: "invalid_request", param: "X-File-Name" } },
           { status: 400 },
         );
       }
@@ -95,7 +96,7 @@ beforeAll(() => {
         name,
         rawHeader,
         contentType: req.headers.get("content-type"),
-        presentation: req.headers.get("x-document-presentation"),
+        headerNames: [...req.headers.keys()].map((h) => h.toLowerCase()),
         sha256,
         size: bytes.byteLength,
       });
@@ -110,17 +111,16 @@ beforeAll(() => {
       const id = `doc_${sha256.slice(0, 12)}`;
       return Response.json({
         id,
-        uri: `document://${id}`,
+        uri: `appfile://${id}`,
         name,
         mime: req.headers.get("content-type") ?? "application/octet-stream",
         size: bytes.byteLength,
         sha256,
-        presentation: req.headers.get("x-document-presentation") === "primary" ? "primary" : null,
       });
     },
   });
   sinkUrl = `http://localhost:${server.port}/api/runs/run_x/events`;
-  documentsUrl = `http://localhost:${server.port}/api/runs/run_x/documents`;
+  filesUrl = `http://localhost:${server.port}/api/runs/run_x/files`;
 });
 
 afterAll(() => server.stop(true));
@@ -137,8 +137,8 @@ beforeEach(async () => {
   workspace = await realpath(await mkdtemp(path.join(tmpdir(), "publish-test-")));
 });
 
-function makeUploader(publishedKeys: Set<string>, overrides?: Partial<RunDocumentUploaderDeps>) {
-  return createRunDocumentUploader({
+function makeUploader(publishedKeys: Set<string>, overrides?: Partial<RunFileUploaderDeps>) {
+  return createRunFileUploader({
     sinkUrl,
     sinkSecret: SECRET,
     workspace,
@@ -155,8 +155,8 @@ function key(sha256: string, name: string): string {
   return `${sha256}:${name}`;
 }
 
-describe("createRunDocumentUploader", () => {
-  it("streams a workspace file to /documents and records its sha", async () => {
+describe("createRunFileUploader", () => {
+  it("streams a workspace file to /files and records its sha", async () => {
     const bytes = new TextEncoder().encode("<html>hello</html>");
     await writeFile(path.join(workspace, "report.html"), bytes);
     const keys = new Set<string>();
@@ -166,8 +166,7 @@ describe("createRunDocumentUploader", () => {
     expect(doc.name).toBe("report.html");
     expect(doc.size).toBe(bytes.byteLength);
     expect(doc.sha256).toBe(sha256Hex(bytes));
-    expect(doc.uri).toBe(`document://${doc.id}`);
-    expect(doc.presentation).toBeNull();
+    expect(doc.uri).toBe(`appfile://${doc.id}`);
     expect(keys.has(key(doc.sha256, doc.name))).toBe(true);
     expect(config.received).toHaveLength(1);
     expect(config.received[0]!.name).toBe("report.html");
@@ -181,14 +180,13 @@ describe("createRunDocumentUploader", () => {
     expect(config.received[0]!.name).toBe("Nice Name.bin");
   });
 
-  it("forwards the primary presentation intent and returns the stored role", async () => {
+  it("never sends the retired X-Document-Presentation header", async () => {
     await writeFile(path.join(workspace, "final.html"), "<h1>Final</h1>");
 
-    const doc = await makeUploader(new Set())("final.html", undefined, "primary");
+    await makeUploader(new Set())("final.html");
 
     expect(config.received).toHaveLength(1);
-    expect(config.received[0]!.presentation).toBe("primary");
-    expect(doc.presentation).toBe("primary");
+    expect(config.received[0]!.headerNames).not.toContain("x-document-presentation");
   });
 
   it("throws on a missing file", async () => {
@@ -304,7 +302,7 @@ describe("createRunDocumentUploader", () => {
     expect((err as UploadError).code).toBe("upload_failed");
   });
 
-  it("round-trips a NON-ASCII document name to the server, byte for byte", async () => {
+  it("round-trips a NON-ASCII file name to the server, byte for byte", async () => {
     // The nominal case on a French/international product. Before the header was
     // percent-encoded: the CJK and emoji names made `Headers` throw INSIDE the
     // fetch try, which the retry loop read as a network fault (3 attempts,
@@ -337,7 +335,7 @@ describe("createRunDocumentUploader", () => {
   });
 
   it("fails immediately on a directory, without a single upload attempt", async () => {
-    // `publish_document({ path: "outputs" })` used to stream a directory,
+    // `publish_file({ path: "outputs" })` used to stream a directory,
     // fail opaquely, and burn 3 attempts plus backoff before reporting
     // `upload_failed`.
     await mkdir(path.join(workspace, "outputs"), { recursive: true });
@@ -346,10 +344,10 @@ describe("createRunDocumentUploader", () => {
   });
 });
 
-describe("X-Document-Name decoding (server contract)", () => {
-  /** POST straight to the documents endpoint with hand-built headers. */
+describe("X-File-Name decoding (server contract)", () => {
+  /** POST straight to the files endpoint with hand-built headers. */
   async function postWithNameHeader(headerValue: string): Promise<Response> {
-    return fetch(documentsUrl, {
+    return fetch(filesUrl, {
       method: "POST",
       headers: {
         ...sign({
@@ -359,7 +357,7 @@ describe("X-Document-Name decoding (server contract)", () => {
           secret: SECRET,
         }),
         "Content-Type": "text/markdown",
-        "X-Document-Name": headerValue,
+        "X-File-Name": headerValue,
       },
       body: "# hello",
     });
@@ -372,7 +370,7 @@ describe("X-Document-Name decoding (server contract)", () => {
     const res = await postWithNameHeader("rapport-été.md");
     expect(res.status).toBe(400);
     const body = (await res.json()) as { error: { param: string } };
-    expect(body.error.param).toBe("X-Document-Name");
+    expect(body.error.param).toBe("X-File-Name");
     expect(config.received).toHaveLength(0);
   });
 
@@ -381,7 +379,7 @@ describe("X-Document-Name decoding (server contract)", () => {
       const res = await postWithNameHeader(bad);
       expect(res.status).toBe(400);
       const body = (await res.json()) as { error: { param: string } };
-      expect(body.error.param).toBe("X-Document-Name");
+      expect(body.error.param).toBe("X-File-Name");
     }
     expect(config.received).toHaveLength(0);
   });
@@ -432,9 +430,8 @@ describe("sweepOutputs", () => {
 
     expect(config.received).toHaveLength(2);
     expect(events).toHaveLength(2);
-    expect(events.every((e) => e.type === "document.published")).toBe(true);
-    expect(events.every((e) => e.presentation === null)).toBe(true);
-    expect(config.received.every((r) => r.presentation === null)).toBe(true);
+    expect(events.every((e) => e.type === "file.published")).toBe(true);
+    expect(events.every((e) => !("presentation" in e))).toBe(true);
     expect(result.published).toHaveLength(2);
     expect(result.failed).toHaveLength(0);
     // Every emitted doc's `${sha}:${name}` key is now tracked.
@@ -495,7 +492,7 @@ describe("sweepOutputs", () => {
     const events: unknown[] = [];
     const uploader = makeUploader(keys, { publishedSourceHashes: sourceHashes });
 
-    const published = await uploader("outputs/report.html", "Quarterly overview", "primary");
+    const published = await uploader("outputs/report.html", "Quarterly overview");
     const result = await sweepOutputs({
       uploader,
       workspace,
@@ -520,7 +517,7 @@ describe("sweepOutputs", () => {
     const sourceHashes = new Map<string, string>();
     const uploader = makeUploader(keys, { publishedSourceHashes: sourceHashes });
 
-    await uploader("outputs/report.html", "Quarterly overview", "primary");
+    await uploader("outputs/report.html", "Quarterly overview");
     await seedOutput("report.html", "final");
     const result = await sweepOutputs({
       uploader,
@@ -629,12 +626,12 @@ describe("sweepOutputs", () => {
           const buf = new Uint8Array(await new Response(body).arrayBuffer());
           const sha = sha256Hex(buf);
           if (sha === failSha) return new Response("boom", { status: 500 });
-          const rawHeader = (init?.headers as Record<string, string>)["X-Document-Name"]!;
+          const rawHeader = (init?.headers as Record<string, string>)["X-File-Name"]!;
           const name = sanitizeFilename(decodeFilenameHeader(rawHeader)!);
           const id = `doc_${sha.slice(0, 12)}`;
           return Response.json({
             id,
-            uri: `document://${id}`,
+            uri: `appfile://${id}`,
             name,
             mime: "text/plain",
             size: buf.byteLength,
@@ -724,10 +721,10 @@ describe("sweepOutputs", () => {
   it("keys the dedup on the SANITIZED name, matching the server index", async () => {
     // `report..md` and `report.md` both sanitize to `report.md`, and the bytes
     // are identical, so by the server identity `(run_id, sha256, name)` they are
-    // ONE document. Keying on the RAW basename produced two distinct container
+    // ONE file. Keying on the RAW basename produced two distinct container
     // keys: the second file was streamed in full (up to the per-file cap, and
     // spending the per-run upload rate-limit budget) only for the server's
-    // partial unique index to hand back the document it already had.
+    // partial unique index to hand back the file it already had.
     await seedOutput("report.md", "same-bytes");
     await seedOutput("report..md", "same-bytes");
     const keys = new Set<string>();
@@ -777,12 +774,12 @@ describe("sweepOutputs", () => {
     expect(events[0]!.name).toBe("rapport-été.md");
   });
 
-  it("keeps a document published when emitting its event fails", async () => {
+  it("keeps a file published when emitting its event fails", async () => {
     // The upload succeeded: the bytes are stored, hashed and counted against
     // the org quota server-side. When the emit sat inside the upload's try, a
     // failing sink rolled the dedup key back and recorded the file as `failed`,
     // i.e. a false negative in the artifacts summary plus a re-upload of a
-    // document that is already durable.
+    // file that is already durable.
     await seedOutput("deliverable.md", "# done");
     const keys = new Set<string>();
     const warnings: string[] = [];
@@ -843,64 +840,68 @@ describe("summarizeArtifacts bounds (server ingest contract)", () => {
   });
 });
 
-describe("buildPublishDocumentDef (publish_document tool)", () => {
-  it("uploads and emits a document.published event on success", async () => {
+describe("buildPublishFileDef (publish_file tool)", () => {
+  it("uploads and emits a file.published event on success", async () => {
     await writeFile(path.join(workspace, "out.html"), new TextEncoder().encode("<h1>ok</h1>"));
-    const def = buildPublishDocumentDef(makeUploader(new Set()));
+    const def = buildPublishFileDef(makeUploader(new Set()));
 
-    const result = await def.handler({ path: "out.html", presentation: "primary" });
+    const result = await def.handler({ path: "out.html" });
 
     expect(result.isError).toBeUndefined();
     expect(result.content[0]!.text).toContain("Published");
     const events = (result._meta?.["dev.appstrate/events"] ?? []) as Array<Record<string, unknown>>;
     expect(events).toHaveLength(1);
-    expect(events[0]!.type).toBe("document.published");
-    expect(events[0]!.document_id).toMatch(/^doc_/);
-    expect(events[0]!.presentation).toBe("primary");
-    expect(config.received[0]!.presentation).toBe("primary");
+    expect(events[0]!.type).toBe("file.published");
+    expect(events[0]!.file_id).toMatch(/^doc_/);
+    expect(events[0]!).not.toHaveProperty("presentation");
   });
 
   it("returns a tool error (not a throw) when the upload fails", async () => {
-    const def = buildPublishDocumentDef(makeUploader(new Set()));
+    const def = buildPublishFileDef(makeUploader(new Set()));
     const result = await def.handler({ path: "missing.txt" });
     expect(result.isError).toBe(true);
     expect(result.content[0]!.text).toContain("Failed to publish");
   });
 
   it("returns a tool error when path is missing", async () => {
-    const def = buildPublishDocumentDef(makeUploader(new Set()));
+    const def = buildPublishFileDef(makeUploader(new Set()));
     const result = await def.handler({});
     expect(result.isError).toBe(true);
   });
 
-  it("returns a tool error for an unsupported presentation role", async () => {
-    const def = buildPublishDocumentDef(makeUploader(new Set()));
+  it("ignores a retired `presentation` argument and publishes anyway", async () => {
+    // Version skew: an older agent may still pass the retired argument. It is
+    // dropped, never turned into a tool error that would lose the deliverable.
+    await writeFile(path.join(workspace, "out.html"), new TextEncoder().encode("<h1>ok</h1>"));
+    const def = buildPublishFileDef(makeUploader(new Set()));
     const result = await def.handler({ path: "out.html", presentation: "thumbnail" });
-    expect(result.isError).toBe(true);
-    expect(result.content[0]!.text).toContain("must be `primary`");
-    expect(config.received).toHaveLength(0);
+    expect(result.isError).toBeUndefined();
+    expect(config.received).toHaveLength(1);
+    expect(config.received[0]!.headerNames).not.toContain("x-document-presentation");
   });
 
-  it("leads its description with the publish-now + `document://` URI value", () => {
+  it("leads its description with the publish-now + `appfile://` URI value", () => {
     // The `outputs/` sweep is unconditional and shares the same uploader, so
     // what the tool alone can do is publish DURING the run and hand back the
     // durable URI. A description that reads "use this tool only to publish a
     // deliverable that lives elsewhere" names the one replaceable case and
     // hides that one, so an agent never calls it at the right moment.
-    const description = buildPublishDocumentDef(makeUploader(new Set())).descriptor.description!;
+    const description = buildPublishFileDef(makeUploader(new Set())).descriptor.description!;
 
-    expect(description).toContain("document://");
-    expect(description.indexOf("document://")).toBeLessThan(description.indexOf("./outputs/"));
+    expect(description).toContain("appfile://");
+    expect(description.indexOf("appfile://")).toBeLessThan(description.indexOf("./outputs/"));
     expect(description).not.toContain("use this tool only");
-    expect(description).toContain("finish editing it first");
-    expect(description).toContain("last successful primary publication");
+    // The retired primary/presentation concept must be gone from the surface
+    // the model reads.
+    expect(description).not.toMatch(/primary/i);
+    expect(description).not.toContain("presentation");
   });
 
   it("still publishes an explicitly-chosen dotfile (hidden filter is sweep-only)", async () => {
     // The hidden-file exclusion applies ONLY to the implicit outputs sweep; an
     // agent deliberately publishing a dotfile via the tool is honoured.
     await writeFile(path.join(workspace, ".config"), new TextEncoder().encode("k=v"));
-    const def = buildPublishDocumentDef(makeUploader(new Set()));
+    const def = buildPublishFileDef(makeUploader(new Set()));
 
     const result = await def.handler({ path: ".config" });
 

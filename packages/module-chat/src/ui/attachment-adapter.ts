@@ -10,7 +10,7 @@
  *    uploader and return a complete attachment whose `file` content part carries
  *    the `upload://upl_x` URI. react-ai-sdk's `toCreateMessage` maps that part to
  *    an ai-SDK file part (`url: upload://…`) on the outgoing UIMessage; the
- *    server then materializes it into a durable `document://` document.
+ *    server then materializes it into a durable `appfile://` file.
  *  - `remove()` — no server round-trip (staging only happens in `send`; an
  *    abandoned upload record is swept by the upload GC).
  *
@@ -52,7 +52,7 @@ export function createChatAttachmentAdapter(deps: {
   const tooLarge = () =>
     new Error(t("upload.tooLarge", { max: Math.round(maxBytes / 1024 / 1024) }));
   return {
-    // Any file type — the composer accepts arbitrary documents (the agent's
+    // Any file type — the composer accepts arbitrary files (the agent's
     // input schema, not the composer, decides what a run will accept).
     accept: "*",
     add({ file }): Promise<PendingAttachment> {

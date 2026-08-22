@@ -2,7 +2,7 @@
 
 /**
  * Unit tests for the bounded-concurrency mapper used to stream a run's input
- * documents without an unbounded fan-out. Covers order preservation, the
+ * files without an unbounded fan-out. Covers order preservation, the
  * concurrency cap, and the abort-on-first-rejection behaviour the workspace
  * rollback relies on.
  */

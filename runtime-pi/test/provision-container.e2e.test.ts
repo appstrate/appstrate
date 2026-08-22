@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Container e2e — the ONLY layer that catches the document-provisioning spin.
+ * Container e2e — the ONLY layer that catches the file-provisioning spin.
  *
  * The original bug (`Bun.write(path, Response)` busy-looping at 100% CPU)
  * reproduces only in the BUNDLED runtime (`dist/entrypoint.js`), so no
  * source-level unit test can trigger it. This test runs the real
- * `appstrate-pi` image against a document-bearing run, with a self-contained
- * mock sink serving the AFPS bundle + one input document. The regression
- * assertion is simple and direct: with a document present, the container must
+ * `appstrate-pi` image against a file-bearing run, with a self-contained
+ * mock sink serving the AFPS bundle + one input file. The regression
+ * assertion is simple and direct: with a file present, the container must
  * emit a boot event PAST provisioning ("workspace initialized") within the
- * deadline. The buggy build never gets there — it spins in `provisionDocuments`
+ * deadline. The buggy build never gets there — it spins in `provisionFiles`
  * and is silent after "runtime starting".
  *
  * Gated: heavy DinD e2e (~11s), so it is opt-in locally — set `TEST_DOCKER=1`
@@ -114,7 +114,7 @@ async function buildAgentBundle(): Promise<Uint8Array> {
   return writeBundleToBuffer(bundle);
 }
 
-describe.skipIf(!RUN)("runtime-pi container provisions documents without spinning", () => {
+describe.skipIf(!RUN)("runtime-pi container provisions files without spinning", () => {
   let server: ReturnType<typeof Bun.serve> | undefined;
   let containerName: string | undefined;
   const SECRET = "container-e2e-secret-0123456789";
@@ -137,11 +137,11 @@ describe.skipIf(!RUN)("runtime-pi container provisions documents without spinnin
         if (p.endsWith("/workspace")) {
           return new Response(bundle, { headers: { "content-type": "application/octet-stream" } });
         }
-        if (p.endsWith("/documents")) {
-          return Response.json({ documents: [{ name: "note.txt", size: docBytes.byteLength }] });
+        if (p.endsWith("/files")) {
+          return Response.json({ files: [{ name: "note.txt", size: docBytes.byteLength }] });
         }
-        if (p.match(/\/documents\/[^/]+$/)) {
-          // Chunked stream — same shape as the platform's document route.
+        if (p.match(/\/files\/[^/]+$/)) {
+          // Chunked stream — same shape as the platform's file route.
           const stream = new ReadableStream<Uint8Array>({
             start(c) {
               c.enqueue(docBytes);
@@ -166,7 +166,7 @@ describe.skipIf(!RUN)("runtime-pi container provisions documents without spinnin
   });
 
   it(
-    "emits a post-provisioning boot event with a document present",
+    "emits a post-provisioning boot event with a file present",
     async () => {
       const port = server!.port;
       const host = `http://host.docker.internal:${port}/api/runs/${RID}`;
@@ -218,13 +218,13 @@ describe.skipIf(!RUN)("runtime-pi container provisions documents without spinnin
       try {
         const start = Date.now();
         // Poll the collected sink events for the post-provisioning marker.
-        // The buggy build spins in provisionDocuments and never emits it.
+        // The buggy build spins in provisionFiles and never emits it.
         for (;;) {
           if (events.some((e) => e.includes("workspace initialized"))) break;
           if (Date.now() - start > DEADLINE_MS) {
             const logs = spawnSync("docker", ["logs", containerName], { encoding: "utf8" });
             throw new Error(
-              `no post-provisioning event within ${DEADLINE_MS}ms — runtime likely spun in provisionDocuments.\nevents=${JSON.stringify(events).slice(0, 500)}\ncontainer logs:\n${(logs.stdout ?? "") + (logs.stderr ?? "")}`.slice(
+              `no post-provisioning event within ${DEADLINE_MS}ms — runtime likely spun in provisionFiles.\nevents=${JSON.stringify(events).slice(0, 500)}\ncontainer logs:\n${(logs.stdout ?? "") + (logs.stderr ?? "")}`.slice(
                 0,
                 1500,
               ),

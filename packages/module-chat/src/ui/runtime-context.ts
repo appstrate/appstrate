@@ -2,7 +2,7 @@
 
 /**
  * The host→module injection seam. Everything the chat UI needs from the shell —
- * scoping headers, navigation, document services, translation — arrives through
+ * scoping headers, navigation, file services, translation — arrives through
  * `ChatPage`'s props and is published from there.
  *
  * This is the ONLY direction the dependency runs: the module never imports the
@@ -57,40 +57,40 @@ export function useSelectConversation(): SelectConversation | null {
 }
 
 /**
- * Presents a document through the host's in-app viewer. The same small interface
- * serves direct clicks and automatic primary-output presentation. The host does
- * not need to know why it was called: both interactions select the document in
- * the same conversation context panel.
+ * Presents a file through the host's in-app viewer. The same small interface
+ * serves direct clicks and the automatic presentation of a run's single produced
+ * file. The host does not need to know why it was called: both interactions
+ * select the file in the same conversation context panel.
  *
  * The module owns no preview component — dependency direction is web →
  * module-chat, so the host injects an opener and the chat delegates to it.
  * `null` means no opener was provided (embedded mounts): direct clicks then fall
  * back to the authenticated download, while automatic presentation is a no-op.
  */
-export type OpenDocument = (doc: { id: string; name: string }) => void;
+export type OpenFile = (file: { id: string; name: string }) => void;
 
 /**
- * The host's authenticated document download (typed API client + user-facing
+ * The host's authenticated file download (typed API client + user-facing
  * error toast). Injected, never reimplemented: a second raw-`fetch` copy here
  * would swallow failures the shell's implementation reports.
  */
-export type DownloadDocument = (id: string, name: string) => void;
+export type DownloadFile = (id: string, name: string) => void;
 
 /**
- * The host's authenticated image-preview hook: a stored document id → an object
+ * The host's authenticated image-preview hook: a stored file id → an object
  * URL for an `<img src>`, or `null` while loading / on failure (callers fall
  * back to the chip). A HOOK is injected — not a fetcher — so the shell keeps
  * ownership of the request, its scoping headers and the object-URL lifecycle.
  *
  * Call it like any hook: unconditionally, at the top of a component (see
- * `DocumentImageThumbnail`, which exists precisely so the call site is stable).
+ * `FileImageThumbnail`, which exists precisely so the call site is stable).
  */
-export type UseDocumentImageSrc = (id: string) => string | null;
+export type UseFileImageSrc = (id: string) => string | null;
 
 /**
  * The host's staged upload (`POST /api/uploads` descriptor + PUT to the sink),
  * returning the `upload://upl_x` URI the server materializes into a durable
- * document. Same function the shell hands to its own `<SchemaForm>` uploader —
+ * file. Same function the shell hands to its own `<SchemaForm>` uploader —
  * the module adds only its staged-image preview cache on top (`upload.ts`).
  * Travels as a `ChatPage` prop, not through context (see the file header).
  */
@@ -118,9 +118,9 @@ export type ChatTranslate = (key: string, params?: Record<string, string | numbe
  */
 export interface ChatHost {
   /** `null` when the host provides no in-app preview (fall back to download). */
-  openDocument: OpenDocument | null;
-  downloadDocument: DownloadDocument;
-  useDocumentImageSrc: UseDocumentImageSrc;
+  openFile: OpenFile | null;
+  downloadFile: DownloadFile;
+  useFileImageSrc: UseFileImageSrc;
   t: ChatTranslate;
 }
 

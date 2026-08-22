@@ -243,10 +243,10 @@ describe("Organizations API", () => {
 
     it("exposes storage usage with a null limit when no quota is configured (issue #945)", async () => {
       const ctx = await createTestContext();
-      // Simulate stored documents by bumping the transactional byte counter.
+      // Simulate stored files by bumping the transactional byte counter.
       await db
         .update(organizations)
-        .set({ documentsBytesUsed: 2048 })
+        .set({ filesBytesUsed: 2048 })
         .where(eq(organizations.id, ctx.orgId));
 
       const res = await app.request(`/api/orgs/${ctx.orgId}`, {
@@ -266,7 +266,7 @@ describe("Organizations API", () => {
       const ctx = await createTestContext();
       await db
         .update(organizations)
-        .set({ documentsBytesUsed: 100, documentsBytesLimit: 4096 })
+        .set({ filesBytesUsed: 100, filesBytesLimit: 4096 })
         .where(eq(organizations.id, ctx.orgId));
 
       const res = await app.request(`/api/orgs/${ctx.orgId}`, {
@@ -287,7 +287,7 @@ describe("Organizations API", () => {
       const ctx = await createTestContext();
       await db
         .update(organizations)
-        .set({ documentsBytesUsed: 500 })
+        .set({ filesBytesUsed: 500 })
         .where(eq(organizations.id, ctx.orgId));
 
       const snapshot = process.env.ORG_STORAGE_QUOTA_BYTES;

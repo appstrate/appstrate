@@ -288,7 +288,7 @@ describe("buildFileIndex — media kind classification", () => {
     // silently moved. It cannot move silently: 1 MiB is baked into the
     // published OpenAPI description text ("Text files up to 1 MiB",
     // `apps/api/src/openapi/paths/packages.ts` and `openapi/schemas.ts`), so a
-    // change here desynchronises the spec from the behaviour it documents.
+    // change here desynchronises the spec from the behaviour it files.
     // The web side pins the same constant in
     // `apps/web/src/lib/test/package-file-tree.test.ts`.
     expect(PACKAGE_FILE_INLINE_MAX_BYTES).toBe(1_048_576);

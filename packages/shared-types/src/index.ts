@@ -181,16 +181,12 @@ export type EnrichedRun = RunWireDto & {
    */
   unread: boolean;
   /**
-   * Per-run document counts, always present on enriched list rows. `input` is
-   * the number of distinct `document://` references in the run's persisted
-   * input; `output` is the number of documents the run produced.
+   * Per-run file counts, always present on enriched list rows. `input` is
+   * the number of distinct `appfile://` (or legacy `document://`) references in
+   * the run's persisted input; `output` is the number of files the run
+   * produced.
    */
-  document_counts: { input: number; output: number };
-  /**
-   * The run's user-facing primary deliverable, selected explicitly by the
-   * publishing agent. Null when the run has no primary output.
-   */
-  primary_document_id: string | null;
+  file_counts: { input: number; output: number };
   /** True if the run's source package is an inline/ephemeral shadow (POST /api/runs/inline). */
   package_ephemeral?: boolean;
   /** For inline runs only — snapshot of the manifest submitted at run time. Null after compaction. */

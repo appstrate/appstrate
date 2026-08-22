@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Chat file attachments (Phase 1) — the composer→document pipeline.
+ * Chat file attachments (Phase 1) — the composer→file pipeline.
  *
  * Covers the module-side lifecycle end to end against the real platform:
- *  - an `upload://` file part materializes into a chat-session-scoped document
- *    and the part is rewritten to the stable `document://` URI, both in memory
+ *  - an `upload://` file part materializes into a chat-session-scoped file
+ *    and the part is rewritten to the stable `appfile://` URI, both in memory
  *    and once persisted into `chat_messages.content`;
- *  - a `document://` belonging to another user is rejected (container ACL);
- *  - file parts flatten to the model-facing `[Attached document: …]` block in
+ *  - a historical `document://` URI still resolves to its file (#1177);
+ *  - an `appfile://` belonging to another user is rejected (container ACL);
+ *  - file parts flatten to the model-facing `[Attached file: …]` block in
  *    both the transcript builder and the shared serializer;
  *  - a quota rejection surfaces as the platform's RFC 9457 error, not a crash.
  */
@@ -16,7 +17,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { documents, uploads, chatSessions, chatMessages } from "@appstrate/db/schema";
+import { files, uploads, chatSessions, chatMessages } from "@appstrate/db/schema";
 import { uploadStream } from "@appstrate/db/storage";
 import { _resetCacheForTesting } from "@appstrate/env";
 import type { UIMessage } from "ai";
@@ -29,7 +30,7 @@ import {
   type TestContext,
 } from "../../../apps/api/test/helpers/auth.ts";
 import { createUpload } from "../../../apps/api/src/services/uploads.ts";
-import { resolveChatAttachment } from "../../../apps/api/src/services/documents.ts";
+import { resolveChatAttachment } from "../../../apps/api/src/services/files.ts";
 import { materializeUserAttachments, messagesWithAttachmentsAsText } from "../src/attachments.ts";
 import { loadPiCodingAgentSdk } from "@appstrate/runner-pi";
 import { buildStructuredPiTurn } from "../src/pi-chat/structured-session.ts";
@@ -77,7 +78,7 @@ function fileMessage(id: string, uri: string, name: string, mime = "text/plain")
     id,
     role: "user",
     parts: [
-      { type: "text", text: "Résume ce document" },
+      { type: "text", text: "Résume ce file" },
       { type: "file", url: uri, mediaType: mime, filename: name },
     ],
   } as UIMessage;
@@ -110,7 +111,7 @@ describe("chat attachments", () => {
     scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
   });
 
-  it("materializes an upload:// part into a session-scoped document and rewrites it to document://", async () => {
+  it("materializes an upload:// part into a session-scoped file and rewrites it to appfile://", async () => {
     const bytes = new TextEncoder().encode("a real pdf-ish payload");
     const sessionId = await createSession(ctx.orgId, ctx.user.id);
     const uploadId = await stageUpload(scope, ctx.user.id, "rapport.txt", bytes);
@@ -121,26 +122,26 @@ describe("chat attachments", () => {
       resolverFor(scope, ctx.user.id, sessionId),
     );
 
-    // The in-memory part is rewritten to document:// + carries the size.
+    // The in-memory part is rewritten to appfile:// + carries the size.
     const filePart = rewritten.parts.find((p) => p.type === "file") as {
       url: string;
       providerMetadata?: { appstrate?: { size?: number } };
     };
-    expect(filePart.url.startsWith("document://")).toBe(true);
+    expect(filePart.url.startsWith("appfile://")).toBe(true);
     expect(filePart.providerMetadata?.appstrate?.size).toBe(bytes.byteLength);
 
-    // A durable document row exists, anchored to the chat session, attributed
+    // A durable file row exists, anchored to the chat session, attributed
     // to its owner, purpose user_upload.
-    const docId = filePart.url.slice("document://".length);
-    const [doc] = await db.select().from(documents).where(eq(documents.id, docId));
-    expect(doc).toBeDefined();
-    expect(doc!.chatSessionId).toBe(sessionId);
-    expect(doc!.runId).toBeNull();
-    expect(doc!.userId).toBe(ctx.user.id);
-    expect(doc!.purpose).toBe("user_upload");
-    expect(doc!.size).toBe(bytes.byteLength);
+    const fileId = filePart.url.slice("appfile://".length);
+    const [file] = await db.select().from(files).where(eq(files.id, fileId));
+    expect(file).toBeDefined();
+    expect(file!.chatSessionId).toBe(sessionId);
+    expect(file!.runId).toBeNull();
+    expect(file!.userId).toBe(ctx.user.id);
+    expect(file!.purpose).toBe("user_upload");
+    expect(file!.size).toBe(bytes.byteLength);
 
-    // Persisted chat message stores ONLY the document:// URI (never upload://).
+    // Persisted chat message stores ONLY the appfile:// URI (never upload://).
     await persistUserMessage(sessionId, rewritten);
     const [stored] = await db
       .select({ content: chatMessages.content })
@@ -149,27 +150,52 @@ describe("chat attachments", () => {
     const storedPart = (stored!.content as { parts: { type: string; url?: string }[] }).parts.find(
       (p) => p.type === "file",
     );
-    expect(storedPart!.url).toBe(`document://${docId}`);
+    expect(storedPart!.url).toBe(`appfile://${fileId}`);
   });
 
-  it("rejects a document:// belonging to another user (container ACL)", async () => {
-    // User A materializes a document in A's own chat session.
-    const bytes = new TextEncoder().encode("owner-only doc");
+  it("still resolves a historical document:// URI to the same file", async () => {
+    // Chat messages persisted before #1177 carry the old scheme. The resolver
+    // must accept it — core's `parseFileUri` reads both — or every attachment
+    // in an older conversation becomes unresolvable on reload.
+    const bytes = new TextEncoder().encode("legacy-scheme payload");
+    const sessionId = await createSession(ctx.orgId, ctx.user.id);
+    const uploadId = await stageUpload(scope, ctx.user.id, "vieux.txt", bytes);
+    const resolve = resolverFor(scope, ctx.user.id, sessionId);
+
+    const canonical = (
+      (
+        await materializeUserAttachments(
+          fileMessage("m1", `upload://${uploadId}`, "vieux.txt"),
+          resolve,
+        )
+      ).parts.find((p) => p.type === "file") as { url: string }
+    ).url;
+    const fileId = canonical.slice("appfile://".length);
+
+    const legacy = await resolve(`document://${fileId}`);
+    expect(legacy.uri).toBe(canonical);
+    expect(legacy.name).toBe("vieux.txt");
+    expect(legacy.size).toBe(bytes.byteLength);
+  });
+
+  it("rejects an appfile:// belonging to another user (container ACL)", async () => {
+    // User A materializes a file in A's own chat session.
+    const bytes = new TextEncoder().encode("owner-only file");
     const sessionA = await createSession(ctx.orgId, ctx.user.id);
     const uploadId = await stageUpload(scope, ctx.user.id, "a.pdf", bytes);
-    const [ownDoc] = (
+    const [ownFile] = (
       await materializeUserAttachments(
         fileMessage("mA", `upload://${uploadId}`, "a.pdf"),
         resolverFor(scope, ctx.user.id, sessionA),
       )
     ).parts.filter((p) => p.type === "file") as { url: string }[];
 
-    // User B (same org, different user) cannot resolve A's document.
+    // User B (same org, different user) cannot resolve A's file.
     const userB = await createTestUser();
     await addOrgMember(ctx.orgId, userB.id, "member");
     const sessionB = await createSession(ctx.orgId, userB.id);
 
-    await expect(resolverFor(scope, userB.id, sessionB)(ownDoc!.url)).rejects.toMatchObject({
+    await expect(resolverFor(scope, userB.id, sessionB)(ownFile!.url)).rejects.toMatchObject({
       status: 404,
     });
   });
@@ -182,13 +208,13 @@ describe("chat attachments", () => {
       fileMessage("m1", `upload://${uploadId}`, "rapport.txt"),
       resolverFor(scope, ctx.user.id, sessionId),
     );
-    const docId = (rewritten.parts.find((p) => p.type === "file") as { url: string }).url;
+    const fileId = (rewritten.parts.find((p) => p.type === "file") as { url: string }).url;
 
     // Shared serializer: file part → a single text part with the block.
     const [asText] = messagesWithAttachmentsAsText([rewritten]);
     const textParts = asText!.parts.filter((p) => p.type === "text") as { text: string }[];
     const block = textParts.map((p) => p.text).join("\n");
-    expect(block).toContain(`[Attached document: rapport.txt — ${docId} — text/plain`);
+    expect(block).toContain(`[Attached file: rapport.txt — ${fileId} — text/plain`);
     expect(block).toContain("2.3 MB");
     expect(asText!.parts.some((p) => p.type === "file")).toBe(false);
 
@@ -199,12 +225,12 @@ describe("chat attachments", () => {
       { api: "openai-completions", provider: "openai", model: "attachment-test" },
       { estimateTokens, baseTokens: 0 },
     );
-    expect(turn.prompt).toContain(docId);
-    expect(turn.prompt).toContain("[Attached document: rapport.txt");
+    expect(turn.prompt).toContain(fileId);
+    expect(turn.prompt).toContain("[Attached file: rapport.txt");
   });
 
-  it("rejects an attachment URI that is neither upload:// nor document:// (e.g. https://)", async () => {
-    // The composer seam only resolves staged uploads or existing documents — a
+  it("rejects an attachment URI that is neither upload:// nor appfile:// (e.g. https://)", async () => {
+    // The composer seam only resolves staged uploads or existing files — a
     // remote URL must be refused, never fetched (SSRF / exfil vector).
     const sessionId = await createSession(ctx.orgId, ctx.user.id);
     await expect(
@@ -233,8 +259,8 @@ describe("chat attachments", () => {
       _resetCacheForTesting();
     }
 
-    // No document row survives the rejected materialization.
-    const rows = await db.select().from(documents).where(eq(documents.chatSessionId, sessionId));
+    // No file row survives the rejected materialization.
+    const rows = await db.select().from(files).where(eq(files.chatSessionId, sessionId));
     expect(rows.length).toBe(0);
   });
 });

@@ -64,11 +64,11 @@ function handleConnectionUpdate(qc: QueryClient) {
 function handleChatSessionUpdate(qc: QueryClient) {
   void qc.invalidateQueries({ queryKey: CHAT_SESSIONS_QUERY_KEY });
   // The context sidebar reads the active session detail and the union of its
-  // direct/run-linked documents. A message persistence signal can create the
+  // direct/run-linked files. A message persistence signal can create the
   // session itself or materialize a new attachment, so both typed query
   // families need the same immediate reconciliation as the conversation list.
   void qc.invalidateQueries({ queryKey: ["get", "/api/chat/sessions/{id}"] });
-  void qc.invalidateQueries({ queryKey: ["get", "/api/documents"] });
+  void qc.invalidateQueries({ queryKey: ["get", "/api/files"] });
 }
 
 /**
@@ -184,8 +184,8 @@ function handleSSEMessage(
     qc.invalidateQueries({ queryKey: runsKeys.all });
     qc.invalidateQueries({ queryKey: runKeys.all });
     // A terminal run has completed its output sweep; refresh every scoped
-    // document collection, including conversation-context filters.
-    qc.invalidateQueries({ queryKey: ["get", "/api/documents"] });
+    // file collection, including conversation-context filters.
+    qc.invalidateQueries({ queryKey: ["get", "/api/files"] });
     qc.invalidateQueries({ queryKey: billingKeys.forOrg(orgId) });
   }
 }

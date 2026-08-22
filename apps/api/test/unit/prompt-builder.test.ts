@@ -450,13 +450,13 @@ describe("buildEnrichedPrompt — user input", () => {
 
   it("excludes file-type input fields from user input section", async () => {
     const ctx = baseContext({
-      input: { text: "hello", document: "file-ref" },
+      input: { text: "hello", file: "file-ref" },
       schemas: {
         input: {
           type: "object",
           properties: {
             text: { type: "string" },
-            document: {
+            file: {
               type: "string",
               format: "uri",
               contentMediaType: "application/octet-stream",
@@ -590,10 +590,10 @@ describe("buildEnrichedPrompt — provider dimension fully removed", () => {
   });
 });
 
-// ─── Documents/files ────────────────────────────────────────
+// ─── Files/files ────────────────────────────────────────
 
-describe("buildEnrichedPrompt — documents", () => {
-  it("includes documents section when files provided", async () => {
+describe("buildEnrichedPrompt — files", () => {
+  it("includes files section when files provided", async () => {
     const ctx = baseContext({
       files: [
         {
@@ -616,25 +616,25 @@ describe("buildEnrichedPrompt — documents", () => {
     });
 
     const prompt = await buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("## Documents");
-    // Neutral wording: an input document can be a sibling run's deliverable
+    expect(prompt).toContain("## Files");
+    // Neutral wording: an input file can be a sibling run's deliverable
     // mounted by reference, not only a human upload.
-    expect(prompt).toContain("The following documents are available on the local filesystem:");
+    expect(prompt).toContain("The following files are available on the local filesystem:");
     expect(prompt).not.toContain("have been uploaded");
     expect(prompt).toContain("report.pdf");
     // The colliding display names resolve to distinct on-disk paths.
-    expect(prompt).toContain("./documents/report.pdf");
-    expect(prompt).toContain("./documents/report-2.pdf");
+    expect(prompt).toContain("./files/report.pdf");
+    expect(prompt).toContain("./files/report-2.pdf");
   });
 
-  // Fan-in by reference: a document mounted through the reserved
-  // `_context_documents` field is announced exactly like any other input
-  // document. A file mounted but not announced is a file never read.
-  it("announces context documents mounted through the reserved field", async () => {
+  // Fan-in by reference: a file mounted through the reserved
+  // `_context_files` field is announced exactly like any other input
+  // file. A file mounted but not announced is a file never read.
+  it("announces context files mounted through the reserved field", async () => {
     const ctx = baseContext({
       files: [
         {
-          fieldName: "_context_documents",
+          fieldName: "_context_files",
           name: "research.json",
           workspaceName: "research.json",
           type: "application/json",
@@ -644,14 +644,14 @@ describe("buildEnrichedPrompt — documents", () => {
     });
 
     const prompt = await buildEnrichedPrompt(ctx);
-    expect(prompt).toContain("## Documents");
-    expect(prompt).toContain("./documents/research.json");
+    expect(prompt).toContain("## Files");
+    expect(prompt).toContain("./files/research.json");
   });
 
-  it("omits documents section when no files", async () => {
+  it("omits files section when no files", async () => {
     const ctx = baseContext({ files: [] });
     const prompt = await buildEnrichedPrompt(ctx);
-    expect(prompt).not.toContain("## Documents");
+    expect(prompt).not.toContain("## Files");
   });
 });
 

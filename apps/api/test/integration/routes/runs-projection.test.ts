@@ -133,7 +133,7 @@ describe("Enriched run projection", () => {
     expect(body.applicationId).toBe(ctx.defaultAppId);
     expect(body.userId).toBe(ctx.user.id);
     // Enrichment computed alongside the projection.
-    expect(body.document_counts).toEqual({ input: 0, output: 0 });
+    expect(body.file_counts).toEqual({ input: 0, output: 0 });
     expect(body.unread).toBeBoolean();
     // `resolvedConnections` reaches the client only in its display-safe form.
     expect(body.connections_used).toEqual([

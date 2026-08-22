@@ -73,7 +73,7 @@ describe("refusalCode", () => {
     ).toBe("quota_exceeded");
   });
 
-  it("reads the same document off a bare string error", () => {
+  it("reads the same file off a bare string error", () => {
     expect(refusalCode(problem({ status: 401, code: "needs_reconnection" }))).toBe(
       "needs_reconnection",
     );
@@ -85,7 +85,7 @@ describe("refusalCode", () => {
     expect(refusalCode(problem({ status: 500, code: "unexpected" }))).toBeUndefined();
   });
 
-  it("declines anything that is not a problem document", () => {
+  it("declines anything that is not a problem file", () => {
     expect(refusalCode("Upstream model error (status 503)")).toBeUndefined();
     expect(refusalCode("{not json")).toBeUndefined();
     expect(refusalCode(undefined)).toBeUndefined();

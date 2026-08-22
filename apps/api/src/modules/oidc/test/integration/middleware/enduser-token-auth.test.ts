@@ -532,12 +532,12 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
   // -------------------------------------------------------------------------
 
   /** Publish an `agent_output` document on a fresh run in the given app. */
-  async function seedRunDocument(opts: { endUserId?: string } = {}): Promise<{
+  async function seedRunFile(opts: { endUserId?: string } = {}): Promise<{
     runId: string;
     docId: string;
   }> {
     const { runs } = await import("@appstrate/db/schema");
-    const { createDocumentFromStream } = await import("../../../../../services/documents.ts");
+    const { createFileFromStream } = await import("../../../../../services/files.ts");
     const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
     await db.insert(runs).values({
       id: runId,
@@ -546,7 +546,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       status: "success",
       endUserId: opts.endUserId ?? null,
     });
-    const { row } = await createDocumentFromStream(
+    const { row } = await createFileFromStream(
       { orgId, applicationId },
       runId,
       { userId: null, endUserId: opts.endUserId ?? null },
@@ -567,7 +567,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
 
   it("dashboard token carrying documents:read reads the org's documents", async () => {
     await addDashboardMembership();
-    const { docId } = await seedRunDocument();
+    const { docId } = await seedRunFile();
 
     const token = await mintToken({
       sub: authUserId,
@@ -582,22 +582,22 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       "X-Application-Id": applicationId,
     };
 
-    const list = await app.request("/api/documents", { headers });
+    const list = await app.request("/api/files", { headers });
     expect(list.status).toBe(200);
     const body = (await list.json()) as { data: Array<{ id: string }> };
     expect(body.data.map((d) => d.id)).toContain(docId);
 
-    const one = await app.request(`/api/documents/${docId}`, { headers });
+    const one = await app.request(`/api/files/${docId}`, { headers });
     expect(one.status).toBe(200);
 
-    const content = await app.request(`/api/documents/${docId}/content`, { headers });
+    const content = await app.request(`/api/files/${docId}/content`, { headers });
     expect(content.status).toBe(200);
     expect(await content.text()).toBe("oidc deliverable");
   });
 
   it("dashboard token without documents:read is refused on every read route", async () => {
     await addDashboardMembership();
-    const { docId } = await seedRunDocument();
+    const { docId } = await seedRunFile();
 
     // A token that requested a DIFFERENT, legitimate scope: the caller is a
     // real org admin (whose role grants `documents:read`), so only the token's
@@ -616,18 +616,14 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       "X-Application-Id": applicationId,
     };
 
-    for (const path of [
-      "/api/documents",
-      `/api/documents/${docId}`,
-      `/api/documents/${docId}/content`,
-    ]) {
+    for (const path of ["/api/files", `/api/files/${docId}`, `/api/files/${docId}/content`]) {
       const res = await app.request(path, { headers });
       expect(res.status).toBe(403);
     }
   });
 
   it("end-user token carrying documents:read reads its own run's document", async () => {
-    const { docId } = await seedRunDocument({ endUserId });
+    const { docId } = await seedRunFile({ endUserId });
 
     const token = await mintToken({
       sub: authUserId,
@@ -637,7 +633,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       email: "stage3@example.com",
       scope: "openid runs:read documents:read",
     });
-    const res = await app.request(`/api/documents/${docId}`, {
+    const res = await app.request(`/api/files/${docId}`, {
       headers: {
         Authorization: `Bearer ${token}`,
         "X-Application-Id": applicationId,

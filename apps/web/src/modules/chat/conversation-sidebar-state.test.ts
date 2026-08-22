@@ -7,39 +7,39 @@ import {
   type ConversationSidebarState,
 } from "./conversation-sidebar-state";
 
-const doc = (id: string) => ({ id, name: `${id}.md` });
+const file = (id: string) => ({ id, name: `${id}.md` });
 
 describe("conversation sidebar state", () => {
   it("starts collapsed until context is explicitly requested", () => {
     expect(INITIAL_CONVERSATION_SIDEBAR_STATE.expanded).toBe(false);
   });
 
-  it("shows every document through the same preview action", () => {
+  it("shows every file through the same preview action", () => {
     const first = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
-      type: "show-document",
-      document: doc("doc_a"),
+      type: "show-file",
+      file: file("doc_a"),
     });
     const second = conversationSidebarReducer(first, {
-      type: "show-document",
-      document: doc("doc_b"),
+      type: "show-file",
+      file: file("doc_b"),
     });
 
     expect(second).toMatchObject({
       expanded: true,
       activeTab: "preview",
-      selectedDocument: doc("doc_b"),
+      selectedFile: file("doc_b"),
     });
   });
 
-  it("collapses without discarding the selected document", () => {
+  it("collapses without discarding the selected file", () => {
     const open = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
-      type: "show-document",
-      document: doc("doc_a"),
+      type: "show-file",
+      file: file("doc_a"),
     });
     const collapsed = conversationSidebarReducer(open, { type: "toggle" });
 
     expect(collapsed.expanded).toBe(false);
-    expect(collapsed.selectedDocument).toEqual(doc("doc_a"));
+    expect(collapsed.selectedFile).toEqual(file("doc_a"));
   });
 
   it("reopens the panel when a header tab is selected", () => {
@@ -59,28 +59,28 @@ describe("conversation sidebar state", () => {
 
   it("opens the modal only as an explicit second action", () => {
     const selected = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
-      type: "show-document",
-      document: doc("doc_a"),
+      type: "show-file",
+      file: file("doc_a"),
     });
-    expect(selected.modalDocument).toBeNull();
+    expect(selected.modalFile).toBeNull();
 
     const modal = conversationSidebarReducer(selected, { type: "open-modal" });
-    expect(modal.modalDocument).toEqual(doc("doc_a"));
+    expect(modal.modalFile).toEqual(file("doc_a"));
   });
 
-  it("clears document state on navigation but keeps the user's panel layout", () => {
+  it("clears file state on navigation but keeps the user's panel layout", () => {
     const state: ConversationSidebarState = {
       expanded: false,
       activeTab: "runs",
-      selectedDocument: doc("doc_a"),
-      modalDocument: doc("doc_a"),
+      selectedFile: file("doc_a"),
+      modalFile: file("doc_a"),
     };
 
     expect(conversationSidebarReducer(state, { type: "conversation-change" })).toEqual({
       expanded: false,
       activeTab: "runs",
-      selectedDocument: null,
-      modalDocument: null,
+      selectedFile: null,
+      modalFile: null,
     });
   });
 });

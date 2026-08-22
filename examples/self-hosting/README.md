@@ -429,7 +429,7 @@ appstrate.example.com {
 
 ### Agent-HTML previews (`USERCONTENT_URL`)
 
-Agents can publish HTML documents, which the dashboard renders in a hardened,
+Agents can publish HTML files, which the dashboard renders in a hardened,
 cookie-less preview. That HTML is untrusted (agent-generated), so it is served
 from a dedicated preview route with an opaque-sandbox iframe, a strict CSP, and
 an injected meta CSP. For the strongest isolation in production, set
@@ -448,7 +448,7 @@ other users to view.
 **Setting it changes no behaviour, only isolation.** Agent HTML is rendered as
 active content **only** inside the dashboard's sandboxed iframe (`Sec-Fetch-Dest:
 iframe`), in _every_ mode — set or unset. Opening a `preview_url` in a top-level
-tab shows the document's source, never a rendered page, whatever this variable
+tab shows the file's source, never a rendered page, whatever this variable
 says. There is no "configured ⇒ trusted" exemption.
 
 **Do not point `USERCONTENT_URL` at `APP_URL`'s host.** A same-host value is not

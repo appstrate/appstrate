@@ -26,7 +26,7 @@ const storageDeletionJobSchema = {
     reason: {
       type: "string",
       description:
-        "Why the object is being purged (document_deleted | document_expired | org_deleted | " +
+        "Why the object is being purged (document_deleted | file_expired | org_deleted | " +
         "application_deleted | end_user_deleted | run_workspace_deleted | upload_expired | " +
         "materialization_failed).",
     },

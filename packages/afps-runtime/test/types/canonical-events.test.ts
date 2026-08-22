@@ -4,7 +4,7 @@
  * `isCanonicalRunEvent` against the shared fixture corpus.
  *
  * The accept/reject cases live in `test/fixtures/canonical-event-corpus.ts`.
- * This file is their only reader since the generated JSON Schema documents
+ * This file is their only reader since the generated JSON Schema files
  * were removed (they were never published — see
  * `src/events/canonical-event-schemas.ts`), which makes the guard the sole
  * definition of the canonical payload shape and this suite the only thing

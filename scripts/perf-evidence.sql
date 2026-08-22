@@ -166,7 +166,7 @@ SELECT
   pg_size_pretty(pg_indexes_size(s.relid))                 AS total_index_size,
   pg_size_pretty(pg_relation_size(s.relid))                AS heap_size
 FROM pg_stat_user_tables s
-WHERE s.relname IN ('runs', 'run_logs', 'llm_usage', 'notifications', 'documents')
+WHERE s.relname IN ('runs', 'run_logs', 'llm_usage', 'notifications', 'files')
 ORDER BY writes_since_reset DESC;
 
 \echo ''

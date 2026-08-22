@@ -7,7 +7,7 @@
  * This suite used to be four layers deep — artifact byte-parity, JSON Schema
  * 2020-12 validity under ajv, behavioral parity between the generated schemas
  * and the fixture corpus, and a coverage guard that derived the constrained
- * field paths from the generated documents. All four read the JSON Schema
+ * field paths from the generated files. All four read the JSON Schema
  * artifacts that `schemas:generate` produced, and those artifacts were never
  * published (see `src/events/canonical-event-schemas.ts` for the 404 evidence),
  * so they went with the generator.

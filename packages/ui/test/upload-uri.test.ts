@@ -6,7 +6,7 @@
 // `@appstrate/core` (the API side parses the same URIs); `packages/ui` used to
 // carry a byte-identical copy and no longer does.
 import { describe, it, expect } from "bun:test";
-import { isUploadUri } from "@appstrate/core/document-uri";
+import { isUploadUri } from "@appstrate/core/file-uri";
 
 describe("isUploadUri", () => {
   it("accepts valid upload:// strings", () => {

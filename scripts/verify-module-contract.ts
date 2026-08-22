@@ -262,9 +262,9 @@ const SERVICE_LEDGER: Record<ServiceMember, NamedLedgerEntry> = {
   resolveSubscriptionChatModel: { owners: ["module-chat"] },
   recordChatUsage: { owners: ["module-chat"] },
   resolveChatAttachment: { owners: ["module-chat"] },
-  cleanupSessionDocuments: { owners: ["module-chat"] },
+  cleanupSessionFiles: { owners: ["module-chat"] },
   checkUsageAllowed: { owners: ["module-chat"] },
-  setDocumentStorageLimit: { owners: ["cloud"] },
+  setFileStorageLimit: { owners: ["cloud"] },
 };
 
 /**

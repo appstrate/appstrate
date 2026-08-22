@@ -1107,7 +1107,7 @@ const L1_REJECT_DEEP_PATH: ConformanceCase = {
 const L3_ALG_UNSUPPORTED: ConformanceCase = {
   id: "L3.6",
   level: "L3",
-  title: "rejects a signature document with an unsupported algorithm (§3.4)",
+  title: "rejects a signature file with an unsupported algorithm (§3.4)",
   run: (adapter) => {
     const trust: TrustRoot = { keys: [] };
     const doc: BundleSignature = {

@@ -4,7 +4,12 @@ import { useTranslation } from "react-i18next";
 import { Check, Sparkles } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { formatBytes } from "@appstrate/core/format";
-import { PLAN_ICONS, PLAN_DESCRIPTION_KEYS, type BillingPlanDetail } from "../hooks/use-billing";
+import {
+  PLAN_ICONS,
+  PLAN_DESCRIPTION_KEYS,
+  planStorageBytes,
+  type BillingPlanDetail,
+} from "../hooks/use-billing";
 
 interface PlanCardProps {
   plan: BillingPlanDetail;
@@ -24,6 +29,7 @@ function PlanCard({
   const { t } = useTranslation(["settings"]);
   const Icon = PLAN_ICONS[plan.id] ?? Sparkles;
   const descKey = PLAN_DESCRIPTION_KEYS[plan.id];
+  const storageBytes = planStorageBytes(plan);
 
   return (
     <button
@@ -68,11 +74,9 @@ function PlanCard({
         {/* Storage entitlement — the plan's other metered resource. Omitted
             entirely when the billing module does not report it, rather than
             rendering a misleading "0 B". */}
-        {plan.document_storage_bytes !== undefined && (
+        {storageBytes !== undefined && (
           <span className="text-muted-foreground text-xs">
-            {t("onboarding.planStorage", {
-              size: formatBytes(plan.document_storage_bytes),
-            })}
+            {t("onboarding.planStorage", { size: formatBytes(storageBytes) })}
           </span>
         )}
       </div>

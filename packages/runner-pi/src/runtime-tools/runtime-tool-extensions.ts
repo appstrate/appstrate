@@ -25,9 +25,9 @@
 import { Type, type ExtensionAPI, type ExtensionFactory } from "../pi-sdk.ts";
 import {
   buildRuntimeToolDefs,
-  buildPublishDocumentDef,
+  buildPublishFileDef,
   reEmitRuntimeToolEvents,
-  type DocumentUploader,
+  type FileUploader,
   type RuntimeToolDef,
   type RuntimeToolEvent,
 } from "@appstrate/core/runtime-tool-defs";
@@ -94,23 +94,23 @@ function runtimeToolExtension(
   };
 }
 
-export interface BuildPublishDocumentExtensionOptions {
-  /** Uploads a workspace file to the platform, returning its document metadata. */
-  uploader: DocumentUploader;
-  /** Sink for the `document.published` event the tool emits (defaults to stdout-JSONL). */
+export interface BuildPublishFileExtensionOptions {
+  /** Uploads a workspace file to the platform, returning its file metadata. */
+  uploader: FileUploader;
+  /** Sink for the `file.published` event the tool emits (defaults to stdout-JSONL). */
   emit?: (event: RuntimeToolEvent) => void;
 }
 
 /**
- * Build the `publish_document` Pi extension around an injected uploader. The
+ * Build the `publish_file` Pi extension around an injected uploader. The
  * uploader (holding the run's HMAC sink signer) is wired in the runtime
  * entrypoint, so this tool is registered in-process even when the sidecar
  * hosts the other runtime tools over MCP — the sidecar has no path back to the
- * platform documents route.
+ * platform files route.
  */
-export function buildPublishDocumentExtension(
-  opts: BuildPublishDocumentExtensionOptions,
+export function buildPublishFileExtension(
+  opts: BuildPublishFileExtensionOptions,
 ): ExtensionFactory {
   const emit = opts.emit ?? defaultStdoutEmit;
-  return runtimeToolExtension(buildPublishDocumentDef(opts.uploader), emit);
+  return runtimeToolExtension(buildPublishFileDef(opts.uploader), emit);
 }

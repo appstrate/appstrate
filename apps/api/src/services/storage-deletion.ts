@@ -35,8 +35,8 @@ import type { ListEnvelope } from "@appstrate/shared-types";
 import {
   RUN_WORKSPACE_BUCKET,
   parseRunWorkspaceManifestKey,
-  parseRunDocumentsManifest,
-  runWorkspaceDocumentKey,
+  parseRunFilesManifest,
+  runWorkspaceFileKey,
 } from "./run-workspace-manifest.ts";
 
 /** A Drizzle executor — either the root `db` or an open transaction handle. */
@@ -157,11 +157,14 @@ interface ProcessStorageDeletionResult {
 
 /**
  * Delete one outbox target. A run-workspace manifest is a durable deletion
- * index: delete every document it names first, then the manifest itself. If a
- * document delete fails, the manifest remains available and the whole job can
+ * index: delete every file it names first, then the manifest itself. If a
+ * file delete fails, the manifest remains available and the whole job can
  * be retried idempotently. This lets parent-row cascades enqueue two bounded
  * jobs per run (bundle + manifest) without storage I/O inside their DB
- * transaction or silently orphaning `documents/*`.
+ * transaction or silently orphaning the run's `{runId}/documents/*` objects.
+ *
+ * That storage prefix really is spelled `documents/` — #1177 renamed the TABLE
+ * to `files`, never the live storage keys. See {@link runWorkspaceFileKey}.
  */
 async function deleteStorageTarget(
   bucket: string,
@@ -180,13 +183,13 @@ async function deleteStorageTarget(
     // Strict shared parse (same reader the serve path uses): every entry name is
     // validated as a single path segment BEFORE it becomes a key, so a corrupted
     // manifest can never steer a delete outside the run's own prefix.
-    const manifest = parseRunDocumentsManifest(manifestBytes, storageKey);
-    for (const name of new Set(manifest.documents.map((d) => d.workspace_name))) {
-      await del(bucket, runWorkspaceDocumentKey(runId, name));
+    const manifest = parseRunFilesManifest(manifestBytes, storageKey);
+    for (const name of new Set(manifest.files.map((d) => d.workspace_name))) {
+      await del(bucket, runWorkspaceFileKey(runId, name));
     }
   }
 
-  // Delete the index last. A retry can then always rediscover any document
+  // Delete the index last. A retry can then always rediscover any file
   // whose previous physical deletion did not complete.
   await del(bucket, storageKey);
 }
@@ -379,7 +382,7 @@ function statusFilter(status: StorageDeletionJobStatus) {
  * Pagination is the codebase's Stripe-style cursor idiom (see
  * `docs/CASING_CONVENTIONS.md` → "Pagination styles"): `startingAfter` carries
  * the id of the last row of the previous page — the same contract as
- * `/api/end-users` and the document gallery — and the response is the standard
+ * `/api/end-users` and the file gallery — and the response is the standard
  * `{ object: "list", data, hasMore }` envelope. The cursor row is looked up to
  * recover its `created_at`, so the keyset comparison stays on the full sort
  * tuple.

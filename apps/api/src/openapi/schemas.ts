@@ -1,8 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { orgRoleEnum } from "@appstrate/db/schema";
+import { ACCEPTED_RUNTIME_TOOL_IDS } from "@appstrate/core/runtime-tools-catalog";
 
 const ORG_ROLES = [...orgRoleEnum.enumValues];
+
+/**
+ * Runtime-tool ids a manifest may DECLARE — derived from the catalog's
+ * ACCEPTED set, not its SELECTABLE one.
+ *
+ * The two differ by the retired spellings (`publish_document` → `publish_file`,
+ * issue #1177). SELECTABLE answers "may the editor offer this?"; ACCEPTED
+ * answers "is this valid input?", which is what a request-body schema
+ * describes. Publishing the narrower set would make the spec reject a manifest
+ * the server accepts and normalizes — and a generated client would refuse to
+ * round-trip an agent published before the rename.
+ */
+const RUNTIME_TOOL_IDS = [...ACCEPTED_RUNTIME_TOOL_IDS];
 
 /**
  * All OpenAPI schema definitions (components/schemas).
@@ -312,10 +326,10 @@ export const schemas = {
       storage: {
         type: "object",
         description:
-          "Durable-document storage consumption for this organization. `used_bytes` is the running total of stored document bytes; `limit_bytes` is the raw per-org limit override (`documents_bytes_limit`), or null when no override is set; `effective_limit_bytes` is the limit the write path enforces — the override, else the global quota (`ORG_STORAGE_QUOTA_BYTES`), else null (unlimited).",
+          "Durable-file storage consumption for this organization. `used_bytes` is the running total of stored file bytes; `limit_bytes` is the raw per-org limit override (`files_bytes_limit`), or null when no override is set; `effective_limit_bytes` is the limit the write path enforces — the override, else the global quota (`ORG_STORAGE_QUOTA_BYTES`), else null (unlimited).",
         required: ["used_bytes", "limit_bytes", "effective_limit_bytes"],
         properties: {
-          used_bytes: { type: "integer", description: "Bytes of durable documents stored." },
+          used_bytes: { type: "integer", description: "Bytes of durable files stored." },
           limit_bytes: {
             type: ["integer", "null"],
             description:
@@ -714,8 +728,7 @@ export const schemas = {
       "connections_used",
       "package_ephemeral",
       "unread",
-      "document_counts",
-      "primary_document_id",
+      "file_counts",
     ],
     properties: {
       id: { type: "string" },
@@ -739,7 +752,7 @@ export const schemas = {
       result: {
         type: ["object", "null"],
         description:
-          "What the run produced: the structured output, and nothing else. Human-facing deliverables are documents (see the run's documents), not fields here. `null` while the run is in flight or when no output was emitted.",
+          "What the run produced: the structured output, and nothing else. Human-facing deliverables are files (see the run's files), not fields here. `null` while the run is in flight or when no output was emitted.",
         properties: {
           output: {
             description:
@@ -749,7 +762,7 @@ export const schemas = {
             type: "string",
             deprecated: true,
             description:
-              "HISTORICAL ONLY. Markdown left by the removed `report` runtime tool. The platform no longer writes this field — it is served verbatim on runs finalized before the removal. Agent reports are descriptively named markdown documents now (`outputs/<task-specific-name>.md`).",
+              "HISTORICAL ONLY. Markdown left by the removed `report` runtime tool. The platform no longer writes this field — it is served verbatim on runs finalized before the removal. Agent reports are descriptively named markdown files now (`outputs/<task-specific-name>.md`).",
           },
           text_truncated: {
             type: "boolean",
@@ -906,29 +919,23 @@ export const schemas = {
         description:
           "Present on enriched run responses. True when the source package is an inline-run shadow (POST /api/runs/inline).",
       },
-      document_counts: {
+      file_counts: {
         type: "object",
         description:
-          "Per-run document counts, always present on enriched list responses. Computed server-side: `input` from the distinct `document://` references in the run's persisted input, `output` from the count of documents the run produced.",
+          "Per-run file counts, always present on enriched list responses. Computed server-side: `input` from the distinct `appfile://` references in the run's persisted input, `output` from the count of files the run produced.",
         required: ["input", "output"],
         properties: {
           input: {
             type: "integer",
             minimum: 0,
-            description: "Distinct documents referenced as input by the run.",
+            description: "Distinct files referenced as input by the run.",
           },
           output: {
             type: "integer",
             minimum: 0,
-            description: "Documents produced by the run.",
+            description: "Files produced by the run.",
           },
         },
-      },
-      primary_document_id: {
-        type: ["string", "null"],
-        description:
-          "Document id of the run's explicitly selected primary deliverable, or null. The " +
-          "referenced document remains part of the ordinary run document list.",
       },
       inline_manifest: {
         type: ["object", "null"],
@@ -1701,10 +1708,13 @@ export const schemas = {
             type: "array",
             items: {
               type: "string",
-              enum: ["output", "log", "note", "pin", "publish_document"],
+              enum: RUNTIME_TOOL_IDS,
             },
             description:
-              "Appstrate top-level extension: runtime tools the agent may use. Optional.",
+              "Appstrate top-level extension: runtime tools the agent may use. Optional. " +
+              "`publish_document` is the retired pre-#1177 spelling of `publish_file`: still " +
+              "accepted on input (a manifest published before the rename carries it) and " +
+              "normalized to the canonical id on save.",
           },
         },
       },

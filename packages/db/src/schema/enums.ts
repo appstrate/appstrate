@@ -6,8 +6,8 @@
  * adding a value updates the DB enum, the Zod validator, and the
  * inferred TS union in lockstep.
  *
- * Only `zDocumentPurposeEnum` still exists as a Zod validator, because
- * `routes/documents.ts` actually parses with it. Eight sibling `z*Enum`
+ * Only `zFilePurposeEnum` still exists as a Zod validator, because
+ * `routes/files.ts` actually parses with it. Eight sibling `z*Enum`
  * validators used to live here under a header telling route handlers to import
  * them instead of redeclaring literal arrays inline — in the years since, not
  * one route ever did, and they had zero consumers across all four repos. The
@@ -93,13 +93,13 @@ export const runOriginValues = ["platform", "remote"] as const;
 export const runOriginEnum = pgEnum("run_origin", runOriginValues);
 
 /**
- * What a `documents` row is: `user_upload` (a staged upload materialized into
+ * What a `files` row is: `user_upload` (a staged upload materialized into
  * durable storage when consumed by a run/chat session) or `agent_output` (a
  * deliverable an agent published from a run). Drives the `downloadable`
  * derivation — an agent output is served to any actor who can read the
  * container, a user upload only to its own creator.
  */
-export const documentPurposeValues = ["user_upload", "agent_output"] as const;
-export const documentPurposeEnum = pgEnum("document_purpose", documentPurposeValues);
-export const zDocumentPurposeEnum = z.enum(documentPurposeValues);
-export type DocumentPurpose = z.infer<typeof zDocumentPurposeEnum>;
+export const filePurposeValues = ["user_upload", "agent_output"] as const;
+export const filePurposeEnum = pgEnum("file_purpose", filePurposeValues);
+export const zFilePurposeEnum = z.enum(filePurposeValues);
+export type FilePurpose = z.infer<typeof zFilePurposeEnum>;

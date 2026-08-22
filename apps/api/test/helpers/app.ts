@@ -62,7 +62,7 @@ import { createPackagesRouter } from "../../src/routes/packages.ts";
 import { createRealtimeRouter } from "../../src/routes/realtime.ts";
 import { createEndUsersRouter } from "../../src/routes/end-users.ts";
 import { createUploadsRouter, createUploadContentRouter } from "../../src/routes/uploads.ts";
-import { createDocumentsRouter, createDocumentPreviewRouter } from "../../src/routes/documents.ts";
+import { createFilesRouter, createFilePreviewRouter } from "../../src/routes/files.ts";
 import { createAdminStorageDeletionRouter } from "../../src/routes/admin-storage-deletion.ts";
 import { createCredentialProxyRouter } from "../../src/routes/credential-proxy.ts";
 import { createLlmProxyRouter } from "../../src/routes/llm-proxy.ts";
@@ -182,7 +182,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   // Cookie-less HTML preview — mounted BEFORE the auth pipeline (mirrors
   // production wiring in `apps/api/src/index.ts`) so no cookie/API-key/org/app
   // middleware runs on it; authorized solely by the signed `?t=` token.
-  app.route("/", createDocumentPreviewRouter());
+  app.route("/", createFilePreviewRouter());
 
   // Module-contributed public paths (e.g. inbound webhooks, OIDC login page).
   // The test harness collects from `extraModules` directly — it does not go
@@ -216,6 +216,8 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
     "/api/packages",
     "/api/integrations",
     "/api/uploads",
+    "/api/files",
+    // Deprecated pre-#1177 spelling — mirrors `src/index.ts`.
     "/api/documents",
   ];
 
@@ -271,7 +273,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   // path first. Mirrors production wiring in `apps/api/src/index.ts`.
   app.route("/api/uploads/_content", createUploadContentRouter());
   app.route("/api/uploads", createUploadsRouter());
-  app.route("/api", createDocumentsRouter());
+  app.route("/api", createFilesRouter());
   // Platform-operator storage-deletion outbox. Mirrors production wiring; the
   // route family carries its own operator guard (session + `platform` realm +
   // `AUTH_PLATFORM_ADMIN_EMAILS`), which is what its tests exercise.

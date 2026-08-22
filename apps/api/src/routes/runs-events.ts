@@ -17,30 +17,31 @@
  */
 
 import { Hono } from "hono";
+import type { Handler } from "hono";
 import { z } from "zod";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs } from "@appstrate/db/schema";
 import { invalidRequest, notFound, conflict } from "../lib/errors.ts";
 import { readJsonBody } from "../lib/request-body.ts";
-import { rateLimitByRunId, rateLimitRunDocuments } from "../middleware/rate-limit.ts";
+import { rateLimitByRunId, rateLimitRunFiles } from "../middleware/rate-limit.ts";
 import {
   verifyRunSignature,
   verifyRunUploadSignature,
 } from "../middleware/verify-run-signature.ts";
 import { ingestRunEvent, finalizeRun } from "../services/run-event-ingestion.ts";
-import { createDocumentFromStream } from "../services/documents.ts";
+import { createFileFromStream } from "../services/files.ts";
 import { getRunAttribution } from "../services/state/runs.ts";
 import { recordAudit } from "../services/audit.ts";
 import { actorFromIds } from "../lib/actor.ts";
 import { decodeFilenameHeader, sanitizeFilename } from "@appstrate/core/naming";
-import { documentUri } from "@appstrate/core/document-uri";
+import { fileUri } from "@appstrate/core/file-uri";
 import {
   downloadRunWorkspace,
-  downloadRunDocumentsManifest,
-  downloadRunDocumentStream,
+  downloadRunFilesManifest,
+  downloadRunFileStream,
 } from "../services/run-workspace-storage.ts";
-import { assertUniqueWorkspaceNames } from "../services/run-document-naming.ts";
+import { assertUniqueWorkspaceNames } from "../services/run-file-naming.ts";
 import { tokenUsageSchema } from "@appstrate/core/token-usage";
 import type { RunResult } from "@appstrate/afps-runtime/runner";
 import { getEnv } from "@appstrate/env";
@@ -184,7 +185,7 @@ export const RunResultSchema = z
     // `runs.cost` is correct even when `process.exit()` aborts the
     // metric POST. Degrades to undefined on a bad value.
     cost: z.number().nonnegative().optional().catch(undefined),
-    // Terminal outputs-sweep summary (documents hardening). Snake_case inner
+    // Terminal outputs-sweep summary (files hardening). Snake_case inner
     // keys, matching the persisted `runs.artifacts` column.
     //
     // A SOFT partial-deliverables SIGNAL. Finalize reports the outcome of an
@@ -253,7 +254,7 @@ export function createRunsEventsRouter() {
   // Uploads get their own per-run budget (30 in any 6s window ≈ 5/s sustained,
   // burst 30) so the finalize `outputs/` sweep's many small POSTs never exhaust
   // — or get starved by — the high-rate event-ingestion budget above.
-  const documentLimiter = rateLimitRunDocuments(30, 6);
+  const fileLimiter = rateLimitRunFiles(30, 6);
 
   // MIDDLEWARE ORDER — the signature guard runs FIRST on every route below,
   // the per-run limiter second. Both limiters key on the `:runId` from the
@@ -376,47 +377,52 @@ export function createRunsEventsRouter() {
     return c.body(bytes);
   });
 
-  // GET /api/runs/:runId/documents — the input-document manifest. The agent
-  // enumerates this, then fetches each document by name. A 404 means the run
-  // carries no input documents (the common case), which the runtime treats as
-  // an empty document set — not a fault.
-  router.get("/runs/:runId/documents", verifyRunSignature, eventLimiter, async (c) => {
+  // GET /api/runs/:runId/files — the input-file manifest. The agent
+  // enumerates this, then fetches each file by name. A 404 means the run
+  // carries no input files (the common case), which the runtime treats as
+  // an empty file set — not a fault.
+  const filesManifest: Handler<AppEnv> = async (c) => {
     const run = c.get("run")!;
-    const manifest = await downloadRunDocumentsManifest(run.id);
-    if (!manifest) throw notFound(`no input documents for run ${run.id}`);
+    const manifest = await downloadRunFilesManifest(run.id);
+    if (!manifest) throw notFound(`no input files for run ${run.id}`);
     // Never serve a manifest whose workspace names collide — the container keys
-    // its `workspace/documents/` writes on `workspace_name`, so a duplicate
-    // would silently overwrite one document with another. The platform build
+    // its `workspace/files/` writes on `workspace_name`, so a duplicate
+    // would silently overwrite one file with another. The platform build
     // path can't produce one (assignWorkspaceNames dedupes); this guards a
     // corrupted / hand-built manifest with a typed 400 instead.
-    // `workspace_name` is guaranteed present: `parseRunDocumentsManifest` (the
+    // `workspace_name` is guaranteed present: `parseRunFilesManifest` (the
     // single reader, shared with the deletion path) rejects any entry without a
     // safe single-segment name before this point.
-    assertUniqueWorkspaceNames(manifest.documents.map((d) => d.workspace_name));
+    assertUniqueWorkspaceNames(manifest.files.map((d) => d.workspace_name));
     return c.json(manifest);
-  });
+  };
+  router.get("/runs/:runId/files", verifyRunSignature, eventLimiter, filesManifest);
+  // Deprecated pre-#1177 spelling — a runtime-pi image older than the platform
+  // still calls it. Same handler, same HMAC. See RUNTIME SKEW below.
+  router.get("/runs/:runId/documents", verifyRunSignature, eventLimiter, filesManifest);
 
-  // POST /api/runs/:runId/documents — agent-published run output (Phase 2).
+  // POST /api/runs/:runId/files — agent-published run output (Phase 2).
   //
   // The agent container streams a file it produced (an HTML report, a CSV, …)
-  // here, either via the `publish_document` runtime tool or the entrypoint's
+  // here, either via the `publish_file` runtime tool or the entrypoint's
   // end-of-run `outputs/` sweep. Authenticated by the SAME run HMAC as the GET
   // provisioning routes (verified over an empty body so the up-to-100 MiB
   // payload streams straight to storage without being buffered for the hash).
   //
   // The bytes stream through a counting/hashing/cap transform into the durable
-  // `documents` bucket: the per-file cap and per-run output budget cut the
+  // file bucket (`documents`, see FILES_BUCKET — the table was renamed by
+  // #1177, the bucket was not): the per-file cap and per-run output budget cut the
   // stream mid-flight (413, deleting any partial object), the org quota is
   // enforced transactionally (403). Idempotent for the sweep's retries: an
-  // identical (run, sha256, name) upload returns the existing document (200).
+  // identical (run, sha256, name) upload returns the existing file (200).
   //
   // Signature before limiter — see the MIDDLEWARE ORDER note at the top of
   // this router. Here the budget being protected is the run's finalize
   // `outputs/` sweep.
-  router.post("/runs/:runId/documents", verifyRunUploadSignature, documentLimiter, async (c) => {
+  const publishFile: Handler<AppEnv> = async (c) => {
     const run = c.get("run")!;
 
-    // Only a live run may publish — a document arriving after finalize (or
+    // Only a live run may publish — a file arriving after finalize (or
     // before the run started) has no valid container state to attach to.
     const [runRow] = await db
       .select({ status: runs.status, packageId: runs.packageId })
@@ -428,32 +434,40 @@ export function createRunsEventsRouter() {
       throw conflict("run_not_running", `run ${run.id} is not running (status: ${runRow.status})`);
     }
 
-    // `X-Document-Name` carries a percent-encoded (encodeURIComponent) UTF-8
+    // `X-File-Name` carries a percent-encoded (encodeURIComponent) UTF-8
     // filename, because an HTTP field value is ISO-8859-1 by spec and cannot
     // carry a raw `report.md` in CJK or even a French accent without being
     // rejected by the sender or mojibaked in transit. Decoding is strict: a
     // value outside the encoder's alphabet, an over-long one, or a malformed
     // escape is a typed 400 rather than a guess, so a mis-encoded client fails
     // loudly instead of silently storing a corrupted deliverable name.
-    const rawName = c.req.header("X-Document-Name");
-    if (!rawName) throw invalidRequest("X-Document-Name header is required", "X-Document-Name");
+    //
+    // RUNTIME SKEW: `X-Document-Name` is the pre-#1177 spelling and is accepted
+    // forever. The runtime-pi image and the platform deploy independently, so a
+    // running container built before the rename still sends the old header; it
+    // holds the deliverable's only name, and rejecting it would silently turn
+    // every publish from an older image into a 400. The new name wins when both
+    // are present. `runtime-pi/publish.ts` emits only `X-File-Name`.
+    const legacyName = c.req.header("X-Document-Name");
+    const rawName = c.req.header("X-File-Name") ?? legacyName;
+    const nameHeader = c.req.header("X-File-Name") ? "X-File-Name" : "X-Document-Name";
+    if (!rawName) throw invalidRequest("X-File-Name header is required", "X-File-Name");
     const decodedName = decodeFilenameHeader(rawName);
     if (decodedName === null) {
       throw invalidRequest(
-        "X-Document-Name must be a percent-encoded (encodeURIComponent) UTF-8 filename",
-        "X-Document-Name",
+        `${nameHeader} must be a percent-encoded (encodeURIComponent) UTF-8 filename`,
+        nameHeader,
       );
     }
     const name = sanitizeFilename(decodedName);
     const mime = c.req.header("Content-Type");
     if (!mime) throw invalidRequest("Content-Type header is required", "Content-Type");
-    const rawPresentation = c.req.header("X-Document-Presentation");
-    if (rawPresentation !== undefined && rawPresentation !== "primary") {
-      throw invalidRequest(
-        "X-Document-Presentation must be 'primary' when provided",
-        "X-Document-Presentation",
-      );
-    }
+    // `X-Document-Presentation` is RETIRED (issue #1177). That is its real
+    // spelling — there was never an `X-File-Presentation`: the header was
+    // retired BEFORE the `document` → `file` rename, so no image ever emitted a
+    // `file`-spelled one. A runtime-pi image older than the platform still sends
+    // `X-Document-Presentation`; the header is read by nobody and must never be
+    // a 400 — the deliverable matters, its retired presentation hint does not.
 
     const body = c.req.raw.body;
     if (!body) throw invalidRequest("request body is required");
@@ -461,34 +475,32 @@ export function createRunsEventsRouter() {
     // Attribution is copied from the run row (never trusted from the agent):
     // the run's creator + end-user, and the run's producing package.
     const attribution = await getRunAttribution(run.orgId, run.id);
-    const { row, deduped, presentationChanged } = await createDocumentFromStream(
+    const { row, deduped } = await createFileFromStream(
       { orgId: run.orgId, applicationId: run.applicationId },
       run.id,
       { userId: attribution?.userId ?? null, endUserId: attribution?.endUserId ?? null },
       runRow.packageId,
-      { name, mime, body, presentation: rawPresentation },
+      { name, mime, body },
     );
 
-    // Audit a genuinely new publish and a dedup replay that changed the
-    // featured document. A no-op replay remains silent.
+    // Audit a genuinely new publish. A dedup replay remains silent.
     // No request context here (HMAC-run-authenticated, no user session), so
     // this is the direct-service `recordAudit`, attributed to the run's actor.
-    if (!deduped || presentationChanged) {
+    if (!deduped) {
       const actor = actorFromIds(attribution?.userId ?? null, attribution?.endUserId ?? null);
       await recordAudit({
         orgId: run.orgId,
         applicationId: run.applicationId,
         actorType: actor ? actor.type : "system",
         actorId: actor?.id ?? null,
-        action: "document.published",
-        resourceType: "document",
+        action: "file.published",
+        resourceType: "file",
         resourceId: row.id,
         after: {
           name: row.name,
           size: row.size,
           mime: row.mime,
           runId: run.id,
-          presentation: row.presentation,
         },
       });
     }
@@ -496,29 +508,34 @@ export function createRunsEventsRouter() {
     return c.json(
       {
         id: row.id,
-        uri: documentUri(row.id),
+        uri: fileUri(row.id),
         name: row.name,
         mime: row.mime,
         size: row.size,
         sha256: row.sha256,
-        presentation: row.presentation,
       },
       deduped ? 200 : 201,
     );
-  });
+  };
+  router.post("/runs/:runId/files", verifyRunUploadSignature, fileLimiter, publishFile);
+  // Deprecated pre-#1177 spelling — the same skew argument as the header above.
+  router.post("/runs/:runId/documents", verifyRunUploadSignature, fileLimiter, publishFile);
 
-  // GET /api/runs/:runId/documents/:name — a single input document, streamed
+  // GET /api/runs/:runId/files/:name — a single input file, streamed
   // straight from storage so neither the platform nor the agent buffers the
-  // whole payload. The agent streams the response body to `documents/<name>`.
-  // A 404 on a document the manifest listed is a fatal provisioning fault.
-  router.get("/runs/:runId/documents/:name", verifyRunSignature, eventLimiter, async (c) => {
+  // whole payload. The agent streams the response body to `files/<name>`.
+  // A 404 on a file the manifest listed is a fatal provisioning fault.
+  const fetchFile: Handler<AppEnv> = async (c) => {
     const run = c.get("run")!;
-    const name = c.req.param("name");
-    const stream = await downloadRunDocumentStream(run.id, name);
-    if (!stream) throw notFound(`document ${name} not found for run ${run.id}`);
+    const name = c.req.param("name")!;
+    const stream = await downloadRunFileStream(run.id, name);
+    if (!stream) throw notFound(`file ${name} not found for run ${run.id}`);
     c.header("Content-Type", "application/octet-stream");
     return c.body(stream);
-  });
+  };
+  router.get("/runs/:runId/files/:name", verifyRunSignature, eventLimiter, fetchFile);
+  // Deprecated pre-#1177 spelling — same skew argument.
+  router.get("/runs/:runId/documents/:name", verifyRunSignature, eventLimiter, fetchFile);
 
   return router;
 }

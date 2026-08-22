@@ -13,16 +13,17 @@ import { Spinner } from "../components/spinner";
 import { useRunRealtime, type RunMetricEvent, type RunLogEvent } from "../hooks/use-realtime";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
-import { LogViewer } from "../components/log-viewer";
 import { buildLogEntries, buildTurnRows } from "../components/log-utils";
 import { RunModal } from "../components/run-modal";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
-import { RunInfoTab } from "../components/run-info-tab";
-import { RunDocumentsTab } from "../components/run-documents-tab";
-import { RunDeliverableTab } from "../components/run-deliverable-tab";
+import { RunOutcomeTab } from "../components/run-outcome-tab";
+import { RunExecutionTab } from "../components/run-execution-tab";
+import { RunConfigurationTab } from "../components/run-configuration-tab";
+import { RunFilesTab } from "../components/run-files-tab";
 import { RunDetailTabsController } from "../components/run-detail-tabs-controller";
-import { invalidateOrgStorage } from "../hooks/use-documents";
+import { invalidateOrgStorage } from "../hooks/use-files";
+import { isPublishedFileLogEvent } from "../lib/files";
 import { RunRow } from "../components/run-row";
 import { RunCostReadout } from "../components/run-cost-readout";
 import { ContextGaugeReadout } from "../components/run-context-gauge";
@@ -32,11 +33,9 @@ import { useMarkReadByRun } from "../hooks/use-notifications";
 import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
 import type { components } from "../api/client";
 import { formatDateField } from "../lib/format-date";
-import { JsonView } from "../components/json-view";
 import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
 import { runKeys, invalidateRunLogs } from "../lib/query-keys";
 import { inlineRunDisplayName, runPageTitle } from "../lib/run-title";
-import { MemoryPanel } from "../components/persistence/memory-panel";
 import { Play } from "lucide-react";
 import type { RunDetailTab } from "../lib/run-detail-tabs";
 
@@ -111,31 +110,23 @@ export function RunDetailPage() {
     structuredOutput || (execResult?.output as Record<string, unknown> | undefined) || null;
   const hasOutput = !!finalOutput && Object.keys(finalOutput).length > 0;
   const allLogs = historicalLogs;
-  const primaryDocumentId = run?.primary_document_id ?? null;
-  const hasDeliverable = !!primaryDocumentId;
-  const handlePrimaryDocumentUnavailable = useCallback(
-    (documentId: string) => {
-      const key = runKeys.detail(orgId, applicationId, runId);
-      qc.setQueryData<EnrichedRun>(key, (previous) => {
-        if (!previous || previous.primary_document_id !== documentId) return previous;
-        return { ...previous, primary_document_id: null };
-      });
-      void qc.invalidateQueries({ queryKey: key });
-    },
-    [applicationId, orgId, qc, runId],
-  );
 
   // Run-level memory rows (only those touched during this run).
   const { data: runMemories } = useRunMemories(packageId, runId);
   const { data: runPinned } = useRunPinned(packageId, runId);
   const runMemoryCount = (runMemories?.length ?? 0) + (runPinned?.length ?? 0);
-  const hasRunMemory = runMemoryCount > 0;
 
-  // Document count for the tab badge — read off the run DTO the page already
-  // has (same field `run-row.tsx` renders). Listing the run's documents just to
+  // File count for the tab badge — read off the run DTO the page already
+  // has (same field `run-row.tsx` renders). Listing the run's files just to
   // count them cost a request on every run page and silently saturated at the
-  // page size; the list query now runs only when the tab is actually opened.
-  const documentCount = (run?.document_counts.input ?? 0) + (run?.document_counts.output ?? 0);
+  // page size; the list query now runs only when a pane that shows them opens.
+  //
+  // `outputFileCount` is also what decides which pane LEADS: the derived
+  // presentation rule (#1177) counts what the run PRODUCED and nothing else —
+  // inputs it consumed never count, and no agent-declared field takes part.
+  const inputFileCount = run?.file_counts.input ?? 0;
+  const outputFileCount = run?.file_counts.output ?? 0;
+  const fileCount = inputFileCount + outputFileCount;
 
   // Per-run SSE for log inserts + live metric updates. Status patches
   // come from `useGlobalRunSync` (mounted in MainLayout), which writes
@@ -165,13 +156,14 @@ export function RunDetailPage() {
           if (prev.some((l) => l.id === entry.id)) return prev;
           return [...prev, entry];
         });
-        // A published document arrives as a `type='result' event='document'`
-        // log frame — invalidate the run's documents list (the tab body), the
-        // run itself (its `document_counts` drives the tab badge) and the org
+        // A published file arrives as a `type='result' event='file'`
+        // log frame — invalidate the run's files list (the tab body), the
+        // run itself (its `file_counts` drives the tab badge) and the org
         // storage total those new bytes just moved, without a dedicated SSE
-        // channel.
-        if (entry.type === "result" && entry.event === "document") {
-          void qc.invalidateQueries({ queryKey: ["get", "/api/documents"] });
+        // channel. The tag set is legacy-tolerant (`isPublishedFileLogEvent`):
+        // a still-deployed pre-#1177 emitter must not go unnoticed here.
+        if (entry.type === "result" && isPublishedFileLogEvent(entry.event)) {
+          void qc.invalidateQueries({ queryKey: ["get", "/api/files"] });
           void qc.invalidateQueries({ queryKey: runKeys.detail(orgId, applicationId, runId) });
           invalidateOrgStorage(qc);
         }
@@ -284,7 +276,11 @@ export function RunDetailPage() {
 
       <RunDetailTabsController
         key={runId}
-        availability={{ hasDeliverable, hasResult: hasOutput, hasMemory: hasRunMemory }}
+        availability={{
+          producedFileCount: outputFileCount,
+          hasOutput,
+          hasMemory: runMemoryCount > 0,
+        }}
       >
         {({ activeTab, setActiveTab }) => (
           <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as RunDetailTab)}>
@@ -294,36 +290,24 @@ export function RunDetailPage() {
                 their bounded region rather than widening the page. */}
             <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
               <div className="max-w-full min-w-0 overflow-x-auto pb-1">
+                {/* Four panes, ALWAYS the same four: what the run produced, its
+                    files, how it ran, how it was set up. The previous strip
+                    grew and shrank per run (Résultat and Mémoire came and
+                    went), so its shape carried information nobody could read
+                    and every position was unlearnable. Emptiness is now stated
+                    inside the pane, where it can say what it means. */}
                 <TabsList className="w-max">
-                  {hasDeliverable && (
-                    <TabsTrigger value="deliverable">{t("run.tabDeliverable")}</TabsTrigger>
-                  )}
-                  {hasOutput && <TabsTrigger value="result">{t("run.tabResultGroup")}</TabsTrigger>}
-                  <TabsTrigger value="logs">
-                    {t("run.tabLogs")}
-                    {allLogs.length > 0 && (
+                  <TabsTrigger value="outcome">{t("run.tabOutcome")}</TabsTrigger>
+                  <TabsTrigger value="files">
+                    {t("run.tabFiles")}
+                    {fileCount > 0 && (
                       <span className="bg-primary/15 text-primary ml-1.5 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none font-medium">
-                        {allLogs.length}
+                        {fileCount}
                       </span>
                     )}
                   </TabsTrigger>
-                  {hasRunMemory && (
-                    <TabsTrigger value="memory">
-                      {t("run.tabMemory")}
-                      <span className="bg-primary/15 text-primary ml-1.5 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none font-medium">
-                        {runMemoryCount}
-                      </span>
-                    </TabsTrigger>
-                  )}
-                  <TabsTrigger value="documents">
-                    {t("run.tabDocuments")}
-                    {documentCount > 0 && (
-                      <span className="bg-primary/15 text-primary ml-1.5 inline-flex items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] leading-none font-medium">
-                        {documentCount}
-                      </span>
-                    )}
-                  </TabsTrigger>
-                  <TabsTrigger value="info">{t("run.tabInfo")}</TabsTrigger>
+                  <TabsTrigger value="execution">{t("run.tabExecution")}</TabsTrigger>
+                  <TabsTrigger value="configuration">{t("run.tabConfiguration")}</TabsTrigger>
                 </TabsList>
               </div>
               <div className="flex items-center gap-2">
@@ -371,37 +355,27 @@ export function RunDetailPage() {
               </div>
             </div>
 
-            {hasDeliverable && primaryDocumentId && (
-              <TabsContent value="deliverable" className="mt-0">
-                <RunDeliverableTab
-                  documentId={primaryDocumentId}
-                  onUnavailable={handlePrimaryDocumentUnavailable}
+            <TabsContent value="outcome" className="mt-0">
+              {runId && (
+                <RunOutcomeTab
+                  runId={runId}
+                  packageId={packageId}
+                  output={finalOutput}
+                  memoryCount={runMemoryCount}
                 />
-              </TabsContent>
-            )}
-
-            {hasOutput && (
-              <TabsContent value="result" className="mt-0">
-                <JsonView data={finalOutput} />
-              </TabsContent>
-            )}
-
-            <TabsContent value="logs" className="mt-0">
-              <LogViewer entries={allLogs} />
+              )}
             </TabsContent>
 
-            {hasRunMemory && (
-              <TabsContent value="memory" className="mt-0">
-                <MemoryPanel packageId={packageId} runId={runId} />
-              </TabsContent>
-            )}
-
-            <TabsContent value="documents" className="mt-0">
-              {runId && <RunDocumentsTab runId={runId} />}
+            <TabsContent value="files" className="mt-0">
+              {runId && <RunFilesTab runId={runId} />}
             </TabsContent>
 
-            <TabsContent value="info" className="mt-0">
-              <RunInfoTab run={enrichedRun} turns={turnRows} />
+            <TabsContent value="execution" className="mt-0">
+              <RunExecutionTab run={enrichedRun} logs={allLogs} turns={turnRows} />
+            </TabsContent>
+
+            <TabsContent value="configuration" className="mt-0">
+              <RunConfigurationTab run={enrichedRun} agentName={agent?.display_name} />
             </TabsContent>
           </Tabs>
         )}

@@ -11,7 +11,7 @@
  * child's attempt to navigate itself to an origin outside `frame-src` is blocked
  * with no network request to the target, while its legitimate initial load still
  * succeeds. (Navigation is all it bounds; exfiltration in general is not closed —
- * see the WebRTC/STUN residual in `services/document-preview.ts`.)
+ * see the WebRTC/STUN residual in `services/file-preview.ts`.)
  *
  * Three things are pinned here, and the last two matter as much as the first:
  *  - the header is present, and its single origin tracks `USERCONTENT_URL`;
@@ -43,7 +43,7 @@ const APP_CONFIG_SCRIPT = `<script>window.__APP_CONFIG__={"features":{}};</scrip
 /**
  * Run `fn` with `USERCONTENT_URL` set to `value` (or unset when undefined),
  * resetting the env cache on both edges — the same mechanism
- * `documents-preview.test.ts` uses for its `USERCONTENT_URL` describe block.
+ * `files-preview.test.ts` uses for its `USERCONTENT_URL` describe block.
  */
 async function withUsercontentUrl(
   value: string | undefined,
@@ -140,7 +140,7 @@ describe("SPA document CSP", () => {
   // flips the moment an unattended install is claimed) and names the current
   // build's hashed asset URLs, which the hashed assets' own year-long
   // `immutable` policy then depends on being fresh.
-  it("declares the document non-reusable without revalidation", async () => {
+  it("declares the file non-reusable without revalidation", async () => {
     await withUsercontentUrl(undefined, async () => {
       const res = await fetchSpa();
       expect(res.headers.get("Cache-Control")).toBe("no-cache");
@@ -169,7 +169,7 @@ describe("SPA document CSP", () => {
 /**
  * The production WIRING, pinned by reading `index.ts`'s source rather than by
  * making a request — the same technique
- * `apps/web/src/components/test/document-preview.test.ts` uses on its component.
+ * `apps/web/src/components/test/file-preview.test.ts` uses on its component.
  *
  * A request assertion is not available here: importing `index.ts` boots a real
  * server (it default-exports a `Bun.serve` config and runs the boot sequence),

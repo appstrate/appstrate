@@ -100,7 +100,7 @@ export function createUploadContentRouter() {
   // check. This endpoint is PUBLIC (the HMAC token is the only credential and it
   // arrives in the body/query), so there is no authenticated identity to key on;
   // rate-limiting by client IP first is exactly what caps brute-force token
-  // guessing before any verification work. (Contrast the run-document route,
+  // guessing before any verification work. (Contrast the run-file route,
   // whose limiter keys on a URL runId and so must verify FIRST.)
   router.put("/", rateLimitByIp(60), async (c) => {
     const token = c.req.query("token");
