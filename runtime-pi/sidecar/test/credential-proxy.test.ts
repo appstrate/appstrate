@@ -10,6 +10,7 @@
 
 import { describe, it, expect, mock } from "bun:test";
 import { executeApiCall, type ApiCallDeps } from "../credential-proxy.ts";
+import { _setLogSinkForTesting } from "../logger.ts";
 import type { CredentialsResponse } from "../helpers.ts";
 
 function makeDeps(overrides: Partial<ApiCallDeps> = {}): ApiCallDeps {
@@ -1325,9 +1326,17 @@ describe("executeApiCall — finalUrl exposure (#471)", () => {
 
 describe("executeApiCall — debug diagnostic envelope (#404)", () => {
   /**
-   * Capture stdout lines written by the sidecar logger during `fn`, restore
-   * the original writer afterwards, and return the parsed JSON log records.
-   * The diagnostic envelope is a `debug` line, so it lands on stdout.
+   * Capture the stdout-bound lines the sidecar logger emits during `fn` and
+   * return them parsed. The diagnostic envelope is a `debug` line, so it
+   * lands on stdout — `warn`/`error` go to stderr and are filtered out here,
+   * exactly as the previous stdout-only capture did.
+   *
+   * The sink belongs to this call (`_setLogSinkForTesting`), it is not the
+   * global `process.stdout.write`. `bun test` runs the whole repo in one
+   * process, so a global capture also collects what other suites, libraries
+   * and the runner write — and every captured line is `JSON.parse`d below, so
+   * one foreign frame would be a hard `SyntaxError` on an innocent test
+   * (issue #1180).
    */
   async function captureLogs(
     level: string | undefined,
@@ -1337,15 +1346,14 @@ describe("executeApiCall — debug diagnostic envelope (#404)", () => {
     if (level === undefined) delete process.env.LOG_LEVEL;
     else process.env.LOG_LEVEL = level;
     const lines: string[] = [];
-    const original = process.stdout.write.bind(process.stdout);
-    process.stdout.write = ((chunk: unknown): boolean => {
-      lines.push(String(chunk));
-      return true;
-    }) as typeof process.stdout.write;
+    _setLogSinkForTesting((lineLevel, line) => {
+      if (lineLevel === "warn" || lineLevel === "error") return;
+      lines.push(line);
+    });
     try {
       await fn();
     } finally {
-      process.stdout.write = original;
+      _setLogSinkForTesting(null);
       if (prevLevel === undefined) delete process.env.LOG_LEVEL;
       else process.env.LOG_LEVEL = prevLevel;
     }

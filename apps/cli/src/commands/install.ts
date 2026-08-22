@@ -14,7 +14,7 @@
 import { closeSync, openSync, writeSync } from "node:fs";
 import { join, resolve } from "node:path";
 import * as clack from "@clack/prompts";
-import { intro, outro, askText, confirm, spinner, exitWithError } from "../lib/ui.ts";
+import { intro, outro, askText, confirm, withSpinner, exitWithError } from "../lib/ui.ts";
 import {
   generateBootstrapToken,
   generateEnvForTier,
@@ -29,7 +29,6 @@ import {
 import {
   assertDockerAvailable,
   checkDockerNetworkBudget,
-  DockerMissingError,
   dockerComposeUp,
   findRunningComposeProject as findRunningComposeProjectImport,
   isDockerAvailable,
@@ -1573,10 +1572,7 @@ async function installTier0(
     if (!proceed) {
       throw new Error("Tier 0 needs Bun. Install it manually from https://bun.sh and re-run.");
     }
-    const bunSpinner = spinner();
-    bunSpinner.start("Installing Bun");
-    await installBun();
-    bunSpinner.stop("Bun installed");
+    await withSpinner("Installing Bun", () => installBun(), "Bun installed");
     // No re-probe: `installBun()` placed the binary at `~/.bun/bin/bun`
     // and verified it via `access()`. Downstream spawns PATH-resolve
     // through `bunEnv()`, which includes BUN_BIN.
@@ -1588,17 +1584,15 @@ async function installTier0(
   // static package.json import in `lib/version.ts`; falling back to
   // `undefined` when the value is a dev placeholder lets `main` be
   // checked out instead of a bogus tag.
-  const cloneSpinner = spinner();
-  cloneSpinner.start("Cloning Appstrate source");
   const versionTag = CLI_VERSION === "0.0.0" ? undefined : `v${CLI_VERSION}`;
-  await cloneAppstrateSource(dir, { version: versionTag });
-  cloneSpinner.stop("Source cloned");
+  await withSpinner(
+    "Cloning Appstrate source",
+    () => cloneAppstrateSource(dir, { version: versionTag }),
+    "Source cloned",
+  );
 
   // Dependencies.
-  const installSpinner = spinner();
-  installSpinner.start("Installing dependencies");
-  await runBunInstall(dir);
-  installSpinner.stop("Dependencies installed");
+  await withSpinner("Installing dependencies", () => runBunInstall(dir), "Dependencies installed");
 
   // `.env`.
   const env = generateEnvForTier(0, appUrl, { port }, opts.bootstrap);
@@ -1617,10 +1611,11 @@ async function installTier0(
     return;
   }
 
-  const devSpinner = spinner();
-  devSpinner.start("Starting dev server");
-  const { pid } = await spawnDevServer(dir, localUrl);
-  devSpinner.stop(`Dev server running (pid ${pid})`);
+  const { pid } = await withSpinner(
+    "Starting dev server",
+    () => spawnDevServer(dir, localUrl),
+    (started) => `Dev server running (pid ${started.pid})`,
+  );
 
   await openBrowser(postInstallBrowserUrl(localUrl, opts.bootstrap));
   printBootstrapFollowup(appUrl, opts.bootstrap);
@@ -1764,16 +1759,9 @@ async function installDockerTier(
   // reverse proxy is configured, which happens AFTER the install.
   const localUrl = appUrlForPort(port);
   // Docker.
-  const dockerSpinner = spinner();
-  dockerSpinner.start("Checking Docker");
-  try {
-    await assertDockerAvailable();
-    dockerSpinner.stop("Docker OK");
-  } catch (err) {
-    dockerSpinner.stop("Docker not found");
-    if (err instanceof DockerMissingError) throw err;
-    throw err;
-  }
+  await withSpinner("Checking Docker", () => assertDockerAvailable(), "Docker OK", {
+    errorLabel: "Docker not found",
+  });
 
   // Informational pre-flight: Docker's default address pool (~31 user-defined
   // networks) is easy to exhaust once Appstrate's stack plus per-run networks
@@ -1842,35 +1830,34 @@ async function installDockerTier(
     backedUp,
     async () => {
       // Compose + .env.
-      const writeSpinner = spinner();
-      writeSpinner.start(
+      await withSpinner(
         mode === "upgrade" ? "Rewriting compose + merging .env" : "Writing compose + .env",
-      );
-      await writeComposeFile(dir, tier);
-      const fresh = generateEnvForTier(tier, appUrl, { port }, opts.bootstrap, runBackendEnv);
-      let envVars = mode === "upgrade" ? mergeEnv(existing.existingEnv, fresh) : fresh;
-      // Firecracker pairing token/URL must track the CURRENT install, not
-      // whatever `mergeEnv` happened to keep: `runSameHostRunnerInstall` below
-      // (and the remote one-liner) pair the daemon with `runBackend.token`, so
-      // the platform `.env` must carry that exact token. `runBackend.token` was
-      // already resolved by `seedUpgradeRunnerToken` above — on a remote/generated
-      // upgrade it holds the PRESERVED token so we don't rotate the platform away
-      // from the daemon; otherwise it's the flag/minted token being (re-)paired.
-      if (mode === "upgrade" && runBackend.adapter === "firecracker") {
-        envVars = {
-          ...envVars,
-          FIRECRACKER_RUNNER_URL: runBackend.runnerUrl,
-          FIRECRACKER_RUNNER_TOKEN: runBackend.token,
-        };
-        // The plaintext escape hatch tracks the CURRENT runner URL. Carrying
-        // a stale `=0` forward after the operator moved to https:// (or to
-        // the unix socket) would silently keep the plaintext door open for
-        // the next http:// misconfiguration.
-        if (runBackend.plaintextOptIn) envVars.FIRECRACKER_RUNNER_TLS_REQUIRED = "0";
-        else delete envVars.FIRECRACKER_RUNNER_TLS_REQUIRED;
-      }
-      await writeComposeEnv(dir, renderEnvFile(envVars));
-      writeSpinner.stop(
+        async () => {
+          await writeComposeFile(dir, tier);
+          const fresh = generateEnvForTier(tier, appUrl, { port }, opts.bootstrap, runBackendEnv);
+          let envVars = mode === "upgrade" ? mergeEnv(existing.existingEnv, fresh) : fresh;
+          // Firecracker pairing token/URL must track the CURRENT install, not
+          // whatever `mergeEnv` happened to keep: `runSameHostRunnerInstall` below
+          // (and the remote one-liner) pair the daemon with `runBackend.token`, so
+          // the platform `.env` must carry that exact token. `runBackend.token` was
+          // already resolved by `seedUpgradeRunnerToken` above — on a remote/generated
+          // upgrade it holds the PRESERVED token so we don't rotate the platform away
+          // from the daemon; otherwise it's the flag/minted token being (re-)paired.
+          if (mode === "upgrade" && runBackend.adapter === "firecracker") {
+            envVars = {
+              ...envVars,
+              FIRECRACKER_RUNNER_URL: runBackend.runnerUrl,
+              FIRECRACKER_RUNNER_TOKEN: runBackend.token,
+            };
+            // The plaintext escape hatch tracks the CURRENT runner URL. Carrying
+            // a stale `=0` forward after the operator moved to https:// (or to
+            // the unix socket) would silently keep the plaintext door open for
+            // the next http:// misconfiguration.
+            if (runBackend.plaintextOptIn) envVars.FIRECRACKER_RUNNER_TLS_REQUIRED = "0";
+            else delete envVars.FIRECRACKER_RUNNER_TLS_REQUIRED;
+          }
+          await writeComposeEnv(dir, renderEnvFile(envVars));
+        },
         mode === "upgrade"
           ? `Rewrote ${dir}/docker-compose.yml (secrets preserved)`
           : `Wrote ${dir}/docker-compose.yml + .env`,
@@ -1879,16 +1866,18 @@ async function installDockerTier(
       // Bring stack up. The project name is pinned via `--project-name`
       // rather than baked into the compose template, so two installs
       // under different dirs get isolated namespaces.
-      const upSpinner = spinner();
-      upSpinner.start(`Starting Appstrate (docker compose --project-name ${project.name} up -d)`);
-      await dockerComposeUp(dir, project.name);
-      upSpinner.stop("Containers up");
+      await withSpinner(
+        `Starting Appstrate (docker compose --project-name ${project.name} up -d)`,
+        () => dockerComposeUp(dir, project.name),
+        "Containers up",
+      );
 
       // Healthcheck.
-      const healthSpinner = spinner();
-      healthSpinner.start("Waiting for Appstrate to become healthy");
-      await waitForAppstrate(localUrl);
-      healthSpinner.stop("Appstrate is healthy");
+      await withSpinner(
+        "Waiting for Appstrate to become healthy",
+        () => waitForAppstrate(localUrl),
+        "Appstrate is healthy",
+      );
 
       // Persist the project-name binding on success. Written AFTER the
       // healthcheck so a stack that never came up doesn't leave a

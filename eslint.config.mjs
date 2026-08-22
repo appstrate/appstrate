@@ -19,6 +19,55 @@ const API_BARREL_BAN = {
   message:
     "Use the typed OpenAPI client from src/api/client.ts ($api / client) — the legacy fetch helpers are gone.",
 };
+// Zod 4 string-format bans (single source of truth). Declared here because the
+// CLI-test block below re-declares `no-restricted-syntax` for a subset of the
+// same files — flat config replaces (not merges) a rule's options across
+// blocks, so a later block that forgot these would silently switch the Zod
+// guard off for `apps/cli/test/**`.
+const ZOD4_STRING_FORMAT_BANS = [
+  {
+    selector:
+      "CallExpression[callee.property.name='email'][callee.object.callee.object.name='z'][callee.object.callee.property.name='string']",
+    message: "Zod 4: use z.email() instead of z.string().email().",
+  },
+  {
+    selector:
+      "CallExpression[callee.property.name='url'][callee.object.callee.object.name='z'][callee.object.callee.property.name='string']",
+    message: "Zod 4: use z.url() instead of z.string().url().",
+  },
+  {
+    selector:
+      "CallExpression[callee.property.name='uuid'][callee.object.callee.object.name='z'][callee.object.callee.property.name='string']",
+    message: "Zod 4: use z.uuid() instead of z.string().uuid().",
+  },
+];
+
+// Global-stream capture, banned in CLI tests. Two shapes are matched:
+// assigning over `process.stdout.write` / `process.stderr.write` /
+// `process.exit`, and `spyOn`-ing the two stream writes (which reaches the
+// same global through a different door — the rule would be theatre without
+// it). All three assignment selectors match through casts: the pattern this
+// replaces wrote `(process as unknown as { exit: … }).exit = original`, so
+// anchoring on `left.object.name === 'process'` would miss the exact code that
+// caused the bug. They anchor on a `process` Identifier *descendant* of the
+// assignment target instead, which the cast cannot hide.
+//
+// NOT covered, and deliberately so — each would need a selector broad enough
+// to fire on innocent code, or type information ESLint's AST pass does not
+// have. They are documented so nobody reads a green lint as proof of absence:
+//   - aliasing:            `const p = process; p.stdout.write = fn`
+//   - computed access:     `process["stdout"].write = fn`
+//   - destructuring:       `const { stdout } = process; stdout.write = fn`
+//   - defineProperty:      `Object.defineProperty(process, "exit", …)`
+//   - a cast on the spy target: `spyOn(process.stdout as any, "write")`
+// `spyOn(process, "exit")` is also intentionally allowed: install.test.ts uses
+// it with a `finally` restore for the installer's terminal paths, which is a
+// different problem from capturing output.
+const globalIoBan = (target, selector) => ({
+  selector,
+  message: `CLI tests must not take over the global ${target} (by assignment or \`spyOn\`). \`bun test\` runs every package in one process, so a global capture buffer also collects what other suites, libraries and the runner write — the assertion then fails non-deterministically and names an innocent test (issue #1180). Pass the command an injected CommandIO instead: createMemoryIO() from test/helpers/memory-io.ts.`,
+});
+
 const AUTH_CLIENT_BAN = {
   // Matches "../lib/auth-client", "../../lib/auth-client" and
   // "@/lib/auth-client". Only hooks/use-auth.ts (the seam) may import it.
@@ -58,23 +107,76 @@ export default tseslint.config(
     // and must not creep back in.
     files: ["**/src/**/*.{ts,tsx}", "**/test/**/*.ts"],
     rules: {
+      "no-restricted-syntax": ["error", ...ZOD4_STRING_FORMAT_BANS],
+    },
+  },
+  {
+    // Unguarded-spinner guard (issue #1180). A clack spinner paints from a
+    // `setInterval` that only `stop()` clears, so a `start()` whose body throws
+    // leaks a writer for the rest of the process — invisible in the shipped CLI
+    // (the error exits it), fatal under `bun test`, where one process runs every
+    // suite and the frames land in someone else's capture. `withSpinner`
+    // (src/lib/ui.ts) owns the start/stop pair; `ui.ts` itself is where the one
+    // remaining `clack.spinner()` call lives.
+    //
+    // Re-declares `no-restricted-syntax` for a subset of the Zod block above,
+    // which fully REPLACES its options here — hence the explicit spread.
+    files: ["apps/cli/src/**/*.ts"],
+    ignores: ["apps/cli/src/lib/ui.ts"],
+    rules: {
       "no-restricted-syntax": [
         "error",
+        ...ZOD4_STRING_FORMAT_BANS,
         {
-          selector:
-            "CallExpression[callee.property.name='email'][callee.object.callee.object.name='z'][callee.object.callee.property.name='string']",
-          message: "Zod 4: use z.email() instead of z.string().email().",
+          selector: "CallExpression[callee.object.name='clack'][callee.property.name='spinner']",
+          message:
+            "Use `withSpinner` from lib/ui.ts — it stops the spinner on every exit path. A raw `clack.spinner()` leaks its paint interval when the body throws (issue #1180). For a conditional start, use `spinner()` from lib/ui.ts and stop it in a `finally`.",
         },
-        {
-          selector:
-            "CallExpression[callee.property.name='url'][callee.object.callee.object.name='z'][callee.object.callee.property.name='string']",
-          message: "Zod 4: use z.url() instead of z.string().url().",
-        },
-        {
-          selector:
-            "CallExpression[callee.property.name='uuid'][callee.object.callee.object.name='z'][callee.object.callee.property.name='string']",
-          message: "Zod 4: use z.uuid() instead of z.string().uuid().",
-        },
+      ],
+    },
+  },
+  {
+    // Global-stream capture guard (issue #1180): tests used to assert on output
+    // by swapping the *global* `process.stdout.write` / `process.stderr.write`
+    // / `process.exit` for the duration of a call. The whole repo runs in one
+    // `bun test` process, so that buffer is not owned by the test writing to it
+    // — `expect(captured).toBe("")` was a coin flip that blamed whichever
+    // command happened to be running, and a reader that parses its capture
+    // (the sidecar's JSON log lines) got a hard `SyntaxError` instead.
+    //
+    // Every package, not just `apps/cli`: they share the one process, so a
+    // global capture anywhere is a capture of everything. Inject a sink the
+    // test owns — `createMemoryIO()` (apps/cli/test/helpers/memory-io.ts) for
+    // CLI commands, `_setLogSinkForTesting()` for the sidecar logger.
+    //
+    // This re-declares `no-restricted-syntax` for a subset of the block above,
+    // which fully REPLACES its options here — hence the explicit spread of the
+    // Zod 4 bans, so they keep firing in `**/test/**` too.
+    files: ["**/test/**/*.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        ...ZOD4_STRING_FORMAT_BANS,
+        globalIoBan(
+          "process.stdout.write",
+          "AssignmentExpression > MemberExpression.left[property.name='write'] MemberExpression[property.name='stdout'] Identifier[name='process']",
+        ),
+        globalIoBan(
+          "process.stderr.write",
+          "AssignmentExpression > MemberExpression.left[property.name='write'] MemberExpression[property.name='stderr'] Identifier[name='process']",
+        ),
+        globalIoBan(
+          "process.exit",
+          "AssignmentExpression > MemberExpression.left[property.name='exit'] Identifier[name='process']",
+        ),
+        globalIoBan(
+          "process.stdout.write",
+          "CallExpression[callee.name='spyOn'][arguments.0.object.name='process'][arguments.0.property.name='stdout'][arguments.1.value='write']",
+        ),
+        globalIoBan(
+          "process.stderr.write",
+          "CallExpression[callee.name='spyOn'][arguments.0.object.name='process'][arguments.0.property.name='stderr'][arguments.1.value='write']",
+        ),
       ],
     },
   },

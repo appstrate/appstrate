@@ -55,13 +55,8 @@ type FetchCall = { url: string; method: string | undefined; auth: string | null 
 let tmpDir: string;
 let originalXdg: string | undefined;
 const originalFetch = globalThis.fetch;
-const originalExit = process.exit;
-const originalStdoutWrite = process.stdout.write.bind(process.stdout);
-const originalStderrWrite = process.stderr.write.bind(process.stderr);
 
 let fetchCalls: FetchCall[];
-let stdoutChunks: string[];
-let stderrChunks: string[];
 
 function installFetch(responder: (url: string, init?: RequestInit) => Promise<Response>): void {
   const stub = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
@@ -78,32 +73,19 @@ function installFetch(responder: (url: string, init?: RequestInit) => Promise<Re
 }
 
 /**
- * Capture stdout + stderr without leaking to the test runner's output,
- * and turn `process.exit` into a throwable so we can assert the
- * exit-code path without killing the test worker. `whoamiCommand` only
- * uses `process.exit(1)` on error branches; the happy path returns
- * normally.
+ * Each test builds its own sink and injects it, so the captured bytes are
+ * the command's and nobody else's. The previous harness reassigned the
+ * process-wide streams; because `bun test` runs every package in one
+ * process, that buffer also collected concurrent writes from other suites
+ * and made `expect(...).toBe("")` a coin flip (issue #1180).
+ *
+ * `io.exit` throws `ExitError` instead of returning, so the rest of
+ * `whoamiCommand` doesn't execute after what would have been a fatal exit
+ * and the test worker survives. `whoamiCommand` only exits on its error
+ * branches; the happy path returns normally.
  */
 import { ExitError } from "./helpers/process-exit.ts";
-
-function captureIo(): void {
-  stdoutChunks = [];
-  stderrChunks = [];
-  process.stdout.write = ((chunk: string | Uint8Array): boolean => {
-    stdoutChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf-8"));
-    return true;
-  }) as typeof process.stdout.write;
-  process.stderr.write = ((chunk: string | Uint8Array): boolean => {
-    stderrChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf-8"));
-    return true;
-  }) as typeof process.stderr.write;
-  // `throw` instead of `return` so the rest of `whoamiCommand` doesn't
-  // execute after what would have been a fatal exit. This mirrors real
-  // process semantics closely enough for the assertions we care about.
-  (process as unknown as { exit: (code?: number) => never }).exit = ((code?: number): never => {
-    throw new ExitError(code ?? 0);
-  }) as (code?: number) => never;
-}
+import { createMemoryIO } from "./helpers/memory-io.ts";
 
 beforeAll(() => {
   originalXdg = process.env.XDG_CONFIG_HOME;
@@ -120,15 +102,11 @@ beforeEach(async () => {
   FakeKeyring.store.clear();
   _setKeyringFactoryForTesting((p) => new FakeKeyring(p));
   fetchCalls = [];
-  captureIo();
 });
 
 afterEach(async () => {
   _setKeyringFactoryForTesting(null);
   globalThis.fetch = originalFetch;
-  process.stdout.write = originalStdoutWrite;
-  process.stderr.write = originalStderrWrite;
-  (process as unknown as { exit: typeof originalExit }).exit = originalExit;
   await rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -167,16 +145,17 @@ describe("whoami (happy path)", () => {
       );
     });
 
-    await whoamiCommand({ profile: "default" });
+    const { io, stdout, stderr } = createMemoryIO();
+    await whoamiCommand({ profile: "default" }, io);
 
-    const out = stdoutChunks.join("");
+    const out = stdout();
     expect(out).toContain("Profile:  default");
     expect(out).toContain("Instance: https://app.example.com");
     // Server-side identity wins over the stale cached email.
     expect(out).toContain("User:     alice@example.com");
     expect(out).not.toContain("stale@example.com");
     expect(out).toContain("Name:     Alice");
-    expect(stderrChunks.join("")).toBe("");
+    expect(stderr()).toBe("");
   });
 
   it("falls back to server `name` when `displayName` is null (fresh signup, no dashboard customization)", async () => {
@@ -200,9 +179,10 @@ describe("whoami (happy path)", () => {
         ),
     );
 
-    await whoamiCommand({ profile: "default" });
+    const { io, stdout } = createMemoryIO();
+    await whoamiCommand({ profile: "default" }, io);
 
-    const out = stdoutChunks.join("");
+    const out = stdout();
     expect(out).toContain("Name:     Fresh User");
   });
 
@@ -222,9 +202,10 @@ describe("whoami (happy path)", () => {
         ),
     );
 
-    await whoamiCommand({ profile: "default" });
+    const { io, stdout } = createMemoryIO();
+    await whoamiCommand({ profile: "default" }, io);
 
-    const out = stdoutChunks.join("");
+    const out = stdout();
     expect(out).not.toContain("Name:");
     // User line is still present — email is the stronger identity.
     expect(out).toContain("User:     anon@example.com");
@@ -261,9 +242,10 @@ describe("whoami (happy path)", () => {
       return new Response("unknown", { status: 500 });
     });
 
-    await whoamiCommand({ profile: "default" });
+    const { io, stdout } = createMemoryIO();
+    await whoamiCommand({ profile: "default" }, io);
 
-    const out = stdoutChunks.join("");
+    const out = stdout();
     expect(out).toContain("Org:      Acme Corp (org_42)");
   });
 
@@ -291,8 +273,9 @@ describe("whoami (happy path)", () => {
       return new Response("unknown", { status: 500 });
     });
 
-    await whoamiCommand({ profile: "default" });
-    expect(stdoutChunks.join("")).toContain("Org:      org_gone");
+    const { io, stdout } = createMemoryIO();
+    await whoamiCommand({ profile: "default" }, io);
+    expect(stdout()).toContain("Org:      org_gone");
   });
 
   it("sends the stored Bearer token on /api/profile (JWT path, not cookies)", async () => {
@@ -305,7 +288,8 @@ describe("whoami (happy path)", () => {
         ),
     );
 
-    await whoamiCommand({ profile: "default" });
+    const { io } = createMemoryIO();
+    await whoamiCommand({ profile: "default" }, io);
 
     expect(fetchCalls).toHaveLength(1);
     expect(fetchCalls[0]!.auth).toBe("Bearer tok-abc");
@@ -331,34 +315,36 @@ describe("whoami (error paths)", () => {
       });
     });
 
+    const { io, stdout, stderr } = createMemoryIO();
     let exitCode: number | undefined;
     try {
-      await whoamiCommand({ profile: "default" });
+      await whoamiCommand({ profile: "default" }, io);
     } catch (err) {
       if (err instanceof ExitError) exitCode = err.code;
       else throw err;
     }
 
     expect(exitCode).toBe(1);
-    const err = stderrChunks.join("");
+    const err = stderr();
     // AuthError message from `apiFetch` — user-actionable re-login hint.
     expect(err).toMatch(/appstrate login/);
-    expect(stdoutChunks.join("")).toBe("");
+    expect(stdout()).toBe("");
   });
 
   it("exits 1 with a 'Profile ... not configured' message when the profile doesn't exist (no network)", async () => {
     installFetch(async () => new Response("should not be reached", { status: 500 }));
 
+    const { io, stderr } = createMemoryIO();
     let exitCode: number | undefined;
     try {
-      await whoamiCommand({ profile: "ghost" });
+      await whoamiCommand({ profile: "ghost" }, io);
     } catch (err) {
       if (err instanceof ExitError) exitCode = err.code;
       else throw err;
     }
 
     expect(exitCode).toBe(1);
-    expect(stderrChunks.join("")).toContain('Profile "ghost" not configured');
+    expect(stderr()).toContain('Profile "ghost" not configured');
     expect(fetchCalls).toHaveLength(0);
   });
 
@@ -368,16 +354,17 @@ describe("whoami (error paths)", () => {
       throw new TypeError("fetch failed");
     });
 
+    const { io, stderr } = createMemoryIO();
     let exitCode: number | undefined;
     try {
-      await whoamiCommand({ profile: "default" });
+      await whoamiCommand({ profile: "default" }, io);
     } catch (err) {
       if (err instanceof ExitError) exitCode = err.code;
       else throw err;
     }
 
     expect(exitCode).toBe(1);
-    const err = stderrChunks.join("");
+    const err = stderr();
     // `formatError` passes plain `Error` through as .message.
     expect(err).toContain("fetch failed");
   });

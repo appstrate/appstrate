@@ -31,10 +31,11 @@ import {
   outro,
   askText,
   select,
-  spinner,
+  withSpinner,
   formatUserCode,
   exitWithError,
 } from "../lib/ui.ts";
+import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import {
   readConfig,
@@ -102,42 +103,57 @@ async function defaultOpenUrl(url: string): Promise<void> {
   await open(url);
 }
 
-const defaultDeps: Required<LoginDeps> = {
-  pickOrg: async (orgs: Org[]): Promise<Org | null> => {
-    if (!process.stdin.isTTY) {
-      process.stdout.write(
-        "Multiple organizations — pass --org <id-or-slug> to pin non-interactively.\n",
+/**
+ * Built as a function of `io` rather than a module constant so the non-TTY
+ * fallbacks write to the caller's sink. The hooks themselves keep their
+ * `io`-free signatures — a test injecting `pickOrg` is choosing an org, not
+ * choosing where bytes go.
+ */
+function makeDefaultDeps(io: CommandIO): Required<LoginDeps> {
+  return {
+    pickOrg: async (orgs: Org[]): Promise<Org | null> => {
+      if (!process.stdin.isTTY) {
+        io.stdout.write(
+          "Multiple organizations — pass --org <id-or-slug> to pin non-interactively.\n",
+        );
+        return null;
+      }
+      return select<Org>(
+        "Select the organization to pin on this profile",
+        orgs.map((o) => ({
+          value: o,
+          label: `${o.name} — ${o.slug}`,
+          hint: o.id,
+        })),
       );
-      return null;
-    }
-    return select<Org>(
-      "Select the organization to pin on this profile",
-      orgs.map((o) => ({
-        value: o,
-        label: `${o.name} — ${o.slug}`,
-        hint: o.id,
-      })),
-    );
-  },
-  promptCreateOrg: async (): Promise<{ name: string; slug?: string } | null> => {
-    if (!process.stdin.isTTY) {
-      process.stdout.write(
-        "No organization yet on this account — run `appstrate org create <name>` to create one.\n",
-      );
-      return null;
-    }
-    const name = await askText("Organization name");
-    const slugRaw = await askText("Slug (optional — leave blank to auto-generate)", "");
-    const slug = slugRaw.trim();
-    return slug.length > 0 ? { name, slug } : { name };
-  },
-};
+    },
+    promptCreateOrg: async (): Promise<{ name: string; slug?: string } | null> => {
+      if (!process.stdin.isTTY) {
+        io.stdout.write(
+          "No organization yet on this account — run `appstrate org create <name>` to create one.\n",
+        );
+        return null;
+      }
+      const name = await askText("Organization name");
+      const slugRaw = await askText("Slug (optional — leave blank to auto-generate)", "");
+      const slug = slugRaw.trim();
+      return slug.length > 0 ? { name, slug } : { name };
+    },
+  };
+}
 
-export async function loginCommand(opts: LoginOptions): Promise<void> {
+/**
+ * `io` is a trailing parameter rather than another `LoginDeps` member: it is
+ * threaded through every helper below, including the ones that never prompt
+ * (`pinAppOnProfile`), whereas `LoginDeps` is documented — and injected by
+ * tests — as the interactive-prompt seam alone. The default keeps `cli.ts`'s
+ * single-argument call site working untouched.
+ */
+export async function loginCommand(opts: LoginOptions, io: CommandIO = DEFAULT_IO): Promise<void> {
   const config = await readConfig();
   const profileName = resolveProfileName(opts.profile, config);
 
-  intro(`Appstrate login — profile "${profileName}"`);
+  intro(`Appstrate login — profile "${profileName}"`, io);
 
   const rawInstance =
     opts.instance ??
@@ -154,29 +170,38 @@ export async function loginCommand(opts: LoginOptions): Promise<void> {
   try {
     normalizedInstance = normalizeInstance(rawInstance);
   } catch (err) {
-    exitWithError(err);
+    // Pass `io` explicitly: the default would exit the *process*, which in a
+    // test run means killing the runner instead of failing one test.
+    exitWithError(err, io);
   }
 
   try {
-    await runLogin(profileName, normalizedInstance, opts);
+    await runLogin(profileName, normalizedInstance, opts, io);
   } catch (err) {
-    exitWithError(err);
+    exitWithError(err, io);
   }
 }
 
-async function runLogin(profileName: string, instance: string, opts: LoginOptions): Promise<void> {
+async function runLogin(
+  profileName: string,
+  instance: string,
+  opts: LoginOptions,
+  io: CommandIO,
+): Promise<void> {
   // Step 1 — device code.
-  const s = spinner();
-  s.start("Requesting device code");
-  const code = await startDeviceFlow(instance, CLI_CLIENT_ID, CLI_SCOPE);
-  s.stop(`Code received — expires in ${Math.round(code.expiresIn / 60)}m`);
+  const code = await withSpinner(
+    "Requesting device code",
+    () => startDeviceFlow(instance, CLI_CLIENT_ID, CLI_SCOPE),
+    (issued) => `Code received — expires in ${Math.round(issued.expiresIn / 60)}m`,
+    { io },
+  );
 
   const display = formatUserCode(code.userCode);
 
   // Step 2 — show the user what to do. Print outside the spinner so the
   // code remains visible even after the spinner rewinds the cursor.
-  process.stdout.write(`\n  Visit: ${code.verificationUri}\n`);
-  process.stdout.write(`  Code:  ${display}\n\n`);
+  io.stdout.write(`\n  Visit: ${code.verificationUri}\n`);
+  io.stdout.write(`  Code:  ${display}\n\n`);
 
   // Step 3 — open the browser on the complete URI (pre-fills user_code).
   // If `open` fails (headless SSH / no display), the printed URL + code
@@ -184,14 +209,17 @@ async function runLogin(profileName: string, instance: string, opts: LoginOption
   defaultOpenUrl(code.verificationUriComplete).catch(() => {});
 
   // Step 4 — poll until approval or terminal error.
-  const pollSpinner = spinner();
-  pollSpinner.start("Waiting for approval in your browser");
-  const token = await pollDeviceFlow(instance, code.deviceCode, CLI_CLIENT_ID, {
-    interval: code.interval,
-    expiresIn: code.expiresIn,
-    deviceName: opts.deviceName,
-  });
-  pollSpinner.stop("Approved");
+  const token = await withSpinner(
+    "Waiting for approval in your browser",
+    () =>
+      pollDeviceFlow(instance, code.deviceCode, CLI_CLIENT_ID, {
+        interval: code.interval,
+        expiresIn: code.expiresIn,
+        deviceName: opts.deviceName,
+      }),
+    "Approved",
+    { io },
+  );
 
   // Step 5 — extract identity from the access token claims. The JWT
   // minted by /api/auth/cli/token carries `sub` (BA user id), `email`,
@@ -256,23 +284,23 @@ async function runLogin(profileName: string, instance: string, opts: LoginOption
   // persisted so `listOrgs` / `createOrg` (both authenticated) work.
   // Any failure here leaves the login valid but unpinned — surfaced as
   // a hint to the user, never as a hard failure.
-  const pinned = await pinOrgOnProfile(profileName, opts);
+  const pinned = await pinOrgOnProfile(profileName, opts, io);
 
   // Step 8 — cascade into application pinning. Issue #217. Requires an
   // `orgId` in context (listApplications is org-scoped), so we gate on
   // `pinned` rather than re-fetching from the keyring.
-  const pinnedApp = await pinAppOnProfile(profileName, opts, pinned);
+  const pinnedApp = await pinAppOnProfile(profileName, opts, pinned, io);
 
   const orgSuffix = pinned ? ` to "${pinned.name}" (${pinned.id})` : "";
   const appSuffix = pinnedApp ? ` / app "${pinnedApp.name}" (${pinnedApp.id})` : "";
-  outro(`Logged in as ${identity.email}${orgSuffix}${appSuffix}`);
+  outro(`Logged in as ${identity.email}${orgSuffix}${appSuffix}`, io);
 
   if (!pinned) {
-    process.stdout.write(
+    io.stdout.write(
       `No org pinned — pass -H "X-Org-Id: …" on each call, or run \`appstrate org switch\` later.\n`,
     );
   } else if (!pinnedApp && !opts.noApp) {
-    process.stdout.write(
+    io.stdout.write(
       `No app pinned — pass -H "X-Application-Id: …" on each call, or run \`appstrate app switch\` later.\n`,
     );
   }
@@ -303,8 +331,12 @@ async function pinOrgResettingStaleApp(profileName: string, orgId: string): Prom
   });
 }
 
-async function pinOrgOnProfile(profileName: string, opts: LoginOptions): Promise<Org | null> {
-  const deps = { ...defaultDeps, ...(opts.deps ?? {}) };
+async function pinOrgOnProfile(
+  profileName: string,
+  opts: LoginOptions,
+  io: CommandIO,
+): Promise<Org | null> {
+  const deps = { ...makeDefaultDeps(io), ...(opts.deps ?? {}) };
 
   // `--no-org` short-circuits everything, including the network call.
   if (opts.noOrg) return null;
@@ -323,7 +355,7 @@ async function pinOrgOnProfile(profileName: string, opts: LoginOptions): Promise
   } catch (err) {
     // Don't fail the login if /api/orgs is temporarily down — tokens
     // are already persisted and the user can retry with `org switch`.
-    process.stderr.write(`Failed to list organizations: ${getErrorMessage(err)}\n`);
+    io.stderr.write(`Failed to list organizations: ${getErrorMessage(err)}\n`);
     return null;
   }
 
@@ -372,6 +404,7 @@ async function pinAppOnProfile(
   profileName: string,
   opts: LoginOptions,
   orgPinned: Org | null,
+  io: CommandIO,
 ): Promise<Application | null> {
   if (opts.noApp) return null;
   if (!orgPinned) return null;
@@ -386,7 +419,7 @@ async function pinAppOnProfile(
   try {
     apps = await listApplications(profileName);
   } catch (err) {
-    process.stderr.write(`Failed to list applications: ${getErrorMessage(err)}\n`);
+    io.stderr.write(`Failed to list applications: ${getErrorMessage(err)}\n`);
     return null;
   }
 
@@ -400,7 +433,7 @@ async function pinAppOnProfile(
   if (apps.length === 0) {
     // Should be impossible in practice — every org has a server-provisioned
     // default app. Surface defensively in case of partial state.
-    process.stderr.write(
+    io.stderr.write(
       "No applications found on the pinned organization — run `appstrate app create <name>` to create one.\n",
     );
     return null;
@@ -419,7 +452,7 @@ async function pinAppOnProfile(
     await updateProfile(profileName, { applicationId: def.id });
     return def;
   }
-  process.stderr.write(
+  io.stderr.write(
     "Multiple applications but none marked default — run `appstrate app switch` to pin one.\n",
   );
   return null;

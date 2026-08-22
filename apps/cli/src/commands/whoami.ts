@@ -20,6 +20,7 @@ import { readConfig, resolveProfileName } from "../lib/config.ts";
 import { apiFetch } from "../lib/api.ts";
 import { listOrgs } from "../lib/orgs.ts";
 import { formatError } from "../lib/ui.ts";
+import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 
 interface WhoamiOptions {
   profile?: string;
@@ -33,16 +34,26 @@ interface ProfileResponse {
   name: string | null;
 }
 
-export async function whoamiCommand(opts: WhoamiOptions): Promise<void> {
+/**
+ * `io` is injected so tests own their own sink. Reassigning the global
+ * stdout/stderr streams used to be the only way to read this command's
+ * output, and in a single-process `bun test` run that buffer collected
+ * writes from every other suite too (issue #1180). Production callers pass
+ * nothing and get `DEFAULT_IO`, so `cli.ts` is unchanged.
+ */
+export async function whoamiCommand(
+  opts: WhoamiOptions,
+  io: CommandIO = DEFAULT_IO,
+): Promise<void> {
   const config = await readConfig();
   const profileName = resolveProfileName(opts.profile, config);
   const profile = config.profiles[profileName];
 
   if (!profile) {
-    process.stderr.write(
+    io.stderr.write(
       `Profile "${profileName}" not configured. Run: appstrate login --profile ${profileName}\n`,
     );
-    process.exit(1);
+    io.exit(1);
   }
 
   try {
@@ -69,7 +80,7 @@ export async function whoamiCommand(opts: WhoamiOptions): Promise<void> {
       }
     }
 
-    process.stdout.write(
+    io.stdout.write(
       [
         `Profile:  ${profileName}`,
         `Instance: ${profile.instance}`,
@@ -81,7 +92,7 @@ export async function whoamiCommand(opts: WhoamiOptions): Promise<void> {
         .join("\n") + "\n",
     );
   } catch (err) {
-    process.stderr.write(formatError(err) + "\n");
-    process.exit(1);
+    io.stderr.write(formatError(err) + "\n");
+    io.exit(1);
   }
 }

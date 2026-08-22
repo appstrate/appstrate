@@ -24,6 +24,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { mkdir, readFile, rename, writeFile, unlink } from "node:fs/promises";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
+import { DEFAULT_IO, type CommandIO } from "./io.ts";
 
 export interface Profile {
   instance: string;
@@ -188,16 +189,23 @@ export async function resolveActiveProfile(
  * Used by every `appstrate org …` / `appstrate app …` subcommand —
  * centralized so the phrasing stays in sync across the two command
  * families.
+ *
+ * Takes the caller's `io` so the "not configured" branch lands in the same
+ * sink as the rest of the command. A test that injects a memory sink into
+ * `orgListCommand` would otherwise still hit the real `process.exit` here
+ * and kill the test worker (issue #1180). `models.ts` and any other caller
+ * that passes nothing keeps the production wiring via the default.
  */
 export function requireLoggedIn(
   profileName: string,
   profile: Profile | undefined,
+  io: CommandIO = DEFAULT_IO,
 ): asserts profile is Profile {
   if (!profile) {
-    process.stderr.write(
+    io.stderr.write(
       `Profile "${profileName}" not configured. Run: appstrate login --profile ${profileName}\n`,
     );
-    process.exit(1);
+    io.exit(1);
   }
 }
 
