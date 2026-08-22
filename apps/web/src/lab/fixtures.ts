@@ -716,14 +716,290 @@ export const integrations: Json200<"/api/integrations", "get"> = {
   ],
 };
 
-/** The same catalogue at the size a real org reaches. */
+/**
+ * The same catalogue at the size a real org reaches.
+ *
+ * The FIRST row keeps its real id: the detail page reads its activation state
+ * out of this list, so a catalogue where every id is suffixed made
+ * `/integrations/@appstrate/google-drive` say "not activated" under `heavy` and
+ * the tables the scenario exists to load were never drawn at all.
+ */
 export const heavyIntegrations: (typeof integrations)["data"] = Array.from(
   { length: 60 },
   (_, i) => {
     const base = integrations.data[i % integrations.data.length]!;
-    return { ...base, id: `${base.id}-${i + 1}`, active: true };
+    return { ...base, id: i === 0 ? base.id : `${base.id}-${i + 1}`, active: true };
   },
 );
+
+/* -------------------------------------------------------------------------- */
+/* Integration detail — the two tables the Connexions and Configuration tabs   */
+/* draw                                                                        */
+/* -------------------------------------------------------------------------- */
+
+/** The integration the detail fixtures are about — the catalogue's first row. */
+export const INTEGRATION_ID = "@appstrate/google-drive";
+
+/** The auth the accounts and the OAuth clients hang off — named once, read by
+ *  every handler that has to answer "which auth is this?". */
+export const INTEGRATION_AUTH_KEY = "drive";
+
+type IntegrationDetail = Json200<"/api/integrations/{packageId}", "get">;
+type IntegrationAuth = IntegrationDetail["auths"][number];
+type Connection = IntegrationAuth["connections"][number];
+
+/**
+ * Connected accounts for the oauth2 auth.
+ *
+ * Three, because every control on that row is gated on something and one
+ * happy account proves none of them: a healthy one the signed-in user owns
+ * (rename, share, disconnect all live), one of theirs that needs
+ * reconnecting (the renew CTA, and an expiry in the past), and one shared by
+ * ANOTHER member — whose row must show the owner badge and no owner-only
+ * control at all, since the API answers 403 for each of them.
+ */
+const driveConnections: Connection[] = [
+  {
+    id: "conn_lab_1",
+    packageId: INTEGRATION_ID,
+    auth_key: "drive",
+    account_id: "108453099102",
+    identity_claims: { email: "olivier@tractr.net" },
+    scopes_granted: [
+      "https://www.googleapis.com/auth/drive.readonly",
+      "https://www.googleapis.com/auth/drive.file",
+    ],
+    needs_reconnection: false,
+    expiresAt: ago(-40_000),
+    owner_type: "user",
+    owner_id: USER_ID,
+    owner_name: "Olivier Tarbès",
+    label: "olivier@tractr.net",
+    shared_with_org: true,
+    client_ref: "cli_lab_custom",
+    createdAt: ago(60_000),
+    updatedAt: ago(400),
+  },
+  {
+    id: "conn_lab_2",
+    packageId: INTEGRATION_ID,
+    auth_key: "drive",
+    account_id: "114820071553",
+    identity_claims: { email: "olivier@appstrate.com" },
+    scopes_granted: ["https://www.googleapis.com/auth/drive.readonly"],
+    needs_reconnection: true,
+    expiresAt: ago(2_800),
+    owner_type: "user",
+    owner_id: USER_ID,
+    owner_name: "Olivier Tarbès",
+    label: "olivier@appstrate.com",
+    shared_with_org: false,
+    client_ref: "cli_lab_custom",
+    createdAt: ago(50_000),
+    updatedAt: ago(2_800),
+  },
+  {
+    id: "conn_lab_3",
+    packageId: INTEGRATION_ID,
+    auth_key: "drive",
+    account_id: "119003471228",
+    identity_claims: { email: "compta@tractr.net" },
+    scopes_granted: [
+      "https://www.googleapis.com/auth/drive",
+      "https://www.googleapis.com/auth/drive.metadata.readonly",
+    ],
+    needs_reconnection: false,
+    expiresAt: ago(-20_000),
+    owner_type: "user",
+    owner_id: "user_lab_2",
+    owner_name: "Pierre",
+    label: "compta@tractr.net",
+    shared_with_org: true,
+    client_ref: "cli_lab_custom",
+    createdAt: ago(30_000),
+    updatedAt: ago(1_200),
+  },
+];
+
+/**
+ * The integration detail.
+ *
+ * THREE auths on purpose, because the states are per-auth and one happy auth
+ * shows none of them: `drive` (oauth2) carries the accounts and the clients;
+ * `mcp` is a remote-MCP auth whose client is auto-provisioned, which is the
+ * only way to reach the clients table's EMPTY state and the hint that explains
+ * it; `service_account` is a `custom` auth with nothing connected, which shows
+ * the connections table's empty state and the Configuration tab's "this auth
+ * has no OAuth client" line. None of the three was visible while the screen had
+ * no fixture at all.
+ */
+export const integrationDetail: IntegrationDetail = {
+  manifest: {
+    display_name: "Google Drive",
+    description:
+      "Lire, écrire et organiser les fichiers d'un Drive : documents, tableurs, dossiers partagés.",
+    version: "2.1.0",
+    author: "Appstrate",
+    license: "Apache-2.0",
+    // The DECLARED auths, keyed like the manifest. The Configuration tab reads
+    // this map and skips any auth missing from it, so without these two the
+    // whole tab renders as the access-rules row alone.
+    auths: {
+      drive: {
+        type: "oauth2",
+        authorized_uris: [
+          "https://www.googleapis.com/drive/v3",
+          "https://www.googleapis.com/upload/drive/v3",
+          "https://oauth2.googleapis.com/token",
+          "https://www.googleapis.com/oauth2/v3/userinfo",
+        ],
+      },
+      mcp: { type: "oauth2", authorized_uris: ["https://mcp.googleapis.com"] },
+      service_account: { type: "custom", authorized_uris: ["https://www.googleapis.com"] },
+    },
+  },
+  auths: [
+    {
+      auth_key: "drive",
+      type: "oauth2",
+      required: true,
+      scopes: [
+        "https://www.googleapis.com/auth/drive.readonly",
+        "https://www.googleapis.com/auth/drive.file",
+      ],
+      resource: "https://www.googleapis.com/",
+      connections: driveConnections,
+      ready: true,
+      has_oauth_client: true,
+      has_system_client: true,
+      client_auto_provisioned: false,
+    },
+    {
+      // A remote MCP auth: no client is registered and none has to be — the
+      // server mints one at connect time (DCR/CIMD). It is here because it is
+      // the only way to look at the clients table's EMPTY state, at the hint
+      // that explains it, and at the manual escape hatch under it.
+      auth_key: "mcp",
+      type: "oauth2",
+      required: false,
+      scopes: ["mcp:tools"],
+      resource: "https://mcp.googleapis.com/",
+      connections: [],
+      ready: false,
+      has_oauth_client: false,
+      has_system_client: false,
+      client_auto_provisioned: true,
+    },
+    {
+      auth_key: "service_account",
+      type: "custom",
+      required: false,
+      scopes: [],
+      resource: null,
+      connections: [],
+      ready: false,
+      has_oauth_client: false,
+      has_system_client: false,
+      client_auto_provisioned: false,
+    },
+  ],
+  tool_catalog: [
+    { name: "drive_search", description: "Chercher des fichiers par nom, type ou contenu." },
+    { name: "drive_read_file", description: "Lire le contenu d'un fichier." },
+    { name: "drive_upload", description: "Déposer un fichier dans un dossier." },
+  ],
+  allow_undeclared_tools: false,
+  active: true,
+  block_user_connections: false,
+  platform_redirect_uri: "https://app.appstrate.com/api/integrations/oauth/callback",
+};
+
+/** The same auth with a dozen accounts — what a shared workspace reaches. */
+export const heavyIntegrationConnections: Connection[] = Array.from({ length: 12 }, (_, i) => {
+  const base = driveConnections[i % driveConnections.length]!;
+  return {
+    ...base,
+    id: `conn_lab_h${i + 1}`,
+    label: `equipe-${i + 1}@tractr.net`,
+    account_id: `1084530991${i}`,
+  };
+});
+
+/**
+ * The OAuth clients of the `drive` auth. Three, for the same reason: a system
+ * client nobody may edit or delete, the org's own client which is the default,
+ * and a second custom one — without which the "définir par défaut" control has
+ * no row to appear on.
+ */
+export const integrationClients: Json200<
+  "/api/integrations/{packageId}/auths/{authKey}/clients",
+  "get"
+> = {
+  object: "list",
+  hasMore: false,
+  data: [
+    {
+      client_ref: "sys_a91f2c",
+      source: "built-in",
+      client_id: "sys_a91f2c4d",
+      is_default: false,
+      auto_provisioned: false,
+      has_client_secret: true,
+      token_endpoint_auth_method: "client_secret_post",
+      redirect_uri: null,
+    },
+    {
+      client_ref: "cli_lab_custom",
+      source: "custom",
+      client_id: "884012773901-h9v2c1k8s0m4.apps.googleusercontent.com",
+      is_default: true,
+      auto_provisioned: false,
+      has_client_secret: true,
+      token_endpoint_auth_method: "client_secret_post",
+      redirect_uri: null,
+    },
+    {
+      client_ref: "cli_lab_second",
+      source: "custom",
+      client_id: "884012773901-p3t7d5j1a2f6.apps.googleusercontent.com",
+      is_default: false,
+      auto_provisioned: false,
+      has_client_secret: false,
+      token_endpoint_auth_method: "none",
+      redirect_uri: "https://tractr.appstrate.com/api/integrations/oauth/callback",
+    },
+  ],
+};
+
+/** The package row behind the integration — the header's source and version. */
+export const integrationPackage: components["schemas"]["OrgPackageItemDetail"] = {
+  id: INTEGRATION_ID,
+  orgId: null,
+  name: "google-drive",
+  description: "Lire, écrire et organiser les fichiers d'un Drive.",
+  content: "# Google Drive\n\nIntégration système.\n",
+  source: "system",
+  created_by: null,
+  auto_installed: true,
+  version: "2.1.0",
+  forked_from: null,
+  agents: [{ id: "@tractr/compta-trimestrielle", display_name: "Compta trimestrielle" }],
+  createdAt: ago(200_000),
+  updatedAt: ago(4_000),
+};
+
+/** The agents that consume the integration — the pin section's left column. */
+export const integrationConsumingAgents: Json200<
+  "/api/integrations/{packageId}/consuming-agents",
+  "get"
+> = {
+  object: "list",
+  hasMore: false,
+  data: [
+    { packageId: "@tractr/compta-trimestrielle", display_name: "Compta trimestrielle" },
+    { packageId: "@tractr/wiki-brain", display_name: "Wiki-brain" },
+  ],
+};
 
 /**
  * Proxies, so the settings table can be looked at. Three of them because the

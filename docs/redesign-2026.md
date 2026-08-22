@@ -494,6 +494,67 @@ are system, which are running, at what version, down one column.
   that formats "3 runs" for everyone is a toolbar that will one day say it
   about agents — it did, for about ten minutes.
 
+## The integration detail
+
+`pages/integration-columns.tsx` (the two column sets) +
+`pages/integration-connection-cells.tsx` (the controls a connection row is made
+of). The fourth and fifth column sets: the OAuth CLIENTS of an auth, and the
+ACCOUNTS connected through it. Both were raw shadcn tables buried in an
+1800-line page, and both were the last collections outside the family.
+
+- **The provenance badge sits with the row's identity**, as on models,
+  credentials and proxies — so the clients table lost its `Source` column and
+  reads `Système  sys_a91f2c4d` on one line. Not for want of room this time
+  (this table has a full page, not a 775px modal): for the four sibling tables
+  to read the same way. Same reasoning took the two `col.actions` keys, which
+  named a column the family draws headerless.
+- **The share toggle is a checkbox, and the sentence is the header.** It used to
+  repeat "Partager avec l'organisation" on every row, where it wrapped onto two
+  lines and doubled the row's height. A column header says it once. A row the
+  caller does not own keeps the checkbox, checked and disabled: the state is the
+  fact, and the reason it cannot be changed is the "Partagée par Pierre" line
+  already under the account's name.
+- **A cell with state is a COMPONENT.** `cell` is called during the table's
+  render, so a hook inside one is a hook inside a loop. The row component that
+  used to hold the rename draft AND the delete confirmation is gone; each
+  control owns its own state, in its own cell. That is also why the two files
+  are split: `integration-columns.tsx` exports nothing but its two hooks, like
+  `model-columns.tsx`, and the components live next door — a file that mixes the
+  two trips `react-refresh/only-export-components` four times.
+- **The auth block stopped being a card, and the page stopped padding itself.**
+  A collection body wears the family's frame, so inside a card it wore two — and
+  the card's 32px plus a stray `p-6` the page kept on top of the shell's own
+  gutter left the table 266px at a 390 window where every other table gets 348.
+  That overflowed a frame which is `overflow-hidden`, so it CLIPPED. Each auth
+  now reads the way a list screen does: a header row with the connect action at
+  its right end, and the collection under it, `space-y-8` apart — the space is
+  what separates two auths once the border is gone.
+- **Measured, not looked at — and then looked at.** That overflow is invisible
+  on a screenshot at 1440; it was found with `getBoundingClientRect` across
+  sixteen widths. After the fix nothing overflows at any width down to 390, and
+  the account column never goes under 132px. The MEASUREMENT then missed one
+  that only a look caught: inside the account cell, "Partagée par Pierre" was a
+  `shrink-0` badge beside the name, so at 390 the badge kept every pixel and the
+  account name — the only thing naming the row — rendered at zero width. The
+  column was the right size; the cell ate it. It is a two-line cell now, name
+  over provenance, like the models table's. **A floor protects a column from its
+  neighbours, not a cell from its own contents.**
+
+The lab had no fixture for this screen at all, so it could only ever be seen
+failing. It has one now, and the three auths on it are what make the states
+visible: an oauth2 auth with three accounts (one healthy, one needing
+reconnection, one shared by ANOTHER member — so every owner-gated control is
+exercised), a remote-MCP auth whose client is auto-provisioned, which is the
+only way to reach the clients table's EMPTY state, and a `custom` auth with
+nothing connected. On the auto-provisioned one the hint that explains the
+emptiness IS the empty state's hint, rather than a second sentence saying the
+same thing in other words above the table.
+
+One fixture bug came out of it: `heavy` suffixed every id in the catalogue, so
+the detail page found no summary for itself, said "Non activée", and the
+scenario meant to load the table with volume never drew one. The first row
+keeps its real id now.
+
 ## Tokens
 
 - **`--background` stays WHITE.** In shadcn it is the COMPONENT surface —
@@ -717,9 +778,10 @@ ls components/ | grep -icE "modal|dialog|panel"              # bespoke modals
 At the time of writing:
 
 - **Collections.** 3 screens go through our `DataTable` (runs, schedules,
-  packages). **4 use the raw shadcn `Table`**: library, models, proxies,
-  integration detail. Plus the lists-inside-a-panel (documents, connections,
-  memory), each its own way.
+  packages). **4 used the raw shadcn `Table`**: library, models, proxies,
+  integration detail — all four are done as of 22 August, and only the LIBRARY
+  still draws a raw one, on purpose, because it is a matrix (below). Plus the
+  lists-inside-a-panel (documents, connections, memory), each its own way.
 - **Only THREE of those four are collections.** The library is a MATRIX —
   packages down, workspaces across, a checkbox at every crossing — and it stays
   on the raw table on purpose. `DataTable`'s contract is that a column is an
@@ -811,12 +873,10 @@ included (`lib/list-params.ts`).
 
 **Left, in the order to take it:**
 
-1. **The integration detail's two tables** (`pages/integration-detail.tsx:442`
-   and `:1153`). The heaviest thing remaining — 1806 lines to read for two
-   tables buried in them — which is why it was left for a session with room.
-   Everything the other three migrations learned applies: a column set is a
-   hook, it joins `column-tiers.test.tsx` or it is not held to the tier rule,
-   and a table inside a modal or a narrow panel never reaches tier 3.
+1. ~~**The integration detail's two tables.**~~ Done 22 August — see "The
+   integration detail" below. It is the last raw table that was a collection,
+   so the Collection family now has one body for every list in the app bar the
+   library matrix and the lists-in-a-panel.
 2. **The list-in-a-panel** (documents, connections, memory), three ways of
    doing one thing, and the last shape of the Collection family.
 3. Then B, loading in one pass.
@@ -948,6 +1008,31 @@ So the strategy the reference itself suggests:
 
 ## Open
 
+- **The tier-one budget is the window MINUS the shell's gutter, and the test
+  says the window** (found 22 August, migrating the integration tables). At a
+  390px window every table in the app measures 348px — the gutter takes the
+  other 42 — so `column-tiers.test.tsx` is checking against a number 42px too
+  generous. Three sets are already over the real one: `packages` at 388,
+  `models` and `proxies` at 384. It is not theoretical for the first of them —
+  **the packages table clips 28px of its last column at a 390px window**, on
+  `/agents`, `/skills` and `/mcp-servers` in table view, because the frame is
+  `overflow-hidden`. Not fixed here: tightening the constant fails three sets
+  this change was not about, and each is a product decision about which column
+  gives up room. The comment on that assertion carries the number and points
+  back here. The two integration sets were SIZED against 348 — by construction,
+  since nothing in the test enforces it.
+- **Two rename affordances, and one of them is the Edit button the product
+  owner ruled out.** The credentials table renames by clicking the label
+  (`InlineEditableLabel`, whose docstring already claims the other settings
+  tables); the connections table reveals an `Input` behind a pencil. The second
+  is what "Direct manipulation in forms. No Edit button revealing a field" says
+  not to do, and it was carried over verbatim in the migration rather than
+  introduced by it. Not converted on the spot because the shared component would
+  have to grow two things first — `truncate`, without which a long account name
+  blows out the column that was just fixed for exactly that, and a way to CLEAR
+  a label back to null, which a connection supports (it falls back to the
+  account id) and a credential does not. Both are small; deciding whether every
+  rename in the app becomes click-to-edit is not, which is why it is here.
 - **The browser pass is DONE (21 August).** Every list screen (`/runs`,
   `/schedules`, `/agents`, `/skills`, `/mcp-servers`) was walked on the four
   scenarios at 1440 / 1024 / 640, plus a width sweep measuring the real DOM at

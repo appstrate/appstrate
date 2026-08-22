@@ -20,6 +20,10 @@ import { useRunColumns } from "../runs-table.tsx";
 import { useScheduleColumns } from "../schedules-table.tsx";
 import { usePackageColumns } from "../packages-table.tsx";
 import { useProxyColumns } from "../../pages/org-settings/proxies.tsx";
+import {
+  useConnectionColumns,
+  useIntegrationClientColumns,
+} from "../../pages/integration-columns.tsx";
 import { useCredentialColumns, useModelColumns } from "../../pages/org-settings/model-columns.tsx";
 import { render } from "./run-fixture.tsx";
 
@@ -103,13 +107,48 @@ const SETS = {
         onSetDefault: () => {},
       }),
     ),
+  integrationClients: () =>
+    columnsFrom(() =>
+      useIntegrationClientColumns({
+        canChooseDefault: true,
+        isSettingDefault: false,
+        isDeleting: false,
+        onSetDefault: () => {},
+        onRotate: () => {},
+        onDelete: () => {},
+      }),
+    ),
+  connections: () =>
+    columnsFrom(() =>
+      useConnectionColumns({
+        packageId: "@appstrate/google-drive",
+        authKey: "drive",
+        authType: "oauth2",
+        canRenew: true,
+        userId: "user_1",
+        isAdmin: true,
+      }),
+    ),
 };
 
 describe.each(Object.entries(SETS))("the %s column set", (_name, load) => {
   const columns = load();
 
+  /**
+   * KNOWN TOO GENEROUS: the tier-one budget asserted below is 390, the WINDOW,
+   * and the real one is 348 — measured 22 August, at a 390px window every table
+   * in the app is 348px wide, because the shell's own gutter takes the other 42.
+   * Three sets are already between the two numbers (`packages` at 388, `models`
+   * and `proxies` at 384), and it is not theoretical: the packages table clips
+   * 28px of its last column at a 390px window, inside a frame that is
+   * `overflow-hidden`. Tightening the assertion is what should happen; it is not
+   * done here because it fails three sets that this change was not about, and
+   * each is a product decision about which column gives up room. Recorded in
+   * `docs/redesign-2026.md` under "Open" as the next thing to take. The two
+   * integration sets were SIZED against 348 (308 and 340) — by construction, not
+   * because anything below enforces it.
+   */
   it("fits its tier-one floors on a phone", () => {
-    // 390px window, minus nothing: below `@xl` the table is the whole width.
     expect(widthOf(columns, 1)).toBeLessThanOrEqual(390);
   });
 

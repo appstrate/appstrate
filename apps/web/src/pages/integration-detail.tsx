@@ -57,7 +57,7 @@ const INTEGRATION_TABS = [
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { Trash2, ShieldCheck, Plus, Pencil, Check, X, ChevronRight } from "lucide-react";
+import { Trash2, ShieldCheck, Plus, KeyRound, Plug, ChevronRight } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Input } from "@appstrate/ui/components/input";
@@ -65,19 +65,14 @@ import { Label } from "@appstrate/ui/components/label";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@appstrate/ui/components/tabs";
 import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from "@appstrate/ui/components/table";
-import {
   Collapsible,
   CollapsibleTrigger,
   CollapsibleContent,
 } from "@appstrate/ui/components/collapsible";
-import { LoadingState, ErrorState } from "../components/page-states";
+import { getErrorMessage } from "@appstrate/core/errors";
+import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
+import { DataTable } from "../components/data-table";
+import { useIntegrationClientColumns, useConnectionColumns } from "./integration-columns";
 import { SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { SetupGuideSteps } from "../components/package-detail/setup-guide-steps";
@@ -85,8 +80,6 @@ import { VersionHistory } from "../components/version-history";
 import { ForkPackageModal } from "../components/fork-package-modal";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Modal } from "../components/modal";
-import { SourceBadge } from "../components/source-badge";
-import { DefaultCell } from "../components/default-cell";
 import { usePermissions } from "../hooks/use-permissions";
 import { usePackageDetail, useDeletePackage, usePackageDownload } from "../hooks/use-packages";
 import {
@@ -98,7 +91,6 @@ import {
   useCreateIntegrationOAuthClient,
   useRotateIntegrationOAuthClient,
   useDeleteIntegrationOAuthClient,
-  useUpdateIntegrationConnection,
   useUpdateIntegrationSettings,
   useIntegrationPins,
   useIntegrationConnections,
@@ -115,17 +107,13 @@ import {
   type IntegrationManifestAuth,
 } from "../hooks/use-integrations";
 import { useIntegrations } from "../hooks/use-integrations";
-import { useDisconnectIntegrationConnection } from "../hooks/use-me-connections";
-import { useCurrentOrgId } from "../hooks/use-org";
 import { useAuth } from "../hooks/use-auth";
-import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { InlineConnectButton } from "../components/integration-connect/inline-connect-button";
 import {
   connectionDisplayLabel,
   isConnectionOwnedBy,
 } from "../components/integration-connect/connection-label";
 import { isOauthAuthConnectable } from "../components/integration-connect/connectable-auth-keys";
-import { ConnectionStatusBadge } from "../components/integration-connect/connection-status-badge";
 
 // ─────────────────────────────────────────────
 // OAuth client (admin) — create / rotate modal
@@ -362,7 +350,7 @@ function ClientsTable({
   autoProvisioned: boolean;
 }) {
   const { t } = useTranslation("settings");
-  const { data: clients } = useIntegrationClients(packageId, authKey);
+  const { data: clients, isLoading, isError, error } = useIntegrationClients(packageId, authKey);
   // Read from the same query key the page already holds, rather than threading
   // the value down through `ConfigAuthBlock`, which would carry a prop it never
   // reads. React Query dedupes, so this costs no request.
@@ -394,6 +382,18 @@ function ClientsTable({
   // Classic auths always allow registering more custom clients; auto-provisioned
   // auths only via the opt-in escape hatch (and only when none is registered yet).
   const canRegister = !autoProvisioned || (showManual && !hasAutoClient);
+  const columns = useIntegrationClientColumns({
+    canChooseDefault,
+    isSettingDefault: setDefault.isPending,
+    isDeleting: del.isPending,
+    onSetDefault: (client) =>
+      setDefault.mutate({
+        params: { path: { packageId, authKey } },
+        body: { client_ref: client.client_ref },
+      }),
+    onRotate: (client) => setModal({ mode: "rotate", client }),
+    onDelete: (client) => setConfirmDelete(client),
+  });
 
   return (
     <div className="mb-3" data-testid={`oauth-clients-list-${authKey}`}>
@@ -428,98 +428,39 @@ function ClientsTable({
         )}
       </div>
 
-      {autoProvisioned && !hasAutoClient && (
-        <p
-          className="text-muted-foreground mb-2 text-xs"
-          data-testid={`oauth-client-auto-hint-${authKey}`}
-        >
-          {t("integration.oauthClient.autoProvisionedHint")}
-        </p>
-      )}
-
-      {rows.length > 0 && (
-        <div className="overflow-hidden rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="text-xs">{t("integration.clients.col.source")}</TableHead>
-                <TableHead className="text-xs">{t("integration.clients.col.clientId")}</TableHead>
-                <TableHead className="text-xs">{t("integration.clients.col.default")}</TableHead>
-                <TableHead className="w-px text-right text-xs">
-                  {t("integration.clients.col.actions")}
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((client) => {
-                const editable = client.source === "custom" && !client.auto_provisioned;
-                const deletable = client.source === "custom";
-                return (
-                  <TableRow
-                    key={client.client_ref}
-                    data-testid={`oauth-client-row-${client.client_ref}`}
-                  >
-                    <TableCell>
-                      <SourceBadge
-                        source={client.source}
-                        autoProvisioned={client.auto_provisioned}
-                      />
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">{client.client_id}</TableCell>
-                    <TableCell>
-                      <DefaultCell
-                        isDefault={client.is_default}
-                        defaultLabel={t("integration.clients.default")}
-                        setLabel={t("integration.clients.setDefault.action")}
-                        canSetDefault={canChooseDefault}
-                        disabled={setDefault.isPending}
-                        onSetDefault={() =>
-                          setDefault.mutate({
-                            params: { path: { packageId, authKey } },
-                            body: { client_ref: client.client_ref },
-                          })
-                        }
-                        testId={`set-default-client-${client.client_ref}`}
-                      />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        {editable && (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 w-7 p-0"
-                            onClick={() => setModal({ mode: "rotate", client })}
-                            data-testid={`oauth-client-rotate-${client.client_ref}`}
-                            aria-label={t("integration.oauthClient.btnRotate")}
-                          >
-                            <Pencil size={14} />
-                          </Button>
-                        )}
-                        {deletable && (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 w-7 p-0"
-                            onClick={() => setConfirmDelete(client)}
-                            disabled={del.isPending}
-                            data-testid={`oauth-client-delete-${client.client_ref}`}
-                            aria-label={t("integration.oauthClient.btnDelete")}
-                          >
-                            <Trash2 size={14} className="text-destructive" />
-                          </Button>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
-      )}
+      <DataTable
+        label={t("integration.clients.title")}
+        columns={columns}
+        rows={rows}
+        rowKey={(client) => client.client_ref}
+        isLoading={isLoading}
+        isError={isError}
+        // The reason, not just the fact: `DataTable` owes a default when the
+        // caller writes no message, and a default is all this had.
+        error={<ErrorState message={getErrorMessage(error)} compact />}
+        // The register button above is the way out of an empty list, and it is
+        // already written out — the empty state does not re-offer it. On an
+        // auto-provisioned auth the reason the list is empty IS the state, so
+        // it is the empty state's hint rather than a second sentence above a
+        // table saying the same thing in other words. It therefore shows only
+        // while the list IS empty, where it used to sit above the table
+        // whenever no auto client existed — with rows on screen, "you have
+        // nothing to enter" contradicts them.
+        empty={
+          <EmptyState
+            message={t("integration.clients.empty")}
+            hint={
+              autoProvisioned ? (
+                <span data-testid={`oauth-client-auto-hint-${authKey}`}>
+                  {t("integration.oauthClient.autoProvisionedHint")}
+                </span>
+              ) : undefined
+            }
+            icon={KeyRound}
+            compact
+          />
+        }
+      />
 
       {autoProvisioned && !showManual && !hasAutoClient && (
         <Button
@@ -623,7 +564,7 @@ function ConnectAuthBlock({
   ).length;
 
   return (
-    <div className="bg-card rounded-lg border p-4" data-testid={`auth-section-${status.auth_key}`}>
+    <section data-testid={`auth-section-${status.auth_key}`}>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <AuthHeader status={status} />
         {/* Connect CTA / locked state. A missing oauth2 client blocks connecting:
@@ -659,7 +600,7 @@ function ConnectAuthBlock({
         // same way to avoid a guaranteed 403.
         canRenew={isOAuth && !clientMissing}
       />
-    </div>
+    </section>
   );
 }
 
@@ -686,7 +627,7 @@ function ConfigAuthBlock({
   const isOAuth = status.type === "oauth2";
 
   return (
-    <div className="bg-card rounded-lg border p-4" data-testid={`auth-config-${status.auth_key}`}>
+    <section data-testid={`auth-config-${status.auth_key}`}>
       <AuthHeader status={status} />
 
       {/* Scopes / resource (RFC 8707 — `resource` in AFPS §7.3) */}
@@ -731,7 +672,7 @@ function ConfigAuthBlock({
       {!isOAuth && (
         <p className="text-muted-foreground text-xs">{t("integration.config.noOAuthClient")}</p>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -1127,10 +1068,13 @@ function PinManagementSection({ packageId }: { packageId: string }) {
 }
 
 /**
- * Connected accounts for one auth, as a table. Empty → a muted line. Columns:
- * account (with inline rename), status (+ reconnect when stale), granted scopes,
- * org-share toggle, and a disconnect action. All mutations are unchanged from
- * the previous card layout — only the presentation moved to a table.
+ * Connected accounts for one auth.
+ *
+ * The rows come from the detail query the page already awaits, so the table has
+ * no loading or failure of its own to draw — an empty auth is an ANSWER, and it
+ * is the only state left for the body to show. Every control on a row lives in
+ * its column (`integration-columns.tsx`), which is where the ownership rules
+ * that gate them are written down.
  */
 function ConnectionsTable({
   packageId,
@@ -1146,296 +1090,26 @@ function ConnectionsTable({
   canRenew: boolean;
 }) {
   const { t } = useTranslation("settings");
-  if (connections.length === 0)
-    return <p className="text-muted-foreground text-sm">{t("integration.auth.noConnection")}</p>;
-  return (
-    <div className="overflow-hidden rounded-md border" data-testid={`connections-table-${authKey}`}>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="text-xs">{t("integration.connection.col.account")}</TableHead>
-            <TableHead className="text-xs">{t("integration.connection.col.status")}</TableHead>
-            <TableHead className="text-xs">{t("integration.connection.col.scopes")}</TableHead>
-            <TableHead className="text-xs">{t("integration.connection.col.shared")}</TableHead>
-            <TableHead className="w-px text-right text-xs">
-              {t("integration.connection.col.actions")}
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {connections.map((c) => (
-            <ConnectionTableRow
-              key={c.id}
-              connection={c}
-              packageId={packageId}
-              authKey={authKey}
-              authType={authType}
-              canRenew={canRenew}
-            />
-          ))}
-        </TableBody>
-      </Table>
-    </div>
-  );
-}
-
-function ConnectionTableRow({
-  connection,
-  packageId,
-  authKey,
-  authType,
-  canRenew,
-}: {
-  connection: IntegrationConnection;
-  packageId: string;
-  /** Auth key the connection is bound to — forwarded to the renew CTA. */
-  authKey: string;
-  /** Auth type from the manifest — gates the renew CTA to oauth2 only. */
-  authType: IntegrationAuthType;
-  /** False when no OAuth client is usable yet — admin must set one up first. */
-  canRenew: boolean;
-}) {
-  const { t } = useTranslation("settings");
-  const updateConnection = useUpdateIntegrationConnection();
-  const disconnect = useDisconnectIntegrationConnection();
-  const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
   const { user } = useAuth();
   const { isAdmin } = usePermissions();
-  const [editing, setEditing] = useState(false);
-  const [draftLabel, setDraftLabel] = useState(connection.label ?? "");
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  // `label` is the single source of truth (set at creation to the identity or
-  // "Connexion N"); render it verbatim.
-  const name = connectionDisplayLabel(connection);
-  const isShared = connection.shared_with_org === true;
-  // The list now returns org-shared connections owned by OTHER members, so
-  // every per-row control has to be gated on the same rule the API enforces —
-  // otherwise the button renders and the request comes back 403:
-  //   - delete  → `DELETE /api/me/connections/:id`, strictly owner-scoped
-  //               (`routes/me.ts`), no admin escape hatch by design;
-  //   - share   → owner-only, because sharing is the owner's consent
-  //               (`routes/integrations.ts`, `shared_with_org` branch);
-  //   - rename  → owner OR org admin (same route, label branch).
-  const isOwn = isConnectionOwnedBy(connection, user?.id);
-  const canRename = isOwn || isAdmin;
-  const startEdit = () => {
-    setDraftLabel(connection.label ?? "");
-    setEditing(true);
-  };
-  const cancelEdit = () => {
-    setEditing(false);
-    setDraftLabel(connection.label ?? "");
-  };
-  const submitLabel = () => {
-    const next = draftLabel.trim();
-    if (next === (connection.label ?? "")) {
-      setEditing(false);
-      return;
-    }
-    updateConnection.mutate(
-      {
-        params: { path: { packageId, connectionId: connection.id } },
-        body: { label: next === "" ? null : next },
-      },
-      { onSuccess: () => setEditing(false) },
-    );
-  };
-  const onDelete = () => {
-    if (!orgId || !applicationId) return;
-    setConfirmDelete(true);
-  };
+  const columns = useConnectionColumns({
+    packageId,
+    authKey,
+    authType,
+    canRenew,
+    userId: user?.id,
+    isAdmin,
+  });
   return (
-    <>
-      <TableRow data-testid={`connection-row-${connection.id}`}>
-        {/* Account — inline rename */}
-        <TableCell>
-          {editing ? (
-            <div className="flex items-center gap-1">
-              <Input
-                value={draftLabel}
-                onChange={(e) => setDraftLabel(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") submitLabel();
-                  if (e.key === "Escape") cancelEdit();
-                }}
-                placeholder={t("integration.connection.labelPlaceholder")}
-                className="h-7 max-w-xs text-sm"
-                autoFocus
-                data-testid={`label-input-${connection.id}`}
-              />
-              <Button
-                size="icon"
-                variant="ghost"
-                className="size-7"
-                onClick={submitLabel}
-                disabled={updateConnection.isPending}
-                title={t("integration.connection.labelSave")}
-                data-testid={`label-save-${connection.id}`}
-              >
-                <Check className="size-3.5" />
-              </Button>
-              <Button
-                size="icon"
-                variant="ghost"
-                className="size-7"
-                onClick={cancelEdit}
-                disabled={updateConnection.isPending}
-                title={t("integration.connection.labelCancel")}
-              >
-                <X className="size-3.5" />
-              </Button>
-            </div>
-          ) : (
-            <div className="flex items-center gap-1">
-              <span className="truncate font-medium">{name}</span>
-              {!isOwn && (
-                <Badge
-                  variant="secondary"
-                  className="text-[0.6rem]"
-                  data-testid={`connection-owner-${connection.id}`}
-                >
-                  {connection.owner_name
-                    ? t("integration.connection.sharedByOwner", { owner: connection.owner_name })
-                    : t("integration.connection.sharedByUnknown")}
-                </Badge>
-              )}
-              {canRename && (
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="size-6"
-                  onClick={startEdit}
-                  title={t("integration.connection.labelEdit")}
-                  data-testid={`label-edit-${connection.id}`}
-                >
-                  <Pencil className="size-3" />
-                </Button>
-              )}
-            </div>
-          )}
-        </TableCell>
-
-        {/* Status — connected / needs reconnection (+ renew) + expiry */}
-        <TableCell>
-          <div className="flex flex-col gap-1">
-            <div className="flex flex-wrap items-center gap-2">
-              {connection.needs_reconnection ? (
-                <>
-                  <ConnectionStatusBadge tone="needsReconnection">
-                    {t("integration.auth.needsReconnection")}
-                  </ConnectionStatusBadge>
-                  {/* Owner-only: the reconnect writes through
-                      `persistCredentialBundle` kind `update-owned`, whose WHERE
-                      carries the actor identity — a non-owner reconnect 404s.
-                      Only the owner can re-authenticate their own credential,
-                      so others see the state without a dead CTA. */}
-                  {isOwn && canRenew && authType === "oauth2" && (
-                    <InlineConnectButton
-                      packageId={packageId}
-                      authKey={authKey}
-                      intent="reconnect"
-                      // Threading the existing row id is what makes the OAuth
-                      // callback UPDATE-in-place rather than INSERT a duplicate
-                      // (integration-connections.ts:721 "explicit connectionId
-                      // = update; no id = insert").
-                      connectionId={connection.id}
-                      lockToAuthKey
-                      size="sm"
-                    />
-                  )}
-                </>
-              ) : (
-                <ConnectionStatusBadge tone="connected">
-                  {t("integration.connection.statusConnected")}
-                </ConnectionStatusBadge>
-              )}
-            </div>
-            {connection.expiresAt && (
-              <p className="text-muted-foreground text-[0.65rem]">
-                {t("integration.auth.expiresAt", {
-                  date: new Date(connection.expiresAt).toLocaleDateString(),
-                })}
-              </p>
-            )}
-          </div>
-        </TableCell>
-
-        {/* Granted scopes */}
-        <TableCell className="max-w-[16rem]">
-          {connection.scopes_granted.length > 0 ? (
-            <span
-              className="text-muted-foreground block truncate font-mono text-[0.65rem]"
-              title={connection.scopes_granted.join(" ")}
-            >
-              {connection.scopes_granted.join(" ")}
-            </span>
-          ) : (
-            <span className="text-muted-foreground text-xs">—</span>
-          )}
-        </TableCell>
-
-        {/* Org-share toggle — owner-only (sharing is the owner's consent) */}
-        <TableCell>
-          {isOwn ? (
-            <label
-              className="flex items-center gap-1.5 text-xs"
-              title={t("integration.connection.shareWithOrg.help")}
-            >
-              <input
-                type="checkbox"
-                checked={isShared}
-                disabled={updateConnection.isPending}
-                onChange={(e) =>
-                  updateConnection.mutate({
-                    params: { path: { packageId, connectionId: connection.id } },
-                    body: { shared_with_org: e.target.checked },
-                  })
-                }
-                data-testid={`share-toggle-${connection.id}`}
-              />
-              {t("integration.connection.shareWithOrg.label")}
-            </label>
-          ) : (
-            <span className="text-muted-foreground text-xs">
-              {t("integration.connection.shareWithOrg.label")}
-            </span>
-          )}
-        </TableCell>
-
-        {/* Disconnect — owner-only: the endpoint is `/api/me/connections` */}
-        <TableCell className="text-right">
-          {isOwn ? (
-            <Button
-              size="icon"
-              variant="ghost"
-              className="size-7"
-              onClick={onDelete}
-              disabled={disconnect.isPending}
-              title={t("integration.connection.delete")}
-              data-testid={`connection-delete-${connection.id}`}
-            >
-              <Trash2 className="text-destructive size-3.5" />
-            </Button>
-          ) : (
-            <span className="text-muted-foreground text-xs">—</span>
-          )}
-        </TableCell>
-      </TableRow>
-      <ConfirmModal
-        open={confirmDelete}
-        onClose={() => setConfirmDelete(false)}
-        title={t("btn.confirm", { ns: "common" })}
-        description={t("integration.connection.deleteConfirm")}
-        isPending={disconnect.isPending}
-        onConfirm={() =>
-          disconnect.mutate(
-            { params: { path: { connectionId: connection.id } } },
-            { onSuccess: () => setConfirmDelete(false) },
-          )
-        }
+    <div data-testid={`connections-table-${authKey}`}>
+      <DataTable
+        label={t("integration.connection.tableLabel")}
+        columns={columns}
+        rows={connections}
+        rowKey={(c) => c.id}
+        empty={<EmptyState message={t("integration.auth.noConnection")} icon={Plug} compact />}
       />
-    </>
+    </div>
   );
 }
 
@@ -1498,7 +1172,7 @@ export function IntegrationDetailPage() {
   const onActivate = () => activate.mutate({ params: { path: { packageId } } });
 
   return (
-    <div className="p-6">
+    <div>
       <SharedHeader
         detail={{
           id: packageId,
@@ -1602,7 +1276,7 @@ export function IntegrationDetailPage() {
         </div>
 
         {/* ─── Connexions (per-auth connect CTA + accounts table) ─── */}
-        <TabsContent value="connections" className="mt-4 space-y-4">
+        <TabsContent value="connections" className="mt-4 space-y-8">
           {!active ? (
             <ActivationHint onActivate={onActivate} pending={activate.isPending} />
           ) : detail.auths.length === 0 ? (
@@ -1624,7 +1298,7 @@ export function IntegrationDetailPage() {
             Connexions view so client setup and connected accounts no longer
             share one crowded card. ─── */}
         {isAdmin && (
-          <TabsContent value="configuration" className="mt-4 space-y-4">
+          <TabsContent value="configuration" className="mt-4 space-y-8">
             {!active ? (
               <ActivationHint onActivate={onActivate} pending={activate.isPending} />
             ) : (

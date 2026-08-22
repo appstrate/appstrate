@@ -81,6 +81,77 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     }),
   },
   {
+    // The integration detail — one package, its auths, and the accounts
+    // connected to each. The clients of an auth come from their own endpoint
+    // below; everything else on the screen is in this one body.
+    method: "GET",
+    pattern: /^\/api\/integrations\/[^/]+\/[^/]+$/,
+    handler: (_u, s) => ({
+      status: 200,
+      body: {
+        ...f.integrationDetail,
+        auths: f.integrationDetail.auths.map((a) =>
+          a.auth_key === f.INTEGRATION_AUTH_KEY
+            ? { ...a, connections: list(a.connections, s, f.heavyIntegrationConnections) }
+            : a,
+        ),
+      },
+    }),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/integrations\/[^/]+\/[^/]+\/auths\/[^/]+\/clients$/,
+    // Per auth, like the endpoint: only the oauth2 one has clients, and the
+    // other auth showing an empty table rather than someone else's rows is
+    // half of what the second auth is in the fixture for.
+    handler: (url, s) => {
+      const authKey = /\/auths\/([^/]+)\/clients$/.exec(url.pathname)?.[1] ?? "";
+      const rows = authKey === f.INTEGRATION_AUTH_KEY ? f.integrationClients.data : [];
+      return { status: 200, body: { ...f.integrationClients, data: list(rows, s) } };
+    },
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/integrations\/[^/]+\/[^/]+\/connections$/,
+    handler: (_u, s) => ({
+      status: 200,
+      body: {
+        object: "list" as const,
+        hasMore: false,
+        data: list(
+          f.integrationDetail.auths.find((a) => a.auth_key === f.INTEGRATION_AUTH_KEY)!.connections,
+          s,
+          f.heavyIntegrationConnections,
+        ),
+      },
+    }),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/integrations\/[^/]+\/[^/]+\/consuming-agents$/,
+    handler: (_u, s) => ({
+      status: 200,
+      body: { ...f.integrationConsumingAgents, data: list(f.integrationConsumingAgents.data, s) },
+    }),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/integrations\/[^/]+\/[^/]+\/pins$/,
+    handler: () => ({ status: 200, body: { object: "list" as const, hasMore: false, data: [] } }),
+  },
+  {
+    // 204 is the real server's "no org default is set", and the section reads
+    // it as such — a 404 there would look like a broken endpoint instead.
+    method: "GET",
+    pattern: /^\/api\/integrations\/[^/]+\/[^/]+\/default$/,
+    handler: () => ({ status: 204, body: null }),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/packages\/integrations\/[^/]+\/[^/]+$/,
+    handler: () => ({ status: 200, body: f.integrationPackage }),
+  },
+  {
     method: "GET",
     pattern: /^\/api\/orgs\/[^/]+\/settings$/,
     handler: () => ({ status: 200, body: f.orgSettings }),
