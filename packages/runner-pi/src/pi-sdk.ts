@@ -42,6 +42,12 @@ export { getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 // --- types (erased at runtime) ---
 export type { ModelRuntime, ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 export type { Api, KnownApi, Model, Transport, Message } from "@earendil-works/pi-ai";
+// The vendor's own event/usage shapes. Consumers keep their own narrow
+// structural views (a mapper must stay testable with synthetic events, and the
+// SDK value graph must stay behind `loadPiCodingAgentSdk()`); these exist so
+// those views can be PINNED against the vendor at compile time. Type-only, so
+// they are erased and drag nothing into the runtime graph.
+export type { AgentSessionEvent as PiSdkAgentSessionEvent } from "@earendil-works/pi-coding-agent";
 
 // --- heavy value surface (pi-coding-agent, ~200ms) behind a dynamic import ---
 // `@earendil-works/pi-coding-agent` is the single most expensive module to

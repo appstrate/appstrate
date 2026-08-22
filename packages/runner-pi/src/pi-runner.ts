@@ -34,6 +34,7 @@ import {
   type Api,
   type KnownApi,
   type Model,
+  type PiSdkAgentSessionEvent,
   type Transport,
 } from "./pi-sdk.ts";
 import { scheduleDeadlineNudges } from "./deadline-nudges.ts";
@@ -737,6 +738,15 @@ const OUTPUT_REPROMPT_INSTRUCTION =
   "context; do not call any other tool, do not research anything new, and do not " +
   "reply with plain text.";
 
+/**
+ * `run_logs` event name carried in the compaction breadcrumb's `data`, so the
+ * hidden cost of auto-compaction is queryable rather than inferred
+ * (`SELECT count(*), sum((data->>'outputTokens')::int) FROM run_logs WHERE
+ * data->>'event' = 'compaction'`). Mirrors the `output_reprompt` /
+ * `deadline_nudge` discriminators.
+ */
+const COMPACTION_EVENT = "compaction";
+
 /** Minimal Pi SDK session surface needed to issue the corrective turn. */
 export interface PromptableSession {
   prompt(message: string): Promise<unknown>;
@@ -1059,6 +1069,7 @@ export interface BridgeableSession {
  *   - `message_end`    (stopReason=error)      → `appstrate.error`
  *   - `tool_execution_start`                   → `appstrate.progress` + data { tool, args }
  *   - `tool_execution_end`                     → `appstrate.progress` + data { tool, result, isError, durationMs? }
+ *   - `compaction_end` (summarisation usage)   → `appstrate.progress` + data { event: "compaction", … } + `appstrate.metric`
  *   - `agent_end` (last turn usage aggregate)  → `appstrate.metric`
  *
  * The bridge deliberately does NOT forward `message_update` / `text_delta`
@@ -1107,6 +1118,61 @@ interface PiToolExecutionStartEvent {
   toolCallId?: string;
   args?: unknown;
 }
+/**
+ * Auto-compaction settled. Its `usage` is the summarisation LLM call — real
+ * spend the run must account for, and the only paid call in a LINEAR Pi
+ * session that never appears as an assistant `message_end`: it is written to a
+ * dedicated `compaction` session entry instead (`agent-session.js` →
+ * `appendCompaction`). Pi's own `getSessionStats()` counts one sibling,
+ * `branch_summary`, which no Appstrate path can produce — branch
+ * summarisation runs only on an explicit tree/branch operation, and both the
+ * runner and the chat drive a single linear session.
+ */
+interface PiCompactionResult {
+  /** Optional on the vendor too: an extension-supplied summary may report none. */
+  usage?: PiUsage;
+  tokensBefore: number;
+  estimatedTokensAfter?: number;
+}
+interface PiCompactionEndEvent {
+  type: "compaction_end";
+  reason: string;
+  aborted: boolean;
+  /** Key always present; `undefined` when the pass was aborted or failed. */
+  result: PiCompactionResult | undefined;
+}
+/**
+ * Compile-time pin: Pi's own `compaction_end` variant must still satisfy
+ * everything {@link installSessionBridge} reads off it. The bridge subscribes
+ * with an untyped callback (the SDK value graph stays behind
+ * `loadPiCodingAgentSdk()`), so nothing else would catch a renamed field —
+ * and a miss here is silent under-accounting, not a crash. Type-only, erased
+ * at runtime. Same idiom as `_assertApiShapeSubsetOfPi` above.
+ *
+ * TWO assertions, because assignability alone is not enough. A structural
+ * check only bites on REQUIRED members: a vendor object that dropped or
+ * renamed an OPTIONAL field still satisfies a view that declares it optional.
+ * `usage` — the whole reason this event is handled — is optional on both
+ * sides, so its key is pinned by name separately.
+ */
+type VendorCompactionEnd = Extract<PiSdkAgentSessionEvent, { type: "compaction_end" }>;
+type VendorCompactionResult = NonNullable<VendorCompactionEnd["result"]>;
+
+type Conforms<Vendor, Ours> = [Vendor] extends [Ours]
+  ? true
+  : { error: "Pi's compaction_end no longer fits the bridge's view"; vendor: Vendor; ours: Ours };
+
+type HasKey<T, K extends string> = K extends keyof T
+  ? true
+  : { error: "Pi's CompactionResult no longer carries this field"; missing: K; vendor: T };
+
+type _CompactionEndConforms = Conforms<VendorCompactionEnd, PiCompactionEndEvent> &
+  HasKey<VendorCompactionResult, "usage"> &
+  HasKey<VendorCompactionResult, "estimatedTokensAfter">;
+
+const _assertCompactionEndConforms: _CompactionEndConforms = true;
+void _assertCompactionEndConforms;
+
 interface PiToolExecutionEndEvent {
   type: "tool_execution_end";
   toolName?: string;
@@ -1196,9 +1262,31 @@ export function installSessionBridge(
   // read-only on the handle so `executeSession` can tell "the agent still
   // owes an `output`" from "the run already delivered".
   let terminalToolCompleted = false;
-  // Token usage accumulator across all assistant turns (shared zero-shape).
+  // Token usage accumulator across every paid call of the session (shared
+  // zero-shape) — assistant turns AND compaction passes.
   const totalUsage: TokenUsage = zeroTokenUsage();
   let totalCost = 0;
+
+  /**
+   * Fold one Pi `Usage` into the run totals and report its deltas.
+   *
+   * Pi exposes the legacy `{ input, output, cacheRead, cacheWrite }` shape;
+   * map it once here so every downstream emit reads the same canonical
+   * snake_case counters. `cost` is Pi's own (`calculateCost` against the
+   * model's rates) — never recomputed.
+   */
+  const accumulateUsage = (usage: PiUsage): { inputDelta: number; outputDelta: number } => {
+    const inputDelta = usage.input ?? 0;
+    const outputDelta = usage.output ?? 0;
+    totalUsage.input_tokens = (totalUsage.input_tokens ?? 0) + inputDelta;
+    totalUsage.output_tokens = (totalUsage.output_tokens ?? 0) + outputDelta;
+    totalUsage.cache_creation_input_tokens =
+      (totalUsage.cache_creation_input_tokens ?? 0) + (usage.cacheWrite ?? 0);
+    totalUsage.cache_read_input_tokens =
+      (totalUsage.cache_read_input_tokens ?? 0) + (usage.cacheRead ?? 0);
+    totalCost += usage.cost?.total ?? 0;
+    return { inputDelta, outputDelta };
+  };
 
   // Terminal verdict tracking. Updated on every assistant `message_end`,
   // so after the loop settles these hold the LAST assistant turn's outcome
@@ -1276,21 +1364,10 @@ export function installSessionBridge(
         lastAssistantStopReason = last.stopReason;
         lastAssistantErrorMessage = last.errorMessage;
 
-        // Accumulate token usage. Pi SDK exposes the legacy
-        // `{ input, output, cacheRead, cacheWrite }` shape on
-        // `message.usage`; map once into the canonical snake_case
-        // total so every downstream emit reads the same fields.
+        // Accumulate this turn's token usage into the run totals.
         const u = last.usage;
         if (u) {
-          const inputDelta = u.input ?? 0;
-          const outputDelta = u.output ?? 0;
-          totalUsage.input_tokens = (totalUsage.input_tokens ?? 0) + inputDelta;
-          totalUsage.output_tokens = (totalUsage.output_tokens ?? 0) + outputDelta;
-          totalUsage.cache_creation_input_tokens =
-            (totalUsage.cache_creation_input_tokens ?? 0) + (u.cacheWrite ?? 0);
-          totalUsage.cache_read_input_tokens =
-            (totalUsage.cache_read_input_tokens ?? 0) + (u.cacheRead ?? 0);
-          totalCost += u.cost?.total ?? 0;
+          const { inputDelta, outputDelta } = accumulateUsage(u);
 
           // Mid-run cumulative snapshot — fires after every assistant
           // turn so the platform can stream live cost to the UI. The
@@ -1367,6 +1444,48 @@ export function installSessionBridge(
             fire(buildProgress({ runId, timestamp: Date.now() }, text));
           }
         }
+        break;
+      }
+
+      // Auto-compaction is a real LLM call the run pays for, and the only one
+      // that never surfaces as an assistant `message_end` — Pi appends it to a
+      // dedicated `compaction` session entry (which is why its own
+      // `getSessionStats()` counts it and a message-only accumulator does
+      // not). Without this the tokens are invisible to `RunResult.usage` /
+      // `.cost`, and on a run with no llm-proxy rows to fall back on (a
+      // no-sidecar run against a static key) they are missing from
+      // `runs.cost` outright.
+      case "compaction_end": {
+        const e = event as unknown as PiCompactionEndEvent;
+        const usage = e.result?.usage;
+        // An aborted or failed pass carries no `result`: nothing was billed.
+        if (!usage) break;
+        accumulateUsage(usage);
+
+        // Breadcrumb BEFORE the metric: a reader scanning `run_logs` sees the
+        // cause next to the cost step it explains — the alternative is a cost
+        // curve that jumps for no visible reason, since compaction produces no
+        // turn row of its own.
+        const before = e.result?.tokensBefore;
+        const after = e.result?.estimatedTokensAfter;
+        fire({
+          type: "appstrate.progress",
+          timestamp: Date.now(),
+          runId,
+          message:
+            before !== undefined && after !== undefined
+              ? `Context compacted — ${before} → ${after} tokens`
+              : "Context compacted",
+          data: {
+            event: COMPACTION_EVENT,
+            ...(e.reason !== undefined ? { reason: e.reason } : {}),
+            ...(before !== undefined ? { tokensBefore: before } : {}),
+            ...(after !== undefined ? { estimatedTokensAfter: after } : {}),
+            inputTokens: usage.input ?? 0,
+            outputTokens: usage.output ?? 0,
+          },
+        });
+        fire(buildMetric({ runId, timestamp: Date.now() }, { ...totalUsage }, totalCost));
         break;
       }
 
