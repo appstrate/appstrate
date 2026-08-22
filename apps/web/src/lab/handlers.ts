@@ -46,6 +46,14 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     }),
   },
   {
+    method: "GET",
+    pattern: /^\/api\/proxies$/,
+    handler: (_u, s) => ({
+      status: 200,
+      body: { ...f.proxies, data: list(f.proxies.data, s) },
+    }),
+  },
+  {
     // The catalogue the integrations page holds whole and filters client-side.
     method: "GET",
     pattern: /^\/api\/integrations$/,

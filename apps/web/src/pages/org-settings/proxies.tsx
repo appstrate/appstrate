@@ -6,14 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Globe, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from "@appstrate/ui/components/table";
+import { DataTable, type DataColumn } from "../../components/data-table";
 import { usePermissions } from "../../hooks/use-permissions";
 import {
   useProxies,
@@ -25,14 +18,138 @@ import {
   type OrgProxyInfo,
 } from "../../hooks/use-proxies";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { useConnectionTest } from "../../hooks/use-connection-test";
+import { useConnectionTest, type TestResult } from "../../hooks/use-connection-test";
 import { ProxyFormModal } from "../../components/proxy-form-modal";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
+import { ErrorState, EmptyState } from "../../components/page-states";
 import { Spinner } from "../../components/spinner";
 import { TestResultSpan } from "../../components/test-result-span";
 import { SourceBadge } from "../../components/source-badge";
 import { DefaultCell } from "../../components/default-cell";
+
+/**
+ * The proxy column set. A proxy has no page of its own, so the row is static
+ * and the actions live in the last column — which is why it has no header: a
+ * column the reader cannot be told about is a column they cannot hide.
+ */
+export function useProxyColumns({
+  testingId,
+  testResults,
+  onTest,
+  onEdit,
+  onDelete,
+  onSetDefault,
+}: {
+  testingId: string | null;
+  testResults: Record<string, TestResult | null>;
+  onTest: (id: string) => void;
+  onEdit: (p: OrgProxyInfo) => void;
+  onDelete: (p: OrgProxyInfo) => void;
+  onSetDefault: (p: OrgProxyInfo) => void;
+}): DataColumn<OrgProxyInfo>[] {
+  const { t } = useTranslation(["settings", "common"]);
+
+  return [
+    {
+      id: "source",
+      header: t("proxies.col.source"),
+      width: "minmax(120px,0.8fr)",
+      // On a phone what matters is which proxy and what to do with it; where it
+      // came from is an attribute. Tier one has to fit 390px and the action
+      // column alone is 168 of them.
+      tier: 2,
+      cell: (p) => (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <SourceBadge source={p.source} />
+          {p.source !== "built-in" && !p.enabled && (
+            <Badge variant="secondary" className="opacity-60">
+              {t("proxies.disabled")}
+            </Badge>
+          )}
+        </div>
+      ),
+    },
+    {
+      id: "proxy",
+      header: t("proxies.col.proxy"),
+      width: "minmax(160px,1.6fr)",
+      cell: (p) => (
+        <div className="min-w-0">
+          <div className="truncate text-sm font-medium">{p.label}</div>
+          <div className="text-muted-foreground truncate font-mono text-[0.65rem]">
+            {p.urlPrefix}
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: "default",
+      header: t("proxies.col.default"),
+      width: "120px",
+      // Tier 3, not 2: with a 168px action column the tier-2 floors come to
+      // 648px against a 576px threshold. `column-tiers.test.tsx` is what says
+      // so — the arithmetic is not obvious by eye.
+      tier: 3,
+      cell: (p) => (
+        <DefaultCell
+          isDefault={p.is_default}
+          defaultLabel={t("proxies.default")}
+          setLabel={t("proxies.setDefault")}
+          onSetDefault={() => onSetDefault(p)}
+          testId={`set-default-proxy-${p.id}`}
+        />
+      ),
+    },
+    {
+      id: "actions",
+      header: "",
+      width: "168px",
+      align: "end",
+      cell: (p) => (
+        <div className="relative z-10 flex items-center justify-end gap-1">
+          {testResults[p.id] && (
+            <TestResultSpan
+              result={testResults[p.id]!}
+              successKey="proxies.testSuccess"
+              failedKey="proxies.testFailed"
+            />
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => onTest(p.id)}
+            disabled={testingId === p.id}
+          >
+            {testingId === p.id ? <Spinner /> : t("proxies.test")}
+          </Button>
+          {p.source !== "built-in" && (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0"
+                onClick={() => onEdit(p)}
+                aria-label={t("proxies.edit")}
+              >
+                <Pencil size={14} />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0"
+                onClick={() => onDelete(p)}
+                aria-label={t("proxies.delete")}
+              >
+                <Trash2 size={14} className="text-destructive" />
+              </Button>
+            </>
+          )}
+        </div>
+      ),
+    },
+  ];
+}
 
 export function OrgSettingsProxiesPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -50,10 +167,6 @@ export function OrgSettingsProxiesPage() {
   const testMutation = useTestProxy();
   const { testingId, testResults, handleTest } = useConnectionTest(testMutation);
 
-  if (!isAdmin) return <Navigate to="/org-settings/general" replace />;
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
-
   const onCreate = () => {
     setEditProxy(null);
     setProxyModalOpen(true);
@@ -64,6 +177,18 @@ export function OrgSettingsProxiesPage() {
   };
   const onDelete = (p: OrgProxyInfo) => setConfirmState({ label: p.label, id: p.id });
   const onSetDefault = (p: OrgProxyInfo) => setDefaultMutation.mutate({ body: { proxyId: p.id } });
+  const columns = useProxyColumns({
+    testingId,
+    testResults,
+    onTest: handleTest,
+    onEdit,
+    onDelete,
+    onSetDefault,
+  });
+
+  // Every hook first, THEN the guard: the column set is a hook now, and a
+  // return above it makes the call conditional.
+  if (!isAdmin) return <Navigate to="/org-settings/general" replace />;
 
   return (
     <>
@@ -71,104 +196,18 @@ export function OrgSettingsProxiesPage() {
         <Button onClick={onCreate}>{t("proxies.add")}</Button>
       </div>
 
-      {proxies && proxies.length > 0 ? (
-        <div className="overflow-hidden rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="text-xs">{t("proxies.col.source")}</TableHead>
-                <TableHead className="text-xs">{t("proxies.col.proxy")}</TableHead>
-                <TableHead className="text-xs">{t("proxies.col.default")}</TableHead>
-                <TableHead className="w-px text-right text-xs">
-                  {t("proxies.col.actions")}
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {proxies.map((p) => {
-                const isBuiltIn = p.source === "built-in";
-                return (
-                  <TableRow key={p.id} data-testid={`proxy-row-${p.id}`}>
-                    <TableCell>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <SourceBadge source={p.source} />
-                        {!isBuiltIn && !p.enabled && (
-                          <Badge variant="secondary" className="opacity-60">
-                            {t("proxies.disabled")}
-                          </Badge>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-medium">{p.label}</div>
-                        <div className="text-muted-foreground font-mono text-[0.65rem]">
-                          {p.urlPrefix}
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <DefaultCell
-                        isDefault={p.is_default}
-                        defaultLabel={t("proxies.default")}
-                        setLabel={t("proxies.setDefault")}
-                        onSetDefault={() => onSetDefault(p)}
-                        testId={`set-default-proxy-${p.id}`}
-                      />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        {testResults[p.id] && (
-                          <TestResultSpan
-                            result={testResults[p.id]!}
-                            successKey="proxies.testSuccess"
-                            failedKey="proxies.testFailed"
-                          />
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 text-xs"
-                          onClick={() => handleTest(p.id)}
-                          disabled={testingId === p.id}
-                        >
-                          {testingId === p.id ? <Spinner /> : t("proxies.test")}
-                        </Button>
-                        {!isBuiltIn && (
-                          <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 w-7 p-0"
-                              onClick={() => onEdit(p)}
-                              aria-label={t("proxies.edit")}
-                            >
-                              <Pencil size={14} />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 w-7 p-0"
-                              onClick={() => onDelete(p)}
-                              aria-label={t("proxies.delete")}
-                            >
-                              <Trash2 size={14} className="text-destructive" />
-                            </Button>
-                          </>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
-      ) : (
-        <EmptyState message={t("proxies.empty")} icon={Globe} compact>
-          <Button onClick={onCreate}>{t("proxies.add")}</Button>
-        </EmptyState>
-      )}
+      <DataTable
+        label={t("proxies.tabTitle")}
+        columns={columns}
+        rows={proxies ?? []}
+        rowKey={(p) => p.id}
+        isLoading={isLoading}
+        isError={Boolean(error)}
+        error={<ErrorState message={getErrorMessage(error)} compact />}
+        // No action of its own: the button above the table is the same one, and
+        // it does not go away when the list is empty.
+        empty={<EmptyState message={t("proxies.empty")} icon={Globe} compact />}
+      />
 
       <ProxyFormModal
         open={proxyModalOpen}

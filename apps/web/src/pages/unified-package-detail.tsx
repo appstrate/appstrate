@@ -19,11 +19,12 @@ import type { JSONSchemaObject } from "@appstrate/core/form";
 import { usePermissions } from "../hooks/use-permissions";
 import { usePackageInstallState, useTogglePackageInstall } from "../hooks/use-library";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
-import { LoadingState } from "../components/page-states";
+import { EmptyState, LoadingState } from "../components/page-states";
+import { CardGrid } from "../components/card-grid";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
 import { packageDetailPath } from "../lib/package-paths";
 import { isModelSelectable } from "../lib/model-selectability";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Layers } from "lucide-react";
 
 // Shared components
 import { ConfirmModal } from "../components/confirm-modal";
@@ -534,15 +535,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         (() => {
           const agentIds = new Set(pkgDetail.agents.map((a) => a.id));
           const enrichedAgents = allAgents?.filter((a) => agentIds.has(a.id)) ?? [];
-          return enrichedAgents.length === 0 ? (
-            <p className="text-muted-foreground py-4 text-center text-sm">
-              {t("packages.noAgents")}
-            </p>
-          ) : (
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              {enrichedAgents.map((agent) => (
+          return (
+            <CardGrid
+              items={enrichedAgents}
+              itemKey={(agent) => agent.id}
+              renderCard={(agent) => (
                 <PackageCard
-                  key={agent.id}
                   id={agent.id}
                   displayName={agent.display_name ?? agent.id}
                   description={agent.description ?? null}
@@ -551,8 +549,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   keywords={agent.keywords}
                   runningRuns={agent.running_runs}
                 />
-              ))}
-            </div>
+              )}
+              empty={<EmptyState message={t("packages.noAgents")} icon={Layers} compact />}
+            />
           );
         })()}
 

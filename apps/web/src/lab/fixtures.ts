@@ -724,3 +724,48 @@ export const heavyIntegrations: (typeof integrations)["data"] = Array.from(
     return { ...base, id: `${base.id}-${i + 1}`, active: true };
   },
 );
+
+/**
+ * Proxies, so the settings table can be looked at. Three of them because the
+ * column set is only interesting with a mix: a built-in that cannot be edited
+ * or deleted, one that is the org default, and one that is switched off.
+ */
+export const proxies: Json200<"/api/proxies", "get"> = {
+  object: "list",
+  hasMore: false,
+  data: [
+    {
+      id: "prx_builtin",
+      label: "Sortie directe",
+      urlPrefix: "https://egress.appstrate.internal",
+      source: "built-in",
+      enabled: true,
+      is_default: false,
+      created_by: null,
+      createdAt: "2026-06-01T09:00:00.000Z",
+      updatedAt: "2026-06-01T09:00:00.000Z",
+    },
+    {
+      id: "prx_eu",
+      label: "Sortie Europe",
+      urlPrefix: "https://eu-proxy.tractr.net:8443",
+      source: "custom",
+      enabled: true,
+      is_default: true,
+      created_by: "Olivier Tarbès",
+      createdAt: "2026-07-14T11:20:00.000Z",
+      updatedAt: "2026-08-02T16:05:00.000Z",
+    },
+    {
+      id: "prx_lab",
+      label: "Bac à sable",
+      urlPrefix: "http://localhost:8888",
+      source: "custom",
+      enabled: false,
+      is_default: false,
+      created_by: "Pierre",
+      createdAt: "2026-08-11T08:40:00.000Z",
+      updatedAt: "2026-08-11T08:40:00.000Z",
+    },
+  ],
+};

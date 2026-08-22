@@ -440,7 +440,6 @@
   "proxies.col.source": "Source",
   "proxies.col.proxy": "Proxy",
   "proxies.col.default": "Default",
-  "proxies.col.actions": "Actions",
   "proxies.modal.createTitle": "Add proxy",
   "proxies.modal.editTitle": "Edit proxy",
   "proxies.modal.label": "Name",

@@ -685,10 +685,15 @@ At the time of writing:
   Sixteen files match `grid-cols-`, and that is the number this section used to
   carry, but most of them are LAYOUT: two-column forms, `[auto_1fr]` label and
   value pairs, a sidebar's `[8rem_minmax(0,1fr)]`. A grid that maps a list of
-  entities onto cards happens in exactly four places — the integration
+  entities onto cards happens in exactly THREE places — the integration
   catalogue (1/2/3 columns), the package list and the package detail's agents
-  (both `grid-cols-1 gap-3 md:grid-cols-2`, character for character), and the
-  billing plans (a fixed 3). So the case for making it a component is NOT the
+  (both `grid-cols-1 gap-3 md:grid-cols-2`, character for character). The
+  billing plans were counted as a fourth and are not one: `PlanGrid` is a
+  COMPARATOR, three options side by side, and its column count is the number of
+  options rather than a consequence of the room available. `auto-fill` would
+  break it into 2 + 1 in the onboarding, which is ~700px wide. Same lesson as
+  the fact grid, one line down: made of cards is not the same as being a
+  collection. So the case for making it a component is NOT the
   duplication, which is two identical lines. It is that a collection has to be
   a thing before it can carry its own apparatus, or live inside a modal.
 - **A second pattern hides in that miscount: the FACT grid.** `run-info-tab`,

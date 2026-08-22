@@ -19,6 +19,7 @@ import type { DataColumn } from "../data-table.tsx";
 import { useRunColumns } from "../runs-table.tsx";
 import { useScheduleColumns } from "../schedules-table.tsx";
 import { usePackageColumns } from "../packages-table.tsx";
+import { useProxyColumns } from "../../pages/org-settings/proxies.tsx";
 import { render } from "./run-fixture.tsx";
 
 /**
@@ -65,6 +66,17 @@ const SETS = {
   runs: () => columnsFrom(() => useRunColumns({ agentName: () => "Compta trimestrielle" })),
   schedules: () => columnsFrom(() => useScheduleColumns({ agentName: () => "Wiki-brain" })),
   packages: () => columnsFrom(() => usePackageColumns()),
+  proxies: () =>
+    columnsFrom(() =>
+      useProxyColumns({
+        testingId: null,
+        testResults: {},
+        onTest: () => {},
+        onEdit: () => {},
+        onDelete: () => {},
+        onSetDefault: () => {},
+      }),
+    ),
 };
 
 describe.each(Object.entries(SETS))("the %s column set", (_name, load) => {

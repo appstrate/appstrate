@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import type { components } from "../api/client";
 
-type TestResult = components["schemas"]["TestResult"];
+export type TestResult = components["schemas"]["TestResult"];
 
 /**
  * Structural subset of the typed `$api.useMutation` result for the
