@@ -1107,11 +1107,19 @@ Two things they taught:
   which was correct inside the `<ul>` it used to sit in and is a list item with
   no list around it inside `ItemList`.
 
-**Left: 16 early returns.** Roughly half are lists that can take the same
-treatment; the rest are DETAIL pages, where the shape of what is coming is a
-whole page rather than a list, and a page-shaped skeleton drifts from the page
-it imitates. Those keep a spinner, which is the honest answer when the shape is
-not known.
+**Left: 15 early returns**, and the count stops being the measure here. Every one of them is now either a DETAIL page — where
+the shape of what is coming is a whole page rather than a list, and a
+page-shaped skeleton drifts from the page it imitates — or a guard that is not
+a request state at all (`!orgId`, a `Suspense` fallback for a lazy chunk, a
+gate before a redirect decision). Both keep their spinner, which is the honest
+answer when the shape is not known or when what you are waiting for is not
+data.
+
+So B is done for the collections: ten hand-written lists took `ItemList`, the
+dashboard stopped replacing itself with a spinner, and every screen that draws
+a collection now holds its layout while it loads and keeps its actions
+standing. What remains would be a page-shaped skeleton per detail page, which
+is a maintenance liability rather than a rule.
 
 **C. Type the modals, then converge.** Read the twenty-one and establish that
 there are four. Then the integration catalogue falls out on its own, as
