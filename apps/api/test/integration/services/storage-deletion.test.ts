@@ -486,7 +486,11 @@ describe("storage-deletion outbox", () => {
       .from(storageDeletionJobs)
       .where(eq(storageDeletionJobs.storageKey, inKey));
     expect(jobs).toHaveLength(1);
-    expect(jobs[0]!.reason).toBe("file_expired");
+    // Pre-#1177 spelling on purpose — `reason` is a persisted free-text label
+    // on live rows that no migration rewrites, so it stays aligned with its
+    // sibling `document_deleted` rather than splitting production into two
+    // spellings of the same event.
+    expect(jobs[0]!.reason).toBe("document_expired");
     expect(jobs[0]!.completedAt).toBeNull();
   });
 

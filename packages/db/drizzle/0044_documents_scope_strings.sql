@@ -25,17 +25,33 @@
 --   2. The scope sets are user-visible (the API-key UI, the OIDC consent
 --      screen). A key created in 2025 would otherwise keep displaying a
 --      resource name that exists nowhere else in the product.
---   3. It makes the invariant checkable: after this migration no row in any
---      credential table contains a `documents:` scope.
+--   3. It makes the invariant checkable: after this migration no row in any of
+--      the five ARRAY-shaped credential columns above contains a `documents:`
+--      scope.
+--
+-- The invariant stops at the column SHAPE. Two platform credential columns
+-- store the same scope vocabulary as a space-delimited `text` string
+-- (`cli_refresh_tokens.scope`, `device_codes.scope`); the `unnest(...)` pattern
+-- below is array-shaped by construction and cannot reach them. Migration 0045
+-- is that pass — only WITH it does "no row in any credential table contains a
+-- `documents:` scope" hold in full.
 --
 -- NOT touched, deliberately:
---   * `application_social_providers.scopes` and `integrations.scopes_granted`
---     hold THIRD-PARTY provider scopes (Google, GitHub, …), not Appstrate
---     permissions. The `documents:` prefix anchor cannot match them, and they
---     are excluded here in writing so a future generic rewrite does not sweep
---     them up.
+--   * `application_social_providers.scopes`,
+--     `integration_connections.scopes_granted` and `account.scope` (Better
+--     Auth's social-account rows) hold THIRD-PARTY provider scopes (Google,
+--     GitHub, …), not Appstrate permissions. The `documents:` prefix anchor
+--     cannot match them, and they are excluded here in writing so a future
+--     generic rewrite does not sweep them up.
 --   * the read-time canonicalization, which stays: a token minted before this
 --     migration ran, or by a replica still on the old code, must keep working.
+--
+-- And a hazard for whoever writes that future rewrite: anchor on the LEGACY
+-- spelling, never on `files:`. Third-party integration manifests already
+-- declare `files:read` / `files:write` verbatim — see the Slack `scope_catalog`
+-- in `scripts/system-packages/integration-slack-1.0.2/manifest.json` — and
+-- those manifests are persisted in `packages.draft_manifest` and
+-- `package_versions.manifest`. A `files:`-anchored pass would corrupt them.
 --
 -- Idempotent + convergent: the WHERE clause is the exact condition the UPDATE
 -- removes, so a re-run is a no-op and a partially-applied environment

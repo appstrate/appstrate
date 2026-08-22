@@ -1532,4 +1532,36 @@ export interface PlatformServices {
    * 400 for a negative / non-integer `bytes`.
    */
   setFileStorageLimit(orgId: string, bytes: number | null): Promise<void>;
+  /**
+   * @deprecated Pre-#1177 spelling of {@link setFileStorageLimit}. Use
+   * `setFileStorageLimit` — it is the canonical name and the only one a new
+   * module should bind.
+   *
+   * Kept because out-of-tree modules bind this capability off the LIVE
+   * services object the platform injects (`ctx.services.setDocumentStorageLimit`),
+   * not off their pinned `PlatformServices` types: renaming the member does
+   * not rename their read, so dropping the name turns their next boot into a
+   * `TypeError` on an unrelated deploy clock. The alias is the platform's side
+   * of that lockstep and can be removed once every out-of-tree consumer binds
+   * `setFileStorageLimit`.
+   *
+   * REQUIRED, not optional, for two reasons that both bite in practice. A
+   * consumer reads it unconditionally — `@appstrate/cloud` does
+   * `services.setDocumentStorageLimit.bind(services)` — and against an
+   * optional member that is a `TS18048 possibly 'undefined'` build failure,
+   * not a nicety: cloud typechecks against the platform image's core, never
+   * against npm, so an optional alias breaks the very build it was added to
+   * protect. And optionality removes the compiler's grip on the platform
+   * side: with `?`, deleting the binding in `buildPlatformServices()` still
+   * typechecks, leaving a hand-written test as the only thing holding the
+   * alias in place.
+   *
+   * Note the deliberate asymmetry with `cleanupSessionDocuments` ->
+   * {@link PlatformServices.cleanupSessionFiles}, which got NO alias: its only
+   * consumer is the in-tree `@appstrate/module-chat`, which ships in the same
+   * image and was renamed in the same commit. An alias there would need a
+   * ledger owner in `scripts/verify-module-contract.ts` that does not exist,
+   * so it would be a fiction rather than a contract.
+   */
+  setDocumentStorageLimit(orgId: string, bytes: number | null): Promise<void>;
 }

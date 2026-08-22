@@ -265,6 +265,11 @@ const SERVICE_LEDGER: Record<ServiceMember, NamedLedgerEntry> = {
   cleanupSessionFiles: { owners: ["module-chat"] },
   checkUsageAllowed: { owners: ["module-chat"] },
   setFileStorageLimit: { owners: ["cloud"] },
+  // Deprecated alias of `setFileStorageLimit` (pre-#1177 spelling). Same owner,
+  // same implementation: cloud still binds THIS name off the live services
+  // object, so the entry records reality rather than the intent. It goes away
+  // with the alias, once every out-of-tree consumer is on the new name.
+  setDocumentStorageLimit: { owners: ["cloud"] },
 };
 
 /**

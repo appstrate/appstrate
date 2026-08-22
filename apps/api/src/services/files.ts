@@ -1836,7 +1836,12 @@ export async function cleanupExpiredFiles(): Promise<number> {
         // Transactional outbox: enqueue the storage purge atomically with the row
         // delete (replaces the old best-effort post-commit delete).
         const jobs = removed
-          .map((r) => storageKeyToDeletionJob(r.storageKey, "file_expired"))
+          // `document_*` is kept at its pre-#1177 spelling for the SAME reason
+          // `document_deleted` is (see `storage_deletion_jobs.reason`): it is a
+          // persisted free-text audit/metric label on live rows, rewritten by no
+          // migration, so a rename only splits an operator's `GROUP BY reason`
+          // across two spellings of the same event.
+          .map((r) => storageKeyToDeletionJob(r.storageKey, "document_expired"))
           .filter((j): j is StorageDeletionJobInput => j !== null);
         await enqueueStorageDeletion(tx, jobs);
         return removed;

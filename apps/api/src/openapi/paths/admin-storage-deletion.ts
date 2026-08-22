@@ -26,9 +26,11 @@ const storageDeletionJobSchema = {
     reason: {
       type: "string",
       description:
-        "Why the object is being purged (document_deleted | file_expired | org_deleted | " +
-        "application_deleted | end_user_deleted | run_workspace_deleted | upload_expired | " +
-        "materialization_failed).",
+        "Why the object is being purged (document_deleted | document_expired | org_deleted | " +
+        "application_deleted | end_user_deleted | run_workspace_deleted | version_deleted | " +
+        "upload_expired | materialization_failed). Free text, not a constrained enum; the " +
+        "`document_*` labels keep their pre-#1177 spelling because they are persisted on live " +
+        "rows that no migration rewrites.",
     },
     attempts: { type: "integer", description: "Delete attempts made so far." },
     next_attempt_at: { type: "string", format: "date-time" },

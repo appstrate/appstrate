@@ -38,11 +38,17 @@ export const storageDeletionJobs = pgTable(
     /** Object key WITHIN the bucket (no bucket prefix). */
     storageKey: text("storage_key").notNull(),
     /**
-     * Why the object is being purged — one of `document_deleted` (kept at its
-     * pre-#1177 spelling: it is a persisted free-text value on live rows, and
-     * the label buys nothing by being rewritten), `org_deleted`,
-     * `application_deleted`, `end_user_deleted`, `run_workspace_deleted`,
+     * Why the object is being purged — one of `document_deleted`,
+     * `document_expired`, `org_deleted`, `application_deleted`,
+     * `end_user_deleted`, `run_workspace_deleted`, `version_deleted`,
      * `upload_expired`, `materialization_failed`.
+     *
+     * The two `document_*` labels are kept at their pre-#1177 spelling: they
+     * are persisted free-text values on live rows that no migration rewrites,
+     * and the label buys nothing by being renamed — while renaming ONE of them
+     * would leave production holding two spellings of the same class of event,
+     * so an operator grouping by `reason` sees it split.
+     *
      * Free text (audit/metric label), not a constrained enum.
      */
     reason: text("reason").notNull(),

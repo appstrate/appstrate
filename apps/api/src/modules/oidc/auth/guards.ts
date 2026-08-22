@@ -767,8 +767,8 @@ export function oidcGuardsPlugin(opts: OidcGuardsOptions) {
           matcher: (ctx: { path?: string }) =>
             ctx.path !== undefined && SCOPE_BEARING_PATHS.has(ctx.path),
           handler: createAuthMiddleware(async (ctx) => {
-            // `/oauth2/authorize` carries the scope in the query string; the
-            // other three carry it in the body.
+            // `/oauth2/authorize` carries the scope in the query string; every
+            // other path in `SCOPE_BEARING_PATHS` carries it in the body.
             const query = ctx.query as Record<string, unknown> | undefined;
             const body = ctx.body as Record<string, unknown> | undefined;
             const fromQuery = canonicalizeScopeParam(query?.scope);
