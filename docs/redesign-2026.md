@@ -681,6 +681,18 @@ At the time of writing:
   packages). **4 use the raw shadcn `Table`**: library, models, proxies,
   integration detail. Plus the lists-inside-a-panel (documents, connections,
   memory), each its own way.
+- **Only THREE of those four are collections.** The library is a MATRIX —
+  packages down, workspaces across, a checkbox at every crossing — and it stays
+  on the raw table on purpose. `DataTable`'s contract is that a column is an
+  attribute of the row and may therefore be dropped when the width runs out;
+  here a column is another entity, and dropping a workspace hides the only
+  control that installs into it. The arithmetic says the same: three workspaces
+  already come to 452px of floors against a phone's 390, with nothing that may
+  be given up. **A matrix scrolls where a list degrades**, which is what
+  shadcn's own `Table` does (`overflow-auto` on its wrapper) and what
+  `DataTable` cannot (`overflow-hidden`, for the frame's radius). It takes the
+  rest of the family instead: the same frame, the same head band, the same
+  states drawn in place rather than above the tabs.
 - **The card grid is drawn FOUR times, not sixteen** (re-counted 21 August).
   Sixteen files match `grid-cols-`, and that is the number this section used to
   carry, but most of them are LAYOUT: two-column forms, `[auto_1fr]` label and

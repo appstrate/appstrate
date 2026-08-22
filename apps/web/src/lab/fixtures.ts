@@ -888,3 +888,78 @@ export const modelCredentials: Json200<"/api/model-provider-credentials", "get">
     },
   ],
 };
+
+/**
+ * The library matrix: packages down, workspaces across. Three workspaces
+ * because the whole question of a matrix is how many columns it grows, and a
+ * mix of installed and not so the checkboxes are not all in one state. The
+ * system row is there for the locked case (agents and skills treat a system
+ * package as globally available; integrations do not).
+ */
+export const library: Json200<"/api/library", "get"> = {
+  object: "library",
+  applications: [
+    { id: "app_default", name: "Default", isDefault: true },
+    { id: "app_compta", name: "Comptabilité", isDefault: false },
+    { id: "app_veille", name: "Veille", isDefault: false },
+  ],
+  packages: {
+    agent: [
+      {
+        type: "agent" as const,
+        id: "@tractr/compta-trimestrielle",
+        name: "Compta trimestrielle",
+        description: "Pipeline de comptabilité trimestrielle.",
+        source: "local",
+        installed_in: ["app_default", "app_compta"],
+      },
+      {
+        type: "agent" as const,
+        id: "@tractr/wiki-brain",
+        name: "Wiki-brain",
+        description: "Mémoire proactive par personne.",
+        source: "system",
+        installed_in: ["app_default"],
+      },
+      {
+        type: "agent" as const,
+        id: "@tractr/analyse-recurrence",
+        name: "Analyse de récurrence des articles Tastet",
+        description: "Détecte le potentiel de récurrence éditoriale.",
+        source: "local",
+        installed_in: ["app_veille"],
+      },
+    ],
+    skill: [
+      {
+        type: "skill" as const,
+        id: "@tractr/compta-references",
+        name: "compta-references",
+        description: "Références et scripts pour la comptabilité Tractr.",
+        source: "local",
+        installed_in: ["app_compta"],
+      },
+    ],
+    integration: [
+      {
+        type: "integration" as const,
+        id: "@appstrate/google-drive",
+        name: "Google Drive",
+        description: "Fichiers, documents et dossiers partagés.",
+        source: "system",
+        installed_in: ["app_default", "app_compta", "app_veille"],
+      },
+      {
+        type: "integration" as const,
+        id: "@appstrate/gmail",
+        name: "Gmail",
+        description: "Courriels au nom de l'employé connecté.",
+        source: "system",
+        installed_in: [],
+      },
+    ],
+    // The library page has three tabs; MCP servers are in the response shape
+    // but not on screen, so the group is present and empty.
+    "mcp-server": [],
+  },
+};

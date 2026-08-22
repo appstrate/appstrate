@@ -98,6 +98,7 @@
   "library.tab.agents": "Agents",
   "library.tab.skills": "Skills",
   "library.tab.integrations": "Intégrations",
+  "library.defaultApp": "par défaut",
   "library.column.package": "Package",
   "library.system": "Système",
   "library.systemAlwaysActive": "Package système, toujours actif",

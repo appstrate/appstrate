@@ -47,6 +47,11 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   },
   {
     method: "GET",
+    pattern: /^\/api\/library$/,
+    handler: () => ({ status: 200, body: f.library }),
+  },
+  {
+    method: "GET",
     pattern: /^\/api\/models$/,
     handler: (_u, s) => ({ status: 200, body: { ...f.models, data: list(f.models.data, s) } }),
   },
