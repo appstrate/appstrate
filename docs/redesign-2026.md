@@ -1075,7 +1075,31 @@ shape — the apparatus is the TABLE's, not the collection's:
 
 **B. Loading, in one pass.** One rule — a skeleton for a collection, because we
 know the shape of what is coming and the layout should not jump; a spinner for
-an action in flight. Forty-five files, one line each.
+an action in flight.
+
+_(Started 22 August.)_ "Forty-five files, one line each" was wrong about the
+shape of the work, and usefully so. The files that matter are not the 45 that
+mention `<Spinner>` — most of those are buttons, which is a spinner doing
+exactly its job. They are the **25 early returns of `<LoadingState />`**, and
+what is wrong with them is not only the spinner: an early return takes the
+whole screen, so the page's action button disappears while the list loads and
+comes back when it arrives. The same defect the package lists were already
+cured of, screen by screen.
+
+Counted 22 August: `LoadingState` in 30 files, `<Spinner>` in 45, `Skeleton` in 5. The three bodies draw skeletons already, so a screen whose body is one of
+them needs no new code — it needs its early return DELETED and `isLoading`
+passed down.
+
+Done so far, all five the same way (early returns gone, `ItemList`, states in
+the family's order, action button standing throughout): API keys, applications,
+devices, webhooks, members. Each was a `flex flex-col gap-3` + `.map()` — the
+third body, written by hand, five times.
+
+**Left: 20 early returns.** Roughly half are lists that can take the same
+treatment; the rest are DETAIL pages, where the shape of what is coming is a
+whole page rather than a list, and a page-shaped skeleton drifts from the page
+it imitates. Those keep a spinner, which is the honest answer when the shape is
+not known.
 
 **C. Type the modals, then converge.** Read the twenty-one and establish that
 there are four. Then the integration catalogue falls out on its own, as

@@ -22,7 +22,8 @@ import { useAuth } from "../../hooks/use-auth";
 import { usePermissions, roleI18nKey } from "../../hooks/use-permissions";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { CopyLinkButton } from "../../components/copy-link-button";
-import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
+import { ErrorState, EmptyState } from "../../components/page-states";
+import { ItemList } from "../../components/item-list";
 import { Spinner } from "../../components/spinner";
 import { toast } from "sonner";
 import {
@@ -107,9 +108,6 @@ export function OrgSettingsMembersPage() {
     onError: (err) => toast.error(t("error.prefix", { message: getErrorMessage(err) })),
   });
 
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
-
   const handleInvite = (data: { email: string; role: AssignableOrgRole }) => {
     const trimmed = data.email.trim();
     if (!trimmed || !orgId) return;
@@ -174,8 +172,17 @@ export function OrgSettingsMembersPage() {
         </form>
       )}
 
-      <div className="flex flex-col gap-3">
-        {members.map((member) => {
+      {/* No `empty` prop on purpose: this page has TWO lists and one shared
+          empty state below, for when neither members nor invitations exist. A
+          per-list empty sentence here would fire while invitations are pending
+          and say the page is empty when it is not. */}
+      <ItemList
+        items={members}
+        itemKey={(member) => member.userId}
+        isLoading={isLoading}
+        isError={Boolean(error)}
+        error={<ErrorState message={getErrorMessage(error)} compact />}
+        renderItem={(member) => {
           const label = member.displayName || member.email || member.userId;
           const isMemberOwner = member.role === "owner";
           const isSelf = member.userId === user?.id;
@@ -186,7 +193,7 @@ export function OrgSettingsMembersPage() {
             ? canRemoveMember({ actorRole: role, targetRole: member.role, isSelf })
             : false;
           return (
-            <div key={member.userId} className="border-border bg-card rounded-lg border p-5">
+            <div className="border-border bg-card rounded-lg border p-5">
               <div className="flex items-center gap-3">
                 <div className="flex-1">
                   <h3 className="text-sm font-semibold">{label}</h3>
@@ -237,8 +244,8 @@ export function OrgSettingsMembersPage() {
               )}
             </div>
           );
-        })}
-      </div>
+        }}
+      />
 
       {invitations.length > 0 && (
         <>

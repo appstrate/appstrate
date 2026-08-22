@@ -39,6 +39,19 @@ export const SCREENS = [
   { path: "/agents/@tractr/compta-trimestrielle#memory", name: "agent-memory" },
   { path: "/agents/@tractr/compta-trimestrielle/runs/run_01", name: "run-detail" },
   { path: "/agents/@tractr/compta-trimestrielle/runs/run_01#memory", name: "run-memory" },
+  // The settings surfaces, which are routed modals over whatever page you were
+  // on. Every one of them is a list, and step B is about what they draw while
+  // that list is on its way.
+  { path: "/org-settings/members", name: "settings-members" },
+  { path: "/org-settings/applications", name: "settings-applications" },
+  { path: "/org-settings/models", name: "settings-models" },
+  { path: "/org-settings/proxies", name: "settings-proxies" },
+  { path: "/org-settings/oauth", name: "settings-oauth" },
+  { path: "/org-settings/cli-sessions", name: "settings-cli-sessions" },
+  { path: "/app-settings", name: "workspace-settings" },
+  { path: "/preferences", name: "preferences" },
+  { path: "/webhooks", name: "webhooks" },
+  { path: "/end-users", name: "end-users" },
 ];
 
 /** The four the scenario switcher offers. `empty` lands on onboarding by design. */

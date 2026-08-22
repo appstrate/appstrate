@@ -6,7 +6,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Laptop } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
-import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
+import { ErrorState, EmptyState } from "../../components/page-states";
+import { ItemList } from "../../components/item-list";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { CliSessionCard } from "../../components/cli-session-card";
 import { $api } from "../../api/client";
@@ -43,9 +44,6 @@ export function PreferencesDevicesPage() {
   const [pendingRevoke, setPendingRevoke] = useState<CliSessionDisplay | null>(null);
   const [confirmRevokeAll, setConfirmRevokeAll] = useState(false);
 
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
-
   const sessions = data ?? [];
 
   return (
@@ -69,26 +67,29 @@ export function PreferencesDevicesPage() {
         )}
       </div>
 
-      {sessions.length === 0 ? (
-        <EmptyState
-          icon={Laptop}
-          message={t("devices.emptyTitle")}
-          hint={t("devices.emptyDescription")}
-        />
-      ) : (
-        <div className="flex flex-col gap-3">
-          {sessions.map((s) => (
-            <CliSessionCard
-              key={s.familyId}
-              session={s}
-              revokeDisabled={
-                revokeOne.isPending && revokeOne.variables?.body.familyId === s.familyId
-              }
-              onRevoke={() => setPendingRevoke(s)}
-            />
-          ))}
-        </div>
-      )}
+      <ItemList
+        items={sessions}
+        itemKey={(s) => s.familyId}
+        isLoading={isLoading}
+        isError={Boolean(error)}
+        error={<ErrorState message={getErrorMessage(error)} compact />}
+        empty={
+          <EmptyState
+            icon={Laptop}
+            message={t("devices.emptyTitle")}
+            hint={t("devices.emptyDescription")}
+          />
+        }
+        renderItem={(s) => (
+          <CliSessionCard
+            session={s}
+            revokeDisabled={
+              revokeOne.isPending && revokeOne.variables?.body.familyId === s.familyId
+            }
+            onRevoke={() => setPendingRevoke(s)}
+          />
+        )}
+      />
 
       <ConfirmModal
         open={pendingRevoke !== null}

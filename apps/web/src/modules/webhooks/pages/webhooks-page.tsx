@@ -8,7 +8,8 @@ import { usePermissions } from "@/hooks/use-permissions";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { useWebhooks } from "../hooks/use-webhooks";
-import { LoadingState, ErrorState, EmptyState } from "@/components/page-states";
+import { ErrorState, EmptyState } from "@/components/page-states";
+import { ItemList } from "@/components/item-list";
 import { WebhookCreateModal } from "../components/webhook-create-modal";
 import { getErrorMessage } from "@appstrate/core/errors";
 
@@ -20,8 +21,6 @@ export function WebhooksPage() {
   const { data: webhooks, isLoading, error } = useWebhooks();
 
   if (!isAdmin) return null;
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
 
   return (
     <div>
@@ -29,41 +28,46 @@ export function WebhooksPage() {
         <Button onClick={() => setCreateOpen(true)}>{t("settings:webhooks.createTitle")}</Button>
       </div>
 
-      {!webhooks || webhooks.length === 0 ? (
-        <EmptyState message={t("settings:webhooks.empty")} icon={Webhook}>
-          <Button onClick={() => setCreateOpen(true)}>{t("settings:webhooks.createTitle")}</Button>
-        </EmptyState>
-      ) : (
-        <div className="space-y-2">
-          {webhooks.map((wh) => (
-            <Link
-              key={wh.id}
-              to={`/webhooks/${wh.id}`}
-              className="border-border bg-card hover:bg-accent/50 block rounded-lg border p-4 transition-colors"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="mb-1 flex items-center gap-2">
-                    <span className="truncate font-mono text-sm">{wh.url}</span>
-                    <Badge variant={wh.enabled ? "success" : "secondary"}>
-                      {wh.enabled ? t("settings:webhooks.active") : t("settings:webhooks.inactive")}
-                    </Badge>
-                  </div>
-                  <p className="text-muted-foreground font-mono text-xs">{wh.events.join(", ")}</p>
-                  <p className="text-muted-foreground mt-1 text-xs">
-                    {wh.packageId || t("settings:webhooks.allAgents")}
-                    {" · "}
-                    {t("settings:webhooks.payloadMode")}:{" "}
-                    {wh.payloadMode === "full"
-                      ? t("settings:webhooks.payloadModeFull")
-                      : t("settings:webhooks.payloadModeSummary")}
-                  </p>
+      <ItemList
+        items={webhooks ?? []}
+        itemKey={(wh) => wh.id}
+        isLoading={isLoading}
+        isError={Boolean(error)}
+        error={<ErrorState message={getErrorMessage(error)} compact />}
+        empty={
+          <EmptyState message={t("settings:webhooks.empty")} icon={Webhook}>
+            <Button onClick={() => setCreateOpen(true)}>
+              {t("settings:webhooks.createTitle")}
+            </Button>
+          </EmptyState>
+        }
+        renderItem={(wh) => (
+          <Link
+            to={`/webhooks/${wh.id}`}
+            className="border-border bg-card hover:bg-accent/50 block rounded-lg border p-4 transition-colors"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="mb-1 flex items-center gap-2">
+                  <span className="truncate font-mono text-sm">{wh.url}</span>
+                  <Badge variant={wh.enabled ? "success" : "secondary"}>
+                    {wh.enabled ? t("settings:webhooks.active") : t("settings:webhooks.inactive")}
+                  </Badge>
                 </div>
+                <p className="text-muted-foreground font-mono text-xs">{wh.events.join(", ")}</p>
+                <p className="text-muted-foreground mt-1 text-xs">
+                  {wh.packageId || t("settings:webhooks.allAgents")}
+                  {" · "}
+                  {t("settings:webhooks.payloadMode")}:{" "}
+                  {wh.payloadMode === "full"
+                    ? t("settings:webhooks.payloadModeFull")
+                    : t("settings:webhooks.payloadModeSummary")}
+                </p>
               </div>
-            </Link>
-          ))}
-        </div>
-      )}
+            </div>
+          </Link>
+        )}
+      />
 
       <WebhookCreateModal open={createOpen} onClose={() => setCreateOpen(false)} />
     </div>

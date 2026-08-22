@@ -1084,6 +1084,143 @@ export const agentModel: Json200<"/api/agents/{scope}/{name}/model", "get"> = {
 };
 
 /* -------------------------------------------------------------------------- */
+/* The settings lists                                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The provider catalogue the model picker reads. Two entries, no `models`
+ * catalogue: this fixture exists so the picker can be OPENED, and the per
+ * provider model list is the heavy half of the real payload.
+ */
+export const providerRegistry: Json200<"/api/model-provider-credentials/registry", "get"> = {
+  object: "list",
+  total: 2,
+  hasMore: false,
+  data: [
+    {
+      providerId: "anthropic",
+      displayName: "Anthropic",
+      apiShape: "anthropic-messages",
+      defaultBaseUrl: "https://api.anthropic.com",
+      baseUrlOverridable: false,
+      authMode: "api_key",
+      featured: true,
+    },
+    {
+      providerId: "openai-compatible",
+      displayName: "OpenAI-compatible",
+      description: "Tout serveur exposant l'API OpenAI : vLLM, Ollama, LM Studio.",
+      apiShape: "openai-completions",
+      defaultBaseUrl: "http://localhost:11434/v1",
+      baseUrlOverridable: true,
+      authMode: "api_key",
+      featured: false,
+    },
+  ],
+};
+
+/** Webhooks, one per level, one switched off. */
+export const webhooks: Json200<"/api/webhooks", "get"> = {
+  object: "list",
+  hasMore: false,
+  data: [
+    {
+      id: "wh_lab_1",
+      object: "webhook",
+      level: "application",
+      applicationId: APP_ID,
+      url: "https://tractr.net/hooks/appstrate/runs",
+      events: ["run.succeeded", "run.failed"],
+      packageId: "@tractr/compta-trimestrielle",
+      payloadMode: "full",
+      enabled: true,
+      createdAt: ago(90_000),
+      updatedAt: ago(4_000),
+    },
+    {
+      id: "wh_lab_2",
+      object: "webhook",
+      level: "org",
+      applicationId: null,
+      url: "https://hooks.slack.com/services/T0000/B0000/xxxxxxxxxxxx",
+      events: ["run.failed"],
+      packageId: null,
+      payloadMode: "summary",
+      enabled: false,
+      createdAt: ago(150_000),
+      updatedAt: ago(20_000),
+    },
+  ],
+};
+
+/** End-users of the workspace: one named, one known only by its external id. */
+export const endUsers: Json200<"/api/end-users", "get"> = {
+  object: "list",
+  hasMore: false,
+  limit: 25,
+  data: [
+    {
+      id: "eu_lab_1",
+      object: "end_user",
+      applicationId: APP_ID,
+      name: "Marie Lavoie",
+      email: "marie@client-a.example",
+      externalId: "crm-40129",
+      metadata: { plan: "pro" },
+      createdAt: ago(60_000),
+      updatedAt: ago(1_200),
+    },
+    {
+      id: "eu_lab_2",
+      object: "end_user",
+      applicationId: APP_ID,
+      name: null,
+      email: null,
+      externalId: "crm-40877",
+      metadata: null,
+      createdAt: ago(8_000),
+      updatedAt: ago(8_000),
+    },
+  ],
+};
+
+/** CLI sessions, admin view: two members, one of them this browser's own. */
+export const cliSessions: Json200<"/api/orgs/{orgId}/cli-sessions", "get"> = {
+  object: "list",
+  hasMore: false,
+  data: [
+    {
+      familyId: "cli_lab_1",
+      userId: USER_ID,
+      userEmail: "olivier@tractr.net",
+      userName: "Olivier Tarbès",
+      deviceName: "MacBook Pro",
+      userAgent: "appstrate-cli/2.4.0 (darwin arm64)",
+      createdIp: "24.201.44.10",
+      lastUsedIp: "24.201.44.10",
+      lastUsedAt: ago(120),
+      createdAt: ago(40_000),
+      expiresAt: ago(-200_000),
+      current: true,
+    },
+    {
+      familyId: "cli_lab_2",
+      userId: "user_lab_2",
+      userEmail: "pierre@tractr.net",
+      userName: "Pierre",
+      deviceName: null,
+      userAgent: "appstrate-cli/2.3.1 (linux x64)",
+      createdIp: "142.113.9.201",
+      lastUsedIp: "142.113.9.201",
+      lastUsedAt: ago(5_000),
+      createdAt: ago(80_000),
+      expiresAt: ago(-100_000),
+      current: false,
+    },
+  ],
+};
+
+/* -------------------------------------------------------------------------- */
 /* Organisation detail                                                         */
 /* -------------------------------------------------------------------------- */
 

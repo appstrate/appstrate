@@ -14,7 +14,8 @@ import {
   useRevokeApiKey,
   type ApiKeyInfo,
 } from "../hooks/use-api-keys";
-import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
+import { ErrorState, EmptyState } from "../components/page-states";
+import { ItemList } from "../components/item-list";
 import { ApiKeyCreateModal } from "../components/api-key-create-modal";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { formatDateField } from "../lib/markdown";
@@ -37,9 +38,6 @@ export function ApiKeysPage() {
   if (!applicationId)
     return <EmptyState message={t("applications.noAppSelected")} icon={KeyRound} />;
 
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
-
   const handleRevoke = (key: ApiKeyInfo) => {
     setConfirmState({ id: key.id, label: key.name });
   };
@@ -58,85 +56,87 @@ export function ApiKeysPage() {
         <Button onClick={() => setCreateOpen(true)}>{t("settings:apiKeys.createBtn")}</Button>
       </div>
 
-      {apiKeys && apiKeys.length > 0 ? (
-        <div className="flex flex-col gap-3">
-          {apiKeys.map((key) => {
-            const expired = isExpired(key.expiresAt);
-            return (
-              <div key={key.id} className="border-border bg-card rounded-lg border p-5">
-                <div className="mb-3 flex items-center gap-3">
-                  <div className="flex-1">
-                    <h3 className="text-[0.95rem] font-semibold">{key.name}</h3>
-                    <div className="mt-1 flex flex-wrap gap-1.5">
-                      <Badge variant="secondary" className="opacity-60">
-                        {key.keyPrefix}...
-                      </Badge>
-                      {expired ? (
-                        <Badge variant="failed">{t("settings:apiKeys.expired")}</Badge>
-                      ) : (
-                        <Badge variant="success">{t("settings:apiKeys.active")}</Badge>
-                      )}
-                    </div>
+      <ItemList
+        items={apiKeys ?? []}
+        itemKey={(key) => key.id}
+        isLoading={isLoading}
+        isError={Boolean(error)}
+        error={<ErrorState message={getErrorMessage(error)} compact />}
+        empty={
+          <EmptyState
+            message={t("settings:apiKeys.empty")}
+            hint={t("settings:apiKeys.emptyHint")}
+            icon={KeyRound}
+            compact
+          />
+        }
+        renderItem={(key) => {
+          const expired = isExpired(key.expiresAt);
+          return (
+            <div className="border-border bg-card rounded-lg border p-5">
+              <div className="mb-3 flex items-center gap-3">
+                <div className="flex-1">
+                  <h3 className="text-[0.95rem] font-semibold">{key.name}</h3>
+                  <div className="mt-1 flex flex-wrap gap-1.5">
+                    <Badge variant="secondary" className="opacity-60">
+                      {key.keyPrefix}...
+                    </Badge>
+                    {expired ? (
+                      <Badge variant="failed">{t("settings:apiKeys.expired")}</Badge>
+                    ) : (
+                      <Badge variant="success">{t("settings:apiKeys.active")}</Badge>
+                    )}
                   </div>
-                  {/* Scope badges */}
-                  {availableScopes && key.scopes.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {key.scopes.length === availableScopes.length ? (
-                        <Badge variant="outline" className="px-1.5 py-0 text-[0.65rem]">
-                          {t("settings:apiKeys.fullAccess")}
+                </div>
+                {/* Scope badges */}
+                {availableScopes && key.scopes.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {key.scopes.length === availableScopes.length ? (
+                      <Badge variant="outline" className="px-1.5 py-0 text-[0.65rem]">
+                        {t("settings:apiKeys.fullAccess")}
+                      </Badge>
+                    ) : (
+                      [...new Set(key.scopes.map((s) => s.split(":")[0]!))].map((resource) => (
+                        <Badge
+                          key={resource}
+                          variant="outline"
+                          className="px-1.5 py-0 text-[0.65rem]"
+                        >
+                          {resource}
                         </Badge>
-                      ) : (
-                        [...new Set(key.scopes.map((s) => s.split(":")[0]!))].map((resource) => (
-                          <Badge
-                            key={resource}
-                            variant="outline"
-                            className="px-1.5 py-0 text-[0.65rem]"
-                          >
-                            {resource}
-                          </Badge>
-                        ))
-                      )}
-                    </div>
-                  )}
-                </div>
-                <div className="mt-3 flex flex-col gap-1">
-                  <span className="text-muted-foreground text-sm">
-                    {key.expiresAt
-                      ? t("settings:apiKeys.expiresOn", {
-                          date: formatDateField(key.expiresAt, "date"),
-                        })
-                      : t("settings:apiKeys.neverExpires")}
-                  </span>
-                  {key.lastUsedAt && (
-                    <span className="text-muted-foreground text-sm">
-                      {t("settings:apiKeys.lastUsed", { date: formatDateField(key.lastUsedAt) })}
-                    </span>
-                  )}
-                  {key.created_by_name && (
-                    <span className="text-muted-foreground text-sm">
-                      {t("settings:apiKeys.createdByLabel", { name: key.created_by_name })}
-                    </span>
-                  )}
-                </div>
-                <div className="border-border mt-3 flex justify-end gap-2 border-t pt-3">
-                  <Button variant="destructive" size="sm" onClick={() => handleRevoke(key)}>
-                    {t("settings:apiKeys.revoke")}
-                  </Button>
-                </div>
+                      ))
+                    )}
+                  </div>
+                )}
               </div>
-            );
-          })}
-        </div>
-      ) : (
-        <EmptyState
-          message={t("settings:apiKeys.empty")}
-          hint={t("settings:apiKeys.emptyHint")}
-          icon={KeyRound}
-          compact
-        >
-          <Button onClick={() => setCreateOpen(true)}>{t("settings:apiKeys.createBtn")}</Button>
-        </EmptyState>
-      )}
+              <div className="mt-3 flex flex-col gap-1">
+                <span className="text-muted-foreground text-sm">
+                  {key.expiresAt
+                    ? t("settings:apiKeys.expiresOn", {
+                        date: formatDateField(key.expiresAt, "date"),
+                      })
+                    : t("settings:apiKeys.neverExpires")}
+                </span>
+                {key.lastUsedAt && (
+                  <span className="text-muted-foreground text-sm">
+                    {t("settings:apiKeys.lastUsed", { date: formatDateField(key.lastUsedAt) })}
+                  </span>
+                )}
+                {key.created_by_name && (
+                  <span className="text-muted-foreground text-sm">
+                    {t("settings:apiKeys.createdByLabel", { name: key.created_by_name })}
+                  </span>
+                )}
+              </div>
+              <div className="border-border mt-3 flex justify-end gap-2 border-t pt-3">
+                <Button variant="destructive" size="sm" onClick={() => handleRevoke(key)}>
+                  {t("settings:apiKeys.revoke")}
+                </Button>
+              </div>
+            </div>
+          );
+        }}
+      />
 
       <ApiKeyCreateModal open={createOpen} onClose={() => setCreateOpen(false)} />
 

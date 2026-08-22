@@ -64,6 +64,11 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   },
   {
     method: "GET",
+    pattern: /^\/api\/model-provider-credentials\/registry$/,
+    handler: () => ({ status: 200, body: f.providerRegistry }),
+  },
+  {
+    method: "GET",
     pattern: /^\/api\/model-provider-credentials$/,
     handler: (_u, s) => ({
       status: 200,
@@ -373,6 +378,24 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     method: "GET",
     pattern: /^\/api\/packages\/agents\/[^/]+\/[^/]+\/versions\/[^/]+$/,
     handler: () => ({ status: 200, body: f.agentLatestVersion }),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/webhooks$/,
+    handler: (_u, s) => ({ status: 200, body: { ...f.webhooks, data: list(f.webhooks.data, s) } }),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/end-users$/,
+    handler: (_u, s) => ({ status: 200, body: { ...f.endUsers, data: list(f.endUsers.data, s) } }),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/orgs\/[^/]+\/cli-sessions$/,
+    handler: (_u, s) => ({
+      status: 200,
+      body: { ...f.cliSessions, data: list(f.cliSessions.data, s) },
+    }),
   },
   {
     method: "GET",
