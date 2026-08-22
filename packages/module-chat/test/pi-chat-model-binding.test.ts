@@ -55,6 +55,24 @@ describe("Pi chat model binding", () => {
     });
   });
 
+  // Regression (#1173 fallout): the proxy binding replaces `baseUrl` with
+  // llm-proxy's, one of the two inputs Pi derives a provider's request shape
+  // from. With `provider` also generic (derived from the api shape), a turn on
+  // a DeepSeek-backed preset went out with `role: "developer"` — a 400 there,
+  // surfaced as "Le modèle a refusé la demande". The real provider key keeps
+  // Pi's detection alive.
+  it("keeps the backing provider key on the proxied model", () => {
+    const binding = createPiProxyModelBinding({
+      model: orgModel({ providerId: "deepseek", modelId: "deepseek-chat" }),
+      origin: ORIGIN,
+      mintBearer: () => "loopback",
+    });
+
+    expect(binding?.provider).toBe("deepseek");
+    expect(binding?.model.provider).toBe("deepseek");
+    expect(binding?.model.baseUrl).toBe(`${ORIGIN}/api/llm-proxy/openai-completions/v1`);
+  });
+
   it("maps every API-key family to its native Pi serializer through llm-proxy", () => {
     const cases = [
       ["anthropic-messages", `${ORIGIN}/api/llm-proxy/anthropic-messages`, "anthropic"],

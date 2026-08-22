@@ -106,6 +106,36 @@ describe("buildRuntimePiEnv", () => {
     expect(env.MODEL_API_KEY).toBe("sk-ant-placeholder");
   });
 
+  // Regression: a sidecar-proxied run replaces MODEL_BASE_URL with the
+  // sidecar's URL, one of the two inputs Pi derives a provider's request shape
+  // from. With only the api shape left, the container emitted plain-OpenAI
+  // bytes at every provider and DeepSeek answered 400 (`unknown variant
+  // 'developer'`). The real provider key travels instead.
+  it("names the backing provider so the container keeps Pi's provider detection", () => {
+    const env = buildRuntimePiEnv({
+      model: {
+        api: "openai-completions",
+        modelId: "deepseek-chat",
+        baseUrl: "https://api.deepseek.com/v1",
+        providerId: "deepseek",
+        apiKey: "sk-secret",
+        apiKeyPlaceholder: "sk-placeholder",
+      },
+      agentPrompt: "p",
+      ...sidecar,
+      sidecarProxyLlmUrl: "http://sidecar:8080/llm",
+    });
+    expect(env.MODEL_PROVIDER).toBe("deepseek");
+    // The binding the sidecar exists to hide stays out of the container.
+    expect(env.MODEL_BASE_URL).toBe("http://sidecar:8080/llm");
+    expect(env.MODEL_API_KEY).toBe("sk-placeholder");
+  });
+
+  it("omits the provider key when the caller does not know the backing", () => {
+    const env = buildRuntimePiEnv({ model, agentPrompt: "p", ...sidecar });
+    expect(env.MODEL_PROVIDER).toBeUndefined();
+  });
+
   // P1-12: on the sidecar-proxied path the real provider key must NEVER reach
   // the agent container. A missing apiKeyPlaceholder used to silently fall back
   // to the raw apiKey (`apiKeyPlaceholder ?? apiKey`) — now it fails closed.
