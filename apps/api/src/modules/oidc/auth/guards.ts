@@ -749,7 +749,7 @@ export function oidcGuardsPlugin(opts: OidcGuardsOptions) {
           // #1177 — rewrite a retired scope spelling BEFORE the oauth-provider
           // plugin's own filter sees it.
           //
-          // `documents:read` became `files:read`, migration 0043 rewrote
+          // `documents:read` became `files:read`, migration 0044 rewrote
           // `oauth_clients.scopes`, and `claims.ts` canonicalizes on the read
           // path. None of that helps the caller: the plugin validates the
           // REQUESTED scopes against `client.scopes ?? opts.scopes` — both

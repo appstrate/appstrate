@@ -163,7 +163,7 @@ describe("retired permission-resource spellings (#1177)", () => {
    * and OAuth grant issued before the rename. Both functions below FILTER —
    * they drop what they do not recognise rather than rejecting it — so an
    * un-normalized legacy scope is not an error: it is a credential that
-   * silently does less than it was granted. Migration `0043` rewrites the
+   * silently does less than it was granted. Migration `0044` rewrites the
    * stored strings; this is the read side, which has to keep working for a
    * token minted before the migration ran.
    */

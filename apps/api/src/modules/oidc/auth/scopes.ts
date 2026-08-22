@@ -115,7 +115,7 @@ export function getAppstrateScopeSet(): ReadonlySet<string> {
  * `/oauth2/authorize` redirects with `error=invalid_scope`, `/oauth2/token`
  * and `/oauth2/register` throw a 400. Both sides of that comparison are
  * canonical (this module's vocabulary, and `oauth_clients.scopes` after
- * migration 0043), so a client that still sends a retired spelling is refused
+ * migration 0044), so a client that still sends a retired spelling is refused
  * outright before any claim is built.
  *
  * A scope string is not only persisted, it is also SENT — hardcoded in the

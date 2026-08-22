@@ -94,7 +94,7 @@ export class OAuthAdminValidationError extends Error {
  *
  * The return value is the point: validating canonically while persisting the
  * caller's raw string is how a re-registering pre-#1177 client puts a
- * `documents:` row back into `oauth_clients.scopes`, undoing migration 0043 —
+ * `documents:` row back into `oauth_clients.scopes`, undoing migration 0044 —
  * which runs once and will never see that row. From then on the client is
  * refused at `/oauth2/authorize` for every scope in that column, because the
  * oauth-provider plugin compares the request against exactly these strings.
@@ -106,7 +106,7 @@ function canonicalizeValidScopes(scopes: readonly string[] | undefined): string[
   // OIDC owns its scope vocabulary directly (identity scopes + OIDC_ALLOWED_SCOPES).
   // Retired spellings are canonicalized first: a client registered before #1177
   // re-registering with `documents:read` must not be rejected for asking for a
-  // scope it already holds. Migration 0043 rewrites the stored strings; this
+  // scope it already holds. Migration 0044 rewrites the stored strings; this
   // covers the request side.
   const allowed = getAppstrateScopeSet();
   const invalid = scopes.filter((s) => !allowed.has(canonicalPermission(s)));
@@ -363,7 +363,7 @@ type CreateClientInput =
 
 export async function createClient(input: CreateClientInput): Promise<OAuthClientWithSecret> {
   assertValidRedirectUris(input.redirectUris);
-  // Canonical on the way IN, so the column migration 0043 normalised stays
+  // Canonical on the way IN, so the column migration 0044 normalised stays
   // normalised — see `canonicalizeValidScopes`.
   const scopes = canonicalizeValidScopes(input.scopes);
 
@@ -1006,7 +1006,7 @@ export async function compareDeclaredClientWithStored(
     });
   }
   // Compare on the CANONICAL spelling: the row was normalized on insert
-  // (`canonicalizeValidScopes`) and by migration 0043, while the env
+  // (`canonicalizeValidScopes`) and by migration 0044, while the env
   // declaration is whatever the operator wrote. Comparing raw would report a
   // permanent, unfixable drift on an env that still says `documents:read`
   // (#1177) — the two ARE the same scope set.

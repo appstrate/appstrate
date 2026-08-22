@@ -99,11 +99,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
      `cloud` and `connect-helper` stay on the currently published version and
      are unaffected today; the eventual major needs a matching code change in
      each, not just a version bump. See `packages/core/CHANGELOG.md`.
-  8. **Migrations `0041`, `0042` and `0043` run automatically at boot.** `0041`
+  8. **Migrations `0042`, `0043` and `0044` run automatically at boot.** `0042`
      drops the `presentation` column with its partial unique index and CHECK.
-     `0042` is a pure `ALTER … RENAME` of the tables, columns, enum type,
+     `0043` is a pure `ALTER … RENAME` of the tables, columns, enum type,
      indexes and constraints — catalog-only, no table rewrite, no data movement,
-     no window where a constraint is absent. `0043` rewrites stored
+     no window where a constraint is absent. `0044` rewrites stored
      `documents:*` permission scope strings to `files:*` across `api_keys` and
      the four `oauth_*` scope columns. All three are idempotent and converge
      from a partially-applied state. Third-party provider scopes
@@ -117,7 +117,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   from a runtime image older than the platform, and ignores the retired
   `X-Document-Presentation`; `POST /api/runs/inline` accepts `context_documents`
   as well as `context_files`; and `documents:read` / `documents:delete` scopes
-  minted before migration `0043` still grant.
+  minted before migration `0044` still grant.
 
 - **The run page is four fixed tabs: Outcome, Fichiers, Exécution,
   Configuration.** The previous set (Résultat / Deliverable / logs / memory /
@@ -147,7 +147,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `publish_document` argument, the `documents.presentation` column, its partial
   unique index `uq_documents_run_primary`, its CHECK constraint, the
   `X-Document-Presentation` ingestion header, and the derived run-DTO field
-  `primary_document_id` are all gone (migration `0041`).
+  `primary_document_id` are all gone (migration `0042`).
 
   It conflated two different questions — how important a file is, and whether
   the UI opens it — and forced at most one per run, which made the producing
@@ -345,6 +345,50 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   already running `LOG_LEVEL=debug` will now get debug output from sidecar
   containers where it previously got none. The default is `info` in both
   `.env.example` and `docker-compose.yml`.
+
+### Fixed
+
+- **Two indexes the schema declared but production never had** (#1182) —
+  `idx_runs_package_started` and `idx_runs_schedule_id` were absent from the
+  production database. They were the only two missing of the 132 indexes the
+  schema declared when production was audited — 0039 has since dropped 18,
+  leaving 114 — so every query planned around them had been running without
+  them. Migration `0041_restore_squash_indexes.sql` creates both, guarded with
+  `IF NOT EXISTS` because every database created FROM the squash already has
+  them and the whole pending batch runs in one transaction — an unguarded
+  `already exists` would abort the deploy for nearly every install.
+
+  **Why nothing looked wrong.** `0000_init.sql` is a SQUASH and production
+  predates it. Drizzle replays only the entries past a database's watermark,
+  so for a database older than the squash `0000_init` is history, never
+  pending work: anything the squash introduced by itself — rather than through
+  a forward migration production also ran — silently never arrived. The
+  bookkeeping was healthy throughout (39 rows, no gap), which is exactly why
+  this went unnoticed; no migration was skipped and no record was wrong, only
+  DDL was missing. The class is structural, not a one-off: the next squash
+  reopens it for every index, constraint and default it introduces.
+
+  **New operator check.** `DATABASE_URL=… bun scripts/check-index-drift.ts`
+  reports every index the schema declares that a live database lacks and exits
+  non-zero; `DATABASE_URL` is its only input, so it runs from a jump host with
+  nothing but a production connection string. It diffs against the snapshot
+  matching that database's OWN migration watermark, not the newest on disk (a
+  database with migrations pending legitimately lacks the indexes they add),
+  and refuses rather than guess when the watermark matches no journal entry.
+  NAMES only — an index present under the expected name with lost uniqueness
+  or a lost partial predicate reads as present. Run it against production
+  after a squash. `apps/api/test/unit/migration-index-parity.test.ts`
+  pins the rest in CI: it replays the journal into a throwaway PGlite and fails
+  if the latest snapshot declares an index no SQL in the journal creates, then
+  drops these two to model the production population and re-runs 0041 against
+  it — both must come back, and the partial one must come back partial.
+
+  **The rule this leaves behind:** a `DROP INDEX` must verify the SURVIVING
+  index against the live database before dropping anything. Neither the TS
+  schema nor `0000_init.sql` is evidence that an index exists in production —
+  migration 0039 dropped `idx_runs_package_id` on the grounds that
+  `idx_runs_package_started` covers it, and that cover was itself absent from
+  production at the time.
 
 ### Security
 

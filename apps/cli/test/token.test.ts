@@ -17,7 +17,7 @@
  *      from the locally stored `expiresAt` by more than 2s.
  */
 
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -45,36 +45,19 @@ class FakeKeyring implements KeyringHandle {
 
 let tmpDir: string;
 let originalXdg: string | undefined;
-const originalExit = process.exit;
-const originalStdoutWrite = process.stdout.write.bind(process.stdout);
-const originalStderrWrite = process.stderr.write.bind(process.stderr);
 
-let stdoutChunks: string[];
-let stderrChunks: string[];
-
+/**
+ * Every test injects its own sink instead of reassigning the process-wide
+ * streams. That matters most here: contract #1 is "no token plaintext ever
+ * reaches stdout or stderr", and a shared global buffer would have made the
+ * `toBe("")` checks below assertions about whatever else the single
+ * `bun test` process happened to write at that moment (issue #1180).
+ *
+ * `io.exit` throws `ExitError` so the error branches unwind without taking
+ * the test worker down with them.
+ */
 import { ExitError } from "./helpers/process-exit.ts";
-
-function captureIo(): void {
-  stdoutChunks = [];
-  stderrChunks = [];
-  process.stdout.write = ((chunk: string | Uint8Array): boolean => {
-    stdoutChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf-8"));
-    return true;
-  }) as typeof process.stdout.write;
-  process.stderr.write = ((chunk: string | Uint8Array): boolean => {
-    stderrChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf-8"));
-    return true;
-  }) as typeof process.stderr.write;
-  process.exit = ((code: number) => {
-    throw new ExitError(code);
-  }) as typeof process.exit;
-}
-
-function restoreIo(): void {
-  process.stdout.write = originalStdoutWrite;
-  process.stderr.write = originalStderrWrite;
-  process.exit = originalExit;
-}
+import { createMemoryIO } from "./helpers/memory-io.ts";
 
 function makeJwt(payload: Record<string, unknown>): string {
   const header = Buffer.from(JSON.stringify({ alg: "ES256", typ: "JWT" })).toString("base64url");
@@ -115,11 +98,6 @@ afterAll(async () => {
 
 beforeEach(() => {
   FakeKeyring.store.clear();
-  captureIo();
-});
-
-afterEach(() => {
-  restoreIo();
 });
 
 describe("token (happy path)", () => {
@@ -151,10 +129,11 @@ describe("token (happy path)", () => {
       refreshExpiresAt: refreshExp,
     });
 
-    await tokenCommand({ profile: "default" });
+    const { io, stdout, stderr } = createMemoryIO();
+    await tokenCommand({ profile: "default" }, io);
 
-    const out = stdoutChunks.join("");
-    expect(stderrChunks.join("")).toBe("");
+    const out = stdout();
+    expect(stderr()).toBe("");
 
     // Metadata present.
     expect(out).toContain("Profile:           default");
@@ -194,9 +173,10 @@ describe("token (happy path)", () => {
       refreshExpiresAt: refreshExp,
     });
 
-    await tokenCommand({ profile: "default" });
+    const { io, stdout } = createMemoryIO();
+    await tokenCommand({ profile: "default" }, io);
 
-    const out = stdoutChunks.join("");
+    const out = stdout();
     expect(out).toContain("Status:          rotating-soon (< 30s remaining)");
   });
 
@@ -215,9 +195,10 @@ describe("token (happy path)", () => {
       refreshExpiresAt: refreshExp,
     });
 
-    await tokenCommand({ profile: "default" });
+    const { io, stdout } = createMemoryIO();
+    await tokenCommand({ profile: "default" }, io);
 
-    const out = stdoutChunks.join("");
+    const out = stdout();
     expect(out).toContain("Status:          expired (next call will trigger rotation)");
     expect(out).toMatch(/Expires:\s+\d+m \d+s ago/);
     // Claims still render — the expiry status doesn't suppress diagnostics.
@@ -239,9 +220,10 @@ describe("token (happy path)", () => {
       refreshExpiresAt: refreshExp,
     });
 
-    await tokenCommand({ profile: "default" });
+    const { io, stdout } = createMemoryIO();
+    await tokenCommand({ profile: "default" }, io);
 
-    const out = stdoutChunks.join("");
+    const out = stdout();
     expect(out).toContain("Status:          expiring-soon (< 24h remaining)");
   });
 
@@ -263,9 +245,10 @@ describe("token (happy path)", () => {
       refreshExpiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
     });
 
-    await tokenCommand({ profile: "default" });
+    const { io, stdout } = createMemoryIO();
+    await tokenCommand({ profile: "default" }, io);
 
-    const out = stdoutChunks.join("");
+    const out = stdout();
     expect(out).toMatch(/JWT `exp` and stored `expiresAt` differ by \d+s/);
   });
 
@@ -278,10 +261,11 @@ describe("token (happy path)", () => {
       refreshExpiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
     });
 
-    await tokenCommand({ profile: "default" });
+    const { io, stdout, stderr } = createMemoryIO();
+    await tokenCommand({ profile: "default" }, io);
 
-    const out = stdoutChunks.join("");
-    expect(stderrChunks.join("")).toBe("");
+    const out = stdout();
+    expect(stderr()).toBe("");
     // TTL lines still render.
     expect(out).toContain("Access token");
     expect(out).toContain("Status:          fresh");
@@ -293,16 +277,17 @@ describe("token (happy path)", () => {
 
 describe("token (error paths)", () => {
   it("exits 1 with a clear hint when the profile is not configured", async () => {
+    const { io, stdout, stderr } = createMemoryIO();
     let exitCode: number | undefined;
     try {
-      await tokenCommand({ profile: "missing-profile" });
+      await tokenCommand({ profile: "missing-profile" }, io);
     } catch (err) {
       if (err instanceof ExitError) exitCode = err.code;
       else throw err;
     }
     expect(exitCode).toBe(1);
-    expect(stderrChunks.join("")).toContain(`Profile "missing-profile" not configured`);
-    expect(stdoutChunks.join("")).toBe("");
+    expect(stderr()).toContain(`Profile "missing-profile" not configured`);
+    expect(stdout()).toBe("");
   });
 
   it("exits 1 with a clear hint when the profile exists but has no stored tokens", async () => {
@@ -312,14 +297,15 @@ describe("token (error paths)", () => {
       email: "alice@example.com",
     });
 
+    const { io, stderr } = createMemoryIO();
     let exitCode: number | undefined;
     try {
-      await tokenCommand({ profile: "default" });
+      await tokenCommand({ profile: "default" }, io);
     } catch (err) {
       if (err instanceof ExitError) exitCode = err.code;
       else throw err;
     }
     expect(exitCode).toBe(1);
-    expect(stderrChunks.join("")).toContain(`No tokens stored for profile "default"`);
+    expect(stderr()).toContain(`No tokens stored for profile "default"`);
   });
 });

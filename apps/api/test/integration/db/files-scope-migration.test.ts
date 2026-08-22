@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Migration `0043_documents_scope_strings` — the data half of the #1177
+ * Migration `0044_documents_scope_strings` — the data half of the #1177
  * permission-resource rename.
  *
  * The migration chain itself is replayed at boot by the tier-0 harness, so a
@@ -24,7 +24,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 
 const MIGRATION = new URL(
-  "../../../../../packages/db/drizzle/0043_documents_scope_strings.sql",
+  "../../../../../packages/db/drizzle/0044_documents_scope_strings.sql",
   import.meta.url,
 ).pathname;
 
@@ -56,7 +56,7 @@ async function scopesOf(id: string): Promise<string[]> {
   return [...row!.scopes].sort();
 }
 
-describe("migration 0043 — documents:* → files:* in stored scopes", () => {
+describe("migration 0044 — documents:* → files:* in stored scopes", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {

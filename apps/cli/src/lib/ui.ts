@@ -7,16 +7,50 @@
  */
 
 import * as clack from "@clack/prompts";
+import { DEFAULT_IO, type CommandIO } from "./io.ts";
 import { DeviceFlowError } from "./device-flow.ts";
 import { ApiError, AuthError } from "./api.ts";
 import { InsecureInstanceError } from "./instance-url.ts";
 
-export function intro(title: string): void {
-  clack.intro(title);
+/**
+ * Adapt a `CommandIO` into the stream clack renders to.
+ *
+ * clack accepts an `output` sink on every helper, so this is the seam that
+ * lets a command's framing (`intro`, `outro`, the spinners) land in a
+ * caller-owned buffer instead of the process-global stdout — the coupling
+ * issue #1180 is about. Only the *bytes* are redirected: everything else is
+ * inherited from the real stream, because clack asks its output for more
+ * than `write`. `spinner()` reads `output.columns` to wrap frames (a bare
+ * four-member sink has none, and clack would silently fall back to 80
+ * columns, rewrapping every spinner line on a wider terminal) and hands the
+ * stream to `node:readline`, which expects a stream. Prototyping off
+ * `process.stdout` keeps the geometry, the `isTTY` flags and the readline
+ * interop exactly as they are today, so the default path stays
+ * byte-for-byte what it renders now.
+ *
+ * The trailing arguments cover `write(chunk, cb)` / `write(chunk, enc, cb)`:
+ * readline passes a continuation there and stalls its cursor bookkeeping if
+ * nobody calls it.
+ */
+function clackOutput(io: CommandIO): typeof process.stdout {
+  return Object.create(process.stdout, {
+    write: {
+      value(chunk: string | Uint8Array, ...rest: unknown[]): boolean {
+        io.stdout.write(chunk);
+        const done = rest.find((arg) => typeof arg === "function") as (() => void) | undefined;
+        done?.();
+        return true;
+      },
+    },
+  }) as typeof process.stdout;
 }
 
-export function outro(message: string): void {
-  clack.outro(message);
+export function intro(title: string, io: CommandIO = DEFAULT_IO): void {
+  clack.intro(title, { output: clackOutput(io) });
+}
+
+export function outro(message: string, io: CommandIO = DEFAULT_IO): void {
+  clack.outro(message, { output: clackOutput(io) });
 }
 
 /**
@@ -95,8 +129,58 @@ export async function select<T>(
   return value as T;
 }
 
-export function spinner(): { start(msg: string): void; stop(msg?: string): void } {
-  return clack.spinner();
+/**
+ * A spinner whose `start` / `stop` the caller drives itself.
+ *
+ * Prefer `withSpinner` — a caller that owns the pair owns the obligation to
+ * stop it on **every** path, and the frames come from a `setInterval` nothing
+ * else clears. Reach for this only when the start is conditional (the
+ * self-update download starts on the first byte-tick), and stop it in a
+ * `finally`.
+ */
+export function spinner(io: CommandIO = DEFAULT_IO): {
+  start(msg: string): void;
+  message(msg: string): void;
+  stop(msg?: string): void;
+} {
+  return clack.spinner({ output: clackOutput(io) });
+}
+
+/**
+ * Run `fn` with a started spinner, stopping it on **every** exit path.
+ *
+ * A clack spinner paints from a `setInterval` that only `stop()` clears, so a
+ * body that throws past it leaves the frames painting for the rest of the
+ * process. In the shipped CLI that is invisible — the error unwinds to
+ * `exitWithError` and the process exits — but `bun test` runs the whole repo
+ * in one process, where the leak outlives its test: `runner.test.ts` exercised
+ * exactly such a path and its frames landed in another suite's capture
+ * (issue #1180, `Received: "◒  Enabling systemd unit..."` on `whoami`). With
+ * an injected `io` the frames go to that test's own sink instead — quieter,
+ * but an unbounded buffer growing every 80ms for the rest of the run.
+ *
+ * `stopLabel` may be a callback when the success line quotes the result (the
+ * dev server's pid). `errorLabel` defaults to `startLabel`: the frame closes
+ * on what it was doing, and the thrown error is the report. Pass it when the
+ * failure has a name of its own ("Docker not found").
+ */
+export async function withSpinner<T>(
+  startLabel: string,
+  fn: (spin: { message(msg: string): void }) => Promise<T>,
+  stopLabel: string | ((value: T) => string),
+  opts: { io?: CommandIO; errorLabel?: string } = {},
+): Promise<T> {
+  const spin = clack.spinner({ output: clackOutput(opts.io ?? DEFAULT_IO) });
+  spin.start(startLabel);
+  let value: T;
+  try {
+    value = await fn(spin);
+  } catch (err) {
+    spin.stop(opts.errorLabel ?? startLabel);
+    throw err;
+  }
+  spin.stop(typeof stopLabel === "function" ? stopLabel(value) : stopLabel);
+  return value;
 }
 
 /**
@@ -136,9 +220,15 @@ export function formatError(err: unknown): string {
   return String(err);
 }
 
-export function exitWithError(err: unknown, code = 1): never {
-  clack.cancel(formatError(err));
-  process.exit(code);
+/**
+ * Render `err` and stop the process. `io` defaults to `DEFAULT_IO`, whose
+ * `cancel` is `clack.cancel` — so the production rendering is byte-for-byte
+ * what it has always been, on the same stream. Tests inject a sink instead of
+ * swapping the global streams (issue #1180).
+ */
+export function exitWithError(err: unknown, io: CommandIO = DEFAULT_IO, code = 1): never {
+  io.cancel(formatError(err));
+  io.exit(code);
 }
 
 /**

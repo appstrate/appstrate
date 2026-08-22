@@ -4,7 +4,7 @@
  * Issue #1177 — a third-party OAuth client that still asks for `documents:read`.
  *
  * The permission resource `documents` was renamed to `files`, and migration
- * 0043 rewrote the stored `oauth_clients.scopes` strings. But a scope string is
+ * 0044 rewrote the stored `oauth_clients.scopes` strings. But a scope string is
  * not only stored — it is also SENT, hardcoded in the config of every satellite,
  * embedded app and MCP client that integrated before the rename. Those callers
  * do not redeploy when the platform does.
@@ -56,7 +56,7 @@ async function sha256Base64Url(input: string): Promise<string> {
 
 /**
  * Register an application-level client the way the dashboard does. `scopes` is
- * what lands in `oauth_clients.scopes` — post-migration-0043 that column holds
+ * what lands in `oauth_clients.scopes` — post-migration-0044 that column holds
  * the CANONICAL spelling, which is exactly why the legacy request has to be
  * rewritten rather than matched.
  */
@@ -134,7 +134,7 @@ describe("#1177 compatibility — a client that still requests documents:read", 
   });
 
   it("does not reject a legacy documents:read scope at /oauth2/authorize", async () => {
-    // The client row holds the canonical spelling (migration 0043 rewrote it);
+    // The client row holds the canonical spelling (migration 0044 rewrote it);
     // the CLIENT still sends the retired one. That mismatch is the whole bug.
     const clientId = await registerClient(ctx, ["openid", "profile", "files:read"]);
     const cookie = await signUpEndUser(ctx.defaultAppId);
@@ -167,8 +167,8 @@ describe("#1177 compatibility — a client that still requests documents:read", 
   it("persists the canonical spelling when a legacy client re-registers", async () => {
     // `assertValidScopes` validated canonically but stored the caller's raw
     // string, so a re-registering legacy client re-introduced a `documents:`
-    // row — breaking the invariant migration 0043 exists to establish, and
-    // leaving the row un-migrated for good (0043 runs once).
+    // row — breaking the invariant migration 0044 exists to establish, and
+    // leaving the row un-migrated for good (0044 runs once).
     const clientId = await registerClient(ctx, ["openid", "profile", "documents:read"]);
 
     const [row] = await db

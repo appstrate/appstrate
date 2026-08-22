@@ -10,6 +10,11 @@
  * interactive-picker semantics are identical so adding a third layer
  * (if ever needed) would follow the same rails.
  *
+ * Mirroring extends to the IO seam: every subcommand takes a trailing
+ * `io: CommandIO = DEFAULT_IO` (after `deps`, since `list` and `current`
+ * have no `deps`), so tests capture output in a sink they own instead of
+ * reassigning the process-wide streams — issue #1180.
+ *
  * Subcommands:
  *   app list          — enumerate apps in the pinned org
  *   app switch [ref]  — re-pin (interactive if no arg)
@@ -25,6 +30,7 @@ import {
   type Application,
 } from "../lib/applications.ts";
 import { askText, select, exitWithError } from "../lib/ui.ts";
+import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 
 interface AppBaseOptions {
   profile?: string;
@@ -74,52 +80,61 @@ const defaultDeps: Required<AppCommandDeps> = {
   },
 };
 
-export async function appListCommand(opts: AppBaseOptions): Promise<void> {
+export async function appListCommand(
+  opts: AppBaseOptions,
+  io: CommandIO = DEFAULT_IO,
+): Promise<void> {
   const { profileName, profile } = await resolveActiveProfile(opts.profile);
-  requireLoggedIn(profileName, profile);
+  requireLoggedIn(profileName, profile, io);
 
   try {
     const apps = await listApplications(profileName);
     if (apps.length === 0) {
-      process.stdout.write("(no applications)\n");
+      io.stdout.write("(no applications)\n");
       return;
     }
     for (const a of apps) {
       const marker = a.id === profile.applicationId ? "*" : " ";
       const def = a.isDefault ? " [default]" : "";
-      process.stdout.write(`${marker} ${a.name.padEnd(24)}  ${a.id}${def}\n`);
+      io.stdout.write(`${marker} ${a.name.padEnd(24)}  ${a.id}${def}\n`);
     }
   } catch (err) {
-    exitWithError(err);
+    // `io` is forwarded so the terminal error and the exit go to the
+    // caller's sink; the default would fire the real `process.exit`.
+    exitWithError(err, io);
   }
 }
 
-export async function appCurrentCommand(opts: AppBaseOptions): Promise<void> {
+export async function appCurrentCommand(
+  opts: AppBaseOptions,
+  io: CommandIO = DEFAULT_IO,
+): Promise<void> {
   const { profile } = await resolveActiveProfile(opts.profile);
   if (!profile) {
-    process.stderr.write("Not logged in. Run: appstrate login\n");
-    process.exit(1);
+    io.stderr.write("Not logged in. Run: appstrate login\n");
+    io.exit(1);
   }
   if (!profile.applicationId) {
-    process.stderr.write("No application pinned. Run: appstrate app switch\n");
-    process.exit(1);
+    io.stderr.write("No application pinned. Run: appstrate app switch\n");
+    io.exit(1);
   }
-  process.stdout.write(`${profile.applicationId}\n`);
+  io.stdout.write(`${profile.applicationId}\n`);
 }
 
 export async function appSwitchCommand(
   opts: AppSwitchOptions,
   deps: AppCommandDeps = {},
+  io: CommandIO = DEFAULT_IO,
 ): Promise<void> {
   const { profileName, profile } = await resolveActiveProfile(opts.profile);
-  requireLoggedIn(profileName, profile);
+  requireLoggedIn(profileName, profile, io);
   const picker = { ...defaultDeps, ...deps };
 
   try {
     const apps = await listApplications(profileName);
     if (apps.length === 0) {
-      process.stderr.write("No applications — run `appstrate app create <name>` to create one.\n");
-      process.exit(1);
+      io.stderr.write("No applications — run `appstrate app create <name>` to create one.\n");
+      io.exit(1);
     }
 
     let chosen: Application;
@@ -128,27 +143,26 @@ export async function appSwitchCommand(
     } else {
       const picked = await picker.pickApp(apps, profile.applicationId);
       if (!picked) {
-        process.stderr.write(
-          "Cannot prompt in non-TTY — pass an id: `appstrate app switch <id>`.\n",
-        );
-        process.exit(1);
+        io.stderr.write("Cannot prompt in non-TTY — pass an id: `appstrate app switch <id>`.\n");
+        io.exit(1);
       }
       chosen = picked;
     }
 
     await updateProfile(profileName, { applicationId: chosen.id });
-    process.stdout.write(`Pinned "${chosen.name}" (${chosen.id}) on profile "${profileName}".\n`);
+    io.stdout.write(`Pinned "${chosen.name}" (${chosen.id}) on profile "${profileName}".\n`);
   } catch (err) {
-    exitWithError(err);
+    exitWithError(err, io);
   }
 }
 
 export async function appCreateCommand(
   opts: AppCreateOptions,
   deps: AppCommandDeps = {},
+  io: CommandIO = DEFAULT_IO,
 ): Promise<void> {
   const { profileName, profile } = await resolveActiveProfile(opts.profile);
-  requireLoggedIn(profileName, profile);
+  requireLoggedIn(profileName, profile, io);
   const picker = { ...defaultDeps, ...deps };
 
   try {
@@ -158,19 +172,17 @@ export async function appCreateCommand(
     } else {
       const prompted = await picker.promptCreateApp();
       if (!prompted) {
-        process.stderr.write(
-          "Cannot prompt in non-TTY — pass a name: `appstrate app create <name>`.\n",
-        );
-        process.exit(1);
+        io.stderr.write("Cannot prompt in non-TTY — pass a name: `appstrate app create <name>`.\n");
+        io.exit(1);
       }
       name = prompted.name;
     }
     const created = await createApplication(profileName, name);
     await updateProfile(profileName, { applicationId: created.id });
-    process.stdout.write(
+    io.stdout.write(
       `Created "${created.name}" (${created.id}) and pinned it on profile "${profileName}".\n`,
     );
   } catch (err) {
-    exitWithError(err);
+    exitWithError(err, io);
   }
 }

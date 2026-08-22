@@ -1,7 +1,7 @@
 -- Rewrite the stored `documents:*` permission scope strings to `files:*`
 -- (issue #1177, phase 2b — the data half of the permission-resource rename).
 --
--- Migration 0042 renamed the TABLES. This one renames the grant STRINGS that
+-- Migration 0043 renamed the TABLES. This one renames the grant STRINGS that
 -- name the permission resource, because a permission scope is not only a
 -- vocabulary — it is a value persisted inside every credential that was ever
 -- issued:

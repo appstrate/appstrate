@@ -1,5 +1,5 @@
 {
-  "id": "3f7a91e2-5c48-4d16-9b03-8ae5d2c47f61",
+  "id": "5ec4a863-3d3b-4d59-80fd-d82cd1e91bcc",
   "prevId": "0d3f9a1c-6b52-4e77-9a0d-7c41f8e2b5a3",
   "version": "7",
   "dialect": "postgresql",
@@ -5708,6 +5708,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "presentation": {
+          "name": "presentation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "expires_at": {
           "name": "expires_at",
           "type": "timestamp with time zone",
@@ -5820,6 +5826,22 @@
           ],
           "isUnique": true,
           "where": "\"documents\".\"purpose\" = 'agent_output'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "uq_documents_run_primary": {
+          "name": "uq_documents_run_primary",
+          "columns": [
+            {
+              "expression": "run_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"documents\".\"presentation\" = 'primary'",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -5958,6 +5980,10 @@
         "chk_documents_single_container": {
           "name": "chk_documents_single_container",
           "value": "NOT (\"documents\".\"run_id\" IS NOT NULL AND \"documents\".\"chat_session_id\" IS NOT NULL)"
+        },
+        "chk_documents_presentation": {
+          "name": "chk_documents_presentation",
+          "value": "\"documents\".\"presentation\" IS NULL OR (\"documents\".\"presentation\" = 'primary' AND \"documents\".\"purpose\" = 'agent_output' AND \"documents\".\"run_id\" IS NOT NULL AND \"documents\".\"chat_session_id\" IS NULL)"
         }
       },
       "isRLSEnabled": false

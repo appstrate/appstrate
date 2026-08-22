@@ -7,6 +7,12 @@
  * stubbed `fetch` — we don't go through commander, we call each
  * subcommand function directly so the injected `deps` (picker / create
  * prompt) aren't bypassed by non-TTY guards.
+ *
+ * Output is captured through a per-test `createMemoryIO()` sink passed as the
+ * command's trailing `io` argument. The suite used to reassign the *global*
+ * `process.stdout.write` / `process.stderr.write` / `process.exit`, which made
+ * every buffer assertion a claim about writes the test did not own — issue
+ * #1180.
  */
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
@@ -45,31 +51,11 @@ type FetchCall = { url: string; method: string | undefined; body?: string };
 let tmpDir: string;
 let originalXdg: string | undefined;
 const originalFetch = globalThis.fetch;
-const originalExit = process.exit;
-const originalStdoutWrite = process.stdout.write.bind(process.stdout);
-const originalStderrWrite = process.stderr.write.bind(process.stderr);
 
 let fetchCalls: FetchCall[];
-let stdoutChunks: string[];
-let stderrChunks: string[];
 
 import { ExitError } from "./helpers/process-exit.ts";
-
-function captureIo(): void {
-  stdoutChunks = [];
-  stderrChunks = [];
-  process.stdout.write = ((chunk: string | Uint8Array): boolean => {
-    stdoutChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf-8"));
-    return true;
-  }) as typeof process.stdout.write;
-  process.stderr.write = ((chunk: string | Uint8Array): boolean => {
-    stderrChunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf-8"));
-    return true;
-  }) as typeof process.stderr.write;
-  (process as unknown as { exit: (code?: number) => never }).exit = ((code?: number): never => {
-    throw new ExitError(code ?? 0);
-  }) as (code?: number) => never;
-}
+import { createMemoryIO } from "./helpers/memory-io.ts";
 
 interface Responders {
   listOrgs?: () => Response;
@@ -133,15 +119,11 @@ beforeEach(async () => {
   FakeKeyring.store.clear();
   _setKeyringFactoryForTesting((p) => new FakeKeyring(p));
   fetchCalls = [];
-  captureIo();
 });
 
 afterEach(async () => {
   _setKeyringFactoryForTesting(null);
   globalThis.fetch = originalFetch;
-  process.stdout.write = originalStdoutWrite;
-  process.stderr.write = originalStderrWrite;
-  (process as unknown as { exit: typeof originalExit }).exit = originalExit;
   await rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -186,6 +168,7 @@ const twoOrgs = {
 
 describe("org list", () => {
   it("prints each org with a `*` marker on the pinned one", async () => {
+    const { io, stdout } = createMemoryIO();
     await seedLoggedIn("org_2");
     installFetch({
       listOrgs: () =>
@@ -195,9 +178,9 @@ describe("org list", () => {
         }),
     });
 
-    await orgListCommand({ profile: "default" });
+    await orgListCommand({ profile: "default" }, io);
 
-    const out = stdoutChunks.join("");
+    const out = stdout();
     expect(out).toContain("acme");
     expect(out).toContain("beta");
     // The pinned row is prefixed with `*`, the other with a space.
@@ -212,6 +195,7 @@ describe("org list", () => {
   });
 
   it("prints a friendly message when the profile has no orgs", async () => {
+    const { io, stdout } = createMemoryIO();
     await seedLoggedIn();
     installFetch({
       listOrgs: () =>
@@ -221,13 +205,14 @@ describe("org list", () => {
         }),
     });
 
-    await orgListCommand({ profile: "default" });
-    expect(stdoutChunks.join("")).toContain("(no organizations)");
+    await orgListCommand({ profile: "default" }, io);
+    expect(stdout()).toContain("(no organizations)");
   });
 
   it("errors out when the profile is not logged in", async () => {
-    await expect(orgListCommand({ profile: "default" })).rejects.toBeInstanceOf(ExitError);
-    expect(stderrChunks.join("")).toContain("not configured");
+    const { io, stderr } = createMemoryIO();
+    await expect(orgListCommand({ profile: "default" }, io)).rejects.toBeInstanceOf(ExitError);
+    expect(stderr()).toContain("not configured");
   });
 });
 
@@ -235,20 +220,23 @@ describe("org list", () => {
 
 describe("org current", () => {
   it("prints the pinned org id to stdout", async () => {
+    const { io, stdout } = createMemoryIO();
     await seedLoggedIn("org_42");
-    await orgCurrentCommand({ profile: "default" });
-    expect(stdoutChunks.join("").trim()).toBe("org_42");
+    await orgCurrentCommand({ profile: "default" }, io);
+    expect(stdout().trim()).toBe("org_42");
   });
 
   it("exits 1 with a hint when no org is pinned", async () => {
+    const { io, stderr } = createMemoryIO();
     await seedLoggedIn();
-    await expect(orgCurrentCommand({ profile: "default" })).rejects.toBeInstanceOf(ExitError);
-    expect(stderrChunks.join("")).toContain("No organization pinned");
+    await expect(orgCurrentCommand({ profile: "default" }, io)).rejects.toBeInstanceOf(ExitError);
+    expect(stderr()).toContain("No organization pinned");
   });
 
   it("exits 1 when the profile is unconfigured", async () => {
-    await expect(orgCurrentCommand({ profile: "default" })).rejects.toBeInstanceOf(ExitError);
-    expect(stderrChunks.join("")).toContain("Not logged in");
+    const { io, stderr } = createMemoryIO();
+    await expect(orgCurrentCommand({ profile: "default" }, io)).rejects.toBeInstanceOf(ExitError);
+    expect(stderr()).toContain("Not logged in");
   });
 });
 
@@ -256,6 +244,7 @@ describe("org current", () => {
 
 describe("org switch", () => {
   it("pins the org matching the positional arg (by id)", async () => {
+    const { io, stdout } = createMemoryIO();
     await seedLoggedIn("org_1");
     installFetch({
       listOrgs: () =>
@@ -265,13 +254,14 @@ describe("org switch", () => {
         }),
     });
 
-    await orgSwitchCommand({ profile: "default", ref: "org_2" });
+    await orgSwitchCommand({ profile: "default", ref: "org_2" }, {}, io);
 
     expect(await pinnedOrgId()).toBe("org_2");
-    expect(stdoutChunks.join("")).toContain('Pinned "Beta"');
+    expect(stdout()).toContain('Pinned "Beta"');
   });
 
   it("pins the org matching the positional arg (by slug)", async () => {
+    const { io } = createMemoryIO();
     await seedLoggedIn("org_1");
     installFetch({
       listOrgs: () =>
@@ -281,11 +271,12 @@ describe("org switch", () => {
         }),
     });
 
-    await orgSwitchCommand({ profile: "default", ref: "beta" });
+    await orgSwitchCommand({ profile: "default", ref: "beta" }, {}, io);
     expect(await pinnedOrgId()).toBe("org_2");
   });
 
   it("uses the injected picker when no ref is passed", async () => {
+    const { io } = createMemoryIO();
     await seedLoggedIn("org_1");
     installFetch({
       listOrgs: () =>
@@ -304,6 +295,7 @@ describe("org switch", () => {
           return orgs[1]!;
         },
       },
+      io,
     );
 
     expect(seenCurrent).toBe("org_1");
@@ -311,6 +303,7 @@ describe("org switch", () => {
   });
 
   it("exits 1 when no orgs exist", async () => {
+    const { io, stderr } = createMemoryIO();
     await seedLoggedIn("org_1");
     installFetch({
       listOrgs: () =>
@@ -320,11 +313,14 @@ describe("org switch", () => {
         }),
     });
 
-    await expect(orgSwitchCommand({ profile: "default" })).rejects.toBeInstanceOf(ExitError);
-    expect(stderrChunks.join("")).toContain("No organizations");
+    await expect(orgSwitchCommand({ profile: "default" }, {}, io)).rejects.toBeInstanceOf(
+      ExitError,
+    );
+    expect(stderr()).toContain("No organizations");
   });
 
   it("exits with an error when the ref does not match any org", async () => {
+    const { io } = createMemoryIO();
     await seedLoggedIn("org_1");
     installFetch({
       listOrgs: () =>
@@ -334,9 +330,9 @@ describe("org switch", () => {
         }),
     });
 
-    await expect(orgSwitchCommand({ profile: "default", ref: "gamma" })).rejects.toBeInstanceOf(
-      ExitError,
-    );
+    await expect(
+      orgSwitchCommand({ profile: "default", ref: "gamma" }, {}, io),
+    ).rejects.toBeInstanceOf(ExitError);
     expect(await pinnedOrgId()).toBe("org_1"); // unchanged
   });
 });
@@ -345,6 +341,7 @@ describe("org switch", () => {
 
 describe("org create", () => {
   it("POSTs with the positional name + auto-pins", async () => {
+    const { io, stdout } = createMemoryIO();
     await seedLoggedIn();
     let createdBody: unknown;
     installFetch({
@@ -363,14 +360,15 @@ describe("org create", () => {
       },
     });
 
-    await orgCreateCommand({ profile: "default", name: "Fresh" });
+    await orgCreateCommand({ profile: "default", name: "Fresh" }, {}, io);
 
     expect(createdBody).toEqual({ name: "Fresh" });
     expect(await pinnedOrgId()).toBe("org_new");
-    expect(stdoutChunks.join("")).toContain('Created "Fresh"');
+    expect(stdout()).toContain('Created "Fresh"');
   });
 
   it("forwards --slug through the request body", async () => {
+    const { io } = createMemoryIO();
     await seedLoggedIn();
     let createdBody: unknown;
     installFetch({
@@ -389,11 +387,12 @@ describe("org create", () => {
       },
     });
 
-    await orgCreateCommand({ profile: "default", name: "Fresh", slug: "override" });
+    await orgCreateCommand({ profile: "default", name: "Fresh", slug: "override" }, {}, io);
     expect(createdBody).toEqual({ name: "Fresh", slug: "override" });
   });
 
   it("prompts via the injected creator when no name is passed", async () => {
+    const { io } = createMemoryIO();
     await seedLoggedIn();
     let createdBody: unknown;
     installFetch({
@@ -417,6 +416,7 @@ describe("org create", () => {
       {
         promptCreateOrg: async () => ({ name: "Prompted", slug: "prompted" }),
       },
+      io,
     );
 
     expect(createdBody).toEqual({ name: "Prompted", slug: "prompted" });
@@ -424,10 +424,11 @@ describe("org create", () => {
   });
 
   it("requires login", async () => {
-    await expect(orgCreateCommand({ profile: "default", name: "X" })).rejects.toBeInstanceOf(
-      ExitError,
-    );
-    expect(stderrChunks.join("")).toContain("not configured");
+    const { io, stderr } = createMemoryIO();
+    await expect(
+      orgCreateCommand({ profile: "default", name: "X" }, {}, io),
+    ).rejects.toBeInstanceOf(ExitError);
+    expect(stderr()).toContain("not configured");
   });
 });
 
@@ -440,6 +441,7 @@ describe("org create", () => {
 
 describe("org switch — cascade: re-pins new org's default app", () => {
   it("pins the new org AND pins the new org's default app in one call", async () => {
+    const { io, stdout } = createMemoryIO();
     // Start pinned to org_1 with an app pin that only exists under org_1.
     await seedLoggedIn("org_1", "default", "app_stale_from_org_1");
     installFetch({
@@ -466,16 +468,17 @@ describe("org switch — cascade: re-pins new org's default app", () => {
         ),
     });
 
-    await orgSwitchCommand({ profile: "default", ref: "org_2" });
+    await orgSwitchCommand({ profile: "default", ref: "org_2" }, {}, io);
 
     expect(await pinnedOrgId()).toBe("org_2");
     expect(await pinnedAppId()).toBe("app_for_org_2");
-    const out = stdoutChunks.join("");
+    const out = stdout();
     expect(out).toContain('Pinned "Beta"');
     expect(out).toContain('/ app "Org 2 Default"');
   });
 
   it("clears the stale app pin even when the new org has no default app", async () => {
+    const { io } = createMemoryIO();
     await seedLoggedIn("org_1", "default", "app_stale");
     installFetch({
       listOrgs: () =>
@@ -490,7 +493,7 @@ describe("org switch — cascade: re-pins new org's default app", () => {
         }),
     });
 
-    await orgSwitchCommand({ profile: "default", ref: "org_2" });
+    await orgSwitchCommand({ profile: "default", ref: "org_2" }, {}, io);
 
     expect(await pinnedOrgId()).toBe("org_2");
     // Crucially, the stale pin is gone even though no new default was found.
@@ -498,6 +501,7 @@ describe("org switch — cascade: re-pins new org's default app", () => {
   });
 
   it("tolerates a failing /api/applications call — org pin still commits", async () => {
+    const { io } = createMemoryIO();
     await seedLoggedIn("org_1", "default", "app_stale");
     installFetch({
       listOrgs: () =>
@@ -508,7 +512,7 @@ describe("org switch — cascade: re-pins new org's default app", () => {
       listApplications: () => new Response("boom", { status: 500 }),
     });
 
-    await orgSwitchCommand({ profile: "default", ref: "org_2" });
+    await orgSwitchCommand({ profile: "default", ref: "org_2" }, {}, io);
 
     expect(await pinnedOrgId()).toBe("org_2");
     expect(await pinnedAppId()).toBeUndefined();
@@ -517,6 +521,7 @@ describe("org switch — cascade: re-pins new org's default app", () => {
 
 describe("org create — cascade: re-pins new org's default app", () => {
   it("pins the newly created org AND pins the auto-provisioned default app", async () => {
+    const { io, stdout } = createMemoryIO();
     await seedLoggedIn(undefined, "default", "app_stale");
     installFetch({
       createOrg: () =>
@@ -548,10 +553,10 @@ describe("org create — cascade: re-pins new org's default app", () => {
         ),
     });
 
-    await orgCreateCommand({ profile: "default", name: "Fresh" });
+    await orgCreateCommand({ profile: "default", name: "Fresh" }, {}, io);
 
     expect(await pinnedOrgId()).toBe("org_new");
     expect(await pinnedAppId()).toBe("app_new_default");
-    expect(stdoutChunks.join("")).toContain('/ app "Default"');
+    expect(stdout()).toContain('/ app "Default"');
   });
 });
