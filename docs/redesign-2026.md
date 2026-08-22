@@ -757,12 +757,32 @@ At the time of writing:
 
 ### The order, and why
 
-**A. Finish the Collection family.** _(in progress — the card grid and the two
-package screens are done; `unified-package-detail`, `plan-card`, the four raw
-tables, the list-in-a-panel and `/schedules` are not.)_ The card grid becomes a component (it is
-drawn sixteen times), the four raw tables move onto `DataTable`, the
-list-in-a-panel becomes a type. It goes first because family 3 depends on it:
-a collection cannot live in a modal until a collection is a thing.
+**A. Finish the Collection family.** _(22 August — mostly done. What is left is
+named at the end of this bullet.)_ The card grid became a component, the raw
+tables that are collections moved onto `DataTable`, and the list-in-a-panel
+has not been touched. It went first because family 3 depends on it: a
+collection cannot live in a modal until a collection is a thing.
+
+Done: `CardGrid` and the three grids that were one (package list, package
+detail, integration catalogue); `collection.ts`, which is what makes the table
+and the grid ONE family — the state a collection is in plus the order it is
+answered in, failure then loading then emptiness; three of the four raw tables
+(proxies, models, credentials); the library, which turned out to be a matrix
+and keeps the raw table on purpose with the family's frame and states;
+`/schedules`, which now has the same bar as `/runs`, filters in the URL
+included (`lib/list-params.ts`).
+
+**Left, in the order to take it:**
+
+1. **The integration detail's two tables** (`pages/integration-detail.tsx:442`
+   and `:1153`). The heaviest thing remaining — 1806 lines to read for two
+   tables buried in them — which is why it was left for a session with room.
+   Everything the other three migrations learned applies: a column set is a
+   hook, it joins `column-tiers.test.tsx` or it is not held to the tier rule,
+   and a table inside a modal or a narrow panel never reaches tier 3.
+2. **The list-in-a-panel** (documents, connections, memory), three ways of
+   doing one thing, and the last shape of the Collection family.
+3. Then B, loading in one pass.
 
 The browser pass handed A four inconsistencies to settle, all of them the same
 shape — the apparatus is the TABLE's, not the collection's:
