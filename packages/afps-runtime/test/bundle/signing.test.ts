@@ -245,13 +245,13 @@ describe("signChildKey + verifyBundleSignature — trust chain", () => {
 describe("verifyBundleSignature — malformed / unsupported", () => {
   const trustRoot: TrustRoot = { keys: [] };
 
-  it("rejects a file that is not a JSON object", () => {
+  it("rejects a document that is not a JSON object", () => {
     const r = verifyBundleSignature(enc("x"), "not-an-object", trustRoot);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toBe("malformed");
   });
 
-  it("rejects a file missing required fields", () => {
+  it("rejects a document missing required fields", () => {
     const r = verifyBundleSignature(enc("x"), { alg: "ed25519" }, trustRoot);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toBe("malformed");

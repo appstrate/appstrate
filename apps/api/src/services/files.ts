@@ -8,7 +8,8 @@
  *
  *  - `user_upload` — a staged upload materialized here the first time a run (or
  *    chat session) consumes it (`createFileFromUpload`). The bytes move
- *    from the ephemeral `uploads` bucket to the durable `files` bucket.
+ *    from the ephemeral `uploads` bucket to the durable file bucket
+ *    (`documents` on the wire — see {@link FILES_BUCKET}).
  *  - `agent_output` — a deliverable an agent published from a run (Phase 2).
  *
  * Access is never a per-file grant (D2): `getFileForActor` derives it from

@@ -247,13 +247,13 @@ export function createFilesRouter() {
  * {@link previewKind}:
  *
  *  - `html` — untrusted agent-generated ACTIVE content: a strict CSP header
- *    whose `sandbox allow-scripts` puts the file in an OPAQUE origin (no
+ *    whose `sandbox allow-scripts` puts the document in an OPAQUE origin (no
  *    storage, no cookies, no popups, no navigating an ancestor — but it may
  *    still navigate ITSELF, see {@link buildPreviewCsp}), plus an injected
  *    parse-time `<meta>` CSP carrying the same policy minus `sandbox`, which a
  *    meta context ignores (covers the relative-URL / `srcdoc` bypass a header
  *    alone can miss), COOP `same-origin`, the full `Permissions-Policy`.
- *    Served as ACTIVE html ONLY on a proven nested-file load
+ *    Served as ACTIVE html ONLY on a proven nested-document load
  *    (`Sec-Fetch-Dest: iframe`) — in EVERY mode, `USERCONTENT_URL` configured or
  *    not. A top-level render is uncontainable (the document may navigate itself,
  *    so an agent-authored fake login exfiltrates by navigation), so every other
@@ -334,7 +334,7 @@ export function createFilePreviewRouter() {
       // read the whole (capped) body, inject the meta CSP as the first child
       // of <head>, serve. Simple + correct over regex streaming.
       //
-      // …but ONLY on a proven nested-file load — the SPA's
+      // …but ONLY on a proven nested-document load — the SPA's
       // `sandbox="allow-scripts"` iframe and nothing else, in EVERY mode. A
       // top-level render of an agent-authored file cannot be contained
       // (it may navigate itself, so the page can BE a fake login and carry the
@@ -361,7 +361,7 @@ export function createFilePreviewRouter() {
 
       if (!active) {
         // Same bytes, relabelled: `text/plain` + `nosniff` means the browser
-        // renders the markup as source and never parses it as a file, so
+        // renders the markup as source and never parses it as a document, so
         // nothing executes and nothing renders that could impersonate a page.
         // `default-src 'none'` on top.
         return new Response(html, {

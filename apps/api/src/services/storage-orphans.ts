@@ -98,9 +98,13 @@ interface BucketDiff {
 }
 
 /**
- * Strip a stored `bucket/path` key down to its in-bucket path. `files` and
- * `uploads` persist the bucket as part of `storage_key`; `listObjects` yields
- * keys without it. Returns null when the row's key does not belong to `bucket`.
+ * Strip a stored `bucket/path` key down to its in-bucket path. The `files` and
+ * `uploads` TABLES persist the bucket as part of `storage_key`; `listObjects`
+ * yields keys without it. Returns null when the row's key does not belong to
+ * `bucket`.
+ *
+ * Note the asymmetry for `files`: its bucket is `documents`, so every
+ * `files.storage_key` reads `documents/<path>`. See {@link FILES_BUCKET}.
  */
 function inBucketKey(storageKey: string, bucket: string): string | null {
   const prefix = `${bucket}/`;
@@ -109,7 +113,9 @@ function inBucketKey(storageKey: string, bucket: string): string | null {
 
 /**
  * Which run owns a `run-workspace` object. Two key shapes exist:
- * `{runId}.afps` (the bundle) and `{runId}/…` (manifest + files).
+ * `{runId}.afps` (the bundle) and `{runId}/…` (`manifest.json` plus the run's
+ * input objects under `{runId}/documents/<name>` — that prefix is still spelled
+ * `documents/`, see the header).
  */
 export function runWorkspaceOwner(key: string): string | null {
   const slash = key.indexOf("/");
@@ -127,6 +133,16 @@ export function runWorkspaceOwner(key: string): string | null {
  * else. Both are loaded here from the same unfiltered queries, so a system
  * object can never be reported as an orphan — that is exactly why the
  * known-sets are built with no `orgId` filter at all.
+ *
+ * ## The first bucket is called `documents`, and that is correct
+ *
+ * There is no `files` bucket. #1177 renamed the TABLE `documents` → `files` and
+ * deliberately left the S3 bucket / key prefix alone, because every stored
+ * `storage_key` already begins with `documents/` and renaming it would orphan
+ * every object in production. So the first descriptor below reconciles objects
+ * under the `documents` bucket against `files.storage_key` values that all
+ * start with `documents/`. `FILES_BUCKET === "documents"` — the constant is
+ * named for the table it serves, not for its own value.
  */
 export function orphanScanBuckets(): OrphanScanBucket[] {
   return [

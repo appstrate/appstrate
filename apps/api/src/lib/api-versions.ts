@@ -107,7 +107,7 @@ export function isVersionSupported(v: string): boolean {
  * suffix.
  *
  * `param` is OPTIONAL because one of the three has no request parameter to
- * name. `packages/core/src/api-errors.ts` files `param` as mirroring
+ * name. `packages/core/src/api-errors.ts` documents `param` as mirroring
  * Stripe's convention — it identifies the *request* parameter at fault so a
  * client can attach the message to the input that produced it. The header and
  * the settings-write callers have one (`Appstrate-Version`, `api_version`); the

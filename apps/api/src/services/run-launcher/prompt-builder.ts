@@ -22,7 +22,7 @@
  *
  * Run history is NOT rendered in the prompt: the runtime wires a
  * typed `run_history` tool (see runtime-pi/entrypoint.ts Phase D) whose
- * description self-files the capability — the agent never sees the
+ * description self-documents the capability — the agent never sees the
  * sidecar URL.
  */
 

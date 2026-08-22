@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * OpenAPI paths for the MCP module's own endpoints. These file the
+ * OpenAPI paths for the MCP module's own endpoints. These document the
  * transport + discovery surface for human/API consumers; the platform's
  * ~250 operations are NOT re-listed here — they are discovered at runtime
  * through the `search_operations` / `describe_operation` MCP tools, with

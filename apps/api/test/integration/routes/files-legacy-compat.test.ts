@@ -19,7 +19,10 @@
  *   4. run rows written before the rename — `runs.input` full of `document://`
  *      URIs and `run_logs` rows tagged `event: "document"`;
  *   5. agent manifests published before the rename — `runtime_tools:
- *      ["publish_document"]`.
+ *      ["publish_document"]`. Asserted on the paths a real agent launches
+ *      on (the run routes and the scheduler, both via `buildRunContext`), not
+ *      only on `POST /api/runs/remote`: the remote resolver was the one place
+ *      that already canonicalized, so covering only it hid the gap.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -33,8 +36,14 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageVersion, seedInstalledPackage } from "../../helpers/seed.ts";
 import { resolveRegistryAgent } from "../../../src/services/registry-run-resolver.ts";
+import { resolveAgentRunVersion } from "../../../src/services/agent-version-resolver.ts";
+import { buildRunContext } from "../../../src/services/run-context-builder.ts";
+import { getPackage } from "../../../src/services/package-catalog.ts";
 import { createFileFromStream } from "../../../src/services/files.ts";
 import { getRunFull } from "../../../src/services/state/runs.ts";
+import { seedDefaultOrgModel } from "../../helpers/run-connection-fixtures.ts";
+import { readBundleFromBuffer } from "@appstrate/afps-runtime/bundle";
+import type { LoadedPackage } from "../../../src/types/index.ts";
 
 const app = getTestApp();
 
@@ -451,5 +460,129 @@ describe("#1177 compatibility — a manifest that names publish_document", () =>
     const tools = (resolved.agent.manifest as { runtime_tools: string[] }).runtime_tools;
     // Normalized, not dropped, and not duplicated.
     expect(tools).toEqual(["log", "publish_file"]);
+  });
+
+  /**
+   * The two cases above cover the WRITE path and `POST /api/runs/remote`.
+   * Neither is how a real agent launches.
+   *
+   * `runtime-pi/entrypoint.ts` gates the publish tool on
+   * `declaredRuntimeTools.includes("publish_file")`, reading `runtime_tools`
+   * straight out of the root manifest inside `agent-package.afps`. Every
+   * ordinary launch — the run routes, the MCP `run_and_wait` shortcut and the
+   * scheduler — reaches that manifest through
+   * `run-pipeline` → `buildRunContext` → `buildAgentPackage`, and none of those
+   * used to canonicalize: `package-catalog` returns `packages.draft_manifest`
+   * as stored and `package-versions` returns `package_versions.manifest` as
+   * stored. An agent published as `["log", "publish_document"]` therefore
+   * launched fine, registered `log`, registered NO publish tool, lost
+   * everything written outside `./outputs/`, and logged nothing.
+   *
+   * So these two assert the alias where it actually has to hold: on the bytes
+   * the container parses, plus the plan the platform hands the sidecar.
+   */
+  async function assertPublishToolSurvivesLaunch(agent: LoadedPackage, versionLabel?: string) {
+    const built = await buildRunContext({
+      runId: `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
+      agent,
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      actor: { type: "user", id: ctx.user.id },
+      input: {},
+      ...(versionLabel ? { overrideVersionLabel: versionLabel } : {}),
+    });
+
+    // 1. What the sidecar is told (RUNTIME_TOOLS_JSON is serialized from this).
+    expect(built.plan.runtimeTools).toEqual(["log", "publish_file"]);
+
+    // 2. What the CONTAINER reads — the root manifest inside the bundle ZIP.
+    //    This is the exact byte stream `readBundleFromFile` parses in
+    //    `runtime-pi/entrypoint.ts` before the `publish_file` gate.
+    expect(built.agentPackage).not.toBeNull();
+    const bundle = readBundleFromBuffer(built.agentPackage!);
+    const rootManifest = bundle.packages.get(bundle.root)!.manifest as {
+      runtime_tools: string[];
+    };
+    expect(rootManifest.runtime_tools).toEqual(["log", "publish_file"]);
+  }
+
+  it("keeps the publish tool on the normal agent-run launch path (stored draft)", async () => {
+    await seedDefaultOrgModel(ctx);
+    await seedPackage({
+      orgId: ctx.orgId,
+      id: "@compatorg/draft-legacy",
+      type: "agent",
+      createdBy: ctx.user.id,
+      draftManifest: {
+        name: "@compatorg/draft-legacy",
+        version: "0.1.0",
+        type: "agent",
+        schema_version: "0.1",
+        display_name: "Draft Legacy",
+        description: "Draft persisted before #1177",
+        runtime_tools: ["log", "publish_document"],
+      },
+      draftContent: "Do the thing.",
+    });
+    await seedInstalledPackage(ctx.defaultAppId, "@compatorg/draft-legacy");
+
+    // Exactly what `routes/runs.ts` puts on the context via `c.get("package")`.
+    const agent = await getPackage("@compatorg/draft-legacy", ctx.orgId);
+    expect(agent).not.toBeNull();
+    // Pre-condition: the stored bytes are still the legacy spelling. If this
+    // ever stops holding, the assertions below stop proving anything.
+    expect((agent!.manifest as { runtime_tools: string[] }).runtime_tools).toEqual([
+      "log",
+      "publish_document",
+    ]);
+
+    await assertPublishToolSurvivesLaunch(agent!);
+  });
+
+  it("keeps the publish tool on the scheduler launch path (pinned published version)", async () => {
+    await seedDefaultOrgModel(ctx);
+    // The schedule's own agent row is post-rename and clean; the PUBLISHED
+    // version it pins is the pre-rename one. `resolveAgentRunVersion` (shared
+    // by `scheduler.ts` and `routes/runs.ts`) swaps the version manifest in
+    // wholesale, so the legacy ids reach `buildRunContext` untouched.
+    await seedPackage({
+      orgId: ctx.orgId,
+      id: "@compatorg/scheduled",
+      type: "agent",
+      createdBy: ctx.user.id,
+      draftManifest: {
+        name: "@compatorg/scheduled",
+        version: "1.0.0",
+        type: "agent",
+        schema_version: "0.1",
+        display_name: "Scheduled Legacy",
+        description: "Draft is clean",
+        runtime_tools: ["log", "publish_file"],
+      },
+      draftContent: "Do the thing.",
+    });
+    await seedInstalledPackage(ctx.defaultAppId, "@compatorg/scheduled");
+    await seedPackageVersion({
+      packageId: "@compatorg/scheduled",
+      version: "1.0.0",
+      manifest: {
+        name: "@compatorg/scheduled",
+        version: "1.0.0",
+        type: "agent",
+        schema_version: "0.1",
+        display_name: "Scheduled Legacy",
+        description: "Published before #1177",
+        runtime_tools: ["log", "publish_document"],
+      },
+    });
+
+    const draftAgent = await getPackage("@compatorg/scheduled", ctx.orgId);
+    const resolved = await resolveAgentRunVersion(draftAgent!, "1.0.0");
+    expect((resolved.agent.manifest as { runtime_tools: string[] }).runtime_tools).toEqual([
+      "log",
+      "publish_document",
+    ]);
+
+    await assertPublishToolSurvivesLaunch(resolved.agent, resolved.overrideVersionLabel);
   });
 });

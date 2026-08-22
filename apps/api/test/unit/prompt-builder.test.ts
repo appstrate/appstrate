@@ -366,7 +366,7 @@ describe("buildEnrichedPrompt — dependency doc companions", () => {
   // AFPS dependencies carry a doc companion at their archive root:
   // skill→SKILL.md, integration→INTEGRATION.md, mcp-server→README.md.
   // None of these are rendered into the platform prompt — integrations
-  // and mcp-servers self-file via MCP `tools/list`, and a skill's
+  // and mcp-servers self-document via MCP `tools/list`, and a skill's
   // SKILL.md is loaded only when the skill is activated in-container.
   it("never renders INTEGRATION.md content in the prompt", async () => {
     const ctx = baseContext({

@@ -619,7 +619,7 @@ function readNormalizedCatalog(): Record<string, LiteLLMEntry> {
   };
   assertNormalizedCatalogDigest(artifactContents, lock.normalizedDigest);
   assertNormalizedGenerationCatalog(data);
-  // Remove LiteLLM's `sample_spec` synthetic top-level entry — it files
+  // Remove LiteLLM's `sample_spec` synthetic top-level entry — it documents
   // the schema, not a real model.
   delete data.sample_spec;
   return data;

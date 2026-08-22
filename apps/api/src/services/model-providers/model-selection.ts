@@ -42,7 +42,7 @@ import { listCatalogModels } from "../pricing-catalog.ts";
 // is not a stylistic problem here, it is a correctness one: the two copies
 // disagreed on date detection, and the weaker one shipped — which let
 // `gpt-5-2025-08-07` parse as version `[5, 2025, 8, 7]` and take the head of
-// a featured list the contract files as excluding dated aliases.
+// a featured list the contract documents as excluding dated aliases.
 
 /**
  * A version segment is fully numeric, optionally dotted: `4`, `8`, `5.6`.

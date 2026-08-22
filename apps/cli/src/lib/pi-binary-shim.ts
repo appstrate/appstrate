@@ -13,7 +13,7 @@
 //
 // Materialise a stub `package.json` under the user's XDG cache directory
 // (idempotent — same content every invocation, ~1 ms total) and override
-// pi's lookup via the `PI_PACKAGE_DIR` env var pi itself files.
+// pi's lookup via the `PI_PACKAGE_DIR` env var pi itself documents.
 //
 // MUST be the first import in `src/cli.ts`. ESM side effects run in
 // import-declaration order, and the shim has to land before any module

@@ -53,6 +53,7 @@ import {
   type ClientAudienceMetadata,
 } from "./realm-check.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { canonicalizeScopeParam } from "./scopes.ts";
 
 const TOKEN_RL_POINTS = 30;
 const AUTHORIZE_RL_POINTS = 30;
@@ -117,6 +118,34 @@ const DEVICE_APPROVE_RL_POINTS = 10;
 // single browser click. Pure brute-force of the 20⁸ user-code space is
 // separately constrained by the per-IP rate limits on these endpoints.
 const MAX_APPROVE_ATTEMPTS = 5;
+
+/**
+ * Every Better Auth endpoint that reads a client-supplied `scope` and compares
+ * it against a canonical vocabulary. The scope-canonicalizing before-hook
+ * (#1177) rewrites the request on each of them.
+ *
+ *   - `/oauth2/authorize` + `/oauth2/token` + `/device/code` — the grant flows;
+ *     the first two hard-fail an unknown scope against
+ *     `client.scopes ?? opts.scopes`, the third persists the string that the
+ *     minted token later carries.
+ *   - `/oauth2/register` (RFC 7591) and the plugin's own client-management
+ *     endpoints — validated against `clientRegistrationAllowedScopes` on
+ *     register and `opts.scopes` otherwise.
+ *
+ * The module's own admin CRUD (`/api/oauth/clients`) is NOT here: it never
+ * reaches Better Auth. It canonicalizes in `oauth-admin.ts`, which is also
+ * where the stored spelling is normalized on the way into the column.
+ */
+const SCOPE_BEARING_PATHS: ReadonlySet<string> = new Set([
+  "/oauth2/authorize",
+  "/oauth2/token",
+  "/oauth2/register",
+  "/device/code",
+  "/oauth2/create-client",
+  "/oauth2/update-client",
+  "/admin/oauth2/create-client",
+  "/admin/oauth2/update-client",
+]);
 
 /**
  * Per-client_id brute-force limit on `/oauth2/token`. Complements the
@@ -716,6 +745,46 @@ export function oidcGuardsPlugin(opts: OidcGuardsOptions) {
     id: "oidc-guards",
     hooks: {
       before: [
+        {
+          // #1177 — rewrite a retired scope spelling BEFORE the oauth-provider
+          // plugin's own filter sees it.
+          //
+          // `documents:read` became `files:read`, migration 0043 rewrote
+          // `oauth_clients.scopes`, and `claims.ts` canonicalizes on the read
+          // path. None of that helps the caller: the plugin validates the
+          // REQUESTED scopes against `client.scopes ?? opts.scopes` — both
+          // canonical — and hard-fails the rest. `/oauth2/authorize` redirects
+          // with `error=invalid_scope`; `/oauth2/token` (client_credentials)
+          // and `/oauth2/register` throw a 400 with the same code. A satellite,
+          // embedded app or MCP client whose config still hardcodes the old
+          // string is refused outright, and it does not redeploy when we do.
+          //
+          // This is the module's Better Auth boundary, so it is where the
+          // request-side alias belongs: one hook covering every endpoint that
+          // carries a `scope`, instead of an alias sprinkled through each. It
+          // only maps retired spellings forward — an unknown scope passes
+          // through unchanged and the plugin still rejects it.
+          matcher: (ctx: { path?: string }) =>
+            ctx.path !== undefined && SCOPE_BEARING_PATHS.has(ctx.path),
+          handler: createAuthMiddleware(async (ctx) => {
+            // `/oauth2/authorize` carries the scope in the query string; the
+            // other three carry it in the body.
+            const query = ctx.query as Record<string, unknown> | undefined;
+            const body = ctx.body as Record<string, unknown> | undefined;
+            const fromQuery = canonicalizeScopeParam(query?.scope);
+            const fromBody = canonicalizeScopeParam(body?.scope);
+            if (!fromQuery && !fromBody) return;
+            // Returning `{ context }` merges into the request context Better
+            // Auth then dispatches with (see `runBeforeHooks` in
+            // `better-auth/dist/api/to-auth-endpoints.mjs`).
+            return {
+              context: {
+                ...(fromQuery ? { query: { ...query, scope: fromQuery } } : {}),
+                ...(fromBody ? { body: { ...body, scope: fromBody } } : {}),
+              },
+            };
+          }),
+        },
         {
           matcher: (ctx: { path?: string }) => ctx.path === "/magic-link/verify",
           handler: createAuthMiddleware(enforceMagicLinkSignupPolicy),

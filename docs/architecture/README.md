@@ -1,6 +1,6 @@
 # Architecture
 
-Design notes for Appstrate's internal subsystems. Each file is the canonical
+Design notes for Appstrate's internal subsystems. Each document is the canonical
 reference for its topic — the code and top-level `CLAUDE.md` link here rather than
 duplicating the detail.
 

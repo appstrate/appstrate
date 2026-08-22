@@ -13,7 +13,7 @@
  * Canonical events additionally carry `dataschema`, a stable versioned
  * IDENTIFIER for the shape of their `data` payload. No file is served
  * at those URIs and none ever was — see `./canonical-event-schemas.ts`,
- * which files why, and which is where the URIs live.
+ * which documents why, and which is where the URIs live.
  *
  * Specification: CloudEvents 1.0 (`dataschema` is §3.1, OPTIONAL).
  */

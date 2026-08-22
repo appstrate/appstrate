@@ -1433,7 +1433,7 @@ async function responseToToolResult(
   // Capture upstream status + allowlisted headers BEFORE consuming the
   // body. The Response object's `headers` view stays valid after read,
   // but resolving the meta up-front keeps the code path linear and
-  // files the dependency: meta is independent of content.
+  // documents the dependency: meta is independent of content.
   const upstreamMeta: UpstreamMeta | undefined = options.attachUpstreamMeta
     ? buildUpstreamMeta(res, options.upstreamFinalUrl)
     : undefined;

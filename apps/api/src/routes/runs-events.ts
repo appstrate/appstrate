@@ -410,7 +410,8 @@ export function createRunsEventsRouter() {
   // payload streams straight to storage without being buffered for the hash).
   //
   // The bytes stream through a counting/hashing/cap transform into the durable
-  // `files` bucket: the per-file cap and per-run output budget cut the
+  // file bucket (`documents`, see FILES_BUCKET — the table was renamed by
+  // #1177, the bucket was not): the per-file cap and per-run output budget cut the
   // stream mid-flight (413, deleting any partial object), the org quota is
   // enforced transactionally (403). Idempotent for the sweep's retries: an
   // identical (run, sha256, name) upload returns the existing file (200).
@@ -461,10 +462,12 @@ export function createRunsEventsRouter() {
     const name = sanitizeFilename(decodedName);
     const mime = c.req.header("Content-Type");
     if (!mime) throw invalidRequest("Content-Type header is required", "Content-Type");
-    // `X-File-Presentation` is RETIRED (issue #1177). A runtime-pi image
-    // older than the platform still sends it; the header is read by nobody and
-    // must never be a 400 — the deliverable matters, its retired presentation
-    // hint does not.
+    // `X-Document-Presentation` is RETIRED (issue #1177). That is its real
+    // spelling — there was never an `X-File-Presentation`: the header was
+    // retired BEFORE the `document` → `file` rename, so no image ever emitted a
+    // `file`-spelled one. A runtime-pi image older than the platform still sends
+    // `X-Document-Presentation`; the header is read by nobody and must never be
+    // a 400 — the deliverable matters, its retired presentation hint does not.
 
     const body = c.req.raw.body;
     if (!body) throw invalidRequest("request body is required");

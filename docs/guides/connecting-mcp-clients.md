@@ -72,9 +72,9 @@ What happens under the hood:
    `/.well-known/oauth-protected-resource/api/mcp/o/<orgId>`, which points at
    this instance's authorization server and advertises the per-org resource URI.
 3. The client identifies itself **without prior registration**, via one of:
-   - **CIMD** (Client ID Metadata Files, the MCP-spec-preferred default) —
+   - **CIMD** (Client ID Metadata Documents, the MCP-spec-preferred default) —
      the client's `client_id` is an HTTPS URL the AS fetches and validates. The
-     AS metadata advertises `client_id_metadata_file_supported: true`.
+     AS metadata advertises `client_id_metadata_document_supported: true`.
    - **DCR** (RFC 7591 Dynamic Client Registration) — the fallback for clients
      that can't host a metadata document. Self-service registration is bounded
      to identity + MCP scopes and rate-limited.
@@ -97,7 +97,7 @@ What happens under the hood:
 ### Self-hosting requirements for Path B
 
 - The instance must be reachable over **HTTPS** at the configured `APP_URL`
-  (CIMD files must be served over HTTPS; an instance on `http://localhost`
+  (CIMD documents must be served over HTTPS; an instance on `http://localhost`
   is a development setup only). Client **redirect URIs** are a separate matter:
   `http://` is accepted for loopback hosts in every environment, on both the
   self-registration (DCR) and dashboard paths — RFC 8252 §7.3.
@@ -145,7 +145,21 @@ otherwise get wrong.
 | `describe_operation` | `mcp:read`   | Full input schema for one operation (only needed when `best_match` didn't cover it).                                                        |
 | `invoke_operation`   | `mcp:invoke` | Execute one operation (validated + authorized exactly as the equivalent REST call).                                                         |
 | `run_and_wait`       | `mcp:invoke` | **Launch and wait.** Starts an agent run (`kind:"agent"`) or an inline run (`kind:"inline"`) and returns when it reaches a terminal status. |
-| `list_files`         | `mcp:read`   | List files visible to the caller (uploads + agent outputs), each with a `appfile://` URI.                                                   |
+| `list_files`         | `mcp:read`   | List files visible to the caller (uploads + agent outputs), each with an `appfile://` URI.                                                  |
+
+**Retired tool names still answer.** `list_documents`, `read_document`,
+`validate_package_document` and `import_package_document` are the pre-#1177
+spellings of `list_files`, `read_file`, `validate_package_file` and
+`import_package_file`. They are withheld from `tools/list` but remain callable
+on the canonical handler, and a `document_uri` argument is renamed to `file_uri`
+on the way in. The server advertises `tools: { listChanged: false }`, which tells
+a client its list is stable for the life of the session — so a client that listed
+before an upgrade and calls the old name afterwards is behaving correctly, and
+would otherwise get `-32602 Unknown tool` mid-conversation. They stay hidden
+because the point of the rename is what the model sees: two entries for one
+capability, one of them named after a thing the tool does not do, is the problem
+being fixed. Likewise `document://` URIs are still parsed everywhere
+`appfile://` is; only `appfile://` is ever emitted.
 
 Prefer `run_and_wait` when you need a newly launched run's progress or terminal
 result. `runAgent` / `runInline` remain fully discoverable and invokable for

@@ -56,6 +56,15 @@ deployment for zero user-visible gain.
   `fileUri`, `extractFileIds`, `extractFileIdsFromText` (plus the unchanged
   `upload://` helpers). The row id prefix stays `doc_` — it is in every stored
   row and every live storage key.
+- **`PUBLISHED_FILE_LOG_EVENTS`** (`./file-uri`) — every `run_logs.event` tag
+  that announces a published file, canonical first: `["file", "document"]`. It
+  lives beside `ACCEPTED_FILE_URI_PREFIXES` because it is the same kind of
+  thing — pure data about a wire spelling that two independent readers (the web
+  shell's run page and the chat module's run card) must agree on. Two copies of
+  a compatibility list is how one of them silently stops matching and a file
+  list never refreshes, with no error anywhere. The old tag stays readable
+  forever: a persisted log line is immutable once written, and the emitter
+  behind it — a runtime image — deploys on its own clock.
 - **`LEGACY_RUNTIME_TOOL_ALIASES`, `LegacyRuntimeToolId`,
   `LEGACY_RUNTIME_TOOL_IDS`, `ACCEPTED_RUNTIME_TOOL_IDS`,
   `AcceptedRuntimeToolId`, `canonicalRuntimeToolId`,
@@ -133,6 +142,19 @@ deployment for zero user-visible gain.
   renamed, see Added.
 - **`InlineRunBody.config`** (`./platform-types`) — the inline-run routes no
   longer accept the field.
+- **`publish_document.presentation`** (`./runtime-tool-defs`) — the
+  `presentation: "primary"` argument, the `presentation` field on
+  `PublishedDocument` / `DocumentPublishedEvent` (now `PublishedFile` /
+  `FilePublishedEvent`), and the primary-selection rule the tool description
+  carried. It conflated how important a file is with whether the UI opens it,
+  allowed at most one per run, and made the producing agent arbitrate a
+  presentation decision that was never its call — an agent writing three peer
+  files had to crown one or leave the run looking empty. Which file a run
+  features is now derived by the consumer from what the run produced (0 → none,
+  exactly 1 → that one, N → none), so core neither declares nor transports it.
+  `buildPublishFileDef` reads only `path` and `name`; an undeclared key, the
+  retired `presentation` included, is ignored rather than rejected — losing a
+  real deliverable over a dead argument would be the worse failure.
 
 ## [7.0.0] — 2026-08-21
 

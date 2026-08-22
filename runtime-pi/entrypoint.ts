@@ -48,6 +48,7 @@ import {
   type PiRunner,
 } from "@appstrate/runner-pi";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { canonicalizeRuntimeToolIds } from "@appstrate/core/runtime-tools-catalog";
 import type { IntegrationBootReport } from "@appstrate/core/sidecar-types";
 import { readBundleFromFile, parsePackageIdentity } from "@appstrate/afps-runtime/bundle";
 import { HttpSink, attachStdoutBridge } from "@appstrate/afps-runtime/sinks";
@@ -472,9 +473,17 @@ await progress("bundle loaded", { bundlePrepareMs: phaseTimings.bundlePrepareMs 
 // The agent's selected runtime tools (`manifest.runtime_tools`), read once from
 // the root package manifest. Reused by the no-sidecar extension registration,
 // the `publish_file` gate, and the PiRunner's terminal-tool decision.
-const declaredRuntimeTools: string[] =
-  (bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined)
-    ?.runtime_tools ?? [];
+//
+// Canonicalized here too (#1177). The platform already rewrites the retired
+// `publish_document` spelling into the bundle it builds, but the platform and
+// this image deploy independently: a NEW image running against an OLDER
+// platform receives the raw stored ids, and the gates below are exact string
+// matches. Resolving the alias in one place, at the single read, is what keeps
+// that version skew from silently unregistering the publish tool.
+const declaredRuntimeTools: string[] = canonicalizeRuntimeToolIds(
+  (bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: unknown[] } | undefined)
+    ?.runtime_tools ?? [],
+).ids;
 
 // --- 2c. Phase C: wire sidecar-backed tools via MCP ---
 // Every sidecar-backed capability is surfaced as a typed Pi tool whose

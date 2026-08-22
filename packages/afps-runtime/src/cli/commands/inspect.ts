@@ -13,7 +13,7 @@ Usage:
   afps inspect <bundle> [--json]
 
 Options:
-  --json                 Emit a single JSON file to stdout instead
+  --json                 Emit a single JSON document to stdout instead
                          of a human-readable report.
 `;
 

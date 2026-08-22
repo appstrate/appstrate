@@ -15,7 +15,7 @@
  * individual implementations (Pi SDK backend, mock replay, remote
  * delegation, etc.) live outside this package.
  *
- * Specification: `afps-spec/spec.md` §8, spec file §5.
+ * Specification: `afps-spec/spec.md` §8, spec document §5.
  */
 
 import type { EventSink } from "../interfaces/event-sink.ts";

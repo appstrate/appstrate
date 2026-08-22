@@ -2,7 +2,7 @@
 
 **Status**: authoritative reference. Audit via `/audit-casing` (see `.claude/commands/audit-casing.md`).
 
-This file captures every casing decision made during the AFPS snake_case + DTO unification. Any code change MUST respect these rules. Deviations are bugs.
+This document captures every casing decision made during the AFPS snake_case + DTO unification. Any code change MUST respect these rules. Deviations are bugs.
 
 ---
 
@@ -284,7 +284,7 @@ Reason: SIEM queries (Datadog, Splunk) need stable field names, and all other au
 
 ---
 
-### Zone 5 — Asymétries fileées (historical inconsistencies, low-impact)
+### Zone 5 — Asymétries documentées (historical inconsistencies, low-impact)
 
 These are inconsistencies we know about and chose not to fix. Don't introduce new asymmetries; don't be surprised by these.
 
@@ -560,7 +560,7 @@ rg "(user|session|account|verification)\.(email_verified|user_id|provider_id|acc
 /audit-casing
 ```
 
-The `/audit-casing` skill dispatches parallel opus sub-agents to verify every dimension against this file and reports any deviation.
+The `/audit-casing` skill dispatches parallel opus sub-agents to verify every dimension against this document and reports any deviation.
 
 ---
 

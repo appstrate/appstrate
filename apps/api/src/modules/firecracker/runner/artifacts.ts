@@ -456,7 +456,7 @@ export async function ensureGuestArtifacts(
   // the marker already matches the pinned version.
   // Compare tag-normalized (strip a leading `v` and build metadata on either
   // side) — the marker records the manifest's version while operators
-  // legitimately pin "v1.2.3" (host-env files that form), and a raw string
+  // legitimately pin "v1.2.3" (host-env documents that form), and a raw string
   // compare would silently re-download the full kernel+rootfs on every boot.
   const versionMatches =
     !config.version ||

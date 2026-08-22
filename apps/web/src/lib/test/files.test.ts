@@ -24,6 +24,10 @@ function file(overrides: Partial<FileLike>): FileLike {
   };
 }
 
+/** The run whose page is open, and an earlier run that chained a file into it. */
+const RUN = "run_1";
+const EARLIER = "run_0";
+
 describe("mimeIconFor", () => {
   it("maps common families", () => {
     expect(mimeIconFor("image/png")).toBe(FileImage);
@@ -143,30 +147,46 @@ describe("isMarkdownFile", () => {
  * produced file, and features nothing at all otherwise.
  */
 describe("featuredRunFile", () => {
-  const produced = (id: string) => ({ ...file({ purpose: "agent_output", run_id: "run_1" }), id });
-  const uploaded = (id: string) => ({ ...file({ purpose: "user_upload", run_id: "run_1" }), id });
+  const produced = (id: string) => ({ ...file({ purpose: "agent_output", run_id: RUN }), id });
+  const uploaded = (id: string) => ({ ...file({ purpose: "user_upload", run_id: RUN }), id });
+  const chained = (id: string) => ({ ...file({ purpose: "agent_output", run_id: EARLIER }), id });
 
   it("features nothing when the run produced no file", () => {
-    expect(featuredRunFile([])).toBeUndefined();
-    expect(featuredRunFile([uploaded("doc_in_1"), uploaded("doc_in_2")])).toBeUndefined();
+    expect(featuredRunFile([], RUN)).toBeUndefined();
+    expect(featuredRunFile([uploaded("doc_in_1"), uploaded("doc_in_2")], RUN)).toBeUndefined();
   });
 
   it("features the single produced file", () => {
-    expect(featuredRunFile([produced("doc_out")])?.id).toBe("doc_out");
+    expect(featuredRunFile([produced("doc_out")], RUN)?.id).toBe("doc_out");
   });
 
   it("features nothing when the run produced several files — they are just listed", () => {
     const three = [produced("doc_1"), produced("doc_2"), produced("doc_3")];
-    expect(featuredRunFile(three)).toBeUndefined();
+    expect(featuredRunFile(three, RUN)).toBeUndefined();
   });
 
   it("never counts the files the run consumed as input", () => {
     // Two inputs + one output is still a single-file run, and one output among
     // several inputs stays the featured one.
     const mixed = [uploaded("doc_in_1"), produced("doc_out"), uploaded("doc_in_2")];
-    expect(featuredRunFile(mixed)?.id).toBe("doc_out");
+    expect(featuredRunFile(mixed, RUN)?.id).toBe("doc_out");
     // Conversely, inputs never make up the "exactly one" count on their own.
-    expect(featuredRunFile([uploaded("doc_in_1")])).toBeUndefined();
+    expect(featuredRunFile([uploaded("doc_in_1")], RUN)).toBeUndefined();
+  });
+
+  it("never counts a chained-in file another run produced", () => {
+    // `GET /api/files?run_id=X` answers the run's whole CONTAINER: it ORs
+    // `files.run_id = X` with the ids extracted from `runs.input`. A file
+    // chained in with `appfile://` is an INPUT of this run while still
+    // carrying `purpose: "agent_output"` — it was produced by the earlier run
+    // whose id it keeps. Matching on purpose alone featured (and previewed)
+    // a file this run never produced.
+    expect(featuredRunFile([chained("doc_from_run_0")], RUN)).toBeUndefined();
+    // And the mixed case: one consumed + one produced is a single-file run,
+    // not the two-file "list them, feature nothing" case.
+    expect(featuredRunFile([chained("doc_from_run_0"), produced("doc_out")], RUN)?.id).toBe(
+      "doc_out",
+    );
   });
 });
 
@@ -176,8 +196,9 @@ describe("featuredRunFile", () => {
  * place that distinction is made.
  */
 describe("producedRunFiles", () => {
-  const produced = (id: string) => ({ ...file({ purpose: "agent_output", run_id: "run_1" }), id });
-  const uploaded = (id: string) => ({ ...file({ purpose: "user_upload", run_id: "run_1" }), id });
+  const produced = (id: string) => ({ ...file({ purpose: "agent_output", run_id: RUN }), id });
+  const uploaded = (id: string) => ({ ...file({ purpose: "user_upload", run_id: RUN }), id });
+  const chained = (id: string) => ({ ...file({ purpose: "agent_output", run_id: EARLIER }), id });
 
   it("keeps the produced files, in order, and drops every upload", () => {
     const mixed = [
@@ -186,18 +207,26 @@ describe("producedRunFiles", () => {
       uploaded("doc_in_2"),
       produced("doc_2"),
     ];
-    expect(producedRunFiles(mixed).map((f) => f.id)).toEqual(["doc_1", "doc_2"]);
+    expect(producedRunFiles(mixed, RUN).map((f) => f.id)).toEqual(["doc_1", "doc_2"]);
   });
 
   it("returns nothing for a run whose only files were uploads", () => {
-    expect(producedRunFiles([uploaded("doc_in_1"), uploaded("doc_in_2")])).toEqual([]);
-    expect(producedRunFiles([])).toEqual([]);
+    expect(producedRunFiles([uploaded("doc_in_1"), uploaded("doc_in_2")], RUN)).toEqual([]);
+    expect(producedRunFiles([], RUN)).toEqual([]);
+  });
+
+  it("drops an `agent_output` file another run produced and this one consumed", () => {
+    // Same container trap as above: `purpose` says who made it, `run_id` says
+    // which run. Outcome answers "what did THIS run produce".
+    const mixed = [chained("doc_from_run_0"), produced("doc_1")];
+    expect(producedRunFiles(mixed, RUN).map((f) => f.id)).toEqual(["doc_1"]);
+    expect(producedRunFiles([chained("doc_from_run_0")], RUN)).toEqual([]);
   });
 
   it("is what the featured rule counts, so the two cannot disagree", () => {
-    const one = [uploaded("doc_in_1"), produced("doc_out")];
-    expect(producedRunFiles(one)).toHaveLength(1);
-    expect(featuredRunFile(one)?.id).toBe("doc_out");
+    const one = [uploaded("doc_in_1"), chained("doc_from_run_0"), produced("doc_out")];
+    expect(producedRunFiles(one, RUN)).toHaveLength(1);
+    expect(featuredRunFile(one, RUN)?.id).toBe("doc_out");
   });
 });
 

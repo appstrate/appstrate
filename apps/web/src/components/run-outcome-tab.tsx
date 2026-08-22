@@ -71,13 +71,16 @@ export function RunOutcomeView({
 }) {
   const { t } = useTranslation(["agents", "files"]);
 
-  // Produced ONLY. The Fichiers tab is where the complete list lives; a pane
-  // titled "what this run produced" that quietly included the uploads it
-  // consumed would be lying about the one thing it exists to say.
-  const produced = useMemo(() => producedRunFiles(files), [files]);
+  // Produced by THIS run ONLY. The Fichiers tab is where the complete list
+  // lives; a pane titled "what this run produced" that quietly included the
+  // files it consumed would be lying about the one thing it exists to say —
+  // and the query answers the run's whole container, so a file chained in from
+  // an earlier run arrives here carrying `agent_output` and is told apart only
+  // by its own `run_id`.
+  const produced = useMemo(() => producedRunFiles(files, runId), [files, runId]);
   // Derived from the produced files alone (#1177) — exactly one is featured and
   // opened, several are only listed and the user picks.
-  const featured = useMemo(() => featuredRunFile(files), [files]);
+  const featured = useMemo(() => featuredRunFile(files, runId), [files, runId]);
 
   const hasOutput = !!output && Object.keys(output).length > 0;
   const hasFiles = isLoading || !!error || produced.length > 0;

@@ -469,4 +469,44 @@ describe("legacy `document` wire shapes", () => {
       }),
     ).toEqual([{ id: "doc_x", uri: "appfile://doc_x", name: "x.md" }]);
   });
+
+  it("still reads a persisted tool result whose list sits under `documents`", () => {
+    // The run_and_wait payload key was `documents` until #1177. This payload is
+    // the RELOAD-SAFE source of a run card's chips — it exists precisely
+    // because run logs get pruned — so a conversation reopened from before the
+    // rename must still find its files here, top level or under the envelope.
+    expect(
+      extractRunFiles({
+        id: "run_1",
+        status: "success",
+        done: true,
+        documents: [
+          {
+            id: "doc_1",
+            uri: "document://doc_1",
+            name: "report.html",
+            mime: "text/html",
+            size: 12,
+          },
+        ],
+      }),
+    ).toEqual([
+      { id: "doc_1", uri: "document://doc_1", name: "report.html", mime: "text/html", size: 12 },
+    ]);
+
+    expect(
+      extractRunFiles({
+        body: { id: "run_1", documents: [{ document_id: "doc_2", name: "a.pdf" }] },
+      }),
+    ).toEqual([{ id: "doc_2", uri: "appfile://doc_2", name: "a.pdf" }]);
+  });
+
+  it("prefers the canonical `files` key when a payload carries both", () => {
+    expect(
+      extractRunFiles({
+        files: [{ id: "doc_new", name: "new.md" }],
+        documents: [{ id: "doc_old", name: "old.md" }],
+      }).map((f) => f.id),
+    ).toEqual(["doc_new"]);
+  });
 });

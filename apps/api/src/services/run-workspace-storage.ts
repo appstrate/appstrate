@@ -179,7 +179,8 @@ export async function deleteRunFiles(runId: string, names: string[]): Promise<vo
  * backoff and dead-letter visibility). Reading the manifest first — to derive
  * the file keys eagerly — made a transient storage failure (S3 503, MinIO
  * timeout) enqueue NOTHING at all: the run is terminal, nothing revisits it, and
- * the orphan-reconciliation script only scans the `files` bucket, so those
+ * the orphan-reconciliation script only scans the durable file bucket
+ * (`documents`), not `run-workspace`, so those
  * bytes would be stranded forever. Enqueue-first is the invariant: a confirmed
  * teardown is always replayable until the objects physically disappear.
  */

@@ -41,8 +41,10 @@ export function RunFilesTab({ runId }: { runId: string }) {
 
   // Computed off the FULL list, never the filtered view: the rule counts what
   // the run produced, and that count does not change because the user is
-  // currently looking at the uploads filter.
-  const featured = useMemo(() => featuredRunFile(data?.data ?? []), [data?.data]);
+  // currently looking at the uploads filter. `runId` is what tells a produced
+  // file from one this run only consumed — the query answers the run's whole
+  // container, chained-in `agent_output` rows from earlier runs included.
+  const featured = useMemo(() => featuredRunFile(data?.data ?? [], runId), [data?.data, runId]);
 
   return (
     <>

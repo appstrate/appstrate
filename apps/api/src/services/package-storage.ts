@@ -14,6 +14,7 @@ import {
   type BundlePackage,
 } from "@appstrate/afps-runtime/bundle";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { dropRetiredRuntimeTools } from "@appstrate/core/validation";
 import { RunPackageCatalog } from "./run-launcher/run-package-catalog.ts";
 import { loadAndVerifyBundle } from "./run-launcher/bundle-signature-policy.ts";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "./package-storage-keys.ts";
@@ -165,7 +166,34 @@ export async function buildAgentPackage(
    */
   dependencyOverrides?: Record<string, string> | null,
 ): Promise<AgentPackageResult> {
-  const manifest = agent.manifest as Record<string, unknown>;
+  // #1177 — canonicalize the persisted `runtime_tools` ids BEFORE they are
+  // serialized into the bundle the container loads. `runtime-pi/entrypoint.ts`
+  // gates the publish tool on an exact string match against THIS manifest's
+  // `runtime_tools` (`declaredRuntimeTools.includes("publish_file")`), so an
+  // agent published under the retired `publish_document` spelling would launch
+  // normally and register no publish tool at all: the model cannot publish
+  // mid-run, everything it writes outside `./outputs/` is lost, and nothing
+  // errors anywhere. Only `POST /api/runs/remote` used to canonicalize (in
+  // `registry-run-resolver.ts`); the two paths a real agent actually launches
+  // on — the run routes via `package-catalog` and the version resolver via
+  // `package-versions` — both hand the stored manifest through verbatim, so
+  // the choke point has to be here, where the manifest BECOMES the run bundle.
+  //
+  // `dropRetiredRuntimeTools` returns the SAME reference when nothing needs
+  // rewriting, so an already-canonical manifest keeps its exact bytes (the
+  // bundle integrity hash is derived from them).
+  const { manifest, dropped: unbuildableRuntimeTools } = dropRetiredRuntimeTools(
+    agent.manifest as Record<string, unknown>,
+  );
+  if (unbuildableRuntimeTools.length > 0) {
+    // Not an alias — an id that resolves to nothing (retired outright, or an
+    // author typo). Dropping it keeps the run alive, but it is a silent
+    // capability loss, so it must not be silent in the log.
+    logger.warn("buildAgentPackage: manifest names runtime tools the platform cannot build", {
+      agentId: agent.id,
+      dropped: unbuildableRuntimeTools,
+    });
+  }
   const name = typeof manifest.name === "string" ? manifest.name : null;
   const version = typeof manifest.version === "string" ? manifest.version : null;
   if (!name || !version || !name.startsWith("@") || !name.includes("/")) {

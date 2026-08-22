@@ -20,7 +20,7 @@
 
 import { z } from "zod";
 import { runStatusValues, TERMINAL_RUN_STATUSES } from "@appstrate/db/run-status";
-import { fileUri, parseFileUri } from "@appstrate/core/file-uri";
+import { fileUri, parseFileUri, PUBLISHED_FILE_LOG_EVENTS } from "@appstrate/core/file-uri";
 import { asRecord, unwrapResult } from "./tool-result.ts";
 
 /** Operation ids whose result launches a run we can follow. */
@@ -309,19 +309,12 @@ export interface ChatRunFile {
   size?: number;
 }
 
-/**
- * The run-log `event` values that carry a published file. `"file"` is what the
- * sink writes today; `"document"` is the pre-#1177 spelling and stays readable
- * FOREVER — a chat session opened today can replay logs written before the
- * rename, and dropping the legacy tag would silently show a run with no files.
- */
-const PUBLISHED_FILE_LOG_EVENTS: readonly string[] = ["file", "document"];
-
 function asChatRunFile(raw: unknown): ChatRunFile | undefined {
   const r = asRecord(raw);
   if (!r) return undefined;
   // `id` in the tool result; `file_id` in the `file.published` log frame; the
-  // pre-#1177 frames used `document_id` — read it too (see the event list above).
+  // pre-#1177 frames used `document_id` — read it too (same reason the legacy
+  // `event` tag stays accepted: persisted frames are immutable once written).
   const id = nonEmptyString(r.id) ?? nonEmptyString(r.file_id) ?? nonEmptyString(r.document_id);
   const uri = nonEmptyString(r.uri) ?? (id ? fileUri(id) : undefined);
   const name = nonEmptyString(r.name);
@@ -334,19 +327,35 @@ function asChatRunFile(raw: unknown): ChatRunFile | undefined {
 }
 
 /**
- * Pull the published `files` list out of a persisted run_and_wait tool
- * result (`files` at the top level, or nested under the invoke envelope's
- * `body`). Empty when the run produced none — survives reload because it reads
- * the persisted message part, not live state.
+ * The keys a persisted `run_and_wait` result can carry its published file list
+ * under, canonical first. `files` is what the tool writes today; `documents` is
+ * the pre-#1177 spelling and stays readable FOREVER — this payload IS the
+ * reload-safe source (it exists precisely because run logs get pruned), so a
+ * conversation reopened from before the rename would otherwise come back with
+ * no chips at all, permanently, once its logs are gone.
+ */
+const PUBLISHED_FILE_RESULT_KEYS = ["files", "documents"] as const;
+
+/** First `PUBLISHED_FILE_RESULT_KEYS` entry present on `record` as an array. */
+function rawFileList(record: Record<string, unknown> | null | undefined): unknown[] | undefined {
+  if (!record) return undefined;
+  for (const key of PUBLISHED_FILE_RESULT_KEYS) {
+    const value = record[key];
+    if (Array.isArray(value)) return value;
+  }
+  return undefined;
+}
+
+/**
+ * Pull the published file list out of a persisted run_and_wait tool result (at
+ * the top level, or nested under the invoke envelope's `body`; under either
+ * accepted key). Empty when the run produced none — survives reload because it
+ * reads the persisted message part, not live state.
  */
 export function extractRunFiles(result: unknown): ChatRunFile[] {
   const unwrapped = asRecord(unwrapResult(result));
   if (!unwrapped) return [];
-  const raw = Array.isArray(unwrapped.files)
-    ? unwrapped.files
-    : Array.isArray(asRecord(unwrapped.body)?.files)
-      ? (asRecord(unwrapped.body)!.files as unknown[])
-      : [];
+  const raw = rawFileList(unwrapped) ?? rawFileList(asRecord(unwrapped.body)) ?? [];
   const out: ChatRunFile[] = [];
   for (const item of raw) {
     const file = asChatRunFile(item);

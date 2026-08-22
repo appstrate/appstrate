@@ -52,6 +52,20 @@ export const LEGACY_DOCUMENT_URI_PREFIX = "document://";
  */
 export const ACCEPTED_FILE_URI_PREFIXES = [FILE_URI_PREFIX, LEGACY_DOCUMENT_URI_PREFIX] as const;
 
+/**
+ * Every `run_logs.event` tag that announces a published file, canonical first.
+ * The sink writes `"file"` today (`type='result' event='file'`); `"document"`
+ * is the pre-#1177 spelling and stays readable FOREVER — a run page tails a
+ * live stream whose emitter (the API, and behind it a runtime image) deploys
+ * on its own clock, and a persisted log line is immutable once written.
+ *
+ * Lives here, beside {@link ACCEPTED_FILE_URI_PREFIXES}, because it is the same
+ * kind of thing: pure data about a wire spelling that two independent readers
+ * (the web shell's run page and the chat module's run card) must agree on. Two
+ * copies of a compatibility list is how one of them silently stops matching.
+ */
+export const PUBLISHED_FILE_LOG_EVENTS: readonly string[] = ["file", "document"];
+
 /** `upload://upl_xxx` — the ephemeral URI form of a staged (not-yet-materialized) upload. */
 export const UPLOAD_URI_PREFIX = "upload://";
 

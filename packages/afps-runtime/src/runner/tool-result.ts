@@ -38,7 +38,7 @@ export function toolResultByteLimit(): number {
  * Strategy:
  *   - `string` payloads: byte-aware truncation with a single trailing
  *     "...(truncated, N bytes)" marker so the rendered output stays valid
- *     UTF-8 and self-files the truncation.
+ *     UTF-8 and self-documents the truncation.
  *   - everything else: serialise to JSON, apply the same cap; on overflow
  *     return a structured marker preserving the original byte size + a preview
  *     so sinks can render "[truncated …]" without re-serialising.

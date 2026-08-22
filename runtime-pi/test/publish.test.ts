@@ -180,13 +180,13 @@ describe("createRunFileUploader", () => {
     expect(config.received[0]!.name).toBe("Nice Name.bin");
   });
 
-  it("never sends the retired X-File-Presentation header", async () => {
+  it("never sends the retired X-Document-Presentation header", async () => {
     await writeFile(path.join(workspace, "final.html"), "<h1>Final</h1>");
 
     await makeUploader(new Set())("final.html");
 
     expect(config.received).toHaveLength(1);
-    expect(config.received[0]!.headerNames).not.toContain("x-file-presentation");
+    expect(config.received[0]!.headerNames).not.toContain("x-document-presentation");
   });
 
   it("throws on a missing file", async () => {
@@ -877,7 +877,7 @@ describe("buildPublishFileDef (publish_file tool)", () => {
     const result = await def.handler({ path: "out.html", presentation: "thumbnail" });
     expect(result.isError).toBeUndefined();
     expect(config.received).toHaveLength(1);
-    expect(config.received[0]!.headerNames).not.toContain("x-file-presentation");
+    expect(config.received[0]!.headerNames).not.toContain("x-document-presentation");
   });
 
   it("leads its description with the publish-now + `appfile://` URI value", () => {

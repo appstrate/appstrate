@@ -48,6 +48,15 @@ function file(overrides: Partial<FileDto> & { name: string }): FileDto {
 /** One file the run consumed — never part of the outcome. */
 const UPLOAD = file({ name: "brief.pdf", purpose: "user_upload", run_id: null });
 
+/**
+ * A file an EARLIER run produced and this one merely consumed, chained in with
+ * `appfile://`. `GET /api/files?run_id=…` returns it because the run's file
+ * query answers the whole container (`run_id = X` OR an id referenced by
+ * `runs.input`), and it keeps `purpose: "agent_output"` — the producing run's
+ * purpose. Only its `run_id` tells it apart.
+ */
+const CHAINED_IN = file({ name: "source.csv", run_id: "run_0" });
+
 function render(node: ReactElement): string {
   return renderToStaticMarkup(
     <QueryClientProvider client={new QueryClient()}>
@@ -115,6 +124,23 @@ describe("the derived presentation rule inside Outcome (#1177)", () => {
   it("counts produced files only — a lone upload never makes a run single-file", () => {
     const html = outcome([UPLOAD]);
     expect(html).not.toContain(`aria-label="${filesFr["run.featuredLabel"]}"`);
+  });
+
+  it("never features — or even lists — a file another run produced", () => {
+    // The `agent_output` purpose alone is not ownership: a chained-in file
+    // carries it while belonging to the run that made it. Featuring it here
+    // would show, and auto-preview, a file this run never produced.
+    const chainedOnly = outcome([CHAINED_IN]);
+    expect(chainedOnly).not.toContain("source.csv");
+    expect(chainedOnly).not.toContain(`aria-label="${filesFr["run.featuredLabel"]}"`);
+    expect(chainedOnly).toContain(agentsFr["run.outcomeEmpty"]);
+
+    // One consumed + one produced is a SINGLE-file run: the produced one is
+    // featured, and the two of them never read as "several, so feature none".
+    const mixed = outcome([CHAINED_IN, file({ name: "rapport.md" })]);
+    expect(mixed).toContain("rapport.md");
+    expect(mixed).not.toContain("source.csv");
+    expect(mixed).toContain(`aria-label="${filesFr["run.featuredLabel"]}"`);
   });
 });
 

@@ -17,6 +17,7 @@ import {
   FileVideo,
   type LucideIcon,
 } from "lucide-react";
+import { PUBLISHED_FILE_LOG_EVENTS } from "@appstrate/core/file-uri";
 
 /** Minimal shape the helpers read — a structural subset of the `FileDto`. */
 export interface FileLike {
@@ -31,9 +32,21 @@ export interface FileLike {
  * merely consumed as input is not one of them — that distinction is what the
  * Outcome pane is built on, and what separates it from the Fichiers tab, whose
  * job is the complete list.
+ *
+ * Both halves of the predicate are load-bearing, and `purpose` alone is NOT
+ * enough. `GET /api/files?run_id=X` deliberately answers the run's whole
+ * CONTAINER: it ORs `files.run_id = X` with the ids extracted from
+ * `runs.input`, so a file chained in from an earlier run via `appfile://` is
+ * listed here while still carrying `purpose: "agent_output"` — it was produced
+ * by that earlier run. Ownership is therefore decided by the row's own
+ * `run_id`, exactly as `fetchRunFiles()` in `@appstrate/core/run-and-wait-client`
+ * decides it server-side; the two rules must not drift.
  */
-export function producedRunFiles<T extends Pick<FileLike, "purpose">>(files: readonly T[]): T[] {
-  return files.filter((file) => file.purpose === "agent_output");
+export function producedRunFiles<T extends Pick<FileLike, "purpose" | "run_id">>(
+  files: readonly T[],
+  runId: string,
+): T[] {
+  return files.filter((file) => file.purpose === "agent_output" && file.run_id === runId);
 }
 
 /**
@@ -41,27 +54,25 @@ export function producedRunFiles<T extends Pick<FileLike, "purpose">>(files: rea
  * a run that produced exactly ONE file features it; zero or several feature
  * nothing — several are just listed, and the user picks.
  *
- * Only what the agent PRODUCED counts (`purpose: "agent_output"`). A file the
- * run merely consumed as input never makes a run "single-file", and no
- * agent-declared field takes part: presentation was never the model's call.
+ * Only what THIS run produced counts (see {@link producedRunFiles}). A file the
+ * run merely consumed as input never makes a run "single-file" — not even one
+ * that an earlier run produced and this one only read — and no agent-declared
+ * field takes part: presentation was never the model's call.
  */
-export function featuredRunFile<T extends Pick<FileLike, "purpose">>(
+export function featuredRunFile<T extends Pick<FileLike, "purpose" | "run_id">>(
   files: readonly T[],
+  runId: string,
 ): T | undefined {
-  const produced = producedRunFiles(files);
+  const produced = producedRunFiles(files, runId);
   return produced.length === 1 ? produced[0] : undefined;
 }
 
 /**
- * The run-log `event` tags that mean "a file was published". `"file"` is what
- * the sink writes today; `"document"` is the pre-#1177 spelling and stays
- * readable FOREVER — the run page tails a live stream whose emitter (the API,
- * and behind it a runtime image) deploys independently, and a tag this misses
- * is a file list that silently never refreshes, with no error anywhere.
+ * Does this run-log `event` tag announce a published file? The accepted set
+ * (current + pre-#1177 spelling) lives in `@appstrate/core/file-uri`, shared
+ * with the chat module's run card: a tag one of them misses is a file list
+ * that silently never refreshes, with no error anywhere.
  */
-const PUBLISHED_FILE_LOG_EVENTS: readonly string[] = ["file", "document"];
-
-/** Does this run-log `event` tag announce a published file? */
 export function isPublishedFileLogEvent(event: string | null | undefined): boolean {
   return !!event && PUBLISHED_FILE_LOG_EVENTS.includes(event);
 }

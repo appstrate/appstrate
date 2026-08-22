@@ -161,7 +161,10 @@ interface ProcessStorageDeletionResult {
  * file delete fails, the manifest remains available and the whole job can
  * be retried idempotently. This lets parent-row cascades enqueue two bounded
  * jobs per run (bundle + manifest) without storage I/O inside their DB
- * transaction or silently orphaning `files/*`.
+ * transaction or silently orphaning the run's `{runId}/documents/*` objects.
+ *
+ * That storage prefix really is spelled `documents/` — #1177 renamed the TABLE
+ * to `files`, never the live storage keys. See {@link runWorkspaceFileKey}.
  */
 async function deleteStorageTarget(
   bucket: string,

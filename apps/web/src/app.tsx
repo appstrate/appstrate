@@ -627,6 +627,15 @@ export function App() {
                 </LazyRoute>
               }
             />
+            {/*
+             * The gallery was `/documents` until #1177. Kept as a redirect for
+             * the same reason `run-detail-tabs.ts` keeps its retired tab hashes
+             * and the API keeps its `/api/documents/*` aliases: the old path is
+             * in bookmarks, in back-history and in links already pasted
+             * elsewhere, and without this it falls through to the catch-all and
+             * lands the user on the dashboard with no explanation.
+             */}
+            <Route path="/documents" element={<Navigate to="/files" replace />} />
             <Route
               path="/schedules"
               element={

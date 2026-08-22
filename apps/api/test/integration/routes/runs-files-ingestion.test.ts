@@ -188,17 +188,22 @@ describe("POST /api/runs/:runId/files — agent-output ingestion", () => {
     expect(body.param).toBe("X-File-Name");
   });
 
-  it("IGNORES a legacy X-File-Presentation header instead of rejecting it", async () => {
+  it("IGNORES a legacy X-Document-Presentation header instead of rejecting it", async () => {
     // Version skew (issue #1177): the runtime-pi image deploys independently of
     // the platform, so an older image still sends this retired header. It must
     // never turn a deliverable into a 400 — the value is simply not read.
+    //
+    // The header is spelled `X-Document-Presentation` and nothing else: it was
+    // retired before the `document` → `file` rename, so the only images that
+    // ever sent it sent that spelling. Asserting an `X-File-Presentation` here
+    // would test a header no client has ever produced.
     const runId = await seedRun(ctx);
     for (const value of ["primary", "featured"]) {
       const res = await postDoc(
         runId,
         {
           ...docHeaders(RUN_SECRET, `${value}.txt`),
-          "X-File-Presentation": value,
+          "X-Document-Presentation": value,
         },
         value,
       );

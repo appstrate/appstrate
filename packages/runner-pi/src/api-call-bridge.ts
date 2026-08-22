@@ -26,7 +26,7 @@ import {
 } from "@appstrate/afps-runtime/resolvers";
 
 // Pull body + responseMode JSON schemas from the canonical AFPS source so
-// the LLM-facing schema files the discriminated body union. Same
+// the LLM-facing schema documents the discriminated body union. Same
 // rationale as the sidecar api_call bridge.
 const SCHEMA_PROPERTIES =
   (apiCallRequestJsonSchema as { properties?: Record<string, unknown> }).properties ?? {};

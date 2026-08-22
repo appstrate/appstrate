@@ -398,7 +398,7 @@ describe("resolveAppstratePort (non-interactive preflight)", () => {
     );
   });
 
-  it("files the correct `curl | VAR=N bash` syntax in the strict error", async () => {
+  it("documents the correct `curl | VAR=N bash` syntax in the strict error", async () => {
     // Regression guard for the shell-scoping gotcha that triggered this
     // whole change: users reach for `APPSTRATE_PORT=N curl … | bash`,
     // which sets the var for curl only — the piped bash doesn't see it.
