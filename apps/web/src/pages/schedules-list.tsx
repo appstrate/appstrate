@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Calendar, Plus } from "lucide-react";
+import { Calendar, Plus, SearchX } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
 import { Button } from "@appstrate/ui/components/button";
 import { useAgents } from "../hooks/use-packages";
@@ -11,16 +12,22 @@ import { PageHeader } from "../components/page-header";
 import { EmptyState } from "../components/page-states";
 import { SchedulesTable, useScheduleColumns } from "../components/schedules-table";
 import { columnMenu, visibleColumns } from "../components/data-table";
-import { ListToolbar } from "../components/list-toolbar";
+import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { TOOLBAR_ACTION } from "../lib/toolbar-button";
+import { useSearchPlaceholder } from "../lib/search-placeholder";
+import { useListParams } from "../lib/list-params";
+
+/** The values the state dimension accepts — a URL is user input. */
+const STATES = ["enabled", "disabled"] as const;
 
 export function SchedulesListPage() {
-  const { t } = useTranslation(["settings", "common"]);
+  const { t } = useTranslation(["settings", "agents", "common"]);
   const { isAdmin } = usePermissions();
   const navigate = useNavigate();
   const { data: schedules, isLoading, isError } = useAllSchedules();
   const { data: agents } = useAgents();
+  const placeholder = useSearchPlaceholder(t("schedules.title"));
 
   const create = (
     <Button
@@ -45,6 +52,32 @@ export function SchedulesListPage() {
   const visibility = useColumnVisibility("schedules");
   const columns = visibleColumns(allColumns, visibility.hidden);
 
+  // Client-side, and honestly so: `GET /api/schedules` returns the list whole,
+  // with no paging and no query parameters, so the box searches every schedule
+  // rather than the page on screen — the same test the package lists pass and
+  // the run list fails, which is why the run list waited for a `q`.
+  //
+  // The state still rides in the URL, like the runs page: a filtered list is
+  // what people paste to each other, whoever does the filtering.
+  const list = useListParams(["state"]);
+  const query = list.search;
+  const states = list.values("state", STATES);
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return (schedules ?? []).filter((schedule) => {
+      const enabled = schedule.enabled ?? true;
+      const key = enabled ? "enabled" : "disabled";
+      if (states.length > 0 && !states.includes(key)) return false;
+      if (!q) return true;
+      return (
+        (schedule.name ?? "").toLowerCase().includes(q) ||
+        agentName(schedule.packageId).toLowerCase().includes(q)
+      );
+    });
+  }, [schedules, query, states, agents]);
+
+  const filtering = query.trim() !== "" || states.length > 0;
+
   return (
     <div>
       <PageHeader
@@ -54,25 +87,47 @@ export function SchedulesListPage() {
       />
 
       <ListToolbar
-        filters={[]}
+        search={{ value: query, onChange: list.setSearch, placeholder }}
+        filters={[
+          {
+            id: "state",
+            label: t("schedules.column.state"),
+            values: states,
+            onChange: list.setValues("state"),
+            options: [
+              { value: "enabled", label: t("schedule.statusActive", { ns: "agents" }) },
+              { value: "disabled", label: t("schedule.statusDisabled", { ns: "agents" }) },
+            ],
+          },
+        ]}
+        onReset={list.reset}
         columns={columnMenu(allColumns, visibility)}
         actions={isAdmin ? create : undefined}
       />
 
       <SchedulesTable
-        schedules={schedules ?? []}
+        schedules={shown}
         columns={columns}
         isLoading={isLoading}
         isError={isError}
         empty={
-          <EmptyState
-            message={t("schedules.empty")}
-            hint={t("schedules.emptyHint")}
-            icon={Calendar}
-          >
-            {isAdmin && create}
-          </EmptyState>
+          // A list nobody filtered and a filter that matched nothing are two
+          // different sentences. The empty one no longer re-offers the page's
+          // action either: the bar above carries it, and stays.
+          filtering ? (
+            <EmptyState message={t("schedules.noMatch")} icon={SearchX} compact />
+          ) : (
+            <EmptyState
+              message={t("schedules.empty")}
+              hint={t("schedules.emptyHint")}
+              icon={Calendar}
+              compact
+            />
+          )
         }
+      />
+      <ListFooter
+        count={isLoading || isError ? undefined : t("schedules.count", { count: shown.length })}
       />
     </div>
   );

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { CheckCheck, SearchX } from "lucide-react";
 import { runStatusValues } from "@appstrate/shared-types";
@@ -10,6 +9,7 @@ import { PageHeader } from "../components/page-header";
 import { EmptyState } from "../components/page-states";
 import { ListToolbar, type FilterSpec } from "../components/list-toolbar";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
+import { useListParams } from "../lib/list-params";
 import { TOOLBAR_ACTION } from "../lib/toolbar-button";
 import { RunList } from "../components/run-list";
 import type { RunKindFilter } from "../hooks/use-paginated-runs";
@@ -33,57 +33,17 @@ const SCOPES = ["me"] as const;
 const FILTER_PARAMS = ["user", "kind", "status", "q"] as const;
 
 /** `?status=failed,timeout` — the wire shape the endpoint takes. */
-function readList<T extends string>(raw: string | null, allowed: readonly T[]): T[] {
-  if (!raw) return [];
-  return raw.split(",").filter((v): v is T => (allowed as readonly string[]).includes(v));
-}
-
 export function RunsPage() {
   const { t } = useTranslation(["agents", "common"]);
   const { data: unreadCount } = useUnreadCount();
   const markAllRead = useMarkAllRead();
-  const [params, setParams] = useSearchParams();
+  const list = useListParams(FILTER_PARAMS);
   const searchPlaceholder = useSearchPlaceholder(t("runs.entity"));
 
-  const scopes = readList(params.get("user"), SCOPES);
-  const kinds = readList(params.get("kind"), KINDS);
-  const statuses = readList(params.get("status"), runStatusValues);
-  const search = params.get("q") ?? "";
-
-  // Pushed, not replaced: a filter is a place you went, and Back has to undo
-  // it — the same obligation the URL brings everywhere else in this app.
-  const setParam = (key: string) => (values: string[]) => {
-    setParams((prev) => {
-      const next = new URLSearchParams(prev);
-      if (values.length === 0) next.delete(key);
-      else next.set(key, values.join(","));
-      return next;
-    });
-  };
-
-  // ONE update, not one per dimension. Three `setParams` in the same tick each
-  // read the same committed location, so the last would win and the other two
-  // filters would survive a "Réinitialiser" that looked like it worked.
-  const resetFilters = () =>
-    setParams((prev) => {
-      const next = new URLSearchParams(prev);
-      for (const key of FILTER_PARAMS) next.delete(key);
-      return next;
-    });
-
-  // The text filter is a URL parameter like the others, so a search is a link
-  // too. Replaced rather than pushed: typing eight characters would otherwise
-  // put eight entries in the history and make Back useless.
-  const setSearch = (value: string) =>
-    setParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        if (value) next.set("q", value);
-        else next.delete("q");
-        return next;
-      },
-      { replace: true },
-    );
+  const scopes = list.values("user", SCOPES);
+  const kinds = list.values("kind", KINDS);
+  const statuses = list.values("status", runStatusValues);
+  const search = list.search;
 
   const filters: FilterSpec[] = [
     {
@@ -91,7 +51,7 @@ export function RunsPage() {
       label: t("runs.filterScope"),
       values: scopes,
       options: [{ value: "me", label: t("runs.filterMine") }],
-      onChange: setParam("user"),
+      onChange: list.setValues("user"),
     },
     {
       id: "kind",
@@ -101,7 +61,7 @@ export function RunsPage() {
         { value: "package", label: t("runs.filterKindPackage") },
         { value: "inline", label: t("runs.filterKindInline") },
       ],
-      onChange: setParam("kind"),
+      onChange: list.setValues("kind"),
     },
     {
       id: "status",
@@ -111,7 +71,7 @@ export function RunsPage() {
         value,
         label: t(`status.${value}`, { ns: "common" }),
       })),
-      onChange: setParam("status"),
+      onChange: list.setValues("status"),
     },
   ];
 
@@ -137,11 +97,11 @@ export function RunsPage() {
           <ListToolbar
             search={{
               value: search,
-              onChange: setSearch,
+              onChange: list.setSearch,
               placeholder: searchPlaceholder,
             }}
             filters={filters}
-            onReset={resetFilters}
+            onReset={list.reset}
             columns={columns}
             // On a list screen the action belongs beside the view controls,
             // not at title height: every table screen then keeps its controls
@@ -168,7 +128,7 @@ export function RunsPage() {
         emptyState={
           search || filters.some((f) => f.values.length > 0) ? (
             <EmptyState message={t("runs.emptyFiltered")} icon={SearchX} compact>
-              <Button variant="outline" size="sm" onClick={resetFilters}>
+              <Button variant="outline" size="sm" onClick={list.reset}>
                 {t("toolbar.clearAll", { ns: "common" })}
               </Button>
             </EmptyState>

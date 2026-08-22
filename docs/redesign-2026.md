@@ -353,7 +353,9 @@ The pattern, and where it deviates:
   alternatives, dimensions narrow each other — `(statut = échoué OU timeout) ET
 (type = agent)`, which is what the query does (`IN (…)` per dimension, `AND`
   between them). No faceted filter anywhere spells that out.
-- **The state is in the URL**, pushed, not replaced: a filtered list is what
+- **The state is in the URL**, pushed, not replaced — `lib/list-params.ts`
+  since `/schedules` learned to filter, because those four functions were about
+  to be written a second time word for word. A filtered list is what
   people paste to each other, and the rule that gave modals real URLs brings
   the same obligation — Back has to undo a filter. The search is the exception,
   replaced rather than pushed: eight keystrokes would otherwise be eight
@@ -765,17 +767,20 @@ a collection cannot live in a modal until a collection is a thing.
 The browser pass handed A four inconsistencies to settle, all of them the same
 shape — the apparatus is the TABLE's, not the collection's:
 
-- **The count is table-only.** ~~Fixed for the package screens~~ (the footer
-  renders whatever the body holds, in both views); `/schedules` still never
-  counts, so two of the three answers remain.
+- ~~**The count is table-only.**~~ Fixed everywhere: the footer renders
+  whatever the body holds, on the package screens in both views and on
+  `/schedules`, which never counted at all.
 - ~~**The bar vanishes when the list is empty.**~~ Fixed: the three early
   returns above the toolbar are gone, the states are drawn IN the body, and the
   empty state no longer re-offers the page's actions as unlabelled squares —
   the bar above carries them, written out. The `emptyExtraActions` prop that
   fed them was passed by nobody and is deleted.
-- **`/schedules` has no search and no filters**, so its bar is nine-tenths empty
-  space with two buttons at the right end, while it does have an Actif /
-  Désactivé state that is a filter dimension waiting to be declared.
+- ~~**`/schedules` has no search and no filters.**~~ Both landed, and both are
+  honest: `GET /api/schedules` returns the list whole, with no paging and no
+  query parameters, so a client-side box searches every schedule rather than
+  the page on screen — the test the package lists pass and the run list failed,
+  which is why the run list waited for a `q`. The Actif / Désactivé state was
+  the filter dimension it already had.
 - ~~**The card grid is two columns at any width.**~~ Settled with the grid
   component: `repeat(auto-fill, minmax(min(20rem,100%),1fr))` takes as many
   columns as fit against the CONTAINER, so 1440 gives three and a narrow window
