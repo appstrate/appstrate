@@ -233,6 +233,7 @@ const config: KnipConfig = {
       // of tree (cloud, connect-helper, third-party modules), so each subpath
       // is a public entry whose readers this repo cannot see.
       entry: [
+        "src/image-ref.ts!",
         "src/logger.ts!",
         "src/env.ts!",
         "src/ajv.ts!",
@@ -348,7 +349,12 @@ const config: KnipConfig = {
     "packages/emails": { entry: ["src/index.ts!", ...TEST_ENTRY] },
     "packages/env": { entry: ["src/index.ts!", ...TEST_ENTRY] },
     "packages/runner-pi": {
-      entry: ["src/index.ts!", "src/runtime-tools/index.ts!", ...TEST_ENTRY],
+      entry: [
+        "src/index.ts!",
+        "src/runtime-tools/index.ts!",
+        "src/provider-map.ts!",
+        ...TEST_ENTRY,
+      ],
     },
     "packages/shared-types": { entry: ["src/index.ts!", ...TEST_ENTRY] },
     "packages/ui": {
