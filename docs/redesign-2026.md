@@ -9,10 +9,15 @@ says where things stand, why the non-obvious calls were made, and what is still
 open — so the work can be picked up cold.
 
 **Picking it up cold, read in this order:** "How the work goes" just below,
-then "Open" (it opens on what the browser pass found and what it left to
-arbitrate), then "The grammar", which is what the next stretch of work IS. The
-sections in between describe what is already built, and are reference rather
-than reading.
+then **"Open", which now opens on NEXT, IN ORDER** — three numbered blocks that
+are the work, written for someone with no other context. Then "Form pattern",
+which the first of those blocks is entirely about, and "The grammar", which
+frames the rest. The sections in between describe what is already built, and are
+reference rather than reading.
+
+This file is the only handover. Nothing needed to continue lives in any agent's
+memory, on purpose: it has to be possible to hand this to a different tool and
+have it pick up where the last session stopped.
 
 ## How the work goes
 
@@ -717,7 +722,83 @@ uncontrolled and keyed on the incoming value, NOT mirrored into state: the
 mirror needs an effect to follow the server, which the Rules-of-React gate
 rejects (`react-hooks/set-state-in-effect`).
 
-Converted so far: the organisation name. The rest follow screen by screen.
+Converted so far: organisation name, workspace name and its OAuth redirect
+domains, account display name. Left: storage, MCP connect.
+
+### THREE ROW SHAPES (decided 23 August, from the product owner's references)
+
+The pattern was "label left, control right" for everything. It is three shapes
+now, and which one a setting takes is decided by what the control IS:
+
+1. **Field row** — label, then the description, then the CONTROL BELOW IT, at a
+   readable width. Not 256px glued to the right edge. Order matters and it is
+   label → description → control: you read a row top to bottom, and the
+   description says what the setting is before you act on it. (The two
+   references disagreed on this — one put the hint above the field, one below.
+   One rule, and this is it.)
+2. **Toggle row** — the checkbox and its label on ONE line, description
+   underneath. This shape did not exist: the closest thing was the dashboard-SSO
+   setting, a title plus a description plus an Enable/Disable BUTTON, which is a
+   value with an action beside it — exactly what "the control IS the setting"
+   rules out.
+3. **Action row** — label and description left, button right. Unchanged. A
+   destructive button stacked under its label costs twice the height to say the
+   same thing, and "here is the setting, here is the deed" reads on one line.
+
+### A FIELD'S SURFACE IS DECIDED BY WHAT IT SITS ON
+
+Same rule as the toolbar's two button treatments, and for the same reason: the
+SURFACE is what tells a control from its background.
+
+- On the grey canvas (a list page) a field is **white**.
+- Inside a white dialog (every settings surface) a field is **grey**.
+
+One rule, two renderings. What is there today is neither: `packages/ui`'s
+`Input` is `bg-transparent`, so a field inherits whatever it sits on and has no
+surface of its own. Exactly one place overrides it — the toolbar's search box,
+which forces `bg-background` with a comment explaining why — and the rule was
+never generalised. Inside the settings dialogs that leaves white rectangles on
+white, readable only by their border.
+
+### WHEN A CHANGE SAVES
+
+Three cases, and the principle is whether a value can be VALID on its own:
+
+- **One value → it commits alone**, on blur or Enter. A name is valid the moment
+  it is non-empty.
+- **Several values that are only valid TOGETHER → a modal that commits once.**
+  An OAuth client with its id typed and its secret empty is not a state to send.
+  The modal is where a complete value is assembled. This is what models,
+  proxies, OAuth clients and webhooks already do; the rule names it.
+- **A list of independently valid values → each entry commits on its own.** The
+  workspace's OAuth domains: a row commits when it is filled and left, and
+  adding an empty row saves nothing, because an empty input is the residue of
+  editing rather than a value.
+
+### WHAT TELLS YOU IT SAVED
+
+A toast on every rename is noise: it confirms something the reader just did and
+can see. But the counter-argument has to be answered honestly — with a
+commit-on-blur field, the box shows what you TYPED whether or not it saved, so a
+visible value proves nothing. Hence:
+
+| Moment                             | Signal                                                 |
+| ---------------------------------- | ------------------------------------------------------ |
+| While saving                       | the row shows it (a spinner beside the control)        |
+| Failure                            | **always** a toast, and the field keeps what you typed |
+| Success, effect visible in the row | nothing more; the spinner stopping is it               |
+| Success, effect NOT visible        | a toast, because nothing on screen would say it        |
+
+The email change is the last case exactly: the field still shows the old
+address, and the real effect is a verification message sent elsewhere.
+
+**And the email is directly editable, not a dialog.** A modal was built for it
+on 22 August on the grounds that a stray blur would send a verification link to
+a typo'd stranger. That was over-cautious and it is reverted: the verification
+link IS the confirmation, since the address does not become yours until someone
+clicks it, so a confirm in front of a flow that confirms itself is belt and
+braces. A Save button never protected against a valid-but-wrong address either.
+The existing format guard means an invalid string never fires at all.
 
 ## Terminology
 
@@ -771,6 +852,20 @@ something that contradicts one.
 - **URLs may move in a redesign.** Redirects, then move on.
 - **Words matter.** "espace de travail" over "application"; the terminology pass
   was requested before any of the screens using it were touched.
+- **A settings list is a TABLE, not cards.** (23 August.) Members, workspaces,
+  end-users, webhooks, API keys, CLI sessions: every row is a RECORD, the same
+  fields in the same order, which is the table's bargain. Drawn as stacked cards
+  each row reprinted its own labels — the CLI sessions card carried four of them
+  per row where a head writes them once.
+- **Adding something is always the same gesture**: the white surface-treatment
+  button with a `+` icon, opening a MODAL. Not a blue fill, not a bare label.
+  The exception is by destination, not by taste: when "create" means opening a
+  whole editor (an agent, a skill), it stays a link to a page, because that is
+  the recorded excursion-vs-destination rule. The visual treatment is the same
+  either way.
+- **An editable value is edited in place, under its label**, never behind an
+  Edit button and never pinned to the right edge of the screen. See "Form
+  pattern" for the three row shapes this produced.
 
 On how the work goes:
 
@@ -1220,6 +1315,60 @@ So the strategy the reference itself suggests:
    revert coarser.
 
 ## Open
+
+### NEXT, IN ORDER (written 23 August, for whoever picks this up cold)
+
+Everything below this block is either done or older context. These three are
+what is next, smallest first, and each one is a commit with the gate green
+(`bun test` + `bun run check`) and a look in the lab before it lands.
+
+**1. The settings row pattern.** All of it is specified under "Form pattern" —
+read that section before touching anything. Five things, one block:
+
+- Give `packages/ui`'s `Input` a surface decided by its ground: white on the
+  canvas, grey inside a dialog. It is `bg-transparent` today, so it has none.
+  Check the toolbar search afterwards; it forces `bg-background` by hand and
+  that override should become unnecessary or stay consistent.
+- Rework `components/settings/setting-row.tsx` into the three shapes: field
+  (control BELOW the label, after the description), toggle (control and label
+  on one line, description under), action (button right, unchanged).
+- Apply to the six existing rows: org name, workspace name, workspace OAuth
+  domains, account display name, account email, workspace danger zone.
+- **Revert the email dialog** built on 22 August (`EmailChangeModal` in
+  `pages/preferences/general.tsx`): the email becomes an in-place field again,
+  with a toast, because its effect is invisible. The reasoning is in "Form
+  pattern".
+- Convert the dashboard-SSO setting in `pages/org-settings/general.tsx` from
+  title + description + Enable/Disable button into a toggle row.
+
+Expect the settings surfaces to grow taller, since every field goes from one
+line to two. Verify at 1440 and at 390 before committing.
+
+**2. The add CTA.** Four buttons are missing their `+` icon: workspaces, API
+keys, end-users, webhooks. And the members page invites through an INLINE FORM
+(email input + role select + Add) where every other screen uses a button that
+opens a modal — replace it with the standard CTA plus an invite modal, which
+also frees the top of the members table.
+
+**3. End-users become a table.** This one has a prerequisite, which is why it is
+last: the row opens its detail panel through an `onClick` on local state, with
+NO URL, and `DataTable`'s contract is that a row is a LINK (middle-click,
+⌘-click, copy-link-address). So:
+
+- First give the detail panel a URL. The precedent is in
+  `components/document-list-panel.tsx`: `?preview=<id>`, pushed on open and
+  REPLACED on close, so Back closes the panel instead of reopening it. Use
+  `?user=<id>`.
+- Then the list becomes a `DataTable` with its own column set, in its own file,
+  registered in `components/test/column-tiers.test.tsx` like every other set.
+- Its date column goes at tier 2, NOT tier 3: this screen is reachable inside
+  the settings dialog, which tops out around 800px and never crosses the 56rem
+  threshold, so tier 3 there means never drawn.
+
+After those three, what is left in this section is: the Usage page (a feature to
+build, not a defect), storage and MCP connect to the form pattern, the
+page-action rule on screens without a list, per-org colour and logo (deferred by
+decision, twice — do not start it), and library browsing through `PanelDialog`.
 
 - ~~**The tier-one budget is the window, and it should be the container.**~~
   Closed 22 August, and it was worth the detour. The test asserted 390 (the
