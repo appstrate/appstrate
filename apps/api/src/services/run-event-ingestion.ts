@@ -443,8 +443,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // (SQL COALESCE) — a JS read-then-write here would race a concurrent
   // metric event and clobber a newer snapshot with the stale read. The read
   // below is what the terminal ledger row is PRICED from (`runs.model_cost` ×
-  // these counters), so it decides what a crashed run is billed — see the
-  // barrier below.
+  // these counters) — see the barrier below.
   const preserveLastKnownUsage = validatedUsage === null && status !== "success";
   if (preserveLastKnownUsage) {
     validatedUsage = await readLastKnownUsage(run.id);
@@ -496,9 +495,13 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   //     with no `cost`, and those are exactly the runs whose last snapshot is
   //     most in doubt. A run that consumed nothing is still skipped.
   //
-  //     This bills: the row is priced server-side from `run.modelCost` × the
-  //     usage passed here, so a crashed run's preserved snapshot now costs what
-  //     it used instead of settling at $0. See `resolveRunnerCost`.
+  //     The row is priced server-side from `run.modelCost` × the usage passed
+  //     here rather than from `result.cost`. It rarely moves the number: the
+  //     upsert is monotone, so the metric side-channel's own rows already hold
+  //     this run's cost and a lower candidate cannot regress them. What it does
+  //     guarantee is a priced row where the container reported no cost at all —
+  //     an aliased run, which is never given `MODEL_COST`. See
+  //     `resolveRunnerCost`.
   const terminalCost = typeof result.cost === "number" ? result.cost : null;
   if (terminalCost !== null || tokenUsageIsNonZero(validatedUsage)) {
     await writeRunnerLedgerRow(

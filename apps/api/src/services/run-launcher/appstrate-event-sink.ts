@@ -301,9 +301,8 @@ interface RunnerCostVerdict {
  * also lets `MODEL_COST` be withheld from a container running an aliased model
  * without changing what the run is billed.
  *
- * BILLING: a run that dies without terminal usage (watchdog kill, crash,
- * timeout, cancel) is priced from the cumulative snapshot finalize preserved,
- * so it bills its real consumption rather than settling at $0
+ * A run that dies without terminal usage (watchdog kill, crash, timeout,
+ * cancel) is priced from the cumulative snapshot finalize preserved
  * (`test/integration/services/llm-usage-settlement.test.ts`).
  *
  * Never recompute from a per-event DELTA: the upsert discards a snapshot whose
