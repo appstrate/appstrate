@@ -49,15 +49,20 @@ export function useEndUser(endUserId: string) {
  */
 function useInvalidateEndUsers() {
   const qc = useQueryClient();
-  return () => {
-    void qc.invalidateQueries({ queryKey: ["get", "/api/end-users"] });
-    void qc.invalidateQueries({ queryKey: ["get", "/api/end-users/{id}"] });
-  };
+  return () =>
+    Promise.all([
+      qc.invalidateQueries({ queryKey: ["get", "/api/end-users"] }),
+      qc.invalidateQueries({ queryKey: ["get", "/api/end-users/{id}"] }),
+    ]);
 }
 
 export function useCreateEndUser() {
   const invalidate = useInvalidateEndUsers();
-  return $api.useMutation("post", "/api/end-users", { onSuccess: invalidate });
+  return $api.useMutation("post", "/api/end-users", {
+    onSuccess: () => {
+      void invalidate();
+    },
+  });
 }
 
 export function useUpdateEndUser() {
@@ -67,5 +72,9 @@ export function useUpdateEndUser() {
 
 export function useDeleteEndUser() {
   const invalidate = useInvalidateEndUsers();
-  return $api.useMutation("delete", "/api/end-users/{id}", { onSuccess: invalidate });
+  return $api.useMutation("delete", "/api/end-users/{id}", {
+    onSuccess: () => {
+      void invalidate();
+    },
+  });
 }

@@ -54,6 +54,8 @@ export const SCREENS = [
   { path: "/preferences", name: "preferences" },
   { path: "/webhooks", name: "webhooks" },
   { path: "/end-users", name: "end-users" },
+  { path: "/workspace-settings/end-users?user=eu_lab_detail", name: "end-user-detail" },
+  { path: "/workspace-settings/end-users?user=eu_lab_detail&edit=1", name: "end-user-edit" },
 ];
 
 /** The four the scenario switcher offers. `empty` lands on onboarding by design. */

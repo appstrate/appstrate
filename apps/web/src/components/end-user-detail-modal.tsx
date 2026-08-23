@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { Copy, Plus, Trash2 } from "lucide-react";
 import { Modal } from "./modal";
 import { ConfirmModal } from "./confirm-modal";
@@ -12,11 +13,15 @@ import { Badge } from "@appstrate/ui/components/badge";
 import { Spinner } from "./spinner";
 import { useDeleteEndUser, useUpdateEndUser, type EndUserInfo } from "../hooks/use-end-users";
 import { formatDateField } from "../lib/markdown";
+import { getErrorMessage } from "@appstrate/core/errors";
 
 interface Props {
   open: boolean;
   onClose: () => void;
   endUser: EndUserInfo | null;
+  initialEditing?: boolean;
+  onEditingChange?: (editing: boolean) => void;
+  onDeleted?: (id: string) => void;
 }
 
 type MetadataValue = string | number | boolean | null;
@@ -115,17 +120,34 @@ function ReadOnlyField({ label, value }: { label: string; value: string | null |
   );
 }
 
-export function EndUserDetailModal({ open, onClose, endUser }: Props) {
+export function EndUserDetailModal({
+  open,
+  onClose,
+  endUser,
+  initialEditing = false,
+  onEditingChange,
+  onDeleted,
+}: Props) {
   const { t } = useTranslation(["settings", "common"]);
   const deleteMutation = useDeleteEndUser();
   const updateMutation = useUpdateEndUser();
+  const mounted = useRef(true);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(initialEditing);
 
-  const [editName, setEditName] = useState("");
-  const [editEmail, setEditEmail] = useState("");
-  const [editExternalId, setEditExternalId] = useState("");
-  const [editMetadata, setEditMetadata] = useState<MetadataEntry[]>([]);
+  const [editName, setEditName] = useState(endUser?.name ?? "");
+  const [editEmail, setEditEmail] = useState(endUser?.email ?? "");
+  const [editExternalId, setEditExternalId] = useState(endUser?.externalId ?? "");
+  const [editMetadata, setEditMetadata] = useState<MetadataEntry[]>(() =>
+    metadataToEntries(endUser?.metadata ?? null),
+  );
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const startEditing = () => {
     if (!endUser) return;
@@ -135,6 +157,12 @@ export function EndUserDetailModal({ open, onClose, endUser }: Props) {
     setEditMetadata(metadataToEntries(endUser.metadata));
     updateMutation.reset();
     setEditing(true);
+    onEditingChange?.(true);
+  };
+
+  const stopEditing = () => {
+    setEditing(false);
+    onEditingChange?.(false);
   };
 
   const handleClose = () => {
@@ -147,9 +175,9 @@ export function EndUserDetailModal({ open, onClose, endUser }: Props) {
   const metadata = endUser.metadata;
   const metaEntries = metadata ? Object.entries(metadata) : [];
 
-  const handleSave = () => {
-    updateMutation.mutate(
-      {
+  const handleSave = async () => {
+    try {
+      await updateMutation.mutateAsync({
         params: { path: { id: endUser.id } },
         body: {
           name: editName.trim() || undefined,
@@ -157,13 +185,12 @@ export function EndUserDetailModal({ open, onClose, endUser }: Props) {
           externalId: editExternalId.trim() || undefined,
           metadata: entriesToMetadata(editMetadata),
         },
-      },
-      {
-        onSuccess: () => {
-          setEditing(false);
-        },
-      },
-    );
+      });
+      if (!mounted.current) return;
+      stopEditing();
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    }
   };
 
   const handleMetadataChange = (index: number, field: "key" | "value", val: string) => {
@@ -184,19 +211,24 @@ export function EndUserDetailModal({ open, onClose, endUser }: Props) {
         <Modal
           open={open}
           onClose={handleClose}
+          preventClose={updateMutation.isPending}
           title={t("applications.editEndUser")}
           actions={
             <>
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setEditing(false)}
+                onClick={stopEditing}
                 disabled={updateMutation.isPending}
               >
                 {t("common:btn.cancel")}
               </Button>
               <Button type="submit" form="edit-end-user-form" disabled={updateMutation.isPending}>
-                {updateMutation.isPending ? <Spinner /> : t("common:btn.save")}
+                {updateMutation.isPending ? (
+                  <Spinner label={t("common:loading")} />
+                ) : (
+                  t("common:btn.save")
+                )}
               </Button>
             </>
           }
@@ -341,16 +373,16 @@ export function EndUserDetailModal({ open, onClose, endUser }: Props) {
         title={t("common:btn.confirm")}
         description={t("applications.deleteEndUserConfirm")}
         isPending={deleteMutation.isPending}
-        onConfirm={() => {
-          deleteMutation.mutate(
-            { params: { path: { id: endUser.id } } },
-            {
-              onSuccess: () => {
-                setConfirmOpen(false);
-                handleClose();
-              },
-            },
-          );
+        onConfirm={async () => {
+          try {
+            await deleteMutation.mutateAsync({ params: { path: { id: endUser.id } } });
+            if (!mounted.current) return;
+            setConfirmOpen(false);
+            onDeleted?.(endUser.id);
+            handleClose();
+          } catch (error) {
+            toast.error(getErrorMessage(error));
+          }
         }}
       />
     </>

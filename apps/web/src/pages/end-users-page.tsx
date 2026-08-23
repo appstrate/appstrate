@@ -2,67 +2,29 @@
 
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Plus, Search, Users } from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+import { Plus, Search, SearchX, Users } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { Badge } from "@appstrate/ui/components/badge";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@appstrate/ui/components/tooltip";
-import { useEndUsers, type EndUserInfo } from "../hooks/use-end-users";
+  useDeleteEndUser,
+  useEndUser,
+  useEndUsers,
+  type EndUserInfo,
+} from "../hooks/use-end-users";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { EndUserCreateModal } from "../components/end-user-create-modal";
 import { EndUserDetailModal } from "../components/end-user-detail-modal";
+import { ConfirmModal } from "../components/confirm-modal";
+import { Modal } from "../components/modal";
+import { DataTable } from "../components/data-table";
 import { TOOLBAR_ACTION } from "../lib/toolbar-button";
-import { formatDateField } from "../lib/markdown";
-
-/** Deterministic color from ID hash for the avatar circle. */
-const AVATAR_COLORS = [
-  "bg-blue-500/20 text-blue-600 dark:text-blue-400",
-  "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400",
-  "bg-violet-500/20 text-violet-600 dark:text-violet-400",
-  "bg-amber-500/20 text-amber-600 dark:text-amber-400",
-  "bg-rose-500/20 text-rose-600 dark:text-rose-400",
-  "bg-cyan-500/20 text-cyan-600 dark:text-cyan-400",
-  "bg-fuchsia-500/20 text-fuchsia-600 dark:text-fuchsia-400",
-  "bg-orange-500/20 text-orange-600 dark:text-orange-400",
-];
-
-function hashCode(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash << 5) - hash + str.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash);
-}
-
-function getInitials(name: string | null, email: string | null): string {
-  if (name) {
-    const parts = name.trim().split(/\s+/);
-    if (parts.length >= 2) return (parts[0]![0]! + parts[1]![0]!).toUpperCase();
-    return name.slice(0, 2).toUpperCase();
-  }
-  if (email) return email.slice(0, 2).toUpperCase();
-  return "?";
-}
-
-function EndUserAvatar({ user }: { user: EndUserInfo }) {
-  const color = AVATAR_COLORS[hashCode(user.id) % AVATAR_COLORS.length]!;
-  return (
-    <div
-      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[0.7rem] font-semibold ${color}`}
-    >
-      {getInitials(user.name, user.email)}
-    </div>
-  );
-}
+import { endUserDisplayName, useEndUserColumns } from "./end-user-columns";
+import { endUserHref, endUsersHref } from "./end-user-route";
 
 export function EndUsersPage() {
   // Remount on application switch so cursor + loadedPages (and the rest of the
@@ -76,10 +38,13 @@ function EndUsersPageContent() {
   const { t } = useTranslation(["settings", "common"]);
   const { isAdmin } = usePermissions();
   const applicationId = useCurrentApplicationId();
+  const location = useLocation();
+  const navigate = useNavigate();
 
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<EndUserInfo | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<EndUserInfo | null>(null);
+  const [deletedUserIds, setDeletedUserIds] = useState<ReadonlySet<string>>(() => new Set());
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   // Pages loaded before the current cursor. "Load more" appends the current
   // page here and advances the cursor, so the list accumulates across pages
@@ -93,6 +58,15 @@ function EndUsersPageContent() {
 
   const currentPage = useMemo(() => data?.data ?? [], [data?.data]);
   const hasMore = data?.hasMore ?? false;
+  const params = new URLSearchParams(location.search);
+  const selectedUserId = params.get("user");
+  const editSelectedUser = params.get("edit") === "1";
+  const {
+    data: selectedUserDetail,
+    isLoading: selectedUserLoading,
+    error: selectedUserError,
+  } = useEndUser(selectedUserId ?? "");
+  const deleteMutation = useDeleteEndUser();
 
   // Merge accumulated pages with the current one, deduping by id (the current
   // page briefly overlaps the accumulator between "Load more" and the next
@@ -101,13 +75,14 @@ function EndUsersPageContent() {
     const seen = new Set<string>();
     const out: EndUserInfo[] = [];
     for (const u of [...loadedPages, ...currentPage]) {
+      if (deletedUserIds.has(u.id)) continue;
       if (!seen.has(u.id)) {
         seen.add(u.id);
         out.push(u);
       }
     }
     return out;
-  }, [loadedPages, currentPage]);
+  }, [loadedPages, currentPage, deletedUserIds]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return endUsers;
@@ -121,130 +96,149 @@ function EndUsersPageContent() {
     );
   }, [endUsers, search]);
 
+  const selectedUser = selectedUserId
+    ? (selectedUserDetail ?? endUsers.find((user) => user.id === selectedUserId) ?? null)
+    : null;
+
+  const closeUser = () => {
+    navigate(endUsersHref(location), { replace: true, state: location.state });
+  };
+
+  const setEditMode = (id: string, editing: boolean) => {
+    navigate(endUserHref(location, id, editing), {
+      replace: true,
+      state: location.state,
+    });
+  };
+
+  const hideDeletedUser = (id: string) => {
+    setDeletedUserIds((previous) => new Set(previous).add(id));
+    setLoadedPages((previous) => previous.filter((user) => user.id !== id));
+  };
+
+  const columns = useEndUserColumns({
+    deletingUserId: deleteMutation.isPending
+      ? (deleteMutation.variables?.params.path.id ?? null)
+      : null,
+    onEdit: (user) => navigate(endUserHref(location, user.id, true), { state: location.state }),
+    onDelete: setPendingDelete,
+  });
+
   if (!isAdmin) return null;
   if (!applicationId) return <EmptyState message={t("applications.noAppSelected")} icon={Users} />;
-  if (error) return <ErrorState message={getErrorMessage(error)} />;
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-end">
-        <Button variant="outline" className={TOOLBAR_ACTION} onClick={() => setCreateOpen(true)}>
+      <div className="mb-4 flex items-center gap-2">
+        <div className="relative min-w-0 flex-1 sm:max-w-[250px]">
+          <Search
+            size={16}
+            className="text-muted-foreground absolute top-1/2 left-3 -translate-y-1/2"
+          />
+          <Input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t("applications.searchEndUsers")}
+            className="pl-9"
+          />
+        </div>
+        <Button
+          variant="outline"
+          className={`${TOOLBAR_ACTION} ml-auto`}
+          onClick={() => setCreateOpen(true)}
+        >
           <Plus />
           {t("applications.newEndUser")}
         </Button>
       </div>
 
-      <div className="relative mb-4">
-        <Search
-          size={16}
-          className="text-muted-foreground absolute top-1/2 left-3 -translate-y-1/2"
-        />
-        <Input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder={t("applications.searchEndUsers")}
-          className="pl-9"
-        />
-      </div>
+      <DataTable
+        label={t("endUsers.pageTitle")}
+        columns={columns}
+        rows={filtered}
+        rowKey={(user) => user.id}
+        rowHref={(user) => endUserHref(location, user.id)}
+        rowState={() => location.state}
+        rowLabel={(user) =>
+          t("applications.openEndUser", {
+            name: endUserDisplayName(user, t("applications.anonymousUser")),
+          })
+        }
+        isLoading={isLoading}
+        isError={Boolean(error)}
+        error={<ErrorState message={getErrorMessage(error)} compact />}
+        empty={
+          search.trim() ? (
+            <EmptyState message={t("applications.noMatchingEndUsers")} icon={SearchX} compact />
+          ) : (
+            <EmptyState
+              message={t("applications.noEndUsers")}
+              hint={t("applications.noEndUsersHint")}
+              icon={Users}
+              compact
+            />
+          )
+        }
+      />
 
-      {isLoading ? (
-        <LoadingState />
-      ) : filtered.length === 0 ? (
-        // The button above is the same one, and it stays.
-        <EmptyState
-          message={t("applications.noEndUsers")}
-          hint={t("applications.noEndUsersHint")}
-          icon={Users}
-        />
-      ) : (
-        <TooltipProvider delayDuration={300}>
-          <div className="flex flex-col gap-2">
-            {filtered.map((user) => {
-              const metaCount = user.metadata ? Object.keys(user.metadata).length : 0;
-              return (
-                <div
-                  key={user.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setSelectedUser(user)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") setSelectedUser(user);
-                  }}
-                  className="border-border bg-card hover:border-primary/30 cursor-pointer rounded-lg border px-4 py-3 transition-colors"
-                >
-                  <div className="flex items-center gap-3">
-                    <EndUserAvatar user={user} />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate text-sm font-semibold">
-                          {user.name || user.email || t("applications.anonymousUser")}
-                        </span>
-                        {user.email && user.name && (
-                          <span className="text-muted-foreground truncate text-sm">
-                            {user.email}
-                          </span>
-                        )}
-                      </div>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Badge
-                              variant="secondary"
-                              className="cursor-default px-1.5 py-0 text-[0.65rem] opacity-60"
-                            >
-                              {user.id.length > 20 ? `${user.id.slice(0, 20)}...` : user.id}
-                            </Badge>
-                          </TooltipTrigger>
-                          <TooltipContent side="bottom">
-                            <span className="font-mono text-xs">{user.id}</span>
-                          </TooltipContent>
-                        </Tooltip>
-                        {user.externalId && (
-                          <Badge variant="outline" className="px-1.5 py-0 text-[0.65rem]">
-                            {user.externalId}
-                          </Badge>
-                        )}
-                        {metaCount > 0 && (
-                          <Badge variant="outline" className="px-1.5 py-0 text-[0.65rem]">
-                            {t("applications.metadataCount", { count: metaCount })}
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                    <span className="text-muted-foreground shrink-0 text-xs">
-                      {formatDateField(user.createdAt, "date")}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-
-            {hasMore && (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  const last = currentPage[currentPage.length - 1];
-                  if (last) {
-                    setLoadedPages((prev) => [...prev, ...currentPage]);
-                    setCursor(last.id);
-                  }
-                }}
-                className="mt-2"
-              >
-                {t("applications.loadMore")}
-              </Button>
-            )}
-          </div>
-        </TooltipProvider>
+      {hasMore && !isLoading && !error && (
+        <Button
+          variant="outline"
+          onClick={() => {
+            const last = currentPage[currentPage.length - 1];
+            if (last) {
+              setLoadedPages((prev) => [...prev, ...currentPage]);
+              setCursor(last.id);
+            }
+          }}
+          className="mt-3 w-full"
+        >
+          {t("applications.loadMore")}
+        </Button>
       )}
 
       <EndUserCreateModal open={createOpen} onClose={() => setCreateOpen(false)} />
 
-      <EndUserDetailModal
-        open={!!selectedUser}
-        onClose={() => setSelectedUser(null)}
-        endUser={selectedUser}
+      {selectedUserId && selectedUser && (
+        <EndUserDetailModal
+          key={`${selectedUserId}:${editSelectedUser ? "edit" : "detail"}`}
+          open
+          onClose={closeUser}
+          endUser={selectedUser}
+          initialEditing={editSelectedUser}
+          onEditingChange={(editing) => setEditMode(selectedUserId, editing)}
+          onDeleted={hideDeletedUser}
+        />
+      )}
+
+      {selectedUserId && !selectedUser && (
+        <Modal open onClose={closeUser} title={t("applications.endUserDetail")}>
+          {selectedUserLoading ? (
+            <LoadingState />
+          ) : (
+            <ErrorState message={getErrorMessage(selectedUserError)} compact />
+          )}
+        </Modal>
+      )}
+
+      <ConfirmModal
+        open={pendingDelete !== null}
+        onClose={() => setPendingDelete(null)}
+        title={t("common:btn.confirm")}
+        description={t("applications.deleteEndUserConfirm")}
+        isPending={deleteMutation.isPending}
+        onConfirm={async () => {
+          if (!pendingDelete) return;
+          const user = pendingDelete;
+          try {
+            await deleteMutation.mutateAsync({ params: { path: { id: user.id } } });
+            hideDeletedUser(user.id);
+            setPendingDelete(null);
+          } catch (error) {
+            toast.error(getErrorMessage(error));
+          }
+        }}
       />
     </div>
   );

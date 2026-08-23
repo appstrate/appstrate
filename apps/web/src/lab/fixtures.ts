@@ -18,6 +18,12 @@ export type Json200<P extends keyof paths, M extends keyof paths[P]> = paths[P][
   ? B
   : never;
 
+export type JsonRequest<P extends keyof paths, M extends keyof paths[P]> = paths[P][M] extends {
+  requestBody: { content: { "application/json": infer B } };
+}
+  ? B
+  : never;
+
 export const ORG_ID = "org_lab";
 export const APP_ID = "app_lab";
 export const USER_ID = "user_lab";
@@ -1191,6 +1197,19 @@ export const endUsers: Json200<"/api/end-users", "get"> = {
       updatedAt: ago(8_000),
     },
   ],
+};
+
+/** A direct `?user=` deep link fetches the record independently of the list. */
+export const endUserDetail: Json200<"/api/end-users/{id}", "get"> = {
+  id: "eu_lab_detail",
+  object: "end_user",
+  applicationId: APP_ID,
+  name: "Noémie Caron",
+  email: "noemie@client-b.example",
+  externalId: "crm-51204",
+  metadata: { plan: "enterprise", region: "ca" },
+  createdAt: ago(35_000),
+  updatedAt: ago(20),
 };
 
 /** CLI sessions, admin view: two members, one of them this browser's own. */

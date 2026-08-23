@@ -43,6 +43,16 @@ function requestMethod(input: RequestInfo | URL, init?: RequestInit): string {
   return "GET";
 }
 
+async function requestBody(input: RequestInfo | URL, init?: RequestInit): Promise<unknown> {
+  const raw = init?.body ?? (input instanceof Request ? await input.clone().text() : undefined);
+  if (typeof raw !== "string" || raw.length === 0) return undefined;
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
 export function installLabFetch(): void {
   const labFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = new URL(requestUrl(input), window.location.origin);
@@ -59,7 +69,13 @@ export function installLabFetch(): void {
     const headers = new Headers(
       init?.headers ?? (input instanceof Request ? input.headers : undefined),
     );
-    const handled = resolveHandler(method, url, getScenario(), headers);
+    const handled = resolveHandler(
+      method,
+      url,
+      getScenario(),
+      headers,
+      await requestBody(input, init),
+    );
 
     if (!handled) {
       // Loud on purpose. An unfaked endpoint is a hole in the fixtures, and a

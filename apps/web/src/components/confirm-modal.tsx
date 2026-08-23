@@ -32,6 +32,7 @@ export function ConfirmModal({
     <Modal
       open={open}
       onClose={onClose}
+      preventClose={isPending}
       title={title}
       actions={
         <>
@@ -39,7 +40,7 @@ export function ConfirmModal({
             {t("btn.cancel")}
           </Button>
           <Button variant={variant} onClick={onConfirm} disabled={isPending}>
-            {isPending ? <Spinner /> : (confirmLabel ?? t("btn.confirm"))}
+            {isPending ? <Spinner label={t("loading")} /> : (confirmLabel ?? t("btn.confirm"))}
           </Button>
         </>
       }

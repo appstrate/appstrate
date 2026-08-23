@@ -1539,21 +1539,61 @@ The block gate is green for `bun test apps/web` (570 pass) and `bun run check`
 with 10,636 passes, then the known local MITM/sidecar infrastructure group
 reported 35 failures and 19 errors; no touched web test failed.
 
-**6. End-users become a table.** This one has a prerequisite, which is why it is
-last: the row opens its detail panel through an `onClick` on local state, with
-NO URL, and `DataTable`'s contract is that a row is a LINK (middle-click,
-⌘-click, copy-link-address). So:
+**6. ~~End-users become a table.~~ Done 23 August.** The local-state card click
+is gone. Every row is a real link to `?user=<id>`: opening pushes, closing
+replaces, Back closes the panel, and unrelated query keys plus the hash survive
+both transformations. The direct Edit action uses the addressable
+`?user=<id>&edit=1` form; changing between detail and edit replaces rather than
+stacking another history entry. A direct deep link fetches its record through
+`GET /api/end-users/{id}`, so it still opens when that user is outside the
+currently loaded page. Every row and programmatic transition also carries the
+settings route's `backgroundLocation`, so opening a user never swaps the
+underlying screen for the cold-link dashboard fallback. The URL transformation
+has its own regression test.
 
-- First give the detail panel a URL. The precedent is in
-  `components/document-list-panel.tsx`: `?preview=<id>`, pushed on open and
-  REPLACED on close, so Back closes the panel instead of reopening it. Use
-  `?user=<id>`.
-- Then the list becomes a `DataTable` with its own column set and the row-action
-  pattern, in its own file,
-  registered in `components/test/column-tiers.test.tsx` like every other set.
-- Its date column goes at tier 2, NOT tier 3: this screen is reachable inside
-  the settings dialog, which tops out around 800px and never crosses the 56rem
-  threshold, so tier 3 there means never drawn.
+The cards became one `DataTable` with Name, Email, External ID, Created and
+Actions. Edit is direct because an end-user is an editable compound record;
+Delete is in the overflow menu, confirms, shows pending on its row and toasts a
+failure. A successful deletion is quiet and immediately filters the row out of
+both the current-page projection and the accumulated pagination pages, without
+waiting for the invalidated query's refetch. A filtered miss has its own empty
+answer instead of claiming the workspace has no users.
+
+Name plus Actions are tier one. Email, External ID and Created enter together
+at tier two; the date did not go to tier three, because this screen's settings
+dialog tops out around 800px and would never draw it there. The set is
+registered in `column-tiers.test.tsx`. In the real dialog it measures 804px at
+a 1440 window: Name 185px, Email 185px, External ID 154px, Created 104px and
+Actions 80px. At a 390 window it measures 340px: Name 224px and Actions 80px.
+The full sixteen-width sweep has zero overflow.
+
+The fixed-point review caught four gaps before the commit. Row and panel
+navigations now preserve the settings overlay's `backgroundLocation`; a local
+deletion tombstone covers the current query page as well as accumulated pages;
+the direct-link fixture is a distinct off-page user and unknown IDs return 404;
+and a pending edit or deletion can no longer close its modal and detach its
+feedback. Edits now use an awaited mutation cycle and wait for cache
+invalidation before leaving edit mode; deletions await the server response but
+apply their tombstone before the background invalidation finishes. A mounted
+guard still lets an error toast survive external navigation, but stops a late
+success callback from undoing Back. Delayed, stateful PATCH and DELETE lab
+handlers preserve resource identity and make pending, success and error paths
+observable.
+
+The list, detail URL and edit URL are now three permanent lab screens. All
+three were inspected at 1440 and 390; all four scenarios produce 24 captures
+with no missing fixture. Adding the direct-link screens caught one harness
+mistake before the commit: the legacy `/end-users` redirect deliberately drops
+its query string, so the first captures showed the list rather than the panel.
+The lab entries now use the canonical `/workspace-settings/end-users` route,
+which is also the URL the row links produce.
+
+The block gate is green for `bun test apps/web` (580 pass) and `bun run check`
+(33/33 tasks, the same nine pre-existing warnings). Root `bun test` completed
+with 10,644 passes, then the known local MITM/sidecar infrastructure group plus
+two saturated End-Users API cases reported 37 failures and 21 errors. The two
+End-Users cases passed 9/9 immediately when rerun alone; no touched web or API
+test remains failing.
 
 **7. Accessibility, which nothing here has ever checked.** The branch
 re-declares ARIA roles on the table because this file demands it, and that is

@@ -27,7 +27,36 @@ export type LabResponse = {
   contentType?: string;
 };
 
-type Handler = (url: URL, scenario: Scenario, headers: Headers) => LabResponse;
+type Handler = (url: URL, scenario: Scenario, headers: Headers, body: unknown) => LabResponse;
+
+type LabEndUser = f.Json200<"/api/end-users/{id}", "get">;
+type EndUserPatch = f.JsonRequest<"/api/end-users/{id}", "patch">;
+
+const changedEndUsers = new Map<string, LabEndUser>();
+const deletedEndUsers = new Set<string>();
+
+export function resetEndUserLabState(): void {
+  changedEndUsers.clear();
+  deletedEndUsers.clear();
+}
+
+function endUserFixture(id: string): LabEndUser | null {
+  if (deletedEndUsers.has(id)) return null;
+  return (
+    changedEndUsers.get(id) ??
+    f.endUsers.data.find((candidate) => candidate.id === id) ??
+    (f.endUserDetail.id === id ? f.endUserDetail : null)
+  );
+}
+
+function endUserId(url: URL): string {
+  const parts = url.pathname.split("/");
+  return decodeURIComponent(parts[parts.length - 1] ?? "");
+}
+
+function isEndUserPatch(body: unknown): body is EndUserPatch {
+  return typeof body === "object" && body !== null && !Array.isArray(body);
+}
 
 /** `heavy` swaps the list bodies; `empty` empties them; `nominal` is as authored. */
 function list<T>(rows: T[], scenario: Scenario, heavy?: T[]): T[] {
@@ -420,7 +449,63 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   {
     method: "GET",
     pattern: /^\/api\/end-users$/,
-    handler: (_u, s) => ({ status: 200, body: { ...f.endUsers, data: list(f.endUsers.data, s) } }),
+    handler: (_u, s) => ({
+      status: 200,
+      body: {
+        ...f.endUsers,
+        data: list(f.endUsers.data, s)
+          .filter((user) => !deletedEndUsers.has(user.id))
+          .map((user) => changedEndUsers.get(user.id) ?? user),
+      },
+    }),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/end-users\/[^/]+$/,
+    handler: (u) => {
+      const user = endUserFixture(endUserId(u));
+      if (!user) {
+        return {
+          status: 404,
+          body: { type: "about:blank", title: "Not found", status: 404 },
+        };
+      }
+      return {
+        status: 200,
+        body: user,
+      };
+    },
+  },
+  {
+    method: "PATCH",
+    pattern: /^\/api\/end-users\/[^/]+$/,
+    handler: (u, scenario, _headers, body) => {
+      const user = endUserFixture(endUserId(u));
+      if (!user) return { status: 404, body: null, delayMs: 800 };
+      if (scenario === "error" || !isEndUserPatch(body)) {
+        return { status: 200, body: user, delayMs: 800 };
+      }
+      const updated = {
+        ...user,
+        ...body,
+        updatedAt: new Date().toISOString(),
+      } satisfies LabEndUser;
+      changedEndUsers.set(user.id, updated);
+      return { status: 200, body: updated, delayMs: 800 };
+    },
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/api\/end-users\/[^/]+$/,
+    handler: (u, scenario) => {
+      const id = endUserId(u);
+      if (!endUserFixture(id)) return { status: 404, body: null, delayMs: 800 };
+      if (scenario !== "error") {
+        deletedEndUsers.add(id);
+        changedEndUsers.delete(id);
+      }
+      return { status: 204, body: null, delayMs: 800 };
+    },
   },
   {
     method: "GET",
@@ -536,10 +621,11 @@ export function resolveHandler(
   url: URL,
   scenario: Scenario,
   headers: Headers = new Headers(),
+  body?: unknown,
 ): LabResponse | null {
   const route = ROUTES.find((r) => r.method === method && r.pattern.test(url.pathname));
   if (!route) return null;
-  const response = route.handler(url, scenario, headers);
+  const response = route.handler(url, scenario, headers, body);
   // The realtime stream stays up in every scenario — a dead channel is not the
   // failure mode `error` is meant to exercise.
   const survives = ERROR_SCENARIO_SURVIVORS.some((p) => p.test(url.pathname));
