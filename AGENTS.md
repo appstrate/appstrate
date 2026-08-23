@@ -245,6 +245,81 @@ describe("GET /api/my-resource", () => {
 });
 ```
 
+## Quality Gate — and the signals it lies with
+
+`bun run check` is the gate. It is honest in CI and in a plain clone; several of
+its steps report false green or false red locally, and each one below has cost
+real time. Establish which you are looking at BEFORE changing code.
+
+### `verify:dead-code` (knip) — what it does and does not derive
+
+Fixed 2026-08-23. This section is kept because the failure mode is easy to
+re-introduce with one careless edit to `knip.config.ts`.
+
+Until then, `bun run check` failed locally on `//#verify:dead-code` with ~161
+"unused exports", ~284 "unused exported types" and 6 "unused files" — on an
+untouched `main` as well as on any branch. None of it was real, and because the
+`pre-push` hook runs `bun run check`, it blocked every local push.
+
+The cause, read out of knip 5.88.1's own `dist/`:
+
+- `ConfigurationChief.js:27` is the **only** place entry defaults are produced,
+  and they are filename patterns: `{index,cli,main}.{exts}` at the package root
+  and under `src/`.
+- Nothing in that `dist/` reads `manifest.exports`, `manifest.main` or
+  `manifest.module`. The one read of `manifest.bin` collects binary **names**
+  for the `ignoreBinaries` check, not entry paths.
+- Declaring `entry` for a workspace **replaces** the filename defaults above.
+
+So knip never derives an entry from a package manifest, and a workspace that
+declares `entry` loses even the filename defaults. Every workspace here that
+declared one had silently lost its real entry points, and each loss cascaded:
+`packages/afps-runtime/bin/afps.ts` unreachable makes its whole `src/**` look
+dead, which was most of the 161.
+
+**The rule when you touch `knip.config.ts`:** if a workspace declares `entry`,
+open its `package.json` and re-declare every `exports` target, every `bin`
+target, and `main`/`module` if present. Those files are reached by npm consumers
+and by the `MODULES` loader resolving a specifier — neither of which knip can
+see. Do not collapse them into a broad glob such as `src/*.ts!`: that is wider
+than the real export map and would hide a genuinely dead root-level file.
+
+**Never un-export a symbol, and never add an `ignore*`, to make this gate quiet.**
+The published packages' public exports have readers out of tree. If a finding
+survives a correct entry list, it is either real dead code or a symbol exported
+with no reader at all — fix it at the source, or report it.
+
+An earlier version of this section blamed `git worktree`, on the strength of one
+clone that came back clean. That was wrong. Measured and refuted since, each
+independently: worktree vs `git clone`, `--frozen-lockfile` vs a plain
+`bun install`, the knip version (5.88.1 on both sides), the presence of a `.env`,
+the turbo cache (the task is `"cache": false`, and CI logs `cache bypass`), and
+the bun version (1.3.11 local vs the `packageManager`-pinned 1.3.14 — tested at
+1.3.14, identical output). CI was green throughout with the same config, and
+that divergence is still unexplained; it stopped mattering once the config was
+made correct rather than merely quiet on one machine.
+
+### Other false signals from the same chain
+
+| signal                                                  | why it lies                                                                                            | what to do instead                                                |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| `turbo` prints `Cached: N` for `typecheck`              | nothing was re-checked                                                                                 | `bunx tsc --noEmit -p <pkg>/tsconfig.json`, per package, no turbo |
+| `bunx turbo …` fails with `Could not resolve workspace` | it resolves a _global_ turbo, and rewrites `bun.lock` on the way                                       | `./node_modules/.bin/turbo`                                       |
+| a backgrounded `cmd > log; echo $?` reports 0           | that is the exit code of `echo`                                                                        | read the `Tasks: N/M` line in the log, not the reported status    |
+| `bun test` passes but types are broken                  | tests do not typecheck                                                                                 | re-run `tsc` after any mechanical rename                          |
+| `codecov/patch` is red                                  | coverage arrives from two jobs; the status is computed after the first and recomputed after the second | wait for the `integration` upload before drawing any conclusion   |
+| a PR shows "no checks reported"                         | usually `mergeable: CONFLICTING`, not a slow CI                                                        | `gh pr view <n> --json mergeable,mergeStateStatus`                |
+
+### Migrations
+
+`bun run db:generate` needs a TTY and collides on index numbers when two
+branches both add the next one. Hand-write the `.sql`, the `meta/_journal.json`
+entry and the `meta/NNNN_snapshot.json`, then prove the snapshot rather than
+trusting it: copy it aside and run `bunx drizzle-kit generate` — a correct
+snapshot yields `No schema changes, nothing to migrate`. Tier-0 tests replay the
+whole chain from `0000` under PGlite, so a malformed migration fails there
+loudly.
+
 ## Workspace Imports
 
 Import from workspace packages using their published subpaths:

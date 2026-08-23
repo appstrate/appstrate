@@ -59,6 +59,7 @@ describe("parseRuntimeEnv — happy path", () => {
       MODEL_TEMPERATURE: "0",
       MODEL_REASONING_LEVEL: "xhigh",
       MODEL_REASONING_LEVEL_MAP: '{"xhigh":"max"}',
+      MODEL_PROVIDER: "deepseek",
       MODEL_INPUT: '["text","image"]',
       MODEL_COST: '{"input":1.5,"output":2.5,"cacheRead":0.5,"cacheWrite":0.7}',
       MODEL_CONTEXT_WINDOW: "200000",
@@ -73,6 +74,9 @@ describe("parseRuntimeEnv — happy path", () => {
     expect(env.modelReasoning).toBe(true);
     expect(env.modelTemperature).toBe(0);
     expect(env.modelReasoningLevel).toBe("xhigh");
+    // On a proxied run this is the only thing left for Pi to recognise the
+    // provider by — MODEL_BASE_URL points at the sidecar.
+    expect(env.modelProvider).toBe("deepseek");
     expect(env.modelReasoningLevelMap).toEqual({ xhigh: "max" });
     expect(env.modelInput).toEqual(["text", "image"]);
     expect(env.modelCost).toEqual({ input: 1.5, output: 2.5, cacheRead: 0.5, cacheWrite: 0.7 });
@@ -101,6 +105,10 @@ describe("parseRuntimeEnv — happy path", () => {
 // `warnings` one — issue #1025 asked for `issues.push()`, which would have
 // crashed every run on a model the platform could not price.
 describe("parseRuntimeEnv — non-fatal warnings", () => {
+  it("treats an absent MODEL_PROVIDER as an older platform, not an error", () => {
+    expect(parseRuntimeEnv({ ...VALID }).modelProvider).toBeUndefined();
+  });
+
   it("warns (does NOT throw) when MODEL_COST is absent", () => {
     const env = parseRuntimeEnv(VALID);
     expect(env.warnings).toHaveLength(1);

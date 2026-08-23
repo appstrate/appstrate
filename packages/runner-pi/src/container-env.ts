@@ -23,6 +23,13 @@ export interface RuntimePiModelConfig {
   modelId: string;
   /** Upstream base URL (routed through the sidecar proxy when `apiKey` is set). */
   baseUrl: string;
+  /**
+   * Appstrate model-provider id of the REAL upstream (`deepseek`, `zai`, …),
+   * emitted as `MODEL_PROVIDER`. On a sidecar-proxied run `MODEL_BASE_URL` is
+   * the sidecar's, so this is the only input left for Pi to recognise which
+   * provider it is talking to and emit that provider's request shape.
+   */
+  providerId?: string | null;
   /** LLM API key. When unset, MODEL_API_KEY / MODEL_BASE_URL are not emitted. */
   apiKey?: string;
   /** Placeholder used in place of the real apiKey inside the container. */
@@ -212,6 +219,15 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
     const placeholder = model.apiKeyPlaceholder ?? model.apiKey;
     env.MODEL_API_KEY = placeholder;
   }
+
+  // Which provider Pi is really talking to. A sidecar-proxied run replaces
+  // MODEL_BASE_URL with the sidecar's URL, erasing one of Pi's two
+  // provider-detection inputs; without this the container emits plain-OpenAI
+  // shape at every provider (DeepSeek answers `400 unknown variant
+  // 'developer'`). A direct run keeps its real base URL, so Pi's own
+  // detection already works — but the key is correct there too, and the
+  // entrypoint applies the same fallback either way.
+  if (model.providerId) env.MODEL_PROVIDER = model.providerId;
 
   if (model.input) env.MODEL_INPUT = JSON.stringify(model.input);
   if (model.contextWindow != null) env.MODEL_CONTEXT_WINDOW = String(model.contextWindow);

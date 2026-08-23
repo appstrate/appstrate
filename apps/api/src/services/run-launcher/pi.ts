@@ -345,6 +345,9 @@ async function runPlatformContainerImpl(
         api: llmConfig.apiShape,
         modelId,
         baseUrl: llmConfig.baseUrl,
+        // Platform-side only — resolves the wire quirks the sidecar-proxied
+        // container can no longer detect for itself (`MODEL_COMPAT`).
+        providerId: llmConfig.providerId,
         apiKey: llmApiKey,
         // When the sidecar is skipped, the agent talks to the upstream
         // provider directly — we must hand it the real API key, not the

@@ -10,18 +10,49 @@ a private binding, rewritten on the inference data path.
 
 ## What an alias hides — and from whom
 
-There are two threat models. The implementation closes the first and reduces
-the second.
+The product requirement is: **an organization must not learn which vendor backs
+a platform (aliased) model.**
+
+State it in the form that can actually be delivered — _the platform does not
+disclose it_ — never as _the org cannot find out_. An agent can ask the model
+who it is, and can fingerprint its tokenizer, its latency, its refusal style.
+No amount of plumbing closes that, so a doc promising it would be promising
+something false. What IS deliverable, and what the rest of this page describes,
+is that no Appstrate surface hands the backing over.
+
+There are two threat models against that requirement.
 
 - **Threat A — the dashboard / API caller.** A user reading `/api/models`, a run
   detail, or calling `/api/llm-proxy/*` must never learn the backing
-  provider/endpoint/model id. **Closed.**
-- **Threat B — the agent runtime (adversarial code inside the container).** The
-  agent needs _some_ protocol/endpoint info to format requests, so the backing
-  cannot be perfectly hidden from determined in-container code. **Reduced, not
-  eliminated** — the real `model` id is rewritten on success responses and
-  every error surface is synthesized (see below), but `MODEL_API` (protocol
-  family) remains observable.
+  provider/endpoint/model id. **Closed.** The read projection leaves only the
+  alias identity plus the portable generation-support vector (see
+  `projectAliasedModel`); every binding, pricing and catalog field is `null`.
+- **Threat B — the agent runtime (adversarial code inside the container).**
+  **NOT met today — tracked in appstrate#1198.** The agent needs _some_
+  protocol information to format requests, so a container that speaks the
+  vendor's dialect necessarily observes something about it. What it observes
+  today is wider than that necessity:
+
+  | reaches the container                       | example (aliased `Appstrate Flash`)              | effect                                         |
+  | ------------------------------------------- | ------------------------------------------------ | ---------------------------------------------- |
+  | `MODEL_PROVIDER`                            | `deepseek`                                       | **names the vendor** (added by appstrate#1196) |
+  | `MODEL_COST`                                | `{"input":0.28,"output":0.42,"cacheRead":0.028}` | **identifies** it — published rate card        |
+  | `MODEL_CONTEXT_WINDOW` / `MODEL_MAX_TOKENS` | `131072` / `8192`                                | identifies it together with the rates          |
+  | `MODEL_API`                                 | `openai-completions`                             | narrows the candidate set                      |
+  | success response body                       | `reasoning_content`                              | vendor vocabulary — structural                 |
+
+  The response path is NOT the hole: headers are reduced to
+  `LLM_PASSTHROUGH_RESPONSE_HEADERS`, error surfaces are synthesized rather
+  than forwarded, and the `model` field is swapped back to the alias. The hole
+  is the request-side metadata above, and the fact that the container formats
+  requests in the vendor's own dialect.
+
+  Closing it means the sidecar translating **both** directions — request shape
+  AND response dialect — so the container can stay generic. That is a design
+  change, not a patch; appstrate#1198 carries the inventory, the plan, and the
+  two open questions (whether `MODEL_COST` can be masked without breaking run
+  accounting, and how to keep a compaction-usable context window without
+  handing over an exact fingerprint).
 
 ## How resolution works
 

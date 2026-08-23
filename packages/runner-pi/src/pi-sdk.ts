@@ -31,10 +31,27 @@ export { Type } from "@earendil-works/pi-ai";
 // reaching `@earendil-works/pi-ai/compat` directly. It is NOT re-exported from
 // `index.ts`; keep it that way.
 export { streamSimple } from "@earendil-works/pi-ai/compat";
+// Test-only: Pi's own list of built-in provider ids. `test/provider-map.test.ts`
+// pins `PI_PROVIDER_BY_MODEL_PROVIDER` against it, so an upstream rename fails
+// there instead of silently dropping a provider back to the generic request
+// shape. Same reason as `streamSimple` above: the `no-restricted-imports`
+// guard forbids a test from reaching the vendor package directly. NOT
+// re-exported from `index.ts`; keep it that way.
+export { getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 
 // --- types (erased at runtime) ---
 export type { ModelRuntime, ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 export type { Api, KnownApi, Model, Transport, Message } from "@earendil-works/pi-ai";
+// The vendor's own event/usage shapes. Consumers keep their own narrow
+// structural views (a mapper must stay testable with synthetic events, and the
+// SDK value graph must stay behind `loadPiCodingAgentSdk()`); these exist so
+// those views can be PINNED against the vendor at compile time. Type-only, so
+// they are erased and drag nothing into the runtime graph.
+export type { AgentSessionEvent as PiSdkAgentSessionEvent } from "@earendil-works/pi-coding-agent";
+export type {
+  AssistantMessageEvent as PiSdkAssistantMessageEvent,
+  Usage as PiSdkUsage,
+} from "@earendil-works/pi-ai";
 
 // --- heavy value surface (pi-coding-agent, ~200ms) behind a dynamic import ---
 // `@earendil-works/pi-coding-agent` is the single most expensive module to

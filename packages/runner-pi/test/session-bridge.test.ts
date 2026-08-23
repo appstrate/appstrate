@@ -17,6 +17,7 @@ import {
   truncateToolResult,
   type InternalSink,
 } from "../src/pi-runner.ts";
+import { loadPiCodingAgentSdk } from "../src/pi-sdk.ts";
 import { createFakeSession, createInternalCapture } from "./helpers.ts";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import { ASSISTANT_MESSAGE_PROGRESS_EVENT } from "@appstrate/afps-runtime/runner";
@@ -47,6 +48,176 @@ describe("installSessionBridge — message_update / text_delta", () => {
     });
 
     expect(sink.events).toHaveLength(0);
+  });
+});
+
+/**
+ * The premise the `compaction_end` case rests on, pinned against the real SDK:
+ * Pi records a compaction's LLM usage on a session entry of its OWN type, and
+ * emits no assistant message for it. Both halves matter — the first is why a
+ * message-only accumulator misses the spend, the second is why adding it back
+ * cannot double-count. If a future Pi folds compaction into the message
+ * stream, this test fails and the special case must be deleted rather than
+ * left to bill twice.
+ */
+describe("Pi session accounting — where compaction usage lives", () => {
+  it("keeps compaction usage off the message stream", async () => {
+    const { SessionManager } = await loadPiCodingAgentSdk();
+    const sessionManager = SessionManager.inMemory("/tmp");
+    const usage = {
+      input: 10,
+      output: 20,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 30,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.001 },
+    };
+    const messageId = sessionManager.appendMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "hi" }],
+      usage,
+      timestamp: 0,
+      api: "openai-completions",
+      provider: "openai",
+      model: "m",
+      stopReason: "stop",
+    } as never);
+    sessionManager.appendCompaction("summary", messageId, 120_000, undefined, false, {
+      ...usage,
+      input: 40_000,
+      cost: { ...usage.cost, total: 0.12 },
+    } as never);
+
+    const entries = sessionManager.getEntries() as Array<{
+      type: string;
+      usage?: { input?: number };
+      message?: { usage?: { input?: number } };
+    }>;
+    expect(entries.map((entry) => entry.type)).toEqual(["message", "compaction"]);
+
+    const compaction = entries.find((entry) => entry.type === "compaction");
+    expect(compaction?.usage?.input).toBe(40_000);
+
+    // The summarisation call produced no message of its own — the only
+    // message present is the assistant turn appended above.
+    const messageUsage = entries
+      .filter((entry) => entry.type === "message")
+      .map((entry) => entry.message?.usage?.input ?? 0);
+    expect(messageUsage).toEqual([10]);
+  });
+});
+
+describe("installSessionBridge — compaction_end", () => {
+  const COMPACTION_USAGE = {
+    input: 40_000,
+    output: 900,
+    cacheRead: 0,
+    cacheWrite: 0,
+    cost: { total: 0.12 },
+  };
+
+  it("accounts the summarisation call the message stream never reports", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    const bridge = installSessionBridge(session, sink, RUN_ID);
+
+    session.pushMessage({
+      role: "assistant",
+      usage: { input: 10, output: 20, cacheRead: 0, cacheWrite: 0, cost: { total: 0.001 } },
+      content: [{ type: "text", text: "a" }],
+    });
+    session.emit({ type: "message_end" });
+
+    session.emit({
+      type: "compaction_end",
+      reason: "threshold",
+      aborted: false,
+      result: {
+        usage: COMPACTION_USAGE,
+        tokensBefore: 120_000,
+        estimatedTokensAfter: 20_000,
+      },
+    });
+
+    expect(bridge.getUsage()).toMatchObject({
+      input_tokens: 40_010,
+      output_tokens: 920,
+    });
+    expect(bridge.getCost()).toBeCloseTo(0.121, 5);
+  });
+
+  it("emits the cost step and the breadcrumb that explains it", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    session.emit({
+      type: "compaction_end",
+      reason: "threshold",
+      aborted: false,
+      result: {
+        usage: COMPACTION_USAGE,
+        tokensBefore: 120_000,
+        estimatedTokensAfter: 20_000,
+      },
+    });
+
+    const breadcrumb = sink.events.find((e) => e.type === "appstrate.progress") as unknown as {
+      message: string;
+      data: Record<string, unknown>;
+    };
+    expect(breadcrumb.data).toMatchObject({
+      event: "compaction",
+      reason: "threshold",
+      tokensBefore: 120_000,
+      estimatedTokensAfter: 20_000,
+      inputTokens: 40_000,
+      outputTokens: 900,
+    });
+    expect(breadcrumb.message).toContain("120000 → 20000");
+
+    // Cause before consequence: an operator reading `run_logs` top-down must
+    // meet the explanation before the cost step it explains.
+    const order = sink.events.map((e) => e.type);
+    expect(order).toEqual(["appstrate.progress", "appstrate.metric"]);
+
+    const metric = sink.events.find((e) => e.type === "appstrate.metric") as unknown as {
+      usage: { input_tokens: number };
+      cost: number;
+    };
+    expect(metric.usage.input_tokens).toBe(40_000);
+    expect(metric.cost).toBeCloseTo(0.12, 5);
+  });
+
+  it("bills nothing for a pass that produced no usage (aborted or failed)", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    const bridge = installSessionBridge(session, sink, RUN_ID);
+
+    session.emit({ type: "compaction_end", reason: "threshold", aborted: true, result: undefined });
+    session.emit({ type: "compaction_end", reason: "threshold", result: { tokensBefore: 10 } });
+
+    expect(bridge.getCost()).toBe(0);
+    expect(bridge.getUsage()).toMatchObject({ input_tokens: 0, output_tokens: 0 });
+    expect(sink.events).toHaveLength(0);
+  });
+
+  it("does not count a compaction as an assistant turn", () => {
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    installSessionBridge(session, sink, RUN_ID);
+
+    session.emit({
+      type: "compaction_end",
+      result: { usage: COMPACTION_USAGE, tokensBefore: 1, estimatedTokensAfter: 0 },
+    });
+
+    // The turn breadcrumb is the per-assistant-turn context gauge; a
+    // compaction has no turn index to claim.
+    const turns = sink.events.filter(
+      (e) => (e as unknown as { data?: { event?: string } }).data?.event === "turn",
+    );
+    expect(turns).toHaveLength(0);
   });
 });
 

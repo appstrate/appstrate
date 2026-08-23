@@ -155,7 +155,12 @@ Tier 0 (zero-install) requires only Bun.
   every entry/ignore: `knip.config.ts`. An entry must say _what reaches the file_; an ignore must
   say _why knip is structurally blind_. Public exports of the **published** packages
   (`@appstrate/core`, `@appstrate/afps-runtime`, `@appstrate/module-*`) are out of scope by design —
-  their readers live out of tree.
+  their readers live out of tree. knip derives NO entry from a package manifest and a workspace
+  `entry` replaces even its filename defaults, so a workspace that declares one must re-declare
+  every `exports`/`bin`/`main` target or its whole subtree reads as dead — the cause of a ~161-finding
+  false red fixed on 2026-08-23. Never un-export a symbol or add an `ignore*` to quiet this gate.
+  Full detail and the other false green/red signals: `AGENTS.md` → **Quality Gate — and the signals
+  it lies with**.
 - **Tests**: `bun test` from root runs all packages in one process. See **Testing** below.
 
 ### Frontend
