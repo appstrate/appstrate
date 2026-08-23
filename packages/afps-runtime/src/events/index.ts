@@ -15,8 +15,3 @@ export {
   type CloudEventEnvelope,
   type BuildEnvelopeOptions,
 } from "./cloudevents.ts";
-export {
-  CANONICAL_EVENT_SCHEMAS,
-  CANONICAL_EVENT_SCHEMA_VERSION,
-  canonicalEventSchemaUri,
-} from "./canonical-event-schemas.ts";

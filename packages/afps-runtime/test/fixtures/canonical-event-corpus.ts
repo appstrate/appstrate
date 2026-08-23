@@ -6,33 +6,34 @@
  *
  * `isCanonicalRunEvent` (`src/types/canonical-events.ts`) is the runtime
  * structural guard that narrows an open `RunEvent` into the discriminated
- * union AND gates the CloudEvents `dataschema` attribute. This corpus is the
+ * union. A rejection is not cosmetic: the reducer drops the event from the
+ * `RunResult`, and the stdout bridge refuses to believe it. This corpus is the
  * only list of accept/reject cases for it; `test/types/canonical-events.test.ts`
  * runs every fixture through the guard and asserts the `valid` label.
- *
- * A second reader used to exist — the JSON Schema documents generated from a
- * Zod payload table in `src/events/canonical-event-schemas.ts`, run through
- * ajv — and the corpus was unified so the two could not restate each other.
- * That generator has been removed: its artifacts were never published to the
- * `$id` hosts (404, see that module), so it guarded a shape nobody could read.
- * The guard is now the sole definition.
  *
  * ## Labels
  *
  * Each fixture's `label` names the constraint it exercises — e.g.
  * "memory.added — numeric content" is the wrong-typed-value case for
- * `content`, and "— missing content" is the omission case. Adding a
- * constraint to the guard means adding a fixture whose label names it.
+ * `content`, and "— missing content" is the omission case. Labels are for
+ * humans reading an assertion diff; they are not what proves coverage.
  *
- * There was a `violates` field restating that in machine-readable form. It
- * drove a mechanical coverage guard: the schema suite derived the constrained
- * field paths from the generated documents (every subschema carrying `type` or
- * `enum`) and failed unless each was named by a fixture — which is how
- * `durationMs`, `usage`'s inner counters and `progress`/`error`'s `data` were
- * caught going un-exercised. With no machine-readable schema left, that set
- * cannot be derived, and hand-writing it would recreate exactly the
- * maintained-by-inspection list the guard replaced. The field was then a
- * second, unread copy of what `label` already says, so it is gone.
+ * ## Coverage is checked, not trusted
+ *
+ * `test/types/canonical-events.test.ts` derives the constrained field paths
+ * from `CANONICAL_CONSTRAINTS` and asserts that each one is, for some fixture
+ * here, the constraint that rejects it. Adding a constraint to the guard
+ * without adding a fixture that violates it fails that test by name.
+ *
+ * That guard was lost for a while: the derivation used to read generated JSON
+ * Schema documents, and those were removed as unpublished — taking the only
+ * machine-readable list of constraints with them, which is how `durationMs`,
+ * `usage`'s inner counters and `progress`/`error`'s `data` had once been
+ * caught going un-exercised. Expressing the constraints as data restored the
+ * derivation from the implementation itself (issue #1184). A `violates` field
+ * on each fixture, which once carried the same information by hand, is
+ * deliberately NOT back: it would be a second copy to keep in sync, and the
+ * point is that nothing here is maintained by inspection.
  */
 
 import type { RunEvent } from "@afps-spec/types";
@@ -368,17 +369,15 @@ export const NON_CANONICAL_EVENTS: readonly { label: string; event: RunEvent }[]
 ];
 
 /**
- * The ONE place guard and schema deliberately disagree.
+ * Values the guard is deliberately stricter about than a JSON Schema would be.
  *
- * `NaN` / `±Infinity` are `number`s in JS, so an in-memory ajv run against
- * `{"type":"number"}` accepts them — but `JSON.stringify` turns them into
- * `null`, which the same schema rejects on the wire. The guard therefore
- * rejects them, which is the safe direction: it can only cost an omitted
- * OPTIONAL `dataschema`, never a false one.
+ * `NaN` / `±Infinity` are `number`s in JS, so `{"type":"number"}` accepts them
+ * in memory — but `JSON.stringify` turns them into `null`, so the consumer
+ * never receives what the producer held. The guard rejects them up front.
  *
- * These fixtures are excluded from {@link CANONICAL_EVENT_CORPUS} because
- * they have no single verdict; both test files assert the divergence
- * explicitly instead.
+ * Kept out of {@link CANONICAL_EVENT_CORPUS} so its fixtures stay
+ * "verdict per the wire"; the guard suite asserts these separately, and the
+ * coverage guard reads them too, since each is a genuine rejection.
  */
 export const NON_FINITE_DIVERGENCES: readonly { label: string; event: RunEvent }[] = [
   {

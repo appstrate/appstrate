@@ -65,13 +65,17 @@ const CloudEventEnvelopeSchema = z
     time: z.iso.datetime(),
     datacontenttype: z.literal("application/json"),
     data: z.record(z.string(), z.unknown()),
-    // OPTIONAL CloudEvents attribute (§3.1) — the runtime stamps it with
-    // the published JSON Schema URI of the `data` payload for canonical
-    // events, and omits it for third-party ones. The schema is `.strict()`,
-    // so an unmodelled attribute would 400 the whole event: accept it
-    // explicitly. Ingestion does not read it (`envelopeToRunEvent` consumes
-    // `data`/`type`/`time` only) — it is documentation for downstream
-    // consumers, not an input.
+    // OPTIONAL CloudEvents attribute (§3.1). The runtime NO LONGER emits it:
+    // the URIs it carried (`schemas.afps.dev/v0/events/*`) were never served,
+    // and they asserted a payload shape AFPS deliberately leaves open — the
+    // specification reserves event namespaces, not shapes. See
+    // `@appstrate/afps-runtime`'s `events/cloudevents.ts` header.
+    //
+    // Accepted anyway, and this is load-bearing: runtime images built before
+    // the removal keep stamping it, and this schema is `.strict()`, so
+    // dropping the field would 400 every canonical event coming from an older
+    // image. Ingestion never read it (`envelopeToRunEvent` consumes
+    // `data`/`type`/`time` only), so accepting and ignoring costs nothing.
     dataschema: z.string().min(1).optional(),
     sequence: z.number().int().nonnegative(),
   })
