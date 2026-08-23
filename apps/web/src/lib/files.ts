@@ -27,26 +27,55 @@ export interface FileLike {
   mime: string;
 }
 
+/** Which side of the run being viewed a file sits on. */
+export type RunFileDirection = "output" | "input";
+
+/**
+ * Where a file stands RELATIVE TO the run being viewed: a file that run
+ * produced ("output"), or one it consumed ("input"). The single rule every
+ * run-scoped surface reads — the tile badge, the Fichiers tab filter, the
+ * Outcome list ({@link producedRunFiles}) — so a badge and a filter can never
+ * disagree about the same row.
+ *
+ * Both halves of the predicate are load-bearing, and NEITHER alone is enough.
+ * A file row carries two independent facts: `purpose` says who created it,
+ * `run_id` says which run it is anchored to.
+ *
+ * - `purpose` alone is wrong because `GET /api/files?run_id=X` deliberately
+ *   answers the run's whole CONTAINER: it ORs `files.run_id = X` with the ids
+ *   extracted from `runs.input`, so a file chained in from an earlier run via
+ *   `appfile://` is listed here while still carrying `purpose: "agent_output"`
+ *   — it was produced by that earlier run, and is an INPUT to this one.
+ * - `run_id` alone is wrong because an upload made FOR this run is committed
+ *   with `purpose: "user_upload"` AND that run's id (`services/files.ts`), so
+ *   matching the id would call the run's own input an output.
+ *
+ * Ownership is therefore decided by the pair, exactly as `fetchRunFiles()` in
+ * `@appstrate/core/run-and-wait-client` decides it server-side; the two rules
+ * must not drift.
+ */
+export function runFileDirection<T extends Pick<FileLike, "purpose" | "run_id">>(
+  file: T,
+  runId: string,
+): RunFileDirection {
+  return file.purpose === "agent_output" && file.run_id === runId ? "output" : "input";
+}
+
 /**
  * The files a run PRODUCED, out of everything attached to it. A file the run
  * merely consumed as input is not one of them — that distinction is what the
  * Outcome pane is built on, and what separates it from the Fichiers tab, whose
  * job is the complete list.
  *
- * Both halves of the predicate are load-bearing, and `purpose` alone is NOT
- * enough. `GET /api/files?run_id=X` deliberately answers the run's whole
- * CONTAINER: it ORs `files.run_id = X` with the ids extracted from
- * `runs.input`, so a file chained in from an earlier run via `appfile://` is
- * listed here while still carrying `purpose: "agent_output"` — it was produced
- * by that earlier run. Ownership is therefore decided by the row's own
- * `run_id`, exactly as `fetchRunFiles()` in `@appstrate/core/run-and-wait-client`
- * decides it server-side; the two rules must not drift.
+ * Defined in terms of {@link runFileDirection} so the predicate lives in
+ * exactly one place: this list and the per-tile badge answer the same question
+ * and must answer it identically.
  */
 export function producedRunFiles<T extends Pick<FileLike, "purpose" | "run_id">>(
   files: readonly T[],
   runId: string,
 ): T[] {
-  return files.filter((file) => file.purpose === "agent_output" && file.run_id === runId);
+  return files.filter((file) => runFileDirection(file, runId) === "output");
 }
 
 /**

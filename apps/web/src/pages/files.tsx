@@ -111,8 +111,7 @@ function FilesPageContent() {
         files={files}
         isLoading={isLoading}
         error={error}
-        purpose={purpose}
-        onPurposeChange={resetPaging}
+        filter={{ axis: "purpose", value: purpose, onChange: resetPaging }}
         empty={{ message: t("page.empty"), hint: t("page.emptyHint") }}
         showRunLink
         onDeleted={(id) => setLoadedPages((prev) => prev.filter((d) => d.id !== id))}

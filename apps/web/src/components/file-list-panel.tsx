@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Shared files panel — the purpose tab strip, loading/error/empty states,
+ * Shared files panel — the filter tab strip, loading/error/empty states,
  * the FileTile grid, and the delete + preview modals. Used by both the
  * gallery page and the run-detail Files tab. Data fetching and pagination
  * stay with the caller; this component is fed an already-resolved list and owns
@@ -16,22 +16,83 @@ import { toast } from "sonner";
 import { FileText } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
+import { runFileDirection, type RunFileDirection } from "../lib/files";
 import { useDeleteFile, useFileDownload, useKeepFile, type FileDto } from "../hooks/use-files";
 import { LoadingState, ErrorState, EmptyState } from "./page-states";
 import { FileTile } from "./file-tile";
 import { FilePreview } from "./file-preview";
 import { ConfirmModal } from "./confirm-modal";
 
+/** Gallery axis: how the file was created, straight off the stored `purpose`. */
 export type PurposeFilter = "all" | "agent_output" | "user_upload";
 
-const PURPOSE_TABS: PurposeFilter[] = ["all", "agent_output", "user_upload"];
+/** Run axis: which side of the run being viewed the file sits on. */
+export type DirectionFilter = "all" | RunFileDirection;
+
+/**
+ * The tab strip filters on ONE of two axes, and which one is not a free choice
+ * — it follows the surface. A run-scoped panel filters by DIRECTION (what this
+ * run produced vs. what it consumed), the only question a run page answers; the
+ * gallery has no run to be relative to, so it filters by the stored `purpose`.
+ *
+ * One discriminated prop rather than a second boolean: the flag would have to
+ * mean both "which labels" and "which values are legal", and nothing would stop
+ * a `user_upload` value reaching a direction strip. Here `value` and `onChange`
+ * stay correlated with `axis`, and both axes render through the SAME strip.
+ *
+ * Who APPLIES the filter differs by axis, and not arbitrarily. `purpose` is a
+ * column, so the gallery pushes it into the list query and pages through the
+ * result — re-filtering a keyset page here would silently drop rows. Direction
+ * is DERIVED and has no server-side representation, so the panel applies it
+ * itself, against the very `runFileDirection` call it badges each tile with:
+ * the strip and the badge are then one expression, not two rules to keep in
+ * step. That is the whole point — they had already drifted apart once.
+ */
+type FileFilter =
+  | { axis: "purpose"; value: PurposeFilter; onChange: (next: PurposeFilter) => void }
+  | { axis: "direction"; value: DirectionFilter; onChange: (next: DirectionFilter) => void };
+
+const FILTER_TABS = {
+  purpose: ["all", "agent_output", "user_upload"],
+  direction: ["all", "output", "input"],
+} as const satisfies Record<FileFilter["axis"], readonly string[]>;
+
+/**
+ * The one tab strip, generic over its value domain so neither axis owns a copy.
+ * Labels come from `files:filter.<value>`, which is why the two domains use
+ * disjoint value names.
+ */
+function FilterTabs<F extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: readonly F[];
+  value: F;
+  onChange: (next: F) => void;
+}) {
+  const { t } = useTranslation("files");
+  return (
+    <div className="mb-4 flex items-center gap-1">
+      {options.map((option) => (
+        <Button
+          key={option}
+          variant={value === option ? "secondary" : "ghost"}
+          size="sm"
+          onClick={() => onChange(option)}
+        >
+          {t(`filter.${option}`)}
+        </Button>
+      ))}
+    </div>
+  );
+}
 
 export function FileListPanel({
   files,
   isLoading,
   error,
-  purpose,
-  onPurposeChange,
+  filter,
   empty,
   showRunLink,
   runId,
@@ -43,20 +104,20 @@ export function FileListPanel({
   isLoading: boolean;
   error: unknown;
   /**
-   * The active purpose filter, and the callback that changes it. BOTH optional,
-   * and the strip renders only when they are given: the Outcome pane shows one
-   * purpose by construction (what the run produced), so a filter offering to
-   * widen it back to the uploads would contradict the pane it sits in.
+   * The active filter (axis + value + setter). Optional, and the strip renders
+   * only when it is given: the Outcome pane shows one direction by construction
+   * (what the run produced), so a filter offering to widen it back to the
+   * consumed files would contradict the pane it sits in.
    */
-  purpose?: PurposeFilter;
-  onPurposeChange?: (p: PurposeFilter) => void;
+  filter?: FileFilter;
   empty: { message: string; hint?: string; compact?: boolean };
   /** Gallery tiles link to the producing run. */
   showRunLink?: boolean;
   /**
-   * Run-tab only: the run this panel belongs to. When set, each tile shows an
-   * input/output badge — a file anchored to this run is an output, anything else
-   * (a differently-anchored or unanchored upload) is an input the run consumed.
+   * Run surfaces only: the run this panel belongs to. When set, each tile shows
+   * an input/output badge, decided by `runFileDirection` — the same rule the
+   * `direction` filter axis uses, so the badge and the strip cannot disagree.
+   * A `direction` filter is only meaningful together with this prop.
    */
   runId?: string;
   /** Gallery's "Load more" control, rendered after the grid. */
@@ -77,6 +138,13 @@ export function FileListPanel({
   const location = useLocation();
   const navigate = useNavigate();
   const [pendingDelete, setPendingDelete] = useState<FileDto | null>(null);
+
+  // The direction axis is derived, so it is resolved here rather than by the
+  // caller (see `FileFilter`). Cheap: a run's file list is one page of 100.
+  const shown =
+    runId && filter?.axis === "direction" && filter.value !== "all"
+      ? files.filter((file) => runFileDirection(file, runId) === filter.value)
+      : files;
 
   // Preview is URL-addressable via a `?preview=<doc_id>` param so it can be
   // deep-linked and shared, and the browser back button closes it. A deep-linked
@@ -146,26 +214,26 @@ export function FileListPanel({
 
   return (
     <>
-      {onPurposeChange && (
-        <div className="mb-4 flex items-center gap-1">
-          {PURPOSE_TABS.map((p) => (
-            <Button
-              key={p}
-              variant={purpose === p ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() => onPurposeChange(p)}
-            >
-              {t(`filter.${p}`)}
-            </Button>
-          ))}
-        </div>
-      )}
+      {filter &&
+        (filter.axis === "direction" ? (
+          <FilterTabs
+            options={FILTER_TABS.direction}
+            value={filter.value}
+            onChange={filter.onChange}
+          />
+        ) : (
+          <FilterTabs
+            options={FILTER_TABS.purpose}
+            value={filter.value}
+            onChange={filter.onChange}
+          />
+        ))}
 
       {isLoading ? (
         <LoadingState />
       ) : error ? (
         <ErrorState message={getErrorMessage(error)} />
-      ) : files.length === 0 ? (
+      ) : shown.length === 0 ? (
         <EmptyState
           message={empty.message}
           hint={empty.hint}
@@ -175,7 +243,7 @@ export function FileListPanel({
       ) : (
         <div className="flex flex-col gap-3">
           <div className="grid [grid-template-columns:repeat(auto-fill,minmax(10rem,1fr))] gap-3">
-            {files.map((file) => (
+            {shown.map((file) => (
               <FileTile
                 key={file.id}
                 file={file}
@@ -184,7 +252,7 @@ export function FileListPanel({
                 onKeep={onKeep}
                 onPreview={(d) => setPreviewParam(d.id)}
                 showRunLink={showRunLink}
-                direction={runId ? (file.run_id === runId ? "output" : "input") : undefined}
+                direction={runId ? runFileDirection(file, runId) : undefined}
               />
             ))}
           </div>

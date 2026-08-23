@@ -1,9 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Run-detail "Fichiers" tab: the COMPLETE file view of a run — inputs (uploads
- * the run consumed) and outputs (files the agent produced), told apart by the
- * per-tile direction badge and filterable by purpose.
+ * Run-detail "Fichiers" tab: the COMPLETE file view of a run — inputs (files
+ * the run consumed, whether uploaded for it or chained in from an earlier run)
+ * and outputs (files the agent produced), told apart by the per-tile direction
+ * badge and filterable on the same axis.
+ *
+ * Direction, not `purpose`, is the axis here: a run answers "what did I make,
+ * what did I read", and the stored `purpose` answers neither on its own (a file
+ * chained in with `appfile://` keeps the PRODUCING run's `agent_output`). The
+ * tab holds only the selected value — the panel resolves it with the same
+ * `runFileDirection` call it badges each tile with, so a row can never be
+ * badged one way and filtered the other.
  *
  * The overlap with the Outcome pane, which lists the produced files again, is
  * deliberate: Outcome answers "what did this run produce?", this tab answers
@@ -24,28 +32,22 @@
  * query).
  */
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useFiles } from "../hooks/use-files";
-import { FileListPanel, type PurposeFilter } from "./file-list-panel";
+import { FileListPanel, type DirectionFilter } from "./file-list-panel";
 
 export function RunFilesTab({ runId }: { runId: string }) {
   const { t } = useTranslation("files");
   const { data, isLoading, error } = useFiles({ runId, limit: 100 });
-  const [purpose, setPurpose] = useState<PurposeFilter>("all");
-
-  const files = useMemo(() => {
-    const all = data?.data ?? [];
-    return purpose === "all" ? all : all.filter((d) => d.purpose === purpose);
-  }, [data?.data, purpose]);
+  const [direction, setDirection] = useState<DirectionFilter>("all");
 
   return (
     <FileListPanel
-      files={files}
+      files={data?.data ?? []}
       isLoading={isLoading}
       error={error}
-      purpose={purpose}
-      onPurposeChange={setPurpose}
+      filter={{ axis: "direction", value: direction, onChange: setDirection }}
       empty={{ message: t("run.empty"), hint: t("run.emptyHint"), compact: true }}
       runId={runId}
     />

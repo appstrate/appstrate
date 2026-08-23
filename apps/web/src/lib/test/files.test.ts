@@ -11,6 +11,7 @@ import {
   isMarkdownFile,
   isPublishedFileLogEvent,
   mimeIconFor,
+  runFileDirection,
   type FileLike,
 } from "../files.ts";
 
@@ -187,6 +188,54 @@ describe("featuredRunFile", () => {
     expect(featuredRunFile([chained("doc_from_run_0"), produced("doc_out")], RUN)?.id).toBe(
       "doc_out",
     );
+  });
+});
+
+/**
+ * Direction relative to the run being VIEWED — the rule the tile badge and the
+ * Fichiers-tab filter both read. Each row carries two independent facts
+ * (`purpose` = who made it, `run_id` = which run it hangs off), and reading
+ * either one alone mislabels a real, routine row.
+ */
+describe("runFileDirection", () => {
+  it("calls a file this run produced an output", () => {
+    expect(runFileDirection(file({ purpose: "agent_output", run_id: RUN }), RUN)).toBe("output");
+  });
+
+  it("calls an upload made FOR this run an input, not an output", () => {
+    // The bug this rule replaces: an input uploaded for a run is committed with
+    // `purpose: "user_upload"` AND that run's id (apps/api/src/services/files.ts),
+    // so a badge keyed on `run_id === runId` alone announced the run's own
+    // INPUT as something it had produced.
+    expect(runFileDirection(file({ purpose: "user_upload", run_id: RUN }), RUN)).toBe("input");
+  });
+
+  it("calls a file an EARLIER run produced an input of this one", () => {
+    // The mirror bug: `GET /api/files?run_id=X` answers the whole container, so
+    // a file chained in with `appfile://` is listed here still carrying the
+    // producing run's `purpose: "agent_output"`. Keyed on `purpose` alone, the
+    // filter listed it as produced by a run that never touched it.
+    expect(runFileDirection(file({ purpose: "agent_output", run_id: EARLIER }), RUN)).toBe("input");
+  });
+
+  it("calls an unanchored upload an input", () => {
+    expect(runFileDirection(file({ purpose: "user_upload", run_id: null }), RUN)).toBe("input");
+  });
+
+  it("is the rule `producedRunFiles` selects on, so list and badge cannot drift", () => {
+    const rows = [
+      { ...file({ purpose: "user_upload", run_id: RUN }), id: "doc_in" },
+      { ...file({ purpose: "agent_output", run_id: EARLIER }), id: "doc_chained" },
+      { ...file({ purpose: "agent_output", run_id: RUN }), id: "doc_out" },
+    ];
+    expect(producedRunFiles(rows, RUN).map((f) => f.id)).toEqual(["doc_out"]);
+    expect(rows.filter((f) => runFileDirection(f, RUN) === "output").map((f) => f.id)).toEqual(
+      producedRunFiles(rows, RUN).map((f) => f.id),
+    );
+    expect(rows.filter((f) => runFileDirection(f, RUN) === "input").map((f) => f.id)).toEqual([
+      "doc_in",
+      "doc_chained",
+    ]);
   });
 });
 

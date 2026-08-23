@@ -6,6 +6,8 @@
   "filter.all": "All",
   "filter.agent_output": "Agent outputs",
   "filter.user_upload": "Uploads",
+  "filter.output": "Produced",
+  "filter.input": "Imported",
   "run.empty": "No files",
   "run.emptyHint": "This run has no uploaded or produced files.",
   "run.featuredLabel": "Produced file",
