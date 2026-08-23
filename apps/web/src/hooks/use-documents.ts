@@ -14,6 +14,7 @@ export type DocumentDto =
   paths["/api/documents"]["get"]["responses"][200]["content"]["application/json"]["data"][number];
 
 export interface DocumentListFilters {
+  search?: string;
   purpose?: "user_upload" | "agent_output";
   runId?: string;
   contextChatSessionId?: string;
@@ -38,6 +39,7 @@ export function useDocuments(filters: DocumentListFilters = {}) {
           purpose: filters.purpose,
           run_id: filters.runId,
           context_chat_session_id: filters.contextChatSessionId,
+          q: filters.search,
           startingAfter: filters.startingAfter,
           limit: filters.limit,
         },

@@ -33,7 +33,13 @@ import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor, actorFromIds } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
-import { forbidden, notFound, payloadTooLarge, unauthorized } from "../lib/errors.ts";
+import {
+  forbidden,
+  invalidRequest,
+  notFound,
+  payloadTooLarge,
+  unauthorized,
+} from "../lib/errors.ts";
 import { reprDigestSha256 } from "../lib/digest.ts";
 import { getPublicAppOrigin } from "../lib/public-url.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
@@ -62,11 +68,13 @@ import {
   PREVIEW_MAX_BYTES,
 } from "../services/document-preview.ts";
 
+const documentSearchSchema = z.string().trim().max(200).optional();
+
 export function createDocumentsRouter() {
   const router = new Hono<AppEnv>();
 
   // GET /api/documents — gallery list. Filters: purpose, run_id, packageId,
-  // chat_session_id, context_chat_session_id; keyset pagination via
+  // chat_session_id, context_chat_session_id, q; keyset pagination via
   // startingAfter + limit. Query-param
   // casing follows the wire DTO (CASING_CONVENTIONS.md carve-out 4b): `packageId`
   // and the `startingAfter` pagination param are camelCase; `run_id` /
@@ -86,6 +94,10 @@ export function createDocumentsRouter() {
     if (chatSessionId) filters.chatSessionId = chatSessionId;
     const contextChatSessionId = c.req.query("context_chat_session_id");
     if (contextChatSessionId) filters.contextChatSessionId = contextChatSessionId;
+    const searchResult = documentSearchSchema.safeParse(c.req.query("q"));
+    if (!searchResult.success) throw invalidRequest("Invalid query parameter", "q");
+    const search = searchResult.data;
+    if (search) filters.search = search;
     const startingAfter = c.req.query("startingAfter");
     if (startingAfter) filters.startingAfter = startingAfter;
     // Documented query-int idiom (routes/models.ts): coerce + clamp + default.

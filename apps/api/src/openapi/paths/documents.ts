@@ -182,7 +182,7 @@ export const documentsPaths = {
         "each row is filtered by its own container ACL, so members see their own documents " +
         "(and system-owned ones) and end-users see only their own. Filter by `purpose`, " +
         "`run_id`, `packageId`, `chat_session_id`, or a chat session's complete context; " +
-        "paginate with `startingAfter` + `limit`.",
+        "search names with `q`, and paginate with `startingAfter` + `limit`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XAppId" },
@@ -221,6 +221,14 @@ export const documentsPaths = {
           schema: { type: "string" },
           description:
             "Filter to the private conversation context: direct attachments plus documents produced or consumed by runs launched from the session.",
+        },
+        {
+          name: "q",
+          in: "query",
+          required: false,
+          schema: { type: "string", maxLength: 200 },
+          description:
+            "Case-insensitive substring search over document names. Longer than 200 characters is rejected with `400`.",
         },
         {
           name: "startingAfter",

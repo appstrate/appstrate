@@ -329,6 +329,32 @@ describe("documents service + routes", () => {
     expect(flist.data.map((d) => d.id)).toEqual([docA.id]);
   });
 
+  it("searches the complete document collection by name before pagination", async () => {
+    const runId = await seedRunRow(scope);
+    const matching = await publishStream(scope, runId, "Quarterly Forecast.pdf", "forecast");
+    await publishStream(scope, runId, "Meeting notes.txt", "notes");
+
+    const page = await listDocumentsForActor(scope, userActor, {
+      search: "FORECAST",
+      limit: 1,
+    });
+    expect(page.data.map((document) => document.id)).toEqual([matching.row.id]);
+    expect(page.hasMore).toBe(false);
+
+    const response = await app.request("/api/documents?q=quarterly&limit=1", {
+      headers: authHeaders(ctx),
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { data: Array<{ id: string }>; hasMore: boolean };
+    expect(body.data.map((document) => document.id)).toEqual([matching.row.id]);
+    expect(body.hasMore).toBe(false);
+
+    const invalid = await app.request(`/api/documents?q=${"x".repeat(201)}`, {
+      headers: authHeaders(ctx),
+    });
+    expect(invalid.status).toBe(400);
+  });
+
   it("run_id filter returns produced outputs AND input documents referenced in runs.input", async () => {
     // docA: a chat-session user_upload consumed by the run as input (its own
     // container is the chat session, so runId is NULL — it would be missed by a

@@ -1286,7 +1286,7 @@ export interface paths {
         };
         /**
          * List documents
-         * @description List the documents visible to the caller in the current application. Requires the `documents:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so members see their own documents (and system-owned ones) and end-users see only their own. Filter by `purpose`, `run_id`, `packageId`, `chat_session_id`, or a chat session's complete context; paginate with `startingAfter` + `limit`.
+         * @description List the documents visible to the caller in the current application. Requires the `documents:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so members see their own documents (and system-owned ones) and end-users see only their own. Filter by `purpose`, `run_id`, `packageId`, `chat_session_id`, or a chat session's complete context; search names with `q`, and paginate with `startingAfter` + `limit`.
          */
         get: operations["listDocuments"];
         put?: never;
@@ -9962,6 +9962,8 @@ export interface operations {
                 chat_session_id?: string;
                 /** @description Filter to the private conversation context: direct attachments plus documents produced or consumed by runs launched from the session. */
                 context_chat_session_id?: string;
+                /** @description Case-insensitive substring search over document names. Longer than 200 characters is rejected with `400`. */
+                q?: string;
                 /** @description Keyset cursor — document id to page after (newest-first order). */
                 startingAfter?: string;
                 /** @description Page size (1–100, default 20). */

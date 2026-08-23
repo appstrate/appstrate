@@ -11,12 +11,15 @@ import { useAllSchedules } from "../hooks/use-schedules";
 import { PageHeader } from "../components/page-header";
 import { EmptyState } from "../components/page-states";
 import { SchedulesTable, useScheduleColumns } from "../components/schedules-table";
+import { ScheduleCard } from "../components/schedule-card";
+import { CardGrid } from "../components/card-grid";
 import { columnMenu, visibleColumns } from "../components/data-table";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { TOOLBAR_ACTION } from "../lib/toolbar-button";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useListParams } from "../lib/list-params";
+import { useScheduleViewStore } from "../stores/list-view-store";
 
 /** The values the state dimension accepts — a URL is user input. */
 const STATES = ["enabled", "disabled"] as const;
@@ -28,6 +31,8 @@ export function SchedulesListPage() {
   const { data: schedules, isLoading, isError } = useAllSchedules();
   const { data: agents } = useAgents();
   const placeholder = useSearchPlaceholder(t("schedules.title"));
+  const view = useScheduleViewStore((state) => state.view);
+  const setView = useScheduleViewStore((state) => state.setView);
 
   const create = (
     <Button
@@ -77,6 +82,16 @@ export function SchedulesListPage() {
   }, [schedules, query, states, agents]);
 
   const filtering = query.trim() !== "" || states.length > 0;
+  const emptyBody = filtering ? (
+    <EmptyState message={t("schedules.noMatch")} icon={SearchX} compact />
+  ) : (
+    <EmptyState
+      message={t("schedules.empty")}
+      hint={t("schedules.emptyHint")}
+      icon={Calendar}
+      compact
+    />
+  );
 
   return (
     <div>
@@ -101,31 +116,38 @@ export function SchedulesListPage() {
           },
         ]}
         onReset={list.reset}
-        columns={columnMenu(allColumns, visibility)}
+        columns={view === "table" ? columnMenu(allColumns, visibility) : undefined}
+        view={view}
+        onViewChange={setView}
         actions={isAdmin ? create : undefined}
       />
 
-      <SchedulesTable
-        schedules={shown}
-        columns={columns}
-        isLoading={isLoading}
-        isError={isError}
-        empty={
+      {view === "table" ? (
+        <SchedulesTable
+          schedules={shown}
+          columns={columns}
+          isLoading={isLoading}
+          isError={isError}
           // A list nobody filtered and a filter that matched nothing are two
-          // different sentences. The empty one no longer re-offers the page's
-          // action either: the bar above carries it, and stays.
-          filtering ? (
-            <EmptyState message={t("schedules.noMatch")} icon={SearchX} compact />
-          ) : (
-            <EmptyState
-              message={t("schedules.empty")}
-              hint={t("schedules.emptyHint")}
-              icon={Calendar}
-              compact
+          // different sentences. The bar stays in either case.
+          empty={emptyBody}
+        />
+      ) : (
+        <CardGrid
+          items={shown}
+          itemKey={(schedule) => schedule.id}
+          renderCard={(schedule) => (
+            <ScheduleCard
+              schedule={schedule}
+              agentName={agentName(schedule.packageId)}
+              variant="collection"
             />
-          )
-        }
-      />
+          )}
+          isLoading={isLoading}
+          isError={isError}
+          empty={emptyBody}
+        />
+      )}
       <ListFooter
         count={isLoading || isError ? undefined : t("schedules.count", { count: shown.length })}
       />

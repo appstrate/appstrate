@@ -336,15 +336,23 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     pattern: /^\/api\/documents$/,
     handler: (url, s) => {
       const all = list(f.documents.data, s, f.heavyDocuments);
+      const purpose = url.searchParams.get("purpose");
+      const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+      const filtered = all.filter((document) => {
+        if (purpose && document.purpose !== purpose) return false;
+        return !q || document.name.toLowerCase().includes(q);
+      });
       const limit = Number(url.searchParams.get("limit") ?? 25);
-      const offset = Number(url.searchParams.get("offset") ?? 0);
-      const page = all.slice(offset, offset + limit);
+      const cursor = url.searchParams.get("startingAfter");
+      const cursorIndex = cursor ? filtered.findIndex((document) => document.id === cursor) : -1;
+      const offset = cursorIndex >= 0 ? cursorIndex + 1 : 0;
+      const page = filtered.slice(offset, offset + limit);
       return {
         status: 200,
         body: {
           object: "list" as const,
           data: page,
-          hasMore: offset + page.length < all.length,
+          hasMore: offset + page.length < filtered.length,
           limit,
         },
       };

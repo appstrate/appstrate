@@ -13,6 +13,7 @@ import { useListParams } from "../lib/list-params";
 import { TOOLBAR_ACTION } from "../lib/toolbar-button";
 import { RunList } from "../components/run-list";
 import type { RunKindFilter } from "../hooks/use-paginated-runs";
+import { useRunViewStore } from "../stores/list-view-store";
 
 /**
  * The filters live in the URL, so a filtered list is a link. They also come
@@ -44,6 +45,8 @@ export function RunsPage() {
   const kinds = list.values("kind", KINDS);
   const statuses = list.values("status", runStatusValues);
   const search = list.search;
+  const view = useRunViewStore((state) => state.view);
+  const setView = useRunViewStore((state) => state.setView);
 
   const filters: FilterSpec[] = [
     {
@@ -92,6 +95,7 @@ export function RunsPage() {
         kind={kind}
         status={statuses}
         search={search}
+        view={view}
         countLabel={(total) => t("runs.count", { count: total })}
         toolbar={({ columns }) => (
           <ListToolbar
@@ -102,7 +106,9 @@ export function RunsPage() {
             }}
             filters={filters}
             onReset={list.reset}
-            columns={columns}
+            columns={view === "table" ? columns : undefined}
+            view={view}
+            onViewChange={setView}
             // On a list screen the action belongs beside the view controls,
             // not at title height: every table screen then keeps its controls
             // and its actions in the same corner.

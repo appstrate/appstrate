@@ -20,41 +20,10 @@ import { PageHeader } from "../components/page-header";
 import { DocumentListPanel } from "../components/document-list-panel";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { useListParams } from "../lib/list-params";
+import { useSearchPlaceholder } from "../lib/search-placeholder";
+import { useDocumentViewStore } from "../stores/list-view-store";
 
 const PURPOSES = ["agent_output", "user_upload"] as const;
-
-/**
- * A single storage-usage line ("X used / Y limit") with a conditional warning
- * when consumption has reached or passed the effective limit — at which point
- * new document writes are rejected (403) while existing documents stay intact.
- * `effective_limit_bytes` null = unlimited: the line collapses to "X used".
- */
-function StorageUsageLine() {
-  const { t } = useTranslation(["documents"]);
-  const { storage, limitBytes: limit } = useOrgStorage();
-  if (!storage) return null;
-
-  const over = limit !== null && storage.used_bytes >= limit;
-
-  return (
-    <div className="mb-4">
-      <p className="text-muted-foreground text-sm tabular-nums">
-        {limit === null
-          ? t("storage.usedUnlimited", { used: formatBytes(storage.used_bytes) })
-          : t("storage.usedOfLimit", {
-              used: formatBytes(storage.used_bytes),
-              limit: formatBytes(limit),
-            })}
-      </p>
-      {over && (
-        <Alert variant="warning" className="mt-2">
-          <AlertTriangle size={16} />
-          <AlertDescription>{t("storage.limitReached")}</AlertDescription>
-        </Alert>
-      )}
-    </div>
-  );
-}
 
 export function DocumentsPage() {
   // Remount on application switch so the cursor + accumulated pages reset.
@@ -66,16 +35,14 @@ function DocumentsPageContent() {
   const list = useListParams(["purpose"]);
   const purposes = list.values("purpose", PURPOSES);
   const effectivePurpose = purposes.length === 1 ? purposes[0] : undefined;
+  const search = list.search;
 
-  // The filter signature remounts only the pagination accumulator. This is the
-  // same derived reset used by the other lists: no effect mirrors URL state,
-  // and changing the filter cannot leave pages from the previous answer mixed
-  // into the next one.
   return (
     <DocumentsCollection
-      key={purposes.join(",")}
       purposes={purposes}
       effectivePurpose={effectivePurpose}
+      search={search}
+      onSearchChange={list.setSearch}
       onPurposeChange={list.setValues("purpose")}
       onReset={list.reset}
     />
@@ -85,20 +52,36 @@ function DocumentsPageContent() {
 function DocumentsCollection({
   purposes,
   effectivePurpose,
+  search,
+  onSearchChange,
   onPurposeChange,
   onReset,
 }: {
   purposes: Array<(typeof PURPOSES)[number]>;
   effectivePurpose: (typeof PURPOSES)[number] | undefined;
+  search: string;
+  onSearchChange: (value: string) => void;
   onPurposeChange: (values: string[]) => void;
   onReset: () => void;
 }) {
   const { t } = useTranslation(["documents", "common"]);
+  const view = useDocumentViewStore((state) => state.view);
+  const setView = useDocumentViewStore((state) => state.setView);
+  const searchPlaceholder = useSearchPlaceholder(t("page.title"));
+  const { storage, limitBytes: limit } = useOrgStorage();
+  const signature = `${effectivePurpose ?? ""}|${search}`;
 
-  const [cursor, setCursor] = useState<string | undefined>(undefined);
-  const [loadedPages, setLoadedPages] = useState<DocumentDto[]>([]);
+  // Search and purpose changes clear pagination without remounting the toolbar:
+  // remounting drops search focus and closes the purpose multi-select.
+  const [paging, setPaging] = useState<{
+    signature: string;
+    cursor: string | undefined;
+    loadedPages: DocumentDto[];
+  }>({ signature, cursor: undefined, loadedPages: [] });
+  const cursor = paging.signature === signature ? paging.cursor : undefined;
 
   const { data, isLoading, error } = useDocuments({
+    search: search || undefined,
     purpose: effectivePurpose,
     startingAfter: cursor,
     limit: 25,
@@ -112,35 +95,62 @@ function DocumentsCollection({
   const documents = useMemo(() => {
     const seen = new Set<string>();
     const out: DocumentDto[] = [];
-    for (const doc of [...loadedPages, ...currentPage]) {
+    const priorPages = paging.signature === signature ? paging.loadedPages : [];
+    for (const doc of [...priorPages, ...currentPage]) {
       if (!seen.has(doc.id)) {
         seen.add(doc.id);
         out.push(doc);
       }
     }
     return out;
-  }, [loadedPages, currentPage]);
+  }, [paging, signature, currentPage]);
 
-  const filtering = purposes.length > 0;
+  const filtering = purposes.length > 0 || search.trim() !== "";
   const countLabel = hasMore
     ? t("page.countLoaded", { count: documents.length })
     : t("page.count", { count: documents.length });
+  const usageLabel = storage
+    ? limit === null
+      ? t("storage.usedUnlimited", { used: formatBytes(storage.used_bytes) })
+      : t("storage.usedOfLimit", {
+          used: formatBytes(storage.used_bytes),
+          limit: formatBytes(limit),
+        })
+    : null;
+  const overLimit = storage !== undefined && limit !== null && storage.used_bytes >= limit;
+  const footerLabel = usageLabel ? (
+    <>
+      {countLabel} <span aria-hidden>·</span> {usageLabel}
+    </>
+  ) : (
+    countLabel
+  );
 
   return (
     <div>
       <PageHeader title={t("page.title")} emoji="📄" breadcrumbs={[{ label: t("page.title") }]} />
 
-      <StorageUsageLine />
+      {overLimit && (
+        <Alert variant="warning" className="mb-4">
+          <AlertTriangle size={16} />
+          <AlertDescription>{t("storage.limitReached")}</AlertDescription>
+        </Alert>
+      )}
 
       <DocumentListPanel
         documents={documents}
         isLoading={isLoading}
         error={error}
-        display="table"
+        display={view}
         showPurposeTabs={false}
         tableLabel={t("tableLabel")}
         toolbar={({ columns }) => (
           <ListToolbar
+            search={{
+              value: search,
+              onChange: onSearchChange,
+              placeholder: searchPlaceholder,
+            }}
             filters={[
               {
                 id: "purpose",
@@ -154,7 +164,9 @@ function DocumentsCollection({
               },
             ]}
             onReset={onReset}
-            columns={columns}
+            columns={view === "table" ? columns : undefined}
+            view={view}
+            onViewChange={setView}
           />
         )}
         empty={
@@ -163,12 +175,26 @@ function DocumentsCollection({
             : { message: t("page.empty"), hint: t("page.emptyHint") }
         }
         showRunLink
-        onDeleted={(id) => setLoadedPages((prev) => prev.filter((d) => d.id !== id))}
+        onDeleted={(id) =>
+          setPaging((previous) => ({
+            signature,
+            cursor: previous.signature === signature ? previous.cursor : undefined,
+            loadedPages: (previous.signature === signature ? previous.loadedPages : []).filter(
+              (document) => document.id !== id,
+            ),
+          }))
+        }
         onKept={(id) =>
-          setLoadedPages((prev) => prev.map((d) => (d.id === id ? { ...d, expiresAt: null } : d)))
+          setPaging((previous) => ({
+            signature,
+            cursor: previous.signature === signature ? previous.cursor : undefined,
+            loadedPages: (previous.signature === signature ? previous.loadedPages : []).map(
+              (document) => (document.id === id ? { ...document, expiresAt: null } : document),
+            ),
+          }))
         }
         footer={
-          <ListFooter count={isLoading || error ? undefined : countLabel}>
+          <ListFooter count={isLoading || error ? undefined : footerLabel}>
             {hasMore && (
               <Button
                 variant="outline"
@@ -176,8 +202,14 @@ function DocumentsCollection({
                 onClick={() => {
                   const last = currentPage[currentPage.length - 1];
                   if (last) {
-                    setLoadedPages((prev) => [...prev, ...currentPage]);
-                    setCursor(last.id);
+                    setPaging((previous) => ({
+                      signature,
+                      cursor: last.id,
+                      loadedPages: [
+                        ...(previous.signature === signature ? previous.loadedPages : []),
+                        ...currentPage,
+                      ],
+                    }));
                   }
                 }}
               >

@@ -79,7 +79,7 @@ export function DocumentListPanel({
    * the pinned row loses its expiry badge without a full remount.
    */
   onKept?: (id: string) => void;
-  /** The main Documents page is table-only; compact run tabs keep the gallery. */
+  /** The main Documents page offers both; compact run tabs keep the gallery. */
   display?: "cards" | "table";
   /** The main page puts this dimension in ListToolbar instead of a tab strip. */
   showPurposeTabs?: boolean;
@@ -211,8 +211,7 @@ export function DocumentListPanel({
             empty={emptyState}
           />
         ) : (
-          /* Run-detail documents stay a thumbnail gallery. The main Documents
-             destination chooses the table above and offers no view switch yet. */
+          /* The same real tiles serve the main card view and compact run tabs. */
           <CardGrid
             items={documents}
             min="10rem"
@@ -234,7 +233,7 @@ export function DocumentListPanel({
             )}
           />
         )}
-        {(display === "table" || documents.length > 0) && footer}
+        {footer}
       </div>
 
       <ConfirmModal

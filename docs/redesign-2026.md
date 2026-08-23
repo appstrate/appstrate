@@ -430,7 +430,9 @@ broke.
 Integrations and the main Documents destination joined the table family on 23
 August. Documents has Name, Purpose, Type, Size, Created, Retention and Actions;
 Integrations has Name, Origin, Version, Status and Actions. Both sets are in the
-column-floor guard and keep identity plus Actions at tier one.
+column-floor guard and keep identity plus Actions at tier one. The later
+level-one collection pass also gave Documents, Runs and Schedules real card
+representations; see completed block 9 under "Open".
 
 Still open on the table, deliberately:
 
@@ -1190,8 +1192,9 @@ included (`lib/list-params.ts`).
      `repeat(auto-fill, minmax(10rem, 1fr))` by hand — the same technique
      `CardGrid` already owns, at a smaller floor. DONE 22 August: the floor is
      a prop and the run's gallery is on the family's grid. The main Documents
-     destination is table-only as of 23 August; that later product decision
-     does not change the compact, thumbnail-led run context.
+     destination gained a card view in the later level-one collection pass;
+     that later product decision does not change the compact, thumbnail-led run
+     context.
    - **Memory is the third body.** Rows stacked, one row a self-contained
      BLOCK rather than cells aligned into columns, in two tiers (pinned slots
      over the archive) inside collapsible sections that carry their own count.
@@ -1739,21 +1742,21 @@ infrastructure failure reproduced across the DB-backed groups; the touched web
 package remains green.
 
 **8. ~~Harmonise the main Documents and Integrations collections.~~ Done 23
-August.** Documents is table-only for now, by explicit product decision. Its
-card view is deferred until that view can be judged on its own. The run-detail
-Documents tab remains the compact thumbnail gallery it already was. The main
-page now uses `ListToolbar`, `DataTable` and `ListFooter`, with one comparable
-fact in each of Name, Purpose, Type, Size, Created and Retention. Actions keeps
-the real server capabilities: Download is direct, while Open run, Keep and
-Delete are secondary. Preview remains a real URL (`?preview=<id>`), and opening
-it preserves the purpose filter plus unrelated URL state.
+August.** Documents was table-only at this point; completed block 9 supersedes
+that decision with a real card view. The run-detail Documents tab remains the
+compact thumbnail gallery it already was. The main page now uses `ListToolbar`,
+`DataTable` and `ListFooter`, with one comparable fact in each of Name, Purpose,
+Type, Size, Created and Retention. Actions keeps the real server capabilities:
+Download is direct, while Open run, Keep and Delete are secondary. Preview
+remains a real URL (`?preview=<id>`), and opening it preserves the purpose filter
+plus unrelated URL state.
 
-The purpose filter is in the URL. There is deliberately no search field:
-`GET /api/documents` is paginated and has no `q`, so client-side search would
-pretend to cover documents it had never loaded. The footer says how many rows
-are loaded while `hasMore` is true, becomes the final count when the endpoint
-is exhausted, and still renders an honest zero for a filtered miss. Storage
-usage and keyset Load more remain.
+The purpose filter is in the URL. Search was deliberately absent here because
+`GET /api/documents` was paginated and had no `q`; completed block 9 adds the
+server contract instead of client-filtering an incomplete page. The footer says
+how many rows are loaded while `hasMore` is true, becomes the final count when
+the endpoint is exhausted, and still renders an honest zero for a filtered
+miss. Storage usage and keyset Load more remain.
 
 Integrations no longer has the mixed `Activated / Installed` tabs. The main
 collection is the organisation's administrable set: every custom integration,
@@ -1815,7 +1818,68 @@ then returned `ECONNREFUSED`, and the systemd-unit spinner kept timing out. It
 was interrupted after the same infrastructure failure described by the prior
 blocks; no touched web test remains failing.
 
-**9. Accessibility, which nothing here has ever checked.** The branch
+**9. ~~Give every level-one collection the same two-view grammar.~~ Done 23
+August.** Agents, Skills, MCP servers and Integrations already had real table
+and card representations. Documents, Runs and Schedules now join them: every
+level-one collection keeps the table/card switch at the left of search, and
+neither control points to a disabled or deferred body. The existing package
+family still shares one persisted preference, and Integrations keeps its own.
+Documents, Runs and Schedules each persist a separate table-default preference:
+they are distinct operational reading tasks, so changing Documents must not
+unexpectedly redraw Runs or Schedules.
+
+Documents reuses its existing thumbnail-led `DocumentTile` and `CardGrid` for
+the new body. Its URL search is honest across the full collection: `q` is now a
+typed OpenAPI query on `GET /api/documents`, the service applies an escaped,
+case-insensitive name match before keyset pagination, the generated web client
+carries the contract, and the lab handler mirrors purpose, search and
+`startingAfter`. The first implementation keyed the collection by the search
+string; the first typed character remounted the toolbar and dropped focus. The
+pagination accumulator now derives its cursor and prior pages from the active
+search signature, resetting immediately without remounting the input. Storage
+usage moved from the page body into the footer beside the honest count; only the
+at-limit warning remains above the collection. Load more still follows the
+server's `hasMore` and works in either representation.
+
+Runs renders a purpose-built card from the same `EnrichedRun` page already
+fetched for the table: agent, run number, status, origin, result, trigger,
+document counts, duration and date, without an extra query or a second account
+of pagination. Embedded run lists remain tables unless their caller explicitly
+selects the collection view. Schedules first reused the old `ScheduleCard`
+unchanged. Pixel inspection exposed that it was a compact bordered row, not a
+card, and three of them collapsed into an unreadable grid. The component now
+has an explicit collection variant with vertical hierarchy, frequency, next
+run and actor, while its compact variant remains intact for embedded contexts.
+
+The API document integration file is green (54 tests) and the touched web
+package is green (610 tests). `bun run check` is green with the repository's
+existing warnings. Documents, Runs and Schedules each measure 1096px at 1440
+and 348px at 390 in table view; all sixteen measured widths report zero
+overflow. The same sixteen-width DOM sweep reports zero viewport overflow for
+all three card views. Their nominal, empty, heavy and error states produced 24
+captures at 1440 and 390 with no fixture gap. Both representations were also
+inspected at 1440 and 390; that visual pass caught both the search-focus remount
+and the false schedule card described above.
+
+Root `bun test` could not exercise its infrastructure groups in this
+environment: preload could not reach the OrbStack Docker socket, database
+cleanup returned `ECONNREFUSED`, and the suite entered the known systemd-unit
+spinner. It was interrupted after the infrastructure failure reproduced. The
+touched API and web suites remain green.
+
+The fixed-point review found three contract gaps. Document `q` was initially an
+unbounded raw query string; it now passes a Zod 200-character guard, advertises
+the same `maxLength` in OpenAPI, and has a route rejection test. An empty card
+result initially hid the entire footer, losing both the honest zero and storage
+usage; the shared documents panel now renders its caller's footer in either
+body even when empty. Finally, purpose selection still keyed the whole
+collection, closing its multi-select on each tick. Purpose and search now share
+one derived pagination signature, so either resets pages without remounting the
+toolbar. Card-level web tests cover the new run and schedule representations,
+the preserved compact schedule variant and the empty document-card footer. The
+review's duplicated schedule activity badges were also reduced to one atom.
+
+**10. Accessibility, which nothing here has ever checked.** The branch
 re-declares ARIA roles on the table because this file demands it, and that is
 the whole of it: not one contrast ratio, keyboard path or touch target has ever
 been measured. Meanwhile the last days added dozens of controls — icon buttons

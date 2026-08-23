@@ -285,10 +285,9 @@ function ColumnsMenu({ columns }: { columns: ColumnMenuSpec }) {
 }
 
 /**
- * Cards or table, for the lists the reference design draws both ways
- * (`view-toggle`). shadcn's slot at this end of the row holds column
- * visibility; ours holds the same kind of thing — how the list is drawn, not
- * what it contains.
+ * Cards or table, for every level-one collection (`view-toggle`). shadcn's
+ * slot at this end of the row holds column visibility; ours holds the same
+ * kind of thing — how the list is drawn, not what it contains.
  */
 function ViewToggle({ view, onChange }: { view: ListView; onChange: (view: ListView) => void }) {
   const { t } = useTranslation("common");
@@ -348,7 +347,7 @@ export function ListToolbar({
   onReset?: () => void;
   /** Present on a table whose columns the reader may hide. */
   columns?: ColumnMenuSpec;
-  /** Present only on the lists the reference draws both as cards and as rows. */
+  /** Present on every level-one collection, whose two representations are real. */
   view?: ListView;
   onViewChange?: (view: ListView) => void;
   /**

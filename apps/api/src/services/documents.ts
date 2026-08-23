@@ -35,6 +35,7 @@ import {
   notInArray,
   notExists,
   exists,
+  ilike,
   sql,
   type SQL,
 } from "drizzle-orm";
@@ -1499,6 +1500,7 @@ export interface ListDocumentsFilters {
   runId?: string;
   chatSessionId?: string;
   contextChatSessionId?: string;
+  search?: string;
   limit?: number;
   startingAfter?: string;
 }
@@ -1634,6 +1636,12 @@ export async function listDocumentsForActor(
   if (filters.chatSessionId) conditions.push(eq(documents.chatSessionId, filters.chatSessionId));
   if (filters.contextChatSessionId) {
     conditions.push(await chatContextDocumentFilter(scope, actor, filters.contextChatSessionId));
+  }
+  if (filters.search) {
+    // `%` and `_` are LIKE wildcards. A document search treats them as the
+    // characters the reader typed, matching the run-list search contract.
+    const pattern = `%${filters.search.replace(/[\\%_]/g, (character) => `\\${character}`)}%`;
+    conditions.push(ilike(documents.name, pattern));
   }
 
   if (filters.startingAfter) {

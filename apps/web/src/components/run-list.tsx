@@ -16,10 +16,15 @@ import { Button } from "@appstrate/ui/components/button";
 import { usePaginatedRuns, type RunKindFilter } from "../hooks/use-paginated-runs";
 import { useRunAgentName } from "../hooks/use-run-agent-name";
 import { RunsTable, useRunColumns } from "./runs-table";
+import { RunCard } from "./run-card";
+import { CardGrid } from "./card-grid";
+import { EmptyState } from "./page-states";
 import { columnMenu, visibleColumns } from "./data-table";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import type { EnrichedRun, RunStatus } from "@appstrate/shared-types";
 import { ListFooter, type ColumnMenuSpec } from "./list-toolbar";
+import type { ListView } from "../stores/list-view-store";
+import { PlayCircle } from "lucide-react";
 
 interface RunListProps {
   packageId?: string;
@@ -59,6 +64,8 @@ interface RunListProps {
    * already had to be cured of.
    */
   countLabel?: (total: number) => React.ReactNode;
+  /** Level-one Runs offers both representations; embedded run lists stay tables. */
+  view?: ListView;
 }
 
 export function RunList({
@@ -76,6 +83,7 @@ export function RunList({
   search,
   toolbar,
   countLabel,
+  view = "table",
 }: RunListProps) {
   const { t } = useTranslation(["agents"]);
   const agentName = useRunAgentName(fixedAgentName);
@@ -119,15 +127,28 @@ export function RunList({
     <div>
       {toolbar?.({ columns: columnMenu(allColumns, visibility) })}
 
-      <RunsTable
-        runs={runs}
-        columns={columns}
-        agentName={agentName}
-        isLoading={showLoading}
-        isError={isError}
-        empty={emptyState}
-        banner={page === 0 ? firstPageBanner : undefined}
-      />
+      {view === "table" ? (
+        <RunsTable
+          runs={runs}
+          columns={columns}
+          agentName={agentName}
+          isLoading={showLoading}
+          isError={isError}
+          empty={emptyState}
+          banner={page === 0 ? firstPageBanner : undefined}
+        />
+      ) : (
+        <CardGrid
+          items={runs}
+          itemKey={(run) => run.id}
+          renderCard={(run) => <RunCard run={run} agentName={agentName(run)} />}
+          isLoading={showLoading}
+          isError={isError}
+          empty={
+            emptyState ?? <EmptyState message={t("detail.emptyRuns")} icon={PlayCircle} compact />
+          }
+        />
+      )}
 
       {/* The count speaks only for an answer we actually have: it read "0 run"
           while the first page was still loading and, worse, on a 500 — the same
