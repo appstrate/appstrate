@@ -264,18 +264,13 @@ async function runPlatformContainerImpl(
       ? {
           alias: llmConfig.aliasId,
           real: llmConfig.modelId,
-          // The container speaks the canonical dialect, whatever the backing
-          // is. Two effects, both required: it restricts this run's `/llm/*`
-          // surface to the one endpoint that dialect calls (everything else —
-          // a vendor catalogue read, say — is refused before any upstream
-          // fetch), and it tells the sidecar to TERMINATE that protocol rather
-          // than proxy it.
+          // The container speaks the canonical dialect whatever the backing is:
+          // it restricts this run's `/llm/*` surface to that dialect's one
+          // endpoint, and tells the sidecar to terminate rather than proxy.
           clientApiShape: ALIAS_CLIENT_API_SHAPE,
           backingApiShape: llmConfig.apiShape,
-          // Everything the sidecar needs to rebuild the backing's pi-ai Model
-          // and re-originate the call. Private to this channel: none of it is
-          // in `containerEnv` below, and `derivePiProvider` is applied HERE so
-          // the sidecar mirrors no provider mapping table of its own.
+          // What the sidecar rebuilds the backing's pi-ai Model from. Private
+          // to this channel — none of it reaches `containerEnv` below.
           backing: {
             providerId: derivePiProvider(llmConfig.providerId, llmConfig.apiShape),
             reasoning: llmConfig.reasoning ?? false,
@@ -367,13 +362,9 @@ async function runPlatformContainerImpl(
         modelId,
         baseUrl: llmConfig.baseUrl,
         // The vendor key pi-ai derives a request shape from. A sidecar-proxied
-        // run replaces MODEL_BASE_URL with the sidecar's own URL, erasing one
-        // of the two inputs `getCompat` reads (`model.provider` +
-        // `model.baseUrl`), so without this the container emits plain-OpenAI
-        // bytes at every provider — the total outage #1196 fixed. Passed
-        // unconditionally: `buildRuntimePiEnv` emits `MODEL_PROVIDER` only for
-        // a NON-aliased run, and an aliased one needs no vendor key at all
-        // because it speaks the canonical `pi-messages` dialect instead.
+        // run replaces MODEL_BASE_URL with the sidecar's, erasing one of the two
+        // inputs compat detection reads; without it every provider would get
+        // plain-OpenAI bytes. An aliased run needs no vendor key at all.
         providerId: llmConfig.providerId,
         apiKey: llmApiKey,
         // When the sidecar is skipped, the agent talks to the upstream
@@ -386,10 +377,8 @@ async function runPlatformContainerImpl(
         reasoning: llmConfig.reasoning,
         reasoningLevelMap: llmConfig.generation?.reasoning.nativeLevels,
         cost: llmConfig.cost,
-        // WHAT this run is, not which vars to mask. `buildRuntimePiEnv` owns
-        // the alias policy for the container env contract (omit the rate card,
-        // coarsen the token limits); re-deriving that list here would give it a
-        // second home to drift in.
+        // WHAT this run is, not which vars to mask: `buildRuntimePiEnv` owns
+        // the alias policy for the container env contract.
         aliased: !!llmConfig.aliased,
       },
       generation: plan.generationConfig,

@@ -485,31 +485,20 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     }
   }
 
-  // 4b. TERMINAL LEDGER BARRIER — the last point at which this run's runner row
-  //     can still be written. The CAS below flips the run to a terminal status,
-  //     which is exactly what makes its runner row `settled`: from that instant
-  //     a billing cursor may claim the row by its serial id, once, and never
-  //     revisit it (`state/runs.ts:settledSql`). Anything still owed must
-  //     therefore be DURABLY in Postgres before the CAS, not merely scheduled —
-  //     hence `required: true`, which propagates a write failure so the run
-  //     stays open and finalize is retried.
+  // 4b. TERMINAL LEDGER BARRIER — last point at which this run's runner row can
+  //     be written. The CAS below flips the run terminal, which is what makes
+  //     the row `settled`: a billing cursor may then claim it by serial id,
+  //     once. So anything owed must be durably in Postgres BEFORE the CAS —
+  //     hence `required: true`, which keeps the run open for a retry on failure.
   //
-  //     The barrier is NOT conditioned on `result.cost > 0`. Every
-  //     platform-synthesised terminal (`synthesiseFinalize`: stall watchdog,
-  //     boot orphan sweep, container crash/timeout/cancel) builds an empty
-  //     RunResult that never carries `cost` — precisely the paths where the
-  //     run's last cumulative snapshot is most likely to be in doubt. Gating on
-  //     cost meant those runs settled with no barrier at all.
+  //     Not gated on `result.cost > 0`: every platform-synthesised terminal
+  //     (stall watchdog, orphan sweep, crash/timeout/cancel) builds a RunResult
+  //     with no `cost`, and those are exactly the runs whose last snapshot is
+  //     most in doubt. A run that consumed nothing is still skipped.
   //
-  //     A run that consumed nothing (no tokens, no reported cost) has no runner
-  //     row to make durable and is skipped — the barrier exists to pin an
-  //     existing accounting fact, not to mint empty ones.
-  //
-  //     Those synthesised terminals are also where this barrier started costing
-  //     money. Its row is priced server-side from `run.modelCost` × the usage
-  //     passed here, so a crashed run's PRESERVED snapshot is now billed;
-  //     previously the row took the absent `result.cost` and settled at $0. See
-  //     the behaviour-change note on `resolveRunnerCost`.
+  //     This bills: the row is priced server-side from `run.modelCost` × the
+  //     usage passed here, so a crashed run's preserved snapshot now costs what
+  //     it used instead of settling at $0. See `resolveRunnerCost`.
   const terminalCost = typeof result.cost === "number" ? result.cost : null;
   if (terminalCost !== null || tokenUsageIsNonZero(validatedUsage)) {
     await writeRunnerLedgerRow(
