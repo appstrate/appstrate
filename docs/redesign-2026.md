@@ -1320,9 +1320,10 @@ So the strategy the reference itself suggests:
 
 ### NEXT, IN ORDER (written 23 August, for whoever picks this up cold)
 
-Everything below this block is either done or older context. The one open
-block is what is next, and each completed block is a commit with the gate
-green (`bun test` + `bun run check`) and a look in the lab before it lands.
+Everything below this block is either done or older context. The open blocks
+are what is next, smallest first, and each completed block is a commit with the
+gate green (`bun test` + `bun run check`) and a look in the lab before it
+lands.
 
 **1. ~~The settings row pattern.~~ Done 23 August.** `SettingRow` has the three
 shapes under "Form pattern", and the six existing rows use the one their
@@ -1407,7 +1408,46 @@ NO URL, and `DataTable`'s contract is that a row is a LINK (middle-click,
   the settings dialog, which tops out around 800px and never crosses the 56rem
   threshold, so tier 3 there means never drawn.
 
-After those three, what is left in this section is: the Usage page (a feature to
+**4. Accessibility, which nothing here has ever checked.** The branch
+re-declares ARIA roles on the table because this file demands it, and that is
+the whole of it: not one contrast ratio, keyboard path or touch target has ever
+been measured. Meanwhile the last days added dozens of controls — icon buttons
+at `size-7` (28px, against the 44px guidance) on tables now meant to work on a
+phone, a checkbox column, disabled controls carrying state, and a row link
+stretched with `after:inset-0`.
+
+Do it in that order: one scoped sweep to find what is there, then turn what is
+MEASURABLE into a guard — a one-shot audit ages at the next commit, a guard
+catches the regression in six months. What is measurable:
+
+- **Contrast** (4.5:1 text, 3:1 UI), read off RENDERED PIXELS. Converting oklch
+  by hand was wrong twice already; see "The lab".
+- **Touch targets** against 44px. Expect the icon buttons to fail; the answer is
+  a decision (a bigger hit area without a bigger glyph), not a shrug.
+- **Focus visible and tab order** on everything interactive, the stretched row
+  link and the controls raised above it with `relative z-10` included.
+- **`prefers-reduced-motion`**, which nothing respects today.
+- **Labels and disabled state**: the share checkbox is `aria-label`ed, but a
+  disabled checked box must still say WHY it cannot be changed, and today that
+  reason is a sentence elsewhere in the row rather than anything tied to the
+  control.
+
+A third harness entry (`e2e/lab/a11y.mjs`, `bun run lab:a11y`) over the same
+screens, exiting non-zero like the fixture guard, is the shape to aim for.
+
+**Do NOT reach for the `tractr-design-review` skill here.** Evaluated against
+this branch on 23 August: six of its seven passes are either already covered
+(interaction states, design-system alignment, unresolved decisions) or off-topic
+for a component-grammar refactor — its first pass BLOCKS on a product
+positioning check, its third is JTBD discovery, its fourth hunts gradients and
+glassmorphism in a project that derives from a fixed reference. It also scores
+each dimension out of ten, which yields a number rather than a defect you can
+contradict, and it has no browser, so it would audit rendering by reading
+source, which is the half the two-axis code review already does. Its
+responsive-and-accessibility pass is the part worth having, and it is what this
+block is. The skill itself is left alone; it is simply not the tool for this.
+
+After those, what is left in this section is: the Usage page (a feature to
 build, not a defect), storage and MCP connect to the form pattern, the
 page-action rule on screens without a list, per-org colour and logo (deferred by
 decision, twice — do not start it), and library browsing through `PanelDialog`.
