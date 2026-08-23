@@ -3,16 +3,15 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { AppWindow, Settings } from "lucide-react";
+import { AppWindow } from "lucide-react";
 import { usePermissions } from "../../hooks/use-permissions";
 import { Button } from "@appstrate/ui/components/button";
-import { Badge } from "@appstrate/ui/components/badge";
 import { useApplications } from "../../hooks/use-applications";
 import { useAppSwitcher } from "../../hooks/use-current-application";
 import { ErrorState, EmptyState } from "../../components/page-states";
-import { ItemList } from "../../components/item-list";
+import { DataTable } from "../../components/data-table";
+import { useApplicationColumns } from "./application-columns";
 import { ApplicationCreateModal } from "../../components/application-create-modal";
-import { formatDateField } from "../../lib/markdown";
 import { getErrorMessage } from "@appstrate/core/errors";
 
 export function OrgSettingsApplicationsPage() {
@@ -23,12 +22,19 @@ export function OrgSettingsApplicationsPage() {
   const navigate = useNavigate();
   const { switchApp } = useAppSwitcher();
 
-  if (!isAdmin) return null;
-
   const handleAppClick = (applicationId: string) => {
     switchApp(applicationId);
     navigate("/org-settings/app/general");
   };
+
+  // Above the admin gate: a hook called after an early return is a hook called
+  // conditionally, which the Rules-of-React lint refuses and React punishes.
+  const columns = useApplicationColumns({
+    defaultLabel: t("applications.default"),
+    onOpen: handleAppClick,
+  });
+
+  if (!isAdmin) return null;
 
   return (
     <>
@@ -38,9 +44,11 @@ export function OrgSettingsApplicationsPage() {
         </Button>
       </div>
 
-      <ItemList
-        items={applications ?? []}
-        itemKey={(app) => app.id}
+      <DataTable
+        label={t("applications.pageTitle")}
+        columns={columns}
+        rows={applications ?? []}
+        rowKey={(app) => app.id}
         isLoading={isLoading}
         isError={Boolean(error)}
         error={<ErrorState message={getErrorMessage(error)} compact />}
@@ -53,32 +61,6 @@ export function OrgSettingsApplicationsPage() {
             <Button onClick={() => setCreateOpen(true)}>{t("applications.create")}</Button>
           </EmptyState>
         }
-        renderItem={(app) => (
-          <div
-            data-testid={`application-card-${app.id}`}
-            className="border-border bg-card rounded-lg border p-5"
-          >
-            <div className="flex items-center gap-3">
-              <div className="flex-1">
-                <h3 className="text-[0.95rem] font-semibold">{app.name}</h3>
-                <span className="text-muted-foreground text-sm">
-                  {t("applications.createdAt", {
-                    date: formatDateField(app.createdAt, "date"),
-                  })}
-                </span>
-              </div>
-              {app.isDefault && <Badge variant="running">{t("applications.default")}</Badge>}
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => handleAppClick(app.id)}
-                title={t("nav.appSettings", { ns: "common" })}
-              >
-                <Settings size={16} />
-              </Button>
-            </div>
-          </div>
-        )}
       />
 
       <ApplicationCreateModal open={createOpen} onClose={() => setCreateOpen(false)} />

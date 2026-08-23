@@ -23,7 +23,8 @@ import { usePermissions, roleI18nKey } from "../../hooks/use-permissions";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { CopyLinkButton } from "../../components/copy-link-button";
 import { ErrorState, EmptyState } from "../../components/page-states";
-import { ItemList } from "../../components/item-list";
+import { DataTable } from "../../components/data-table";
+import { useMemberColumns } from "./member-columns";
 import { Spinner } from "../../components/spinner";
 import { toast } from "sonner";
 import {
@@ -130,6 +131,29 @@ export function OrgSettingsMembersPage() {
     });
   };
 
+  const memberColumns = useMemberColumns({
+    assignableRoles: (member) =>
+      role
+        ? assignableRolesForMember({
+            actorRole: role,
+            targetRole: member.role,
+            isSelf: member.userId === user?.id,
+          })
+        : [],
+    canRemove: (member) =>
+      role
+        ? canRemoveMember({
+            actorRole: role,
+            targetRole: member.role,
+            isSelf: member.userId === user?.id,
+          })
+        : false,
+    isChangingRole: changeRoleMutation.isPending,
+    isRemoving: removeMemberMutation.isPending,
+    onChangeRole: handleRoleChange,
+    onRemove: handleRemove,
+  });
+
   return (
     <>
       {isAdmin && (
@@ -176,75 +200,14 @@ export function OrgSettingsMembersPage() {
           empty state below, for when neither members nor invitations exist. A
           per-list empty sentence here would fire while invitations are pending
           and say the page is empty when it is not. */}
-      <ItemList
-        items={members}
-        itemKey={(member) => member.userId}
+      <DataTable
+        label={t("orgSettings.tabMembers")}
+        columns={memberColumns}
+        rows={members}
+        rowKey={(member) => member.userId}
         isLoading={isLoading}
         isError={Boolean(error)}
         error={<ErrorState message={getErrorMessage(error)} compact />}
-        renderItem={(member) => {
-          const label = member.displayName || member.email || member.userId;
-          const isMemberOwner = member.role === "owner";
-          const isSelf = member.userId === user?.id;
-          const assignableRoles = role
-            ? assignableRolesForMember({ actorRole: role, targetRole: member.role, isSelf })
-            : [];
-          const canRemove = role
-            ? canRemoveMember({ actorRole: role, targetRole: member.role, isSelf })
-            : false;
-          return (
-            <div className="border-border bg-card rounded-lg border p-5">
-              <div className="flex items-center gap-3">
-                <div className="flex-1">
-                  <h3 className="text-sm font-semibold">{label}</h3>
-                  {member.email && (
-                    <span className="text-muted-foreground text-sm">{member.email}</span>
-                  )}
-                </div>
-                <Badge
-                  variant={
-                    isMemberOwner ? "running" : member.role === "admin" ? "success" : "pending"
-                  }
-                >
-                  {t(roleI18nKey(member.role))}
-                </Badge>
-              </div>
-              {(assignableRoles.length > 0 || canRemove) && (
-                <div className="border-border mt-3 flex gap-2 border-t pt-3">
-                  {assignableRoles.length > 0 && (
-                    <Select
-                      value={member.role}
-                      onValueChange={(v) => handleRoleChange(member.userId, v as AssignableOrgRole)}
-                      disabled={changeRoleMutation.isPending}
-                    >
-                      <SelectTrigger className="w-[140px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {assignableRoles.map((r) => (
-                          <SelectItem key={r} value={r}>
-                            {t(roleI18nKey(r))}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                  {canRemove && (
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      className="ml-auto"
-                      onClick={() => handleRemove(member)}
-                      disabled={removeMemberMutation.isPending}
-                    >
-                      {t("btn.remove")}
-                    </Button>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        }}
       />
 
       {invitations.length > 0 && (

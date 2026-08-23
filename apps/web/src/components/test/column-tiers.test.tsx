@@ -24,6 +24,8 @@ import {
   useConnectionColumns,
   useIntegrationClientColumns,
 } from "../../pages/integration-columns.tsx";
+import { useMemberColumns } from "../../pages/org-settings/member-columns.tsx";
+import { useApplicationColumns } from "../../pages/org-settings/application-columns.tsx";
 import { useCredentialColumns, useModelColumns } from "../../pages/org-settings/model-columns.tsx";
 import { render } from "./run-fixture.tsx";
 
@@ -118,6 +120,19 @@ const SETS = {
         onDelete: () => {},
       }),
     ),
+  members: () =>
+    columnsFrom(() =>
+      useMemberColumns({
+        assignableRoles: () => ["admin", "member"],
+        canRemove: () => true,
+        isChangingRole: false,
+        isRemoving: false,
+        onChangeRole: () => {},
+        onRemove: () => {},
+      }),
+    ),
+  applications: () =>
+    columnsFrom(() => useApplicationColumns({ defaultLabel: "Défaut", onOpen: () => {} })),
   connections: () =>
     columnsFrom(() =>
       useConnectionColumns({
