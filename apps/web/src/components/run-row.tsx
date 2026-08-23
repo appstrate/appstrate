@@ -173,8 +173,10 @@ export function RunRow({
       )}
 
       {/* Trigger, proxy and (below) the start date are list-only: on the detail
-          page the Info tab already owns all three, so they are dropped outright
-          rather than moved into the panel. */}
+          page other panes already own all three — trigger in
+          `run-configuration-tab.tsx`, proxy and start date in
+          `run-execution-tab.tsx` (see this file's `RunRowDetails` note) — so
+          they are dropped outright rather than moved into the panel. */}
       {!isDetail && <RunTrigger run={run} />}
 
       {!isDetail && run.proxy_label && (

@@ -684,6 +684,34 @@ export async function* runAndWaitSteps(
 }
 
 /**
+ * How many produced-file rows one read asks for. `GET /api/files` clamps
+ * `limit` to 100 and answers `hasMore` rather than a cursor, so this is also
+ * the ceiling — a run that published more needs paging, not a bigger number.
+ */
+const RUN_PRODUCED_FILES_PAGE_LIMIT = 100;
+
+/**
+ * The `GET /api/files` request path for "the files THIS run produced" — the
+ * origin-relative half, so a browser caller can pass it to `fetch` verbatim and
+ * a server caller can hand it to {@link apiUrl}.
+ *
+ * A builder rather than a literal because two independent callers issue the
+ * exact same request and must keep issuing the SAME one: {@link fetchRunFiles}
+ * below (the `run_and_wait` tool result the model reads) and the chat module's
+ * run card (`module-chat/src/ui/use-run-log-stream.ts`), which reconciles its
+ * log-derived file chips against this authoritative list once the run goes
+ * terminal. Two hand-built copies of the query string is how one of them
+ * quietly starts reading a different set than the other.
+ *
+ * `purpose=agent_output` narrows but does not decide: the route answers the
+ * run's whole CONTAINER, so a file chained in from an earlier run arrives
+ * carrying that purpose. Both callers filter on `run_id` themselves.
+ */
+export function runProducedFilesPath(runId: string): string {
+  return `/api/files?run_id=${encodeURIComponent(runId)}&purpose=agent_output&limit=${RUN_PRODUCED_FILES_PAGE_LIMIT}`;
+}
+
+/**
  * List the agent-output files a run published, projected to the `{ id, uri,
  * name, mime, size }` shape the tool result embeds. Best-effort: any failure
  * (network, non-2xx, malformed body) yields an empty list — a missing file
@@ -700,10 +728,7 @@ export async function fetchRunFiles(
   opts: RunAndWaitClientOptions,
 ): Promise<RunAndWaitFile[]> {
   try {
-    const url = apiUrl(
-      opts.origin,
-      `/api/files?run_id=${encodeURIComponent(runId)}&purpose=agent_output&limit=100`,
-    );
+    const url = apiUrl(opts.origin, runProducedFilesPath(runId));
     const res = await opts.fetch(url, { method: "GET", headers: new Headers(opts.headers) });
     if (!res.ok) return [];
     const data = asRecord(await readJsonResponse(res))?.data;

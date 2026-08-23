@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+import { legacyFilesPath } from "../../lib/legacy-file-paths.ts";
 
 // Shared File object schema (mirrors FileDto in services/files.ts).
 // Field casing follows CASING_CONVENTIONS.md carve-out 4b: `applicationId`,
@@ -422,10 +423,14 @@ const canonicalFilesPaths = {
  * DEPRECATED alias of the same operation.
  *
  * Derived rather than hand-copied: the aliases cannot drift from the canonical
- * paths, and adding an operation above adds its alias for free. Each alias gets
- * `deprecated: true`, a `Deprecated` operationId suffix (OpenAPI requires
- * operationIds to be unique, and a generated client would otherwise collide),
- * and a description line naming the replacement.
+ * paths, and adding an operation above adds its alias for free. The rename
+ * itself comes from `lib/legacy-file-paths.ts` — the one place the segment pair
+ * is spelled, shared with the rate limiter, which must collapse the alias back
+ * onto the canonical pattern so the two spellings share one bucket.
+ *
+ * Each alias gets `deprecated: true`, a `Deprecated` operationId suffix
+ * (OpenAPI requires operationIds to be unique, and a generated client would
+ * otherwise collide), and a description line naming the replacement.
  *
  * They are documented rather than merely tolerated because they are REGISTERED
  * — `routes/files.ts` binds both spellings to one handler, and
@@ -456,7 +461,7 @@ function deprecateOperations(
 
 const deprecatedFilesPaths = Object.fromEntries(
   Object.entries(canonicalFilesPaths).map(([path, operations]) => [
-    path.replace("/api/files", "/api/documents"),
+    legacyFilesPath(path),
     deprecateOperations(operations as Record<string, unknown>, path),
   ]),
 );

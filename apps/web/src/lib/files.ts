@@ -107,16 +107,6 @@ export function isPublishedFileLogEvent(event: string | null | undefined): boole
 }
 
 /**
- * True for an `image/*` mime — the only content shown as a thumbnail (gallery
- * tiles, run-tab tiles, chat attachments). Lives in the shell because the
- * files surfaces are core: an optional module consumes the shell's helpers,
- * never the reverse.
- */
-export function isImageMime(mime: string | null | undefined): boolean {
-  return !!mime?.startsWith("image/");
-}
-
-/**
  * Markdown detection for the preview modal: an explicit `text/markdown` mime
  * (tolerating a `; charset=…` parameter) or a `.md` filename served with a
  * text-ish mime. The preview route relabels markdown as `text/plain` to defeat

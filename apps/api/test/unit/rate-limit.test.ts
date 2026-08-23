@@ -2,6 +2,7 @@
 
 import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { _resetCacheForTesting } from "@appstrate/env";
 import type { AppEnv } from "../../src/types/index.ts";
 import {
@@ -155,6 +156,74 @@ describe("rateLimit (authenticated)", () => {
     userId = "user-b";
     const res2 = await app.request("/test");
     expect(res2.status).toBe(200);
+  });
+});
+
+describe("deprecated path aliases share one bucket", () => {
+  beforeEach(async () => {
+    resetRateLimiters();
+    await flushRedis();
+  });
+
+  // #1177 registers every `/api/files…` route a second time under its
+  // pre-rename `/api/documents…` spelling, on the SAME handler. The limiter
+  // keys on the matched ROUTE PATTERN, so without canonicalization the alias
+  // gets its own bucket and a client that alternates spellings gets double the
+  // budget the endpoint declares.
+  it("keys a legacy `/documents` route into the same bucket as its `/files` twin", async () => {
+    const app = createApp();
+    app.use("*", async (c, next) => {
+      c.set("user", { id: "user-alias", email: "test@test.com", name: "Test" });
+      return next();
+    });
+    const files = new Hono<AppEnv>();
+    const handler = (c: Context<AppEnv>) => c.json({ ok: true });
+    files.get("/files/:id", rateLimit(1), handler);
+    files.get("/documents/:id", rateLimit(1), handler);
+    app.route("/api", files);
+
+    const canonical = await app.request("/api/files/doc_1");
+    expect(canonical.status).toBe(200);
+
+    // Same identity, same endpoint, other spelling — must be the SAME bucket.
+    const legacy = await app.request("/api/documents/doc_1");
+    expect(legacy.status).toBe(429);
+  });
+
+  // The preview pair is IP-keyed and unauthenticated, so a split bucket there
+  // doubles an ANONYMOUS caller's budget.
+  it("keys the legacy preview alias into the same IP bucket as its twin", async () => {
+    const app = createApp();
+    const preview = new Hono<AppEnv>();
+    const handler = (c: Context<AppEnv>) => c.json({ ok: true });
+    preview.get("/preview/files/:id", rateLimitByIp(1), handler);
+    preview.get("/preview/documents/:id", rateLimitByIp(1), handler);
+    app.route("/", preview);
+
+    const headers = { "X-Forwarded-For": "33.33.33.33" };
+    const canonical = await app.request("/preview/files/doc_1", { headers });
+    expect(canonical.status).toBe(200);
+
+    const legacy = await app.request("/preview/documents/doc_1", { headers });
+    expect(legacy.status).toBe(429);
+  });
+
+  // Guard against the blunt fix: canonicalization must not fold DIFFERENT
+  // endpoints together. `/api/files` and `/api/files/:id` stay separate.
+  it("keeps distinct endpoints in distinct buckets", async () => {
+    const app = createApp();
+    app.use("*", async (c, next) => {
+      c.set("user", { id: "user-distinct", email: "test@test.com", name: "Test" });
+      return next();
+    });
+    const files = new Hono<AppEnv>();
+    const handler = (c: Context<AppEnv>) => c.json({ ok: true });
+    files.get("/files", rateLimit(1), handler);
+    files.get("/files/:id", rateLimit(1), handler);
+    app.route("/api", files);
+
+    expect((await app.request("/api/files")).status).toBe(200);
+    expect((await app.request("/api/files/doc_1")).status).toBe(200);
   });
 });
 

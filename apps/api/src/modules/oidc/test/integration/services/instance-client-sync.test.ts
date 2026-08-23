@@ -208,6 +208,46 @@ describe("syncInstanceClientsFromEnv — drift", () => {
     await expect(syncInstanceClientsFromEnv()).rejects.toThrow(/name/);
   });
 
+  // #1177 renamed the `documents:*` scope resource to `files:*`. A stored row
+  // can still hold the retired spelling — minted between the code deploy and
+  // migration 0044/0045, or written by a replayed request — and a comparison
+  // that canonicalizes only the DECLARED side reports a permanent `scopes`
+  // drift, which `syncInstanceClientsFromEnv` escalates to an
+  // `InstanceClientSyncError`: the platform refuses to boot over two scope sets
+  // that are in fact equal.
+  it("does not drift on a stored LEGACY scope spelling (boot must not refuse)", async () => {
+    setDeclaration([validEntry({ scopes: ["openid", "profile", "files:read"] })]);
+    await syncInstanceClientsFromEnv();
+
+    // Simulate the un-migrated row: same scope set, retired spelling.
+    await db
+      .update(oauthClient)
+      .set({ scopes: ["openid", "profile", "documents:read"] })
+      .where(eq(oauthClient.clientId, "admin-dashboard"));
+
+    await syncInstanceClientsFromEnv(); // Must not throw.
+
+    const [row] = await db
+      .select()
+      .from(oauthClient)
+      .where(eq(oauthClient.clientId, "admin-dashboard"))
+      .limit(1);
+    // Unchanged — a match is a no-op, the sync never rewrites the row.
+    expect(row!.scopes).toEqual(["openid", "profile", "documents:read"]);
+  });
+
+  it("still reports a REAL scope drift when the sets differ", async () => {
+    setDeclaration([validEntry({ scopes: ["openid", "profile", "files:read"] })]);
+    await syncInstanceClientsFromEnv();
+
+    await db
+      .update(oauthClient)
+      .set({ scopes: ["openid", "profile", "documents:delete"] })
+      .where(eq(oauthClient.clientId, "admin-dashboard"));
+
+    await expect(syncInstanceClientsFromEnv()).rejects.toThrow(/scopes/);
+  });
+
   it("treats redirectUris as order-insensitive (no drift on reorder)", async () => {
     setDeclaration([
       validEntry({

@@ -19,6 +19,7 @@
 import type { FileUIPart, UIMessage } from "ai";
 import type { ResolvedChatAttachment } from "@appstrate/core/chat-contract";
 import { formatBytes } from "@appstrate/core/format";
+import { UNNAMED_FILE } from "./ui/run-events.ts";
 
 /** Is `part` an ai-SDK `file` part? */
 function isFileUIPart(part: unknown): part is FileUIPart {
@@ -42,7 +43,9 @@ function partSize(part: FileUIPart): number | null {
  * Size is included when the materialized part carries it.
  */
 function attachmentTextBlock(part: FileUIPart): string {
-  const name = part.filename ?? "file";
+  // Same nameless-file fallback the chips render, so the line the model reads
+  // names the attachment exactly as the user sees it named.
+  const name = part.filename ?? UNNAMED_FILE;
   const size = partSize(part);
   const sizeSuffix = size !== null ? `, ${formatBytes(size)}` : "";
   return `[Attached file: ${name} — ${part.url} — ${part.mediaType}${sizeSuffix}]`;

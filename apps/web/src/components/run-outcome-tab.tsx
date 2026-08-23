@@ -41,6 +41,7 @@ import { useTranslation } from "react-i18next";
 import { PackageOpen } from "lucide-react";
 import { useFiles, type FileDto } from "../hooks/use-files";
 import { featuredRunFile, producedRunFiles } from "../lib/files";
+import { runHasOutcome, runHasOutputValue } from "../lib/run-detail-tabs";
 import { FileListPanel } from "./file-list-panel";
 import { RunFeaturedFile, RunFeaturedFilePlaceholder } from "./run-featured-file";
 import { JsonView } from "./json-view";
@@ -75,11 +76,9 @@ export function RunOutcomeTab(props: RunOutcomeProps) {
       {...props}
       files={data?.data ?? []}
       // The route clamps `limit` to 100 and answers `hasMore` with no cursor
-      // field (paging is `startingAfter=<last id>`). Discarding it truncated a
-      // >100-file run's list with nothing on screen saying so. Surfaced, not
-      // paged — and it never endangers the derived presentation rule (#1177):
-      // a truncated page holds at least 100 rows, never exactly 1. So the
-      // notice only ever has the list, in the several-files shape, to hang off.
+      // field (paging is `startingAfter=<last id>`). It describes the run's
+      // whole CONTAINER, inputs included — see `pageCutProducedFiles` below for
+      // why this pane cannot show a notice off it alone.
       hasMore={data?.hasMore ?? false}
       isLoading={isLoading}
       error={error}
@@ -107,7 +106,11 @@ export function RunOutcomeView({
   error,
 }: RunOutcomeProps & {
   files: FileDto[];
-  /** The list query's page was capped — the run has files beyond it. */
+  /**
+   * The list query's page was capped — the run's file CONTAINER holds rows
+   * beyond it. Not "the produced list was cut": the container ORs the run's own
+   * files with the ones its input references, so the inputs count toward it.
+   */
   hasMore?: boolean;
   isLoading: boolean;
   error: unknown;
@@ -125,7 +128,9 @@ export function RunOutcomeView({
   // opened, several are only listed and the user picks.
   const featured = useMemo(() => featuredRunFile(files, runId), [files, runId]);
 
-  const hasOutput = !!output && Object.keys(output).length > 0;
+  // Shared with the page, which feeds the same predicate over the same object
+  // into the tab controller — see `runHasOutputValue`.
+  const hasOutput = runHasOutputValue(output);
   // Decided by the run DTO's own count, not by the list query's phase. Reading
   // `isLoading || error` here painted the card — spinner and all — on every run
   // with an `output` value and no file, then removed it a moment later (a layout
@@ -149,7 +154,30 @@ export function RunOutcomeView({
   // `produced.length === 1`, so the two branches can never both be taken.
   const singleFileShape = isLoading ? producedFileCount === 1 : featured !== undefined;
 
-  if (!hasOutput && !hasFiles && !hasMemory) {
+  // Was THIS pane's list cut — not the container's.
+  //
+  // `hasMore` alone answers the wrong question: the run's file query ORs
+  // `files.run_id = X` with the ids its input references, so a run with 40
+  // produced files and 70 inputs is 110 rows and reports `hasMore` while every
+  // one of its 40 produced files is on screen. Reading it here put a
+  // "truncated" notice under a complete list, and left the Fichiers tab — the
+  // pane that DOES list the container, and is cut by the same page — silent.
+  //
+  // The honest comparison is against the run DTO's own produced count, the
+  // authority on how many there are (`file_counts.output`, the server counting
+  // `run_id = this run AND purpose = 'agent_output'`). Fewer produced rows
+  // arrived than exist ⇒ the page cut some of them off.
+  //
+  // `hasMore` still gates it, as a staleness guard rather than the signal: an
+  // uncapped page holds the whole container, so the produced list is complete
+  // BY CONSTRUCTION and a count that momentarily disagrees (a file deleted
+  // between the two reads) must not raise a notice about it.
+  const pageCutProducedFiles = hasMore && produced.length < producedFileCount;
+
+  // The SAME rule the tab controller selects the default pane with, not its
+  // hand-written De Morgan dual: a drift between the two opens the page on a
+  // pane that says the run produced nothing, and the capture is frozen.
+  if (!runHasOutcome({ hasFiles, hasOutput, hasMemory })) {
     return (
       <EmptyState
         message={t("run.outcomeEmpty")}
@@ -182,7 +210,7 @@ export function RunOutcomeView({
               empty={{ message: t("run.empty", { ns: "files" }), compact: true }}
               runId={runId}
             />
-            {hasMore && (
+            {pageCutProducedFiles && (
               <p className="text-muted-foreground mt-2 text-xs">
                 {t("run.producedFilesTruncated")}
               </p>

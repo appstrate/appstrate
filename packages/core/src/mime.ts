@@ -17,6 +17,9 @@
  *
  * See `@appstrate/afps-shared/mime` for the full contract, including why
  * `application/octet-stream` is deliberately absent from the text set.
+ *
+ * {@link isImageMime} is the one primitive defined HERE rather than re-exported
+ * — see its own note for why it does not belong in the shared module.
  */
 
 export {
@@ -25,3 +28,25 @@ export {
   isTextShapedMime,
   isTextShapedContentType,
 } from "@appstrate/afps-shared/mime";
+
+/**
+ * True for an `image/*` mime — the only content any surface renders as a
+ * thumbnail (the gallery tiles, the run Files tab tiles, the chat attachment
+ * chips).
+ *
+ * Lives here, not in the web shell, for the same reason
+ * `PUBLISHED_FILE_LOG_EVENTS` lives in `@appstrate/core/file-uri`: two
+ * independent renderers of the same file rows — the shell's file surfaces and
+ * the chat module's attachment chips — must agree on which rows get a
+ * thumbnail, and each kept its own verbatim copy of the predicate. The shell's
+ * copy even carried a docblock claiming the module consumed it, which it never
+ * did.
+ *
+ * Local to core rather than pushed down into `@appstrate/afps-shared`: this is
+ * a PRESENTATION classification (does it render as a picture), not the
+ * text-vs-binary transport policy the shared module owns, and no `afps-runtime`
+ * consumer asks the question.
+ */
+export function isImageMime(mime: string | null | undefined): boolean {
+  return !!mime?.startsWith("image/");
+}

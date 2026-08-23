@@ -42,6 +42,7 @@ import {
   type RunAndWaitFile,
 } from "@appstrate/core/run-and-wait-client";
 import { parseFileUri, fileUri } from "@appstrate/core/file-uri";
+import { CONTEXT_FREE_FILENAMES_PHRASE } from "@appstrate/afps-runtime/bundle";
 import type { Actor } from "@appstrate/connect";
 import { getCatalog, collectReferencedSchemas, type CatalogOperation } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
@@ -798,8 +799,7 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       "published as a file when the run ends and returned here as a `resource_link` — when the " +
       "goal is a downloadable file (report, CSV, image…), instruct the run's `prompt` to write it " +
       "into `outputs/` with a descriptive, task-specific filename that remains understandable " +
-      "outside this run; never use context-free names such as `report.md`, `summary.md`, or " +
-      "`output.md`. " +
+      `outside this run; never use context-free names such as ${CONTEXT_FREE_FILENAMES_PHRASE}. ` +
       "For several files or an executable package, instruct the run to build a `.zip` or `.afps` " +
       "archive with its normal shell tools, then publish that single archive with " +
       "`publish_file`. " +
@@ -899,7 +899,7 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
             "alongside `manifest` (never nested inside it). Tell the run to call the `log` tool " +
             "to report each meaningful step — those lines are what the chat shows live. When the " +
             "run produces files, require descriptive, task-specific names that remain clear " +
-            "outside this run; never generic names such as `report.md`, `summary.md`, or `output.md`.",
+            `outside this run; never generic names such as ${CONTEXT_FREE_FILENAMES_PHRASE}.`,
         },
         connection_overrides: {
           type: "object",

@@ -43,6 +43,7 @@
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import { isPlainObject } from "@appstrate/core/safe-json";
 import { fileUri } from "@appstrate/core/file-uri";
+import { LEGACY_RUNTIME_TOOL_EVENT_TYPES } from "@appstrate/core/runtime-tool-defs";
 import type { Db } from "@appstrate/db/client";
 import { modelCostSchema, type ModelCost } from "@appstrate/core/module";
 import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
@@ -55,6 +56,42 @@ import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { TokenUsage } from "./types.ts";
 import { scheduleRunMetricBroadcast } from "../run-metric-broadcaster.ts";
+
+/** The canonical event type this sink ingests as "a run file was published". */
+const FILE_PUBLISHED_EVENT_TYPE = "file.published";
+
+/**
+ * #1177's rename applied to an event type's SUBJECT segment
+ * (`document.published` → `file.published`). The rename was total — the
+ * `document` subject became `file` across the whole run-event vocabulary — so
+ * the forward mapping of a retired spelling IS this substitution.
+ */
+function canonicalRuntimeToolEventType(type: string): string {
+  return type.startsWith("document.") ? `file.${type.slice("document.".length)}` : type;
+}
+
+/**
+ * Every spelling this sink must ingest as a published run file: the canonical
+ * type plus each retired one `@appstrate/core` still ACCEPTS.
+ *
+ * READ from `LEGACY_RUNTIME_TOOL_EVENT_TYPES` rather than restated. That table
+ * calls itself "the one place a retired spelling is mapped forward", and
+ * `reEmitRuntimeToolEvents` forwards everything in it — so an alias added there
+ * but missing from a hand-written `case` here would fall straight through to
+ * `default`: the file stored, and nothing anywhere in the run log saying why.
+ * Reading the table makes that drift impossible for the published-file event.
+ *
+ * A future alias whose forward mapping is NOT the `document.` → `file.`
+ * substitution belongs to some other canonical event and is deliberately left
+ * out of this set — it would need its own `case`, exactly as `memory.added` and
+ * `pinned.set` (accepted by core, intentionally no-ops here) already do.
+ */
+const FILE_PUBLISHED_EVENT_TYPES: ReadonlySet<string> = new Set<string>([
+  FILE_PUBLISHED_EVENT_TYPE,
+  ...LEGACY_RUNTIME_TOOL_EVENT_TYPES.filter(
+    (type) => canonicalRuntimeToolEventType(type) === FILE_PUBLISHED_EVENT_TYPE,
+  ),
+]);
 
 /**
  * Dispatch one {@link RunEvent} through the platform write-through table.
@@ -78,7 +115,16 @@ export async function persistRunEvent(
     modelCost?: ModelCost | null;
   } = {},
 ): Promise<string | null> {
-  switch (event.type) {
+  // Route every accepted spelling of the published-file event onto its
+  // canonical type BEFORE dispatch, so the switch below carries one `case` and
+  // the alias list stays where core owns it. `RunEvent.type` is an open
+  // `string` (AFPS wire envelope), so switching on a derived value costs no
+  // narrowing.
+  const eventType = FILE_PUBLISHED_EVENT_TYPES.has(event.type)
+    ? FILE_PUBLISHED_EVENT_TYPE
+    : event.type;
+
+  switch (eventType) {
     case "output.emitted": {
       await appendRunLog(
         scope,
@@ -111,21 +157,37 @@ export async function persistRunEvent(
       return null;
     }
 
-    // `document.published` (with a `document_id` payload key) is the pre-#1177
-    // spelling. Both are accepted forever: the runtime-pi image and the
-    // platform deploy independently, so a container built before the rename
-    // still emits the old shape, and an unmatched event type falls through to
-    // `default` — i.e. the file would be stored but never appear in the run
-    // log, with nothing anywhere saying why. Only `file.published` /`file_id`
-    // are ever EMITTED (see `filePublishedEvent()` in @appstrate/core).
-    case "document.published":
-    case "file.published": {
+    // Reached by `file.published` AND by every retired spelling in
+    // `FILE_PUBLISHED_EVENT_TYPES` above (today: `document.published`). Both
+    // are accepted forever: the runtime-pi image and the platform deploy
+    // independently, so a container built before the rename still emits the old
+    // shape. Only `file.published` / `file_id` are ever EMITTED (see
+    // `filePublishedEvent()` in @appstrate/core).
+    case FILE_PUBLISHED_EVENT_TYPE: {
       // A run file was stored on the platform (via the `publish_file`
       // tool or the entrypoint outputs sweep). The `files` row already
       // exists (created by the POST /api/runs/:id/files route) — this
       // event carries no new DB state, it only persists a run_log so the
       // published file streams over the existing run_log SSE and replays.
       // Stored as `type='result' event='file'`, mirroring output.
+      //
+      // COUPLING — the literal `"file"` tag written below is the CANONICAL
+      // member of `PUBLISHED_FILE_LOG_EVENTS` (`@appstrate/core/file-uri`,
+      // `["file", "document"]`), the list every reader filters run_log lines
+      // with (`apps/web/src/lib/files.ts`, `module-chat`'s run-events
+      // projection). It is not derived from that list on purpose: the list is a
+      // READER's alias set — it exists to accept the rows this writer used to
+      // write — so deriving the write from it would invert the direction. If
+      // this tag ever changes, `PUBLISHED_FILE_LOG_EVENTS[0]` must change with
+      // it and the old value must stay in the list for historical rows.
+      //
+      // The PAYLOAD-key half of the same rename. It cannot be derived the way
+      // the type is: core catalogues retired event TYPES
+      // (`LEGACY_RUNTIME_TOOL_EVENT_TYPES`) and nothing catalogues retired
+      // payload keys, so there is no table to consult — only `@appstrate/core`
+      // could own one, and it does not. Kept literal, and read only as a
+      // fallback: a pre-rename image emits `document.published` with
+      // `document_id`, everything since emits `file.published` with `file_id`.
       const rawFileId = event.file_id ?? event.document_id;
       const fileId = typeof rawFileId === "string" ? rawFileId : null;
       if (fileId) {

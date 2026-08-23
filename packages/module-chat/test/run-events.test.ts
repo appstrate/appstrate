@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
+import { runProducedFilesPath } from "@appstrate/core/run-and-wait-client";
 import { fileURLToPath } from "node:url";
 import {
   autoPresentFile,
@@ -589,11 +590,17 @@ describe("useRunLogStream source guards", () => {
   });
 
   it("reads the produced-file set from the authoritative endpoint, filtered", () => {
-    // The URL the hook builds is invisible to a unit test. Dropping `purpose`
-    // (or the `run_id` this list is keyed on) would list files the run merely
-    // CONSUMED and silently switch the auto-present rule off.
-    expect(hook).toContain("purpose=agent_output");
-    expect(hook).toContain("run_id=${encodeURIComponent(runId)}");
+    // Two halves, because neither alone can see the whole claim. The hook no
+    // longer spells the URL out — it and `fetchRunFiles` share one builder — so
+    // the invariant itself is asserted directly on that builder, and only the
+    // fact that the hook REACHES it stays a grep: without a DOM harness nothing
+    // can observe the call. Dropping `purpose` (or the `run_id` this list is
+    // keyed on) would list files the run merely CONSUMED and silently switch
+    // the auto-present rule off.
+    expect(hook).toContain("runProducedFilesPath(runId)");
+    const path = runProducedFilesPath("run_abc");
+    expect(path).toContain("purpose=agent_output");
+    expect(path).toContain("run_id=run_abc");
   });
 });
 

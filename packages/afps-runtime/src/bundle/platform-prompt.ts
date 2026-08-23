@@ -130,6 +130,39 @@ export interface PlatformPromptOptions {
   deliverables?: boolean;
 }
 
+/**
+ * Context-free deliverable filenames a model reaches for when it is not told to
+ * be specific. Banned by every prompt that instructs a run to write files.
+ *
+ * The rendered {@link CONTEXT_FREE_FILENAMES_PHRASE} below is exported because
+ * that instruction is issued from more than one prompt — the
+ * platform run prompt (below) and the MCP `run_and_wait` tool descriptions
+ * (`apps/api/src/modules/mcp/tools.ts`) — and the copies had already drifted:
+ * the MCP sites banned three of these six, omitting exactly the three (`result`,
+ * `document`, `file`) that #1177's vocabulary makes most attractive to a model.
+ * One list, interpolated everywhere, is the only shape that cannot drift again.
+ */
+const CONTEXT_FREE_DELIVERABLE_FILENAMES: readonly string[] = [
+  "report.md",
+  "summary.md",
+  "output.md",
+  "result.md",
+  "document.md",
+  "file.md",
+];
+
+/**
+ * {@link CONTEXT_FREE_DELIVERABLE_FILENAMES} rendered for a prompt sentence:
+ * `` `report.md`, `summary.md`, …, or `file.md` ``. Interpolate it after
+ * "never use context-free names such as " — it supplies no trailing
+ * punctuation.
+ */
+export const CONTEXT_FREE_FILENAMES_PHRASE: string = (() => {
+  const quoted = CONTEXT_FREE_DELIVERABLE_FILENAMES.map((name) => `\`${name}\``);
+  const last = quoted[quoted.length - 1]!;
+  return quoted.length > 1 ? `${quoted.slice(0, -1).join(", ")}, or ${last}` : last;
+})();
+
 export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   const sections: string[] = [];
   const { context } = opts;
@@ -430,7 +463,7 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
         "descriptive, task-specific kebab-case filename in the user's language, including enough " +
         "subject or scope to remain understandable outside this run (for example, " +
         "`./outputs/analyse-concurrents-restaurants-lyon.md`). Never use context-free names such " +
-        "as `report.md`, `summary.md`, `output.md`, `result.md`, `document.md`, or `file.md`. If the user " +
+        `as ${CONTEXT_FREE_FILENAMES_PHRASE}. If the user ` +
         "expects a written report or summary without specifying a format, use markdown with such " +
         "a descriptive filename.\n",
     );

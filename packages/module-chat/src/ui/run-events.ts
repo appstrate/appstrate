@@ -310,17 +310,31 @@ export interface ChatRunFile {
 }
 
 /**
- * Display name for a publication that carries none. The sink writes
- * `name: null` whenever the emitter omitted it
+ * Display name AND download filename for a file that carries none. The sink
+ * writes `name: null` whenever the emitter omitted it
  * (`appstrate-event-sink.ts` → `file.published`), so a nameless frame is
  * reachable, not hypothetical. Dropping such a frame would be the worse
  * failure by far: the count of produced files IS the auto-present rule, so one
  * missing file turns a two-file run into a single-file run and opens the wrong
  * thing. A chip with a generic label still opens, still downloads, and — once
  * the run is terminal — is relabelled by the authoritative `/api/files` read.
- * Matches the fallback the thread already renders for a nameless attachment.
+ *
+ * Exported and shared by every nameless-file site in the module (the run-card
+ * chips, the thread's sent-attachment chips, the model-facing attachment line,
+ * the run-notice code span) — the fallback WAS hand-written at six of them,
+ * which is how the same file could read `file` on the card and something else
+ * in the thread.
+ *
+ * NOT translated, deliberately, and that is load-bearing at
+ * `fileActivation`: this same string becomes the name the browser saves the
+ * download under, so a localized value would save the file as
+ * «Fichier sans nom» for one reader and something else for the next. The chip
+ * LABEL is a different question and gets `t("file.previewOf" | "file.downloadOf")`
+ * with the translated `file.unnamed` placeholder inside it; `file.unnamed`
+ * ("ce fichier") is a sentence fragment for that interpolation, not a name a
+ * chip can wear on its own.
  */
-const UNNAMED_FILE = "file";
+export const UNNAMED_FILE = "file";
 
 function asChatRunFile(raw: unknown): ChatRunFile | undefined {
   const r = asRecord(raw);

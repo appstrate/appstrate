@@ -7,13 +7,16 @@ import {
   fileRunHref,
   featuredRunFile,
   producedRunFiles,
-  isImageMime,
   isMarkdownFile,
   isPublishedFileLogEvent,
   mimeIconFor,
   runFileDirection,
   type FileLike,
 } from "../files.ts";
+// Not a web helper any more: the shell and the chat module render the same file
+// rows and each kept a verbatim copy, so the predicate moved to core (W5). The
+// coverage stays here — the web file surfaces are its only in-repo readers.
+import { isImageMime } from "@appstrate/core/mime";
 
 function file(overrides: Partial<FileLike>): FileLike {
   return {

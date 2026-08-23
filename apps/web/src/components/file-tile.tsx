@@ -28,7 +28,8 @@ import { Button } from "@appstrate/ui/components/button";
 import { formatBytes } from "@appstrate/core/format";
 import { cn } from "@appstrate/ui/cn";
 import { formatDateField } from "../lib/format-date";
-import { isImageMime, mimeIconFor, fileRunHref, fileExpiryInfo } from "../lib/files";
+import { mimeIconFor, fileRunHref, fileExpiryInfo, type RunFileDirection } from "../lib/files";
+import { isImageMime } from "@appstrate/core/mime";
 import { useFileImageSrc, type FileDto } from "../hooks/use-files";
 
 /**
@@ -112,7 +113,7 @@ export function FileTile({
   /** Show the producing-agent label + a link to its run (gallery). */
   showRunLink?: boolean;
   /** Run tab only: whether this run consumed the file (input) or produced it (output). */
-  direction?: "input" | "output";
+  direction?: RunFileDirection;
 }) {
   const { t } = useTranslation("files");
   const runHref = showRunLink ? fileRunHref(file) : undefined;

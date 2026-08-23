@@ -26,6 +26,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { runProducedFilesPath } from "@appstrate/core/run-and-wait-client";
 import { useChatHeaders } from "./runtime-context.ts";
 import {
   buildRunSseUrl,
@@ -187,10 +188,10 @@ export function useRunLogStream(
      */
     const readProducedFiles = async (): Promise<SweepRead> => {
       try {
-        const res = await fetch(
-          `/api/files?run_id=${encodeURIComponent(runId)}&purpose=agent_output&limit=100`,
-          { headers, credentials: "include" },
-        );
+        const res = await fetch(runProducedFilesPath(runId), {
+          headers,
+          credentials: "include",
+        });
         if (!res.ok) return "failed";
         const page = producedFilesFromFileList(await res.json(), runId);
         if (!page) return "failed";

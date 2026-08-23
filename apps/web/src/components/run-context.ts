@@ -4,7 +4,8 @@
  * Pure logic behind "how full is this run's context window".
  *
  * Two surfaces read it — the run-header gauge (`ContextGaugeReadout`) and the
- * Info tab's per-turn table (`TurnsTable`) — and they must agree: a header
+ * Exécution pane's per-turn table (`TurnsTable`, in `run-execution-tab.tsx`) —
+ * and they must agree: a header
  * saying `64 %` above a table whose widest bar is always full is exactly the
  * disagreement #1046 exists to remove. This module is the single derivation;
  * the two components only render what it returns.
@@ -88,7 +89,7 @@ export function fractionOfWindow(tokens: number, window: number): number {
  *     informs nobody — 128k is comfortable in a 1M window and terminal in a
  *     200k one, and the header's whole job is to answer "how much headroom is
  *     left" at a glance. Naming the cost of that choice: the number is not
- *     lost, it is relocated — the Info tab's per-turn table still lists every
+ *     lost, it is relocated — the Exécution pane's per-turn table still lists every
  *     turn's absolute context, and falls back to its own peak-relative bar
  *     precisely so a window-less run keeps a readable breakdown somewhere.
  *     Fabricating a 200k default client-side is the one option rejected

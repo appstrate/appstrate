@@ -37,7 +37,7 @@ import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
 import { runKeys, invalidateRunLogs } from "../lib/query-keys";
 import { inlineRunDisplayName, runPageTitle } from "../lib/run-title";
 import { Play } from "lucide-react";
-import type { RunDetailTab } from "../lib/run-detail-tabs";
+import { runHasOutputValue, type RunDetailTab } from "../lib/run-detail-tabs";
 
 /** Wire shape of a persisted log row (spec `RunLog`); `createdAt` is an ISO string. */
 type RunLogEntry = components["schemas"]["RunLog"];
@@ -108,7 +108,8 @@ export function RunDetailPage() {
     }
     const { entries, output } = buildLogEntries(logs, { isRunTerminal: isTerminal });
     // Turn breadcrumbs are filtered OUT of the log stream by `buildLogEntries`
-    // and projected here into the Info tab's per-turn table instead.
+    // and projected here into the Exécution pane's per-turn table instead
+    // (`TurnsTable` in `run-execution-tab.tsx`, fed by the `turns` prop below).
     return { historicalLogs: entries, structuredOutput: output, turnRows: buildTurnRows(logs) };
   }, [logs, isTerminal]);
 
@@ -119,7 +120,11 @@ export function RunDetailPage() {
   const execResult = run?.result as components["schemas"]["Run"]["result"];
   const finalOutput =
     structuredOutput || (execResult?.output as Record<string, unknown> | undefined) || null;
-  const hasOutput = !!finalOutput && Object.keys(finalOutput).length > 0;
+  // One predicate, shared with the Outcome pane, which is handed this exact
+  // object as its `output` prop and used to re-derive the answer itself. The
+  // pane's «Ce run n'a rien produit» state and this tab-selection input have to
+  // agree, and a second spelling one prop away is how they stop agreeing.
+  const hasOutput = runHasOutputValue(finalOutput);
   const allLogs = historicalLogs;
 
   // Run-level memory rows (only those touched during this run).
@@ -189,7 +194,8 @@ export function RunDetailPage() {
     onMetric: useCallback(
       (metric: RunMetricEvent) => {
         // Patch the cached run row with the running token usage + cost
-        // so the Info tab reflects live progress without polling.
+        // so the header readout above and the Exécution pane's Usage card
+        // (`run-execution-tab.tsx`) reflect live progress without polling.
         // `runs.cost` is the cached aggregate written at finalize on
         // the server; mid-run we render the broadcaster's
         // `cost_so_far` instead. The next terminal-status invalidation

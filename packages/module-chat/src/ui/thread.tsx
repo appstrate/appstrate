@@ -44,16 +44,16 @@ import {
 } from "./tool-uis.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
-import { resolveAttachmentContent } from "./run-events.ts";
+import { resolveAttachmentContent, UNNAMED_FILE } from "./run-events.ts";
 import { stagedImagePreviewUrl } from "./upload.ts";
 import { useChatHost } from "./runtime-context.ts";
 import { sourceMessage, turnErrorState } from "./turn-error-state.ts";
 import {
   FileAttachment,
-  isImageMime,
   ATTACHMENT_CHIP_CLASS,
   ATTACHMENT_IMAGE_CLASS,
 } from "./file-attachment.tsx";
+import { isImageMime } from "@appstrate/core/mime";
 
 export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
   return (
@@ -187,7 +187,7 @@ function FileAttachmentPart(props: { filename?: string }) {
   return (
     <div className="bg-background text-foreground mt-1 inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs">
       <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
-      <span className="max-w-52 truncate font-medium">{props.filename ?? "file"}</span>
+      <span className="max-w-52 truncate font-medium">{props.filename ?? UNNAMED_FILE}</span>
     </div>
   );
 }
@@ -204,7 +204,7 @@ function InertAttachmentChip({ name }: { name: string }) {
   return (
     <div className={ATTACHMENT_CHIP_CLASS}>
       <FileIcon className="text-muted-foreground size-3.5 shrink-0" />
-      <span className="truncate font-medium">{name || "file"}</span>
+      <span className="truncate font-medium">{name || UNNAMED_FILE}</span>
     </div>
   );
 }

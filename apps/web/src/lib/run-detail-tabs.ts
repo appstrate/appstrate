@@ -75,6 +75,55 @@ export interface RunTabAvailability {
 }
 
 /**
+ * What the Outcome pane is holding, as three independent booleans.
+ *
+ * Its own type, distinct from {@link RunTabAvailability}, because the two
+ * callers know the file half differently: the page has only the run DTO's
+ * COUNT, while the pane has resolved rows too. Both collapse to "are there
+ * produced files", which is all {@link runHasOutcome} asks.
+ */
+interface RunOutcomeContent {
+  /** The run produced at least one file. */
+  hasFiles: boolean;
+  /** The `output` tool emitted a value. */
+  hasOutput: boolean;
+  /** The run wrote or touched at least one memory row. */
+  hasMemory: boolean;
+}
+
+/**
+ * Does this run have an OUTCOME — anything at all for the Outcome pane to show?
+ *
+ * THE single rule, and it has to be single. Two callers depend on it and they
+ * are on opposite sides of the same coin:
+ *
+ *  - {@link initialRunDetailTab} sends the reader to `outcome` when it is true;
+ *  - `run-outcome-tab.tsx` renders «Ce run n'a rien produit» when it is false.
+ *
+ * Written out twice — as De Morgan duals, in two files — they drifted silently
+ * in one direction into "the page opens on a pane that says the run produced
+ * nothing", and in the other into "the outcome sits behind an unadvertised
+ * click". Neither self-corrects: the tab capture is FROZEN
+ * ({@link capturedRunDetailTab}), so a later render cannot walk it back.
+ */
+export function runHasOutcome({ hasFiles, hasOutput, hasMemory }: RunOutcomeContent): boolean {
+  return hasFiles || hasOutput || hasMemory;
+}
+
+/**
+ * Does an `output` tool value count as present?
+ *
+ * The run DTO carries `{}` for a run whose tool emitted an empty object, and
+ * an empty object is not an outcome — it would open the pane on a card holding
+ * `{}`. Exported because the page (feeding {@link RunTabAvailability}) and the
+ * pane (rendering the same value) each computed it, over the SAME object the
+ * page hands down: two spellings of one predicate, one prop apart.
+ */
+export function runHasOutputValue(output: Record<string, unknown> | null | undefined): boolean {
+  return !!output && Object.keys(output).length > 0;
+}
+
+/**
  * Select the most useful pane when a run is opened without an explicit hash.
  *
  * Anything the run produced — a file, an output value, a memory write — leads
@@ -87,8 +136,9 @@ export function initialRunDetailTab({
   hasOutput,
   hasMemory,
 }: RunTabAvailability): RunDetailTab {
-  if (producedFileCount > 0 || hasOutput || hasMemory) return "outcome";
-  return "execution";
+  return runHasOutcome({ hasFiles: producedFileCount > 0, hasOutput, hasMemory })
+    ? "outcome"
+    : "execution";
 }
 
 /**

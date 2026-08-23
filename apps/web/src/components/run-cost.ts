@@ -4,8 +4,9 @@
  * Pure logic behind "how do I render a run's cost, given what the platform
  * actually knows about its pricing".
  *
- * Two surfaces show the number — the run header readout and the Info tab's
- * Usage card — and they must agree: a header saying `—` above a card saying
+ * Two surfaces show the number — the run header readout (`run-detail.tsx`) and
+ * the Exécution pane's Usage card (`run-execution-tab.tsx`) — and they must
+ * agree: a header saying `—` above a card saying
  * `$0.0000` is worse than either alone. This module is the single decision;
  * {@link RunCostReadout} (`run-cost-readout.tsx`) is its only renderer.
  *

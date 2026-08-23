@@ -21,7 +21,8 @@ import { totalTokens, type TokenUsage } from "@appstrate/core/token-usage";
  *
  * The count goes through `totalTokens` so it covers the same four buckets the
  * cost prices — `input_tokens` is net of cache, so an input+output sum would
- * omit the bulk of the consumption on any cached run and contradict the Info tab.
+ * omit the bulk of the consumption on any cached run and contradict the four
+ * buckets the Exécution pane lists (`run-execution-tab.tsx`, Usage card).
  *
  * ABSENT vs ZERO are not the same fact. `runs.token_usage` is `null` on a run
  * that failed before reaching the model, and `totalTokens({})` would turn that

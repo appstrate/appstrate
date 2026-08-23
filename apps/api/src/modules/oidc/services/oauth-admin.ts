@@ -1005,16 +1005,25 @@ export async function compareDeclaredClientWithStored(
       declared: declared.postLogoutRedirectUris,
     });
   }
-  // Compare on the CANONICAL spelling: the row was normalized on insert
-  // (`canonicalizeValidScopes`) and by migration 0044, while the env
-  // declaration is whatever the operator wrote. Comparing raw would report a
-  // permanent, unfixable drift on an env that still says `documents:read`
-  // (#1177) — the two ARE the same scope set.
+  // Compare on the CANONICAL spelling — on BOTH sides. The env declaration is
+  // whatever the operator wrote; the row is *usually* normalized (on insert by
+  // `canonicalizeValidScopes`, retroactively by migration 0044), but "usually"
+  // is not an invariant this comparison may assume: `narrowScopeToClient`
+  // (`cli-tokens.ts`) documents the same exposure and canonicalizes both sides
+  // for it — a row minted between the code deploy and the migration, an
+  // operator-set `OIDC_INSTANCE_CLIENTS` still listing the old resource, or a
+  // replayed request all put a pre-#1177 `documents:read` in front of this
+  // check. Canonicalizing only the declaration turns such a row into a
+  // permanent `drift`, which `syncInstanceClientsFromEnv` escalates to an
+  // `InstanceClientSyncError` — i.e. the platform REFUSES TO BOOT over two
+  // scope sets that are in fact equal. Both sides are also REPORTED canonical:
+  // a mismatch list that mixes spellings is unreadable as a diff.
   const declaredScopes = canonicalizeScopes(declared.scopes);
-  if (!setEquals(row.scopes ?? [], declaredScopes)) {
+  const storedScopes = canonicalizeScopes(row.scopes ?? []);
+  if (!setEquals(storedScopes, declaredScopes)) {
     mismatches.push({
       field: "scopes",
-      stored: row.scopes ?? [],
+      stored: storedScopes,
       declared: declaredScopes,
     });
   }

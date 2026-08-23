@@ -48,7 +48,7 @@ import { db } from "@appstrate/db/client";
 import { chatSessions, files, runs } from "@appstrate/db/schema";
 import { fileUri } from "@appstrate/core/file-uri";
 import { persistNotice } from "./persistence.ts";
-import { buildRunPageHref } from "./ui/run-events.ts";
+import { buildRunPageHref, UNNAMED_FILE } from "./ui/run-events.ts";
 import { logger } from "./logger.ts";
 
 /** One file named in the notice. */
@@ -93,7 +93,7 @@ function renderNoticeName(name: string): string {
     flattened.length > NOTICE_NAME_MAX_CHARS
       ? `${flattened.slice(0, NOTICE_NAME_MAX_CHARS - 1)}…`
       : flattened;
-  return `\`${clipped || "file"}\``;
+  return `\`${clipped || UNNAMED_FILE}\``;
 }
 
 /**

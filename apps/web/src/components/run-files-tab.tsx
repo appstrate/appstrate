@@ -34,22 +34,66 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useFiles } from "../hooks/use-files";
+import { useFiles, type FileDto } from "../hooks/use-files";
 import { FileListPanel, type DirectionFilter } from "./file-list-panel";
 
+/** Fetches the run's whole file container and hands it to the view. */
 export function RunFilesTab({ runId }: { runId: string }) {
-  const { t } = useTranslation("files");
   const { data, isLoading, error } = useFiles({ runId, limit: 100 });
+  return (
+    <RunFilesView
+      runId={runId}
+      files={data?.data ?? []}
+      // The route clamps `limit` to 100 and answers `hasMore` with no cursor
+      // field. `hasMore` describes the run's file CONTAINER — every row this
+      // pane lists — so here, unlike on the Outcome pane, it is exactly the
+      // right predicate and needs no correction.
+      hasMore={data?.hasMore ?? false}
+      isLoading={isLoading}
+      error={error}
+    />
+  );
+}
+
+/**
+ * The pane itself, fed an already-resolved list. Split from the fetch so the
+ * truncation notice — the one decision here that is not the panel's — is
+ * testable without a query harness.
+ */
+export function RunFilesView({
+  runId,
+  files,
+  hasMore,
+  isLoading,
+  error,
+}: {
+  runId: string;
+  files: FileDto[];
+  /** The list query's page was capped — rows of this run's container are missing. */
+  hasMore?: boolean;
+  isLoading: boolean;
+  error: unknown;
+}) {
+  const { t } = useTranslation("files");
   const [direction, setDirection] = useState<DirectionFilter>("all");
 
   return (
-    <FileListPanel
-      files={data?.data ?? []}
-      isLoading={isLoading}
-      error={error}
-      filter={{ axis: "direction", value: direction, onChange: setDirection }}
-      empty={{ message: t("run.empty"), hint: t("run.emptyHint"), compact: true }}
-      runId={runId}
-    />
+    <>
+      <FileListPanel
+        files={files}
+        isLoading={isLoading}
+        error={error}
+        filter={{ axis: "direction", value: direction, onChange: setDirection }}
+        empty={{ message: t("run.empty"), hint: t("run.emptyHint"), compact: true }}
+        runId={runId}
+      />
+      {/* This pane calls itself the COMPLETE view of the run, so a silently
+          short list is the one failure it cannot afford — and it is the pane
+          the 100-row page actually cuts, since it lists the whole container
+          `hasMore` describes. The direction filter narrows what is DISPLAYED
+          but not what was fetched, so the notice stands whatever is selected:
+          the missing rows could be inputs, outputs, or both. */}
+      {hasMore && <p className="text-muted-foreground mt-2 text-xs">{t("run.truncated")}</p>}
+    </>
   );
 }

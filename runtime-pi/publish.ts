@@ -197,6 +197,14 @@ export interface RunFileUploaderDeps {
 export function createRunFileUploader(deps: RunFileUploaderDeps): FileUploader {
   const fetchFn = deps.fetchFn ?? fetch;
   const sleep = deps.sleepFn ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  // PLATFORM SKEW — deliberately NO `/documents` fallback here, unlike the
+  // input-side probe in `provision.ts`. The asymmetry is by design and is
+  // documented in `CHANGELOG.md` → "Deploy order: roll the PLATFORM first, then
+  // the runtime image": on the input side a 404 is ambiguous and cheap to probe;
+  // on the upload side a new image against an old platform is a HARD failure
+  // that the release note mitigates by ordering the deploy, not by a fallback.
+  // Do not add one here, and do not delete `provision.ts`'s on the assumption
+  // the two sites should match.
   const url = deps.sinkUrl.replace(/\/events$/, "/files");
 
   return async (relPath, name) => {

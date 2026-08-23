@@ -14,14 +14,11 @@
  */
 
 import { DownloadIcon, EyeIcon } from "lucide-react";
+import { isImageMime } from "@appstrate/core/mime";
 import { fileActivation } from "./file-activation.ts";
+import { UNNAMED_FILE } from "./run-events.ts";
 import { useChatHost } from "./runtime-context.ts";
 import type { OpenFile } from "./runtime-context.ts";
-
-/** True for an `image/*` mime — the only content shown as a thumbnail. */
-export function isImageMime(mime: string | null | undefined): boolean {
-  return !!mime?.startsWith("image/");
-}
 
 /** Base chip look, shared with the inert composer/attachment chips in the thread. */
 export const ATTACHMENT_CHIP_CLASS =
@@ -63,7 +60,7 @@ function AttachmentChip({
       className={`${ATTACHMENT_CHIP_CLASS} hover:bg-muted`}
     >
       <Icon className="text-muted-foreground size-3.5 shrink-0" />
-      <span className="truncate font-medium">{name || "file"}</span>
+      <span className="truncate font-medium">{name || UNNAMED_FILE}</span>
     </button>
   );
 }

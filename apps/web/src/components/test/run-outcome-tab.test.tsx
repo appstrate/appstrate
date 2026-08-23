@@ -24,6 +24,7 @@ import filesFr from "../../locales/fr/files.json";
 import i18n, { i18nReady } from "../../i18n.ts";
 import type { FileDto } from "../../hooks/use-files.ts";
 import { RunOutcomeView } from "../run-outcome-tab.tsx";
+import { initialRunDetailTab } from "../../lib/run-detail-tabs.ts";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -154,15 +155,36 @@ describe("Outcome shows what the run PRODUCED, and only that", () => {
     expect(html).not.toContain(agentsFr["run.outcomeEmpty"]);
   });
 
-  it("says so when the file page was truncated, instead of showing a short list", () => {
+  it("says so when the PRODUCED list itself was cut, not merely the page", () => {
     // `GET /api/files` clamps `limit` to 100 and answers `hasMore`; discarding
     // it truncated a >100-file run with nothing on screen saying so.
     // Several files, because that is the only shape the notice can occur in: a
     // truncated page holds at least 100 rows, never the exactly-1 that hoists
     // the viewer and drops the card the notice hangs off.
     const many = [file({ name: "rapport.md" }), file({ name: "annexe.md" })];
-    expect(outcome(many, { hasMore: true })).toContain(agentsFr["run.producedFilesTruncated"]);
-    expect(outcome(many)).not.toContain(agentsFr["run.producedFilesTruncated"]);
+    // The run produced four; two of them fell off the page.
+    expect(outcome(many, { hasMore: true, producedFileCount: 4 })).toContain(
+      agentsFr["run.producedFilesTruncated"],
+    );
+    expect(outcome(many, { producedFileCount: 4 })).not.toContain(
+      agentsFr["run.producedFilesTruncated"],
+    );
+  });
+
+  it("stays silent when the page was cut but every produced file is on screen", () => {
+    // The regression this pane shipped with: `hasMore` describes the run's
+    // whole CONTAINER — `files.run_id = X` OR'd with the ids its input
+    // references — so a run with 2 produced files and 100 inputs reports
+    // `hasMore` while the "Fichiers produits" card holds all 2 of them, and
+    // the card claimed truncation under a complete list.
+    const produced = [file({ name: "rapport.md" }), file({ name: "annexe.md" })];
+    const inputs = Array.from({ length: 5 }, (_, i) =>
+      file({ name: `entree-${i}.csv`, purpose: "user_upload", run_id: null }),
+    );
+    const html = outcome([...produced, ...inputs], { hasMore: true, producedFileCount: 2 });
+    expect(html).toContain("rapport.md");
+    expect(html).toContain("annexe.md");
+    expect(html).not.toContain(agentsFr["run.producedFilesTruncated"]);
   });
 
   it("still shows the card while loading when the run DID produce files", () => {
@@ -178,6 +200,38 @@ describe("Outcome shows what the run PRODUCED, and only that", () => {
     expect(html).not.toContain(filesFr["filter.user_upload"]);
     expect(html).not.toContain(filesFr["filter.all"]);
   });
+});
+
+describe("the pane's empty state and the tab-selection rule are ONE rule", () => {
+  /**
+   * The controller freezes its captured default pane (`capturedRunDetailTab`),
+   * so a disagreement between the two does not self-correct on a later render:
+   * the page either opens on a pane saying «Ce run n\'a rien produit», or it
+   * opens on Exécution with the outcome one unadvertised click away. Both
+   * halves now read `runHasOutcome`; this asserts the whole truth table, so
+   * either half drifting back to a hand-written dual fails here.
+   */
+  for (const hasFiles of [false, true]) {
+    for (const hasOutput of [false, true]) {
+      for (const hasMemory of [false, true]) {
+        const label = `files=${hasFiles} output=${hasOutput} memory=${hasMemory}`;
+        it(`agrees for ${label}`, () => {
+          const html = outcome(hasFiles ? [file({ name: "rapport.md" })] : [], {
+            output: hasOutput ? { verdict: "ok" } : null,
+            memoryCount: hasMemory ? 2 : 0,
+          });
+          const paneSaysEmpty = html.includes(agentsFr["run.outcomeEmpty"]);
+          const tabLeadsToOutcome =
+            initialRunDetailTab({
+              producedFileCount: hasFiles ? 1 : 0,
+              hasOutput,
+              hasMemory,
+            }) === "outcome";
+          expect(paneSaysEmpty).toBe(!tabLeadsToOutcome);
+        });
+      }
+    }
+  }
 });
 
 describe("the derived presentation rule inside Outcome (#1177)", () => {
