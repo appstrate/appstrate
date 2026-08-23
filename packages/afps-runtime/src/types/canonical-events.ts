@@ -198,25 +198,32 @@ export const TOKEN_USAGE_COUNTERS = [
  *
  * Performs **structural** checks only — no deep clone, no mutation.
  *
- * ## Relationship to the published payload schemas
+ * ## Relationship to the `dataschema` attribute
  *
- * This guard is the gate `buildCloudEventEnvelope` uses to decide whether
- * to stamp the CloudEvents `dataschema` attribute, so it MUST NOT accept
- * anything the schema at that URI would reject. It therefore mirrors every
- * constraint in `../events/canonical-event-schemas.ts` field for field —
- * including the ones a reader might dismiss as cosmetic (`data` on
- * `appstrate.progress`/`error` must be an object; each `usage` counter and
- * `durationMs` on `appstrate.metric` must be a number).
+ * This guard is the gate `buildCloudEventEnvelope` uses to decide whether to
+ * stamp the CloudEvents `dataschema` attribute, so it must not accept
+ * anything the document at that URI would reject. It is now the *sole*
+ * definition of that shape: `../events/canonical-event-schemas.ts` holds the
+ * URI table and nothing else — the Zod payload table and the JSON Schema
+ * artifacts it generated were removed once those URIs were found to 404 (see
+ * that module). Constraints a reader might dismiss as cosmetic are
+ * load-bearing for that reason: `data` on `appstrate.progress`/`error` must
+ * be an object, and each `usage` counter and `durationMs` on
+ * `appstrate.metric` must be a number.
  *
- * The one deliberate asymmetry is non-finite numbers: the guard rejects
- * them (see {@link isWireNumber}) where an in-memory ajv run would accept
- * them. That direction is safe — rejecting more than the schema only costs
- * an omitted OPTIONAL attribute — and it matches what survives
- * serialization. The shared fixture corpus
- * (`test/fixtures/canonical-event-corpus.ts`) pins the equality on every
- * other constrained field, and a coverage assertion derived from the
- * generated JSON Schema documents fails if a new constrained field appears
- * without a fixture exercising it.
+ * Non-finite numbers are rejected (see {@link isWireNumber}) — stricter than
+ * any JSON Schema would be, and safe in that direction: over-rejecting only
+ * costs an omitted OPTIONAL attribute, and it matches what survives
+ * serialization.
+ *
+ * ## Coverage is a human convention, not a check
+ *
+ * The shared fixture corpus (`test/fixtures/canonical-event-corpus.ts`)
+ * exercises every constraint below, and each fixture's `label` names the one
+ * it exercises. Nothing verifies that. The mechanical coverage guard derived
+ * the constrained field paths from the generated schema documents, so it went
+ * with them — a constraint added here without a fixture naming it ships
+ * unexercised, and nothing will say so. See issue #1184.
  */
 export function isCanonicalRunEvent(event: RunEvent): event is CanonicalRunEvent {
   if (!CANONICAL_TYPE_SET.has(event.type)) return false;
