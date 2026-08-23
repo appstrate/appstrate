@@ -14,26 +14,28 @@
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 
 /**
+ * Pi provider key an aliased container is bound to — canonical, naming no
+ * vendor. {@link PROVIDER_BY_API} resolves `pi-messages` to it; not a built-in
+ * pi provider id, so its credential goes in via `setPiRuntimeCredential`.
+ */
+export const ALIAS_PI_PROVIDER_KEY = "appstrate";
+
+/**
+ * `@earendil-works/pi-ai` build this image was compiled against, stamped onto
+ * {@link PI_SDK_VERSION_HEADER}. A proxy for `pi-messages` compatibility, not a
+ * protocol version.
+ */
+export const PI_SDK_VERSION = "0.84.2";
+/* Pinned against every manifest in the repo by `test/pi-sdk-version.test.ts`. */
+
+/** Container → sidecar only; never forwarded to a backing. */
+export const PI_SDK_VERSION_HEADER = "x-appstrate-pi-sdk";
+
+/**
  * Single source of truth for both the in-container path (entrypoint builds
  * `model.provider` from it) and the CLI's local-run resolver, which imports
  * this const + {@link deriveProviderFromApi} rather than keeping its own copy.
  */
-/**
- * Pi provider key an ALIASED run's container is bound to.
- *
- * An alias's whole contract is that the container learns nothing about the
- * vendor, so its provider key must name Appstrate rather than a backing — and
- * it is what {@link PROVIDER_BY_API} resolves `pi-messages` to, so nothing has
- * to emit `MODEL_PROVIDER` for an aliased run at all.
- *
- * It is NOT one of pi's built-in provider ids, and that has a consequence
- * every consumer must honour: `ModelRuntime.setRuntimeApiKey` only installs a
- * credential OVERLAY, so a key registered under an id pi does not know leaves
- * `prepareRequest` throwing `Unknown provider`. The credential must go in
- * through `registerProvider` instead — see `setPiRuntimeCredential`.
- */
-export const ALIAS_PI_PROVIDER_KEY = "appstrate";
-
 export const PROVIDER_BY_API: Record<ModelApiShape, string> = {
   "pi-messages": ALIAS_PI_PROVIDER_KEY,
   "anthropic-messages": "anthropic",

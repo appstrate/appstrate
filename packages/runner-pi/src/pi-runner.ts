@@ -38,7 +38,7 @@ import {
   type Transport,
 } from "./pi-sdk.ts";
 import { scheduleDeadlineNudges } from "./deadline-nudges.ts";
-import { ALIAS_PI_PROVIDER_KEY } from "./provider-map.ts";
+import { ALIAS_PI_PROVIDER_KEY, PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "./provider-map.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import {
   anthropicThinkingBudgets,
@@ -127,9 +127,8 @@ function prepareAnthropicThinkingBudgets(
   level: ModelReasoningLevel,
 ): PiThinkingBudgets | undefined {
   if (model.api !== "anthropic-messages") return undefined;
-  // The rule itself lives in core: the sidecar has to apply the identical one
-  // when it re-originates an ALIASED run, whose container speaks `pi-messages`
-  // and never reaches this branch.
+  // The rule lives in core: the sidecar applies the identical one when it
+  // re-originates an aliased run, whose container never reaches this branch.
   return anthropicThinkingBudgets(level);
 }
 
@@ -185,30 +184,30 @@ export function prepareRequestedThinkingLevel(
 /**
  * Install an ephemeral credential on Pi 0.84's ModelRuntime.
  *
- * `setRuntimeApiKey` is a credential OVERLAY on an EXISTING provider: it stores
- * the key and then recomposes the provider, which for an id pi has no builtin,
- * models.json entry or extension registration for resolves to
- * `models.deleteProvider(...)`. The key is stored, the provider is gone, and
- * the failure lands one layer away at request time — `ModelRuntime.prepareRequest`
- * throws `Unknown provider: <id>` on the first turn. Two ids here are therefore
- * registered rather than overlaid, for different reasons:
+ * OpenAI Codex is OAuth-only in Pi's built-in catalog, so `setRuntimeApiKey`
+ * deliberately refuses it. Appstrate already resolves and refreshes that
+ * OAuth bearer outside Pi; a process-local provider overlay exposes the token
+ * as request auth without persisting it or replacing Codex's native serializer.
  *
- *   - `openai-codex` — OAuth-only in pi's builtin catalog, so `setRuntimeApiKey`
- *     deliberately refuses it. Appstrate already resolves and refreshes that
- *     OAuth bearer outside pi; a process-local provider overlay exposes the
- *     token as request auth without persisting it or replacing Codex's native
- *     serializer.
- *   - {@link ALIAS_PI_PROVIDER_KEY} — an ALIASED run's container is bound to
- *     Appstrate's own provider key precisely BECAUSE pi has no such vendor;
- *     `registerProvider` composes it with no base, and the `pi-messages` api
- *     implementation is resolved from pi's api registry.
+ * {@link ALIAS_PI_PROVIDER_KEY} needs `registerProvider` for a different
+ * reason: `setRuntimeApiKey` only overlays an EXISTING provider, so a canonical
+ * key pi knows no vendor for is dropped and `prepareRequest` later throws.
  */
 export async function setPiRuntimeCredential(
   modelRuntime: ModelRuntime,
   provider: string,
   apiKey: string,
 ): Promise<void> {
-  if (provider === "openai-codex" || provider === ALIAS_PI_PROVIDER_KEY) {
+  if (provider === ALIAS_PI_PROVIDER_KEY) {
+    // Provider-config headers are the only ones `pi-messages` puts on the wire.
+    // Alias-only: this header must never reach `openai-codex`.
+    modelRuntime.registerProvider(provider, {
+      apiKey,
+      headers: { [PI_SDK_VERSION_HEADER]: PI_SDK_VERSION },
+    });
+    return;
+  }
+  if (provider === "openai-codex") {
     modelRuntime.registerProvider(provider, { apiKey });
     return;
   }
@@ -221,17 +220,9 @@ export interface PiRunnerOptions {
   /** LLM API key. Registered on the runner's {@link ModelRuntime} under `model.provider`. */
   apiKey?: string;
   /**
-   * No per-token rates were resolved for {@link model}, so the zero rates it
-   * carries are a placeholder the Pi SDK's required `Model.cost` forced, not a
-   * price. The runner then reports NO cost — `appstrate.metric` events and the
-   * finalize body omit the field entirely rather than carrying a fabricated
-   * `0`, which a consumer cannot tell from a genuinely free model.
-   *
-   * Set by `runtime-pi/entrypoint.ts` when `MODEL_COST` never arrived: an
-   * unpriced model, or an aliased one whose published rate card is withheld
-   * because it names the vendor. Token counts are unaffected — they are
-   * observed, not derived — and the platform prices its own ledger row from
-   * `runs.model_cost` × those counts regardless.
+   * No per-token rates for {@link model}; its zero rates are a placeholder the
+   * Pi SDK's required `Model.cost` forced, so the runner omits cost entirely
+   * rather than reporting a fabricated `0`. Token counts are unaffected.
    */
   unpriced?: boolean;
   /**
@@ -1073,10 +1064,8 @@ export interface SessionBridgeHandle {
   /** Snapshot of token usage accumulated across the session so far. */
   getUsage(): TokenUsage;
   /**
-   * Snapshot of total LLM cost in USD accumulated across the session so far,
-   * or `undefined` on an {@link SessionBridgeOptions.unpriced} session — the
-   * accumulated total is then a product of placeholder zero rates and saying
-   * "$0" would assert a price nobody computed.
+   * Snapshot of total LLM cost in USD accumulated so far, or `undefined` on an
+   * {@link SessionBridgeOptions.unpriced} session (the total is placeholder zeros).
    */
   getCost(): number | undefined;
   /**
@@ -1302,12 +1291,7 @@ interface SessionBridgeOptions {
    * it.
    */
   contextWindow?: number;
-  /**
-   * No rates back this session's model — see {@link PiRunnerOptions.unpriced}.
-   * The bridge still accumulates whatever the SDK computed (it costs nothing
-   * and keeps one code path), but reports it as absent everywhere it is
-   * emitted.
-   */
+  /** No rates back this session's model — see {@link PiRunnerOptions.unpriced}. */
   unpriced?: boolean;
 }
 
@@ -1329,12 +1313,8 @@ export function installSessionBridge(
   // zero-shape) — assistant turns AND compaction passes.
   const totalUsage: TokenUsage = zeroTokenUsage();
   let totalCost = 0;
-  // The one place the unpriced decision is applied. Every emit path — the
-  // per-turn metric, the compaction metric, the `agent_end` metric, and the
-  // finalize body via `getCost()` — reads through this, so none of them can be
-  // the one that leaks the placeholder zero. `undefined` makes
-  // `buildMetric`/`RunResult.cost` omit the field entirely, which the platform
-  // already reads as "nothing to compare" (it prices the ledger row itself).
+  // Single place the unpriced decision is applied: every emit path reads through
+  // this, so none can leak the placeholder zero. `undefined` omits the field.
   const reportedCost = (): number | undefined => (options.unpriced ? undefined : totalCost);
 
   /**

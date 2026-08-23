@@ -5,14 +5,12 @@
  * byte-identical to the native (non-proxied) call for the same backing.
  *
  * Moving the vendor dialect out of the container only works if the sidecar
- * still produces exactly what the vendor expects. pi-ai re-derives every quirk
- * per request from `model.provider` + `model.baseUrl`, so the guarantee is that
- * the `Model` record this module rebuilds drives pi-ai into the same shape a
- * direct call would — which is what makes it safe for the backend to mirror no
- * quirk table at all.
+ * still produces exactly what the vendor expects, so the guarantee is that the
+ * `Model` record the backend rebuilds drives pi-ai into the same shape a direct
+ * call would. That is what makes it safe for the backend to mirror no quirk
+ * table at all.
  *
- * BEHAVIORAL, like `provider-map.test.ts` (the closest existing harness) and
- * for the same reason: it compares real captured payloads through pi-ai's own
+ * BEHAVIORAL: it compares real payloads captured through pi-ai's own
  * `onPayload` hook, never source text. This design transcribes nothing, so it
  * must not acquire a text oracle that fires on cosmetic upstream reformatting.
  *
@@ -21,11 +19,13 @@
  * from them), and nothing vendor-named may reach the client on any path.
  */
 
-import { describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import { anthropicThinkingBudgets } from "@appstrate/core/model-generation";
 import type { LlmProxyApiKeyConfig, ModelSwap } from "../helpers.ts";
 import { _setLogSinkForTesting } from "../logger.ts";
+import { PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "@appstrate/runner-pi/provider-map";
 import {
+  _resetSdkDriftWarningForTesting,
   buildBackingModel,
   FORWARDED_OPTION_KEYS,
   handlePiMessagesRequest,
@@ -65,10 +65,9 @@ interface Backing {
 }
 
 /**
- * The same vendor spread Gate 1 uses, minus the oauth-subscription protocol
- * (aliases are rejected on oauth credentials). Each of these drives a DIFFERENT
- * branch of pi-ai's per-vendor request shaping, which is what makes an
- * identical-payload comparison meaningful rather than vacuous.
+ * The same vendor spread Gate 1 uses, minus the oauth-subscription protocol.
+ * Each drives a DIFFERENT branch of pi-ai's per-vendor request shaping, which
+ * is what keeps an identical-payload comparison from being vacuous.
  */
 const BACKINGS: Backing[] = [
   {
@@ -139,11 +138,10 @@ function depsFor(backing: Backing, streamBackingFn?: BackingStreamFn): PiMessage
 }
 
 /**
- * Drive the handler and capture the request pi-ai originated.
- *
- * The stream function is injected (the repo bans `mock.module()`) and wraps the
- * REAL pi-ai dispatcher with `onPayload`, so what is captured is what the
- * production path would have sent — not a re-implementation of it.
+ * Drive the handler and capture the request pi-ai originated. The stream
+ * function is injected (the repo bans `mock.module()`) and wraps the REAL pi-ai
+ * dispatcher with `onPayload`, so what is captured is what the production path
+ * would have sent — not a re-implementation of it.
  */
 async function originatedPayload(backing: Backing): Promise<Record<string, unknown>> {
   let payload: unknown;
@@ -152,8 +150,8 @@ async function originatedPayload(backing: Backing): Promise<Record<string, unkno
       ...options,
       onPayload: (next: unknown) => {
         payload = next;
-        // Same stop-before-I/O trick as `provider-map.test.ts`: pi-ai turns the
-        // throw into the stream's terminal error event.
+        // Stops before any network I/O: pi-ai turns the throw into the
+        // stream's terminal error event.
         throw new Error("payload captured");
       },
     });
@@ -188,10 +186,9 @@ async function nativePayload(backing: Backing): Promise<Record<string, unknown>>
     maxTokens: 4_096,
     reasoning: "high",
     temperature: 0.5,
-    // What a DIRECT Appstrate run sends: `prepareRequestedThinkingLevel`
-    // attaches the same core-owned budget for a classic Anthropic call. The
-    // reference has to include it, or "native" would mean bare pi rather than
-    // the platform's own direct path.
+    // What a DIRECT Appstrate run sends: the same core-owned budget for a
+    // classic Anthropic call. Without it "native" would mean bare pi rather
+    // than the platform's own direct path.
     ...(backing.apiShape === "anthropic-messages"
       ? { thinkingBudgets: anthropicThinkingBudgets("high") }
       : {}),
@@ -213,14 +210,10 @@ describe("re-originated request shape", () => {
 
   it("control: the comparison is not vacuous — vendors really do differ", async () => {
     // Two backings on the SAME protocol family whose request shapes diverge
-    // (`system` + `max_tokens` + a `thinking` block for DeepSeek vs
-    // `developer` + `max_completion_tokens` for OpenAI). Without this, an
-    // `onPayload` that silently stopped firing would make every case above
-    // compare `undefined` to `undefined`.
-    //
-    // Note what re-originating buys here, incidentally: pi-ai derives the shape
-    // from `provider` AND `baseUrl`, and on this side BOTH are the vendor's own
-    // — unlike the container, whose `baseUrl` was always the sidecar's.
+    // (`system` + `max_tokens` + a `thinking` block for DeepSeek vs `developer`
+    // + `max_completion_tokens` for OpenAI). Without this, an `onPayload` that
+    // silently stopped firing would make every case above compare `undefined`
+    // to `undefined`.
     const deepseek = await originatedPayload(BACKINGS[0]!);
     const openai = await originatedPayload({
       name: "openai completions",
@@ -233,10 +226,10 @@ describe("re-originated request shape", () => {
   });
 
   it("restores the Anthropic thinking budget the canonical protocol cannot carry", async () => {
-    // `PiMessagesOptions` models no budget, so the container cannot send one and
-    // `pi-runner`'s own branch never fires for an aliased run. Without the
-    // sidecar re-applying the rule, a `max` request silently drops to pi's
-    // built-in table, which collapses `xhigh` AND `max` onto 16384.
+    // `PiMessagesOptions` models no budget, so the container cannot send one
+    // and `pi-runner`'s own branch never fires for an aliased run. Without the
+    // sidecar re-applying the rule, a `max` request drops to pi's built-in
+    // table, which collapses `xhigh` AND `max` onto 16384.
     let payload: unknown;
     const capture: BackingStreamFn = (model, context, options) =>
       streamBacking(model, context, {
@@ -258,11 +251,11 @@ describe("re-originated request shape", () => {
     );
     await res.text();
     const thinking = (payload as { thinking?: { budget_tokens?: number } }).thinking;
-    // Asserted as a bound, not an exact figure: pi shaves `MIN_ANSWER_TOKENS`
-    // off a budget that would consume the whole response cap, and pinning that
-    // arithmetic would make this a test of pi rather than of the restoration.
-    // 16384 is what pi's own table yields for `max`, so anything above it can
-    // only come from the override.
+    // A bound, not an exact figure: pi shaves a reserve off a budget that would
+    // consume the whole response cap, and pinning that arithmetic would make
+    // this a test of pi rather than of the restoration. 16384 is what pi's own
+    // table yields for `max`, so anything above it can only come from the
+    // override.
     expect(thinking?.budget_tokens).toBeGreaterThan(16_384);
   });
 
@@ -280,10 +273,9 @@ describe("buildBackingModel", () => {
   });
 
   it("carries zero rates so no rate card can reach the container", () => {
-    // pi-ai writes `usage.cost` from `Model.cost` on every settled turn, and
-    // that number rides the terminal `done` event straight to the client. The
-    // published per-token card names the vendor on its own, which is why
-    // `MODEL_COST` is withheld from an aliased container in the first place.
+    // pi-ai writes `usage.cost` from `Model.cost` on every settled turn and
+    // that number rides the terminal `done` event straight to the client, where
+    // a published per-token card names the vendor on its own.
     const model = buildBackingModel(depsFor(BACKINGS[0]!));
     expect(model.cost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
   });
@@ -291,17 +283,16 @@ describe("buildBackingModel", () => {
   it("falls back to pi's own defaults when the platform resolved no limits", () => {
     const deps = depsFor(BACKINGS[0]!);
     const model = buildBackingModel({ ...deps, limits: {} });
-    // 0 is pi-ai's "do not clamp" sentinel in `clampMaxTokensToContext`.
+    // 0 is pi-ai's "do not clamp" sentinel.
     expect(model.contextWindow).toBe(0);
     // pi's own default for a model definition declaring no maxTokens.
     expect(model.maxTokens).toBe(16_384);
   });
 
   it("forces the adaptive Anthropic shape when the descriptor says the backing is adaptive", async () => {
-    // The container cannot know this — that is why the descriptor carries it —
-    // and pi-ai's own adaptive metadata does not cover a model record we
-    // rebuilt rather than it resolved. Without the flag an adaptive backing
-    // would get the classic budget shape and answer 400.
+    // The container cannot know this — hence the descriptor — and pi-ai's own
+    // adaptive metadata does not cover a record we rebuilt rather than it
+    // resolved. Without the flag an adaptive backing answers 400.
     const anthropic = BACKINGS.find((b) => b.apiShape === "anthropic-messages")!;
     let payload: unknown;
     const capture: BackingStreamFn = (model, context, options) =>
@@ -339,9 +330,8 @@ function partialMessage(content: AssistantMessage["content"]): AssistantMessage 
   return {
     role: "assistant",
     content,
-    // The three identity fields the projection MUST drop: they name the vendor,
-    // its protocol and the real backing id, and pi-ai stamps them on `partial`
-    // for every single event.
+    // The three identity fields the projection MUST drop: vendor, protocol and
+    // the real backing id, stamped on `partial` for every single event.
     api: "openai-completions",
     provider: "deepseek",
     model: "deepseek-chat",
@@ -396,7 +386,7 @@ describe("event projection", () => {
   it("recovers the fields the wire event declares but pi-ai's does not", () => {
     // `toolcall_start` carries no id/name on pi-ai's side; `text_end` and
     // `thinking_end` carry no signature. All three are read back from the named
-    // content block, which is why the projection is not a pure field drop.
+    // content block, so the projection is not a pure field drop.
     expect(
       projectAssistantEvent({
         type: "toolcall_start",
@@ -439,9 +429,8 @@ describe("event projection", () => {
       message: { ...partialMessage([]), stopReason: "stop", usage: USAGE },
     }) as Extract<PiMessagesEvent, { type: "done" }>;
 
-    // The platform prices `llm_usage.cost_usd` from exactly these four counts
-    // (`apps/api/test/unit/runner-cost-parity.test.ts`), so losing one loses
-    // the bill.
+    // The platform prices `llm_usage.cost_usd` from exactly these four counts,
+    // so losing one loses the bill.
     expect(projected.usage.input).toBe(100);
     expect(projected.usage.output).toBe(42);
     expect(projected.usage.cacheRead).toBe(7);
@@ -481,15 +470,14 @@ describe("event projection", () => {
  *
  * The sink belongs to this call (`_setLogSinkForTesting`), not the global
  * `process.stdout.write`: `bun test` runs the whole repo in one process, so a
- * global capture also collects what other suites write — and every line here is
- * `JSON.parse`d, so one foreign frame would be a hard `SyntaxError` on an
- * innocent test (issue #1180). Same pattern as `credential-proxy.test.ts`.
+ * global capture would also collect what other suites write — and every line
+ * here is `JSON.parse`d, so one foreign frame is a hard `SyntaxError` on an
+ * innocent test.
  */
 async function captureWarnings(fn: () => Promise<void>): Promise<Array<Record<string, unknown>>> {
-  // The shared test preload pins `LOG_LEVEL=error` to keep suites quiet, and
-  // the logger checks that threshold BEFORE reaching the sink — so a warn would
-  // never arrive. Lowered for this call only, and restored, exactly as
-  // `credential-proxy.test.ts` does around its own capture.
+  // The shared test preload pins `LOG_LEVEL=error` and the logger checks that
+  // threshold BEFORE reaching the sink, so a warn would never arrive. Lowered
+  // for this call only, and restored.
   const prevLevel = process.env.LOG_LEVEL;
   process.env.LOG_LEVEL = "warn";
   const lines: string[] = [];
@@ -533,11 +521,11 @@ async function forwardedOptions(
 
 /**
  * A field that reaches this boundary and does not reach the backing must SAY
- * so. The reasoning for not forwarding `toolChoice` (its value space is
- * per-vendor, so honouring it means the mapping table this design avoids) is a
- * decision; "pi-coding-agent emits none today" is a fact about the installed
- * version. If a future pi starts sending it, the constraint the agent asked for
- * would vanish here with no error and nothing in the run to find.
+ * so. Not forwarding `toolChoice` is a decision (its value space is per-vendor,
+ * so honouring it means the mapping table this design avoids); "no client sends
+ * it today" is a fact about the installed pi version. If a future pi starts
+ * sending it, the constraint the agent asked for would vanish here with no
+ * error and nothing in the run to find.
  */
 describe("discarded request fields", () => {
   it("warns that `toolChoice` was not forwarded, and does not forward it", async () => {
@@ -558,9 +546,8 @@ describe("discarded request fields", () => {
   });
 
   it("warns about `debug`, which rides the URL query rather than the body", async () => {
-    // pi-ai sets `?debug=1` from `PiMessagesOptions.debug`; it asks a backend
-    // for routing metadata about itself, which for an alias is the one thing
-    // this boundary exists not to answer.
+    // `?debug=1` asks a backend for routing metadata about itself, which for an
+    // alias is the one thing this boundary exists not to answer.
     const { warnings } = await forwardedOptions(
       { model: "appstrate-medium", context: CONTEXT, options: {} },
       "/llm/messages?debug=1",
@@ -570,9 +557,9 @@ describe("discarded request fields", () => {
   });
 
   it("reports an option a FUTURE pi-ai adds, without anyone updating a blacklist", async () => {
-    // The drop is reported as a set difference against what this boundary
-    // forwards, not as a two-name list — so the day pi-messages grows a seventh
-    // option it is visible instead of silent.
+    // Reported as a SET DIFFERENCE against what this boundary forwards, never a
+    // two-name list — so the day pi-messages grows a seventh option the drop is
+    // visible instead of silent.
     const { warnings } = await forwardedOptions({
       model: "appstrate-medium",
       context: CONTEXT,
@@ -583,8 +570,8 @@ describe("discarded request fields", () => {
 
   it("stays silent — and actually forwards — for every key it claims to forward", async () => {
     // Closes the drift between `FORWARDED_OPTION_KEYS` and the projection that
-    // reads it. A key in the set but missing from the projection would be
-    // dropped silently again, which is the exact defect this suite exists for.
+    // reads it: a key in the set but missing from the projection would be
+    // dropped silently, the exact defect this suite exists for.
     for (const key of FORWARDED_OPTION_KEYS) {
       const value = key === "temperature" || key === "maxTokens" ? 1 : "medium";
       const { options, warnings } = await forwardedOptions({
@@ -674,8 +661,8 @@ describe("handlePiMessagesRequest", () => {
       CLIENT_BODY,
     );
     // 200 + SSE even on failure: pi-ai's `pi-messages` reader treats a non-2xx
-    // as a transport failure and never reaches the terminal event, so an
-    // upstream refusal has to arrive as an error EVENT to read as a failed turn.
+    // as a transport failure and never reaches the terminal event, so a refusal
+    // has to arrive as an error EVENT to read as a failed turn.
     expect(res.status).toBe(200);
 
     const frames = await readFrames(res);
@@ -712,10 +699,96 @@ describe("handlePiMessagesRequest", () => {
 });
 
 /**
+ * The agent container and the sidecar ship as separate images and deploy
+ * independently, so a partial rollout can pair pi-ai versions across a protocol
+ * whose event union is internal to pi-ai. Naming that costs one log line;
+ * missing it costs a bisect. The latch is a single process-wide flag, so each
+ * case below resets it in `beforeEach` to stay order-independent.
+ */
+describe("pi-ai version drift", () => {
+  beforeEach(() => _resetSdkDriftWarningForTesting());
+
+  /** Drive one request carrying `header`, and report what the logger emitted. */
+  async function requestWith(
+    header: string | undefined,
+    times = 1,
+  ): Promise<{ warnings: Array<Record<string, unknown>>; forwarded: Record<string, unknown> }> {
+    let model: Record<string, unknown> = {};
+    let options: Record<string, unknown> = {};
+    const capture: BackingStreamFn = (m, _context, o) => {
+      model = m as unknown as Record<string, unknown>;
+      options = o as unknown as Record<string, unknown>;
+      return fakeStream([]);
+    };
+    const warnings = await captureWarnings(async () => {
+      for (let i = 0; i < times; i++) {
+        const res = handlePiMessagesRequest(
+          depsFor(BACKINGS[0]!, capture),
+          new Request("http://sidecar:8080/llm/messages", {
+            method: "POST",
+            ...(header !== undefined ? { headers: { [PI_SDK_VERSION_HEADER]: header } } : {}),
+          }),
+          CLIENT_BODY,
+        );
+        await res.text();
+      }
+    });
+    return {
+      warnings,
+      forwarded: { modelHeaders: model["headers"], optionHeaders: options["headers"] },
+    };
+  }
+
+  it("says nothing when the container reports the same version", async () => {
+    const { warnings } = await requestWith(PI_SDK_VERSION);
+    expect(warnings).toEqual([]);
+  });
+
+  it("says nothing when the header is absent", async () => {
+    // A container image predating this change sends nothing. That must not warn
+    // on every request of every aliased run.
+    const { warnings } = await requestWith(undefined);
+    expect(warnings).toEqual([]);
+  });
+
+  it("warns once even for many DISTINCT versions — the header is container-controlled", async () => {
+    // Keying the latch on the header value would let the container grow the
+    // sidecar's memory and flood its logs one fresh value at a time.
+    const warnings = await captureWarnings(async () => {
+      for (let i = 0; i < 50; i++) {
+        const res = handlePiMessagesRequest(
+          depsFor(BACKINGS[0]!, () => fakeStream([])),
+          new Request("http://sidecar:8080/llm/messages", {
+            method: "POST",
+            headers: { [PI_SDK_VERSION_HEADER]: `9.9.${i}` },
+          }),
+          CLIENT_BODY,
+        );
+        await res.text();
+      }
+    });
+    expect(warnings).toHaveLength(1);
+  });
+
+  it("truncates the container-supplied version in the log line", async () => {
+    const { warnings } = await requestWith("x".repeat(4096));
+    expect(warnings[0]).toMatchObject({ container: "x".repeat(32) });
+  });
+
+  it("warns ONCE per mismatched version, naming both", async () => {
+    const { warnings, forwarded } = await requestWith("0.85.0", 3);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatchObject({ container: "0.85.0", sidecar: PI_SDK_VERSION });
+    // The inbound header is a container↔sidecar fact; it must not ride upstream.
+    expect(forwarded).toEqual({ modelHeaders: undefined, optionHeaders: undefined });
+  });
+});
+
+/**
  * A stand-in for pi-ai's `AssistantMessageEventStream` that replays a fixed
- * event list. The handler only ever iterates the stream, so an async iterable
- * is the whole contract it depends on — the cast covers the ten members of the
- * concrete class (`queue`, `waiting`, …) it never touches.
+ * event list. The handler only ever iterates, so an async iterable is the whole
+ * contract it depends on; the cast covers the concrete class members it never
+ * touches.
  */
 function fakeStream(events: AssistantMessageEvent[]): ReturnType<BackingStreamFn> {
   return {

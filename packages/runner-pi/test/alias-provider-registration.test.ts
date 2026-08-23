@@ -16,7 +16,12 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { ALIAS_PI_PROVIDER_KEY, setPiRuntimeCredential } from "../src/index.ts";
+import {
+  ALIAS_PI_PROVIDER_KEY,
+  PI_SDK_VERSION,
+  PI_SDK_VERSION_HEADER,
+  setPiRuntimeCredential,
+} from "../src/index.ts";
 import { loadPiCodingAgentSdk } from "../src/pi-sdk.ts";
 import type { Api, Model } from "../src/pi-sdk.ts";
 
@@ -69,6 +74,39 @@ describe("alias provider key on ModelRuntime", () => {
     expect(error).toBeDefined();
     expect(error).not.toContain("Unknown provider");
     expect(error).not.toContain("not configured");
+  });
+
+  it("stamps the pi-ai version on the outbound request", async () => {
+    // `pi-messages` reads no `Model.headers` (unlike every sibling api), so a
+    // provider-config header is the only thing that reaches its wire. Asserted
+    // on the bytes: the capturing `fetch` is what pi-ai actually calls.
+    const runtime = await newRuntime();
+    await setPiRuntimeCredential(runtime, ALIAS_PI_PROVIDER_KEY, "sk-placeholder");
+    let sent: Record<string, string> = {};
+    const stream = runtime.stream(
+      ALIASED_MODEL,
+      { messages: [{ role: "user", content: "hi", timestamp: 0 }] },
+      {
+        fetch: ((_url: unknown, init: { headers?: Record<string, string> }) => {
+          sent = init.headers ?? {};
+          throw new Error("captured");
+        }) as unknown as typeof fetch,
+      },
+    );
+    for await (const event of stream) if (event.type === "error") break;
+    expect(sent[PI_SDK_VERSION_HEADER]).toBe(PI_SDK_VERSION);
+  });
+
+  it("stamps NOTHING on `openai-codex`, which talks to a real vendor", async () => {
+    const runtime = await newRuntime();
+    await setPiRuntimeCredential(runtime, "openai-codex", "sk-codex");
+    // `auth.headers` is the single junction a provider-config header enters
+    // through, so absent here is absent on every request pi originates for it.
+    expect((await runtime.getAuth("openai-codex"))?.auth.headers).toBeUndefined();
+    await setPiRuntimeCredential(runtime, ALIAS_PI_PROVIDER_KEY, "sk-placeholder");
+    expect((await runtime.getAuth(ALIAS_PI_PROVIDER_KEY))?.auth.headers).toEqual({
+      [PI_SDK_VERSION_HEADER]: PI_SDK_VERSION,
+    });
   });
 
   it("would NOT survive a bare runtime-key overlay (the trap this avoids)", async () => {

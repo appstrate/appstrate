@@ -17,6 +17,8 @@ export {
   deriveProviderFromApi,
   derivePiProvider,
   ALIAS_PI_PROVIDER_KEY,
+  PI_SDK_VERSION,
+  PI_SDK_VERSION_HEADER,
   PROVIDER_BY_API,
   PI_PROVIDER_BY_MODEL_PROVIDER,
 } from "./provider-map.ts";

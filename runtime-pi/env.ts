@@ -16,7 +16,7 @@
  */
 
 import { getErrorMessage } from "@appstrate/core/errors";
-import { derivePiProvider } from "@appstrate/runner-pi";
+import { derivePiProvider } from "@appstrate/runner-pi/provider-map";
 import type { Api, Model } from "./pi-sdk.ts";
 import { MODEL_API_SHAPES } from "@appstrate/core/sidecar-types";
 import {
@@ -56,10 +56,8 @@ interface RuntimeEnv {
   modelInput: ReadonlyArray<"text" | "image">;
   /**
    * Per-token cost (input/output/cacheRead/cacheWrite USD), or ABSENT when the
-   * platform resolved no rates for this model — an unpriced model, or an
-   * aliased one whose rate card is withheld on purpose (the published card
-   * names the vendor). Absent means absent all the way down: the run reports no
-   * cost rather than a fabricated 0. See {@link parseModelCost}.
+   * platform resolved no rates — unpriced, or aliased (the published rate card
+   * names the vendor). Absent means the run reports no cost, never a fake 0.
    */
   modelCost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
   /** Pi SDK context window in tokens. */
@@ -224,24 +222,12 @@ function parseModelCost(
 ): { input: number; output: number; cacheRead: number; cacheWrite: number } | undefined {
   const fallback = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   if (!raw) {
-    // The platform sets MODEL_COST only when the resolved model carries rates
-    // AND the run may see them (`buildRuntimePiEnv` withholds the card from an
-    // aliased model — the published rate card names the vendor the alias
-    // exists to hide). Either way, no rates reached this container.
-    //
-    // Returning `undefined` rather than the all-zero shape is the point. Zero
-    // rates are arithmetically fine and epistemically wrong: they make the run
-    // report `cost: 0`, indistinguishable from a genuinely free model, and on
-    // an aliased run they would sit next to a real server-computed number and
-    // trip the ledger's cost-divergence warning on every single run. Reporting
-    // nothing is the honest statement, and the platform already reads it that
-    // way — a null reported cost prices the row from `runs.model_cost` and
-    // makes no comparison.
-    //
-    // Still a warning, not an issue: a pricing gap must not become an outage.
-    // (Server-side the same run's ledger row is stamped
-    // `pricing_status='unpriced'` from `runs.model_cost`; this line is the
-    // in-container half of the same fact, for operators reading logs.)
+    // The platform sets MODEL_COST only when the model carries rates AND the
+    // run may see them (an aliased model's card names the vendor it hides).
+    // `undefined`, not zeros: a fake `cost: 0` is indistinguishable from a free
+    // model and trips the ledger's cost-divergence warning on an aliased run.
+    // Server-side the same run's ledger row is stamped `pricing_status='unpriced'`
+    // from `runs.model_cost`; this line is its in-container half, for operators.
     warnings.push(
       "MODEL_COST: absent — no per-token pricing reached this container; " +
         "this run reports no cost of its own (the platform prices it server-side)",
@@ -448,38 +434,24 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
 }
 
 /**
- * Build the Pi SDK `Model` record the run's session is driven with, from the
- * parsed environment.
- *
- * Lives here rather than inline in `entrypoint.ts` because it is the second
- * half of the same contract: `buildRuntimePiEnv` writes the variables,
- * {@link parseRuntimeEnv} reads them, and this turns them into the record whose
- * `provider` + `baseUrl` decide the vendor request shape pi-ai puts on the
- * wire. That last step is what an ALIASED run's opacity depends on, and a copy
- * of it inside a top-level boot script is a copy no test can join to the
- * launcher's actual output.
+ * Build the Pi SDK `Model` record the session is driven with; its `provider` +
+ * `baseUrl` decide the vendor request shape pi-ai emits.
  */
 export function buildPiModelFromEnv(env: RuntimeEnv): Model<Api> {
   return {
     id: env.modelId,
     name: env.modelId,
     api: env.modelApi as Api,
-    // Pi SDK AuthStorage key AND its provider-detection input: Pi re-derives
-    // each provider's request shape from `provider` + `baseUrl`, and on a
-    // proxied run `baseUrl` is the sidecar's. Prefer the real backing provider
-    // the platform named, falling back to the api shape's generic key — which
-    // for an aliased run's `pi-messages` IS the answer, Appstrate's own key,
-    // because the platform deliberately names no vendor.
+    // Pi re-derives each provider's request shape from `provider` + `baseUrl`.
+    // An aliased container is given no MODEL_PROVIDER and must derive none: the
+    // api-shape fallback yields Appstrate's own key, naming no vendor.
     provider: derivePiProvider(env.modelProvider, env.modelApi),
     baseUrl: env.modelBaseUrl ?? "",
     reasoning: env.modelReasoning,
     ...(env.modelReasoningLevelMap ? { thinkingLevelMap: env.modelReasoningLevelMap } : {}),
     input: [...env.modelInput],
-    // `Model.cost` is REQUIRED by the Pi SDK and dereferenced unconditionally on
-    // every settled turn (`calculateCost` reads `model.cost.tiers` — omitting it
-    // throws mid-stream, it does not degrade), so an unpriced run still has to
-    // hand the SDK a rate shape. Zero is the only honest one, and it stays
-    // SDK-internal: the runner's `unpriced` flag stops it emitting the 0.
+    // `Model.cost` is REQUIRED by the Pi SDK on every settled turn, so an unpriced
+    // run still hands it zeros; the runner's `unpriced` flag stops the 0 escaping.
     cost: env.modelCost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: env.modelContextWindow,
     maxTokens: env.modelMaxTokens,

@@ -93,9 +93,7 @@ function readLlmConfigFromEnv(): LlmProxyConfig | undefined {
       // Model-alias swap (api-key path only — the oauth mode carries no
       // modelSwap; aliases are rejected platform-side for oauth providers).
       // A malformed or incomplete payload is a launcher bug: `parseModelSwapEnv`
-      // throws at boot, naming the field, rather than letting the descriptor
-      // through to fail closed once per request with no stated cause (or,
-      // worse, silently disabling the swap and leaking the real id).
+      // throws at boot rather than silently disabling the swap and leaking the real id.
       ...(process.env.PI_MODEL_SWAP_JSON
         ? { modelSwap: parseModelSwapEnv(process.env.PI_MODEL_SWAP_JSON) }
         : {}),

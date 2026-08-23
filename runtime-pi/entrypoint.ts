@@ -685,9 +685,6 @@ if (declaredRuntimeTools.includes("publish_file")) {
 
 const systemPrompt = env.agentPrompt;
 
-// Built by `buildPiModelFromEnv` (env.ts) rather than inline, so the
-// launcher-env → model-record → wire-shape join has one implementation that a
-// test can actually exercise end to end — the alias-opacity gates depend on it.
 const model: Model<Api> = buildPiModelFromEnv(env);
 
 // --- 4. Build ExecutionContext from env ---
@@ -784,9 +781,8 @@ function buildPiRunner(): PiRunner {
   return createRuntimePiRunner({
     sidecarUrl,
     model,
-    // No rates reached this container (unpriced model, or an alias whose rate
-    // card is withheld). The zero shape above would otherwise be reported as a
-    // real $0; say nothing instead. See `parseModelCost` in `env.ts`.
+    // No rates reached this container (unpriced model, or a withheld alias
+    // rate card). Report no cost rather than a placeholder $0.
     ...(env.modelCost === undefined ? { unpriced: true } : {}),
     apiKey: env.modelApiKey,
     systemPrompt,
