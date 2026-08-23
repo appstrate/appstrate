@@ -366,8 +366,14 @@ async function runPlatformContainerImpl(
         api: llmConfig.apiShape,
         modelId,
         baseUrl: llmConfig.baseUrl,
-        // Platform-side only — resolves the wire quirks the sidecar-proxied
-        // container can no longer detect for itself (`MODEL_COMPAT`).
+        // The vendor key pi-ai derives a request shape from. A sidecar-proxied
+        // run replaces MODEL_BASE_URL with the sidecar's own URL, erasing one
+        // of the two inputs `getCompat` reads (`model.provider` +
+        // `model.baseUrl`), so without this the container emits plain-OpenAI
+        // bytes at every provider — the total outage #1196 fixed. Passed
+        // unconditionally: `buildRuntimePiEnv` emits `MODEL_PROVIDER` only for
+        // a NON-aliased run, and an aliased one needs no vendor key at all
+        // because it speaks the canonical `pi-messages` dialect instead.
         providerId: llmConfig.providerId,
         apiKey: llmApiKey,
         // When the sidecar is skipped, the agent talks to the upstream

@@ -27,70 +27,20 @@ There are two threat models against that requirement.
   provider/endpoint/model id. **Closed.** The read projection leaves only the
   alias identity plus the portable generation-support vector (see
   `projectAliasedModel`); every binding, pricing and catalog field is `null`.
-- **Threat B — the agent runtime (adversarial code inside the container).**
-  **Closed for the request/response surface — appstrate#1198.** The agent needs
-  _some_ protocol information to format requests, and this used to mean the
-  container spoke the vendor's own dialect. It no longer does: an aliased run's
-  container speaks **`pi-messages`**, pi-ai's own vendor-neutral protocol, and
-  the sidecar re-originates the call against the real backing (see
-  "The canonical dialect" below). This was never merely a sandbox-escape
-  concern — the agent's own logs are an Appstrate surface, so an org member who
-  prints the container env reads whatever is in it from the dashboard.
+- **Threat B — the agent runtime (adversarial code inside the container).** The
+  agent needs _some_ protocol information to format requests, and this used to
+  mean the container spoke the vendor's own dialect, against the vendor's own
+  endpoint, priced with the vendor's own rate card. It no longer does
+  (appstrate#1198). This was never merely a sandbox-escape concern — the
+  agent's own logs are an Appstrate surface, so an org member who prints the
+  container env reads whatever is in it from the dashboard.
 
-  | reaches the container                       | example (aliased `Appstrate Flash`) | effect                                          |
-  | ------------------------------------------- | ----------------------------------- | ----------------------------------------------- |
-  | ~~`MODEL_PROVIDER`~~                        | —                                   | **no longer emitted** (appstrate#1198)          |
-  | `MODEL_API`                                 | `pi-messages`                       | the same for every alias — names nothing        |
-  | ~~`MODEL_REASONING_LEVEL_MAP`~~             | —                                   | **no longer emitted** (appstrate#1198)          |
-  | `MODEL_CONTEXT_WINDOW` / `MODEL_MAX_TOKENS` | `196608` / `8192`                   | narrows it — rounded, see below                 |
-  | success response body                       | `text_delta`, `done`                | closed pi-messages union — no vendor vocabulary |
-
-  `MODEL_COST` is **no longer sent at all** for an aliased run. The published
-  per-token rate card identifies the vendor on its own, and nothing depends on
-  the container knowing it any more: `writeRunnerLedgerRow` computes the
-  runner's `llm_usage.cost_usd` server-side from `runs.model_cost` × the
-  reported token counts, so what the sandbox knows stopped determining what is
-  billed. The container then reports **no cost**, not a fabricated `0` — the
-  ledger reads a null reported cost as "nothing to compare" and prices the row
-  itself either way.
-
-  The two token limits are **rounded down, not dropped**. The container really
-  needs them (`derivePiCompactionSettings` sizes the compaction pass from them,
-  and an absent value lands on per-code-path defaults that disagree), so
-  `maskAliasedTokenLimits` (`@appstrate/core/model-swap`) puts them on a ladder
-  of 16 buckets per binary octave: down only — `maxTokens` reaches the upstream
-  as the response cap and rounding it UP would produce a 400 that the neutral
-  error envelope makes undiagnosable — never producing `maxTokens >=
-contextWindow`, which `deriveResponseReserveTokens` treats as corrupt data,
-  and losing under 6.25 % so compaction is not materially degraded. Be precise
-  about what this buys: it removes the _exactness_ that lets a pair be looked up
-  in a public catalog. It narrows the candidate set; it does not close it. The
-  **sidecar** keeps the REAL numbers — it is trusted, and its token-budget guard
-  on MCP tool results protects against the real upstream limit, so rounding
-  there would be a correctness regression rather than extra safety.
-
-  The `/llm/*` **surface** is no longer part of the hole either. For an
-  aliased run the sidecar allows exactly one call — the inference endpoint the
-  run's own protocol family uses (`ALIAS_INFERENCE_PATHS` /
-  `isAliasInferenceCall` in `@appstrate/core/model-swap`, the same table the
-  platform gateway derives its `upstreamPath` values from). Anything else —
-  `GET /v1/models` above all, which returns the vendor's catalogue in a **2xx**
-  body that neither the error synthesis nor the `model`-field rewrite looks at
-  — is refused with the neutral `syntheticAliasErrorBody` envelope at 404,
-  before any upstream fetch and before the real credential is injected.
-  Non-aliased runs keep the verbatim passthrough; their contract is reaching
-  the provider, not hiding it.
-
-  The response path is NOT the hole: headers are reduced to
-  `LLM_PASSTHROUGH_RESPONSE_HEADERS`, error surfaces are synthesized rather
-  than forwarded, and the `model` field is swapped back to the alias. The hole
-  is the request-side metadata above, and the fact that the container formats
-  requests in the vendor's own dialect.
-
-  What remains is not the dialect. It is the residue listed under "Residual
-  exposure" below: the rounded token limits, the modality vector the read
-  projection discloses on purpose, and everything an agent can infer by asking
-  the model who it is.
+Threat B splits in two, and keeping the halves apart is what makes the
+requirement writable at all: **what the platform discloses** to the container
+(closed, inventoried and CI-gated) versus **what an observer can infer** from
+the model's own behaviour (irreducible). Both are written out under
+"[Threat B in two tiers](#threat-b-in-two-tiers)" at the end of this page; the
+mechanism that closed the first half is the next three sections.
 
 ## The canonical dialect
 
@@ -341,17 +291,142 @@ so the offline generator drops it:
 FEATURED_MODELS_EXCLUDE="deepseek-chat,some-other-backing"
 ```
 
-## Residual exposure (Threat B)
+## Deployment ordering
 
-The container receives `MODEL_API=pi-messages` — the same value for every alias,
-so it names nothing — and reaches the sidecar's one `POST /messages`. It does
-not receive the vendor, the protocol family, the native effort mapping, the rate
-card, the real `model` id, the upstream id echoed in responses, the endpoint
-host, or the credential. Its token limits are rounded onto a shared ladder
-rather than handed over verbatim.
+The platform and the runtime images (`appstrate-pi`, the sidecar) implement two
+halves of one contract, and they are deployed separately. **Ship the platform
+before or with the runtime images.**
 
-What is left is not plumbing. An agent can ask the model who it is, fingerprint
-its tokenizer, time its latency, probe its refusal style — and the rounded
-limits plus the disclosed modality vector still narrow the candidate set. That
-is the honest boundary this page opened with: the platform does not disclose the
-backing; it cannot make an org unable to find out.
+That direction is safe because the sidecar validates its private swap
+descriptor at boot and **fails closed**: an OLD platform that does not yet emit
+`clientApiShape` / `backingApiShape` against a NEW sidecar image gets its
+aliased runs refused, with the offending field named in an operator log (never
+its value). Aliased runs stop; nothing leaks. Non-aliased runs are unaffected —
+they carry no descriptor.
+
+The reverse is the dangerous direction, and nothing detects it. A NEW platform
+against OLD runtime images means the container is told to speak `pi-messages`
+and the sidecar has no `pi-messages` backend to terminate it, and the `/llm/*`
+surface allowlist is not there either — an old sidecar is the total passthrough
+appstrate#1198 opened by closing. The aliased run does fail, because its
+inference call has no route; but it fails _after_ the container has had a
+verbatim proxy to the vendor's own endpoints for as long as it lived, which is
+long enough for one `GET /v1/models`. The platform's own side of the contract
+looks entirely satisfied throughout, so there is no signal to act on: the
+ordering is the control.
+
+## Threat B in two tiers
+
+Collapsing these two is what made the requirement unwritable in the first
+place, because they are different kinds of claim. The first is a property of
+this codebase, enumerable and CI-gated. The second is a property of talking to
+a language model at all, and no plumbing anywhere touches it.
+
+### Tier 1 — what the platform discloses (closed)
+
+Everything an aliased run's container is handed:
+
+| reaches the container                       | example (aliased `Appstrate Flash`) | effect                                          |
+| ------------------------------------------- | ----------------------------------- | ----------------------------------------------- |
+| ~~`MODEL_PROVIDER`~~                        | —                                   | **no longer emitted** (appstrate#1198)          |
+| ~~`MODEL_REASONING_LEVEL_MAP`~~             | —                                   | **no longer emitted** (appstrate#1198)          |
+| ~~`MODEL_COST`~~                            | —                                   | **no longer emitted** (appstrate#1198)          |
+| `MODEL_API`                                 | `pi-messages`                       | the same for every alias — names nothing        |
+| `MODEL_ID`                                  | `appstrate-flash`                   | the public alias the caller already chose       |
+| `MODEL_BASE_URL` / `MODEL_API_KEY`          | sidecar URL / placeholder           | neither reaches upstream                        |
+| `MODEL_CONTEXT_WINDOW` / `MODEL_MAX_TOKENS` | `196608` / `63488`                  | narrows it — rounded, see below                 |
+| `MODEL_INPUT`                               | `["text","image"]`                  | already published by the read projection        |
+| success response body                       | `text_delta`, `done`                | closed pi-messages union — no vendor vocabulary |
+
+Phase by phase, what each one removed (all of appstrate#1198):
+
+1. **The `/llm/*` surface.** It was a total passthrough: any method, any path,
+   recomposed onto the real upstream base URL with the provider credential
+   injected. `GET /v1/models` returned the vendor's own catalogue in a **2xx**
+   body, which neither the error synthesis (non-2xx only) nor the `model`-field
+   rewrite ever looks at. An aliased run now gets exactly ONE call — the
+   inference endpoint its protocol family uses (`ALIAS_INFERENCE_PATHS` /
+   `isAliasInferenceCall` in `@appstrate/core/model-swap`, the same table the
+   platform gateway derives its `upstreamPath` values from). Everything else is
+   refused with the neutral `syntheticAliasErrorBody` envelope at 404, before
+   any upstream fetch and before the placeholder is swapped for the real key,
+   so the credential is never spent on a request being rejected. Non-aliased
+   runs keep the verbatim passthrough; their contract is reaching the provider,
+   not hiding it.
+2. **The ledger's dependency on the container.** Not a disclosure fix on its
+   own — it is what made the next one possible. The runner's
+   `llm_usage.cost_usd` used to be a number computed INSIDE the container (the
+   Pi SDK multiplying its own counters by the rates the platform handed it) and
+   reported back over the event sink. It is now computed server-side from
+   `runs.model_cost` × the reported token counts (`computeTokenCost`), so what
+   the sandbox knows stopped determining what is billed.
+3. **The rate card and the exact token limits.** `MODEL_COST` is no longer sent
+   at all: a published `{"input":0.28,"output":0.42}` is one catalog lookup
+   away from a vendor name. The container then reports **no cost**, not a
+   fabricated `0` — the ledger reads a null reported cost as "nothing to
+   compare" and prices the row itself either way. The two token limits are
+   **rounded down, not dropped**: the container really needs them
+   (`derivePiCompactionSettings` sizes the compaction pass from them, and an
+   absent value lands on per-code-path defaults that disagree), so
+   `maskAliasedTokenLimits` puts them on a ladder of 16 buckets per binary
+   octave — down only, because `maxTokens` reaches the upstream as the response
+   cap and rounding it UP would produce a 400 the neutral error envelope makes
+   undiagnosable, and never producing `maxTokens >= contextWindow`, which
+   `deriveResponseReserveTokens` treats as corrupt data. Worst-case loss is
+   under 6.25 %, so compaction is not materially degraded. The **sidecar** keeps
+   the REAL numbers: it is trusted, and its token-budget guard on MCP tool
+   results protects against the real upstream limit, so rounding there would be
+   a correctness regression rather than extra safety. `MODEL_INPUT` deliberately
+   stays — dropping it does not degrade gracefully, it silently disables image
+   input for the whole run, and the modality vector is already disclosed on
+   purpose by the read projection.
+4. **The dialect.** The container spoke the backing vendor's own wire dialect,
+   which made the request shape a fingerprint and let the vendor's raw response
+   frames through untouched. It now speaks `pi-messages` and the sidecar
+   re-originates through pi-ai against the real backing — see
+   "The canonical dialect" above. `MODEL_PROVIDER`, `MODEL_API`'s
+   vendor-family value and `MODEL_REASONING_LEVEL_MAP` stopped reaching the
+   container with it.
+
+The response path was never the hole and stays closed the same way it always
+was: headers reduced to `LLM_PASSTHROUGH_RESPONSE_HEADERS`, error surfaces
+synthesized rather than forwarded, the `model` field swapped back to the alias.
+
+What keeps tier 1 closed is not this page. `packages/runner-pi/test/alias-env-allowlist.test.ts`
+pins the COMPLETE set of variables an aliased container receives as an exact
+set, and pins the non-aliased set beside it so the assertion states the
+difference rather than one side of it. Any new variable fails it until someone
+adds it deliberately. That is the guard the four phases above lacked: `MODEL_PROVIDER`
+first reached an aliased container as a side effect of appstrate#1196 — a fix
+for a real total outage — and went unnoticed for a release.
+
+### Tier 2 — what an observer can infer (irreducible)
+
+None of the following is closed, and none of it will be. An organization
+running an agent controls the code inside the container and the prompt going to
+the model, so it can measure the model itself.
+
+- **Ask it.** An agent can simply ask the model who it is. It can also
+  fingerprint the shape of a refusal, the house style of a system-prompt
+  leak attempt, or the tics of a long generation.
+- **Time it.** Time-to-first-token and sustained throughput are stable enough
+  per backing, at a given load, to separate candidates.
+- **Count its tokens.** This is the one that is easy to miss, because it looks
+  like accounting rather than identity. The terminal `done` event carries
+  `usage`, and `usage.input` for a controlled prompt _is_ a tokenizer
+  fingerprint: a fixed probe string tokenizes to a different integer under each
+  vocabulary, and a handful of probes separates the families outright. Nothing
+  in appstrate#1198 touches it, and nothing should: the count is load-bearing
+  on both sides of the boundary — the container sizes its next compaction from
+  it, and the platform prices `llm_usage.cost_usd` from it. Withholding it
+  would break compaction and billing to buy an inference the org can also get
+  by asking the model to count.
+- **Read the rounded limits.** The ladder removes the _exactness_ that lets a
+  pair be looked up in a public catalog; it leaves a bucket, not a value. It
+  narrows the candidate set. It does not close it.
+- **Read the modality vector.** `MODEL_INPUT` / the read projection publish it
+  on purpose, and it narrows the set too.
+
+That is the honest boundary this page opened with, and it is the reason the
+requirement is stated the way it is: the platform does not disclose the backing.
+It cannot make an organization unable to find out.

@@ -162,6 +162,16 @@ export interface RuntimePiEnvOptions {
  * only set when their source is defined — the entrypoint falls back to
  * SDK defaults when a key is absent, so emitting an empty string would
  * silently override the default.
+ *
+ * ADDING A KEY HERE IS A DISCLOSURE DECISION when the run is
+ * {@link RuntimePiModelConfig.aliased}: the agent can print its own
+ * environment and the run log is a dashboard surface, so whatever is in this
+ * dict is readable by the organization the alias hides the backing from. The
+ * complete allowlist for an aliased container is pinned as an exact set in
+ * `test/alias-env-allowlist.test.ts`, which fails on any new key and points at
+ * the contract in `docs/architecture/MODEL_ALIASES.md`. It is deliberately not
+ * a list of known-bad names: the next leak has a name nobody has written down
+ * yet, which is how `MODEL_PROVIDER` came back in #1196.
  */
 export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, string> {
   const { model } = opts;
@@ -258,7 +268,7 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
   // detection already works — but the key is correct there too, and the
   // entrypoint applies the same fallback either way.
   //
-  // An ALIASED run emits it at all: naming the vendor is the leak, and there
+  // An ALIASED run never emits it at all: naming the vendor is the leak, and there
   // is nothing left for the name to configure — the `pi-messages` request
   // shape is the same whatever the backing. The entrypoint's
   // `derivePiProvider` falls back to `PROVIDER_BY_API["pi-messages"]`, which
