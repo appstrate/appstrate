@@ -30,6 +30,12 @@ await i18n.changeLanguage("fr");
 
 const RUN_ID = "run_1";
 
+/**
+ * The class `RunFeaturedFile` and its placeholder both put on the viewer box —
+ * the marker for "the top slot is being held", with no text to read.
+ */
+const VIEWER_HEIGHT_CLASS = "h-[max(24rem,calc(100vh-28rem))]";
+
 function file(overrides: Partial<FileDto> & { name: string }): FileDto {
   return {
     id: `doc_${overrides.name}`,
@@ -142,7 +148,8 @@ describe("Outcome shows what the run PRODUCED, and only that", () => {
     // clause the card — and the file in it — would stay hidden until the run
     // resource refetched.
     const html = outcome([file({ name: "rapport.md" })], { producedFileCount: 0 });
-    expect(html).toContain(agentsFr["run.sectionProducedFiles"]);
+    // A single produced file arrives HOISTED (no card at all) — but it arrives.
+    expect(html).toContain(`aria-label="${filesFr["run.featuredLabel"]}"`);
     expect(html).toContain("rapport.md");
     expect(html).not.toContain(agentsFr["run.outcomeEmpty"]);
   });
@@ -150,12 +157,12 @@ describe("Outcome shows what the run PRODUCED, and only that", () => {
   it("says so when the file page was truncated, instead of showing a short list", () => {
     // `GET /api/files` clamps `limit` to 100 and answers `hasMore`; discarding
     // it truncated a >100-file run with nothing on screen saying so.
-    expect(outcome([file({ name: "rapport.md" })], { hasMore: true })).toContain(
-      agentsFr["run.producedFilesTruncated"],
-    );
-    expect(outcome([file({ name: "rapport.md" })])).not.toContain(
-      agentsFr["run.producedFilesTruncated"],
-    );
+    // Several files, because that is the only shape the notice can occur in: a
+    // truncated page holds at least 100 rows, never the exactly-1 that hoists
+    // the viewer and drops the card the notice hangs off.
+    const many = [file({ name: "rapport.md" }), file({ name: "annexe.md" })];
+    expect(outcome(many, { hasMore: true })).toContain(agentsFr["run.producedFilesTruncated"]);
+    expect(outcome(many)).not.toContain(agentsFr["run.producedFilesTruncated"]);
   });
 
   it("still shows the card while loading when the run DID produce files", () => {
@@ -166,7 +173,8 @@ describe("Outcome shows what the run PRODUCED, and only that", () => {
   });
 
   it("offers no purpose filter — the pane is one purpose by construction", () => {
-    const html = outcome([UPLOAD, file({ name: "rapport.md" })]);
+    // The several-files shape: the one that renders a FileListPanel at all.
+    const html = outcome([UPLOAD, file({ name: "rapport.md" }), file({ name: "annexe.md" })]);
     expect(html).not.toContain(filesFr["filter.user_upload"]);
     expect(html).not.toContain(filesFr["filter.all"]);
   });
@@ -230,5 +238,64 @@ describe("the other two outcome sections", () => {
     expect(html).not.toContain(agentsFr["run.sectionOutput"]);
     expect(html).not.toContain(agentsFr["run.sectionProducedFiles"]);
     expect(html).not.toContain(agentsFr["run.sectionMemory"]);
+  });
+});
+
+describe("what the run produced LEADS the pane", () => {
+  /** Where a marker sits in the rendered pane, asserted to be present. */
+  function at(html: string, marker: string): number {
+    const index = html.indexOf(marker);
+    expect(index).toBeGreaterThan(-1);
+    return index;
+  }
+
+  it("puts the single produced file above Output, and in no card", () => {
+    // The file is what the run is FOR; the `output` tool's JSON is metadata
+    // about it. And one file under a "Fichiers produits" title would be listed
+    // as a single row directly beneath a full-size preview of itself.
+    const html = outcome([file({ name: "rapport.md" })], { output: { verdict: "ok" } });
+    expect(at(html, `aria-label="${filesFr["run.featuredLabel"]}"`)).toBeLessThan(
+      at(html, agentsFr["run.sectionOutput"]),
+    );
+    expect(html).not.toContain(agentsFr["run.sectionProducedFiles"]);
+  });
+
+  it("puts the files card above Output when the run produced SEVERAL", () => {
+    const html = outcome([file({ name: "rapport.md" }), file({ name: "annexe.md" })], {
+      output: { verdict: "ok" },
+    });
+    expect(at(html, agentsFr["run.sectionProducedFiles"])).toBeLessThan(
+      at(html, agentsFr["run.sectionOutput"]),
+    );
+    // Several are only listed — the pane never picks one for the user.
+    expect(html).not.toContain(`aria-label="${filesFr["run.featuredLabel"]}"`);
+  });
+
+  it("leaves Output leading when the run produced no file at all", () => {
+    const html = outcome([], { output: { verdict: "ok" }, memoryCount: 2 });
+    expect(html).not.toContain(agentsFr["run.sectionProducedFiles"]);
+    expect(at(html, agentsFr["run.sectionOutput"])).toBeLessThan(
+      at(html, agentsFr["run.sectionMemory"]),
+    );
+  });
+
+  it("holds the top slot while the list loads on a single-file run", () => {
+    // `producedFileCount` is known on the first paint, `featured` only once
+    // /api/files answers. Painting the card in that window and swapping it for
+    // the hoisted viewer would be a layout jump on every open — the same class
+    // of bug the `hasFiles` count already fixed once.
+    const html = outcome([], { producedFileCount: 1, isLoading: true, output: { verdict: "ok" } });
+    expect(html).not.toContain(agentsFr["run.sectionProducedFiles"]);
+    // The placeholder reserves the viewer's exact footprint, above Output.
+    expect(at(html, VIEWER_HEIGHT_CLASS)).toBeLessThan(at(html, agentsFr["run.sectionOutput"]));
+  });
+
+  it("believes the resolved list over a stale count that disagrees", () => {
+    // Count says 1, the page holds three: the rows are the honest ones, so the
+    // pane shows the list rather than featuring an arbitrary one of them.
+    const three = ["a.md", "b.md", "c.md"].map((name) => file({ name }));
+    const html = outcome(three, { producedFileCount: 1 });
+    expect(html).toContain(agentsFr["run.sectionProducedFiles"]);
+    expect(html).not.toContain(`aria-label="${filesFr["run.featuredLabel"]}"`);
   });
 });

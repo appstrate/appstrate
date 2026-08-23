@@ -3,13 +3,29 @@
 /**
  * Run-detail "Outcome" pane — everything the run PRODUCED, in one place:
  *
- *   1. Output      — the value the `output` tool emitted. Not "the result of
- *                    the run": it is literally what that one tool wrote, which
- *                    is why the section carries the tool's own name.
- *   2. Fichiers    — the files the run produced. Inputs it merely consumed are
+ *   1. Fichiers    — the files the run produced. Inputs it merely consumed are
  *                    NOT here; the Fichiers tab is where the complete list,
  *                    imported and produced, lives.
+ *   2. Output      — the value the `output` tool emitted. Not "the result of
+ *                    the run": it is literally what that one tool wrote, which
+ *                    is why the section carries the tool's own name.
  *   3. Mémoire     — the memory rows the run wrote or touched.
+ *
+ * FILES LEAD, and this order is deliberate — do not put Output back on top.
+ * What a run is FOR is the artefact it produced; the `output` tool's JSON is
+ * metadata about that artefact (a verdict, a summary, a status), and reading it
+ * first means scrolling past it to reach the thing itself. On the common single
+ * -file run the file IS the answer, so the pane opens on it.
+ *
+ * The files therefore take one of two SHAPES, both above Output:
+ *
+ *   - exactly ONE produced file → the viewer is HOISTED out of any card and is
+ *     the first thing on the pane. No "Fichiers produits" card at all: the
+ *     viewer already carries the file's name and its download button, so the
+ *     card would wrap one file in a title, then list that same file underneath
+ *     the preview of itself.
+ *   - SEVERAL → no featured viewer (the derived rule #1177 gives one only at
+ *     exactly one), so the "Fichiers produits" card with the list leads instead.
  *
  * Each section is present only when the run has that kind of outcome, and a run
  * that produced none of the three says so once instead of stacking three empty
@@ -27,7 +43,7 @@ import { PackageOpen } from "lucide-react";
 import { useFiles, type FileDto } from "../hooks/use-files";
 import { featuredRunFile, producedRunFiles } from "../lib/files";
 import { FileListPanel } from "./file-list-panel";
-import { RunFeaturedFile } from "./run-featured-file";
+import { RunFeaturedFile, RunFeaturedFilePlaceholder } from "./run-featured-file";
 import { JsonView } from "./json-view";
 import { SectionCard } from "./section-card";
 import { EmptyState } from "./page-states";
@@ -44,9 +60,10 @@ interface RunOutcomeProps {
    * How many files the run produced, read off the run DTO's `file_counts.output`
    * (the server counts `run_id = this run AND purpose = 'agent_output'` — the
    * same predicate as {@link producedRunFiles}). It is what decides whether the
-   * Fichiers card appears AT ALL, so the card never paints a spinner on a run
-   * that produced nothing, and an errored `/api/files` never leaves a permanent
-   * empty card there.
+   * files lead the pane AT ALL, and — while `/api/files` is still in flight —
+   * which of the two shapes they take, so the pane never paints a spinner on a
+   * run that produced nothing, never swaps one shape for the other mid-load,
+   * and an errored `/api/files` never leaves a permanent empty card there.
    */
   producedFileCount: number;
 }
@@ -62,7 +79,8 @@ export function RunOutcomeTab(props: RunOutcomeProps) {
       // field (paging is `startingAfter=<last id>`). Discarding it truncated a
       // >100-file run's list with nothing on screen saying so. Surfaced, not
       // paged — and it never endangers the derived presentation rule (#1177):
-      // a truncated page holds at least 100 rows, never exactly 1.
+      // a truncated page holds at least 100 rows, never exactly 1. So the
+      // notice only ever has the list, in the several-files shape, to hang off.
       hasMore={data?.hasMore ?? false}
       isLoading={isLoading}
       error={error}
@@ -73,10 +91,10 @@ export function RunOutcomeTab(props: RunOutcomeProps) {
 /**
  * The pane itself, fed an already-resolved list.
  *
- * Split from the fetch so which sections appear — and which files reach them —
- * is testable without a query harness. That decision is the whole of the
- * derived presentation rule (#1177) and of "produced only", so it is the part
- * that must not be assumed correct.
+ * Split from the fetch so which sections appear — in which order, in which
+ * shape, and which files reach them — is testable without a query harness.
+ * That decision is the whole of the derived presentation rule (#1177) and of
+ * "produced only", so it is the part that must not be assumed correct.
  */
 export function RunOutcomeView({
   runId,
@@ -119,6 +137,19 @@ export function RunOutcomeView({
   const hasFiles = producedFileCount > 0 || produced.length > 0;
   const hasMemory = memoryCount > 0;
 
+  // WHICH shape, on the same principle and for the same reason: the DTO count
+  // is known on the first paint, `featured` only once `/api/files` answers. Read
+  // `featured` alone and a single-file run would paint the "Fichiers produits"
+  // card for one frame and then replace it with the hoisted viewer — the exact
+  // layout jump `hasFiles` above was already fixed once. So the count picks
+  // the shape while the list is in flight, and a placeholder holds the top slot.
+  //
+  // Once the list has ANSWERED, the list wins: a count of 1 whose page turns out
+  // to hold three files (or none — deleted between the two reads) is stale, and
+  // the resolved rows are the honest ones. `featured` is exactly
+  // `produced.length === 1`, so the two branches can never both be taken.
+  const singleFileShape = isLoading ? producedFileCount === 1 : featured !== undefined;
+
   if (!hasOutput && !hasFiles && !hasMemory) {
     return (
       <EmptyState
@@ -132,26 +163,34 @@ export function RunOutcomeView({
 
   return (
     <div>
+      {hasFiles &&
+        (singleFileShape ? (
+          featured ? (
+            <RunFeaturedFile id={featured.id} name={featured.name} />
+          ) : (
+            <RunFeaturedFilePlaceholder />
+          )
+        ) : (
+          <SectionCard title={t("run.sectionProducedFiles")}>
+            {/* No purpose filter: this list is produced files by construction. */}
+            <FileListPanel
+              files={produced}
+              isLoading={isLoading}
+              error={error}
+              empty={{ message: t("run.empty", { ns: "files" }), compact: true }}
+              runId={runId}
+            />
+            {hasMore && (
+              <p className="text-muted-foreground mt-2 text-xs">
+                {t("run.producedFilesTruncated")}
+              </p>
+            )}
+          </SectionCard>
+        ))}
+
       {hasOutput && (
         <SectionCard title={t("run.sectionOutput")}>
           <JsonView data={output} />
-        </SectionCard>
-      )}
-
-      {hasFiles && (
-        <SectionCard title={t("run.sectionProducedFiles")}>
-          {featured && <RunFeaturedFile id={featured.id} name={featured.name} />}
-          {/* No purpose filter: this list is produced files by construction. */}
-          <FileListPanel
-            files={produced}
-            isLoading={isLoading}
-            error={error}
-            empty={{ message: t("run.empty", { ns: "files" }), compact: true }}
-            runId={runId}
-          />
-          {hasMore && (
-            <p className="text-muted-foreground mt-2 text-xs">{t("run.producedFilesTruncated")}</p>
-          )}
         </SectionCard>
       )}
 
