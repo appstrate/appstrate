@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed — the `dataschema` attribute
+
+- CloudEvent envelopes no longer carry the OPTIONAL `dataschema` attribute
+  (CloudEvents 1.0 §3.1), and `canonicalEventSchemaUri` /
+  `CANONICAL_EVENT_SCHEMAS` / `CANONICAL_EVENT_SCHEMA_VERSION` are gone from
+  `@appstrate/afps-runtime/events`.
+
+  The URIs it carried were never served — `schemas.afps.dev/v0/events/*` 404s
+  and `schemas.appstrate.dev` has no DNS record — but that was the smaller
+  problem. AFPS defines `RunEvent` with an OPEN payload: the specification
+  reserves event _namespaces_ and deliberately leaves _shapes_ unconstrained,
+  "so tools can carry whatever data they need without amending the spec".
+  Minting payload schemas under `schemas.afps.dev` asserted a normative shape
+  AFPS has not adopted, decided in this repository rather than through the AFPS
+  change process. Withdrawing the claim is the honest state.
+
+  Standardizing event payloads remains possible — as a spec change first
+  (§events in `spec.md`, documents under `packages/schema/v0/events/`, a Pages
+  job that copies them), and only then an attribute here.
+
+  **Receivers keep accepting `dataschema` on the wire.** Runtime images built
+  before this change still stamp it, and the ingestion schema is `.strict()`.
+
+### Changed
+
+- The canonical payload contract is now data: `CANONICAL_CONSTRAINTS` is a
+  table of `{ path, holds }` entries that `isCanonicalRunEvent` iterates,
+  replacing a hand-written `switch`. Behaviour is unchanged — the 60-fixture
+  corpus pins every verdict — but the set of constrained field paths is
+  recoverable again without parsing TypeScript.
+
+  That set is what a coverage guard needs. `test/types/canonical-events.test.ts`
+  derives it and asserts that each constraint is, for some fixture, the one
+  that rejects it; a constraint added without a fixture violating it now fails
+  by name. The previous guard derived the same set from generated JSON Schema
+  documents and was lost when those were removed as unpublished (issue #1184).
+
+- New export `firstViolatedConstraint(event)` — the path of the first
+  constraint an event violates, or `undefined`. It backs the coverage guard and
+  makes rejection reasons legible to callers.
+
 ### Removed — unused surface
 
 - `composeCatalogs(...)` (`@appstrate/afps-runtime/bundle`). No production caller

@@ -190,6 +190,134 @@ export const TOKEN_USAGE_COUNTERS = [
 ] as const;
 
 /**
+ * One structural constraint: the dotted path it reads, and the predicate the
+ * value at that path must satisfy.
+ *
+ * Optionality lives inside the predicate (`v === undefined || …`) rather than
+ * in a separate flag, so every constraint is one uniform thing to check — and
+ * one uniform thing to count, which is what makes coverage derivable.
+ */
+interface FieldConstraint {
+  readonly path: string;
+  readonly holds: (value: unknown) => boolean;
+}
+
+const required = (holds: (value: unknown) => boolean) => holds;
+const optional =
+  (holds: (value: unknown) => boolean) =>
+  (value: unknown): boolean =>
+    value === undefined || holds(value);
+
+const isString = (v: unknown): boolean => typeof v === "string";
+const isPresent = (v: unknown): boolean => v !== undefined;
+
+/**
+ * The canonical payload contract, as data.
+ *
+ * ## Why a table and not a `switch`
+ *
+ * This used to be a hand-written `switch`, and the set of constrained field
+ * paths could not be recovered from it without parsing TypeScript. That set is
+ * what a coverage guard needs: it is how `durationMs`, `usage`'s inner
+ * counters and `progress`/`error`'s `data` were once caught shipping with no
+ * fixture exercising them. The guard that derived it read generated JSON
+ * Schema documents; those were removed (they were never published), and with
+ * them went the only machine-readable list of constraints.
+ *
+ * Expressing the constraints as data restores that list from the
+ * implementation itself — `test/types/canonical-events.test.ts` derives it
+ * with `Object.keys`, no parser and no second copy to maintain. A constraint
+ * added here is a constraint the corpus is immediately required to exercise.
+ *
+ * ## Order is semantic
+ *
+ * Constraints are evaluated in declaration order and the first failure wins,
+ * so a parent path MUST precede the children that assume it resolved:
+ * `usage` is checked to be a JSON object before `usage.<counter>` reads
+ * through it. That mirrors the short-circuit the `switch` performed, and it
+ * makes "which constraint rejected this event" a well-defined question — the
+ * question the coverage guard asks.
+ */
+export const CANONICAL_CONSTRAINTS = {
+  "memory.added": [
+    { path: "content", holds: required(isString) },
+    { path: "scope", holds: isValidScope },
+  ],
+  "pinned.set": [
+    { path: "key", holds: required((v) => typeof v === "string" && v.length > 0) },
+    // `content` is required, but an explicit `undefined` is dropped by
+    // `JSON.stringify`, so it is absent on the wire — `!== undefined`
+    // rather than an `in` check.
+    { path: "content", holds: required(isPresent) },
+    { path: "scope", holds: isValidScope },
+  ],
+  "output.emitted": [{ path: "data", holds: required(isPresent) }],
+  "log.written": [
+    { path: "level", holds: required((v) => v === "info" || v === "warn" || v === "error") },
+    { path: "message", holds: required(isString) },
+  ],
+  "appstrate.progress": [
+    { path: "message", holds: required(isString) },
+    // Optional structured context: `Record<string, unknown>`, so an array /
+    // null / scalar is a violation.
+    { path: "data", holds: optional(isJsonObject) },
+  ],
+  "appstrate.error": [
+    { path: "message", holds: required(isString) },
+    { path: "data", holds: optional(isJsonObject) },
+  ],
+  "appstrate.metric": [
+    { path: "usage", holds: optional(isJsonObject) },
+    // Derived from TOKEN_USAGE_COUNTERS, which is pinned to `keyof TokenUsage`
+    // at compile time below: a counter added to the interface grows this table
+    // on its own, and the coverage guard then demands a fixture for it.
+    ...TOKEN_USAGE_COUNTERS.map((counter) => ({
+      path: `usage.${counter}`,
+      holds: optional(isWireNumber),
+    })),
+    { path: "cost", holds: optional((v) => isWireNumber(v) && v >= 0) },
+    { path: "durationMs", holds: optional(isWireNumber) },
+  ],
+} as const satisfies Record<CanonicalRunEvent["type"], ReadonlyArray<FieldConstraint>>;
+
+/**
+ * Read a dotted path off an event. Returns `undefined` for any segment that
+ * cannot be traversed (missing, `null`, scalar, array) — never throws. A
+ * parent constraint has already rejected those cases by the time a child path
+ * is reached, so `undefined` here is unreachable in practice; it exists so the
+ * reader is total.
+ */
+function readPath(event: Record<string, unknown>, path: string): unknown {
+  let current: unknown = event;
+  for (const segment of path.split(".")) {
+    if (!isJsonObject(current)) return undefined;
+    current = current[segment];
+  }
+  return current;
+}
+
+/**
+ * The first constraint the event violates, or `undefined` when it satisfies
+ * all of them. Exported for the coverage guard in
+ * `test/types/canonical-events.test.ts`, which asks "which constraint rejected
+ * this fixture" and fails when some constraint is never the answer.
+ *
+ * Returns `undefined` for a non-canonical `type` too — no constraints apply,
+ * so none can be violated. Callers must check the type separately;
+ * {@link isCanonicalRunEvent} does.
+ */
+export function firstViolatedConstraint(event: RunEvent): string | undefined {
+  const constraints: ReadonlyArray<FieldConstraint> | undefined =
+    CANONICAL_CONSTRAINTS[event.type as CanonicalRunEvent["type"]];
+  if (constraints === undefined) return undefined;
+  const record = event as Record<string, unknown>;
+  for (const constraint of constraints) {
+    if (!constraint.holds(readPath(record, constraint.path))) return constraint.path;
+  }
+  return undefined;
+}
+
+/**
  * True when the event's `type` is one of the canonical strings AND its
  * payload satisfies the canonical shape. Returns `false` for tampered
  * payloads (e.g. `memory.added` without a string `content`) so callers
@@ -198,86 +326,33 @@ export const TOKEN_USAGE_COUNTERS = [
  *
  * Performs **structural** checks only — no deep clone, no mutation.
  *
- * ## Relationship to the `dataschema` attribute
+ * ## What rides on this
  *
- * This guard is the gate `buildCloudEventEnvelope` uses to decide whether to
- * stamp the CloudEvents `dataschema` attribute, so it must not accept
- * anything the document at that URI would reject. It is now the *sole*
- * definition of that shape: `../events/canonical-event-schemas.ts` holds the
- * URI table and nothing else — the Zod payload table and the JSON Schema
- * artifacts it generated were removed once those URIs were found to 404 (see
- * that module). Constraints a reader might dismiss as cosmetic are
- * load-bearing for that reason: `data` on `appstrate.progress`/`error` must
- * be an object, and each `usage` counter and `durationMs` on
- * `appstrate.metric` must be a number.
+ * Three callers, and two of them lose data when the guard says no:
+ *
+ *  - `../runner/reducer.ts` narrows with it before folding an event into the
+ *    `RunResult`. A rejected event is **silently dropped** — no output, no
+ *    memory, no metric.
+ *  - `../sinks/stdout-bridge.ts` validates what the agent prints on stdout.
+ *    That is a trust boundary: untrusted container output, structurally
+ *    checked before it is believed.
+ *  - `../events/cloudevents.ts` no longer consults it. The `dataschema` stamp
+ *    it used to gate is gone (see that module for why).
+ *
+ * So this is not a cosmetic classifier. Every constraint in
+ * {@link CANONICAL_CONSTRAINTS} is a rejection path that discards data, and
+ * the corpus is required to exercise each one.
+ *
+ * ## Deliberate strictness
  *
  * Non-finite numbers are rejected (see {@link isWireNumber}) — stricter than
- * any JSON Schema would be, and safe in that direction: over-rejecting only
- * costs an omitted OPTIONAL attribute, and it matches what survives
- * serialization.
- *
- * ## Coverage is a human convention, not a check
- *
- * The shared fixture corpus (`test/fixtures/canonical-event-corpus.ts`)
- * exercises every constraint below, and each fixture's `label` names the one
- * it exercises. Nothing verifies that. The mechanical coverage guard derived
- * the constrained field paths from the generated schema documents, so it went
- * with them — a constraint added here without a fixture naming it ships
- * unexercised, and nothing will say so. See issue #1184.
+ * a JSON Schema `type: "number"` would be, and correct in that direction:
+ * `JSON.stringify` turns them into `null`, so a consumer never receives what
+ * the producer held.
  */
 export function isCanonicalRunEvent(event: RunEvent): event is CanonicalRunEvent {
   if (!CANONICAL_TYPE_SET.has(event.type)) return false;
-  switch (event.type) {
-    case "memory.added": {
-      const e = event as Record<string, unknown>;
-      if (typeof e.content !== "string") return false;
-      return isValidScope(e.scope);
-    }
-    case "pinned.set": {
-      const e = event as Record<string, unknown>;
-      if (typeof e.key !== "string" || e.key.length === 0) return false;
-      // `content` is `required` in the published schema. An explicit
-      // `undefined` is dropped by `JSON.stringify`, so it is absent on the
-      // wire — `!== undefined`, not `"content" in e`.
-      if (e.content === undefined) return false;
-      return isValidScope(e.scope);
-    }
-    case "output.emitted":
-      return (event as Record<string, unknown>).data !== undefined;
-    case "log.written": {
-      const e = event as Record<string, unknown>;
-      return (
-        (e.level === "info" || e.level === "warn" || e.level === "error") &&
-        typeof e.message === "string"
-      );
-    }
-    case "appstrate.progress":
-    case "appstrate.error": {
-      const e = event as Record<string, unknown>;
-      if (typeof e.message !== "string") return false;
-      // Optional structured context: `Record<string, unknown>` in the
-      // schema, so an array / null / scalar is a violation.
-      if (e.data !== undefined && !isJsonObject(e.data)) return false;
-      return true;
-    }
-    case "appstrate.metric": {
-      const e = event as Record<string, unknown>;
-      // usage, cost and durationMs are all optional; when present each
-      // must match the published payload schema exactly.
-      if (e.usage !== undefined) {
-        if (!isJsonObject(e.usage)) return false;
-        for (const counter of TOKEN_USAGE_COUNTERS) {
-          const value = e.usage[counter];
-          if (value !== undefined && !isWireNumber(value)) return false;
-        }
-      }
-      if (e.cost !== undefined && (!isWireNumber(e.cost) || e.cost < 0)) return false;
-      if (e.durationMs !== undefined && !isWireNumber(e.durationMs)) return false;
-      return true;
-    }
-    default:
-      return false;
-  }
+  return firstViolatedConstraint(event) === undefined;
 }
 
 /** Fails to compile unless `T` is `true`. */
@@ -290,9 +365,10 @@ type Assert<T extends true> = T;
  * unchecked; one removed from the interface would leave a dead entry.
  *
  * These two assertions used to live beside the Zod payload table in
- * `../events/canonical-event-schemas.ts`; they moved here with the table's
- * removal because they were never about the published schemas — they guard the
- * live structural guard, which is now the sole definition of the payload shape.
+ * `../events/canonical-event-schemas.ts`; they moved here when that module was
+ * removed, because they were never about the published schemas — they guard
+ * {@link CANONICAL_CONSTRAINTS}, which is now the sole definition of the
+ * payload shape, and which derives its `usage.*` entries from this list.
  *
  * A module-private annotation rather than an exported type alias: tsc checks
  * `Assert<>` constraints identically either way, but a *type alias* nothing
