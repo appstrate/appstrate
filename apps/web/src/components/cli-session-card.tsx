@@ -1,17 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ReactNode } from "react";
-import { Laptop, Terminal, Monitor } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
-import {
-  categorizeUserAgent,
-  deriveLabel,
-  displayIp,
-  type CliSessionDisplay,
-  type UaCategory,
-} from "../lib/cli-sessions";
+import { deriveLabel, displayIp, type CliSessionDisplay } from "../lib/cli-sessions";
 import { formatDateField } from "../lib/markdown";
+import { CliSessionIcon } from "./cli-session-icon";
 
 export interface CliSessionCardProps {
   session: CliSessionDisplay;
@@ -22,22 +16,13 @@ export interface CliSessionCardProps {
   onRevoke: () => void;
 }
 
-function DeviceIcon({ category }: { category: UaCategory }) {
-  if (category === "cli") {
-    return <Terminal className="text-muted-foreground mt-0.5 h-5 w-5 shrink-0" />;
-  }
-  if (category === "github-action") {
-    return <Monitor className="text-muted-foreground mt-0.5 h-5 w-5 shrink-0" />;
-  }
-  return <Laptop className="text-muted-foreground mt-0.5 h-5 w-5 shrink-0" />;
-}
-
 export function CliSessionCard({ session, meta, revokeDisabled, onRevoke }: CliSessionCardProps) {
   const { t } = useTranslation(["settings", "common"]);
-  const category = categorizeUserAgent(session.userAgent);
   return (
     <div className="border-border bg-card flex items-start gap-4 rounded-lg border p-5">
-      <DeviceIcon category={category} />
+      <span className="mt-0.5 [&_svg]:h-5 [&_svg]:w-5">
+        <CliSessionIcon userAgent={session.userAgent} />
+      </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="font-medium">{deriveLabel(session, t)}</span>

@@ -28,6 +28,7 @@ import { useMemberColumns } from "../../pages/org-settings/member-columns.tsx";
 import { useApplicationColumns } from "../../pages/org-settings/application-columns.tsx";
 import { useCredentialColumns, useModelColumns } from "../../pages/org-settings/model-columns.tsx";
 import { useOAuthClientColumns } from "../../modules/oidc/components/oauth-client-columns.tsx";
+import { useCliSessionColumns } from "../../pages/org-settings/cli-session-columns.tsx";
 import { render } from "./run-fixture.tsx";
 
 /**
@@ -149,6 +150,13 @@ const SETS = {
     columnsFrom(() =>
       useOAuthClientColumns({
         onEdit: () => {},
+      }),
+    ),
+  cliSessions: () =>
+    columnsFrom(() =>
+      useCliSessionColumns({
+        revokingFamilyId: null,
+        onRevoke: () => {},
       }),
     ),
 };

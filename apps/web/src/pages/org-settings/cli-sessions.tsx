@@ -3,25 +3,16 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { Laptop } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
-import { ItemList } from "../../components/item-list";
+import { DataTable } from "../../components/data-table";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { CliSessionCard } from "../../components/cli-session-card";
 import { $api } from "../../api/client";
 import { useOrg } from "../../hooks/use-org";
-import { deriveLabel, type CliSessionDisplay } from "../../lib/cli-sessions";
-
-interface AdminCliSession extends CliSessionDisplay {
-  userId: string;
-  userEmail: string | null;
-  userName: string | null;
-}
-
-function memberLabel(s: AdminCliSession): string {
-  return s.userName || s.userEmail || s.userId;
-}
+import { deriveLabel } from "../../lib/cli-sessions";
+import { memberLabel, useCliSessionColumns, type AdminCliSession } from "./cli-session-columns";
 
 export function OrgSettingsCliSessionsPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -46,9 +37,14 @@ export function OrgSettingsCliSessionsPage() {
         queryKey: ["get", "/api/orgs/{orgId}/cli-sessions"],
       });
     },
+    onError: (mutationError) => toast.error(getErrorMessage(mutationError)),
   });
 
   const [pendingRevoke, setPendingRevoke] = useState<AdminCliSession | null>(null);
+  const columns = useCliSessionColumns({
+    revokingFamilyId: revoke.isPending ? (revoke.variables?.params.path.familyId ?? null) : null,
+    onRevoke: setPendingRevoke,
+  });
 
   // Not a request state: without an org id the query never runs, so `isLoading`
   // is false and the body would call an empty list an ANSWER. This waits for
@@ -66,9 +62,11 @@ export function OrgSettingsCliSessionsPage() {
         </p>
       </div>
 
-      <ItemList
-        items={sessions}
-        itemKey={(s) => s.familyId}
+      <DataTable
+        columns={columns}
+        rows={sessions}
+        rowKey={(session) => session.familyId}
+        label={t("orgCliSessions.tableLabel")}
         isLoading={isLoading}
         isError={Boolean(error)}
         error={<ErrorState message={getErrorMessage(error)} compact />}
@@ -79,16 +77,6 @@ export function OrgSettingsCliSessionsPage() {
             hint={t("orgCliSessions.emptyDescription")}
           />
         }
-        renderItem={(s) => (
-          <CliSessionCard
-            session={s}
-            meta={<span className="text-muted-foreground text-xs">· {memberLabel(s)}</span>}
-            revokeDisabled={
-              revoke.isPending && revoke.variables?.params.path.familyId === s.familyId
-            }
-            onRevoke={() => setPendingRevoke(s)}
-          />
-        )}
       />
 
       <ConfirmModal

@@ -1441,10 +1441,39 @@ A second pass put the pending label on the status element itself and widened the
 action track from 72px to its measured 80px pending footprint; source markup
 and the column-floor guard caught what the nominal screenshot could not show.
 
-**4. CLI sessions become a table.** Device identity keeps the current-device
-badge and member together at tier 1; user agent, IP and dates degrade by tier.
-CLI sessions are not editable, so their action end is `…` alone with Revoke,
-not a decorative pencil.
+**4. ~~CLI sessions become a table.~~ Done 23 August.** Device identity keeps
+its category icon, current-device badge and member together at tier 1; user
+agent and last activity appear at tier 2, while IP and the connection date are
+tier 3. The settings dialog never reaches tier 3, so its useful wide state is
+four columns rather than a squeezed six. The shared CLI icon now serves both
+this table and the personal-device card instead of duplicating category logic.
+
+CLI sessions have no editable whole, so the action end is `…` alone. Its one
+Revoke item is destructive, disabled for the current session, opens the
+existing confirmation dialog, shows pending on that row and toasts every
+failure. There is no decorative pencil and no success toast for a row whose
+disappearance is the success signal.
+
+Measured inside the real settings dialog, the table is 804px at a 1440 window
+and 340px at a 390 window. It shows four columns / two columns respectively,
+and the full twelve-width sweep has zero overflow. All four lab scenarios pass
+at both required widths with no missing fixture. The menu, its current-session
+disabled state, the confirmation and its close path were exercised at 390;
+the nested confirmation is 341px wide with no overflow.
+
+The first geometry pass found zero overflow too, but its headers named Runs:
+without `LAB_SELECTOR='[role="dialog"]'`, the harness had measured the first
+table in the document, behind the settings overlay. Scoping the measurement
+produced the CLI columns above. Looking at the screen caught a second wording
+error the DOM arithmetic could not: the first header repeated the whole
+"Active CLI sessions" title where the record field is simply "Device".
+
+The block gate is green for `bun test apps/web` (570 pass) and `bun run check`
+(33/33 tasks, the same nine pre-existing warnings).
+Root `bun test` again advanced through the suite, then its pairing-cleanup hook
+timed out at 10 seconds and the runner remained in the systemd-unit spinner
+while that worker reported `connect ETIMEDOUT`; it was interrupted without a
+summary after the same infrastructure failure reproduced.
 
 **5. Roll the action end through existing tables.** Start with the noisy
 models, credentials, proxies and integration OAuth clients. Keep direct
