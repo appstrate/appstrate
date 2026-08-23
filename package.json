@@ -63,6 +63,7 @@
     "test:e2e:ui": "cd e2e && npx playwright test --project=ui",
     "lab:shots": "cd e2e && bun lab/shots.mjs",
     "lab:measure": "cd e2e && bun lab/measure.mjs",
+    "lab:record": "cd e2e && bun lab/record.mjs",
     "lint": "eslint . --cache --cache-strategy content",
     "lint:fix": "eslint . --fix && prettier --write \"apps/*/src/**\" \"packages/*/src/**\"",
     "format": "prettier --write \"apps/*/src/**\" \"packages/*/src/**\"",

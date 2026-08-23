@@ -211,6 +211,71 @@ org that was ASKED for rather than the one the app is in — `applicationsByOrg`
 gives Tractr three workspaces and Appstrate one, which is what makes the
 switcher's second column provable.
 
+**Recording response SHAPES from a real Tier 0 instance** (23 August) is a
+separate, review-only workflow:
+
+```bash
+bun run lab:record
+```
+
+It starts `bun run dev` when the real app is not already reachable on `:3000`
+and leaves that server running. It signs into the disposable local account
+(`olivier@tractr.net` / `123456789` by default), creates a minimal agent, a
+closed remote run and an end user, then walks the SAME `e2e/lab/screens.mjs`
+coverage statement as `lab:shots`. The fixture ids in detail URLs are replaced
+with those live ids before navigation. This setup uses the existing E2E seed
+helpers; the responses that count are still observed on the browser page.
+
+The recorder listens to Playwright `request` and `response` events, assigning
+order when the REQUEST starts (response order is not request order). It loads
+the running instance's `/api/openapi.json` first and resolves each concrete URL
+to that live template, including package ids that occupy more than one path
+segment. Query strings are retained in browser order. `X-Org-Id` and
+`X-Application-Id` are reduced immediately to deterministic aliases, and are
+part of deduplication along with method, OpenAPI path and a canonical query.
+No request header set and no request body is ever stored.
+
+Only documented JSON `200` bodies become candidates. Every declaration is an
+explicit `Json200<"/api/…", "get">`, so leaving the generated file in
+`src/lab` makes the ordinary type gate check the captured shape. Better Auth
+bodies (notably the real `session.token`), `204`, SSE and binary responses are
+listed in the report WITHOUT reading their bodies. JSON is pseudonymized in
+memory before it enters a result: ids, names, emails, dates and remote hosts are
+made deterministic. A sensitive key, a secret-bearing query, an unknown
+high-entropy scalar, an unmatched OpenAPI path or an unreadable response is a
+blocking report item and a non-zero exit. Known credential placeholders and
+credential SCHEMA property names are not mistaken for live credentials.
+
+The two default outputs are deliberately outside the authored fixture graph:
+
+- `src/lab/recorded-fixtures.generated.ts` — typed candidates, never imported
+  by `handlers.ts` and ignored by Git;
+- `src/lab/recorded-fixtures.report.md` — request order, screen provenance,
+  scope/query variants, expected special responses and body conflicts.
+
+The recorder NEVER edits `fixtures.ts` or `handlers.ts`. The ignored files
+prevent a flat local capture from entering a commit by accident. A human
+reviews them locally, promotes a useful shape by hand, then authors the varied
+states that make the lab valuable. Empty, heavy and error remain derived from nominal in
+`handlers.ts`; they are not recorded from a backend. Repeated captures with
+different bodies are reported but do not fail by themselves: opening a run can
+mark a notification read, for example, and the first observed nominal body
+remains the candidate.
+
+Keep the candidate in `src/lab` and run `bun run --cwd apps/web typecheck`
+before promotion. On 23 August the live Tier 0 responses exposed three existing
+OpenAPI gaps: `/api/packages/integrations/{scope}/{name}` returns a non-empty
+`manifest`, `/api/packages/agents/{scope}/{name}` returns a manifest that does
+not satisfy `AgentManifest`, and `/api/runs/{id}/logs` returns non-empty `data`
+while the generated types use `Record<string, never>`. Those declarations are
+expected to fail until the contracts are corrected. Do not hide them with a
+cast; review or fix the contract before promoting those shapes.
+
+Parameters are environment variables: `LAB_RECORD_URL`,
+`LAB_RECORD_SCREENS`, `LAB_RECORD_OUT`, `LAB_RECORD_REPORT`,
+`LAB_RECORD_EMAIL`, `LAB_RECORD_PASSWORD`, and `LAB_RECORD_START=0` to require
+an already-running backend instead of starting one.
+
 ## The target, read from the SAVED design state
 
 `app.jsx` in the design project pins `layout: "droit"` and `fondsGris: true`,

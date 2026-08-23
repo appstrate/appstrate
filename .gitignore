@@ -83,3 +83,7 @@ conformance-snapshot/
 
 # Lab harness output (e2e/lab/shots.mjs) — captures, never committed
 lab-shots/
+# Real-backend fixture candidates. Review locally, then promote selected shapes
+# into the authored fixtures by hand.
+apps/web/src/lab/recorded-fixtures.generated.ts
+apps/web/src/lab/recorded-fixtures.report.md
