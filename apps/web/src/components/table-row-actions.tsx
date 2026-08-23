@@ -9,6 +9,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
+import { Spinner } from "./spinner";
 
 interface PrimaryAction {
   label: string;
@@ -26,16 +27,21 @@ interface PrimaryAction {
 export function TableRowActions({
   primary,
   menuLabel,
+  isPending = false,
+  pendingLabel,
   children,
 }: {
   primary?: PrimaryAction;
   menuLabel?: string;
+  isPending?: boolean;
+  pendingLabel?: string;
   children?: ReactNode;
 }) {
   const PrimaryIcon = primary?.icon ?? Pencil;
 
   return (
     <div className="relative z-10 flex items-center justify-end gap-1">
+      {isPending && <Spinner label={pendingLabel} />}
       {primary && (
         <Button
           type="button"
@@ -43,7 +49,7 @@ export function TableRowActions({
           size="sm"
           className="h-7 w-7 p-0"
           onClick={primary.onSelect}
-          disabled={primary.disabled}
+          disabled={primary.disabled || isPending}
           title={primary.label}
           aria-label={primary.label}
         >
@@ -60,6 +66,7 @@ export function TableRowActions({
               className="h-7 w-7 p-0"
               title={menuLabel}
               aria-label={menuLabel}
+              disabled={isPending}
             >
               <MoreHorizontal size={14} />
             </Button>

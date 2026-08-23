@@ -6,10 +6,10 @@
  */
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { $api, client, type components, type paths } from "@/api/client";
-import { useCurrentOrgId } from "@/hooks/use-org";
-import { useCurrentApplicationId } from "@/hooks/use-current-application";
-import { useOrgOnlyScope } from "@/hooks/use-org-scope";
+import { $api, client, type components, type paths } from "../../../api/client";
+import { useCurrentOrgId } from "../../../hooks/use-org";
+import { useCurrentApplicationId } from "../../../hooks/use-current-application";
+import { useOrgOnlyScope } from "../../../hooks/use-org-scope";
 
 /** Wire shapes from the OpenAPI spec. */
 export type OAuthClient = components["schemas"]["OAuthClientObject"];

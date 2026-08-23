@@ -770,6 +770,8 @@ Three cases, and the principle is whether a value can be VALID on its own:
   An OAuth client with its id typed and its secret empty is not a state to send.
   The modal is where a complete value is assembled. This is what models,
   proxies, OAuth clients and webhooks already do; the rule names it.
+  An Edit action is valid for one of these compound records; it is not a way to
+  reveal a single field that should have been directly editable.
 - **A list of independently valid values → each entry commits on its own.** The
   workspace's OAuth domains: a row commits when it is filled and left, and
   adding an empty row saves nothing, because an empty input is the residue of
@@ -859,6 +861,12 @@ something that contradicts one.
   fields in the same order, which is the table's bargain. Drawn as stacked cards
   each row reprinted its own labels — the CLI sessions card carried four of them
   per row where a head writes them once.
+- **A table's action end is semantic, not ceremonial.** (23 August.) One
+  frequent action on a compound record may stay direct; secondary and
+  destructive actions go into shadcn's `…` menu. No editable whole means no
+  pencil, and one deed means no empty overflow. Direct controls such as role,
+  default and share remain in their own columns because the control is the
+  setting.
 - **Adding something is always the same gesture**: the white surface-treatment
   button with a `+` icon, opening a MODAL. Not a blue fill, not a bare label.
   The exception is by destination, not by taste: when "create" means opening a
@@ -1393,7 +1401,57 @@ group. Running its reference listener file alone reproduces the documented CA
 baseline exactly, 15/15 failures at `planCaBundle` because `caKeyPem` lacks the
 expected PEM marker. No touched package is involved.
 
-**3. End-users become a table.** This one has a prerequisite, which is why it is
+**3. ~~The row-action pattern and SSO table.~~ Done 23 August.**
+`TableRowActions` owns one frequent direct action and the shadcn overflow
+trigger, while callers keep the resource-specific items, permissions and
+pending states. It deliberately does not make Edit or `…` universal: a direct
+control stays the setting, a row with one deed gets no empty menu, and a record
+with no editable whole gets no invented pencil. Secondary and destructive
+deeds go in the menu, with the destructive group after a separator.
+
+The SSO collaborator clients are a `DataTable` now. Client identity carries
+its id and state badges; redirect URIs appear at tier 2; the last column keeps
+Edit direct and moves first-party status, enable/disable, secret rotation and
+delete into the menu. Edit and Create push `?oauth-client=<id|new>`, while
+closing replaces the URL, so Back closes a modal instead of reopening it.
+
+Measured in the real settings containers, the table is 804px at a 1440 window
+and 340px at a 390 window. It shows three columns / two columns respectively,
+both row-action buttons are 28px, and neither viewport overflows. All four lab
+scenarios pass at both widths. The fixture guard only found the modal's
+previously unserved `GET /api/oauth/scopes`; it now has an OpenAPI-typed
+fixture. The tests also caught the root runner's `@/…` resolution trap in the
+new column set and the old card's orphaned `toggleFirstParty` locale key before
+either landed.
+
+The block gate is green for `bun test apps/web` (566 pass) and `bun run check`
+(33/33 tasks, the same nine pre-existing warnings). Root `bun test` did not
+reach a summary in this environment: after its pairing-cleanup hooks timed out,
+it remained stuck in the systemd-unit setup spinner while the OAuth pairing
+cleanup and webhook-delivery workers repeatedly reported `connect ETIMEDOUT`.
+It was interrupted after several minutes; the touched web package is green.
+
+The fixed-point review caught that the first action pass had inherited the old
+card's feedback contract: visible badge changes still toasted on success,
+failures said nothing, and pending disappeared with the closed menu. Success is
+quiet now, every mutation failure toasts, and the row keeps a labelled spinner
+beside locked actions while any deed is pending. It also replaced two repeated
+confirmation-dialog bodies with the existing `ConfirmModal`.
+A second pass put the pending label on the status element itself and widened the
+action track from 72px to its measured 80px pending footprint; source markup
+and the column-floor guard caught what the nominal screenshot could not show.
+
+**4. CLI sessions become a table.** Device identity keeps the current-device
+badge and member together at tier 1; user agent, IP and dates degrade by tier.
+CLI sessions are not editable, so their action end is `…` alone with Revoke,
+not a decorative pencil.
+
+**5. Roll the action end through existing tables.** Start with the noisy
+models, credentials, proxies and integration OAuth clients. Keep direct
+controls (member role, default, share) where they are, keep Run direct, and do
+not add an overflow trigger to a row with nothing to put in it.
+
+**6. End-users become a table.** This one has a prerequisite, which is why it is
 last: the row opens its detail panel through an `onClick` on local state, with
 NO URL, and `DataTable`'s contract is that a row is a LINK (middle-click,
 ⌘-click, copy-link-address). So:
@@ -1402,13 +1460,14 @@ NO URL, and `DataTable`'s contract is that a row is a LINK (middle-click,
   `components/document-list-panel.tsx`: `?preview=<id>`, pushed on open and
   REPLACED on close, so Back closes the panel instead of reopening it. Use
   `?user=<id>`.
-- Then the list becomes a `DataTable` with its own column set, in its own file,
+- Then the list becomes a `DataTable` with its own column set and the row-action
+  pattern, in its own file,
   registered in `components/test/column-tiers.test.tsx` like every other set.
 - Its date column goes at tier 2, NOT tier 3: this screen is reachable inside
   the settings dialog, which tops out around 800px and never crosses the 56rem
   threshold, so tier 3 there means never drawn.
 
-**4. Accessibility, which nothing here has ever checked.** The branch
+**7. Accessibility, which nothing here has ever checked.** The branch
 re-declares ARIA roles on the table because this file demands it, and that is
 the whole of it: not one contrast ratio, keyboard path or touch target has ever
 been measured. Meanwhile the last days added dozens of controls — icon buttons

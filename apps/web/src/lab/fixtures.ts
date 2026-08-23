@@ -1294,6 +1294,10 @@ export const oauthClients: Json200<"/api/oauth/clients", "get"> = {
   ],
 };
 
+export const oauthScopes: Json200<"/api/oauth/scopes", "get"> = {
+  data: ["openid", "profile", "email", "offline_access", "agents:read", "agents:run"],
+};
+
 /**
  * The integration catalogue, so the one list that is still cards-only can be
  * looked at at all. Six of them because the grid's whole question is how many
