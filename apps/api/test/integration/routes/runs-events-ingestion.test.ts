@@ -1627,9 +1627,14 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
 
       const row = await finalizeAndRead(runId);
       expect(row?.costPricingStatus).toBe("unpriced");
-      // The cached cost still sums both rows — the status qualifies it, it
-      // does not replace it.
-      expect(row?.cost).toBeCloseTo(0.012, 5);
+      // The cached cost still sums both rows — the status qualifies it, it does
+      // not replace it. The runner row contributes exactly 0: its cost is the
+      // platform's own product of `runs.model_cost` × tokens, and there are no
+      // rates, so the `$0.002` the container reported is not summed in. That
+      // zero and this `unpriced` verdict are now the same fact, which is the
+      // point — a total the platform cannot price says so instead of quietly
+      // adopting the container's figure.
+      expect(row?.cost).toBeCloseTo(0.01, 5);
     });
 
     it("mixed rows: `partial` wins over `priced` but loses to `unpriced`", async () => {

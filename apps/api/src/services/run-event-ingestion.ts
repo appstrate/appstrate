@@ -417,17 +417,34 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   //     is already in the `llm_usage` ledger (runner/proxy rows) and the
   //     column is its run-row mirror, so preserve it instead.
   //
-  // No double-counting is possible: preservation writes no ledger row
-  // (only `result.cost > 0` triggers the runner-row fallback below), and
-  // the CAS on `sink_closed_at` guarantees a terminal usage arriving
-  // after this finalize can never re-open the run.
+  // Preserving that snapshot cannot double-bill — but NOT because preservation
+  // skips the ledger. It does write a ledger row: the barrier below is gated on
+  // `terminalCost !== null || tokenUsageIsNonZero(...)`, so a preserved snapshot
+  // carrying tokens goes through it, and that is exactly how a run that died
+  // mid-flight is billed at all.
+  //
+  // What makes it safe is structural, and holds for any number of writes. A run
+  // has at MOST ONE `source="runner"` row (partial unique index
+  // `uq_llm_usage_runner_run_id`), and every write is an UPSERT of the run's
+  // CUMULATIVE total — never an append of a delta. Re-submitting the snapshot
+  // the `appstrate.metric` side channel already wrote is therefore an exact
+  // duplicate, which the strict-inequality advance rule discards as a no-op; a
+  // smaller one is refused outright. Two writes of the same total bill that
+  // total once. Double-counting would need either a second runner row or an
+  // additive write, and the ledger offers neither.
+  //
+  // The other half is ordering, and is unchanged: the CAS on `sink_closed_at`
+  // guarantees a terminal usage arriving after this finalize can never re-open
+  // the run.
   let validatedUsage = validateFinalizeUsage(result.usage, run.id);
   // Non-success without runner-posted usage: the run-row column must keep
   // whatever cumulative snapshot the `appstrate.metric` side-channel last
   // wrote. The COLUMN preservation happens atomically in the CAS below
   // (SQL COALESCE) — a JS read-then-write here would race a concurrent
-  // metric event and clobber a newer snapshot with the stale read. The
-  // read below only feeds the ledger-row fallback (result.cost > 0).
+  // metric event and clobber a newer snapshot with the stale read. The read
+  // below is what the terminal ledger row is PRICED from (`runs.model_cost` ×
+  // these counters), so it decides what a crashed run is billed — see the
+  // barrier below.
   const preserveLastKnownUsage = validatedUsage === null && status !== "success";
   if (preserveLastKnownUsage) {
     validatedUsage = await readLastKnownUsage(run.id);
@@ -487,6 +504,12 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   //     A run that consumed nothing (no tokens, no reported cost) has no runner
   //     row to make durable and is skipped — the barrier exists to pin an
   //     existing accounting fact, not to mint empty ones.
+  //
+  //     Those synthesised terminals are also where this barrier started costing
+  //     money. Its row is priced server-side from `run.modelCost` × the usage
+  //     passed here, so a crashed run's PRESERVED snapshot is now billed;
+  //     previously the row took the absent `result.cost` and settled at $0. See
+  //     the behaviour-change note on `resolveRunnerCost`.
   const terminalCost = typeof result.cost === "number" ? result.cost : null;
   if (terminalCost !== null || tokenUsageIsNonZero(validatedUsage)) {
     await writeRunnerLedgerRow(
