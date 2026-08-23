@@ -11,23 +11,23 @@
  * files in one page), so the second pane costs no extra request and the two can
  * never show a different list.
  *
+ * No preview here, deliberately. The derived rule (#1177) still decides that a
+ * run which produced exactly one file gets that file PRESENTED — but the pane
+ * that presents it is Outcome, where the artefact leads the page. This tab is
+ * the inventory: an inline preview above a list whose job is to be complete
+ * pushed the list itself below the fold and answered a question the reader did
+ * not come here to ask. Files open in the viewer on click, like any other row.
+ *
  * The list is invalidated live from the run's SSE stream: `run-detail`
  * invalidates this query when a `file.published` log frame arrives, which is
  * also what refreshes it after a delete (useDeleteFile invalidates the same
  * query).
- *
- * When the run produced exactly ONE file, that file is featured above the list
- * with an inline preview — the derived rule (#1177) that replaced the agent's
- * `presentation: "primary"` declaration and the Deliverable tab it drove.
- * Several produced files are only listed: the page never picks one for the user.
  */
 
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useFiles } from "../hooks/use-files";
-import { featuredRunFile } from "../lib/files";
 import { FileListPanel, type PurposeFilter } from "./file-list-panel";
-import { RunFeaturedFile } from "./run-featured-file";
 
 export function RunFilesTab({ runId }: { runId: string }) {
   const { t } = useTranslation("files");
@@ -39,27 +39,15 @@ export function RunFilesTab({ runId }: { runId: string }) {
     return purpose === "all" ? all : all.filter((d) => d.purpose === purpose);
   }, [data?.data, purpose]);
 
-  // Computed off the FULL list, never the filtered view: the rule counts what
-  // the run produced, and that count does not change because the user is
-  // currently looking at the uploads filter. `runId` is what tells a produced
-  // file from one this run only consumed — the query answers the run's whole
-  // container, chained-in `agent_output` rows from earlier runs included.
-  const featured = useMemo(() => featuredRunFile(data?.data ?? [], runId), [data?.data, runId]);
-
   return (
-    <>
-      {featured && purpose !== "user_upload" && (
-        <RunFeaturedFile id={featured.id} name={featured.name} />
-      )}
-      <FileListPanel
-        files={files}
-        isLoading={isLoading}
-        error={error}
-        purpose={purpose}
-        onPurposeChange={setPurpose}
-        empty={{ message: t("run.empty"), hint: t("run.emptyHint"), compact: true }}
-        runId={runId}
-      />
-    </>
+    <FileListPanel
+      files={files}
+      isLoading={isLoading}
+      error={error}
+      purpose={purpose}
+      onPurposeChange={setPurpose}
+      empty={{ message: t("run.empty"), hint: t("run.emptyHint"), compact: true }}
+      runId={runId}
+    />
   );
 }

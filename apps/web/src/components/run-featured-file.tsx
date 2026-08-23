@@ -1,25 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The one file a run produced, previewed in place.
+ * The one file a run produced, previewed in place — the visible half of the
+ * derived presentation rule (#1177): a run that produced exactly one file
+ * presents it, several are only listed and the user picks.
  *
- * Its own module because two panes render it — Outcome (where the produced
- * files live) and Files (the complete list) — and the derived presentation rule
- * (#1177) has to look identical on both: exactly one produced file is featured
- * and opened, several are only listed.
+ * Rendered by the Outcome pane ONLY, and it leads that pane: the artefact is
+ * what the run is for, so it sits above the `output` JSON and outside any card.
+ * The Fichiers tab deliberately does NOT render it. That tab is the complete
+ * inventory — inputs and outputs both — and an inline preview above it pushed
+ * the list below the fold to answer a question the reader did not come there to
+ * ask. Presenting the file is Outcome's job; listing every file is Fichiers'.
  *
- * WHERE the two panes deliberately differ is the surroundings, not the rule:
- *
- *   - Files keeps the viewer ABOVE its own list, because that pane's job is the
- *     complete inventory — inputs included — and the featured file is a preview
- *     bolted on top of a list that still has to be there.
- *   - Outcome HOISTS it: at exactly one produced file the pane drops its
- *     "Fichiers produits" card entirely and this section is the pane's first
- *     child, above Output. A card there would have listed the single file as one
- *     row directly under a full-size preview of that same file.
- *
- * Both still ask `featuredRunFile()` the same question and get the same
- * answer; only the container around this component changes.
+ * Its own module because the viewer and {@link RunFeaturedFilePlaceholder} must
+ * keep the same footprint (see `VIEWER_HEIGHT`), and because the pane decides
+ * WHICH of the two to show before the file list has answered.
  *
  * It refetches the file on its own (`useFile`) rather than reusing the list
  * row: `preview_url` carries a short-lived signed token minted per single-file
