@@ -1283,6 +1283,7 @@ export const integrations: Json200<"/api/integrations", "get"> = {
         description:
           "Lire, écrire et organiser les fichiers d'un Drive : documents, tableurs, dossiers partagés.",
         version: "2.1.0",
+        keywords: ["drive", "fichiers", "google"],
       },
     },
     {
@@ -1294,6 +1295,7 @@ export const integrations: Json200<"/api/integrations", "get"> = {
         display_name: "Gmail",
         description: "Chercher, lire et envoyer des courriels au nom de l'employé connecté.",
         version: "1.8.2",
+        keywords: ["courriel", "google"],
       },
     },
     {
@@ -1305,6 +1307,7 @@ export const integrations: Json200<"/api/integrations", "get"> = {
         display_name: "ClickUp",
         description: "Tâches, listes et suivi du temps.",
         version: "0.9.0",
+        keywords: ["tâches", "temps"],
       },
     },
     {

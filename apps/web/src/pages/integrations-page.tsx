@@ -22,6 +22,9 @@ import { Button } from "@appstrate/ui/components/button";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { PageHeader } from "../components/page-header";
 import { CardGrid } from "../components/card-grid";
+import { DataTable } from "../components/data-table";
+import { usePackageColumns } from "../components/packages-table";
+import type { CardItem } from "./package-list";
 import { TOOLBAR_ACTION } from "../lib/toolbar-button";
 import { ErrorState, EmptyState } from "../components/page-states";
 import { useIntegrations, type IntegrationSummaryWire } from "../hooks/use-integrations";
@@ -51,6 +54,24 @@ function ActiveBadge({ active }: { active: boolean }) {
       {t("integrations.badge.inactive")}
     </span>
   );
+}
+
+/**
+ * An installed integration, seen as what it is: a package of the org, with the
+ * same fields the other package lists read. Projecting it onto `CardItem` is
+ * what lets it take `usePackageColumns` verbatim rather than a fourth column
+ * set that would drift from the three.
+ */
+function toCardItem(integration: IntegrationSummaryWire): CardItem {
+  const m = integration.manifest;
+  return {
+    id: integration.id,
+    displayName: m.display_name ?? integration.id,
+    description: m.description,
+    type: "integration",
+    source: integration.source === "system" ? "system" : "local",
+    keywords: m.keywords,
+  };
 }
 
 function IntegrationCard({ integration }: { integration: IntegrationSummaryWire }) {
@@ -85,6 +106,8 @@ export function IntegrationsPage() {
   const [tab, setTab] = useState<"active" | "all">("active");
   const [query, setQuery] = useState("");
   const { data: integrations, isLoading, error } = useIntegrations();
+
+  const columns = usePackageColumns("integration");
 
   const filtered = useMemo(() => {
     const list = integrations ?? [];
@@ -137,24 +160,42 @@ export function IntegrationsPage() {
         </div>
       </div>
 
-      <CardGrid
-        items={filtered}
-        itemKey={(integration) => integration.id}
-        renderCard={(integration) => <IntegrationCard integration={integration} />}
-        isLoading={isLoading}
-        isError={Boolean(error)}
-        // RFC 9457, not an `Error`: `detail` is the sentence, `title` the class.
-        error={<ErrorState message={error?.detail ?? error?.title} compact />}
-        empty={
-          <EmptyState
-            icon={Boxes}
-            compact
-            message={
-              tab === "active" ? t("integrations.empty.active") : t("integrations.empty.all")
-            }
-          />
-        }
-      />
+      {/* Two lists, two bodies, because they are two different KINDS of thing.
+          The org's OWN integrations are platform objects like its agents, its
+          skills and its MCP servers, so they take the table those take — the
+          same `usePackageColumns`, not a lookalike. The catalogue is what you
+          BROWSE to choose one, and a card is what carries a description at a
+          length you can read, which is what choosing needs.
+
+          (Under the install/activate rule coming next, the second list stops
+          being "everything imported" and becomes the catalogue Appstrate
+          offers: installing will mean filling the activation form, so there is
+          no third state left between the two.) */}
+      {tab === "active" ? (
+        <DataTable
+          label={t("integrations.tabs.active")}
+          columns={columns}
+          rows={filtered.map(toCardItem)}
+          rowKey={(item) => item.id}
+          rowHref={(item) => `/integrations/${item.id}`}
+          rowLabel={(item) => item.displayName}
+          isLoading={isLoading}
+          isError={Boolean(error)}
+          error={<ErrorState message={error?.detail ?? error?.title} compact />}
+          empty={<EmptyState icon={Boxes} compact message={t("integrations.empty.active")} />}
+        />
+      ) : (
+        <CardGrid
+          items={filtered}
+          itemKey={(integration) => integration.id}
+          renderCard={(integration) => <IntegrationCard integration={integration} />}
+          isLoading={isLoading}
+          isError={Boolean(error)}
+          // RFC 9457, not an `Error`: `detail` is the sentence, `title` the class.
+          error={<ErrorState message={error?.detail ?? error?.title} compact />}
+          empty={<EmptyState icon={Boxes} compact message={t("integrations.empty.all")} />}
+        />
+      )}
     </div>
   );
 }

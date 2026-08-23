@@ -2,14 +2,13 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
 import { Webhook } from "lucide-react";
 import { usePermissions } from "@/hooks/use-permissions";
 import { Button } from "@appstrate/ui/components/button";
-import { Badge } from "@appstrate/ui/components/badge";
 import { useWebhooks } from "../hooks/use-webhooks";
 import { ErrorState, EmptyState } from "@/components/page-states";
-import { ItemList } from "@/components/item-list";
+import { DataTable } from "@/components/data-table";
+import { useWebhookColumns } from "../components/webhook-columns";
 import { WebhookCreateModal } from "../components/webhook-create-modal";
 import { getErrorMessage } from "@appstrate/core/errors";
 
@@ -19,6 +18,7 @@ export function WebhooksPage() {
   const [createOpen, setCreateOpen] = useState(false);
 
   const { data: webhooks, isLoading, error } = useWebhooks();
+  const columns = useWebhookColumns();
 
   if (!isAdmin) return null;
 
@@ -28,9 +28,13 @@ export function WebhooksPage() {
         <Button onClick={() => setCreateOpen(true)}>{t("settings:webhooks.createTitle")}</Button>
       </div>
 
-      <ItemList
-        items={webhooks ?? []}
-        itemKey={(wh) => wh.id}
+      <DataTable
+        label={t("settings:webhooks.pageTitle")}
+        columns={columns}
+        rows={webhooks ?? []}
+        rowKey={(wh) => wh.id}
+        rowHref={(wh) => `/webhooks/${wh.id}`}
+        rowLabel={(wh) => wh.url}
         isLoading={isLoading}
         isError={Boolean(error)}
         error={<ErrorState message={getErrorMessage(error)} compact />}
@@ -41,32 +45,6 @@ export function WebhooksPage() {
             </Button>
           </EmptyState>
         }
-        renderItem={(wh) => (
-          <Link
-            to={`/webhooks/${wh.id}`}
-            className="border-border bg-card hover:bg-accent/50 block rounded-lg border p-4 transition-colors"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <div className="mb-1 flex items-center gap-2">
-                  <span className="truncate font-mono text-sm">{wh.url}</span>
-                  <Badge variant={wh.enabled ? "success" : "secondary"}>
-                    {wh.enabled ? t("settings:webhooks.active") : t("settings:webhooks.inactive")}
-                  </Badge>
-                </div>
-                <p className="text-muted-foreground font-mono text-xs">{wh.events.join(", ")}</p>
-                <p className="text-muted-foreground mt-1 text-xs">
-                  {wh.packageId || t("settings:webhooks.allAgents")}
-                  {" · "}
-                  {t("settings:webhooks.payloadMode")}:{" "}
-                  {wh.payloadMode === "full"
-                    ? t("settings:webhooks.payloadModeFull")
-                    : t("settings:webhooks.payloadModeSummary")}
-                </p>
-              </div>
-            </div>
-          </Link>
-        )}
       />
 
       <WebhookCreateModal open={createOpen} onClose={() => setCreateOpen(false)} />

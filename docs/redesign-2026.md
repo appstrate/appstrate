@@ -1382,9 +1382,30 @@ So the strategy the reference itself suggests:
   content. Getting there means the bar (or something bar-shaped) on every screen
   that has an action, which is a sweep of the detail and settings pages, done on
   purpose rather than in passing.
-- **Integrations is the one list still card-only**, and the one place a real
-  `lt-search` can land first: that page already filters its catalogue
-  client-side because it holds the whole thing.
+- ~~**Integrations is the one list still card-only.**~~ Reframed and done on 22
+  August, and the reframing is the point. The entry treated integrations as ONE
+  list that was missing its table. The product owner corrected it: that screen
+  holds **two different kinds of thing**, and they do not want the same body.
+
+  - **The org's own integrations** — installed, and under the rule coming next,
+    installed MEANS activated, since installing will require filling the
+    activation form. Those are platform objects like its agents, its skills and
+    its MCP servers, so they take **the table those take**: the same
+    `usePackageColumns`, not a lookalike. An integration projects onto the same
+    `CardItem` the other package lists read, so the reuse is literal.
+  - **The catalogue Appstrate offers** — what you BROWSE to choose one. Cards,
+    because a card carries a description at a length you can read, which is
+    what choosing needs. That is the recorded reason cards stayed for the
+    package family, and it is the half of the old entry that was right.
+
+  So it is not a view toggle. A toggle offers two ways of seeing ONE list; here
+  there are two lists, and each has the body its job asks for.
+
+  Reusing the package column set surfaced a defect it had been carrying: only
+  an AGENT can be running or be run, so the `state` column and the run action
+  are dead on skills and MCP servers — a column of em dashes, on two of the
+  three lists, since the set was written. `usePackageColumns` takes what the
+  list HOLDS now and drops both when nothing in it can ever be run.
 
 ## Chat
 

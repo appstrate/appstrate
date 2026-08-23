@@ -48,6 +48,8 @@ interface PackageTabProps {
   emptyIcon: LucideIcon;
   /** What the list holds, plural, for the search box: "Agents", "Skills". */
   entity: string;
+  /** What KIND it holds. Decides which columns can say anything at all. */
+  holds: PackageType;
   extraActions?: ReactNode;
   headerContent?: ReactNode;
 }
@@ -74,6 +76,7 @@ export function PackageTab({
   emptyHint,
   emptyIcon,
   entity,
+  holds,
   extraActions,
   headerContent,
 }: PackageTabProps) {
@@ -84,7 +87,7 @@ export function PackageTab({
   // the box searches the whole list rather than the page on screen — which is
   // exactly why the run list, paginated server-side, has no box.
   const [query, setQuery] = useState("");
-  const allColumns = usePackageColumns();
+  const allColumns = usePackageColumns(holds);
   const searchPlaceholder = useSearchPlaceholder(entity);
   const visibility = useColumnVisibility("packages");
 
@@ -183,6 +186,7 @@ export function PackageList() {
       <PackageTab
         title={t("list.tabAgents")}
         entity={t("list.tabAgents")}
+        holds="agent"
         emoji="⚡"
         breadcrumbs={[{ label: t("list.tabAgents") }]}
         items={items}

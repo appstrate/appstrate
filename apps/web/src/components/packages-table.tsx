@@ -23,10 +23,19 @@ import { Badge, MetaBadge } from "./status-badge";
 import { RunAgentButton } from "./run-agent-button";
 import { packageDetailPath } from "../lib/package-paths";
 import type { CardItem } from "../pages/package-list";
+import type { PackageType } from "@appstrate/core/validation";
 
 /** The column set, as a value the caller holds — see `useRunColumns` on why. */
-export function usePackageColumns(): DataColumn<CardItem>[] {
+/**
+ * @param holds What the list contains. Only an AGENT can be running or be run,
+ * so on any other list the `state` column is a column of em dashes and the
+ * actions column is empty — which is what the skills and MCP-server tables have
+ * been drawing all along, and what the integrations table would have inherited.
+ * A column that can never say anything is not a column.
+ */
+export function usePackageColumns(holds?: PackageType): DataColumn<CardItem>[] {
   const { t } = useTranslation(["agents", "common"]);
+  const runnable = holds === undefined || holds === "agent";
 
   const columns: DataColumn<CardItem>[] = [
     {
@@ -127,7 +136,7 @@ export function usePackageColumns(): DataColumn<CardItem>[] {
     },
   ];
 
-  return columns;
+  return runnable ? columns : columns.filter((c) => c.id !== "state" && c.id !== "actions");
 }
 
 export function PackagesTable({
