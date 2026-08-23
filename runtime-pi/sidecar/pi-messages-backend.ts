@@ -455,7 +455,7 @@ export function handlePiMessagesRequest(
         terminal = {
           type: "error",
           reason: "error",
-          usage: projectUsage(EMPTY_USAGE),
+          usage: EMPTY_USAGE,
           errorMessage: syntheticAliasErrorMessage(swap),
         };
       }
