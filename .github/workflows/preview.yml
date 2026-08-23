@@ -130,6 +130,15 @@ jobs:
           # staging/prod server — skipping arm64 roughly halves build time.
           platforms: linux/amd64
           push: true
+          # Unlike release.yml, this job has no metadata-action `labels:` input,
+          # so runtime-pi + sidecar get their OCI labels from these ARGs. The
+          # platform compares the two `org.opencontainers.image.revision` labels
+          # and warns on a pair built from different commits (#1200); unstamped
+          # preview images read `unknown` on both sides and disable that check
+          # silently. Images declaring no such ARG ignore them.
+          build-args: |
+            BUILD_VERSION=${{ needs.resolve.outputs.tag }}
+            BUILD_REVISION=${{ github.sha }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}:${{ needs.resolve.outputs.tag }}
             ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}:${{ needs.resolve.outputs.tag }}-${{ github.sha }}

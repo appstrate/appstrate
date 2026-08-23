@@ -165,6 +165,14 @@ jobs:
           push: true
           # Stamp the deployed build identity into the image. Only the main
           # Dockerfile declares these ARGs; other matrix images ignore them.
+          #
+          # The runtime-pi / sidecar images need no build-arg of their own: the
+          # `labels:` input below carries metadata-action's OCI set, and a
+          # `--label` overrides the Dockerfile's `LABEL`, so released images
+          # already carry a real `org.opencontainers.image.revision` (verified
+          # on 1.0.0-beta.51). That label is what the platform compares to warn
+          # on a mismatched runtime/sidecar pair (#1200) — do not drop the
+          # `labels:` input without feeding BUILD_REVISION instead.
           build-args: |
             APP_VERSION=${{ github.ref_name }}
             GIT_SHA=${{ github.sha }}

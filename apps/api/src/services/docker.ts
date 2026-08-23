@@ -98,6 +98,21 @@ async function imageExists(image: string): Promise<boolean> {
   return res.ok;
 }
 
+/**
+ * Read an image's config labels (`Config.Labels` from `GET /images/{ref}/json`).
+ *
+ * Returns `{}` when the image is absent locally or carries no labels — the
+ * single caller (runtime-image pair drift check) treats "no stamp" and "no
+ * image" identically: neither is evidence of a mismatch, and neither is worth
+ * failing a boot over.
+ */
+export async function readImageLabels(image: string): Promise<Record<string, string>> {
+  const res = await dockerFetch(`/images/${encodeURIComponent(image)}/json`);
+  if (!res.ok) return {};
+  const body = (await res.json()) as { Config?: { Labels?: Record<string, string> | null } };
+  return body.Config?.Labels ?? {};
+}
+
 /** Pulls currently in flight, keyed by image reference. See {@link pullImage}. */
 const inFlightPulls = new Map<string, Promise<void>>();
 
