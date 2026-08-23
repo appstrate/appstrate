@@ -10,17 +10,32 @@
  * `type` mirrors the RunEvent `type` verbatim — e.g. `memory.added`,
  * `pinned.set`, or any third-party `@scope/tool.verb`.
  *
- * Canonical events additionally carry `dataschema`, a stable versioned
- * IDENTIFIER for the shape of their `data` payload. No document is served
- * at those URIs and none ever was — see `./canonical-event-schemas.ts`,
- * which documents why, and which is where the URIs live.
+ * ## No `dataschema`
  *
- * Specification: CloudEvents 1.0 (`dataschema` is §3.1, OPTIONAL).
+ * Envelopes used to carry the OPTIONAL CloudEvents `dataschema` attribute
+ * (§3.1) for the seven canonical types, pointing at
+ * `https://schemas.afps.dev/v0/events/*` and
+ * `https://schemas.appstrate.dev/v0/events/*`. Both claims were withdrawn:
+ *
+ *  - Nothing was ever served at either host — the first 404s, the second has
+ *    no DNS record at all.
+ *  - More importantly, the AFPS `RunEvent` payload is deliberately an OPEN
+ *    index signature (`@afps-spec/types`): the specification reserves event
+ *    *namespaces*, never payload *shapes*, precisely so tools can carry what
+ *    they need "without amending the spec". Minting payload schemas under
+ *    `schemas.afps.dev` asserted a normative shape the specification has not
+ *    adopted, decided in this repository rather than through the AFPS change
+ *    process (`afps-spec/GOVERNANCE.md`).
+ *
+ * If AFPS ever does standardize event payloads, that is a spec change first —
+ * §events in `spec.md`, documents under `packages/schema/v0/events/`, a Pages
+ * job that copies them — and only then a `dataschema` attribute here.
+ *
+ * Receivers still accept the attribute on the wire, because runtime images
+ * built before this change keep sending it.
  */
 
 import type { RunEvent } from "@afps-spec/types";
-import { isCanonicalRunEvent } from "../types/canonical-events.ts";
-import { canonicalEventSchemaUri } from "./canonical-event-schemas.ts";
 
 export interface CloudEventEnvelope {
   specversion: "1.0";
@@ -31,12 +46,6 @@ export interface CloudEventEnvelope {
   time: string; // RFC 3339
   datacontenttype: "application/json";
   data: Record<string, unknown>;
-  /**
-   * OPTIONAL CloudEvents 1.0 attribute (§3.1) identifying the JSON
-   * Schema `data` adheres to. Present only for canonical events whose
-   * payload actually validates — see {@link buildCloudEventEnvelope}.
-   */
-  dataschema?: string;
   /**
    * Non-standard CloudEvents extension attribute
    * (https://github.com/cloudevents/spec/blob/main/cloudevents/extensions/sequence.md)
@@ -68,20 +77,6 @@ export function buildCloudEventEnvelope(opts: BuildEnvelopeOptions): CloudEventE
     if (!ENVELOPE_KEYS.has(key)) data[key] = value;
   }
 
-  // `dataschema` is an assertion about `data`, so it is emitted only when
-  // the payload genuinely satisfies the canonical shape. A third-party
-  // `@scope/tool.verb` event (unknown payload) and a tampered canonical
-  // event (e.g. `memory.added` without a string `content`) both fall
-  // through without the attribute rather than pointing at a schema they
-  // would fail. Omission is conformant — the attribute is OPTIONAL.
-  //
-  // `isCanonicalRunEvent` is the sole definition of the canonical payload
-  // shape. It additionally rejects non-finite numbers, which `JSON.stringify`
-  // would turn into `null` — rejecting more is always safe here, since it only
-  // omits an OPTIONAL attribute. Its accept/reject verdicts are pinned by
-  // `test/fixtures/canonical-event-corpus.ts`.
-  const dataschema = isCanonicalRunEvent(event) ? canonicalEventSchemaUri(event.type) : undefined;
-
   return {
     specversion: "1.0",
     type: event.type,
@@ -90,7 +85,6 @@ export function buildCloudEventEnvelope(opts: BuildEnvelopeOptions): CloudEventE
     time: new Date(nowMs).toISOString(),
     datacontenttype: "application/json",
     data,
-    ...(dataschema === undefined ? {} : { dataschema }),
     sequence,
   };
 }

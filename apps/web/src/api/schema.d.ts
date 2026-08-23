@@ -19550,7 +19550,7 @@ export interface operations {
                     data: Record<string, never>;
                     /**
                      * Format: uri
-                     * @description OPTIONAL CloudEvents attribute identifying the JSON Schema the `data` payload adheres to. Emitted for canonical event types (e.g. `https://schemas.afps.dev/v0/events/memory.added.schema.json`); absent for third-party `@scope/tool.verb` events.
+                     * @description OPTIONAL CloudEvents attribute identifying a JSON Schema the `data` payload adheres to. Deprecated and no longer emitted by the Appstrate runtime — the URIs it carried were never served, and AFPS leaves RunEvent payloads open by design. Still accepted, and ignored, so runtime images built before the removal keep working.
                      */
                     dataschema?: string;
                     sequence: number;
