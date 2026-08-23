@@ -1341,6 +1341,33 @@ So the strategy the reference itself suggests:
   than their own runs, because chat sessions belong to members and the filter
   is no longer ignored for them. That is the correct answer to the question
   asked, but it is a change.
+- ~~**Some page actions were still a filled blue.**~~ Fixed 22 August, and the
+  gap was the SETTINGS surfaces: the two treatments were applied to the list
+  screens when they were written and never to the settings ones, which was
+  invisible while those were stacked cards and glaring the moment they became
+  tables. Six screens took the surface treatment (API keys, workspaces,
+  members, end-users, webhooks, OAuth clients), and their empty states stopped
+  REPEATING the action — the button above stays now that the early returns are
+  gone, so the empty state offering it again was the duplication the run list
+  had already been cured of.
+
+  Two rules held up under it, and both are worth keeping:
+
+  - **A form's submit is not an exception.** The members invite is a form, but
+    it performs the same deed as every other screen's "new …" button, so it
+    takes the same treatment. The rule is about the DEED, not the markup.
+  - **A dialog's confirm keeps its surface.** The bar rule is about a bar. In a
+    modal, the button the modal was opened for is the primary and stays one.
+
+  Swept and verified: seventeen screens, zero `bg-primary` buttons left
+  anywhere in the app.
+
+- ~~**Preferences was the last screen on the old form pattern.**~~ The display
+  name is an `InlineTextSetting` now. The email is the pattern's documented
+  EXCEPTION and earns it: changing it sends a verification message to the
+  address typed, and a blur on a typo would send it to a stranger — so its
+  control is a button that opens a dialog, which is what the row pattern says a
+  consequential change looks like. Storage and MCP connect are what is left.
 - **Usage page**, scoped by user: observability, not billing — who spends what,
   on which agent, with which model, for the agents a user can reach.
   `/api/runs` already accepts `start_date` / `end_date` / `user=me`, and each

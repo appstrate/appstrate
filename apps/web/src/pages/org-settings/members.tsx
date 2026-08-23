@@ -25,6 +25,7 @@ import { CopyLinkButton } from "../../components/copy-link-button";
 import { ErrorState, EmptyState } from "../../components/page-states";
 import { DataTable } from "../../components/data-table";
 import { useMemberColumns } from "./member-columns";
+import { TOOLBAR_ACTION } from "../../lib/toolbar-button";
 import { Spinner } from "../../components/spinner";
 import { toast } from "sonner";
 import {
@@ -190,7 +191,16 @@ export function OrgSettingsMembersPage() {
               </p>
             )}
           </div>
-          <Button type="submit" disabled={addMemberMutation.isPending}>
+          {/* A form's submit, but the same DEED as every other screen's "new
+              …" button — it creates the row the table below holds. So it takes
+              the same treatment, rather than being the one page whose action
+              is a filled blue. */}
+          <Button
+            type="submit"
+            variant="outline"
+            className={TOOLBAR_ACTION}
+            disabled={addMemberMutation.isPending}
+          >
             {addMemberMutation.isPending ? <Spinner /> : t("btn.add")}
           </Button>
         </form>

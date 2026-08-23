@@ -17,6 +17,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { ErrorState, EmptyState } from "@/components/page-states";
 import { ItemList } from "@/components/item-list";
+import { TOOLBAR_ACTION } from "@/lib/toolbar-button";
 import { Spinner } from "@/components/spinner";
 import { Modal } from "@/components/modal";
 import { SecretRevealModal } from "@/components/secret-reveal-modal";
@@ -61,7 +62,7 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
               : "settings:oauthClients.introOrg",
           )}
         </p>
-        <Button size="sm" onClick={openCreate}>
+        <Button size="sm" variant="outline" className={TOOLBAR_ACTION} onClick={openCreate}>
           <Plus className="h-4 w-4" /> {t("settings:oauthClients.createBtn")}
         </Button>
       </div>
@@ -73,11 +74,8 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
         isError={Boolean(error)}
         error={<ErrorState message={getErrorMessage(error)} compact />}
         empty={
-          <EmptyState message={t("settings:oauthClients.empty")} icon={KeyRound}>
-            <Button size="sm" onClick={openCreate}>
-              <Plus className="h-4 w-4" /> {t("settings:oauthClients.createBtn")}
-            </Button>
-          </EmptyState>
+          // The button above is the same one, and it stays.
+          <EmptyState message={t("settings:oauthClients.empty")} icon={KeyRound} />
         }
         renderItem={(client) => <OAuthClientRow client={client} onEdit={() => openEdit(client)} />}
       />

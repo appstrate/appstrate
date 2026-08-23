@@ -19,6 +19,7 @@ import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { EndUserCreateModal } from "../components/end-user-create-modal";
 import { EndUserDetailModal } from "../components/end-user-detail-modal";
+import { TOOLBAR_ACTION } from "../lib/toolbar-button";
 import { formatDateField } from "../lib/markdown";
 
 /** Deterministic color from ID hash for the avatar circle. */
@@ -127,7 +128,9 @@ function EndUsersPageContent() {
   return (
     <div>
       <div className="mb-4 flex items-center justify-end">
-        <Button onClick={() => setCreateOpen(true)}>{t("applications.newEndUser")}</Button>
+        <Button variant="outline" className={TOOLBAR_ACTION} onClick={() => setCreateOpen(true)}>
+          {t("applications.newEndUser")}
+        </Button>
       </div>
 
       <div className="relative mb-4">
@@ -147,13 +150,12 @@ function EndUsersPageContent() {
       {isLoading ? (
         <LoadingState />
       ) : filtered.length === 0 ? (
+        // The button above is the same one, and it stays.
         <EmptyState
           message={t("applications.noEndUsers")}
           hint={t("applications.noEndUsersHint")}
           icon={Users}
-        >
-          <Button onClick={() => setCreateOpen(true)}>{t("applications.newEndUser")}</Button>
-        </EmptyState>
+        />
       ) : (
         <TooltipProvider delayDuration={300}>
           <div className="flex flex-col gap-2">

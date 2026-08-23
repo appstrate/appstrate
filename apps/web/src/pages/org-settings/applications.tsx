@@ -11,6 +11,7 @@ import { useAppSwitcher } from "../../hooks/use-current-application";
 import { ErrorState, EmptyState } from "../../components/page-states";
 import { DataTable } from "../../components/data-table";
 import { useApplicationColumns } from "./application-columns";
+import { TOOLBAR_ACTION } from "../../lib/toolbar-button";
 import { ApplicationCreateModal } from "../../components/application-create-modal";
 import { getErrorMessage } from "@appstrate/core/errors";
 
@@ -39,7 +40,12 @@ export function OrgSettingsApplicationsPage() {
   return (
     <>
       <div className="mb-4 flex justify-end">
-        <Button data-testid="create-application-button" onClick={() => setCreateOpen(true)}>
+        <Button
+          variant="outline"
+          className={TOOLBAR_ACTION}
+          data-testid="create-application-button"
+          onClick={() => setCreateOpen(true)}
+        >
           {t("applications.create")}
         </Button>
       </div>
@@ -53,13 +59,13 @@ export function OrgSettingsApplicationsPage() {
         isError={Boolean(error)}
         error={<ErrorState message={getErrorMessage(error)} compact />}
         empty={
+          // No action of its own: the button above is the same one, and it
+          // stays now that the early return is gone.
           <EmptyState
             message={t("applications.empty")}
             hint={t("applications.emptyHint")}
             icon={AppWindow}
-          >
-            <Button onClick={() => setCreateOpen(true)}>{t("applications.create")}</Button>
-          </EmptyState>
+          />
         }
       />
 

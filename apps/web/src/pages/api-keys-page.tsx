@@ -16,6 +16,7 @@ import {
 } from "../hooks/use-api-keys";
 import { ErrorState, EmptyState } from "../components/page-states";
 import { ItemList } from "../components/item-list";
+import { TOOLBAR_ACTION } from "../lib/toolbar-button";
 import { ApiKeyCreateModal } from "../components/api-key-create-modal";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { formatDateField } from "../lib/markdown";
@@ -53,7 +54,9 @@ export function ApiKeysPage() {
         >
           {t("settings:apiKeys.swaggerLink")}
         </a>
-        <Button onClick={() => setCreateOpen(true)}>{t("settings:apiKeys.createBtn")}</Button>
+        <Button variant="outline" className={TOOLBAR_ACTION} onClick={() => setCreateOpen(true)}>
+          {t("settings:apiKeys.createBtn")}
+        </Button>
       </div>
 
       <ItemList

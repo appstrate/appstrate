@@ -10,6 +10,11 @@ import { useUpdateDisplayName } from "../../hooks/use-profile";
 import { useAuth, refreshAuth, EmailChangeError } from "../../hooks/use-auth";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { CheckCircle2, AlertCircle } from "lucide-react";
+import { Modal } from "../../components/modal";
+import { Spinner } from "../../components/spinner";
+import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
+import { InlineTextSetting } from "../../components/settings/inline-text-setting";
+import { TOOLBAR_ACTION } from "../../lib/toolbar-button";
 
 function EmailVerificationBadge() {
   const { t } = useTranslation(["settings", "common"]);
@@ -61,7 +66,41 @@ function EmailVerificationBadge() {
   );
 }
 
-function EmailChangeForm() {
+/**
+ * The email, as a row whose control opens a dialog.
+ *
+ * This is the pattern's documented EXCEPTION and it earns it: changing an email
+ * is not a one-word edit that can commit on blur. It sends a verification
+ * message to the address typed, and a blur on a typo would send it to a
+ * stranger. So the control is a button that opens a confirm-shaped surface,
+ * which is what the row pattern says a consequential change looks like.
+ */
+function EmailRow() {
+  const { t } = useTranslation(["settings", "common"]);
+  const { user } = useAuth();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <SettingRow
+        label={t("preferences.email")}
+        description={
+          <span className="flex flex-wrap items-center gap-2">
+            {user?.email}
+            <EmailVerificationBadge />
+          </span>
+        }
+      >
+        <Button variant="outline" className={TOOLBAR_ACTION} onClick={() => setOpen(true)}>
+          {t("preferences.changeEmail")}
+        </Button>
+      </SettingRow>
+      {open && <EmailChangeModal onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+function EmailChangeModal({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation(["settings", "common"]);
   const { user, changeEmail } = useAuth();
   const { features } = useAppConfig();
@@ -107,16 +146,11 @@ function EmailChangeForm() {
   };
 
   return (
-    <div className="border-border bg-card mb-4 rounded-lg border p-5">
+    <Modal open onClose={onClose} title={t("preferences.changeEmail")}>
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 py-1">
         <div className="space-y-2">
-          <Label>{t("preferences.email")}</Label>
-          <Input type="email" value={user?.email ?? ""} disabled />
-          <EmailVerificationBadge />
-        </div>
-        <div className="space-y-2">
           <Label>{t("preferences.newEmail")}</Label>
-          <Input type="email" {...register("newEmail")} placeholder={user?.email ?? ""} />
+          <Input type="email" autoFocus {...register("newEmail")} placeholder={user?.email ?? ""} />
         </div>
         {errors.root && <div className="text-destructive text-sm">{errors.root.message}</div>}
         {success && <div className="text-success text-sm">{success}</div>}
@@ -130,63 +164,48 @@ function EmailChangeForm() {
             />
           </div>
         )}
-        <Button type="submit" disabled={!canSubmit}>
-          {isSubmitting ? t("preferences.changingEmail") : t("preferences.changeEmail")}
-        </Button>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>
+            {t("btn.cancel", { ns: "common" })}
+          </Button>
+          {/* A dialog's confirm keeps its surface: it is the deed the dialog
+              was opened for, and the bar rule is about a bar. */}
+          <Button type="submit" disabled={!canSubmit}>
+            {isSubmitting ? t("preferences.changingEmail") : t("preferences.changeEmail")}
+          </Button>
+        </div>
       </form>
-    </div>
+    </Modal>
   );
 }
 
-function DisplayNameForm() {
+/**
+ * The display name, as a setting rather than a form.
+ *
+ * "The control IS the setting": a name is a one-word change, and a Save button
+ * put two clicks and a mode change in front of it. It commits on blur or Enter
+ * and reverts on Escape, like the organisation's name and the workspace's.
+ */
+function DisplayNameRow() {
   const { t } = useTranslation(["settings", "common"]);
   const { profile } = useAuth();
   const updateDisplayName = useUpdateDisplayName();
-  const [success, setSuccess] = useState("");
-
-  const { register, handleSubmit, control } = useForm<{ name: string }>({
-    defaultValues: { name: profile?.displayName ?? "" },
-  });
-
-  const nameValue = useWatch({ control, name: "name" });
-  const isDirty = nameValue.trim() !== (profile?.displayName ?? "");
-  const canSubmit = nameValue.trim().length > 0 && isDirty && !updateDisplayName.isPending;
-
-  const onSubmit = (data: { name: string }) => {
-    setSuccess("");
-    updateDisplayName.mutate(
-      { body: { displayName: data.name.trim() } },
-      {
-        onSuccess: () => {
-          setSuccess(t("preferences.displayNameChanged"));
-        },
-      },
-    );
-  };
 
   return (
-    <div className="border-border bg-card mb-4 rounded-lg border p-5">
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 py-1">
-        <div className="space-y-2">
-          <Label>{t("preferences.displayName")}</Label>
-          <Input
-            type="text"
-            {...register("name")}
-            onChange={(e) => {
-              register("name").onChange(e);
-              setSuccess("");
-            }}
-            maxLength={100}
-          />
-        </div>
-        {success && <div className="text-success text-sm">{success}</div>}
-        <Button type="submit" disabled={!canSubmit}>
-          {updateDisplayName.isPending
-            ? t("preferences.savingDisplayName")
-            : t("preferences.saveDisplayName")}
-        </Button>
-      </form>
-    </div>
+    <SettingRow label={t("preferences.displayName")}>
+      <InlineTextSetting
+        value={profile?.displayName ?? ""}
+        disabled={updateDisplayName.isPending}
+        aria-label={t("preferences.displayName")}
+        className="w-64"
+        onCommit={(name) => {
+          const next = name.trim();
+          if (!next) return;
+          updateDisplayName.mutate({ body: { displayName: next } });
+        }}
+      />
+      {updateDisplayName.isPending && <Spinner />}
+    </SettingRow>
   );
 }
 
@@ -194,12 +213,9 @@ export function PreferencesGeneralPage() {
   const { t } = useTranslation(["settings", "common"]);
 
   return (
-    <>
-      <div className="text-muted-foreground mb-4 text-sm font-medium">
-        {t("preferences.account")}
-      </div>
-      <EmailChangeForm />
-      <DisplayNameForm />
-    </>
+    <SettingsGroup title={t("preferences.account")}>
+      <DisplayNameRow />
+      <EmailRow />
+    </SettingsGroup>
   );
 }
