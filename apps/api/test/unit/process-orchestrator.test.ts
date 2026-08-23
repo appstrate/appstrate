@@ -284,6 +284,36 @@ describe("ProcessOrchestrator", () => {
     });
   });
 
+  describe("createIsolationBoundary ownership marker", () => {
+    beforeEach(async () => {
+      await resetDataDir();
+    });
+
+    it("stamps the creating platform's pid so sibling sweeps can spare the run (#1130)", async () => {
+      orchestrator = new ProcessOrchestrator();
+      const runId = "marker-write";
+      const boundary = await orchestrator.createIsolationBoundary(runId);
+
+      try {
+        const marker = join(workspaceDirFor(runId), ".appstrate-owner");
+        expect(existsSync(marker)).toBe(true);
+        expect((await Bun.file(marker).text()).trim()).toBe(String(process.pid));
+      } finally {
+        await orchestrator.removeIsolationBoundary(boundary);
+      }
+    });
+
+    it("takes the marker down with the workspace, so finished runs read as reclaimable", async () => {
+      orchestrator = new ProcessOrchestrator();
+      const runId = "marker-teardown";
+      const boundary = await orchestrator.createIsolationBoundary(runId);
+
+      await orchestrator.removeIsolationBoundary(boundary);
+
+      expect(existsSync(workspaceDirFor(runId))).toBe(false);
+    });
+  });
+
   describe("createSidecar (no health gate)", () => {
     beforeEach(async () => {
       await resetDataDir();
