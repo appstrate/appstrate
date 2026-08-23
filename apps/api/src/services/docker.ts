@@ -3,7 +3,11 @@
 import { hostname } from "node:os";
 import { logger } from "../lib/logger.ts";
 import { getEnv } from "@appstrate/env";
-import { classifyDockerNetworkError, createContainerWithImagePull } from "./docker-errors.ts";
+import {
+  classifyDockerNetworkError,
+  createContainerWithImagePull,
+  DockerContainerDisappearedError,
+} from "./docker-errors.ts";
 import { SIGTERM_GRACE_SECONDS } from "./orchestrator/constants.ts";
 
 const DOCKER_SOCKET = getEnv().DOCKER_SOCKET;
@@ -531,8 +535,10 @@ export async function waitForExit(containerId: string): Promise<number> {
   while (true) {
     const res = await dockerFetch(`/containers/${containerId}/json`);
     if (!res.ok) {
-      // Container removed mid-poll → treat as exit code 137 (SIGKILL).
-      if (res.status === 404) return 137;
+      // Container removed mid-poll. Its exit status is unrecoverable, so
+      // report the disappearance instead of inventing one — see
+      // DockerContainerDisappearedError.
+      if (res.status === 404) throw new DockerContainerDisappearedError(containerId);
       await assertDockerOk(res, "inspect container during waitForExit");
     }
     const data = (await res.json()) as { State?: { Status?: string; ExitCode?: number } };
@@ -562,16 +568,61 @@ export async function stopContainer(containerId: string): Promise<void> {
 }
 
 /**
+ * One row of `GET /containers/json`. `State` is the lifecycle word
+ * (`running`, `created`, `exited`, `dead`, `paused`, `restarting`,
+ * `removing`) — NOT the nested object that `/containers/{id}/json`
+ * returns under the same key.
+ */
+interface ListedContainer {
+  Id: string;
+  State: string;
+  Created: number;
+  Labels: Record<string, string> | null;
+}
+
+/**
+ * List containers carrying every one of `labels`. Throws on a Docker-side
+ * failure — callers that prefer to degrade rather than propagate say so
+ * explicitly at the call site.
+ *
+ * Without `all`, Docker lists ONLY running containers: a `created` or
+ * `exited` row is invisible to the default listing. Every caller that
+ * reasons about residue must therefore pass `all: true`.
+ */
+async function listContainers(
+  labels: string[],
+  options: { all?: boolean } = {},
+): Promise<ListedContainer[]> {
+  const filters = JSON.stringify({ label: labels });
+  const query = `${options.all ? "all=true&" : ""}filters=${encodeURIComponent(filters)}`;
+  const res = await dockerFetch(`/containers/json?${query}`);
+  await assertDockerOk(res, "list containers");
+  return (await res.json()) as ListedContainer[];
+}
+
+/**
+ * Force-remove containers in parallel, returning how many actually went
+ * away. `removeContainer` treats 404 as success, so a container someone
+ * else reaped first still counts — the postcondition is "gone", not
+ * "removed by us".
+ */
+async function removeContainers(ids: string[]): Promise<number> {
+  if (ids.length === 0) return 0;
+  const results = await Promise.allSettled(ids.map((id) => removeContainer(id)));
+  return results.filter((r) => r.status === "fulfilled").length;
+}
+
+/** Label set identifying every per-run resource of a single run. */
+function runLabels(runId: string): string[] {
+  return [`appstrate.run=${runId}`, "appstrate.managed=true"];
+}
+
+/**
  * Stop all containers belonging to a run, identified by label.
  * Returns "stopped" if any containers were found, "not_found" otherwise.
  */
 export async function stopContainersByRun(runId: string): Promise<"stopped" | "not_found"> {
-  const filters = JSON.stringify({
-    label: [`appstrate.run=${runId}`, "appstrate.managed=true"],
-  });
-  const res = await dockerFetch(`/containers/json?filters=${encodeURIComponent(filters)}`);
-  if (!res.ok) return "not_found";
-  const containers = (await res.json()) as Array<{ Id: string }>;
+  const containers = await listContainers(runLabels(runId)).catch(() => []);
   if (containers.length === 0) return "not_found";
   await Promise.allSettled(containers.map((c) => stopContainer(c.Id)));
   return "stopped";
@@ -584,17 +635,14 @@ export async function stopContainersByRun(runId: string): Promise<"stopped" | "n
  * workspace volume open before `removeVolume` is attempted on a
  * quick-restart loop — Docker 409s on attached volumes, so the volume
  * pre-reap is a no-op until the zombie is gone.
+ *
+ * Unlike the daemon-wide sweep in {@link cleanupOrphanedContainers} this
+ * removes regardless of container state: the `runId` came from the caller's
+ * own database, which IS the ownership proof the sweep lacks.
  */
 export async function removeContainersByRun(runId: string): Promise<number> {
-  const filters = JSON.stringify({
-    label: [`appstrate.run=${runId}`, "appstrate.managed=true"],
-  });
-  const res = await dockerFetch(`/containers/json?all=true&filters=${encodeURIComponent(filters)}`);
-  if (!res.ok) return 0;
-  const containers = (await res.json()) as Array<{ Id: string }>;
-  if (containers.length === 0) return 0;
-  const results = await Promise.allSettled(containers.map((c) => removeContainer(c.Id)));
-  return results.filter((r) => r.status === "fulfilled").length;
+  const containers = await listContainers(runLabels(runId), { all: true }).catch(() => []);
+  return removeContainers(containers.map((c) => c.Id));
 }
 
 // --- Docker Network operations ---
@@ -805,8 +853,8 @@ export async function runEphemeralCommand(options: {
         // AutoRemove deliberately OFF — Docker removes the container
         // the moment its main process exits, racing the `waitForExit`
         // poll (which inspects /containers/<id>/json every 2s). Without
-        // the container row, the poll sees 404 and reports the
-        // sentinel exit code 137 even on a clean `true` invocation.
+        // the container row, the poll sees 404 and can only report the
+        // container as disappeared — failing a clean `true` invocation.
         // We remove explicitly after `waitForExit` resolves so the
         // exit code is always observable.
         AutoRemove: false,
@@ -880,25 +928,88 @@ async function removeVolumesMatching(predicate: (name: string) => boolean): Prom
 
 // --- Orphaned container cleanup ---
 
+/**
+ * Container states that are inert: the workload is over and the row is
+ * pure residue. Matches what `docker container prune` itself reclaims,
+ * minus `created` — see {@link isReclaimableContainer}.
+ */
+const TERMINAL_CONTAINER_STATES = new Set(["exited", "dead"]);
+
+/**
+ * Can the daemon-wide sweep reclaim this container?
+ *
+ * `appstrate.managed=true` marks a per-run resource but says NOTHING about
+ * WHICH instance owns it: every Appstrate process on the host — a second
+ * `bun run dev` from another worktree, the new container of a rolling
+ * redeploy that boots before the old one is drained — writes the same label.
+ * A sweep keyed on that label alone force-removed live agents and sidecars
+ * out from under a sibling instance mid-run, and the victim's `waitForExit`
+ * then reported the disappearance as exit code 137 (#1130). Same class of
+ * bug as #834, which fixed it for the shared egress network.
+ *
+ * So the sweep reclaims only what it can prove is finished, without needing
+ * to prove ownership:
+ *
+ * - `exited` / `dead` — inert. Docker's own prune reclaims these.
+ * - `created` — created but never started. Docker's prune reclaims these
+ *   too, unconditionally; we additionally require it to be older than the
+ *   run boot deadline, because a sibling caught between `createWorkload`
+ *   and `startWorkload` is legitimately in this state for a few hundred
+ *   milliseconds. Past `RUN_BOOT_DEADLINE_SECONDS` the platform's own
+ *   liveness contract says no run may still be provisioning, so the row is
+ *   abandoned by definition. Without this branch such a container leaks
+ *   forever: `POST /stop` on it returns 304 and leaves it `created`, so no
+ *   stop-then-sweep sequence can ever make it terminal, and it keeps a
+ *   network endpoint attached — which in turn blocks the orphan-network
+ *   reclaim.
+ * - everything else (`running`, `paused`, `restarting`, `removing`, plus
+ *   any state a future Engine adds) — preserved. Docker's prune spares
+ *   these as well.
+ *
+ * Runs this instance DOES own are not this pass's job: the boot sequence
+ * stops them by id first (`listOrphanRunIds` → `stopByRunId`), which turns
+ * them into `exited` rows that the next branch here reclaims.
+ */
+export function isReclaimableContainer(
+  container: Pick<ListedContainer, "State" | "Created">,
+  now: number = Date.now(),
+): boolean {
+  if (TERMINAL_CONTAINER_STATES.has(container.State)) return true;
+  if (container.State !== "created") return false;
+  const ageMs = now - container.Created * 1000;
+  return ageMs > getEnv().RUN_BOOT_DEADLINE_SECONDS * 1000;
+}
+
 export async function cleanupOrphanedContainers(): Promise<{
   containers: number;
   networks: number;
   volumes: number;
 }> {
-  // Clean up orphaned containers
-  const filters = JSON.stringify({ label: ["appstrate.managed=true"] });
-  const res = await dockerFetch(`/containers/json?all=true&filters=${encodeURIComponent(filters)}`);
+  const managed = await listContainers(["appstrate.managed=true"], { all: true });
+  // Partitioned in ONE pass against ONE clock reading: evaluating the
+  // predicate twice would let a `created` container that crosses the boot
+  // deadline between the two reads fall out of both halves.
+  const now = Date.now();
+  const reclaimable: ListedContainer[] = [];
+  const preserved: ListedContainer[] = [];
+  for (const container of managed) {
+    (isReclaimableContainer(container, now) ? reclaimable : preserved).push(container);
+  }
 
-  await assertDockerOk(res, "list managed containers");
+  const containerCount = await removeContainers(reclaimable.map((c) => c.Id));
 
-  const containers = (await res.json()) as Array<{
-    Id: string;
-    Labels: Record<string, string>;
-  }>;
-
-  // Remove all containers in parallel (force=true handles running containers)
-  if (containers.length > 0) {
-    await Promise.allSettled(containers.map((c) => removeContainer(c.Id)));
+  // Anything preserved belongs to a live sibling instance, or to a workload
+  // this instance cannot account for. Either way it is now invisible to the
+  // reaper, so say so — a silent skip would read as "nothing to clean".
+  if (preserved.length > 0) {
+    logger.info("Preserved non-terminal managed containers during orphan sweep", {
+      count: preserved.length,
+      containers: preserved.map((c) => ({
+        id: c.Id.slice(0, 12),
+        state: c.State,
+        runId: c.Labels?.["appstrate.run"],
+      })),
+    });
   }
 
   // Clean up orphaned networks by listing Docker networks directly.
@@ -912,7 +1023,7 @@ export async function cleanupOrphanedContainers(): Promise<{
   // Docker's "volume in use" check (409) doesn't refuse the delete.
   const volumeCount = await cleanupOrphanedVolumes();
 
-  return { containers: containers.length, networks: networkCount, volumes: volumeCount };
+  return { containers: containerCount, networks: networkCount, volumes: volumeCount };
 }
 
 /**

@@ -3,6 +3,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { existsSync } from "node:fs";
 import { mkdir, rm, writeFile, readdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { ProcessOrchestrator } from "../../src/services/orchestrator/process-orchestrator.ts";
 
@@ -18,6 +19,21 @@ afterEach(async () => {
 async function resetDataDir() {
   await rm(DATA_DIR, { recursive: true, force: true });
   await mkdir(DATA_DIR, { recursive: true });
+}
+
+/** Where the orchestrator keeps a run's workspace — mirrors workspaceDirFor(). */
+function workspaceDirFor(runId: string): string {
+  return join(tmpdir(), `appstrate-ws-${runId}`);
+}
+
+/**
+ * Write the ownership marker that tells a boot sweep which platform process
+ * created a run. Mirrors what createIsolationBoundary writes.
+ */
+async function writeOwnerMarker(runId: string, ownerPid: number): Promise<void> {
+  const dir = workspaceDirFor(runId);
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  await writeFile(join(dir, ".appstrate-owner"), String(ownerPid));
 }
 
 /** Spawn a long-lived child process and return its pid. Caller must kill it. */
@@ -173,6 +189,82 @@ describe("ProcessOrchestrator", () => {
       expect(report.isolationBoundaries).toBe(1);
       expect(report.workloads).toBe(0);
       expect(existsSync(dir)).toBe(false);
+    });
+
+    it("preserves a boundary owned by a live sibling instance (#1130)", async () => {
+      // The regression: DATA_DIR is cwd-relative, so two `bun run dev`
+      // sessions from the same checkout share it. Booting the second one
+      // SIGKILLed the first one's live agent and deleted its boundary —
+      // the sweep probed `kill(pid, 0)`, saw the workload was ALIVE, and
+      // killed it for exactly that reason.
+      const workloadPid = spawnSleeper();
+      const ownerPid = spawnSleeper();
+      const runId = "sibling-live";
+      const dir = join(DATA_DIR, runId);
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, "sidecar.pid"), String(workloadPid));
+      await writeOwnerMarker(runId, ownerPid);
+
+      try {
+        orchestrator = new ProcessOrchestrator();
+        const report = await orchestrator.cleanupOrphans();
+
+        expect(report.workloads).toBe(0);
+        expect(report.isolationBoundaries).toBe(0);
+        expect(existsSync(dir)).toBe(true);
+        // The sibling's workload is still running.
+        expect(() => process.kill(workloadPid, 0)).not.toThrow();
+      } finally {
+        await rm(workspaceDirFor(runId), { recursive: true, force: true });
+        for (const pid of [workloadPid, ownerPid]) {
+          try {
+            process.kill(pid, "SIGKILL");
+          } catch {
+            // Already dead
+          }
+        }
+      }
+    });
+
+    it("preserves the workspace of a live sibling started from another worktree (#1130)", async () => {
+      // Worktrees get their own DATA_DIR but share os.tmpdir(), so the
+      // workspace sweep is the one path that sees across them. It used to
+      // `rm -rf` a running agent's /workspace mid-run: the uid filter it
+      // relied on does not separate two instances run by the same user.
+      const ownerPid = spawnSleeper();
+      const runId = "sibling-worktree";
+      const workspace = workspaceDirFor(runId);
+      await mkdir(workspace, { recursive: true });
+      await writeOwnerMarker(runId, ownerPid);
+      await writeFile(join(workspace, "output.txt"), "work in progress");
+
+      try {
+        orchestrator = new ProcessOrchestrator();
+        await orchestrator.cleanupOrphans();
+
+        expect(existsSync(join(workspace, "output.txt"))).toBe(true);
+      } finally {
+        await rm(workspace, { recursive: true, force: true });
+        try {
+          process.kill(ownerPid, "SIGKILL");
+        } catch {
+          // Already dead
+        }
+      }
+    });
+
+    it("reclaims a workspace whose owning instance is gone (#1130)", async () => {
+      // The other half of the invariant: a dead owner is what makes residue
+      // reclaimable, so a crashed instance's leftovers must still be reaped.
+      const runId = "owner-dead";
+      const workspace = workspaceDirFor(runId);
+      await mkdir(workspace, { recursive: true });
+      await writeOwnerMarker(runId, 99999999);
+
+      orchestrator = new ProcessOrchestrator();
+      await orchestrator.cleanupOrphans();
+
+      expect(existsSync(workspace)).toBe(false);
     });
 
     it("is idempotent — second call after a wipe returns zeros", async () => {
