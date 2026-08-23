@@ -3,10 +3,11 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useForm, useWatch } from "react-hook-form";
-import { Users } from "lucide-react";
+import { Plus, Users } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Input } from "@appstrate/ui/components/input";
+import { Label } from "@appstrate/ui/components/label";
 import {
   Select,
   SelectContent,
@@ -21,6 +22,7 @@ import { useOrg } from "../../hooks/use-org";
 import { useAuth } from "../../hooks/use-auth";
 import { usePermissions, roleI18nKey } from "../../hooks/use-permissions";
 import { ConfirmModal } from "../../components/confirm-modal";
+import { Modal } from "../../components/modal";
 import { CopyLinkButton } from "../../components/copy-link-button";
 import { ErrorState, EmptyState } from "../../components/page-states";
 import { DataTable } from "../../components/data-table";
@@ -45,6 +47,7 @@ export function OrgSettingsMembersPage() {
   const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
 
+  const [inviteOpen, setInviteOpen] = useState(false);
   const [confirmState, setConfirmState] = useState<{ label: string; id: string } | null>(null);
 
   const inviteForm = useForm<{ email: string; role: AssignableOrgRole }>({
@@ -76,6 +79,7 @@ export function OrgSettingsMembersPage() {
     onSuccess: () => {
       invalidateOrg();
       inviteForm.reset();
+      setInviteOpen(false);
     },
     onError: (err) => {
       inviteForm.setError("root", { message: getErrorMessage(err) });
@@ -119,6 +123,12 @@ export function OrgSettingsMembersPage() {
     });
   };
 
+  const handleInviteClose = () => {
+    inviteForm.reset();
+    addMemberMutation.reset();
+    setInviteOpen(false);
+  };
+
   const handleRemove = (member: OrgMember) => {
     const label = member.displayName || member.email || member.userId;
     setConfirmState({ label, id: member.userId });
@@ -158,22 +168,56 @@ export function OrgSettingsMembersPage() {
   return (
     <>
       {isAdmin && (
-        <form
-          onSubmit={inviteForm.handleSubmit(handleInvite)}
-          className="mb-4 flex items-start gap-2"
+        <div className="mb-4 flex justify-end">
+          <Button variant="outline" className={TOOLBAR_ACTION} onClick={() => setInviteOpen(true)}>
+            <Plus />
+            {t("orgSettings.inviteMember")}
+          </Button>
+        </div>
+      )}
+
+      {isAdmin && (
+        <Modal
+          open={inviteOpen}
+          onClose={handleInviteClose}
+          title={t("orgSettings.inviteMember")}
+          actions={
+            <>
+              <Button type="button" variant="outline" onClick={handleInviteClose}>
+                {t("btn.cancel", { ns: "common" })}
+              </Button>
+              <Button
+                type="submit"
+                form="invite-member-form"
+                disabled={addMemberMutation.isPending}
+              >
+                {addMemberMutation.isPending ? <Spinner /> : t("orgSettings.invite")}
+              </Button>
+            </>
+          }
         >
-          <div className="flex-1">
-            <div className="flex gap-2">
+          <form
+            id="invite-member-form"
+            onSubmit={inviteForm.handleSubmit(handleInvite)}
+            className="space-y-4"
+          >
+            <div className="space-y-2">
+              <Label htmlFor="invite-member-email">{t("invite.emailLabel")}</Label>
               <Input
+                id="invite-member-email"
                 type="email"
                 {...inviteForm.register("email", { required: true })}
                 placeholder="email@example.com"
+                autoFocus
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="invite-member-role">{t("invite.roleLabel")}</Label>
               <Select
                 value={inviteRole}
                 onValueChange={(v) => inviteForm.setValue("role", v as AssignableOrgRole)}
               >
-                <SelectTrigger className="w-[140px]">
+                <SelectTrigger id="invite-member-role" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -186,24 +230,10 @@ export function OrgSettingsMembersPage() {
               </Select>
             </div>
             {inviteForm.formState.errors.root && (
-              <p className="text-destructive mt-1 text-sm">
-                {inviteForm.formState.errors.root.message}
-              </p>
+              <p className="text-destructive text-sm">{inviteForm.formState.errors.root.message}</p>
             )}
-          </div>
-          {/* A form's submit, but the same DEED as every other screen's "new
-              …" button — it creates the row the table below holds. So it takes
-              the same treatment, rather than being the one page whose action
-              is a filled blue. */}
-          <Button
-            type="submit"
-            variant="outline"
-            className={TOOLBAR_ACTION}
-            disabled={addMemberMutation.isPending}
-          >
-            {addMemberMutation.isPending ? <Spinner /> : t("btn.add")}
-          </Button>
-        </form>
+          </form>
+        </Modal>
       )}
 
       {/* No `empty` prop on purpose: this page has TWO lists and one shared

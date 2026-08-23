@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { AppWindow } from "lucide-react";
+import { AppWindow, Plus } from "lucide-react";
 import { usePermissions } from "../../hooks/use-permissions";
 import { Button } from "@appstrate/ui/components/button";
 import { useApplications } from "../../hooks/use-applications";
@@ -46,6 +46,7 @@ export function OrgSettingsApplicationsPage() {
           data-testid="create-application-button"
           onClick={() => setCreateOpen(true)}
         >
+          <Plus />
           {t("applications.create")}
         </Button>
       </div>

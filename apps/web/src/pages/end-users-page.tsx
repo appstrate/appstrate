@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Search, Users } from "lucide-react";
+import { Plus, Search, Users } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
@@ -129,6 +129,7 @@ function EndUsersPageContent() {
     <div>
       <div className="mb-4 flex items-center justify-end">
         <Button variant="outline" className={TOOLBAR_ACTION} onClick={() => setCreateOpen(true)}>
+          <Plus />
           {t("applications.newEndUser")}
         </Button>
       </div>

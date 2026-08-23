@@ -198,6 +198,11 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   },
   {
     method: "GET",
+    pattern: /^\/api\/api-keys\/available-scopes$/,
+    handler: () => ({ status: 200, body: f.availableApiKeyScopes }),
+  },
+  {
+    method: "GET",
     pattern: /^\/api\/applications$/,
     // Answers for the org the request asks for, not the one the app is in: the
     // org switcher reads another org's workspaces before switching to it.

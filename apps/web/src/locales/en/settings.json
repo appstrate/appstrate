@@ -80,6 +80,8 @@
   "orgSettings.sectionOrganization": "Organization",
   "orgSettings.tabGeneral": "General",
   "orgSettings.tabMembers": "Members",
+  "orgSettings.inviteMember": "Invite member",
+  "orgSettings.invite": "Invite",
   "orgSettings.memberColumn": "Member",
   "orgSettings.roleColumn": "Role",
   "orgSettings.joinedColumn": "Joined",

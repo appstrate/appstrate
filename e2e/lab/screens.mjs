@@ -50,6 +50,7 @@ export const SCREENS = [
   { path: "/org-settings/oauth", name: "settings-oauth" },
   { path: "/org-settings/cli-sessions", name: "settings-cli-sessions" },
   { path: "/app-settings", name: "workspace-settings" },
+  { path: "/workspace-settings/api-keys", name: "settings-api-keys" },
   { path: "/preferences", name: "preferences" },
   { path: "/webhooks", name: "webhooks" },
   { path: "/end-users", name: "end-users" },

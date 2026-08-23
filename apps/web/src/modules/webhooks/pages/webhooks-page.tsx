@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Webhook } from "lucide-react";
+import { Plus, Webhook } from "lucide-react";
 import { usePermissions } from "@/hooks/use-permissions";
 import { Button } from "@appstrate/ui/components/button";
 import { useWebhooks } from "../hooks/use-webhooks";
@@ -27,6 +27,7 @@ export function WebhooksPage() {
     <div>
       <div className="mb-4 flex items-center justify-end">
         <Button variant="outline" className={TOOLBAR_ACTION} onClick={() => setCreateOpen(true)}>
+          <Plus />
           {t("settings:webhooks.createTitle")}
         </Button>
       </div>

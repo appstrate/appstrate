@@ -114,6 +114,12 @@ export const applications: Json200<"/api/applications", "get"> = {
   data: applicationsByOrg[ORG_ID]!,
 };
 
+export const availableApiKeyScopes: Json200<"/api/api-keys/available-scopes", "get"> = {
+  object: "list",
+  hasMore: false,
+  data: ["agents:read", "agents:run", "runs:read", "end-users:read", "end-users:write"],
+};
+
 /* -------------------------------------------------------------------------- */
 /* Runs                                                                        */
 /* -------------------------------------------------------------------------- */

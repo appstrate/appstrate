@@ -1320,8 +1320,8 @@ So the strategy the reference itself suggests:
 
 ### NEXT, IN ORDER (written 23 August, for whoever picks this up cold)
 
-Everything below this block is either done or older context. The two open
-blocks are what is next, smallest first, and each one is a commit with the gate
+Everything below this block is either done or older context. The one open
+block is what is next, and each completed block is a commit with the gate
 green (`bun test` + `bun run check`) and a look in the lab before it lands.
 
 **1. ~~The settings row pattern.~~ Done 23 August.** `SettingRow` has the three
@@ -1366,11 +1366,31 @@ row-pattern block: its client-card heading, badge and five icon actions compete
 on one line at 390, forcing the client id into a narrow column. It is recorded
 here rather than silently folded into an unrelated commit.
 
-**2. The add CTA.** Four buttons are missing their `+` icon: workspaces, API
-keys, end-users, webhooks. And the members page invites through an INLINE FORM
-(email input + role select + Add) where every other screen uses a button that
-opens a modal — replace it with the standard CTA plus an invite modal, which
-also frees the top of the members table.
+**2. ~~The add CTA.~~ Done 23 August.** Workspaces, API keys, end-users and
+webhooks now use the same white `+` CTA as the rest of the product. Members no
+longer reserves the top of its table for an email field, role select and Add
+button: `+ Invite member` opens the standard modal, where the labelled email
+and role controls assemble the complete invitation before one submit. Closing
+the modal resets the form; a successful invite invalidates the organisation,
+closes it, and an API failure stays visible inside it.
+
+Measured at 1440 and 390, all five CTAs are 32px tall, contain exactly one SVG,
+render `--background`, and produce no viewport overflow. The nested invite
+modal measures 512px / 358px with 462px / 308px controls and no overflow in
+either it or the settings dialog behind it. Its open, cancel, reset and reopen
+path was exercised at 390 as well as inspected visually at both widths.
+
+The fixture guard caught the API-key screen missing from the harness and, once
+added, its unserved `GET /api/api-keys/available-scopes`. The screen is in the
+coverage list now and the endpoint has a generated-OpenAPI-typed fixture; the
+five-screen, two-width pass has no holes.
+
+The block gate is green for `bun test apps/web` (559 pass) and `bun run check`
+(33/33 tasks, the same nine pre-existing warnings). Root `bun test` reaches
+10,625 passes, then reports 35 failures and 19 errors in the local MITM/sidecar
+group. Running its reference listener file alone reproduces the documented CA
+baseline exactly, 15/15 failures at `planCaBundle` because `caKeyPem` lacks the
+expected PEM marker. No touched package is involved.
 
 **3. End-users become a table.** This one has a prerequisite, which is why it is
 last: the row opens its detail panel through an `onClick` on local state, with

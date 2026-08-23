@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { KeyRound } from "lucide-react";
+import { KeyRound, Plus } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Button } from "@appstrate/ui/components/button";
@@ -55,6 +55,7 @@ export function ApiKeysPage() {
           {t("settings:apiKeys.swaggerLink")}
         </a>
         <Button variant="outline" className={TOOLBAR_ACTION} onClick={() => setCreateOpen(true)}>
+          <Plus />
           {t("settings:apiKeys.createBtn")}
         </Button>
       </div>
