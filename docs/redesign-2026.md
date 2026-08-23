@@ -1789,6 +1789,27 @@ so Back from the closed page cannot reopen it. A cold catalogue URL closes by
 removing its catalogue-only keys. No install endpoint or authentication
 taxonomy was invented.
 
+A follow-up on 23 August made Browse catalogue an action in the toolbar rather
+than a view utility: it now uses the white, slightly raised action surface,
+while Filters and Columns stay unfilled on the grey canvas. The custom
+integration action keeps the same deed treatment and its existing admin
+permission.
+
+The catalogue's desktop browse surface now puts its icon, title, description,
+search and status navigation in the fixed 224px rail. The content pane contains
+only the cards and footer. `All`, `Active` and `Inactive` reuse the existing
+`catalogue_status` URL state; no semantic categories were derived from the
+manifest `keywords`, because keywords are search metadata rather than a
+first-class taxonomy. Below `md`, the rail disappears and the existing mobile
+title, search, filter disclosure and stacked cards remain. The boundary was
+looked at on both sides: the rail stands at 768px and gives way at 767px.
+
+The first clear strip above the desktop cards looked sufficient but its 16px
+height still overlapped the close button's real hit rectangle by 4px. Geometry,
+not the screenshot, caught it. The strip is 24px now; at 1440, 768, 767 and
+390 the close target intersects no link, button or input, and the dialog,
+content pane and viewport report zero horizontal overflow.
+
 The lab covers Documents, Integrations and the catalogue across nominal,
 empty, heavy and error at 1440 and 390: 24 captures, no missing fixture. The
 nominal and error surfaces were inspected visually. The empty scenario still

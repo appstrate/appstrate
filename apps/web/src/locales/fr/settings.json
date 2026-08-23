@@ -756,6 +756,8 @@
   "integrations.catalogue.browse": "Parcourir le catalogue",
   "integrations.catalogue.title": "Catalogue des intégrations",
   "integrations.catalogue.description": "Parcourez les intégrations système offertes par Appstrate, puis ouvrez leur fiche pour les activer ou les configurer.",
+  "integrations.catalogue.all": "Toutes",
+  "integrations.catalogue.statusNavigation": "Statut du catalogue",
   "integrations.catalogue.empty": "Aucune intégration système n'est disponible.",
   "integrations.search.placeholder": "Rechercher une intégration…",
   "integrations.badge.active": "Activée",

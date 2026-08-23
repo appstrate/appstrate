@@ -111,6 +111,24 @@ describe("catalogueSearch", () => {
     expect(catalogueSearch(filtered, false)).toBe("?q=mail");
   });
 
+  it("represents every catalogue rail destination in the existing status URL", () => {
+    const active = catalogueFilterSearch("?catalogue=1", {
+      query: "",
+      statuses: ["active"],
+    });
+    expect(readCatalogueFilters(active)).toEqual({ query: "", statuses: ["active"] });
+
+    const inactive = catalogueFilterSearch(active, {
+      query: "",
+      statuses: ["inactive"],
+    });
+    expect(readCatalogueFilters(inactive)).toEqual({ query: "", statuses: ["inactive"] });
+
+    const all = catalogueFilterSearch(inactive, { query: "", statuses: [] });
+    expect(all).toBe("?catalogue=1");
+    expect(readCatalogueFilters(all)).toEqual({ query: "", statuses: [] });
+  });
+
   it("ignores unknown catalogue status values from the URL", () => {
     expect(readCatalogueFilters("?catalogue_status=active,retired")).toEqual({
       query: "",

@@ -3,9 +3,10 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Boxes, LibraryBig, Plus, SearchX } from "lucide-react";
+import { Boxes, LibraryBig, Plus, Search, SearchX } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
+import { Input } from "@appstrate/ui/components/input";
 import { PageHeader } from "../components/page-header";
 import { CardGrid } from "../components/card-grid";
 import { DataTable, columnMenu, visibleColumns } from "../components/data-table";
@@ -13,7 +14,7 @@ import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { PanelDialog } from "../components/panel-dialog";
 import { ErrorState, EmptyState } from "../components/page-states";
 import { IntegrationIcon } from "../components/integration-icon";
-import { TOOLBAR_ACTION, TOOLBAR_UTILITY } from "../lib/toolbar-button";
+import { TOOLBAR_ACTION } from "../lib/toolbar-button";
 import {
   INTEGRATION_ORIGINS,
   INTEGRATION_STATUSES,
@@ -111,48 +112,90 @@ function CataloguePanel({
     [integrations, query, statuses],
   );
   const filtering = query.trim() !== "" || statuses.length > 0;
+  const selectedStatus = statuses.length === 1 ? statuses[0] : "all";
+  const statusOptions: Array<{ value: IntegrationStatus; label: string }> = [
+    { value: "active", label: t("integrations.badge.active") },
+    { value: "inactive", label: t("integrations.badge.inactive") },
+  ];
+  const statusNavigation: Array<{
+    value: "all" | IntegrationStatus;
+    label: string;
+    statuses: IntegrationStatus[];
+  }> = [
+    { value: "all", label: t("integrations.catalogue.all"), statuses: [] },
+    ...statusOptions.map(({ value, label }) => ({ value, label, statuses: [value] })),
+  ];
 
   const rail = (
-    <div className="p-5">
-      <div className="bg-background mb-4 grid size-10 place-items-center rounded-lg border">
-        <LibraryBig className="text-muted-foreground size-5" />
+    <div className="flex min-h-full flex-col p-5">
+      <div className="flex items-center gap-2">
+        <LibraryBig className="text-muted-foreground size-5 shrink-0" />
+        <h2 className="font-semibold">{t("integrations.catalogue.title")}</h2>
       </div>
-      <h2 className="font-semibold">{t("integrations.catalogue.title")}</h2>
       <p className="text-muted-foreground mt-2 text-sm">
         {t("integrations.catalogue.description")}
       </p>
+
+      <div className="relative mt-5">
+        <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2" />
+        <Input
+          value={query}
+          onChange={(event) => onQueryChange(event.target.value)}
+          placeholder={t("integrations.search.placeholder")}
+          className="[[data-slot=dialog-content]_&]:bg-background pl-9"
+        />
+      </div>
+
+      <nav aria-label={t("integrations.catalogue.statusNavigation")} className="mt-3 space-y-1">
+        {statusNavigation.map((item) => (
+          <Button
+            key={item.value}
+            type="button"
+            variant="ghost"
+            size="sm"
+            aria-pressed={selectedStatus === item.value}
+            className="aria-pressed:bg-accent w-full justify-start px-3"
+            onClick={() => onStatusesChange(item.statuses)}
+          >
+            {item.label}
+          </Button>
+        ))}
+      </nav>
     </div>
   );
 
   return (
     <PanelDialog title={t("integrations.catalogue.title")} rail={rail} onClose={onClose}>
-      <div className="mb-5 md:hidden">
-        <h2 className="text-lg font-semibold">{t("integrations.catalogue.title")}</h2>
-        <p className="text-muted-foreground mt-1 text-sm">
-          {t("integrations.catalogue.description")}
-        </p>
+      <div className="md:hidden">
+        <div className="mb-5 pr-10">
+          <h2 className="text-lg font-semibold">{t("integrations.catalogue.title")}</h2>
+          <p className="text-muted-foreground mt-1 text-sm">
+            {t("integrations.catalogue.description")}
+          </p>
+        </div>
+
+        <ListToolbar
+          search={{
+            value: query,
+            onChange: onQueryChange,
+            placeholder: t("integrations.search.placeholder"),
+          }}
+          filters={[
+            {
+              id: "status",
+              label: t("integrations.filter.status"),
+              values: statuses,
+              onChange: (values) => onStatusesChange(values as IntegrationStatus[]),
+              options: statusOptions,
+            },
+          ]}
+          onReset={onReset}
+        />
       </div>
 
-      <ListToolbar
-        search={{
-          value: query,
-          onChange: onQueryChange,
-          placeholder: t("integrations.search.placeholder"),
-        }}
-        filters={[
-          {
-            id: "status",
-            label: t("integrations.filter.status"),
-            values: statuses,
-            onChange: (values) => onStatusesChange(values as IntegrationStatus[]),
-            options: [
-              { value: "active", label: t("integrations.badge.active") },
-              { value: "inactive", label: t("integrations.badge.inactive") },
-            ],
-          },
-        ]}
-        onReset={onReset}
-      />
+      {/* The desktop rail owns every catalogue control. This clear strip keeps
+          the card collection below the dialog close control. */}
+      <div aria-hidden className="hidden h-6 md:block" />
 
       <CardGrid
         items={shown}
@@ -297,7 +340,7 @@ export function IntegrationsPage() {
               type="button"
               variant="outline"
               size="sm"
-              className={TOOLBAR_UTILITY}
+              className={TOOLBAR_ACTION}
               title={t("integrations.catalogue.browse")}
               onClick={() =>
                 navigate(

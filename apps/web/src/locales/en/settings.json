@@ -756,6 +756,8 @@
   "integrations.catalogue.browse": "Browse catalogue",
   "integrations.catalogue.title": "Integration catalogue",
   "integrations.catalogue.description": "Browse the system integrations offered by Appstrate, then open one to activate or configure it.",
+  "integrations.catalogue.all": "All",
+  "integrations.catalogue.statusNavigation": "Catalogue status",
   "integrations.catalogue.empty": "No system integrations are available.",
   "integrations.search.placeholder": "Search integrations…",
   "integrations.badge.active": "Active",
