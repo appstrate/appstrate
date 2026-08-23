@@ -19,6 +19,7 @@ import { Spinner } from "../../../components/spinner";
 import { SettingsGroup, SettingRow } from "../../../components/settings/setting-row";
 import { InlineTextSetting } from "../../../components/settings/inline-text-setting";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { toast } from "sonner";
 
 export function OrgSettingsAppGeneralPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -55,57 +56,71 @@ function GeneralForm({
   const domains = application.settings?.allowedRedirectDomains ?? [];
   const [editedDomains, setEditedDomains] = useState<string[] | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [saving, setSaving] = useState<"name" | "domains" | null>(null);
   const activeDomains = editedDomains ?? domains;
 
   // Each control commits on its own — "the control IS the setting". The Save
   // button that used to sit under this form was the last one in the settings
   // surfaces, and it made the workspace the one screen where a change was not
   // a change until you pressed something else.
-  const save = (patch: { name?: string; domains?: string[] }) =>
-    updateMutation.mutate({
-      params: { path: { id: applicationId } },
-      body: {
-        name: (patch.name ?? application.name).trim(),
-        settings: { allowedRedirectDomains: patch.domains ?? activeDomains },
+  const save = (patch: { name?: string; domains?: string[] }, field: "name" | "domains") => {
+    setSaving(field);
+    updateMutation.mutate(
+      {
+        params: { path: { id: applicationId } },
+        body: {
+          name: (patch.name ?? application.name).trim(),
+          settings: { allowedRedirectDomains: patch.domains ?? activeDomains },
+        },
       },
-    });
+      {
+        onError: (error) => {
+          toast.error(t("error.prefix", { message: getErrorMessage(error) }));
+        },
+        onSettled: () => setSaving(null),
+      },
+    );
+  };
 
   const commitDomains = (next: string[]) => {
     // Empty rows are the residue of editing, not a value: a domain nobody typed
     // has no business being sent, and an empty string is not one.
     const cleaned = next.map((d) => d.trim()).filter(Boolean);
     setEditedDomains(next);
-    save({ domains: cleaned });
+    save({ domains: cleaned }, "domains");
   };
 
   return (
     <>
       <SettingsGroup title={t("applications.settingsTitle")}>
-        <SettingRow label={t("applications.nameLabel")}>
+        <SettingRow
+          variant="field"
+          label={t("applications.nameLabel")}
+          status={saving === "name" && <Spinner />}
+        >
           <InlineTextSetting
             value={application.name}
             disabled={updateMutation.isPending}
             aria-label={t("applications.nameLabel")}
-            className="w-64"
             placeholder={t("applications.namePlaceholder")}
-            onCommit={(name) => save({ name })}
+            onCommit={(name) => save({ name }, "name")}
           />
-          {updateMutation.isPending && <Spinner />}
         </SettingRow>
 
         <SettingRow
+          variant="field"
           label={t("applications.redirectDomains")}
           description={t("applications.redirectDomainsHint")}
-          // A list does not fit the row's right edge: it grows downward, so the
-          // row stacks instead of pretending one line is enough.
-          className="flex-col items-stretch gap-3"
+          status={saving === "domains" && <Spinner />}
         >
-          <div className="flex flex-col gap-2">
+          <div className="flex w-full flex-col gap-2">
             {activeDomains.map((domain, index) => (
-              <div key={index} className="flex items-center gap-2">
+              <div key={index} className="flex w-full items-center gap-2">
                 <Input
                   type="text"
                   value={domain}
+                  disabled={updateMutation.isPending}
+                  className="min-w-0 flex-1"
                   onChange={(e) =>
                     setEditedDomains((prev) =>
                       (prev ?? domains).map((d, i) => (i === index ? e.target.value : d)),
@@ -123,6 +138,7 @@ function GeneralForm({
                   type="button"
                   variant="ghost"
                   size="icon"
+                  disabled={updateMutation.isPending}
                   aria-label={t("btn.delete", { ns: "common" })}
                   onClick={() => commitDomains(activeDomains.filter((_, i) => i !== index))}
                 >
@@ -136,6 +152,7 @@ function GeneralForm({
               type="button"
               variant="outline"
               size="sm"
+              disabled={updateMutation.isPending}
               className="self-start"
               onClick={() => setEditedDomains([...(activeDomains ?? []), ""])}
             >
@@ -153,6 +170,7 @@ function GeneralForm({
       {!application.isDefault && (
         <SettingsGroup title={t("applications.dangerZone")}>
           <SettingRow
+            variant="action"
             label={t("applications.deleteTitle")}
             description={t("applications.deleteDesc")}
           >

@@ -42,6 +42,7 @@ export const SCREENS = [
   // The settings surfaces, which are routed modals over whatever page you were
   // on. Every one of them is a list, and step B is about what they draw while
   // that list is on its way.
+  { path: "/org-settings/general", name: "settings-general" },
   { path: "/org-settings/members", name: "settings-members" },
   { path: "/org-settings/applications", name: "settings-applications" },
   { path: "/org-settings/models", name: "settings-models" },

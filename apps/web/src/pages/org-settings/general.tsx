@@ -5,6 +5,8 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Building, HardDrive, AlertTriangle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
+import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { Label } from "@appstrate/ui/components/label";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { formatBytes } from "@appstrate/core/format";
@@ -73,18 +75,21 @@ export function OrgSettingsGeneralPage() {
   return (
     <>
       <SettingsGroup title={t("orgSettings.orgTitle")}>
-        <SettingRow label={t("orgSettings.nameLabel")} description={currentOrg.slug}>
+        <SettingRow
+          variant="field"
+          label={t("orgSettings.nameLabel")}
+          description={currentOrg.slug}
+          status={updateNameMutation.isPending && <Spinner />}
+        >
           <InlineTextSetting
             value={currentOrg.name}
             disabled={!isAdmin || updateNameMutation.isPending}
             aria-label={t("orgSettings.nameLabel")}
-            className="w-64"
             onCommit={(name) => {
               if (!orgId) return;
               updateNameMutation.mutate({ params: { path: { orgId } }, body: { name } });
             }}
           />
-          {updateNameMutation.isPending && <Spinner />}
         </SettingRow>
       </SettingsGroup>
 
@@ -140,53 +145,37 @@ export function OrgSettingsGeneralPage() {
       )}
 
       {isAdmin && features.oidc && (
-        <>
-          <div className="text-muted-foreground mt-8 mb-4 text-sm font-medium">
-            {t("orgSettings.advancedSection")}
-          </div>
-          <div className="border-border bg-card mb-4 rounded-lg border p-5">
-            <div className="flex items-center gap-3">
-              <div className="flex-1">
-                <h3 className="text-sm font-semibold">{t("orgSettings.dashboardSsoTitle")}</h3>
-                <span className="text-muted-foreground text-sm">
-                  {t("orgSettings.dashboardSsoDesc")}
-                </span>
-              </div>
-              <Button
-                variant={orgSettings?.dashboard_sso_enabled ? "default" : "outline"}
-                disabled={updateSettingsMutation.isPending}
-                onClick={() =>
-                  updateSettingsMutation.mutate(
-                    {
-                      params: { path: { orgId: currentOrg.id } },
-                      body: { dashboard_sso_enabled: !orgSettings?.dashboard_sso_enabled },
+        <SettingsGroup title={t("orgSettings.advancedSection")}>
+          <SettingRow
+            variant="toggle"
+            label={
+              <Label htmlFor="dashboard-sso" className="cursor-pointer">
+                {t("orgSettings.dashboardSsoTitle")}
+              </Label>
+            }
+            description={t("orgSettings.dashboardSsoDesc")}
+            status={updateSettingsMutation.isPending && <Spinner />}
+          >
+            <Checkbox
+              id="dashboard-sso"
+              checked={orgSettings?.dashboard_sso_enabled ?? false}
+              disabled={updateSettingsMutation.isPending}
+              onCheckedChange={(checked) =>
+                updateSettingsMutation.mutate(
+                  {
+                    params: { path: { orgId: currentOrg.id } },
+                    body: { dashboard_sso_enabled: checked === true },
+                  },
+                  {
+                    onError: (err) => {
+                      toast.error(t("error.prefix", { message: getErrorMessage(err) }));
                     },
-                    {
-                      onSuccess: (data) => {
-                        toast.success(
-                          data.dashboard_sso_enabled
-                            ? t("orgSettings.dashboardSsoEnabled")
-                            : t("orgSettings.dashboardSsoDisabled"),
-                        );
-                      },
-                      onError: (err) => {
-                        toast.error(t("error.prefix", { message: getErrorMessage(err) }));
-                      },
-                    },
-                  )
-                }
-              >
-                {updateSettingsMutation.isPending ? (
-                  <Spinner />
-                ) : orgSettings?.dashboard_sso_enabled ? (
-                  t("orgSettings.dashboardSsoDisable")
-                ) : (
-                  t("orgSettings.dashboardSsoEnable")
-                )}
-              </Button>
-            </div>
-          </div>
-        </>
+                  },
+                )
+              }
+            />
+          </SettingRow>
+        </SettingsGroup>
       )}
 
       <div className="text-muted-foreground mt-8 mb-4 text-sm font-medium">

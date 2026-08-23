@@ -16,6 +16,13 @@
 import { installLabFetch } from "./mock-fetch";
 import { mountLabPanel } from "./panel";
 
+// Start on the non-default workspace whose settings fixture exposes all three
+// row shapes, including the destructive action. Preserve a deliberate switch
+// made while using the lab instead of forcing this on every reload.
+if (!localStorage.getItem("appstrate_current_app")) {
+  localStorage.setItem("appstrate_current_app", "app_lab");
+}
+
 // The platform injects this into index.html at serve time; `vite dev` serves
 // the file raw, so the lab supplies it. Modules are ON here: the point of the
 // lab is to see the whole surface, not the subset a given deployment enables.
@@ -30,6 +37,7 @@ window.__APP_CONFIG__ = {
     chat: true,
     billing: true,
     webhooks: true,
+    oidc: true,
   },
   trustedOrigins: [],
 };

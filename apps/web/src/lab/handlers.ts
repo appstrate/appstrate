@@ -170,6 +170,14 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   },
   {
     method: "GET",
+    pattern: /^\/api\/oauth\/clients$/,
+    handler: (_u, s) => ({
+      status: 200,
+      body: { ...f.oauthClients, data: list(f.oauthClients.data, s) },
+    }),
+  },
+  {
+    method: "GET",
     pattern: /^\/api\/orgs\/[^/]+$/,
     handler: (_u, s) => ({
       status: 200,

@@ -98,8 +98,11 @@ function makeApplication(id: string, orgId: string, name: string, isDefault = fa
  */
 export const applicationsByOrg: Record<string, Application[]> = {
   [ORG_ID]: [
-    makeApplication(APP_ID, ORG_ID, "Default", true),
-    makeApplication("app_lab_prod", ORG_ID, "Production"),
+    {
+      ...makeApplication(APP_ID, ORG_ID, "Production"),
+      settings: { allowedRedirectDomains: ["appstrate.com"] },
+    },
+    makeApplication("app_lab_default", ORG_ID, "Default", true),
     makeApplication("app_lab_sandbox", ORG_ID, "Bac à sable"),
   ],
   org_lab_2: [makeApplication("app_lab_2_default", "org_lab_2", "Default", true)],
@@ -1258,7 +1261,31 @@ export const orgDetail: Json200<"/api/orgs/{orgId}", "get"> = {
 
 export const orgSettings: Json200<"/api/orgs/{orgId}/settings", "get"> = {
   api_version: "2026-08-01",
-  dashboard_sso_enabled: false,
+  dashboard_sso_enabled: true,
+};
+
+export const oauthClients: Json200<"/api/oauth/clients", "get"> = {
+  object: "list",
+  hasMore: false,
+  data: [
+    {
+      id: "oauth_lab_dashboard",
+      clientId: "tractr-dashboard",
+      name: "TRACTR Dashboard",
+      level: "org",
+      referencedOrgId: ORG_ID,
+      referencedApplicationId: null,
+      redirectUris: ["https://dashboard.tractr.net/auth/callback"],
+      postLogoutRedirectUris: ["https://dashboard.tractr.net"],
+      scopes: ["openid", "profile", "email"],
+      disabled: false,
+      isFirstParty: true,
+      allowSignup: false,
+      signupRole: "member",
+      createdAt: ago(40_000),
+      updatedAt: ago(2_000),
+    },
+  ],
 };
 
 /**

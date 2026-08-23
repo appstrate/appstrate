@@ -380,12 +380,7 @@ export function ListToolbar({
               value={search.value}
               onChange={(event) => search.onChange(event.target.value)}
               placeholder={search.placeholder}
-              // WHITE, unlike the buttons beside it, and the difference is the
-              // point: a field is a surface you type into, so it takes the
-              // app's component surface like every other input. Our `Input` is
-              // `bg-transparent` by default, which on the grey canvas made the
-              // box grey inside.
-              className="bg-background h-8 w-full max-w-[250px]"
+              className="h-8 w-full max-w-[250px]"
             />
           )}
         </div>

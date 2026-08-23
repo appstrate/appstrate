@@ -710,8 +710,8 @@ Three surfaces, one rendering: **organisation**, **workspace**, **account**
 
 ## Form pattern
 
-`components/settings/setting-row.tsx` — `SettingsGroup` + `SettingRow`, label
-and explanation left, control right. The rule it encodes:
+`components/settings/setting-row.tsx` — `SettingsGroup` + `SettingRow`, with a
+shape named for the control it holds. The rule it encodes:
 
 > **The control IS the setting.** A field you type in, a dropdown you open, a
 > toggle you flip — never a value with an Edit button beside it, which puts two
@@ -723,7 +723,8 @@ mirror needs an effect to follow the server, which the Rules-of-React gate
 rejects (`react-hooks/set-state-in-effect`).
 
 Converted so far: organisation name, workspace name and its OAuth redirect
-domains, account display name. Left: storage, MCP connect.
+domains, account display name, account email, workspace danger action, and the
+dashboard-SSO toggle. Left: storage, MCP connect.
 
 ### THREE ROW SHAPES (decided 23 August, from the product owner's references)
 
@@ -753,11 +754,10 @@ SURFACE is what tells a control from its background.
 - On the grey canvas (a list page) a field is **white**.
 - Inside a white dialog (every settings surface) a field is **grey**.
 
-One rule, two renderings. What is there today is neither: `packages/ui`'s
-`Input` is `bg-transparent`, so a field inherits whatever it sits on and has no
-surface of its own. Exactly one place overrides it — the toolbar's search box,
-which forces `bg-background` with a comment explaining why — and the rule was
-never generalised. Inside the settings dialogs that leaves white rectangles on
+One rule, two renderings. `packages/ui`'s `Input` now owns it: `bg-background`
+by default, then `bg-muted` under a `DialogContent`, identified by that
+component's `data-slot`. The toolbar's search box no longer carries its own
+surface override, and settings fields no longer leave white rectangles on
 white, readable only by their border.
 
 ### WHEN A CHANGE SAVES
@@ -794,11 +794,13 @@ address, and the real effect is a verification message sent elsewhere.
 
 **And the email is directly editable, not a dialog.** A modal was built for it
 on 22 August on the grounds that a stray blur would send a verification link to
-a typo'd stranger. That was over-cautious and it is reverted: the verification
-link IS the confirmation, since the address does not become yours until someone
-clicks it, so a confirm in front of a flow that confirms itself is belt and
-braces. A Save button never protected against a valid-but-wrong address either.
-The existing format guard means an invalid string never fires at all.
+a typo'd stranger. That was over-cautious and was reverted on 23 August: the
+verification link IS the confirmation, since the address does not become yours
+until someone clicks it, so a confirm in front of a flow that confirms itself
+is belt and braces. A Save button never protected against a valid-but-wrong
+address either. The format guard means an invalid string never fires at all;
+success gets a toast because the row keeps showing the current address while
+verification happens elsewhere.
 
 ## Terminology
 
@@ -1318,31 +1320,51 @@ So the strategy the reference itself suggests:
 
 ### NEXT, IN ORDER (written 23 August, for whoever picks this up cold)
 
-Everything below this block is either done or older context. These three are
-what is next, smallest first, and each one is a commit with the gate green
-(`bun test` + `bun run check`) and a look in the lab before it lands.
+Everything below this block is either done or older context. The two open
+blocks are what is next, smallest first, and each one is a commit with the gate
+green (`bun test` + `bun run check`) and a look in the lab before it lands.
 
-**1. The settings row pattern.** All of it is specified under "Form pattern" —
-read that section before touching anything. Five things, one block:
+**1. ~~The settings row pattern.~~ Done 23 August.** `SettingRow` has the three
+shapes under "Form pattern", and the six existing rows use the one their
+control calls for. Fields now take their own line, up to 512px on a wide panel
+and the full 342px available on a phone; the workspace danger action stays
+opposite its explanation. Account email is a directly editable field again,
+with its format guard and a success toast because the verification happens
+elsewhere. Dashboard SSO is a checkbox beside its label rather than an
+Enable/Disable button.
 
-- Give `packages/ui`'s `Input` a surface decided by its ground: white on the
-  canvas, grey inside a dialog. It is `bg-transparent` today, so it has none.
-  Check the toolbar search afterwards; it forces `bg-background` by hand and
-  that override should become unnecessary or stay consistent.
-- Rework `components/settings/setting-row.tsx` into the three shapes: field
-  (control BELOW the label, after the description), toggle (control and label
-  on one line, description under), action (button right, unchanged).
-- Apply to the six existing rows: org name, workspace name, workspace OAuth
-  domains, account display name, account email, workspace danger zone.
-- **Revert the email dialog** built on 22 August (`EmailChangeModal` in
-  `pages/preferences/general.tsx`): the email becomes an in-place field again,
-  with a toast, because its effect is invisible. The reasoning is in "Form
-  pattern".
-- Convert the dashboard-SSO setting in `pages/org-settings/general.tsx` from
-  title + description + Enable/Disable button into a toggle row.
+`Input` owns the surface rule now: white by default, grey under a
+`DialogContent`, whose `data-slot` makes the context explicit. The toolbar's
+one-off white override is gone. Measured at 1440 and 390: field controls sit
+12px below their copy, their rails resolve to 512px / 342px, neither the viewport nor the
+dialog overflows, dialog fields render `--muted`, and the toolbar search stays
+`--background`.
 
-Expect the settings surfaces to grow taller, since every field goes from one
-line to two. Verify at 1440 and at 390 before committing.
+The fixture pass caught an omission before the SSO row could be judged: the
+lab claimed its modules were on but did not set `features.oidc`, so the row was
+hidden and the OAuth screen redirected away before its missing clients fixture
+could announce itself. OIDC and dashboard SSO are on in the lab now, the OAuth
+client list has a typed fixture, and the general-settings screen is in the
+harness's coverage list. The workspace fixture also carries a real redirect
+domain: the empty editor's Add button alone had hidden a 180px shrink-to-content
+field that the row's outer 512px / 342px measurement could not catch.
+
+The fixed-point review caught two behavioral gaps as well. Email now remounts
+to the account's current address after a successful request (and after rejecting
+an invalid format), while a server failure deliberately keeps the typed value.
+Workspace and display-name failures now toast, and the domain controls lock
+during their full-array write so two responses cannot race and restore an older
+list.
+
+A second review caught the last invisible variant: the lab selected the default
+workspace, so its conditional danger row never rendered. The lab now starts on
+the non-default Production workspace (while retaining a separate real default),
+and its DOM exposes `field`, `field`, `action` at both widths.
+
+That newly reachable OAuth screen also exposes older mobile debt outside this
+row-pattern block: its client-card heading, badge and five icon actions compete
+on one line at 390, forcing the client id into a narrow column. It is recorded
+here rather than silently folded into an unrelated commit.
 
 **2. The add CTA.** Four buttons are missing their `+` icon: workspaces, API
 keys, end-users, webhooks. And the members page invites through an INLINE FORM
