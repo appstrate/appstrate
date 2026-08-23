@@ -407,7 +407,7 @@ export function publishedFilesFromLogs(logs: readonly RunLogLine[]): ChatRunFile
  * One page of `GET /api/files?run_id=…&purpose=agent_output`, narrowed to what
  * this run PRODUCED.
  */
-export interface ProducedFileList {
+interface ProducedFileList {
   /** The rows on this page that this run produced. */
   files: ChatRunFile[];
   /**
