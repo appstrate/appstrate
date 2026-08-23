@@ -65,12 +65,19 @@ See the [Progressive Infrastructure](./README.md#progressive-infrastructure) sec
 
 The `.env.example` ships with dev-ready defaults — no manual secret generation needed. For production, regenerate all secrets (see comments in `.env`).
 
-**If you modify `runtime-pi/` or `runtime-pi/sidecar/`**, rebuild the Docker images:
+**If you modify `runtime-pi/` or `runtime-pi/sidecar/`**, rebuild the runtime images:
 
 ```sh
-bun run build-runtime    # agent image
-bun run build-sidecar    # sidecar proxy image
+bun run build-runtime    # rebuilds BOTH appstrate-pi and appstrate-sidecar
 ```
+
+There is deliberately no command that rebuilds one of the two. `PI_IMAGE` and
+`SIDECAR_IMAGE` are a version contract — the agent runtime and the sidecar speak
+a wire protocol that changes in the same commit — and a pair built from two
+different commits starts normally, passes every health check, then fails runs
+with an error that names neither image (#1195). Both images are stamped with the
+git revision they were built from, and the platform warns at boot when the two
+stamps disagree.
 
 ### Useful Commands
 

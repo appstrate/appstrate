@@ -47,6 +47,7 @@ import { initLlmUsageRetryWorker } from "../services/llm-usage-retry.ts";
 import { initCancelSubscriber } from "../services/run-tracker.ts";
 import { startRunWatchdog } from "../services/run-watchdog.ts";
 import { startRuntimeImageWarmer } from "../services/orchestrator/runtime-image-warmer.ts";
+import { assertRuntimeImagePairPinned } from "../services/orchestrator/runtime-image-pair.ts";
 import { getExecutionMode } from "../infra/mode.ts";
 import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { ensureBucket } from "@appstrate/db/storage";
@@ -205,6 +206,15 @@ export async function bootCritical(): Promise<void> {
   // Parse + validate proxy limits (LLM_PROXY_LIMITS, CREDENTIAL_PROXY_LIMITS).
   // Same fail-fast contract as initRunLimits — strict Zod, unknown keys reject.
   initProxyLimits();
+
+  // `PI_IMAGE` / `SIDECAR_IMAGE` are a version contract: the agent runtime and
+  // the sidecar speak a wire protocol that changes in lockstep, so a pair
+  // pinned to two different release tags boots fine and then fails runs with
+  // an opaque upstream error (#1195). Detectable here, before anything starts.
+  // Docker-only — the process adapter consumes neither ref.
+  if (getExecutionMode() === "docker") {
+    assertRuntimeImagePairPinned(env.PI_IMAGE, env.SIDECAR_IMAGE);
+  }
 
   // Load system proxies from SYSTEM_PROXIES env var
   initSystemProxies();

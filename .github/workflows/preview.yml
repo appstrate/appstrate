@@ -130,6 +130,17 @@ jobs:
           # staging/prod server — skipping arm64 roughly halves build time.
           platforms: linux/amd64
           push: true
+          # Stamp `org.opencontainers.image.{version,revision,created}` into
+          # runtime-pi + sidecar. The platform compares the two `revision`
+          # labels after pre-pulling and warns when the pair was built from
+          # different commits (#1200); an unstamped preview image reads
+          # `unknown` on both sides and silently disables that check — which is
+          # worst here, since preview deploys are exactly where someone points
+          # the two env vars at two different tags. Images that declare none of
+          # these ARGs ignore them (docker warns, never fails).
+          build-args: |
+            BUILD_VERSION=${{ needs.resolve.outputs.tag }}
+            BUILD_REVISION=${{ github.sha }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}:${{ needs.resolve.outputs.tag }}
             ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}:${{ needs.resolve.outputs.tag }}-${{ github.sha }}
