@@ -8,6 +8,8 @@
  *     coverage lives in the label-gated integration suite.
  *   - `isAliasInferenceCall` — behind the sidecar's narrowed `/llm/*` surface
  *     for a run that already HAS an alias.
+ *   - `maskAliasedTokenLimits` — behind the agent container's env contract for
+ *     such a run (`buildRuntimePiEnv`).
  */
 
 import { describe, it, expect } from "bun:test";
@@ -15,9 +17,11 @@ import {
   checkAliasInvariants,
   isAliasableApiShape,
   isAliasInferenceCall,
+  maskAliasedTokenLimits,
   ALIAS_INFERENCE_PATHS,
   ALIASABLE_API_SHAPES,
 } from "../src/model-swap.ts";
+import { deriveResponseReserveTokens, isUsableMaxOutputTokens } from "../src/token-budget.ts";
 import type { ModelApiShape } from "../src/sidecar-types.ts";
 
 describe("checkAliasInvariants", () => {
@@ -162,5 +166,97 @@ describe("isAliasInferenceCall", () => {
       expect(isAliasInferenceCall(shape, "POST", "/v1/messages")).toBe(false);
       expect(isAliasInferenceCall(shape, "POST", "/chat/completions")).toBe(false);
     }
+  });
+});
+
+describe("maskAliasedTokenLimits", () => {
+  // Real catalog pairs an alias might be backed by. `window` is what the org
+  // would read off a public catalog if the exact number reached the container.
+  const catalog: Array<{ window: number; max: number }> = [
+    { window: 200_000, max: 8192 }, // Claude family
+    { window: 200_000, max: 64_000 }, // Sonnet thinking
+    { window: 131_072, max: 8192 }, // DeepSeek / many OSS models
+    { window: 128_000, max: 16_384 }, // GPT-4o family
+    { window: 1_047_576, max: 32_768 }, // GPT-4.1
+    { window: 2_000_000, max: 8192 }, // Gemini-class
+  ];
+
+  it("never rounds UP — `maxTokens` reaches upstream as the response cap", () => {
+    // Rounding the cap up risks an upstream 400 which, on an alias, is replaced
+    // by the neutral synthesized envelope and becomes undiagnosable. Rounding
+    // down only leaves capacity unused.
+    for (const { window, max } of catalog) {
+      const masked = maskAliasedTokenLimits({ contextWindow: window, maxTokens: max });
+      expect(masked.contextWindow).toBeLessThanOrEqual(window);
+      expect(masked.maxTokens).toBeLessThanOrEqual(max);
+    }
+  });
+
+  it("keeps the loss under 6.25 % so compaction is not materially degraded", () => {
+    // The ladder is 16 buckets per binary octave, so the worst case is strictly
+    // under 1/16. An octave-wide ladder would round 200 000 down to 131 072 and
+    // throw away a third of the window.
+    for (let n = 1000; n <= 2_100_000; n += 997) {
+      const masked = maskAliasedTokenLimits({ contextWindow: n });
+      const loss = (n - (masked.contextWindow ?? 0)) / n;
+      expect(loss).toBeLessThan(0.0625);
+    }
+    expect(maskAliasedTokenLimits({ contextWindow: 200_000 }).contextWindow).toBe(196_608);
+  });
+
+  it("narrows the candidate set — distinct catalog windows collapse onto one rung", () => {
+    // The honest claim: rounding NARROWS, it does not close. What it removes is
+    // the ability to look an exact pair up in a public catalog and read off one
+    // row.
+    const rungs = new Set(
+      [128_000, 127_000, 126_976, 200_000, 199_000, 197_000].map(
+        (w) => maskAliasedTokenLimits({ contextWindow: w }).contextWindow,
+      ),
+    );
+    expect(rungs.size).toBe(2);
+  });
+
+  it("never yields `maxTokens >= contextWindow` for a pair that arrived usable", () => {
+    // `deriveResponseReserveTokens` treats that as corrupt data and substitutes
+    // a derived reserve, so masking must not manufacture the condition. The
+    // close pair is the one that would: independently rounded, 197 000 and
+    // 200 000 both land on 196 608.
+    const close = maskAliasedTokenLimits({ contextWindow: 200_000, maxTokens: 197_000 });
+    expect(close.contextWindow).toBe(196_608);
+    expect(close.maxTokens).toBeLessThan(close.contextWindow ?? 0);
+    // And the pair still reads as usable to the shared clamp, so the reserve
+    // comes from the explicit cap (capped by the 80 % prompt-headroom ceiling,
+    // exactly as the raw pair would have been) rather than the fallback.
+    expect(isUsableMaxOutputTokens(close.maxTokens, close.contextWindow ?? 0)).toBe(true);
+
+    for (const { window, max } of catalog) {
+      const masked = maskAliasedTokenLimits({ contextWindow: window, maxTokens: max });
+      expect(masked.maxTokens).toBeLessThan(masked.contextWindow ?? 0);
+    }
+  });
+
+  it("leaves an ALREADY-impossible pair impossible (masking changes no verdict)", () => {
+    // Devstral 2512's `256000 / 256000` from the LiteLLM catalog — the
+    // run_b6e99890 case. It falls back to a derived reserve today and must keep
+    // doing exactly that; the ladder is monotone, so it cannot turn an unusable
+    // pair into a usable one either.
+    const masked = maskAliasedTokenLimits({ contextWindow: 256_000, maxTokens: 256_000 });
+    expect(masked.maxTokens).toBe(masked.contextWindow);
+    expect(deriveResponseReserveTokens(masked.contextWindow ?? 0, masked.maxTokens)).toBe(
+      Math.floor((masked.contextWindow ?? 0) * 0.2),
+    );
+  });
+
+  it("passes through what it cannot round rather than inventing a number", () => {
+    expect(maskAliasedTokenLimits({})).toEqual({ contextWindow: null, maxTokens: null });
+    expect(maskAliasedTokenLimits({ contextWindow: null, maxTokens: null })).toEqual({
+      contextWindow: null,
+      maxTokens: null,
+    });
+    // Out of the roundable range — passed through, and the readers already
+    // treat these as unusable.
+    expect(maskAliasedTokenLimits({ contextWindow: 0 }).contextWindow).toBe(0);
+    expect(maskAliasedTokenLimits({ contextWindow: -5 }).contextWindow).toBe(-5);
+    expect(maskAliasedTokenLimits({ contextWindow: 1.5 }).contextWindow).toBe(1.5);
   });
 });

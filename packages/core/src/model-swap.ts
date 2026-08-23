@@ -31,6 +31,13 @@
  *     Anthropic backing. Pi sees the public alias, so the sidecar restores the
  *     catalogued adaptive shape from its private swap descriptor.
  *
+ * The module is also where the rest of the alias-opacity policy lives, because
+ * "what an alias discloses" is one decision even when it is enforced at
+ * different boundaries: {@link checkAliasInvariants} (configuration-time),
+ * {@link maskAliasedTokenLimits} (what the agent container is told about the
+ * backing's size), {@link LLM_PASSTHROUGH_RESPONSE_HEADERS} and
+ * {@link syntheticAliasErrorBody} (what comes back out).
+ *
  * The SURFACE itself is narrowed too: for an aliased run only the protocol's
  * own inference endpoint is a legitimate call, so
  * {@link ALIAS_INFERENCE_PATHS} / {@link isAliasInferenceCall} give the
@@ -170,6 +177,101 @@ export function checkAliasInvariants(input: {
   if (!isAliasableApiShape(input.apiShape)) return "non_aliasable_shape";
   if (input.authMode === "oauth2") return "oauth_provider";
   return null;
+}
+
+/**
+ * Buckets per binary octave on the token-limit ladder below.
+ *
+ * 16 puts the grid step at `2^floor(log2(n)) / 16`, so a value loses strictly
+ * less than 1/16 = 6.25 % of itself. That is the whole trade: coarse enough
+ * that catalog entries a few thousand tokens apart collapse onto one rung,
+ * cheap enough that compaction sizing is not materially degraded. Powers of
+ * two are NOT the ladder — an octave-wide bucket would round a 200 000 window
+ * down to 131 072 and throw away a third of it.
+ */
+const ALIAS_TOKEN_BUCKETS_PER_OCTAVE = 16;
+
+/**
+ * Largest ladder rung `<= value`.
+ *
+ * The octave is taken with `Math.clz32` rather than `Math.log2` so the whole
+ * computation stays exact integer arithmetic — no float rounding can put a
+ * value just below a power of two into the octave above it. Caller guarantees
+ * `1 <= value < 2^31`, which every real token count satisfies by orders of
+ * magnitude.
+ */
+function floorToAliasBucket(value: number): number {
+  const octave = 2 ** (31 - Math.clz32(value));
+  const step = Math.max(1, Math.floor(octave / ALIAS_TOKEN_BUCKETS_PER_OCTAVE));
+  return Math.floor(value / step) * step;
+}
+
+/**
+ * Round one token count onto the ladder, or hand it back untouched when it is
+ * not a count we can round. Values outside `[1, 2^31)` (absent, zero, negative,
+ * fractional, NaN) are passed through verbatim: masking must never INVENT a
+ * number, and the readers already treat those as unusable.
+ */
+function maskTokenCount(value: number | null | undefined): number | null {
+  if (typeof value !== "number") return null;
+  if (!Number.isInteger(value) || value < 1 || value >= 2 ** 31) return value;
+  return floorToAliasBucket(value);
+}
+
+/**
+ * Coarsen an aliased model's `(contextWindow, maxTokens)` pair before it enters
+ * the agent container (issue #1198, Threat B).
+ *
+ * The container genuinely needs both numbers — `derivePiCompactionSettings`
+ * sizes the compaction pass from them, and dropping them lands on per-code-path
+ * defaults that disagree (`runtime-pi/env.ts` says 128 000, `pi-runner.ts` says
+ * 200 000). So this rounds rather than removes.
+ *
+ * **What it buys, stated honestly.** A rounded pair NARROWS the candidate set;
+ * it does not close it. `(200000, 8192)` is close to a fingerprint on its own,
+ * and `(196608, 8192)` is still a strong hint. What the ladder removes is the
+ * exactness — the ability to look a pair up in a public catalog and read off
+ * one row. Combined with the rate card no longer travelling at all, that is the
+ * part of Threat B this layer can carry; the protocol dialect the container
+ * speaks remains the wide surface, and closing it is a different change.
+ *
+ * **Round DOWN, never up.** `maxTokens` reaches the upstream as the response
+ * cap. Rounding it up risks an upstream 400 that, on an alias, is replaced by
+ * the neutral {@link syntheticAliasErrorBody} envelope — an undiagnosable
+ * failure. Rounding down only leaves capacity unused.
+ *
+ * **The pair stays as usable as it arrived.** `deriveResponseReserveTokens`
+ * (`@appstrate/core/token-budget`) treats `maxTokens >= contextWindow` as
+ * corrupt and substitutes a derived reserve. Independent rounding can land two
+ * values that were a few hundred tokens apart on the SAME rung, which would
+ * silently push a healthy model onto that fallback — so a pair that arrived
+ * usable is stepped one rung apart again. The reverse cannot happen:
+ * {@link floorToAliasBucket} is monotone, so an already-impossible pair stays
+ * impossible and keeps the exact behaviour it has today.
+ */
+export function maskAliasedTokenLimits(limits: {
+  contextWindow?: number | null;
+  maxTokens?: number | null;
+}): { contextWindow: number | null; maxTokens: number | null } {
+  const contextWindow = maskTokenCount(limits.contextWindow);
+  const maxTokens = maskTokenCount(limits.maxTokens);
+
+  const arrivedUsable =
+    typeof limits.contextWindow === "number" &&
+    typeof limits.maxTokens === "number" &&
+    limits.maxTokens < limits.contextWindow;
+  if (
+    arrivedUsable &&
+    contextWindow !== null &&
+    maxTokens !== null &&
+    maxTokens >= contextWindow &&
+    contextWindow > 1
+  ) {
+    // The highest rung strictly below the masked window. `Math.min` keeps the
+    // round-down guarantee intact — this can only ever lower the cap further.
+    return { contextWindow, maxTokens: Math.min(maxTokens, floorToAliasBucket(contextWindow - 1)) };
+  }
+  return { contextWindow, maxTokens };
 }
 
 /**

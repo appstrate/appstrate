@@ -218,6 +218,76 @@ describe("buildRuntimePiEnv", () => {
     expect(env.MODEL_COST).toBe(JSON.stringify({ input: 3, output: 15 }));
   });
 
+  describe("model-alias masking (issue #1198, Threat B)", () => {
+    // The env an aliased run is built from. The backing here is a real
+    // 200 000/8192 catalog pair — the exact shape an org member who printed the
+    // container env could look up.
+    const aliasedModel = {
+      ...model,
+      aliased: true,
+      input: ["text", "image"],
+      contextWindow: 200_000,
+      maxTokens: 8192,
+      reasoning: true,
+      cost: { input: 3, output: 15 },
+    };
+
+    it("omits MODEL_COST — the published rate card names the vendor", () => {
+      const env = buildRuntimePiEnv({ model: aliasedModel, agentPrompt: "p", ...sidecar });
+      expect(env).not.toHaveProperty("MODEL_COST");
+      // Safe only because the ledger stopped depending on it: the runner row's
+      // `cost_usd` is computed server-side from `runs.model_cost` × the
+      // reported token counts (`writeRunnerLedgerRow`).
+    });
+
+    it("rounds the token limits DOWN onto the alias ladder", () => {
+      const env = buildRuntimePiEnv({ model: aliasedModel, agentPrompt: "p", ...sidecar });
+      expect(env.MODEL_CONTEXT_WINDOW).toBe("196608");
+      // 8192 is already a rung; rounding never moves a value that sits on one.
+      expect(env.MODEL_MAX_TOKENS).toBe("8192");
+      expect(Number(env.MODEL_CONTEXT_WINDOW)).toBeLessThan(200_000);
+      expect(Number(env.MODEL_MAX_TOKENS)).toBeLessThanOrEqual(8192);
+    });
+
+    it("keeps MODEL_INPUT — dropping it silently disables image input", () => {
+      // `parseModelInput` falls back to `["text"]` on an absent var, so masking
+      // the modality vector would degrade the run rather than hide anything the
+      // read projection does not already publish.
+      const env = buildRuntimePiEnv({ model: aliasedModel, agentPrompt: "p", ...sidecar });
+      expect(env.MODEL_INPUT).toBe(JSON.stringify(["text", "image"]));
+    });
+
+    it("never rounds up, and never yields MODEL_MAX_TOKENS >= MODEL_CONTEXT_WINDOW", () => {
+      // The close pair is the one that would: independently rounded, 197 000
+      // and 200 000 both land on 196 608, and a cap equal to the window sends
+      // `deriveResponseReserveTokens` to its corrupt-data fallback.
+      const env = buildRuntimePiEnv({
+        model: { ...aliasedModel, contextWindow: 200_000, maxTokens: 197_000 },
+        agentPrompt: "p",
+        ...sidecar,
+      });
+      expect(Number(env.MODEL_CONTEXT_WINDOW)).toBeLessThanOrEqual(200_000);
+      expect(Number(env.MODEL_MAX_TOKENS)).toBeLessThanOrEqual(197_000);
+      expect(Number(env.MODEL_MAX_TOKENS)).toBeLessThan(Number(env.MODEL_CONTEXT_WINDOW));
+    });
+
+    it("leaves a NON-aliased run byte-for-byte as it was", () => {
+      // A BYOK model the org configured itself has nothing to hide — the org
+      // already knows its own binding.
+      const { aliased: _aliased, ...byokModel } = aliasedModel;
+      const byok = buildRuntimePiEnv({ model: byokModel, agentPrompt: "p", ...sidecar });
+      const explicitlyNotAliased = buildRuntimePiEnv({
+        model: { ...aliasedModel, aliased: false },
+        agentPrompt: "p",
+        ...sidecar,
+      });
+      expect(explicitlyNotAliased).toEqual(byok);
+      expect(byok.MODEL_CONTEXT_WINDOW).toBe("200000");
+      expect(byok.MODEL_MAX_TOKENS).toBe("8192");
+      expect(byok.MODEL_COST).toBe(JSON.stringify({ input: 3, output: 15 }));
+    });
+  });
+
   it("omits MODEL_REASONING when null and emits 'false' when explicitly disabled", () => {
     const env = buildRuntimePiEnv({
       model: { ...model, reasoning: null },

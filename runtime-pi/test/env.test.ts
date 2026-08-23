@@ -25,7 +25,9 @@ describe("parseRuntimeEnv — happy path", () => {
     expect(env.sink.secret).toBe(VALID.APPSTRATE_SINK_SECRET);
     expect(env.workspaceDir).toBe("/workspace");
     expect(env.modelInput).toEqual(["text"]);
-    expect(env.modelCost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+    // Absent, not zero — the run reports no cost of its own (see the warnings
+    // block below), and the platform prices its ledger row server-side.
+    expect(env.modelCost).toBeUndefined();
     expect(env.modelContextWindow).toBe(128_000);
     expect(env.modelMaxTokens).toBe(16_384);
     expect(env.modelReasoning).toBe(false);
@@ -113,8 +115,17 @@ describe("parseRuntimeEnv — non-fatal warnings", () => {
     const env = parseRuntimeEnv(VALID);
     expect(env.warnings).toHaveLength(1);
     expect(env.warnings[0]).toContain("MODEL_COST");
-    // The run still gets a usable (all-zero) rate table.
-    expect(env.modelCost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+  });
+
+  it("reports NO rates when MODEL_COST is absent — never a fabricated all-zero table", () => {
+    // The var is absent for two reasons now: an unpriced model, and an ALIASED
+    // one whose published rate card is withheld because it names the vendor
+    // (`buildRuntimePiEnv`). An all-zero table would make the run report
+    // `cost: 0` — indistinguishable from a genuinely free model, and on an
+    // aliased run a permanent false positive for the platform's cost-divergence
+    // warning, which compares exactly this number against its own.
+    expect(parseRuntimeEnv(VALID).modelCost).toBeUndefined();
+    expect("modelCost" in parseRuntimeEnv(VALID)).toBe(false);
   });
 
   it("emits no warning when MODEL_COST is present", () => {

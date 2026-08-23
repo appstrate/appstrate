@@ -205,6 +205,20 @@ export interface PiRunnerOptions {
   /** LLM API key. Registered on the runner's {@link ModelRuntime} under `model.provider`. */
   apiKey?: string;
   /**
+   * No per-token rates were resolved for {@link model}, so the zero rates it
+   * carries are a placeholder the Pi SDK's required `Model.cost` forced, not a
+   * price. The runner then reports NO cost — `appstrate.metric` events and the
+   * finalize body omit the field entirely rather than carrying a fabricated
+   * `0`, which a consumer cannot tell from a genuinely free model.
+   *
+   * Set by `runtime-pi/entrypoint.ts` when `MODEL_COST` never arrived: an
+   * unpriced model, or an aliased one whose published rate card is withheld
+   * because it names the vendor. Token counts are unaffected — they are
+   * observed, not derived — and the platform prices its own ledger row from
+   * `runs.model_cost` × those counts regardless.
+   */
+  unpriced?: boolean;
+  /**
    * Agent's system prompt. This is the static instruction Pi SDK stores
    * on every session; in Appstrate it is the full enriched prompt built
    * by `buildPlatformSystemPrompt`. Minimal consumers can pass
@@ -635,6 +649,7 @@ export class PiRunner implements Runner {
     const bridge = installSessionBridge(session, internalSink, context.runId, {
       terminalTools,
       contextWindow: budget.contextWindow,
+      ...(this.opts.unpriced ? { unpriced: true } : {}),
       // Early-stop: abort the SDK loop as soon as a terminal tool has
       // executed successfully. `session.abort()` resolves once the agent
       // is idle; detached because the bridge callback is synchronous.
@@ -1041,8 +1056,13 @@ export interface SessionBridgeHandle {
   readonly terminalToolCompleted: boolean;
   /** Snapshot of token usage accumulated across the session so far. */
   getUsage(): TokenUsage;
-  /** Snapshot of total LLM cost in USD accumulated across the session so far. */
-  getCost(): number;
+  /**
+   * Snapshot of total LLM cost in USD accumulated across the session so far,
+   * or `undefined` on an {@link SessionBridgeOptions.unpriced} session — the
+   * accumulated total is then a product of placeholder zero rates and saying
+   * "$0" would assert a price nobody computed.
+   */
+  getCost(): number | undefined;
   /**
    * Wait until every fire-and-forget `sink.emit(event)` dispatched from
    * the Pi SDK subscribe callback has settled. The Pi SDK callback runs
@@ -1266,6 +1286,13 @@ interface SessionBridgeOptions {
    * it.
    */
   contextWindow?: number;
+  /**
+   * No rates back this session's model — see {@link PiRunnerOptions.unpriced}.
+   * The bridge still accumulates whatever the SDK computed (it costs nothing
+   * and keeps one code path), but reports it as absent everywhere it is
+   * emitted.
+   */
+  unpriced?: boolean;
 }
 
 export function installSessionBridge(
@@ -1286,6 +1313,13 @@ export function installSessionBridge(
   // zero-shape) — assistant turns AND compaction passes.
   const totalUsage: TokenUsage = zeroTokenUsage();
   let totalCost = 0;
+  // The one place the unpriced decision is applied. Every emit path — the
+  // per-turn metric, the compaction metric, the `agent_end` metric, and the
+  // finalize body via `getCost()` — reads through this, so none of them can be
+  // the one that leaks the placeholder zero. `undefined` makes
+  // `buildMetric`/`RunResult.cost` omit the field entirely, which the platform
+  // already reads as "nothing to compare" (it prices the ledger row itself).
+  const reportedCost = (): number | undefined => (options.unpriced ? undefined : totalCost);
 
   /**
    * Fold one Pi `Usage` into the run totals and report its deltas.
@@ -1399,7 +1433,7 @@ export function installSessionBridge(
           // payload would be identical to the previous one and waste
           // a NOTIFY round-trip.
           if (inputDelta > 0 || outputDelta > 0) {
-            fire(buildMetric({ runId, timestamp: Date.now() }, { ...totalUsage }, totalCost));
+            fire(buildMetric({ runId, timestamp: Date.now() }, { ...totalUsage }, reportedCost()));
 
             // Per-turn context-growth breadcrumb. Shares the metric's gate on
             // purpose — a turn the SDK reported with no counters has nothing to
@@ -1505,7 +1539,7 @@ export function installSessionBridge(
             outputTokens: usage.output ?? 0,
           },
         });
-        fire(buildMetric({ runId, timestamp: Date.now() }, { ...totalUsage }, totalCost));
+        fire(buildMetric({ runId, timestamp: Date.now() }, { ...totalUsage }, reportedCost()));
         break;
       }
 
@@ -1568,7 +1602,7 @@ export function installSessionBridge(
       }
 
       case "agent_end": {
-        fire(buildMetric({ runId, timestamp: Date.now() }, { ...totalUsage }, totalCost));
+        fire(buildMetric({ runId, timestamp: Date.now() }, { ...totalUsage }, reportedCost()));
         break;
       }
 
@@ -1584,8 +1618,8 @@ export function installSessionBridge(
     getUsage(): TokenUsage {
       return { ...totalUsage };
     },
-    getCost(): number {
-      return totalCost;
+    getCost(): number | undefined {
+      return reportedCost();
     },
     getTerminalError(): RunError | undefined {
       // Verdict on the LAST assistant turn. `isTerminalErrorStop` /

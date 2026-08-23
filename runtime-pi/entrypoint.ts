@@ -140,7 +140,8 @@ try {
 // SUCCEEDS, before anything else runs, so a degraded-but-valid configuration is
 // visible at the top of the run's log. The fatal channel above is untouched:
 // these are conditions the run can legitimately proceed under (today: no
-// `MODEL_COST`, i.e. every cost this run reports will be 0).
+// `MODEL_COST`, i.e. this run reports no cost of its own and the platform
+// prices it server-side).
 for (const warning of env.warnings) {
   logLine("warn", "runtime_env_warning", { warning });
 }
@@ -699,7 +700,12 @@ const model: Model<Api> = {
   reasoning: env.modelReasoning,
   ...(env.modelReasoningLevelMap ? { thinkingLevelMap: env.modelReasoningLevelMap } : {}),
   input: [...env.modelInput],
-  cost: env.modelCost,
+  // `Model.cost` is REQUIRED by the Pi SDK and dereferenced unconditionally on
+  // every settled turn (`calculateCost` reads `model.cost.tiers` — omitting it
+  // throws mid-stream, it does not degrade), so an unpriced run still has to
+  // hand the SDK a rate shape. Zero is the only honest one, and it stays
+  // SDK-internal: `unpriced` below stops the runner emitting the 0 it produces.
+  cost: env.modelCost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   contextWindow: env.modelContextWindow,
   maxTokens: env.modelMaxTokens,
 };
@@ -798,6 +804,10 @@ function buildPiRunner(): PiRunner {
   return createRuntimePiRunner({
     sidecarUrl,
     model,
+    // No rates reached this container (unpriced model, or an alias whose rate
+    // card is withheld). The zero shape above would otherwise be reported as a
+    // real $0; say nothing instead. See `parseModelCost` in `env.ts`.
+    ...(env.modelCost === undefined ? { unpriced: true } : {}),
     apiKey: env.modelApiKey,
     systemPrompt,
     ...(env.modelTemperature !== undefined ? { temperature: env.modelTemperature } : {}),

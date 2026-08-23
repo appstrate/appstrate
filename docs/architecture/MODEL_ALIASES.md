@@ -30,16 +30,41 @@ There are two threat models against that requirement.
 - **Threat B — the agent runtime (adversarial code inside the container).**
   **NOT met today — tracked in appstrate#1198.** The agent needs _some_
   protocol information to format requests, so a container that speaks the
-  vendor's dialect necessarily observes something about it. What it observes
-  today is wider than that necessity:
+  vendor's dialect necessarily observes something about it. This is not merely
+  a sandbox-escape concern: the agent's own logs are an Appstrate surface, so
+  an org member who prints the container env reads whatever is in it from the
+  dashboard. What is left there is now narrower than it was:
 
-  | reaches the container                       | example (aliased `Appstrate Flash`)              | effect                                         |
-  | ------------------------------------------- | ------------------------------------------------ | ---------------------------------------------- |
-  | `MODEL_PROVIDER`                            | `deepseek`                                       | **names the vendor** (added by appstrate#1196) |
-  | `MODEL_COST`                                | `{"input":0.28,"output":0.42,"cacheRead":0.028}` | **identifies** it — published rate card        |
-  | `MODEL_CONTEXT_WINDOW` / `MODEL_MAX_TOKENS` | `131072` / `8192`                                | identifies it together with the rates          |
-  | `MODEL_API`                                 | `openai-completions`                             | narrows the candidate set                      |
-  | success response body                       | `reasoning_content`                              | vendor vocabulary — structural                 |
+  | reaches the container                       | example (aliased `Appstrate Flash`) | effect                                         |
+  | ------------------------------------------- | ----------------------------------- | ---------------------------------------------- |
+  | `MODEL_PROVIDER`                            | `deepseek`                          | **names the vendor** (added by appstrate#1196) |
+  | `MODEL_API`                                 | `openai-completions`                | narrows the candidate set                      |
+  | `MODEL_CONTEXT_WINDOW` / `MODEL_MAX_TOKENS` | `196608` / `8192`                   | narrows it — rounded, see below                |
+  | success response body                       | `reasoning_content`                 | vendor vocabulary — structural                 |
+
+  `MODEL_COST` is **no longer sent at all** for an aliased run. The published
+  per-token rate card identifies the vendor on its own, and nothing depends on
+  the container knowing it any more: `writeRunnerLedgerRow` computes the
+  runner's `llm_usage.cost_usd` server-side from `runs.model_cost` × the
+  reported token counts, so what the sandbox knows stopped determining what is
+  billed. The container then reports **no cost**, not a fabricated `0` — the
+  ledger reads a null reported cost as "nothing to compare" and prices the row
+  itself either way.
+
+  The two token limits are **rounded down, not dropped**. The container really
+  needs them (`derivePiCompactionSettings` sizes the compaction pass from them,
+  and an absent value lands on per-code-path defaults that disagree), so
+  `maskAliasedTokenLimits` (`@appstrate/core/model-swap`) puts them on a ladder
+  of 16 buckets per binary octave: down only — `maxTokens` reaches the upstream
+  as the response cap and rounding it UP would produce a 400 that the neutral
+  error envelope makes undiagnosable — never producing `maxTokens >=
+contextWindow`, which `deriveResponseReserveTokens` treats as corrupt data,
+  and losing under 6.25 % so compaction is not materially degraded. Be precise
+  about what this buys: it removes the _exactness_ that lets a pair be looked up
+  in a public catalog. It narrows the candidate set; it does not close it. The
+  **sidecar** keeps the REAL numbers — it is trusted, and its token-budget guard
+  on MCP tool results protects against the real upstream limit, so rounding
+  there would be a correctness regression rather than extra safety.
 
   The `/llm/*` **surface** is no longer part of the hole either. For an
   aliased run the sidecar allows exactly one call — the inference endpoint the
@@ -59,12 +84,11 @@ There are two threat models against that requirement.
   is the request-side metadata above, and the fact that the container formats
   requests in the vendor's own dialect.
 
-  Closing it means the sidecar translating **both** directions — request shape
+  What remains is the dialect itself: `MODEL_PROVIDER`, `MODEL_API`,
+  `MODEL_REASONING_LEVEL_MAP` and the vendor vocabulary in success bodies.
+  Closing that means the sidecar translating **both** directions — request shape
   AND response dialect — so the container can stay generic. That is a design
-  change, not a patch; appstrate#1198 carries the inventory, the plan, and the
-  two open questions (whether `MODEL_COST` can be masked without breaking run
-  accounting, and how to keep a compaction-usable context window without
-  handing over an exact fingerprint).
+  change, not a patch; appstrate#1198 carries the inventory and the plan.
 
 ## How resolution works
 
@@ -218,10 +242,12 @@ FEATURED_MODELS_EXCLUDE="deepseek-chat,some-other-backing"
 
 ## Residual exposure (Threat B)
 
-The container still receives `MODEL_API` (the protocol family) and reaches the
-real endpoint through the sidecar — now only its one inference call, so the
-vendor's other endpoints (catalogue, account, batch, …) are no longer readable
-through the proxy. An adversarial agent can infer the _protocol_ but not the
-real `model` id, the upstream id echoed in responses, the endpoint host, or the
-credential. Closing Threat B fully would require a protocol-
-normalizing gateway and is out of scope here.
+The container still receives `MODEL_PROVIDER` + `MODEL_API` (the vendor and its
+protocol family) and reaches the real endpoint through the sidecar — now only
+its one inference call, so the vendor's other endpoints (catalogue, account,
+batch, …) are no longer readable through the proxy. It no longer receives the
+rate card, and its token limits are rounded onto a shared ladder rather than
+handed over verbatim. An adversarial agent can infer the _protocol_ but not the
+real `model` id, the upstream id echoed in responses, the endpoint host, the
+credential, or the price. Closing Threat B fully would require a
+protocol-normalizing gateway and is out of scope here.

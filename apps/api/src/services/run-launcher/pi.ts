@@ -363,6 +363,11 @@ async function runPlatformContainerImpl(
         reasoning: llmConfig.reasoning,
         reasoningLevelMap: llmConfig.generation?.reasoning.nativeLevels,
         cost: llmConfig.cost,
+        // WHAT this run is, not which vars to mask. `buildRuntimePiEnv` owns
+        // the alias policy for the container env contract (omit the rate card,
+        // coarsen the token limits); re-deriving that list here would give it a
+        // second home to drift in.
+        aliased: !!llmConfig.aliased,
       },
       generation: plan.generationConfig,
       agentPrompt: prompt,

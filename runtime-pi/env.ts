@@ -52,8 +52,14 @@ interface RuntimeEnv {
   modelProvider?: string;
   /** Pi SDK input modalities. */
   modelInput: ReadonlyArray<"text" | "image">;
-  /** Per-token cost (input/output/cacheRead/cacheWrite USD). */
-  modelCost: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  /**
+   * Per-token cost (input/output/cacheRead/cacheWrite USD), or ABSENT when the
+   * platform resolved no rates for this model — an unpriced model, or an
+   * aliased one whose rate card is withheld on purpose (the published card
+   * names the vendor). Absent means absent all the way down: the run reports no
+   * cost rather than a fabricated 0. See {@link parseModelCost}.
+   */
+  modelCost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
   /** Pi SDK context window in tokens. */
   modelContextWindow: number;
   /** Pi SDK max completion tokens. */
@@ -213,22 +219,32 @@ function parseModelCost(
   raw: string | undefined,
   issues: string[],
   warnings: string[],
-): { input: number; output: number; cacheRead: number; cacheWrite: number } {
+): { input: number; output: number; cacheRead: number; cacheWrite: number } | undefined {
   const fallback = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   if (!raw) {
-    // The platform only sets MODEL_COST when the resolved model carries rates
-    // (`buildRuntimePiEnv`), so an absent var means the model could not be
-    // priced. The all-zero fallback below is arithmetically fine but silent:
-    // every metric event this run emits will report cost 0, indistinguishable
-    // from a genuinely free model. Report it — non-fatally, see
-    // {@link RuntimeEnv.warnings}. (Server-side, the same run's ledger row is
-    // stamped `pricing_status='unpriced'` from `runs.model_cost`; this line is
-    // the in-container half of the same fact, for operators reading logs.)
+    // The platform sets MODEL_COST only when the resolved model carries rates
+    // AND the run may see them (`buildRuntimePiEnv` withholds the card from an
+    // aliased model — the published rate card names the vendor the alias
+    // exists to hide). Either way, no rates reached this container.
+    //
+    // Returning `undefined` rather than the all-zero shape is the point. Zero
+    // rates are arithmetically fine and epistemically wrong: they make the run
+    // report `cost: 0`, indistinguishable from a genuinely free model, and on
+    // an aliased run they would sit next to a real server-computed number and
+    // trip the ledger's cost-divergence warning on every single run. Reporting
+    // nothing is the honest statement, and the platform already reads it that
+    // way — a null reported cost prices the row from `runs.model_cost` and
+    // makes no comparison.
+    //
+    // Still a warning, not an issue: a pricing gap must not become an outage.
+    // (Server-side the same run's ledger row is stamped
+    // `pricing_status='unpriced'` from `runs.model_cost`; this line is the
+    // in-container half of the same fact, for operators reading logs.)
     warnings.push(
-      "MODEL_COST: absent — no per-token pricing was resolved for this model; " +
-        "this run's reported cost will be 0 regardless of tokens consumed",
+      "MODEL_COST: absent — no per-token pricing reached this container; " +
+        "this run reports no cost of its own (the platform prices it server-side)",
     );
-    return fallback;
+    return undefined;
   }
   let parsed: unknown;
   try {
@@ -415,7 +431,7 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     ...(modelReasoningLevelMap ? { modelReasoningLevelMap } : {}),
     ...(source.MODEL_PROVIDER ? { modelProvider: source.MODEL_PROVIDER } : {}),
     modelInput,
-    modelCost,
+    ...(modelCost !== undefined ? { modelCost } : {}),
     modelContextWindow,
     modelMaxTokens,
     agentPrompt: agentPrompt!,

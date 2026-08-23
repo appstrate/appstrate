@@ -11,6 +11,7 @@
  */
 
 import { createLogger } from "@appstrate/core/logger";
+import { maskAliasedTokenLimits } from "@appstrate/core/model-swap";
 import type {
   ModelNativeReasoningLevel,
   ModelReasoningLevel,
@@ -40,6 +41,15 @@ export interface RuntimePiModelConfig {
   reasoning?: boolean | null;
   reasoningLevelMap?: Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel>>;
   cost?: unknown | null;
+  /**
+   * This run's model is a platform ALIAS: the caller sees a vanity id and the
+   * real backing vendor is meant to stay hidden (`docs/architecture/
+   * MODEL_ALIASES.md`). The flag says WHAT the run is; WHICH variables that
+   * changes is decided once, in {@link buildRuntimePiEnv} — see the masking
+   * block there. Defaults to false: a BYOK model the org configured itself has
+   * nothing to hide, so those runs must stay byte-for-byte as they were.
+   */
+  aliased?: boolean;
 }
 
 export interface RuntimePiEnvOptions {
@@ -229,9 +239,25 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
   // entrypoint applies the same fallback either way.
   if (model.providerId) env.MODEL_PROVIDER = model.providerId;
 
+  // --- Model-alias masking (issue #1198, Threat B) ---
+  //
+  // The single place the alias policy touches the container env contract. The
+  // launcher passes `model.aliased` and nothing else; every decision about
+  // WHICH variables an alias changes is made here, so a second call site cannot
+  // grow a divergent copy of the rule.
+  //
+  // `MODEL_INPUT` deliberately stays on both paths: it is the model's input
+  // modalities, and dropping it does not degrade gracefully — the reader's
+  // `parseModelInput` falls back to `["text"]`, silently disabling image input
+  // for the whole run. The modality vector is already part of what the read
+  // projection (`projectAliasedModel`) discloses on purpose.
+  const limits = model.aliased
+    ? maskAliasedTokenLimits({ contextWindow: model.contextWindow, maxTokens: model.maxTokens })
+    : { contextWindow: model.contextWindow ?? null, maxTokens: model.maxTokens ?? null };
+
   if (model.input) env.MODEL_INPUT = JSON.stringify(model.input);
-  if (model.contextWindow != null) env.MODEL_CONTEXT_WINDOW = String(model.contextWindow);
-  if (model.maxTokens != null) env.MODEL_MAX_TOKENS = String(model.maxTokens);
+  if (limits.contextWindow != null) env.MODEL_CONTEXT_WINDOW = String(limits.contextWindow);
+  if (limits.maxTokens != null) env.MODEL_MAX_TOKENS = String(limits.maxTokens);
   if (model.reasoning != null) env.MODEL_REASONING = model.reasoning ? "true" : "false";
   if (model.reasoningLevelMap && Object.keys(model.reasoningLevelMap).length > 0) {
     env.MODEL_REASONING_LEVEL_MAP = JSON.stringify(model.reasoningLevelMap);
@@ -242,7 +268,15 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
   if (opts.generation?.reasoningLevel != null) {
     env.MODEL_REASONING_LEVEL = opts.generation.reasoningLevel;
   }
-  if (model.cost !== undefined && model.cost !== null) {
+  // The published per-token rate card identifies the vendor on its own — a
+  // `{"input":0.28,"output":0.42,"cacheRead":0.028}` is one lookup away from a
+  // name — so an aliased run is told nothing about price. Safe because the
+  // ledger no longer depends on it: `writeRunnerLedgerRow` computes the runner
+  // row's `cost_usd` server-side from `runs.model_cost` × the reported token
+  // counts, so what the container knows stopped determining what is billed.
+  // The container's own report goes quiet rather than to a fabricated zero —
+  // see `parseModelCost` in `runtime-pi/env.ts`.
+  if (!model.aliased && model.cost !== undefined && model.cost !== null) {
     env.MODEL_COST = JSON.stringify(model.cost);
   }
 
