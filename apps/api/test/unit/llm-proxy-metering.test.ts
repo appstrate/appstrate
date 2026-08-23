@@ -250,7 +250,7 @@ describe("guardSseTeardown", () => {
       headers: { "content-type": "text/event-stream" },
     });
     const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
-      swap: { alias: "alias-model", real: "real-model" },
+      swap: { alias: "alias-model", real: "real-model", apiShape: "anthropic-messages" as const },
       recordUsage: collectUsage().recordUsage,
     });
     const out = await readAll(res.body!);
@@ -285,7 +285,11 @@ describe("guardSseTeardown", () => {
 // shared allowlist, so neither prose nor headers can fingerprint the backing.
 // The no-swap path stays byte-for-byte permissive (subscription gateways).
 describe("forwardMeteredResponse — aliased error synthesis and header allowlist", () => {
-  const swap = { alias: "appstrate-medium", real: "deepseek-SECRET" };
+  const swap = {
+    alias: "appstrate-medium",
+    real: "deepseek-SECRET",
+    apiShape: "anthropic-messages" as const,
+  };
 
   it("replaces an aliased upstream error body with the synthetic envelope and strips fingerprinting headers", async () => {
     const upstream = new Response(

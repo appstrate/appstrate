@@ -9,8 +9,16 @@
 
 import { describe, it, expect, mock } from "bun:test";
 import { createApp, type AppDeps } from "../app.ts";
+import { parseModelSwapEnv } from "../model-swap.ts";
 
-const SWAP = { alias: "appstrate-medium", real: "deepseek-chat" };
+// `openai-completions` backing: the OpenAI SDK posts `/chat/completions`
+// (the `/v1` lives in the base URL), so that is the ONE path an aliased run
+// of this shape is allowed to reach — see `isAliasInferenceCall`.
+const SWAP = {
+  alias: "appstrate-medium",
+  real: "deepseek-chat",
+  apiShape: "openai-completions" as const,
+};
 
 function makeDeps(fetchFn: typeof fetch): AppDeps {
   return {
@@ -51,7 +59,7 @@ describe("/llm/* model-alias swap (api_key)", () => {
     }) as unknown as typeof fetch;
 
     const app = createApp(makeDeps(fetchFn));
-    await app.request("/llm/v1/chat/completions", {
+    await app.request("/llm/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model: "appstrate-medium", messages: [] }),
@@ -74,6 +82,7 @@ describe("/llm/* model-alias swap (api_key)", () => {
     deps.config.llm.modelSwap = {
       alias: "appstrate-adaptive",
       real: "claude-sonnet-4-6",
+      apiShape: "anthropic-messages",
       anthropicAdaptiveReasoning: { effort: "max" },
     };
 
@@ -105,7 +114,7 @@ describe("/llm/* model-alias swap (api_key)", () => {
     ) as unknown as typeof fetch;
 
     const app = createApp(makeDeps(fetchFn));
-    const res = await app.request("/llm/v1/chat/completions", {
+    const res = await app.request("/llm/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model: "appstrate-medium", messages: [] }),
@@ -127,7 +136,7 @@ describe("/llm/* model-alias swap (api_key)", () => {
     ) as unknown as typeof fetch;
 
     const app = createApp(makeDeps(fetchFn));
-    const res = await app.request("/llm/v1/chat/completions", {
+    const res = await app.request("/llm/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model: "appstrate-medium", messages: [] }),
@@ -148,7 +157,7 @@ describe("/llm/* model-alias swap (api_key)", () => {
     }) as unknown as typeof fetch;
 
     const app = createApp(makeDeps(fetchFn));
-    const res = await app.request("/llm/v1/chat/completions", {
+    const res = await app.request("/llm/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model: "appstrate-medium", messages: [] }),
@@ -194,7 +203,7 @@ describe("/llm/* model-alias swap (api_key)", () => {
     ) as unknown as typeof fetch;
 
     const app = createApp(makeDeps(fetchFn));
-    const res = await app.request("/llm/v1/chat/completions", {
+    const res = await app.request("/llm/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model: "appstrate-medium", messages: [], stream: true }),
@@ -203,5 +212,190 @@ describe("/llm/* model-alias swap (api_key)", () => {
     expect(text).not.toContain("deepseek-chat");
     expect(text.match(/"model":"appstrate-medium"/g)?.length).toBe(2);
     expect(text).toContain("data: [DONE]");
+  });
+});
+
+/**
+ * P0 alias-surface restriction (issue #1198, Threat B). `/llm/*` used to be a
+ * total passthrough — any method, any path, recomposed onto the real upstream
+ * base URL with the real credential injected. For an ALIASED run that hands an
+ * adversarial agent the vendor's own catalogue over `GET /v1/models`: a 2xx
+ * body, so neither the error synthesis (non-2xx only) nor the `model`-field
+ * rewrite ever looked at it. An aliased run now reaches exactly one endpoint.
+ */
+describe("/llm/* alias surface restriction", () => {
+  /** Upstream that fails the test if it is ever reached. */
+  function refusingFetch(): { fetchFn: typeof fetch; calls: () => number } {
+    let calls = 0;
+    const fetchFn = mock(async () => {
+      calls += 1;
+      return new Response('{"data":[{"id":"deepseek-chat"}]}', {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+    return { fetchFn, calls: () => calls };
+  }
+
+  it("proxies the protocol's own inference call through unchanged", async () => {
+    let seenUrl = "";
+    const fetchFn = mock(async (url: string) => {
+      seenUrl = url;
+      return new Response('{"model":"deepseek-chat","choices":[]}', {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+
+    const app = createApp(makeDeps(fetchFn));
+    const res = await app.request("/llm/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "appstrate-medium", messages: [] }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(seenUrl).toBe("https://api.deepseek.com/chat/completions");
+  });
+
+  it("refuses a vendor catalogue read and never reaches upstream", async () => {
+    const { fetchFn, calls } = refusingFetch();
+    const app = createApp(makeDeps(fetchFn));
+
+    const res = await app.request("/llm/v1/models", { method: "GET" });
+
+    expect(res.status).toBe(404);
+    expect(res.headers.get("content-type")).toBe("application/json");
+    // The refusal is the SAME neutral envelope every other alias refusal uses —
+    // a distinct shape would itself be a signal worth probing for.
+    const body = JSON.parse(await res.text());
+    expect(body).toMatchObject({
+      type: "error",
+      error: { type: "upstream_error" },
+    });
+    expect(body.error.message).toContain("appstrate-medium");
+    expect(JSON.stringify(body)).not.toContain("deepseek");
+    // Refused BEFORE the fetch, so the real credential was never spent on it.
+    expect(calls()).toBe(0);
+  });
+
+  it("refuses a non-inference method on the inference path", async () => {
+    const { fetchFn, calls } = refusingFetch();
+    const app = createApp(makeDeps(fetchFn));
+
+    const res = await app.request("/llm/chat/completions", { method: "GET" });
+
+    expect(res.status).toBe(404);
+    expect(calls()).toBe(0);
+  });
+
+  it("refuses a sibling endpoint of the same vendor (path is exact, not a prefix)", async () => {
+    const { fetchFn, calls } = refusingFetch();
+    const app = createApp(makeDeps(fetchFn));
+
+    const res = await app.request("/llm/chat/completions/extra", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "appstrate-medium" }),
+    });
+
+    expect(res.status).toBe(404);
+    expect(calls()).toBe(0);
+  });
+
+  it("keeps the verbatim passthrough for a NON-aliased run", async () => {
+    // No alias means no opacity contract: the run's whole point is reaching the
+    // provider it was configured with, so the surface stays wide open.
+    let seenUrl = "";
+    const fetchFn = mock(async (url: string) => {
+      seenUrl = url;
+      return new Response('{"data":[{"id":"deepseek-chat"}]}', {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+
+    const deps = makeDeps(fetchFn);
+    delete (deps.config.llm as { modelSwap?: unknown }).modelSwap;
+    const app = createApp(deps);
+
+    const res = await app.request("/llm/v1/models", { method: "GET" });
+
+    expect(res.status).toBe(200);
+    expect(seenUrl).toBe("https://api.deepseek.com/v1/models");
+    expect(await res.text()).toContain("deepseek-chat");
+  });
+
+  it("drives the allowlist from the descriptor as it arrives over PI_MODEL_SWAP_JSON", async () => {
+    // Ties the boot-time boundary to the request-time enforcement: the swap the
+    // sidecar actually runs on is whatever `parseModelSwapEnv` returned, so the
+    // allowed path must follow the `apiShape` that crossed the env var.
+    let seenUrl = "";
+    const fetchFn = mock(async (url: string) => {
+      seenUrl = url;
+      return new Response('{"model":"deepseek-chat","choices":[]}', {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+
+    const deps = makeDeps(fetchFn);
+    if (deps.config.llm?.authMode !== "api_key") throw new Error("expected api_key llm");
+    deps.config.llm.modelSwap = parseModelSwapEnv(
+      JSON.stringify({
+        alias: "appstrate-medium",
+        real: "deepseek-chat",
+        apiShape: "openai-completions",
+      }),
+    );
+    const app = createApp(deps);
+
+    const allowed = await app.request("/llm/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "appstrate-medium", messages: [] }),
+    });
+    expect(allowed.status).toBe(200);
+    expect(seenUrl).toBe("https://api.deepseek.com/chat/completions");
+    expect(await allowed.text()).toContain("appstrate-medium");
+
+    expect((await app.request("/llm/v1/models", { method: "GET" })).status).toBe(404);
+  });
+
+  it("allows the Anthropic inference path for an anthropic-messages alias", async () => {
+    // The allowed path is per protocol family — `/v1/messages` here, NOT the
+    // OpenAI `/chat/completions` the fixture's default shape would permit.
+    let seenUrl = "";
+    const fetchFn = mock(async (url: string) => {
+      seenUrl = url;
+      return new Response('{"model":"claude-sonnet-4-6","content":[]}', {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as unknown as typeof fetch;
+
+    const deps = makeDeps(fetchFn);
+    if (deps.config.llm?.authMode !== "api_key") throw new Error("expected api_key llm");
+    deps.config.llm.modelSwap = {
+      alias: "appstrate-opus",
+      real: "claude-sonnet-4-6",
+      apiShape: "anthropic-messages",
+    };
+    const app = createApp(deps);
+
+    const allowed = await app.request("/llm/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "appstrate-opus", messages: [] }),
+    });
+    expect(allowed.status).toBe(200);
+    expect(seenUrl).toBe("https://api.deepseek.com/v1/messages");
+
+    const refused = await app.request("/llm/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "appstrate-opus", messages: [] }),
+    });
+    expect(refused.status).toBe(404);
   });
 });

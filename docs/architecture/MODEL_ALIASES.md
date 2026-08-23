@@ -41,6 +41,18 @@ There are two threat models against that requirement.
   | `MODEL_API`                                 | `openai-completions`                             | narrows the candidate set                      |
   | success response body                       | `reasoning_content`                              | vendor vocabulary — structural                 |
 
+  The `/llm/*` **surface** is no longer part of the hole either. For an
+  aliased run the sidecar allows exactly one call — the inference endpoint the
+  run's own protocol family uses (`ALIAS_INFERENCE_PATHS` /
+  `isAliasInferenceCall` in `@appstrate/core/model-swap`, the same table the
+  platform gateway derives its `upstreamPath` values from). Anything else —
+  `GET /v1/models` above all, which returns the vendor's catalogue in a **2xx**
+  body that neither the error synthesis nor the `model`-field rewrite looks at
+  — is refused with the neutral `syntheticAliasErrorBody` envelope at 404,
+  before any upstream fetch and before the real credential is injected.
+  Non-aliased runs keep the verbatim passthrough; their contract is reaching
+  the provider, not hiding it.
+
   The response path is NOT the hole: headers are reduced to
   `LLM_PASSTHROUGH_RESPONSE_HEADERS`, error surfaces are synthesized rather
   than forwarded, and the `model` field is swapped back to the alias. The hole
@@ -207,7 +219,9 @@ FEATURED_MODELS_EXCLUDE="deepseek-chat,some-other-backing"
 ## Residual exposure (Threat B)
 
 The container still receives `MODEL_API` (the protocol family) and reaches the
-real endpoint through the sidecar. An adversarial agent can infer the _protocol_
-but not the real `model` id, the upstream id echoed in responses, the endpoint
-host, or the credential. Closing Threat B fully would require a protocol-
+real endpoint through the sidecar — now only its one inference call, so the
+vendor's other endpoints (catalogue, account, batch, …) are no longer readable
+through the proxy. An adversarial agent can infer the _protocol_ but not the
+real `model` id, the upstream id echoed in responses, the endpoint host, or the
+credential. Closing Threat B fully would require a protocol-
 normalizing gateway and is out of scope here.

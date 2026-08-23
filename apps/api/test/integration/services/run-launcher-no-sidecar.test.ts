@@ -229,7 +229,11 @@ describe("run-launcher — sidecar skip decision", () => {
     const llm = counts.capturedSidecarSpec?.llm;
     // Narrow the discriminated union (vend variant carries no modelSwap).
     if (llm?.authMode !== "api_key") throw new Error(`expected api_key llm, got ${llm?.authMode}`);
-    expect(llm.modelSwap).toEqual({ alias: "appstrate-medium", real: "deepseek-chat" });
+    expect(llm.modelSwap).toEqual({
+      alias: "appstrate-medium",
+      real: "deepseek-chat",
+      apiShape: "openai-completions",
+    });
 
     // The container is handed the ALIAS as MODEL_ID; the real backing id and
     // the real endpoint never enter the agent env.
@@ -284,6 +288,7 @@ describe("run-launcher — sidecar skip decision", () => {
     expect(llm.modelSwap).toEqual({
       alias: "appstrate-adaptive",
       real: "claude-sonnet-4-6",
+      apiShape: "anthropic-messages",
       anthropicAdaptiveReasoning: { effort: "max" },
     });
 

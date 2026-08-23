@@ -58,6 +58,7 @@ import { assertBearerOnly } from "../lib/bearer-only.ts";
 import { getRunAttribution } from "../services/state/runs.ts";
 import { enforceSystemProxyAdmission } from "../services/system-proxy-admission.ts";
 import { recordLlmLatency } from "@appstrate/core/telemetry";
+import { ALIAS_INFERENCE_PATHS } from "@appstrate/core/model-swap";
 import {
   proxyLlmCall,
   LlmProxyModelApiMismatchError,
@@ -86,27 +87,26 @@ export function createLlmProxyRouter() {
   }> = [
     // `upstreamPath` mirrors each SDK's own path convention so a stored
     // `baseUrl` produces the same final URL whether pi-ai calls the
-    // upstream directly (platform runner) or via this proxy (CLI).
-    //   - OpenAI SDK appends `/chat/completions` → baseUrl carries `/v1`
-    //     (`https://api.openai.com/v1`, `https://openrouter.ai/api/v1`).
-    //   - Anthropic SDK appends `/v1/messages` → baseUrl is the bare host
-    //     (`https://api.anthropic.com`).
+    // upstream directly (platform runner) or via this proxy (CLI). The
+    // sidecar's alias allowlist needs the identical set of paths, so both
+    // read them from `ALIAS_INFERENCE_PATHS` in `@appstrate/core/model-swap`
+    // rather than each repeating the literals — a drift between the two
+    // boundaries would either 404 real traffic here or open a hole there.
+    // `urlPath` stays literal: it is this gateway's own public route surface,
+    // not an upstream convention.
     {
       urlPath: "/openai-completions/v1/chat/completions",
-      upstreamPath: "/chat/completions",
+      upstreamPath: ALIAS_INFERENCE_PATHS["openai-completions"],
       adapter: openaiCompletionsAdapter,
     },
     {
       urlPath: "/anthropic-messages/v1/messages",
-      upstreamPath: "/v1/messages",
+      upstreamPath: ALIAS_INFERENCE_PATHS["anthropic-messages"],
       adapter: anthropicMessagesAdapter,
     },
-    // Mistral SDK (`@mistralai/mistralai` `chat.stream`) appends
-    // `/v1/chat/completions` to its `serverURL` — same convention as
-    // Anthropic, NOT OpenAI.
     {
       urlPath: "/mistral-conversations/v1/chat/completions",
-      upstreamPath: "/v1/chat/completions",
+      upstreamPath: ALIAS_INFERENCE_PATHS["mistral-conversations"],
       adapter: mistralConversationsAdapter,
     },
   ];

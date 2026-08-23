@@ -31,6 +31,13 @@
  *     Anthropic backing. Pi sees the public alias, so the sidecar restores the
  *     catalogued adaptive shape from its private swap descriptor.
  *
+ * The SURFACE itself is narrowed too: for an aliased run only the protocol's
+ * own inference endpoint is a legitimate call, so
+ * {@link ALIAS_INFERENCE_PATHS} / {@link isAliasInferenceCall} give the
+ * sidecar an allowlist to refuse everything else (a vendor catalogue read like
+ * `GET /v1/models` returns 2xx, so neither the error synthesis nor the field
+ * rewrite below would have caught it).
+ *
  * ERROR surfaces are handled differently: provider error bodies are free-form
  * prose that can name the backing anywhere (model id, hostname, provider
  * vocabulary), so for an aliased model they are never forwarded at all —
@@ -43,24 +50,94 @@
 import type { ModelApiShape, ModelSwap } from "./sidecar-types.ts";
 
 /**
- * API shapes that carry the model id in the REQUEST BODY (top-level `model`) —
- * the only shapes the swap can rewrite. The remaining shapes (`google-*`,
- * `azure-*`, `bedrock-*`) put the model id in the URL path / deployment segment,
- * which this swap does not touch, so an alias on those would forward `<alias>`
- * verbatim and 404 upstream. Callers MUST reject `aliased` for any shape not in
- * this set (see {@link isAliasableApiShape}).
+ * The ONE upstream inference endpoint each aliasable protocol family calls,
+ * as the path suffix its SDK appends to the configured base URL.
+ *
+ * This table has two readers, and they must not drift:
+ *   - the platform LLM gateway (`apps/api` `routes/llm-proxy.ts`) uses it as
+ *     the `upstreamPath` it joins onto the model's stored `baseUrl`, and
+ *   - the in-container sidecar uses it via {@link isAliasInferenceCall} to
+ *     decide whether an inbound `/llm/*` request is the inference call at all.
+ * The sidecar sees exactly the same suffix: the container's `MODEL_BASE_URL`
+ * is `<sidecar>/llm`, and `deriveLlmTarget` strips that `/llm` mount prefix
+ * before recomposing the upstream URL.
+ *
+ * Each value is the SDK's own literal, not a guess:
+ *   - `anthropic-messages`     — `@anthropic-ai/sdk` posts `/v1/messages`.
+ *   - `openai-completions`     — `openai` posts `/chat/completions` (the `/v1`
+ *     lives in the base URL: `https://api.openai.com/v1`).
+ *   - `openai-responses`       — `openai` posts `/responses`, same convention.
+ *   - `openai-codex-responses` — pi-ai builds the URL itself
+ *     (`resolveCodexUrl`) and appends `/codex/responses`.
+ *   - `mistral-conversations`  — pi-ai resolves `v1/chat/completions` against
+ *     the base URL (slash-terminated first, so the prefix survives).
+ *
+ * A shape absent from this table is one the alias swap cannot serve at all —
+ * `google-*`, `azure-*` and `bedrock-*` carry the model id in the URL path /
+ * deployment segment rather than the request body, so the swap could not
+ * rewrite them and an alias on those would forward `<alias>` verbatim and 404
+ * upstream. That is why the aliasable set below is DERIVED from these keys
+ * rather than restated: one list, no mirror to police.
  */
-export const ALIASABLE_API_SHAPES: ReadonlySet<ModelApiShape> = new Set<ModelApiShape>([
-  "anthropic-messages",
-  "openai-completions",
-  "openai-responses",
-  "openai-codex-responses",
-  "mistral-conversations",
-]);
+export const ALIAS_INFERENCE_PATHS = {
+  "anthropic-messages": "/v1/messages",
+  "openai-completions": "/chat/completions",
+  "openai-responses": "/responses",
+  "openai-codex-responses": "/codex/responses",
+  "mistral-conversations": "/v1/chat/completions",
+} as const satisfies Partial<Record<ModelApiShape, string>>;
+
+/**
+ * Widened view of the table for a lookup keyed by ANY shape. Plain assignment
+ * to the wider type (no cast): a shape with no entry reads `undefined`, which
+ * is what makes {@link isAliasInferenceCall} fail closed.
+ */
+const INFERENCE_PATH_BY_SHAPE: Readonly<Partial<Record<ModelApiShape, string>>> =
+  ALIAS_INFERENCE_PATHS;
+
+/**
+ * API shapes that carry the model id in the REQUEST BODY (top-level `model`) —
+ * the only shapes the swap can rewrite. Callers MUST reject `aliased` for any
+ * shape not in this set (see {@link isAliasableApiShape}).
+ *
+ * Derived from {@link ALIAS_INFERENCE_PATHS}: "the swap can rewrite it" and
+ * "we know the one endpoint it calls" are the same fact, and a hand-mirrored
+ * second list would let the two disagree silently.
+ */
+export const ALIASABLE_API_SHAPES: ReadonlySet<ModelApiShape> = new Set<ModelApiShape>(
+  // `satisfies Partial<Record<ModelApiShape, string>>` above already proves
+  // every key is a `ModelApiShape`; `Object.keys` just loses that in its
+  // `string[]` return type.
+  Object.keys(ALIAS_INFERENCE_PATHS) as ModelApiShape[],
+);
 
 /** True when an alias is technically supportable for this protocol shape. */
 export function isAliasableApiShape(shape: ModelApiShape): boolean {
   return ALIASABLE_API_SHAPES.has(shape);
+}
+
+/**
+ * True when `(method, path)` is exactly the inference call `shape` needs —
+ * the allowlist the sidecar narrows an ALIASED run's `/llm/*` surface down to
+ * (issue #1198, Threat B).
+ *
+ * Without this, `/llm/*` is a total passthrough: an adversarial agent inside
+ * the container can `GET <MODEL_BASE_URL>/v1/models` and read the vendor's own
+ * catalogue — vendor identity plus the real backing id — in a 2xx body that
+ * neither the error synthesis (non-2xx only) nor `swapResponseModelJson`
+ * (exact `model` / `message.model` / `response.model` fields only) touches.
+ * An alias's contract is that the backing stays hidden, and inference is the
+ * only thing the run legitimately needs, so everything else is refused.
+ *
+ * Fail-closed on both axes: an unknown/url-model shape has no entry, and the
+ * comparison is exact — no trailing-slash or case normalisation, because the
+ * SDK emits a fixed literal and a normaliser would be one more parser to get
+ * wrong at a security boundary. Method is upper-cased only because HTTP does
+ * not guarantee the casing the client sent.
+ */
+export function isAliasInferenceCall(shape: ModelApiShape, method: string, path: string): boolean {
+  const inferencePath = INFERENCE_PATH_BY_SHAPE[shape];
+  return inferencePath !== undefined && method.toUpperCase() === "POST" && path === inferencePath;
 }
 
 /**

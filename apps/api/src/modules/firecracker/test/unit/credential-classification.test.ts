@@ -101,7 +101,11 @@ const apiKeySpec = buildSpec({
   baseUrl: "https://api.openai.com",
   apiKey: "sk-real-key",
   placeholder: "PLACEHOLDER",
-  modelSwap: { alias: "public-alias", real: "real-model-id" },
+  modelSwap: {
+    alias: "public-alias",
+    real: "real-model-id",
+    apiShape: "openai-completions" as const,
+  },
 });
 
 function emittedKeys(spec: SidecarLaunchSpec): string[] {

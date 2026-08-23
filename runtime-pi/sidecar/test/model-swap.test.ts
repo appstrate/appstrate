@@ -16,9 +16,14 @@ import {
   createSseModelSwapStream,
   syntheticAliasErrorBody,
   isAliasableApiShape,
+  parseModelSwapEnv,
 } from "../model-swap.ts";
 
-const swap = { alias: "appstrate-medium", real: "deepseek-chat" };
+const swap = {
+  alias: "appstrate-medium",
+  real: "deepseek-chat",
+  apiShape: "openai-completions" as const,
+};
 
 async function pipeSse(input: string): Promise<string> {
   const stream = new ReadableStream<Uint8Array>({
@@ -79,6 +84,7 @@ describe("swapRequestModel (alias→real)", () => {
   it("restores adaptive Anthropic reasoning for a hidden backing model", () => {
     const adaptiveSwap = {
       ...swap,
+      apiShape: "anthropic-messages" as const,
       anthropicAdaptiveReasoning: { effort: "max" as const },
     };
     const out = swapRequestModel(
@@ -105,6 +111,7 @@ describe("swapRequestModel (alias→real)", () => {
       }),
       {
         ...swap,
+        apiShape: "anthropic-messages" as const,
         anthropicAdaptiveReasoning: { effort: "low" },
       },
     );
@@ -237,7 +244,11 @@ describe("createSseModelSwapStream (real→alias, streaming)", () => {
   });
 
   it("matches the model by EXACT value, not substring (real=gpt-4 ≠ gpt-4o)", async () => {
-    const narrow = { alias: "appstrate-small", real: "gpt-4" };
+    const narrow = {
+      alias: "appstrate-small",
+      real: "gpt-4",
+      apiShape: "openai-completions" as const,
+    };
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(new TextEncoder().encode(`data: {"model":"gpt-4o","choices":[]}\n\n`));
@@ -355,6 +366,92 @@ describe("isAliasableApiShape", () => {
       "bedrock-converse-stream",
     ] as const) {
       expect(isAliasableApiShape(s)).toBe(false);
+    }
+  });
+});
+
+/**
+ * `parseModelSwapEnv` — the process boundary the swap descriptor actually
+ * crosses (`PI_MODEL_SWAP_JSON`, read once in `server.ts` at boot). It used to
+ * be a blind `as ModelSwap` cast, so a platform predating `apiShape` produced a
+ * swap that failed closed at request time: correct, but one opaque 404 per
+ * inference attempt and no statement of the cause. The guard turns that into a
+ * single boot failure naming the field — and never naming its value, because
+ * these logs are operator-visible and the backing is what an alias hides.
+ */
+describe("parseModelSwapEnv", () => {
+  // `as const` only so `toEqual` can compare against the `ModelSwap` the parser
+  // returns; the parser itself receives these as raw JSON text.
+  const wellFormed = {
+    alias: "appstrate-medium",
+    real: "deepseek-chat",
+    apiShape: "openai-completions" as const,
+  };
+
+  it("accepts a well-formed descriptor", () => {
+    expect(parseModelSwapEnv(JSON.stringify(wellFormed))).toEqual(wellFormed);
+  });
+
+  it("keeps the optional adaptive-reasoning correction", () => {
+    const adaptive = {
+      alias: "appstrate-adaptive",
+      real: "claude-sonnet-4-6",
+      apiShape: "anthropic-messages" as const,
+      anthropicAdaptiveReasoning: { effort: "max" as const },
+    };
+    expect(parseModelSwapEnv(JSON.stringify(adaptive))).toEqual(adaptive);
+  });
+
+  it("rejects a descriptor with no apiShape (the pre-#1198 platform payload)", () => {
+    expect(() => parseModelSwapEnv(JSON.stringify({ alias: "a", real: "deepseek-chat" }))).toThrow(
+      /"apiShape"/,
+    );
+  });
+
+  it("rejects an unknown apiShape", () => {
+    expect(() =>
+      parseModelSwapEnv(JSON.stringify({ ...wellFormed, apiShape: "openai-chat" })),
+    ).toThrow(/"apiShape"/);
+  });
+
+  it("rejects a known but non-aliasable apiShape (url-model protocol)", () => {
+    // Every call would be refused anyway — say so at boot instead.
+    expect(() =>
+      parseModelSwapEnv(JSON.stringify({ ...wellFormed, apiShape: "google-generative-ai" })),
+    ).toThrow(/"apiShape"/);
+  });
+
+  it("rejects a missing or blank alias / real", () => {
+    expect(() =>
+      parseModelSwapEnv(JSON.stringify({ real: "deepseek-chat", apiShape: "openai-completions" })),
+    ).toThrow(/"alias"/);
+    expect(() => parseModelSwapEnv(JSON.stringify({ ...wellFormed, real: "   " }))).toThrow(
+      /"real"/,
+    );
+  });
+
+  it("reports malformed JSON instead of crashing with a raw SyntaxError", () => {
+    expect(() => parseModelSwapEnv("{not json")).toThrow(/not valid JSON/);
+    expect(() => parseModelSwapEnv("[]")).toThrow(/expected a JSON object/);
+    expect(() => parseModelSwapEnv("null")).toThrow(/expected a JSON object/);
+  });
+
+  it("never names the backing model in any message", () => {
+    const cases = [
+      JSON.stringify({ alias: "appstrate-medium", real: "deepseek-chat" }),
+      JSON.stringify({ ...wellFormed, apiShape: "google-generative-ai" }),
+      `{"real":"deepseek-chat",`,
+    ];
+    for (const raw of cases) {
+      let message = "";
+      try {
+        parseModelSwapEnv(raw);
+      } catch (err) {
+        message = err instanceof Error ? err.message : String(err);
+      }
+      expect(message).not.toBe("");
+      expect(message).not.toContain("deepseek");
+      expect(message).not.toContain("google");
     }
   });
 });

@@ -165,7 +165,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   // already rewritten alias→real by `request.rewriteModel` above. This mirrors
   // the in-container sidecar path; both share `@appstrate/core/model-swap`.
   const swap: ModelSwap | null = resolved.aliased
-    ? { alias: presetId, real: resolved.modelId }
+    ? { alias: presetId, real: resolved.modelId, apiShape: resolved.apiShape }
     : null;
 
   // Response-cache lookup. The cache is keyed on `(orgId, presetId,

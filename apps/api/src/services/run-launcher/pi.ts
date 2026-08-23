@@ -263,6 +263,10 @@ async function runPlatformContainerImpl(
       ? {
           alias: llmConfig.aliasId,
           real: llmConfig.modelId,
+          // Lets the sidecar restrict this run's `/llm/*` surface to the one
+          // inference endpoint this protocol calls; everything else (a vendor
+          // catalogue read, say) is refused before any upstream fetch.
+          apiShape: llmConfig.apiShape,
           ...(llmConfig.apiShape === "anthropic-messages" &&
           llmConfig.generation?.reasoning.adaptive === true &&
           requestedReasoningLevel !== "off" &&

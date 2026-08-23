@@ -25,6 +25,7 @@ import {
   swapResponseModelJson,
   createSseModelSwapStream,
   syntheticAliasErrorBody,
+  isAliasInferenceCall,
   LLM_PASSTHROUGH_RESPONSE_HEADERS,
 } from "./model-swap.ts";
 import { applyOauthBearerSwap } from "@appstrate/core/oauth-bearer-swap";
@@ -409,11 +410,19 @@ async function bufferLlmBodyBounded(c: Context, maxBytes: number): Promise<strin
  * `/llm` mount prefix, re-append the query string onto the configured base URL,
  * and surface the method. Shared by both `/llm` branches (api_key + oauth);
  * each keeps its own SSRF check (`isBlockedEgressUrl`) and credential handling.
+ *
+ * The stripped `path` is returned alongside the composed URL because the alias
+ * surface check needs exactly that suffix — the same one the in-container SDK
+ * appended to `MODEL_BASE_URL` — and recomputing the slice at the call site
+ * would be a second place for the two to disagree.
  */
-function deriveLlmTarget(c: Context, baseUrl: string): { targetUrl: string; method: string } {
+function deriveLlmTarget(
+  c: Context,
+  baseUrl: string,
+): { targetUrl: string; method: string; path: string } {
   const path = c.req.path.slice("/llm".length) || "/";
   const qs = new URL(c.req.url).search;
-  return { targetUrl: `${baseUrl}${path}${qs}`, method: c.req.method };
+  return { targetUrl: `${baseUrl}${path}${qs}`, method: c.req.method, path };
 }
 
 /**
@@ -601,7 +610,36 @@ export function createApp(deps: AppDeps): Hono {
     }
 
     const apiKeyConfig = config.llm; // discriminated narrowing
-    const { targetUrl, method } = deriveLlmTarget(c, apiKeyConfig.baseUrl);
+    const { targetUrl, method, path } = deriveLlmTarget(c, apiKeyConfig.baseUrl);
+
+    // ALIASED runs get a narrowed `/llm/*` surface, not a passthrough. The
+    // agent needs the inference endpoint to do its job; everything else the
+    // vendor happens to serve on the same base URL is opacity it was never
+    // promised — `GET /v1/models` alone returns the vendor's catalogue, in a
+    // 2xx body that the error synthesis (non-2xx only) and the `model`-field
+    // rewrite both leave untouched. Refused HERE, before the header filter
+    // swaps the placeholder for the real key and before any upstream fetch:
+    // the credential must not be spent on a request we are about to reject.
+    //
+    // Non-aliased runs keep the verbatim passthrough — their contract is
+    // reaching the provider, not hiding it.
+    if (apiKeyConfig.modelSwap) {
+      const swap = apiKeyConfig.modelSwap;
+      if (!isAliasInferenceCall(swap.apiShape, method, path)) {
+        logger.warn("llm alias: non-inference request refused", {
+          method,
+          path,
+          apiShape: swap.apiShape,
+        });
+        // Same neutral envelope as every other alias refusal — a distinct
+        // shape would itself be a signal to probe with. 404 reads as "no such
+        // endpoint here", which is the truth of the narrowed surface.
+        return new Response(syntheticAliasErrorBody(swap, 404), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+    }
 
     const filtered = filterHeaders(c.req.header());
     const forwardedHeaders: Record<string, string> = {};

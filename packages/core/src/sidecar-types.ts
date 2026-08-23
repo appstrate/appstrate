@@ -565,6 +565,20 @@ export interface ModelSwap {
   /** Real upstream model id forwarded to the provider. */
   real: string;
   /**
+   * Protocol family of the BACKING model. Required, not optional: it is what
+   * lets the sidecar narrow an aliased run's `/llm/*` surface to the one
+   * inference endpoint this protocol calls (`isAliasInferenceCall` in
+   * `@appstrate/core/model-swap`) and refuse everything else — a total
+   * passthrough hands an adversarial agent the vendor's own catalogue over
+   * `GET /v1/models`. An optional field would fail OPEN on the construction
+   * site that forgot it, which is the opposite of what an alias promises.
+   *
+   * This descriptor is private to the platform↔sidecar channel and never
+   * reaches the agent container, so naming the backing protocol here leaks
+   * nothing the container does not already read from `MODEL_API`.
+   */
+  apiShape: ModelApiShape;
+  /**
    * Request-scoped Anthropic transport correction for an adaptive backing.
    * Pi cannot infer adaptive support from a hidden alias id, so the sidecar
    * restores the catalogued request shape without exposing this fact to the
