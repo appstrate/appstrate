@@ -30,6 +30,7 @@ import { useCredentialColumns, useModelColumns } from "../../pages/org-settings/
 import { useOAuthClientColumns } from "../../modules/oidc/components/oauth-client-columns.tsx";
 import { useCliSessionColumns } from "../../pages/org-settings/cli-session-columns.tsx";
 import { useEndUserColumns } from "../../pages/end-user-columns.tsx";
+import { useWebhookColumns } from "../../modules/webhooks/components/webhook-columns.tsx";
 import { render } from "./run-fixture.tsx";
 
 /**
@@ -170,6 +171,7 @@ const SETS = {
         onDelete: () => {},
       }),
     ),
+  webhooks: () => columnsFrom(() => useWebhookColumns()),
 };
 
 describe.each(Object.entries(SETS))("the %s column set", (_name, load) => {

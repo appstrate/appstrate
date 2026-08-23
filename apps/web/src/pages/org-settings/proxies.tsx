@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { FlaskConical, Globe, Plus, Trash2 } from "lucide-react";
+import { CheckCircle2, FlaskConical, Globe, Plus, Trash2 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
@@ -27,8 +27,6 @@ import { ConfirmModal } from "../../components/confirm-modal";
 import { ErrorState, EmptyState } from "../../components/page-states";
 import { TestResultSpan } from "../../components/test-result-span";
 import { TableRowActions } from "../../components/table-row-actions";
-import { SourceBadge } from "../../components/source-badge";
-import { DefaultCell } from "../../components/default-cell";
 
 /**
  * The proxy column set. A proxy has no page of its own, so the row is static
@@ -57,76 +55,108 @@ export function useProxyColumns({
   return [
     {
       id: "proxy",
-      header: t("proxies.col.proxy"),
-      width: "minmax(160px,1.6fr)",
+      header: t("proxies.col.name"),
+      width: "minmax(80px,1.3fr)",
       cell: (p) => (
         <div className="min-w-0">
-          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-            <span className="truncate text-sm font-medium">{p.label}</span>
-            {/* The badges belong with the name, like the models table: they are
-                attributes of one proxy, not a dimension read down the table,
-                and a column of their own does not fit the settings modal. */}
-            <SourceBadge source={p.source} />
-            {p.source !== "built-in" && !p.enabled && (
-              <Badge variant="secondary" className="opacity-60">
-                {t("proxies.disabled")}
-              </Badge>
-            )}
-          </div>
-          <div className="text-muted-foreground truncate font-mono text-[0.65rem]">
-            {p.urlPrefix}
-          </div>
-        </div>
-      ),
-    },
-    {
-      id: "default",
-      header: t("proxies.col.default"),
-      width: "120px",
-      tier: 2,
-      cell: (p) => (
-        <DefaultCell
-          isDefault={p.is_default}
-          defaultLabel={t("proxies.default")}
-          setLabel={t("proxies.setDefault")}
-          onSetDefault={() => onSetDefault(p)}
-          disabled={settingDefaultId !== null}
-          isPending={settingDefaultId === p.id}
-          testId={`set-default-proxy-${p.id}`}
-        />
-      ),
-    },
-    {
-      id: "actions",
-      header: "",
-      // See `model-columns.tsx`: the menu makes 104px enough even with a
-      // transient, truncating test result.
-      width: "104px",
-      align: "end",
-      cell: (p) => {
-        const isTesting = testingIds.has(p.id);
-        const isCustom = p.source !== "built-in";
-        return (
-          <div className="relative z-10 flex min-w-0 items-center justify-end gap-1">
-            {testResults[p.id] && (
+          <span className="block truncate text-sm font-medium">{p.label}</span>
+          {testResults[p.id] && (
+            <div className="@xl/table:hidden">
               <TestResultSpan
                 result={testResults[p.id]!}
                 successKey="proxies.testSuccess"
                 failedKey="proxies.testFailed"
               />
-            )}
+            </div>
+          )}
+        </div>
+      ),
+    },
+    {
+      id: "url",
+      header: t("proxies.col.url"),
+      width: "minmax(72px,1.5fr)",
+      tier: 2,
+      cell: (p) => (
+        <span className="text-muted-foreground block truncate font-mono text-[0.65rem]">
+          {p.urlPrefix}
+        </span>
+      ),
+    },
+    {
+      id: "type",
+      header: t("proxies.col.type"),
+      width: "72px",
+      tier: 2,
+      cell: (p) => (
+        <span className="text-muted-foreground block truncate text-xs">
+          {p.source === "built-in" ? t("source.builtIn") : t("source.custom")}
+        </span>
+      ),
+    },
+    {
+      id: "status",
+      header: t("proxies.col.status"),
+      width: "minmax(56px,0.8fr)",
+      tier: 2,
+      cell: (p) =>
+        testResults[p.id] ? (
+          <TestResultSpan
+            result={testResults[p.id]!}
+            successKey="proxies.testSuccess"
+            failedKey="proxies.testFailed"
+          />
+        ) : (
+          <Badge variant={p.enabled ? "success" : "secondary"}>
+            {p.enabled ? t("proxies.active") : t("proxies.disabled")}
+          </Badge>
+        ),
+    },
+    {
+      id: "default",
+      header: t("proxies.col.default"),
+      width: "96px",
+      tier: 2,
+      cell: (p) =>
+        p.is_default ? (
+          <Badge variant="success">{t("proxies.default")}</Badge>
+        ) : (
+          <span className="text-muted-foreground text-xs">—</span>
+        ),
+    },
+    {
+      id: "actions",
+      header: "",
+      width: "80px",
+      align: "end",
+      cell: (p) => {
+        const isTesting = testingIds.has(p.id);
+        const isSettingDefault = settingDefaultId === p.id;
+        const isCustom = p.source !== "built-in";
+        return (
+          <div className="relative z-10 flex min-w-0 items-center justify-end gap-1">
             <TableRowActions
               primary={
                 isCustom ? { label: t("proxies.edit"), onSelect: () => onEdit(p) } : undefined
               }
               menuLabel={t("proxies.moreActions", { name: p.label })}
-              isPending={isTesting}
+              isPending={isTesting || isSettingDefault}
               pendingLabel={t("common:loading")}
             >
               <DropdownMenuItem onSelect={() => onTest(p.id)} disabled={isTesting}>
                 <FlaskConical />
                 {t("proxies.test")}
               </DropdownMenuItem>
+              {!p.is_default && (
+                <DropdownMenuItem
+                  onSelect={() => onSetDefault(p)}
+                  disabled={settingDefaultId !== null}
+                  data-testid={`set-default-proxy-${p.id}`}
+                >
+                  <CheckCircle2 />
+                  {t("proxies.setDefault")}
+                </DropdownMenuItem>
+              )}
               {isCustom && (
                 <>
                   <DropdownMenuSeparator />

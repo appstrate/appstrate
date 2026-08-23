@@ -66,6 +66,8 @@ interface InlineConnectButtonProps {
    */
   intent: "connect" | "reconnect" | "upgrade";
   size?: "sm" | "default";
+  /** Compact row-action trigger; the label remains available to assistive tech. */
+  iconOnly?: boolean;
   /** Override button label entirely. */
   label?: string;
   /**
@@ -103,6 +105,7 @@ export function InlineConnectButton({
   scopes,
   intent,
   size = "sm",
+  iconOnly = false,
   label,
   forceAccountSelect,
   connectionId,
@@ -184,14 +187,17 @@ export function InlineConnectButton({
         </DropdownMenu>
       ) : (
         <Button
-          size={size}
+          size={iconOnly ? "icon" : size}
+          variant={iconOnly ? "ghost" : "default"}
+          className={iconOnly ? "size-7" : undefined}
           onClick={() => triggerConnect(defaultAuthKey)}
           disabled={disabled}
-          title={tooltip}
+          title={tooltip ?? (iconOnly ? text : undefined)}
+          aria-label={iconOnly ? text : undefined}
           data-testid={`inline-connect-${packageId}-${defaultAuthKey}`}
         >
-          <Icon className="mr-1 size-3" />
-          {text}
+          <Icon className={iconOnly ? "size-3.5" : "mr-1 size-3"} />
+          {!iconOnly && text}
         </Button>
       )}
     </>

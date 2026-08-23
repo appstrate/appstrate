@@ -12,7 +12,7 @@
  * The move to a table settled something the card had left crooked: the role was
  * drawn TWICE, as a badge in the header and as a `Select` in a footer strip.
  * One column now, and it holds the CONTROL when the actor may change the role,
- * falling back to the badge when they may not — "the control IS the setting",
+ * falling back to plain text when they may not — "the control IS the setting",
  * which a value with a picker beside it is not.
  *
  * Out of the page for the same reason as `model-columns.tsx`: a column set is
@@ -21,8 +21,7 @@
 
 import { useTranslation } from "react-i18next";
 import { Trash2 } from "lucide-react";
-import { Badge } from "@appstrate/ui/components/badge";
-import { Button } from "@appstrate/ui/components/button";
+import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import {
   Select,
   SelectContent,
@@ -35,6 +34,7 @@ import type { DataColumn } from "../../components/data-table";
 import { roleI18nKey } from "../../hooks/use-permissions";
 import { formatDateField } from "../../lib/markdown";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
+import { TableRowActions } from "../../components/table-row-actions";
 
 type OrgMember = components["schemas"]["OrgMember"];
 
@@ -60,37 +60,34 @@ export function useMemberColumns({
     {
       id: "member",
       header: t("orgSettings.memberColumn"),
-      width: "minmax(160px,1.6fr)",
+      width: "minmax(100px,1.4fr)",
       cell: (member) => (
-        <div className="min-w-0">
-          <div className="truncate text-sm font-medium">
-            {member.displayName || member.email || member.userId}
-          </div>
-          {member.email && (
-            <div className="text-muted-foreground truncate text-xs">{member.email}</div>
-          )}
-        </div>
+        <span className="block truncate text-sm font-medium">
+          {member.displayName || member.email || member.userId}
+        </span>
+      ),
+    },
+    {
+      id: "email",
+      header: t("orgSettings.emailColumn"),
+      width: "minmax(100px,1.3fr)",
+      tier: 2,
+      cell: (member) => (
+        <span className="text-muted-foreground block truncate text-xs">{member.email ?? "—"}</span>
       ),
     },
     {
       id: "role",
       header: t("orgSettings.roleColumn"),
-      width: "132px",
+      width: "100px",
+      tier: 2,
       cell: (member) => {
         const roles = assignableRoles(member);
         if (roles.length === 0) {
           return (
-            <Badge
-              variant={
-                member.role === "owner"
-                  ? "running"
-                  : member.role === "admin"
-                    ? "success"
-                    : "pending"
-              }
-            >
+            <span className="text-muted-foreground block truncate text-xs">
               {t(roleI18nKey(member.role))}
-            </Badge>
+            </span>
           );
         }
         return (
@@ -116,7 +113,7 @@ export function useMemberColumns({
     {
       id: "joined",
       header: t("orgSettings.joinedColumn"),
-      width: "132px",
+      width: "92px",
       align: "end",
       // Tier 2, NOT 3. This table lives in the settings dialog, which tops out
       // around 800px, so it never crosses the 56rem threshold at all: a column
@@ -134,21 +131,24 @@ export function useMemberColumns({
       header: "",
       width: "48px",
       align: "end",
-      // Removing a member is desk work; who they are and what they may do is
-      // what a narrow table owes the reader.
-      tier: 2,
       cell: (member) =>
         canRemove(member) ? (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 w-7 p-0"
-            onClick={() => onRemove(member)}
-            disabled={isRemoving}
-            aria-label={t("btn.remove")}
+          <TableRowActions
+            menuLabel={t("orgSettings.moreMemberActions", {
+              name: member.displayName || member.email || member.userId,
+            })}
+            isPending={isRemoving}
+            pendingLabel={t("common:loading")}
           >
-            <Trash2 size={14} className="text-destructive" />
-          </Button>
+            <DropdownMenuItem
+              onSelect={() => onRemove(member)}
+              disabled={isRemoving}
+              className="text-destructive focus:text-destructive"
+            >
+              <Trash2 />
+              {t("btn.remove")}
+            </DropdownMenuItem>
+          </TableRowActions>
         ) : null,
     },
   ];

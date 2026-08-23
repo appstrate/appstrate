@@ -33,24 +33,39 @@ export function useCliSessionColumns({
     {
       id: "device",
       header: t("orgCliSessions.deviceColumn"),
-      width: "minmax(160px,1.5fr)",
+      width: "minmax(80px,1.3fr)",
       cell: (session) => (
-        <div className="flex min-w-0 items-start gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           <CliSessionIcon userAgent={session.userAgent} />
-          <div className="min-w-0">
-            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-              <span className="truncate text-sm font-medium">{deriveLabel(session, t)}</span>
-              {session.current && <Badge variant="running">{t("devices.thisDevice")}</Badge>}
-            </div>
-            <div className="text-muted-foreground truncate text-xs">{memberLabel(session)}</div>
-          </div>
+          <span className="block truncate text-sm font-medium">{deriveLabel(session, t)}</span>
         </div>
       ),
     },
     {
+      id: "member",
+      header: t("orgCliSessions.memberColumn"),
+      width: "minmax(60px,1fr)",
+      tier: 2,
+      cell: (session) => (
+        <span className="text-muted-foreground block truncate text-xs">{memberLabel(session)}</span>
+      ),
+    },
+    {
+      id: "status",
+      header: t("orgCliSessions.statusColumn"),
+      width: "minmax(60px,0.7fr)",
+      tier: 2,
+      cell: (session) =>
+        session.current ? (
+          <Badge variant="running">{t("orgCliSessions.current")}</Badge>
+        ) : (
+          <span className="text-muted-foreground text-xs">—</span>
+        ),
+    },
+    {
       id: "userAgent",
       header: t("devices.userAgentLabel"),
-      width: "minmax(140px,1fr)",
+      width: "minmax(96px,1fr)",
       tier: 2,
       cell: (session) => (
         <span
@@ -75,7 +90,7 @@ export function useCliSessionColumns({
     {
       id: "created",
       header: t("devices.createdAtLabel"),
-      width: "116px",
+      width: "100px",
       align: "end",
       tier: 3,
       cell: (session) => (
@@ -87,7 +102,7 @@ export function useCliSessionColumns({
     {
       id: "lastUsed",
       header: t("devices.lastUsedLabel"),
-      width: "116px",
+      width: "120px",
       align: "end",
       tier: 2,
       cell: (session) => (

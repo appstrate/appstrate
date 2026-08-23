@@ -10,12 +10,9 @@
  * cannot be imported by the runner (it reaches the package editor and the
  * connect popup through modules bun does not resolve), so the sets live here.
  *
- * Both are the same FAMILY as the models, credentials and proxies tables: a
- * system+DB list with `SourceBadge` for provenance and `DefaultCell` for the
- * one row that is the default. So the provenance badge sits WITH the row's
- * identity here too, rather than in a column of its own — four sibling tables
- * reading the same way is worth more than a column that only repeats what a
- * badge already says.
+ * Both are the same FAMILY as the models, credentials and proxies tables. A
+ * stable provenance value gets its own text column; badges are reserved for
+ * row states that benefit from visual emphasis.
  *
  * A cell that needs its own state or its own mutation is a COMPONENT, not a
  * closure: `cell` is called during the table's render, so a hook inside one
@@ -30,7 +27,6 @@ import { RotateCcw, Trash2 } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import type { DataColumn } from "../components/data-table";
 import { DefaultCell } from "../components/default-cell";
-import { SourceBadge } from "../components/source-badge";
 import { TableRowActions } from "../components/table-row-actions";
 import { isConnectionOwnedBy } from "../components/integration-connect/connection-label";
 import type {
@@ -40,7 +36,7 @@ import type {
 } from "../hooks/use-integrations";
 import {
   AccountCell,
-  DisconnectCell,
+  ConnectionActionsCell,
   SharedCell,
   StatusCell,
 } from "./integration-connection-cells";
@@ -53,7 +49,7 @@ import {
  * The OAuth client column set: which client, whether it is the default, and
  * what may be done to it.
  *
- * Three columns. `default` waits for a 36rem table because on a phone what
+ * Four columns. Type and `default` wait for a 36rem table because on a phone what
  * matters is which clients exist and how to remove one; which of them connect
  * picks is a setting you come back for.
  */
@@ -82,12 +78,24 @@ export function useIntegrationClientColumns({
       header: t("integration.clients.col.clientId"),
       width: "minmax(200px,2fr)",
       cell: (client) => (
-        <div className="flex min-w-0 items-center gap-2">
-          <SourceBadge source={client.source} autoProvisioned={client.auto_provisioned} />
-          <span className="truncate font-mono text-xs" title={client.client_id}>
-            {client.client_id}
-          </span>
-        </div>
+        <span className="block truncate font-mono text-xs" title={client.client_id}>
+          {client.client_id}
+        </span>
+      ),
+    },
+    {
+      id: "type",
+      header: t("integration.clients.col.type"),
+      width: "72px",
+      tier: 2,
+      cell: (client) => (
+        <span className="text-muted-foreground block truncate text-xs">
+          {client.auto_provisioned
+            ? t("source.autoProvisioned")
+            : client.source === "built-in"
+              ? t("source.builtIn")
+              : t("source.custom")}
+        </span>
       ),
     },
     {
@@ -170,10 +178,9 @@ export function useIntegrationClientColumns({
  * and delete, share and reconnect are all owner-only server-side. A control
  * drawn for a row the caller does not own is a button that answers 403.
  *
- * Tier one is the account and its state — a connection you cannot name and
- * whose health you cannot read is not worth a row. The share toggle waits for
- * 36rem and the granted scopes for 56rem: scopes are the longest thing here
- * and the least often read.
+ * Tier one is the account and its action end. Status, owner and the share
+ * toggle wait for 36rem; granted scopes and expiry wait for 56rem because they
+ * are the longest and least often read facts.
  */
 export function useConnectionColumns({
   packageId,
@@ -208,16 +215,19 @@ export function useConnectionColumns({
     {
       id: "status",
       header: t("integration.connection.col.status"),
-      width: "minmax(112px,1fr)",
+      width: "minmax(88px,1fr)",
+      tier: 2,
+      cell: (c) => <StatusCell connection={c} />,
+    },
+    {
+      id: "owner",
+      header: t("integration.connection.col.owner"),
+      width: "minmax(80px,1fr)",
+      tier: 2,
       cell: (c) => (
-        <StatusCell
-          connection={c}
-          packageId={packageId}
-          authKey={authKey}
-          authType={authType}
-          canRenew={canRenew}
-          isOwn={owns(c)}
-        />
+        <span className="text-muted-foreground block truncate text-xs">
+          {c.owner_name ?? t("integration.connection.ownerUnknown")}
+        </span>
       ),
     },
     {
@@ -238,18 +248,38 @@ export function useConnectionColumns({
         ),
     },
     {
+      id: "expires",
+      header: t("integration.connection.col.expires"),
+      width: "100px",
+      tier: 3,
+      cell: (c) => (
+        <span className="text-muted-foreground block truncate text-xs">
+          {c.expiresAt ? new Date(c.expiresAt).toLocaleDateString() : "—"}
+        </span>
+      ),
+    },
+    {
       id: "shared",
       header: t("integration.connection.col.shared"),
-      width: "88px",
+      width: "64px",
       tier: 2,
       cell: (c) => <SharedCell connection={c} packageId={packageId} isOwn={owns(c)} />,
     },
     {
       id: "actions",
       header: "",
-      width: "56px",
+      width: "80px",
       align: "end",
-      cell: (c) => <DisconnectCell connection={c} isOwn={owns(c)} />,
+      cell: (c) => (
+        <ConnectionActionsCell
+          connection={c}
+          packageId={packageId}
+          authKey={authKey}
+          authType={authType}
+          canRenew={canRenew}
+          isOwn={owns(c)}
+        />
+      ),
     },
   ];
 }

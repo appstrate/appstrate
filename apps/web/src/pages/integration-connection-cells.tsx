@@ -18,8 +18,8 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Trash2 } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { ConfirmModal } from "../components/confirm-modal";
 import { InlineEditableLabel } from "../components/inline-editable-label";
 import { ConnectionStatusBadge } from "../components/integration-connect/connection-status-badge";
@@ -31,6 +31,7 @@ import {
   type IntegrationConnection,
 } from "../hooks/use-integrations";
 import { useDisconnectIntegrationConnection } from "../hooks/use-me-connections";
+import { TableRowActions } from "../components/table-row-actions";
 
 /**
  * The account, renamed in place.
@@ -78,76 +79,23 @@ export function AccountCell({
           });
         }}
       />
-      {!isOwn && (
-        <div
-          className="text-muted-foreground truncate text-[0.65rem]"
-          data-testid={`connection-owner-${connection.id}`}
-        >
-          {connection.owner_name
-            ? t("integration.connection.sharedByOwner", { owner: connection.owner_name })
-            : t("integration.connection.sharedByUnknown")}
-        </div>
-      )}
     </div>
   );
 }
 
 /** Connected, or needing a reconnection its owner alone can perform. */
-export function StatusCell({
-  connection,
-  packageId,
-  authKey,
-  authType,
-  canRenew,
-  isOwn,
-}: {
-  connection: IntegrationConnection;
-  packageId: string;
-  authKey: string;
-  authType: IntegrationAuthType;
-  canRenew: boolean;
-  isOwn: boolean;
-}) {
+export function StatusCell({ connection }: { connection: IntegrationConnection }) {
   const { t } = useTranslation("settings");
   return (
-    <div className="flex min-w-0 flex-col gap-1">
-      <div className="flex flex-wrap items-center gap-2">
-        {connection.needs_reconnection ? (
-          <>
-            <ConnectionStatusBadge tone="needsReconnection">
-              {t("integration.auth.needsReconnection")}
-            </ConnectionStatusBadge>
-            {/* Owner-only: the reconnect writes through `persistCredentialBundle`
-                kind `update-owned`, whose WHERE carries the actor identity — a
-                non-owner reconnect 404s. Others see the state without a dead
-                CTA. */}
-            {isOwn && canRenew && authType === "oauth2" && (
-              <InlineConnectButton
-                packageId={packageId}
-                authKey={authKey}
-                intent="reconnect"
-                // Threading the existing row id is what makes the OAuth callback
-                // UPDATE-in-place rather than INSERT a duplicate
-                // (integration-connections.ts:721 "explicit connectionId =
-                // update; no id = insert").
-                connectionId={connection.id}
-                lockToAuthKey
-                size="sm"
-              />
-            )}
-          </>
-        ) : (
-          <ConnectionStatusBadge tone="connected">
-            {t("integration.connection.statusConnected")}
-          </ConnectionStatusBadge>
-        )}
-      </div>
-      {connection.expiresAt && (
-        <p className="text-muted-foreground text-[0.65rem]">
-          {t("integration.auth.expiresAt", {
-            date: new Date(connection.expiresAt).toLocaleDateString(),
-          })}
-        </p>
+    <div className="flex min-w-0 items-center gap-2">
+      {connection.needs_reconnection ? (
+        <ConnectionStatusBadge tone="needsReconnection">
+          {t("integration.auth.needsReconnection")}
+        </ConnectionStatusBadge>
+      ) : (
+        <ConnectionStatusBadge tone="connected">
+          {t("integration.connection.statusConnected")}
+        </ConnectionStatusBadge>
       )}
     </div>
   );
@@ -190,12 +138,20 @@ export function SharedCell({
   );
 }
 
-/** Disconnect — owner-only: the endpoint is `/api/me/connections`. */
-export function DisconnectCell({
+/** Reconnect direct when needed; destructive disconnect stays in the menu. */
+export function ConnectionActionsCell({
   connection,
+  packageId,
+  authKey,
+  authType,
+  canRenew,
   isOwn,
 }: {
   connection: IntegrationConnection;
+  packageId: string;
+  authKey: string;
+  authType: IntegrationAuthType;
+  canRenew: boolean;
   isOwn: boolean;
 }) {
   const { t } = useTranslation(["settings", "common"]);
@@ -204,17 +160,35 @@ export function DisconnectCell({
   if (!isOwn) return <span className="text-muted-foreground text-xs">—</span>;
   return (
     <>
-      <Button
-        size="icon"
-        variant="ghost"
-        className="size-7"
-        onClick={() => setConfirmDelete(true)}
-        disabled={disconnect.isPending}
-        title={t("integration.connection.delete")}
-        data-testid={`connection-delete-${connection.id}`}
-      >
-        <Trash2 className="text-destructive size-3.5" />
-      </Button>
+      <div className="relative z-10 flex items-center justify-end gap-1">
+        {connection.needs_reconnection && canRenew && authType === "oauth2" && (
+          <InlineConnectButton
+            packageId={packageId}
+            authKey={authKey}
+            intent="reconnect"
+            connectionId={connection.id}
+            lockToAuthKey
+            iconOnly
+          />
+        )}
+        <TableRowActions
+          menuLabel={t("integration.connection.moreActions", {
+            name: connectionDisplayLabel(connection),
+          })}
+          isPending={disconnect.isPending}
+          pendingLabel={t("common:loading")}
+        >
+          <DropdownMenuItem
+            onSelect={() => setConfirmDelete(true)}
+            disabled={disconnect.isPending}
+            className="text-destructive focus:text-destructive"
+            data-testid={`connection-delete-${connection.id}`}
+          >
+            <Trash2 />
+            {t("integration.connection.delete")}
+          </DropdownMenuItem>
+        </TableRowActions>
+      </div>
       <ConfirmModal
         open={confirmDelete}
         onClose={() => setConfirmDelete(false)}

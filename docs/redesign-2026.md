@@ -1409,8 +1409,8 @@ control stays the setting, a row with one deed gets no empty menu, and a record
 with no editable whole gets no invented pencil. Secondary and destructive
 deeds go in the menu, with the destructive group after a separator.
 
-The SSO collaborator clients are a `DataTable` now. Client identity carries
-its id and state badges; redirect URIs appear at tier 2; the last column keeps
+The SSO collaborator clients are a `DataTable` now. Client name, client id,
+type, state and redirect URIs are separate desktop facts; the last column keeps
 Edit direct and moves first-party status, enable/disable, secret rotation and
 delete into the menu. Edit and Create push `?oauth-client=<id|new>`, while
 closing replaces the URL, so Back closes a modal instead of reopening it.
@@ -1441,12 +1441,13 @@ A second pass put the pending label on the status element itself and widened the
 action track from 72px to its measured 80px pending footprint; source markup
 and the column-floor guard caught what the nominal screenshot could not show.
 
-**4. ~~CLI sessions become a table.~~ Done 23 August.** Device identity keeps
-its category icon, current-device badge and member together at tier 1; user
-agent and last activity appear at tier 2, while IP and the connection date are
-tier 3. The settings dialog never reaches tier 3, so its useful wide state is
-four columns rather than a squeezed six. The shared CLI icon now serves both
-this table and the personal-device card instead of duplicating category logic.
+**4. ~~CLI sessions become a table.~~ Done 23 August.** Device, member, session
+state, user agent, IP, connection date and last activity are separate desktop
+facts. Device plus Actions stay at tier 1; Member, Session, User-Agent and Last
+activity appear at tier 2, while IP and the connection date are tier 3. The
+settings dialog never reaches tier 3, so its useful wide state is six columns
+rather than a squeezed eight. The shared CLI icon now serves both this table
+and the personal-device card instead of duplicating category logic.
 
 CLI sessions have no editable whole, so the action end is `…` alone. Its one
 Revoke item is destructive, disabled for the current session, opens the
@@ -1495,19 +1496,21 @@ in the row, and successful deletions stay quiet because the row's disappearance
 is already the confirmation.
 
 The first Model cell no longer tries to be a miniature card. At desktop width,
-Model, Provider, Identifier, Status, Default and Actions are six separate
-columns. The phone keeps Model and Actions only; a transient test result moves
-under the model name there so the hidden desktop Status column never hides the
-feedback too.
+Model, Provider, Type, Status, Default and Actions are six separate columns.
+The technical identifier is deliberately absent from the list and remains in
+the detail/edit surface. The phone keeps Model and Actions only; a transient
+test result moves under the model name there so the hidden desktop Status
+column never hides the feedback too. Set default is a deed in the overflow
+menu, not an action disguised as the Default fact.
 
 Measured in the real settings dialog, Models and Proxies resolve to 804px at
 the stable desktop widths and 340px at a 390 window. Models shows all six
 columns at 804px and resolves to Model 224px plus Actions 80px on the phone;
-Proxies resolves to record 200px plus Actions 104px there. The integration
-table resolves to 1096px at 1440 and 348px at 390, with an 80px action track.
-All three full sixteen-width sweeps have zero overflow. The nominal 1440 and
-390 screens were also inspected, and all four scenarios across the three
-screens pass at both required widths, 24 captures with no missing load fixture.
+Proxies resolves to Name 224px plus Actions 80px there. The integration table
+resolves to 1096px at 1440 and 348px at 390, with an 80px action track. All
+three full sixteen-width sweeps have zero overflow. The nominal 1440 and 390
+screens were also inspected, and all four scenarios across the three screens
+pass at both required widths, 24 captures with no missing load fixture.
 
 Exercising the menus found what the screenshot pass could not: Model, Proxy and
 provider-credential Test each called an endpoint that the lab did not serve.
@@ -1595,7 +1598,71 @@ two saturated End-Users API cases reported 37 failures and 21 errors. The two
 End-Users cases passed 9/9 immediately when rerun alone; no touched web or API
 test remains failing.
 
-**7. Accessibility, which nothing here has ever checked.** The branch
+**7. ~~Give every comparable table fact its own column.~~ Done 23 August.**
+Stable facts are plain text in their own desktop columns. A badge is reserved
+for a state that benefits from visual scanning, and that state owns its own
+column. The phone keeps the essential identity and Actions only. A transient
+test result may repeat under the identity on the phone so feedback is never
+hidden with the desktop Status column.
+
+Models now show Model, Provider, Type, Status, Default and Actions. Their
+technical identifier left the list, and Set default moved into the overflow
+menu. Proxies show Name, URL, Type, Status, Default and Actions; every row uses
+the same Test and Set default menu grammar. Provider credentials show Provider,
+Account, Type, Status and Actions. SSO clients show Name, Client ID, Type,
+Status, Redirect URIs and Actions. Integration clients split Type out of the
+client-id cell. Integration connections split Account, Status, Owner, Scopes,
+Expires and Shared before Actions. CLI sessions use the field set recorded in
+block 4. End-users were audited and already met the rule.
+
+Three nearby tables had the same observable defect and were corrected without
+expanding the feature: Members split email from the member name; Workspaces
+split Default from the name; Webhooks split Agent and Payload. Member removal
+and connection deletion also moved from isolated destructive icons into the
+overflow menu. A connection that needs reconnection keeps that frequent deed
+direct, while the Status column remains a fact and never becomes another
+action column.
+
+The tier guard covers every changed column set. In the settings dialog, Models,
+Proxies, provider credentials, SSO clients and CLI sessions are 804px at the
+1440 window and 340px at 390. Models and Proxies both resolve to 224px identity
+plus 80px Actions on the phone; provider credentials resolve without overflow
+to Provider plus Actions. The integration connection table measures 945px at
+1280 and 348px at 390, where it resolves to Account 232px plus Actions 80px.
+The full measured sweeps have zero horizontal overflow.
+
+The first provider-credential split was mechanically complete but visually too
+dense: Authentication repeated Type and truncated stable values. Browser
+inspection reduced it to the mutually exclusive System, API key or OAuth Type
+and gave Status the reconnection/availability state. The first integration
+connection pass left Reconnect inside Status and a standalone trash icon at the
+action end; the 390 screenshot caught the overlap that the desktop DOM measure
+did not. Reconnect now lives at the action end, Delete lives in its menu, and
+the narrow row is stable. This is another reason both geometry and pixels stay
+mandatory.
+
+The fixed-point Spec/Standards pass caught two final inconsistencies. The
+Members role fallback was still a provenance-colored badge even though Role is
+a stable fact; it is plain text now when the row is not editable. Widening Last
+activity made the CLI screenshot legible but put the declared tier-two floors
+8px over their 576px budget. Reducing the two flexible identity floors by 4px
+each kept the full label, the real sweep at zero overflow and the tier guard at
+56/56.
+
+The block gate is green for `bun test apps/web` (584 pass) and `bun run check`
+(33/33 tasks, the same nine pre-existing warnings). The ten changed screens
+produce 20 nominal captures at 1440 and 390 with no missing fixture; the full
+30-screen `bun run lab:shots` pass is green too. CLI's final sixteen-width sweep
+has zero overflow after widening Last activity to its visible 120px footprint.
+
+Root `bun test` could not exercise its infrastructure groups in this
+environment: the preload immediately reported that the OrbStack Docker daemon
+was unavailable, database setup then failed with `ECONNREFUSED`, and the suite
+entered the known systemd-unit spinner. It was interrupted after the same
+infrastructure failure reproduced across the DB-backed groups; the touched web
+package remains green.
+
+**8. Accessibility, which nothing here has ever checked.** The branch
 re-declares ARIA roles on the table because this file demands it, and that is
 the whole of it: not one contrast ratio, keyboard path or touch target has ever
 been measured. Meanwhile the last days added dozens of controls — icon buttons

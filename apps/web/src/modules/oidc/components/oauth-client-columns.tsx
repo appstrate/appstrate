@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { ShieldCheck } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import type { DataColumn } from "../../../components/data-table";
 import type { OAuthClient } from "../hooks/use-oauth-clients";
@@ -18,31 +17,53 @@ export function useOAuthClientColumns({
     {
       id: "client",
       header: t("oauthClients.nameLabel"),
-      width: "minmax(160px,1.5fr)",
+      width: "minmax(72px,1.3fr)",
       cell: (client) => (
-        <div className="min-w-0">
-          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-            <span className="truncate text-sm font-medium">{client.name ?? client.clientId}</span>
-            {client.isFirstParty && (
-              <Badge variant="outline">
-                <ShieldCheck className="mr-1 h-3 w-3" />
-                {t("oauthClients.firstPartyBadge")}
-              </Badge>
-            )}
-            {client.disabled && (
-              <Badge variant="secondary">{t("oauthClients.disabledBadge")}</Badge>
-            )}
-          </div>
-          <div className="text-muted-foreground truncate font-mono text-xs" title={client.clientId}>
-            {client.clientId}
-          </div>
-        </div>
+        <span className="block truncate text-sm font-medium">{client.name ?? client.clientId}</span>
+      ),
+    },
+    {
+      id: "clientId",
+      header: t("oauthClients.clientIdColumn"),
+      width: "minmax(88px,1.3fr)",
+      tier: 2,
+      cell: (client) => (
+        <span
+          className="text-muted-foreground block truncate font-mono text-xs"
+          title={client.clientId}
+        >
+          {client.clientId}
+        </span>
+      ),
+    },
+    {
+      id: "type",
+      header: t("oauthClients.typeColumn"),
+      width: "60px",
+      tier: 2,
+      cell: (client) => (
+        <span className="text-muted-foreground block truncate text-xs">
+          {client.isFirstParty
+            ? t("oauthClients.firstPartyBadge")
+            : t("oauthClients.standardClient")}
+        </span>
+      ),
+    },
+    {
+      id: "status",
+      header: t("oauthClients.statusColumn"),
+      width: "56px",
+      tier: 2,
+      cell: (client) => (
+        <Badge variant={client.disabled ? "secondary" : "success"}>
+          {client.disabled ? t("oauthClients.disabledBadge") : t("oauthClients.activeBadge")}
+        </Badge>
       ),
     },
     {
       id: "redirectUris",
       header: t("oauthClients.redirectUris"),
-      width: "minmax(180px,1.5fr)",
+      width: "minmax(88px,1.4fr)",
       tier: 2,
       cell: (client) => {
         const label = client.redirectUris.join(", ");

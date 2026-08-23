@@ -37,12 +37,19 @@ export function useApplicationColumns({
       id: "workspace",
       header: t("applications.nameLabel"),
       width: "minmax(160px,1.6fr)",
-      cell: (app) => (
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-sm font-medium">{app.name}</span>
-          {app.isDefault && <Badge variant="running">{defaultLabel}</Badge>}
-        </div>
-      ),
+      cell: (app) => <span className="block truncate text-sm font-medium">{app.name}</span>,
+    },
+    {
+      id: "default",
+      header: t("applications.defaultColumn"),
+      width: "96px",
+      tier: 2,
+      cell: (app) =>
+        app.isDefault ? (
+          <Badge variant="running">{defaultLabel}</Badge>
+        ) : (
+          <span className="text-muted-foreground text-xs">—</span>
+        ),
     },
     {
       id: "created",

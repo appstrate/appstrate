@@ -26,7 +26,7 @@ export function useWebhookColumns(): DataColumn<Webhook>[] {
     {
       id: "endpoint",
       header: t("settings:webhooks.urlColumn"),
-      width: "minmax(160px,2fr)",
+      width: "minmax(100px,2fr)",
       cell: (wh) => (
         <span className="truncate font-mono text-xs" title={wh.url}>
           {wh.url}
@@ -36,7 +36,7 @@ export function useWebhookColumns(): DataColumn<Webhook>[] {
     {
       id: "state",
       header: t("settings:webhooks.stateColumn"),
-      width: "104px",
+      width: "72px",
       cell: (wh) => (
         <Badge variant={wh.enabled ? "success" : "secondary"}>
           {wh.enabled ? t("settings:webhooks.active") : t("settings:webhooks.inactive")}
@@ -46,7 +46,7 @@ export function useWebhookColumns(): DataColumn<Webhook>[] {
     {
       id: "events",
       header: t("settings:webhooks.eventsColumn"),
-      width: "minmax(140px,1.4fr)",
+      width: "minmax(100px,1.4fr)",
       // Tier 2, not 3: this list is a full page, but it is also reachable in
       // the settings dialog, which never crosses the 56rem threshold.
       tier: 2,
@@ -60,14 +60,23 @@ export function useWebhookColumns(): DataColumn<Webhook>[] {
       ),
     },
     {
-      id: "scope",
-      header: t("settings:webhooks.scopeColumn"),
-      width: "minmax(120px,1fr)",
+      id: "agent",
+      header: t("settings:webhooks.agentColumn"),
+      width: "minmax(80px,1fr)",
       tier: 2,
       cell: (wh) => (
-        <span className="text-muted-foreground truncate text-xs">
+        <span className="text-muted-foreground block truncate text-xs">
           {wh.packageId || t("settings:webhooks.allAgents")}
-          {" · "}
+        </span>
+      ),
+    },
+    {
+      id: "payload",
+      header: t("settings:webhooks.payloadColumn"),
+      width: "72px",
+      tier: 2,
+      cell: (wh) => (
+        <span className="text-muted-foreground block truncate text-xs">
           {wh.payloadMode === "full"
             ? t("settings:webhooks.payloadModeFull")
             : t("settings:webhooks.payloadModeSummary")}
