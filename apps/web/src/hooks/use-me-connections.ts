@@ -107,7 +107,6 @@ export function useUpdateMeIntegrationConnection() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["get", "/api/me/connections"] });
       void invalidateIntegrationQueries(qc);
-      toast.success(i18n.t("settings:integration.connection.updated"));
     },
     onError: onMutationError,
   });

@@ -84,6 +84,21 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     }),
   },
   {
+    method: "POST",
+    pattern: /^\/api\/models\/[^/]+\/test$/,
+    handler: () => ({ status: 200, body: f.connectionTest, delayMs: 800 }),
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/model-provider-credentials\/[^/]+\/test$/,
+    handler: () => ({ status: 200, body: f.connectionTest, delayMs: 800 }),
+  },
+  {
+    method: "POST",
+    pattern: /^\/api\/proxies\/[^/]+\/test$/,
+    handler: () => ({ status: 200, body: f.connectionTest, delayMs: 800 }),
+  },
+  {
     // The catalogue the integrations page holds whole and filters client-side.
     method: "GET",
     pattern: /^\/api\/integrations$/,

@@ -384,8 +384,10 @@ function ClientsTable({
   const canRegister = !autoProvisioned || (showManual && !hasAutoClient);
   const columns = useIntegrationClientColumns({
     canChooseDefault,
-    isSettingDefault: setDefault.isPending,
-    isDeleting: del.isPending,
+    settingDefaultClientRef: setDefault.isPending
+      ? (setDefault.variables?.body.client_ref ?? null)
+      : null,
+    deletingClientRef: del.isPending ? (del.variables?.params.path.clientId ?? null) : null,
     onSetDefault: (client) =>
       setDefault.mutate({
         params: { path: { packageId, authKey } },

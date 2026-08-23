@@ -3,9 +3,11 @@
 import { useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Globe, Pencil, Plus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import { FlaskConical, Globe, Plus, Trash2 } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
+import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import { DataTable, type DataColumn } from "../../components/data-table";
 import { TOOLBAR_ACTION } from "../../lib/toolbar-button";
 import { usePermissions } from "../../hooks/use-permissions";
@@ -23,8 +25,8 @@ import { useConnectionTest, type TestResult } from "../../hooks/use-connection-t
 import { ProxyFormModal } from "../../components/proxy-form-modal";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { ErrorState, EmptyState } from "../../components/page-states";
-import { Spinner } from "../../components/spinner";
 import { TestResultSpan } from "../../components/test-result-span";
+import { TableRowActions } from "../../components/table-row-actions";
 import { SourceBadge } from "../../components/source-badge";
 import { DefaultCell } from "../../components/default-cell";
 
@@ -34,15 +36,17 @@ import { DefaultCell } from "../../components/default-cell";
  * column the reader cannot be told about is a column they cannot hide.
  */
 export function useProxyColumns({
-  testingId,
+  testingIds,
   testResults,
+  settingDefaultId,
   onTest,
   onEdit,
   onDelete,
   onSetDefault,
 }: {
-  testingId: string | null;
+  testingIds: ReadonlySet<string>;
   testResults: Record<string, TestResult | null>;
+  settingDefaultId: string | null;
   onTest: (id: string) => void;
   onEdit: (p: OrgProxyInfo) => void;
   onDelete: (p: OrgProxyInfo) => void;
@@ -86,6 +90,8 @@ export function useProxyColumns({
           defaultLabel={t("proxies.default")}
           setLabel={t("proxies.setDefault")}
           onSetDefault={() => onSetDefault(p)}
+          disabled={settingDefaultId !== null}
+          isPending={settingDefaultId === p.id}
           testId={`set-default-proxy-${p.id}`}
         />
       ),
@@ -93,52 +99,50 @@ export function useProxyColumns({
     {
       id: "actions",
       header: "",
-      // See `model-columns.tsx`: 132 is what tier one can spare in a 340px
-      // dialog once the proxy's name has what it needs.
-      width: "132px",
+      // See `model-columns.tsx`: the menu makes 104px enough even with a
+      // transient, truncating test result.
+      width: "104px",
       align: "end",
-      cell: (p) => (
-        <div className="relative z-10 flex items-center justify-end gap-1">
-          {testResults[p.id] && (
-            <TestResultSpan
-              result={testResults[p.id]!}
-              successKey="proxies.testSuccess"
-              failedKey="proxies.testFailed"
-            />
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 text-xs"
-            onClick={() => onTest(p.id)}
-            disabled={testingId === p.id}
-          >
-            {testingId === p.id ? <Spinner /> : t("proxies.test")}
-          </Button>
-          {p.source !== "built-in" && (
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0"
-                onClick={() => onEdit(p)}
-                aria-label={t("proxies.edit")}
-              >
-                <Pencil size={14} />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0"
-                onClick={() => onDelete(p)}
-                aria-label={t("proxies.delete")}
-              >
-                <Trash2 size={14} className="text-destructive" />
-              </Button>
-            </>
-          )}
-        </div>
-      ),
+      cell: (p) => {
+        const isTesting = testingIds.has(p.id);
+        const isCustom = p.source !== "built-in";
+        return (
+          <div className="relative z-10 flex min-w-0 items-center justify-end gap-1">
+            {testResults[p.id] && (
+              <TestResultSpan
+                result={testResults[p.id]!}
+                successKey="proxies.testSuccess"
+                failedKey="proxies.testFailed"
+              />
+            )}
+            <TableRowActions
+              primary={
+                isCustom ? { label: t("proxies.edit"), onSelect: () => onEdit(p) } : undefined
+              }
+              menuLabel={t("proxies.moreActions", { name: p.label })}
+              isPending={isTesting}
+              pendingLabel={t("common:loading")}
+            >
+              <DropdownMenuItem onSelect={() => onTest(p.id)} disabled={isTesting}>
+                <FlaskConical />
+                {t("proxies.test")}
+              </DropdownMenuItem>
+              {isCustom && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={() => onDelete(p)}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <Trash2 />
+                    {t("proxies.delete")}
+                  </DropdownMenuItem>
+                </>
+              )}
+            </TableRowActions>
+          </div>
+        );
+      },
     },
   ];
 }
@@ -157,7 +161,7 @@ export function OrgSettingsProxiesPage() {
   const deleteMutation = useDeleteProxy();
   const setDefaultMutation = useSetDefaultProxy();
   const testMutation = useTestProxy();
-  const { testingId, testResults, handleTest } = useConnectionTest(testMutation);
+  const { testingIds, testResults, handleTest } = useConnectionTest(testMutation);
 
   const onCreate = () => {
     setEditProxy(null);
@@ -170,12 +174,15 @@ export function OrgSettingsProxiesPage() {
   const onDelete = (p: OrgProxyInfo) => setConfirmState({ label: p.label, id: p.id });
   const onSetDefault = (p: OrgProxyInfo) => setDefaultMutation.mutate({ body: { proxyId: p.id } });
   const columns = useProxyColumns({
-    testingId,
+    testingIds,
     testResults,
     onTest: handleTest,
     onEdit,
     onDelete,
     onSetDefault,
+    settingDefaultId: setDefaultMutation.isPending
+      ? (setDefaultMutation.variables?.body.proxyId ?? null)
+      : null,
   });
 
   // Every hook first, THEN the guard: the column set is a hook now, and a
@@ -223,10 +230,19 @@ export function OrgSettingsProxiesPage() {
                 params: { path: { id: editProxy.id } },
                 body: data.url ? data : { label: data.label },
               },
-              { onSuccess: () => setProxyModalOpen(false) },
+              {
+                onSuccess: () => setProxyModalOpen(false),
+                onError: (error) => toast.error(getErrorMessage(error)),
+              },
             );
           } else {
-            createMutation.mutate({ body: data }, { onSuccess: () => setProxyModalOpen(false) });
+            createMutation.mutate(
+              { body: data },
+              {
+                onSuccess: () => setProxyModalOpen(false),
+                onError: (error) => toast.error(getErrorMessage(error)),
+              },
+            );
           }
         }}
       />
@@ -241,7 +257,10 @@ export function OrgSettingsProxiesPage() {
           if (confirmState) {
             deleteMutation.mutate(
               { params: { path: { id: confirmState.id } } },
-              { onSuccess: () => setConfirmState(null) },
+              {
+                onSuccess: () => setConfirmState(null),
+                onError: (error) => toast.error(getErrorMessage(error)),
+              },
             );
           }
         }}

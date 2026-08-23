@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { $api, client, type components } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
@@ -61,7 +63,10 @@ export function useDeleteModel() {
 
 export function useSetDefaultModel() {
   const invalidate = useInvalidateModels();
-  return $api.useMutation("put", "/api/models/default", { onSuccess: invalidate });
+  return $api.useMutation("put", "/api/models/default", {
+    onSuccess: invalidate,
+    onError: (error) => toast.error(getErrorMessage(error)),
+  });
 }
 
 export function useTestModel() {
@@ -169,6 +174,7 @@ export function useModelFormHandler(opts: {
   useModelProviderCredentials();
 
   const isPending = createModel.isPending || updateModel.isPending || createCredential.isPending;
+  const onError = (error: unknown) => toast.error(getErrorMessage(error));
 
   const onSubmit = (data: ModelFormData) => {
     const createCredentialAndThen = (onKeyCreated: (keyId: string) => void) => {
@@ -185,7 +191,7 @@ export function useModelFormHandler(opts: {
               : {}),
           },
         },
-        { onSuccess: (result) => onKeyCreated(result.id) },
+        { onSuccess: (result) => onKeyCreated(result.id), onError },
       );
     };
 
@@ -198,13 +204,13 @@ export function useModelFormHandler(opts: {
               params: { path: { id: opts.editModel!.id } },
               body: { ...modelData, credentialId: keyId },
             },
-            { onSuccess: opts.onSuccess },
+            { onSuccess: opts.onSuccess, onError },
           );
         });
       } else {
         updateModel.mutate(
           { params: { path: { id: opts.editModel.id } }, body: data },
-          { onSuccess: opts.onSuccess },
+          { onSuccess: opts.onSuccess, onError },
         );
       }
     } else if (data.newCredential) {
@@ -212,11 +218,11 @@ export function useModelFormHandler(opts: {
         const { newCredential: _, ...modelData } = data;
         createModel.mutate(
           { body: { ...modelData, credentialId: keyId } },
-          { onSuccess: opts.onSuccess },
+          { onSuccess: opts.onSuccess, onError },
         );
       });
     } else {
-      createModel.mutate({ body: data }, { onSuccess: opts.onSuccess });
+      createModel.mutate({ body: data }, { onSuccess: opts.onSuccess, onError });
     }
   };
 

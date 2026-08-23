@@ -26,11 +26,12 @@
  */
 
 import { useTranslation } from "react-i18next";
-import { Pencil, Trash2 } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
+import { RotateCcw, Trash2 } from "lucide-react";
+import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import type { DataColumn } from "../components/data-table";
 import { DefaultCell } from "../components/default-cell";
 import { SourceBadge } from "../components/source-badge";
+import { TableRowActions } from "../components/table-row-actions";
 import { isConnectionOwnedBy } from "../components/integration-connect/connection-label";
 import type {
   IntegrationAuthType,
@@ -58,17 +59,17 @@ import {
  */
 export function useIntegrationClientColumns({
   canChooseDefault,
-  isSettingDefault,
-  isDeleting,
+  settingDefaultClientRef,
+  deletingClientRef,
   onSetDefault,
   onRotate,
   onDelete,
 }: {
   /** Choosing one only means something when more than one client can mint. */
   canChooseDefault: boolean;
-  isSettingDefault: boolean;
-  /** A delete in flight — the row's button stops re-opening the confirmation. */
-  isDeleting: boolean;
+  settingDefaultClientRef: string | null;
+  /** The delete in flight — only that row shows pending. */
+  deletingClientRef: string | null;
   onSetDefault: (client: IntegrationClient) => void;
   onRotate: (client: IntegrationClient) => void;
   onDelete: (client: IntegrationClient) => void;
@@ -100,7 +101,8 @@ export function useIntegrationClientColumns({
           defaultLabel={t("integration.clients.default")}
           setLabel={t("integration.clients.setDefault.action")}
           canSetDefault={canChooseDefault}
-          disabled={isSettingDefault}
+          disabled={settingDefaultClientRef !== null}
+          isPending={settingDefaultClientRef === client.client_ref}
           onSetDefault={() => onSetDefault(client)}
           testId={`set-default-client-${client.client_ref}`}
         />
@@ -109,7 +111,7 @@ export function useIntegrationClientColumns({
     {
       id: "actions",
       header: "",
-      width: "72px",
+      width: "80px",
       align: "end",
       cell: (client) => {
         // A system client is the platform's, and an auto-provisioned one was
@@ -118,36 +120,38 @@ export function useIntegrationClientColumns({
         // allowed: it re-triggers registration.
         const editable = client.source === "custom" && !client.auto_provisioned;
         const deletable = client.source === "custom";
+        if (!editable && !deletable) return null;
         return (
-          <div className="flex items-center justify-end gap-1">
-            {editable && (
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="h-7 w-7 p-0"
-                onClick={() => onRotate(client)}
-                data-testid={`oauth-client-rotate-${client.client_ref}`}
-                aria-label={t("integration.oauthClient.btnRotate")}
-              >
-                <Pencil size={14} />
-              </Button>
-            )}
+          <TableRowActions
+            primary={
+              editable
+                ? {
+                    label: t("integration.oauthClient.btnRotate"),
+                    onSelect: () => onRotate(client),
+                    icon: RotateCcw,
+                  }
+                : undefined
+            }
+            menuLabel={
+              deletable
+                ? t("integration.oauthClient.moreActions", { name: client.client_id })
+                : undefined
+            }
+            isPending={deletingClientRef === client.client_ref}
+            pendingLabel={t("common:loading")}
+          >
             {deletable && (
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="h-7 w-7 p-0"
-                onClick={() => onDelete(client)}
-                disabled={isDeleting}
+              <DropdownMenuItem
+                onSelect={() => onDelete(client)}
+                disabled={deletingClientRef === client.client_ref}
                 data-testid={`oauth-client-delete-${client.client_ref}`}
-                aria-label={t("integration.oauthClient.btnDelete")}
+                className="text-destructive focus:text-destructive"
               >
-                <Trash2 size={14} className="text-destructive" />
-              </Button>
+                <Trash2 />
+                {t("integration.oauthClient.btnDelete")}
+              </DropdownMenuItem>
             )}
-          </div>
+          </TableRowActions>
         );
       },
     },

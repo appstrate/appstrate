@@ -79,8 +79,9 @@ const SETS = {
     columnsFrom(() =>
       useModelColumns({
         registry: undefined,
-        testingId: null,
+        testingIds: new Set(),
         testResults: {},
+        settingDefaultId: null,
         onTest: () => {},
         onEdit: () => {},
         onDelete: () => {},
@@ -91,7 +92,7 @@ const SETS = {
     columnsFrom(() =>
       useCredentialColumns({
         registry: undefined,
-        testingId: null,
+        testingIds: new Set(),
         testResults: {},
         onTest: () => {},
         onEdit: () => {},
@@ -103,8 +104,9 @@ const SETS = {
   proxies: () =>
     columnsFrom(() =>
       useProxyColumns({
-        testingId: null,
+        testingIds: new Set(),
         testResults: {},
+        settingDefaultId: null,
         onTest: () => {},
         onEdit: () => {},
         onDelete: () => {},
@@ -115,8 +117,8 @@ const SETS = {
     columnsFrom(() =>
       useIntegrationClientColumns({
         canChooseDefault: true,
-        isSettingDefault: false,
-        isDeleting: false,
+        settingDefaultClientRef: null,
+        deletingClientRef: null,
         onSetDefault: () => {},
         onRotate: () => {},
         onDelete: () => {},

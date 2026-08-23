@@ -20,6 +20,7 @@ import type {
   IntegrationOrgDefault,
   IntegrationPin,
 } from "@appstrate/shared-types";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { $api, client, type paths } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { isVersioned } from "../lib/version-selector";
@@ -341,6 +342,7 @@ export function useCreateIntegrationOAuthClient() {
       toast.success(t("integration.oauthClient.save.success"));
       invalidate();
     },
+    onError: (error) => toast.error(getErrorMessage(error)),
   });
 }
 
@@ -353,6 +355,7 @@ export function useRotateIntegrationOAuthClient() {
       toast.success(t("integration.oauthClient.save.success"));
       invalidate();
     },
+    onError: (error) => toast.error(getErrorMessage(error)),
   });
 }
 
@@ -388,15 +391,14 @@ export function useIntegrationClients(packageId: string | undefined, authKey: st
  * clients list so the "default" badge updates.
  */
 export function useSetDefaultIntegrationClient() {
-  const { t } = useTranslation("settings");
   const qc = useQueryClient();
   return $api.useMutation("put", "/api/integrations/{packageId}/auths/{authKey}/default-client", {
     onSuccess: () => {
-      toast.success(t("integration.clients.setDefault.success"));
       void qc.invalidateQueries({
         queryKey: ["get", "/api/integrations/{packageId}/auths/{authKey}/clients"],
       });
     },
+    onError: (error) => toast.error(getErrorMessage(error)),
   });
 }
 
@@ -557,7 +559,6 @@ export function useDeleteIntegrationOrgDefault() {
 }
 
 export function useUpdateIntegrationConnection() {
-  const { t } = useTranslation("settings");
   const qc = useQueryClient();
   return useMutation({
     // 200 + the bare connection resource (#657) — same serializer as the
@@ -573,23 +574,20 @@ export function useUpdateIntegrationConnection() {
       return data;
     },
     onSuccess: () => {
-      toast.success(t("integration.connection.updated"));
       void qc.invalidateQueries({
         queryKey: ["get", "/api/integrations/{packageId}/connections"],
       });
       void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}"] });
     },
+    onError: (error) => toast.error(getErrorMessage(error)),
   });
 }
 
 /** Delete one custom client by its id. */
 export function useDeleteIntegrationOAuthClient() {
-  const { t } = useTranslation("settings");
   const invalidate = useInvalidateIntegrationClients();
   return $api.useMutation("delete", "/api/integrations/{packageId}/oauth-clients/{clientId}", {
-    onSuccess: () => {
-      toast.success(t("integration.oauthClient.delete.success"));
-      invalidate();
-    },
+    onSuccess: invalidate,
+    onError: (error) => toast.error(getErrorMessage(error)),
   });
 }

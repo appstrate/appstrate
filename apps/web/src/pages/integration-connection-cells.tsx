@@ -71,12 +71,12 @@ export function AccountCell({
         allowEmpty
         placeholder={t("integration.connection.labelPlaceholder")}
         testId={`label-edit-${connection.id}`}
-        onSave={(next) =>
-          updateConnection.mutate({
+        onSave={async (next) => {
+          await updateConnection.mutateAsync({
             params: { path: { packageId, connectionId: connection.id } },
             body: { label: next === "" ? null : next },
-          })
-        }
+          });
+        }}
       />
       {!isOwn && (
         <div

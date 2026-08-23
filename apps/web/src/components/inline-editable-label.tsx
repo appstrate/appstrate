@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Input } from "@appstrate/ui/components/input";
 import { cn } from "@appstrate/ui/cn";
+import { Spinner } from "./spinner";
 
 /**
  * A label that turns into an inline text input on click (when editable). Saves
@@ -36,20 +38,38 @@ export function InlineEditableLabel({
 }: {
   value: string;
   editable: boolean;
-  onSave: (newValue: string) => void;
+  onSave: (newValue: string) => void | Promise<void>;
   /** Emptying the field is meaningful — the caller has a fallback to fall to. */
   allowEmpty?: boolean;
   placeholder?: string;
   testId?: string;
 }) {
+  const { t } = useTranslation("common");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
 
-  const commit = () => {
+  const commit = async () => {
+    if (savingRef.current) return;
     const next = draft.trim();
     // `allowEmpty` is what makes clearing a real answer rather than a no-op.
-    if (next !== value && (allowEmpty || next)) onSave(next);
-    setEditing(false);
+    if (next === value || (!allowEmpty && !next)) {
+      setEditing(false);
+      return;
+    }
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      await onSave(next);
+      setEditing(false);
+    } catch {
+      // The caller owns the error message. Keeping edit mode and `draft` here
+      // is what prevents a failed commit-on-blur write from erasing the input.
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
   };
 
   if (!editable || !editing) {
@@ -74,20 +94,24 @@ export function InlineEditableLabel({
   }
 
   return (
-    <Input
-      autoFocus
-      value={draft}
-      placeholder={placeholder}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") commit();
-        if (e.key === "Escape") setEditing(false);
-      }}
-      // `min-w-0`, not `min-w-40`: in a 132px column a 10rem minimum is an
-      // input wider than the cell that holds it.
-      className="h-7 w-full min-w-0 text-sm font-medium"
-      data-testid={testId}
-    />
+    <div className="flex min-w-0 items-center gap-1" aria-busy={saving}>
+      <Input
+        autoFocus
+        value={draft}
+        disabled={saving}
+        placeholder={placeholder}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => void commit()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") void commit();
+          if (e.key === "Escape" && !savingRef.current) setEditing(false);
+        }}
+        // `min-w-0`, not `min-w-40`: in a 132px column a 10rem minimum is an
+        // input wider than the cell that holds it.
+        className="h-7 w-full min-w-0 text-sm font-medium"
+        data-testid={testId}
+      />
+      {saving && <Spinner className="shrink-0" label={t("loading")} />}
+    </div>
   );
 }

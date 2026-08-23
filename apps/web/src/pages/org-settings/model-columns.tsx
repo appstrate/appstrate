@@ -12,9 +12,9 @@
  */
 
 import { useTranslation } from "react-i18next";
-import { Pencil, Trash2 } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
+import { FlaskConical, RotateCcw, Trash2 } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
+import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import type { OrgModelInfo } from "../../hooks/use-models";
 import type { ModelProviderCredentialInfo } from "../../hooks/use-model-provider-credentials";
 import type { ProviderRegistryEntry } from "../../hooks/use-model-provider-credentials";
@@ -23,38 +23,29 @@ import type { DataColumn } from "../../components/data-table";
 import { getModelIcon, getProviderIcon } from "../../components/icons";
 import { findProviderByApiShapeAndBaseUrl } from "../../lib/provider-registry-helpers";
 import { formatDateField } from "../../lib/markdown";
-import { Spinner } from "../../components/spinner";
 import { TestResultSpan } from "../../components/test-result-span";
+import { TableRowActions } from "../../components/table-row-actions";
 import { InlineEditableLabel } from "../../components/inline-editable-label";
 import { SourceBadge } from "../../components/source-badge";
 import { ModelUnavailableBadge } from "../../components/model-availability-badge";
 import { DefaultCell } from "../../components/default-cell";
 import { isModelUnpriced } from "./model-pricing";
 
-/**
- * The model column set.
- *
- * Three columns, not four: the badges (source, disabled, unavailable, unpriced)
- * sit WITH the name rather than in a column of their own. They are attributes
- * of one model, not a dimension you read down the table, and a column for them
- * did not fit — this table lives in the settings modal, which is 775px wide, so
- * it never crosses the 56rem threshold and anything parked in tier 3 is never
- * drawn at all. Putting them in a tier-3 column cost more than space: the
- * unavailable badge is what EXPLAINS the disabled "set as default" control on
- * the same row, and hiding it left a dead control with no reason given.
- */
+/** The model's comparable facts each get their own desktop column. */
 export function useModelColumns({
   registry,
-  testingId,
+  testingIds,
   testResults,
+  settingDefaultId,
   onTest,
   onEdit,
   onDelete,
   onSetDefault,
 }: {
   registry: ProviderRegistryEntry[] | undefined;
-  testingId: string | null;
+  testingIds: ReadonlySet<string>;
   testResults: Record<string, TestResult | null>;
+  settingDefaultId: string | null;
   onTest: (id: string) => void;
   onEdit: (m: OrgModelInfo) => void;
   onDelete: (m: OrgModelInfo) => void;
@@ -66,41 +57,82 @@ export function useModelColumns({
     {
       id: "model",
       header: t("models.col.model"),
-      width: "minmax(160px,1.6fr)",
+      width: "minmax(80px,1.4fr)",
       cell: (m) => {
         const ProviderIcon = getModelIcon(m, registry ?? []);
         return (
           <div className="flex min-w-0 items-center gap-2">
             {ProviderIcon && <ProviderIcon className="size-4 shrink-0" />}
             <div className="min-w-0">
-              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                <span className="truncate text-sm font-medium">{m.label}</span>
-                <span className="relative z-10 flex flex-wrap items-center gap-1.5">
-                  <SourceBadge source={m.source} />
-                  {m.aliased && <Badge variant="secondary">{t("models.alias")}</Badge>}
-                  {m.source !== "built-in" && !m.enabled && (
-                    <Badge variant="secondary" className="opacity-60">
-                      {t("models.disabled")}
-                    </Badge>
-                  )}
-                  {m.needs_reconnection && <ModelUnavailableBadge />}
-                  {/* Pre-spend counterpart of the run's `cost_pricing_status`,
-                      which only reports after the fact. Rule + exclusions live
-                      in `model-pricing.ts`, where they are covered. */}
-                  {isModelUnpriced(m) && (
-                    <Badge variant="warning" title={t("models.unpricedHint")}>
-                      {t("models.unpriced")}
-                    </Badge>
-                  )}
-                </span>
-              </div>
-              <div className="text-muted-foreground truncate font-mono text-[0.65rem]">
-                {m.aliased ? t("models.aliasHidden") : `${m.apiShape} / ${m.modelId}`}
-              </div>
+              <span className="block truncate text-sm font-medium">{m.label}</span>
+              {testResults[m.id] && (
+                <div className="@xl/table:hidden">
+                  <TestResultSpan
+                    result={testResults[m.id]!}
+                    successKey="models.testSuccess"
+                    failedKey="models.testFailed"
+                  />
+                </div>
+              )}
             </div>
           </div>
         );
       },
+    },
+    {
+      id: "provider",
+      header: t("models.col.provider"),
+      width: "minmax(50px,0.8fr)",
+      tier: 2,
+      cell: (m) => (
+        <span className="text-muted-foreground block truncate text-xs">
+          {m.providerName ?? m.providerId ?? m.apiShape}
+        </span>
+      ),
+    },
+    {
+      id: "identifier",
+      header: t("models.col.identifier"),
+      width: "minmax(70px,1fr)",
+      tier: 2,
+      cell: (m) => (
+        <span className="text-muted-foreground block truncate font-mono text-[0.65rem]">
+          {m.aliased ? t("models.aliasHidden") : m.modelId}
+        </span>
+      ),
+    },
+    {
+      id: "status",
+      header: t("models.col.status"),
+      width: "minmax(50px,1fr)",
+      tier: 2,
+      cell: (m) => (
+        <div className="relative z-10 flex min-w-0 flex-wrap items-center gap-1.5">
+          {testResults[m.id] ? (
+            <TestResultSpan
+              result={testResults[m.id]!}
+              successKey="models.testSuccess"
+              failedKey="models.testFailed"
+            />
+          ) : (
+            <>
+              <SourceBadge source={m.source} />
+              {m.aliased && <Badge variant="secondary">{t("models.alias")}</Badge>}
+              {m.source !== "built-in" && !m.enabled && (
+                <Badge variant="secondary" className="opacity-60">
+                  {t("models.disabled")}
+                </Badge>
+              )}
+              {m.needs_reconnection && <ModelUnavailableBadge />}
+              {isModelUnpriced(m) && (
+                <Badge variant="warning" title={t("models.unpricedHint")}>
+                  {t("models.unpriced")}
+                </Badge>
+              )}
+            </>
+          )}
+        </div>
+      ),
     },
     {
       id: "default",
@@ -118,7 +150,8 @@ export function useModelColumns({
           defaultLabel={t("models.default")}
           setLabel={t("models.setDefault")}
           onSetDefault={() => onSetDefault(m)}
-          disabled={m.needs_reconnection}
+          disabled={m.needs_reconnection || settingDefaultId !== null}
+          isPending={settingDefaultId === m.id}
           testId={`set-default-model-${m.id}`}
         />
       ),
@@ -126,60 +159,40 @@ export function useModelColumns({
     {
       id: "actions",
       header: "",
-      // 132, not 168: this table lives in a dialog that is 340px wide on a
-      // phone, and tier one has to fit inside that with the model's name. The
-      // test result is what needed the extra room, and it truncates now
-      // instead of taking it from the row's identity.
-      width: "132px",
+      width: "80px",
       align: "end",
-      cell: (m) => (
-        <div className="relative z-10 flex items-center justify-end gap-1">
-          {testResults[m.id] && (
-            <TestResultSpan
-              result={testResults[m.id]!}
-              successKey="models.testSuccess"
-              failedKey="models.testFailed"
-            />
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 text-xs"
-            onClick={() => onTest(m.id)}
-            disabled={testingId === m.id}
-          >
-            {testingId === m.id ? <Spinner /> : t("models.test")}
-          </Button>
-          {m.source !== "built-in" && (
-            <>
-              {/* Aliases hide their real binding (modelId etc.), so the edit
-                  form cannot round-trip them — the projected modelId is null
-                  and would fail validation. Edit env/API-side; delete still
-                  works, by id. */}
-              {!m.aliased && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 w-7 p-0"
-                  onClick={() => onEdit(m)}
-                  aria-label={t("models.edit")}
-                >
-                  <Pencil size={14} />
-                </Button>
+      cell: (m) => {
+        const isTesting = testingIds.has(m.id);
+        const isCustom = m.source !== "built-in";
+        const canEdit = isCustom && !m.aliased;
+        return (
+          <div className="relative z-10 flex min-w-0 items-center justify-end gap-1">
+            <TableRowActions
+              primary={canEdit ? { label: t("models.edit"), onSelect: () => onEdit(m) } : undefined}
+              menuLabel={t("models.moreActions", { name: m.label })}
+              isPending={isTesting}
+              pendingLabel={t("common:loading")}
+            >
+              <DropdownMenuItem onSelect={() => onTest(m.id)} disabled={isTesting}>
+                <FlaskConical />
+                {t("models.test")}
+              </DropdownMenuItem>
+              {isCustom && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={() => onDelete(m)}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <Trash2 />
+                    {t("models.delete")}
+                  </DropdownMenuItem>
+                </>
               )}
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0"
-                onClick={() => onDelete(m)}
-                aria-label={t("models.delete")}
-              >
-                <Trash2 size={14} className="text-destructive" />
-              </Button>
-            </>
-          )}
-        </div>
-      ),
+            </TableRowActions>
+          </div>
+        );
+      },
     },
   ];
 }
@@ -191,7 +204,7 @@ export function useModelColumns({
  */
 export function useCredentialColumns({
   registry,
-  testingId,
+  testingIds,
   testResults,
   onTest,
   onEdit,
@@ -200,7 +213,7 @@ export function useCredentialColumns({
   onConnectOAuth,
 }: {
   registry: ProviderRegistryEntry[] | undefined;
-  testingId: string | null;
+  testingIds: ReadonlySet<string>;
   testResults: Record<string, TestResult | null>;
   onTest: (id: string) => void;
   onEdit: (pk: ModelProviderCredentialInfo) => void;
@@ -287,77 +300,60 @@ export function useCredentialColumns({
     {
       id: "actions",
       header: "",
-      // 132, not 168: this table lives in a dialog that is 340px wide on a
-      // phone, and tier one has to fit inside that with the model's name. The
-      // test result is what needed the extra room, and it truncates now
-      // instead of taking it from the row's identity.
-      width: "132px",
+      // Same measured action footprint as the model rows above.
+      width: "104px",
       align: "end",
-      cell: (pk) => (
-        <div className="relative z-10 flex items-center justify-end gap-1">
-          {testResults[pk.id] && (
-            <TestResultSpan
-              result={testResults[pk.id]!}
-              successKey="credentials.testSuccess"
-              failedKey="credentials.testFailed"
-            />
-          )}
-          {!isOauth(pk) && pk.source === "custom" && (
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 text-xs"
-                onClick={() => onTest(pk.id)}
-                disabled={testingId === pk.id}
-              >
-                {testingId === pk.id ? <Spinner /> : t("credentials.test")}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0"
-                onClick={() => onEdit(pk)}
-                aria-label={t("credentials.edit")}
-              >
-                <Pencil size={14} />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0"
-                onClick={() => onDelete(pk)}
-                aria-label={t("credentials.delete")}
-              >
-                <Trash2 size={14} className="text-destructive" />
-              </Button>
-            </>
-          )}
-          {isOauth(pk) && (
-            <>
-              {pk.needs_reconnection && pk.providerId && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={() => onConnectOAuth(pk)}
-                >
-                  {t("credentials.oauth.reconnect")}
-                </Button>
+      cell: (pk) => {
+        const oauth = isOauth(pk);
+        const isCustomKey = !oauth && pk.source === "custom";
+        const canReconnect = oauth && pk.needs_reconnection && Boolean(pk.providerId);
+        const isTesting = testingIds.has(pk.id);
+        if (!isCustomKey && !oauth) return null;
+        return (
+          <div className="relative z-10 flex min-w-0 items-center justify-end gap-1">
+            {testResults[pk.id] && (
+              <TestResultSpan
+                result={testResults[pk.id]!}
+                successKey="credentials.testSuccess"
+                failedKey="credentials.testFailed"
+              />
+            )}
+            <TableRowActions
+              primary={
+                isCustomKey
+                  ? { label: t("credentials.edit"), onSelect: () => onEdit(pk) }
+                  : canReconnect
+                    ? {
+                        label: t("credentials.oauth.reconnect"),
+                        onSelect: () => onConnectOAuth(pk),
+                        icon: RotateCcw,
+                      }
+                    : undefined
+              }
+              menuLabel={t("credentials.moreActions", { name: pk.label })}
+              isPending={isTesting}
+              pendingLabel={t("common:loading")}
+            >
+              {isCustomKey && (
+                <>
+                  <DropdownMenuItem onSelect={() => onTest(pk.id)} disabled={isTesting}>
+                    <FlaskConical />
+                    {t("credentials.test")}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                </>
               )}
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0"
-                onClick={() => onDelete(pk)}
-                aria-label={t("credentials.oauth.disconnect")}
+              <DropdownMenuItem
+                onSelect={() => onDelete(pk)}
+                className="text-destructive focus:text-destructive"
               >
-                <Trash2 size={14} className="text-destructive" />
-              </Button>
-            </>
-          )}
-        </div>
-      ),
+                <Trash2 />
+                {oauth ? t("credentials.oauth.disconnect") : t("credentials.delete")}
+              </DropdownMenuItem>
+            </TableRowActions>
+          </div>
+        );
+      },
     },
   ];
 }

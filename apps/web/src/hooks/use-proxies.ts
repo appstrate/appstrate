@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { $api, client, type components } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
@@ -46,7 +48,10 @@ export function useDeleteProxy() {
 
 export function useSetDefaultProxy() {
   const invalidate = useInvalidateProxies();
-  return $api.useMutation("put", "/api/proxies/default", { onSuccess: invalidate });
+  return $api.useMutation("put", "/api/proxies/default", {
+    onSuccess: invalidate,
+    onError: (error) => toast.error(getErrorMessage(error)),
+  });
 }
 
 export function useTestProxy() {

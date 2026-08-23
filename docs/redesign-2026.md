@@ -1475,10 +1475,69 @@ timed out at 10 seconds and the runner remained in the systemd-unit spinner
 while that worker reported `connect ETIMEDOUT`; it was interrupted without a
 summary after the same infrastructure failure reproduced.
 
-**5. Roll the action end through existing tables.** Start with the noisy
-models, credentials, proxies and integration OAuth clients. Keep direct
-controls (member role, default, share) where they are, keep Run direct, and do
-not add an overflow trigger to a row with nothing to put in it.
+**5. ~~Roll the action end through existing tables.~~ Done 23 August.** Models,
+provider credentials and proxies now use the same action grammar as SSO. A
+custom editable record keeps Edit direct and moves Test plus Delete into the
+menu; a built-in or otherwise immutable record has the menu alone, with Test
+inside it. It does not show a disabled or invented Edit control. An OAuth
+credential that needs attention keeps Reconnect direct and puts Disconnect in
+the menu, while a healthy OAuth credential has only the menu. The integration
+OAuth-client table follows the same rule: Rotate or Update credentials is
+direct on custom clients, Delete is secondary, and a system client invents
+neither action nor overflow trigger because it has no available deed.
+
+Test therefore lives in the same place on every model and proxy row instead of
+turning into a flask-only direct action on system rows. Rotate/Reconnect uses
+the refresh icon rather than a pencil, so the direct symbol describes its deed.
+Pending connection tests remain visible in their own rows and lock both action
+triggers. Mutation failures always toast; successful tests render their result
+in the row, and successful deletions stay quiet because the row's disappearance
+is already the confirmation.
+
+The first Model cell no longer tries to be a miniature card. At desktop width,
+Model, Provider, Identifier, Status, Default and Actions are six separate
+columns. The phone keeps Model and Actions only; a transient test result moves
+under the model name there so the hidden desktop Status column never hides the
+feedback too.
+
+Measured in the real settings dialog, Models and Proxies resolve to 804px at
+the stable desktop widths and 340px at a 390 window. Models shows all six
+columns at 804px and resolves to Model 224px plus Actions 80px on the phone;
+Proxies resolves to record 200px plus Actions 104px there. The integration
+table resolves to 1096px at 1440 and 348px at 390, with an 80px action track.
+All three full sixteen-width sweeps have zero overflow. The nominal 1440 and
+390 screens were also inspected, and all four scenarios across the three
+screens pass at both required widths, 24 captures with no missing load fixture.
+
+Exercising the menus found what the screenshot pass could not: Model, Proxy and
+provider-credential Test each called an endpoint that the lab did not serve.
+The three routes now share one OpenAPI-typed successful fixture. Their real
+pending state was observed and each action settled to `OK (42ms)` without a
+fixture hole.
+
+The fixed-point review found six gaps before the commit. Concurrent tests used
+one shared id, then the first correction still used per-call `mutate`
+callbacks, which React Query detaches when a later call takes over the mutation
+observer. The hook now tracks a set of ids and gives every row its own
+`mutateAsync` promise lifecycle. A connection test can answer HTTP 200 with
+`ok: false`, which now toasts just like a transport failure. Model, credential,
+proxy and integration-client modal writes now toast their mutation errors too.
+The inline credential rename also keeps the typed draft open, locks the field
+with a row spinner while saving and toasts a failed write. The same shared
+inline control now carries that contract for connection names as well.
+
+Set-default writes were the other gap: they now show the spinner on the row
+being changed, lock the other choices until it settles, always toast failure
+and stay quiet on visible success. Finally, the lab gained a healthy OAuth
+credential, so both the Reconnect-plus-menu and menu-only variants are visible
+at 1440 and 390. The product-owner pass then caught the inconsistent flask-only
+system rows and the overloaded Model cell; both are the uniform menu and
+six-column desktop treatment described above.
+
+The block gate is green for `bun test apps/web` (570 pass) and `bun run check`
+(33/33 tasks, the same nine pre-existing warnings). Root `bun test` completed
+with 10,636 passes, then the known local MITM/sidecar infrastructure group
+reported 35 failures and 19 errors; no touched web test failed.
 
 **6. End-users become a table.** This one has a prerequisite, which is why it is
 last: the row opens its detail panel through an `onClick` on local state, with

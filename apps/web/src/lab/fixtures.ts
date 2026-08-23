@@ -1779,7 +1779,7 @@ export const models: Json200<"/api/models", "get"> = {
   ],
 };
 
-/** Provider credentials: one built-in, one API key, one OAuth to reconnect. */
+/** Provider credentials: built-in, API key, and both OAuth action variants. */
 export const modelCredentials: Json200<"/api/model-provider-credentials", "get"> = {
   object: "list",
   hasMore: false,
@@ -1826,7 +1826,27 @@ export const modelCredentials: Json200<"/api/model-provider-credentials", "get">
       createdAt: "2026-08-01T11:00:00.000Z",
       updatedAt: "2026-08-19T07:20:00.000Z",
     },
+    {
+      id: "cred_oauth_healthy",
+      label: "Claude Code, équipe",
+      apiShape: "anthropic",
+      baseUrl: null,
+      source: "custom",
+      authMode: "oauth2",
+      providerId: "claude-code",
+      oauth_email: "pierre@tractr.net",
+      needs_reconnection: false,
+      created_by: "Pierre",
+      createdAt: "2026-08-03T14:30:00.000Z",
+      updatedAt: "2026-08-21T09:45:00.000Z",
+    },
   ],
+};
+
+/** Shared successful response for the three connection-test actions above. */
+export const connectionTest: Json200<"/api/models/{id}/test", "post"> = {
+  ok: true,
+  latency: 42,
 };
 
 /**

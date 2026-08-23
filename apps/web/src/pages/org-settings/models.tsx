@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { BrainCircuit, KeyRound, Plus } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
@@ -43,6 +44,7 @@ function ModelsList({
   onEdit,
   onDelete,
   onSetDefault,
+  settingDefaultId,
 }: {
   models: OrgModelInfo[] | undefined;
   isLoading: boolean;
@@ -51,16 +53,18 @@ function ModelsList({
   onEdit: (m: OrgModelInfo) => void;
   onDelete: (m: OrgModelInfo) => void;
   onSetDefault: (m: OrgModelInfo) => void;
+  settingDefaultId: string | null;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const testMutation = useTestModel();
-  const { testingId, testResults, handleTest } = useConnectionTest(testMutation);
+  const { testingIds, testResults, handleTest } = useConnectionTest(testMutation);
   const { data: registry } = useProvidersRegistry();
 
   const columns = useModelColumns({
     registry,
-    testingId,
+    testingIds,
     testResults,
+    settingDefaultId,
     onTest: handleTest,
     onEdit,
     onDelete,
@@ -107,17 +111,17 @@ function CredentialsSection({
   onCreate: () => void;
   onEdit: (pk: ModelProviderCredentialInfo) => void;
   onDelete: (pk: ModelProviderCredentialInfo) => void;
-  onRename: (pk: ModelProviderCredentialInfo, newLabel: string) => void;
+  onRename: (pk: ModelProviderCredentialInfo, newLabel: string) => Promise<void>;
   onConnectOAuth: (credential: ModelProviderCredentialInfo) => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const testMutation = useTestModelProviderCredential();
-  const { testingId, testResults, handleTest } = useConnectionTest(testMutation);
+  const { testingIds, testResults, handleTest } = useConnectionTest(testMutation);
   const { data: registry } = useProvidersRegistry();
 
   const columns = useCredentialColumns({
     registry,
-    testingId,
+    testingIds,
     testResults,
     onTest: handleTest,
     onEdit,
@@ -212,6 +216,11 @@ export function OrgSettingsModelsPage() {
             setModelModalOpen(true);
           }}
           onDelete={(m) => setConfirmState({ type: "deleteModel", label: m.label, id: m.id })}
+          settingDefaultId={
+            setDefaultModelMutation.isPending
+              ? (setDefaultModelMutation.variables?.body.modelId ?? null)
+              : null
+          }
           onSetDefault={(m) => setDefaultModelMutation.mutate({ body: { modelId: m.id } })}
         />
       )}
@@ -232,11 +241,16 @@ export function OrgSettingsModelsPage() {
           onDelete={(pk) =>
             setConfirmState({ type: "deleteCredential", label: pk.label, id: pk.id })
           }
-          onRename={(pk, newLabel) => {
-            updatePkMutation.mutate({
-              params: { path: { id: pk.id } },
-              body: { label: newLabel },
-            });
+          onRename={async (pk, newLabel) => {
+            try {
+              await updatePkMutation.mutateAsync({
+                params: { path: { id: pk.id } },
+                body: { label: newLabel },
+              });
+            } catch (error) {
+              toast.error(getErrorMessage(error));
+              throw error;
+            }
           }}
           onConnectOAuth={(credential) => {
             setEditPk(credential);
@@ -267,7 +281,10 @@ export function OrgSettingsModelsPage() {
             if (data.apiKey) patch.apiKey = data.apiKey;
             updatePkMutation.mutate(
               { params: { path: { id: editPk.id } }, body: patch },
-              { onSuccess: () => setPkModalOpen(false) },
+              {
+                onSuccess: () => setPkModalOpen(false),
+                onError: (error) => toast.error(getErrorMessage(error)),
+              },
             );
           } else {
             const uniqueLabel = deduplicateLabel(data.label, credentials ?? []);
@@ -280,7 +297,10 @@ export function OrgSettingsModelsPage() {
                   ...(data.baseUrlOverride ? { baseUrlOverride: data.baseUrlOverride } : {}),
                 },
               },
-              { onSuccess: () => setPkModalOpen(false) },
+              {
+                onSuccess: () => setPkModalOpen(false),
+                onError: (error) => toast.error(getErrorMessage(error)),
+              },
             );
           }
         }}
@@ -304,12 +324,12 @@ export function OrgSettingsModelsPage() {
           if (confirmState.type === "deleteModel") {
             deleteModelMutation.mutate(
               { params: { path: { id: confirmState.id } } },
-              { onSuccess: close },
+              { onSuccess: close, onError: (error) => toast.error(getErrorMessage(error)) },
             );
           } else {
             deletePkMutation.mutate(
               { params: { path: { id: confirmState.id } } },
-              { onSuccess: close },
+              { onSuccess: close, onError: (error) => toast.error(getErrorMessage(error)) },
             );
           }
         }}

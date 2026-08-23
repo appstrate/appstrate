@@ -2,6 +2,7 @@
 
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
+import { Spinner } from "./spinner";
 
 /**
  * The "default" toggle shared by every system+DB table where exactly one row is
@@ -25,6 +26,7 @@ export function DefaultCell({
   onSetDefault,
   canSetDefault = true,
   disabled = false,
+  isPending = false,
   testId,
 }: {
   isDefault: boolean;
@@ -33,6 +35,7 @@ export function DefaultCell({
   onSetDefault: () => void;
   canSetDefault?: boolean;
   disabled?: boolean;
+  isPending?: boolean;
   testId?: string;
 }) {
   if (isDefault) {
@@ -44,11 +47,11 @@ export function DefaultCell({
       size="sm"
       variant="ghost"
       className="h-7 text-xs"
-      disabled={disabled}
+      disabled={disabled || isPending}
       onClick={onSetDefault}
       data-testid={testId}
     >
-      {setLabel}
+      {isPending ? <Spinner label={setLabel} /> : setLabel}
     </Button>
   );
 }
