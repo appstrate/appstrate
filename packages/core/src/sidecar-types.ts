@@ -519,13 +519,9 @@ export type LlmProxyConfig = LlmProxyApiKeyConfig | LlmProxyOauthConfig;
  * a single source of truth — drift between the three previously caused 401s
  * to surface as "unknown apiShape" rather than a real auth failure.
  *
- * `pi-messages` is the odd one out and deliberately so: it is not a vendor's
- * protocol but pi-ai's OWN vendor-neutral one (a first-class `KnownApi` its
- * docs describe as usable by any backend). It is what an ALIASED run's agent
- * container speaks, so that the container emits no vendor-varying request
- * shape and receives no vendor-shaped response frames — the sidecar terminates
- * it and re-originates the call against the real backing. See
- * `docs/architecture/MODEL_ALIASES.md`.
+ * `pi-messages` is pi-ai's own vendor-neutral protocol rather than a vendor's:
+ * an aliased run's container speaks it, so no vendor-shaped request or response
+ * crosses into the container. See `docs/architecture/MODEL_ALIASES.md`.
  */
 export const MODEL_API_SHAPES = [
   "pi-messages",
@@ -574,38 +570,20 @@ export interface ModelSwap {
   /** Real upstream model id forwarded to the provider. */
   real: string;
   /**
-   * Protocol the CLIENT of this boundary speaks — the agent container for the
-   * sidecar, the API caller for the platform `/api/llm-proxy/*` gateway.
-   *
-   * Kept SEPARATE from {@link backingApiShape} because the two are no longer
-   * the same fact. An aliased run's container speaks `pi-messages` whatever
-   * the backing is, so the one inbound call the sidecar may accept
-   * (`isAliasInferenceCall` in `@appstrate/core/model-swap`) is `POST
-   * /messages` — reading the BACKING's path there would refuse every aliased
-   * run, and dropping the check would re-open the passthrough that hands an
-   * adversarial agent the vendor's own catalogue over `GET /v1/models`.
-   * Required, not optional: an optional field fails OPEN on the construction
-   * site that forgot it, which is the opposite of what an alias promises.
+   * Protocol the CLIENT of this boundary speaks (`pi-messages` for an aliased
+   * run's container). Never inferred from {@link backingApiShape}.
    */
   clientApiShape: ModelApiShape;
+  /* The sidecar's inbound allowlist keys on THIS field; keying it on
+     `backingApiShape` would refuse every aliased call. */
   /**
-   * Protocol family of the BACKING model — what this boundary speaks UPSTREAM.
-   * Equal to {@link clientApiShape} when the boundary merely proxies (today:
-   * the platform gateway); different when it terminates the client protocol
-   * and re-originates (today: the sidecar on an aliased run).
-   *
-   * This descriptor is private to the platform↔sidecar channel and never
-   * reaches the agent container.
+   * Protocol this boundary speaks UPSTREAM; differs from {@link clientApiShape}
+   * when it terminates and re-originates. Never reaches the agent container.
    */
   backingApiShape: ModelApiShape;
   /**
-   * Catalog of the real backing model, needed to REBUILD its pi-ai `Model`
-   * record when this boundary re-originates the call. Required exactly when
-   * `clientApiShape !== backingApiShape`; absent otherwise, because a
-   * proxying boundary forwards the client's own bytes and never constructs a
-   * model record. `parseModelSwapEnv` (sidecar boot) enforces that pairing —
-   * a re-originating boundary with no backing catalog cannot serve a single
-   * request, so it fails at boot, once, at the cause.
+   * Catalog the sidecar rebuilds the real pi-ai `Model` record from. Required
+   * exactly when `clientApiShape !== backingApiShape`; enforced at sidecar boot.
    */
   backing?: ModelSwapBacking;
   /**
@@ -620,44 +598,20 @@ export interface ModelSwap {
 }
 
 /**
- * The backing model's catalog entry, carried on the PRIVATE platform↔sidecar
- * channel ({@link LlmProxyApiKeyConfig.modelSwap}) and never emitted into the
- * agent container.
- *
- * It holds exactly the fields a pi-ai `Model` record needs that the rest of
- * the sidecar's LLM config does not already carry: the record's `id` is
- * {@link ModelSwap.real}, its `api` is {@link ModelSwap.backingApiShape}, its
- * `baseUrl` is {@link LlmProxyApiKeyConfig.baseUrl}, and its token limits are
- * the REAL `MODEL_CONTEXT_WINDOW` / `MODEL_MAX_TOKENS` the sidecar already
- * receives unmasked. Nothing here is duplicated from those.
- *
- * {@link providerId} is the load-bearing one: pi-ai re-derives every vendor
- * quirk per request from `model.provider` + `model.baseUrl`, and on an aliased
- * run those quirks must be derived HERE — one process to the left of the
- * container, which is now told nothing about the vendor at all.
+ * Backing model catalog, private to the platform↔sidecar channel and never
+ * emitted into the agent container — only what a pi-ai `Model` record needs.
  */
 export interface ModelSwapBacking {
   /**
-   * pi provider key of the real vendor (`deepseek`, `zai`, `anthropic`, …).
-   * Drives pi-ai's per-vendor request shaping; resolved platform-side by
-   * `derivePiProvider` so the sidecar mirrors no mapping table of its own.
+   * pi provider key of the real vendor. Drives pi-ai's per-vendor request
+   * shaping, which on an aliased run happens here, not in the container.
    */
   providerId: string;
   /** Whether the backing supports extended thinking at all. */
   reasoning: boolean;
-  /**
-   * The backing's native thinking-level mapping. This is why the container no
-   * longer receives `MODEL_REASONING_LEVEL_MAP`: the portable level crosses
-   * the wire (`options.reasoning`) and the vendor-specific mapping is applied
-   * on this side.
-   */
+  /** Native thinking-level mapping; the container receives only the portable level. */
   reasoningLevelMap?: Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel>>;
-  /**
-   * Input modalities the backing accepts — pi-ai gates image content on them.
-   * Free strings, as the platform stores them; the sidecar narrows to pi's
-   * closed pair at the process boundary, exactly as `runtime-pi/env.ts`
-   * narrows the container's `MODEL_INPUT`.
-   */
+  /** Input modalities the backing accepts — pi-ai gates image content on them. */
   input: ReadonlyArray<string>;
 }
 

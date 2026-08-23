@@ -286,9 +286,9 @@ describe("run-launcher — sidecar skip decision", () => {
     // runner row's cost is computed server-side from `runs.model_cost`.
     expect(env).not.toHaveProperty("MODEL_COST");
     expect(JSON.stringify(env)).not.toContain("0.28");
-    // Rounded DOWN onto the alias ladder — the container still needs both
-    // numbers to size compaction, so they are coarsened, not dropped.
-    expect(env.MODEL_CONTEXT_WINDOW).toBe("196608");
+    // The real limits — the container needs both numbers to size compaction,
+    // and the exact `usage.input` count it reports out-tells them anyway.
+    expect(env.MODEL_CONTEXT_WINDOW).toBe("200000");
     expect(env.MODEL_MAX_TOKENS).toBe("8192");
     // Modalities survive: dropping MODEL_INPUT silently disables image input.
     expect(env.MODEL_INPUT).toBe(JSON.stringify(["text", "image"]));

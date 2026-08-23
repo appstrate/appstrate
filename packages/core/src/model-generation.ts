@@ -33,20 +33,11 @@ export function anthropicReasoningBudgetTokens(level: Exclude<ModelReasoningLeve
 }
 
 /**
- * The request-scoped thinking budget a CLASSIC (non-adaptive) Anthropic call
- * needs, in the shape pi-ai's `SimpleStreamOptions.thinkingBudgets` takes.
- *
- * pi ships its own table and it disagrees with the one above — most sharply at
- * the top, where `clampReasoning` collapses BOTH `xhigh` and `max` onto its
- * `high` slot (16 384). So a request that does not carry this override silently
- * loses the distinction Appstrate's vocabulary makes; the collapse is also why
- * the returned key is the clamped slot rather than the requested level.
- *
- * Two callers, on opposite sides of the container boundary, which is why it
- * lives here rather than beside either: the runner applies it for a direct
- * Anthropic run, and the sidecar applies it when it re-originates an ALIASED
- * run (whose container speaks `pi-messages` and cannot express a budget —
- * `PiMessagesOptions` models none).
+ * Request-scoped thinking budget for a classic (non-adaptive) Anthropic call,
+ * shaped for pi-ai's `SimpleStreamOptions.thinkingBudgets`. The returned key is
+ * pi's clamped slot — it collapses `xhigh` and `max` onto `high` — not the
+ * requested level. Applied both by the runner and by the sidecar re-originating
+ * an aliased run.
  */
 export function anthropicThinkingBudgets(
   level: ModelReasoningLevel,
