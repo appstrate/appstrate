@@ -458,6 +458,7 @@
         "@appstrate/core": "workspace:*",
         "@appstrate/mcp-transport": "workspace:*",
         "@appstrate/runner-pi": "workspace:*",
+        "@earendil-works/pi-ai": "0.84.2",
         "@modelcontextprotocol/sdk": "^1.30.0",
         "fflate": "^0.8.3",
         "hono": "^4.12.33",

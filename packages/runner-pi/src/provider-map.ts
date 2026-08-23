@@ -14,11 +14,30 @@
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 
 /**
+ * Pi provider key an aliased container is bound to — canonical, naming no
+ * vendor. {@link PROVIDER_BY_API} resolves `pi-messages` to it; not a built-in
+ * pi provider id, so its credential goes in via `setPiRuntimeCredential`.
+ */
+export const ALIAS_PI_PROVIDER_KEY = "appstrate";
+
+/**
+ * `@earendil-works/pi-ai` build this image was compiled against, stamped onto
+ * {@link PI_SDK_VERSION_HEADER}. A proxy for `pi-messages` compatibility, not a
+ * protocol version.
+ */
+export const PI_SDK_VERSION = "0.84.2";
+/* Pinned against every manifest in the repo by `test/pi-sdk-version.test.ts`. */
+
+/** Container → sidecar only; never forwarded to a backing. */
+export const PI_SDK_VERSION_HEADER = "x-appstrate-pi-sdk";
+
+/**
  * Single source of truth for both the in-container path (entrypoint builds
  * `model.provider` from it) and the CLI's local-run resolver, which imports
  * this const + {@link deriveProviderFromApi} rather than keeping its own copy.
  */
 export const PROVIDER_BY_API: Record<ModelApiShape, string> = {
+  "pi-messages": ALIAS_PI_PROVIDER_KEY,
   "anthropic-messages": "anthropic",
   "openai-completions": "openai",
   "openai-responses": "openai",

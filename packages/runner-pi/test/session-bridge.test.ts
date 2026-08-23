@@ -925,7 +925,41 @@ describe("installSessionBridge — getCost()", () => {
     const metric = sink.events.find((e) => e.type === "appstrate.metric") as unknown as {
       cost: number;
     };
-    expect(metric.cost).toBeCloseTo(bridge.getCost(), 5);
+    const cost = bridge.getCost();
+    // A priced session always reports a number — `getCost()` only widens to
+    // `undefined` for an `unpriced` one (covered below).
+    expect(typeof cost).toBe("number");
+    expect(metric.cost).toBeCloseTo(cost ?? Number.NaN, 5);
+  });
+
+  it("reports NO cost — not 0 — when the session is unpriced", () => {
+    // No rates reached the container (unpriced model, or an aliased one whose
+    // published rate card is withheld because it names the vendor). The Pi SDK
+    // still computes a cost against the placeholder zero rates it was handed;
+    // reporting that as `$0` would be indistinguishable from a genuinely free
+    // model AND, on an aliased run, would sit next to the platform's own
+    // server-computed figure and trip its divergence warning every time.
+    const sink = createInternalCapture();
+    const session = createFakeSession();
+    const bridge = installSessionBridge(session, sink, RUN_ID, { unpriced: true });
+
+    session.pushMessage({
+      role: "assistant",
+      usage: { input: 100, output: 200, cost: { total: 0 } },
+      content: [{ type: "text", text: "x" }],
+    });
+    session.emit({ type: "message_end" });
+    session.emit({ type: "agent_end" });
+
+    expect(bridge.getCost()).toBeUndefined();
+    const metrics = sink.events.filter((e) => e.type === "appstrate.metric");
+    expect(metrics.length).toBeGreaterThan(0);
+    // Absent, not zero: `buildMetric` omits the key entirely, and the platform
+    // reads a null reported cost as "nothing to compare".
+    for (const metric of metrics) expect(metric).not.toHaveProperty("cost");
+    // Token counts are OBSERVED, not derived from rates — they must survive.
+    expect(bridge.getUsage().input_tokens).toBe(100);
+    expect(bridge.getUsage().output_tokens).toBe(200);
   });
 });
 

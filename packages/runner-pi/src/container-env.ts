@@ -2,15 +2,12 @@
 // Copyright 2026 Appstrate
 
 /**
- * The env var contract that `runtime-pi/entrypoint.ts` reads when the
- * Docker image boots. Keeping a single helper that shapes this dict
- * means the contract is documented once and any external consumer
- * (GitHub Action, CLI, self-hosted runner) gets the exact same set of
- * variables without re-deriving conditionals (empty strings, JSON
- * serialisation, boolean casing) on their own.
+ * The env var contract `runtime-pi/entrypoint.ts` reads when the Docker image
+ * boots, shaped once so external consumers do not re-derive the conditionals.
  */
 
 import { createLogger } from "@appstrate/core/logger";
+import { ALIAS_CLIENT_API_SHAPE } from "@appstrate/core/model-swap";
 import type {
   ModelNativeReasoningLevel,
   ModelReasoningLevel,
@@ -19,20 +16,13 @@ import type {
 export interface RuntimePiModelConfig {
   /** Pi SDK `api` slug — e.g. `"anthropic-messages"`, `"openai-completions"`. */
   api: string;
-  /** Model identifier passed to the SDK. */
   modelId: string;
-  /** Upstream base URL (routed through the sidecar proxy when `apiKey` is set). */
   baseUrl: string;
-  /**
-   * Appstrate model-provider id of the REAL upstream (`deepseek`, `zai`, …),
-   * emitted as `MODEL_PROVIDER`. On a sidecar-proxied run `MODEL_BASE_URL` is
-   * the sidecar's, so this is the only input left for Pi to recognise which
-   * provider it is talking to and emit that provider's request shape.
-   */
+  /** Real upstream provider id → `MODEL_PROVIDER`. Pass it even for an {@link aliased} run. */
   providerId?: string | null;
   /** LLM API key. When unset, MODEL_API_KEY / MODEL_BASE_URL are not emitted. */
   apiKey?: string;
-  /** Placeholder used in place of the real apiKey inside the container. */
+  /** Stands in for the real apiKey inside the container. Required when LLM traffic is proxied. */
   apiKeyPlaceholder?: string;
   input?: ReadonlyArray<string> | null;
   contextWindow?: number | null;
@@ -40,6 +30,12 @@ export interface RuntimePiModelConfig {
   reasoning?: boolean | null;
   reasoningLevelMap?: Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel>>;
   cost?: unknown | null;
+  /**
+   * This run's model is a platform ALIAS (`docs/architecture/MODEL_ALIASES.md`).
+   * WHICH variables that changes is decided in the masking block of
+   * {@link buildRuntimePiEnv}; false means a BYOK run, which hides nothing.
+   */
+  aliased?: boolean;
 }
 
 export interface RuntimePiEnvOptions {
@@ -49,119 +45,67 @@ export interface RuntimePiEnvOptions {
     temperature?: number | null;
     reasoningLevel?: ModelReasoningLevel | null;
   };
-  /** Full enriched system prompt fed to the Pi SDK. */
   agentPrompt: string;
-  /** Run identifier. Bundled tools + the entrypoint surface it in every emitted {@link RunEvent}. */
   runId?: string;
-  /** JSON-encoded user input passed to the agent (`AGENT_INPUT`). */
   agentInput?: unknown;
-  /**
-   * Sidecar URL reachable from the agent container. Required unless
-   * {@link noSidecar}: the orchestrator owns the topology (Docker DNS
-   * alias, host loopback port, in-guest loopback for microVMs) — there
-   * is deliberately no default, a missing value throws at build time.
-   */
+  /** Sidecar URL reachable from the agent container. Required unless {@link noSidecar} — throws. */
   sidecarUrl?: string;
-  /**
-   * If set, LLM traffic is routed through `${sidecarProxyUrl}` and
-   * MODEL_API_KEY is replaced with {@link RuntimePiModelConfig.apiKeyPlaceholder}
-   * before container boot.
-   */
+  /** Routes LLM traffic through this URL; MODEL_API_KEY becomes the placeholder. */
   sidecarProxyLlmUrl?: string;
-  /**
-   * When `true`, no sidecar will be attached to the run. The entrypoint
-   * skips the MCP wiring phase entirely (no `{ns}__api_call`, `run_history`,
-   * `recall_memory` tools), `SIDECAR_URL` is not emitted, and the agent
-   * talks to the upstream LLM directly via {@link sidecarProxyLlmUrl} or
-   * the model's native baseUrl. Only valid for runs that declare no
-   * providers and use a static API key.
-   */
+  /** Skips MCP wiring and `SIDECAR_URL`. Only valid with no providers and a static API key. */
   noSidecar?: boolean;
-  /** Optional JSON Schema — becomes the `output` runtime tool's `data` argument schema. */
   outputSchema?: unknown;
-  /** Forward-proxy URL reachable from the agent container. When set, HTTP(S)_PROXY + NO_PROXY are emitted. */
+  /** Forward-proxy URL. When set, HTTP(S)_PROXY + NO_PROXY are emitted. */
   forwardProxyUrl?: string;
-  /**
-   * Disable Pi SDK's internal retry loop. Defaults to undefined (SDK
-   * retry stays on with `maxRetries: 4`). Opt-in escape hatch for
-   * deployments wiring an external retry layer that would otherwise
-   * stack with the SDK retry and cause amplification on 429.
-   */
+  /** Turn off the Pi SDK's retry loop (default on, `maxRetries: 4`) when wiring an external one. */
   disableModelRetry?: boolean;
-  /**
-   * Hosts excluded from the forward proxy. Required when
-   * {@link forwardProxyUrl} is set on a sidecar-backed run — like
-   * {@link sidecarUrl}, the exclusion list is topology (which hostname
-   * the sidecar answers on), so the orchestrator must supply it.
-   */
+  /** Hosts excluded from the proxy. Required with {@link forwardProxyUrl} on a sidecar run. */
   noProxy?: string;
-  /**
-   * Credentials for the container to post signed {@link RunEvent}s back to
-   * the platform. When set, `runtime-pi/entrypoint.ts` instantiates an
-   * HttpSink against these URLs; the platform no longer parses container
-   * stdout. Both URLs must be reachable from inside the container
-   * (typically `http://host.docker.internal:3000/...` in Docker-for-Mac or
-   * the platform-container hostname on a Docker bridge network).
-   */
   sink?: {
     /** POST target for each {@link RunEvent} — typically `…/api/runs/{runId}/events`. */
     url: string;
-    /** POST target for the terminal `RunResult` — typically `…/api/runs/{runId}/events/finalize`. */
+    /** POST target for the terminal `RunResult` — typically `…/events/finalize`. */
     finalizeUrl: string;
     /** Ephemeral HMAC secret — ASCII base64url, never persisted on the host. */
     secret: string;
   };
-  /**
-   * W3C `traceparent` header (wire format) of the request that spawned
-   * the run. When set, every event/finalize POST emitted by the
-   * container becomes a child span of that trace, enabling end-to-end
-   * correlation across the platform → runner → sidecar boundary.
-   * Forwarded as `TRACEPARENT` env var, consumed by HttpSink at boot.
-   */
+  /** W3C `traceparent` (wire format); the container's event POSTs join that trace. */
   traceparent?: string;
-  /**
-   * Wall-clock execution budget for the run, in seconds. Forwarded as
-   * `AGENT_TIMEOUT_SECONDS`; the entrypoint surfaces it on
-   * `ExecutionContext.timeoutSeconds`, where the runner arms its own
-   * timeout watchdog (measured from the run loop start, so boot is
-   * excluded). Omitted when absent or non-positive — the platform's own
-   * container watchdog stays the only backstop.
-   */
+  /** Wall-clock budget in seconds, measured from the run loop start. Omitted if non-positive. */
   timeoutSeconds?: number;
-  /**
-   * Effective per-file cap (bytes) resolved from the platform's
-   * `DOCUMENT_MAX_FILE_BYTES` env knob. Forwarded as `DOCUMENT_MAX_FILE_BYTES`
-   * so the entrypoint's outputs sweep uses the SAME ceiling the server enforces
-   * on `publish_file` / the `outputs/` sweep — otherwise an operator who
-   * raises the platform cap would see large deliverables silently skipped
-   * client-side (data loss), or a lowered cap would doom uploads mid-stream.
-   * Omitted when absent/non-positive — the entrypoint falls back to its
-   * compiled 100 MiB default.
-   */
+  /** Per-file cap for the outputs sweep; must match the server's `publish_file` ceiling. */
   maxFileBytes?: number;
 }
 
 /**
- * Build the exact env dict `runtime-pi/entrypoint.ts` reads at boot.
+ * Build the exact env dict `runtime-pi/entrypoint.ts` reads at boot. A key is set
+ * only when its source is defined — an absent key keeps the SDK default, so an
+ * empty string would silently override it.
  *
- * Conditional keys (MODEL_INPUT, MODEL_COST, OUTPUT_SCHEMA, etc.) are
- * only set when their source is defined — the entrypoint falls back to
- * SDK defaults when a key is absent, so emitting an empty string would
- * silently override the default.
+ * ADDING A KEY HERE IS A DISCLOSURE DECISION when the run is
+ * {@link RuntimePiModelConfig.aliased}: the agent can print its own environment.
+ * `test/alias-env-allowlist.test.ts` pins the aliased container's complete env as
+ * an exact set, and fails on any new key.
  */
 export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, string> {
   const { model } = opts;
 
+  // An aliased container speaks pi-ai's vendor-neutral protocol instead of the
+  // backing's, which is all `MODEL_API` decides. pi-ai re-derives vendor quirks
+  // per request from `model.provider` + `model.baseUrl`, so the backing's shape
+  // would have the container emit and read that vendor's vocabulary; `pi-messages`
+  // has a closed event union, and the sidecar re-originates against the backing.
+  const api = model.aliased ? ALIAS_CLIENT_API_SHAPE : model.api;
+
   const env: Record<string, string> = {
     AGENT_PROMPT: opts.agentPrompt,
-    MODEL_API: model.api,
+    MODEL_API: api,
     MODEL_ID: model.modelId,
   };
 
   if (!opts.noSidecar) {
-    // No fallback: a Docker-shaped magic default here would silently
-    // misroute process/firecracker runs. The orchestrator's
-    // `IsolationBoundary.sidecarEndpoints` is the single topology owner.
+    // No fallback: a Docker-shaped default here would silently misroute
+    // process/firecracker runs. `IsolationBoundary.sidecarEndpoints` owns topology.
     if (!opts.sidecarUrl) {
       throw new Error(
         "buildRuntimePiEnv: sidecarUrl is required for sidecar-backed runs " +
@@ -181,30 +125,19 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
     env.AGENT_TIMEOUT_SECONDS = String(opts.timeoutSeconds);
   }
 
-  // MODEL_BASE_URL tells the Pi SDK where to send inference. Two cases set it:
-  //   1. Sidecar-backed run — point at the sidecar LLM proxy, which injects the
-  //      real credential and forwards to the upstream provider.
-  //   2. No-sidecar run (static API key, no integrations/proxy) — the agent talks
-  //      to the provider directly, so it needs the model's native endpoint.
-  // Without (2), MODEL_BASE_URL stays empty and the entrypoint falls back to the
-  // Pi SDK's per-`api` default (api.openai.com for `openai-*`), which silently
-  // misroutes every OpenAI-compatible provider with a custom base URL (DeepSeek,
-  // Mistral, z.ai, OpenRouter, …) to OpenAI. See issue #741.
-  // We never emit an empty string: an absent key keeps the SDK default for the
-  // few providers whose native default is already correct.
+  // Where the Pi SDK sends inference: the sidecar LLM proxy when there is one,
+  // else the model's native endpoint on a no-sidecar run. Never an empty string —
+  // an absent key keeps the SDK's per-`api` default, which misroutes every
+  // OpenAI-compatible provider with a custom base URL to api.openai.com.
   if (opts.sidecarProxyLlmUrl) {
     env.MODEL_BASE_URL = opts.sidecarProxyLlmUrl;
   } else if (opts.noSidecar && model.baseUrl) {
     env.MODEL_BASE_URL = model.baseUrl;
   }
   if (model.apiKey) {
-    // Fail closed on the sidecar-proxied path. When LLM traffic is routed
-    // through the sidecar LLM proxy (`sidecarProxyLlmUrl` is set), the sidecar
-    // injects the real credential upstream and the container must only ever
-    // see the placeholder — the raw key must never cross the isolation
-    // boundary the sidecar exists to protect. A caller that forgets the
-    // placeholder here would silently leak the real provider key into the
-    // agent container, so we throw rather than fall back to `model.apiKey`.
+    // Fail closed: the sidecar injects the real credential upstream, so the raw
+    // key must never cross the boundary the sidecar exists to protect. A caller
+    // that forgot the placeholder would leak it into the container silently.
     if (opts.sidecarProxyLlmUrl && !model.apiKeyPlaceholder) {
       throw new Error(
         "buildRuntimePiEnv: model.apiKeyPlaceholder is required when LLM traffic " +
@@ -213,27 +146,38 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
           "or route the run without the sidecar LLM proxy for a static direct key.",
       );
     }
-    // The raw-key fallback is only reachable on the direct (non-proxied) path,
-    // where the agent talks to the provider itself and legitimately needs the
-    // real credential.
+    // The raw-key fallback is reachable only on the direct path, where the agent
+    // talks to the provider itself and needs the real credential.
     const placeholder = model.apiKeyPlaceholder ?? model.apiKey;
     env.MODEL_API_KEY = placeholder;
   }
 
-  // Which provider Pi is really talking to. A sidecar-proxied run replaces
-  // MODEL_BASE_URL with the sidecar's URL, erasing one of Pi's two
-  // provider-detection inputs; without this the container emits plain-OpenAI
-  // shape at every provider (DeepSeek answers `400 unknown variant
-  // 'developer'`). A direct run keeps its real base URL, so Pi's own
-  // detection already works — but the key is correct there too, and the
-  // entrypoint applies the same fallback either way.
-  if (model.providerId) env.MODEL_PROVIDER = model.providerId;
+  // Which provider Pi is really talking to: a sidecar-proxied run replaces
+  // MODEL_BASE_URL with the sidecar's, erasing one of Pi's two detection inputs,
+  // and without this the container emits plain-OpenAI shape at every provider.
+  // An ALIASED run never emits it — naming the vendor is the leak, and there is
+  // nothing left to configure, `pi-messages` having one request shape.
+  if (model.providerId && !model.aliased) env.MODEL_PROVIDER = model.providerId;
 
+  // --- Model-alias masking: the one place the alias policy touches the container
+  // env contract. An alias withholds `MODEL_PROVIDER`, `MODEL_REASONING_LEVEL_MAP`
+  // and `MODEL_COST`, and replaces `MODEL_API` with the canonical dialect.
+  // `MODEL_INPUT` and the two token limits go out unchanged: the container needs
+  // them — dropping `MODEL_INPUT` silently disables image input — and the exact
+  // `usage.input` count it reports out-tells what withholding them could hide.
   if (model.input) env.MODEL_INPUT = JSON.stringify(model.input);
   if (model.contextWindow != null) env.MODEL_CONTEXT_WINDOW = String(model.contextWindow);
   if (model.maxTokens != null) env.MODEL_MAX_TOKENS = String(model.maxTokens);
   if (model.reasoning != null) env.MODEL_REASONING = model.reasoning ? "true" : "false";
-  if (model.reasoningLevelMap && Object.keys(model.reasoningLevelMap).length > 0) {
+  // The native mapping is the VENDOR's own effort vocabulary, and nothing in an
+  // aliased container reads it: the portable level crosses the wire as
+  // `options.reasoning`, and the sidecar applies the backing's mapping. Sibling
+  // `MODEL_REASONING` stays — a container that cannot reason sends no level.
+  if (
+    !model.aliased &&
+    model.reasoningLevelMap &&
+    Object.keys(model.reasoningLevelMap).length > 0
+  ) {
     env.MODEL_REASONING_LEVEL_MAP = JSON.stringify(model.reasoningLevelMap);
   }
   if (opts.generation?.temperature != null) {
@@ -242,7 +186,10 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
   if (opts.generation?.reasoningLevel != null) {
     env.MODEL_REASONING_LEVEL = opts.generation.reasoningLevel;
   }
-  if (model.cost !== undefined && model.cost !== null) {
+  // The published rate card identifies the vendor on its own, so an aliased run is
+  // told nothing about price. Safe because `writeRunnerLedgerRow` computes
+  // `cost_usd` server-side from `runs.model_cost` and the reported token counts.
+  if (!model.aliased && model.cost !== undefined && model.cost !== null) {
     env.MODEL_COST = JSON.stringify(model.cost);
   }
 
@@ -259,8 +206,8 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
   }
 
   if (opts.forwardProxyUrl && !opts.noSidecar) {
-    // Same invariant as sidecarUrl above: the exclusion list names the
-    // sidecar's own host, which only the orchestrator knows.
+    // Same invariant as sidecarUrl above: the exclusion list names the sidecar's
+    // own host, which only the orchestrator knows.
     const { noProxy } = opts;
     if (!noProxy) {
       throw new Error(
@@ -290,25 +237,17 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
     env.TRACEPARENT = opts.traceparent;
   }
 
-  // Forward operator-tunable sidecar caps so the agent container's
-  // runtime-side mirror (afps-runtime/.../http-call-core.ts) agrees with
-  // the sidecar on what counts as "too large" — otherwise large uploads
-  // would fail with a 413 from the sidecar instead of a typed
-  // RESOLVER_BODY_TOO_LARGE caught client-side. The envelope cap stays
-  // sidecar-internal (the runtime never builds JSON-RPC envelopes). The
-  // tool-timeout knob (#779) rides along so the agent→sidecar leg honours
-  // the same per-call budget as the sidecar→runner leg.
+  // Forward the sidecar caps so the container's runtime-side mirror agrees on what
+  // is too large; otherwise a big upload fails with a raw 413 instead of a typed
+  // RESOLVER_BODY_TOO_LARGE caught client-side.
   Object.assign(
     env,
     pickOperatorSidecarEnv(["SIDECAR_MAX_REQUEST_BODY_BYTES", "APPSTRATE_MCP_TOOL_TIMEOUT_MS"]),
   );
 
-  // Forward the operator-tunable tool-result truncation cap (read by
-  // `truncateToolResult` in pi-runner.ts). Tool results are truncated at
-  // WRITE time before they reach the event sink / `run_logs`, so this is
-  // the only knob that controls how much of a tool result survives into
-  // `getRunLogs`. Absent or empty → the runner's compiled 2048-byte
-  // default. Keep below the platform's 32 KB `run_logs.data` cap.
+  // Tool results are truncated at WRITE time, before the event sink, so this is the
+  // only knob controlling how much survives into `run_logs`. Keep it below the
+  // platform's 32 KB `run_logs.data` cap.
   {
     const toolResultLimit = process.env.TOOL_RESULT_BYTE_LIMIT;
     if (toolResultLimit !== undefined && toolResultLimit !== "") {
@@ -320,38 +259,25 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
 }
 
 /**
- * Operator-tunable env vars that the API host forwards from its own
- * `process.env` into spawned sidecar / agent containers. Sidecar-side
- * defaults live in `runtime-pi/sidecar/helpers.ts`; absent keys mean
- * "use the compiled default".
+ * Operator-tunable env vars the API host forwards from its own `process.env` into
+ * spawned containers. Defaults live in `runtime-pi/sidecar/helpers.ts`.
  */
 export const SIDECAR_OPERATOR_ENV_KEYS = [
   "SIDECAR_MAX_REQUEST_BODY_BYTES",
   "SIDECAR_MAX_MCP_ENVELOPE_BYTES",
-  // Runner image refs per MCPB `server.type`. Consumed sidecar-side by
-  // `integration-runtime-adapter-docker.resolveRunnerImage`; absent keys
-  // fall back to the adapter's bare `:latest` defaults (local dev). In
-  // production these carry the versioned GHCR refs so the sidecar can
-  // `docker create` runner containers without a Docker Hub pull.
+  // Runner image refs per MCPB `server.type`, consumed sidecar-side. Absent keys
+  // fall back to bare `:latest` (local dev); production sets versioned GHCR refs.
   "RUNNER_IMAGE_NODE",
   "RUNNER_IMAGE_BUN",
   "RUNNER_IMAGE_PYTHON",
   "RUNNER_IMAGE_UV",
   "RUNNER_IMAGE_BINARY",
-  // Per-call MCP tool timeout override (#779 annex). Consumed sidecar-side
-  // (integration clients, `integrations-boot.toolTimeoutMsFromEnv`) and
-  // agent-side (`runtime-pi/env.ts` → entrypoint's sidecar client), so a
-  // single operator knob widens BOTH legs of a tool call. Absent → the
-  // MCP SDK default applies on each leg.
+  // Per-call MCP tool timeout, read on BOTH legs of a tool call (sidecar-side and
+  // agent-side), so one operator knob widens both. Absent → the MCP SDK default.
   "APPSTRATE_MCP_TOOL_TIMEOUT_MS",
-  // The four below are read INSIDE the sidecar process but were never
-  // forwarded, so under RUN_ADAPTER=docker/firecracker — where the sidecar env
-  // is built from `pickOperatorSidecarEnv()` alone rather than inherited —
-  // setting them had no effect and the sidecar silently used its compiled
-  // default. `.env.example` documented that gap for the two token knobs and
-  // named this list as the fix; `LOG_LEVEL` made every `logger.debug` in the
-  // sidecar permanently unreachable in container mode, including diagnostics
-  // whose own comments say they are "emitted at LOG_LEVEL=debug".
+  // The four below are read INSIDE the sidecar process. Under
+  // RUN_ADAPTER=docker/firecracker its env is built from `pickOperatorSidecarEnv()`
+  // alone rather than inherited, so a key missing here is silently ignored there.
   "LOG_LEVEL",
   "SIDECAR_API_CALL_CONCURRENCY",
   "SIDECAR_INLINE_TOOL_OUTPUT_TOKENS",
@@ -360,18 +286,14 @@ export const SIDECAR_OPERATOR_ENV_KEYS = [
 
 export type SidecarOperatorEnvKey = (typeof SIDECAR_OPERATOR_ENV_KEYS)[number];
 
-/**
- * The operator keys the sidecar parses as a positive integer, and would throw
- * on. Everything else in {@link SIDECAR_OPERATOR_ENV_KEYS} is a string the
- * sidecar either uses verbatim (`RUNNER_IMAGE_*`) or already degrades safely on
- * (`LOG_LEVEL` falls back to `info`; `APPSTRATE_MCP_TOOL_TIMEOUT_MS` returns
- * `undefined` on garbage rather than throwing).
- */
-// Core pino logger read straight from LOG_LEVEL, matching `subprocess-util.ts`:
-// this module is pulled into the firecracker daemon's dependency closure and
-// must not drag in the platform logger's env schema.
+// Core pino logger read straight from LOG_LEVEL: this module is in the firecracker
+// daemon's dependency closure and must not drag in the platform logger's schema.
 const logger = createLogger(process.env.LOG_LEVEL ?? "info");
 
+/**
+ * The operator keys the sidecar parses as a positive integer, and would throw on.
+ * The rest it uses verbatim or already degrades safely on.
+ */
 const NUMERIC_SIDECAR_ENV_KEYS = new Set<SidecarOperatorEnvKey>([
   "SIDECAR_MAX_REQUEST_BODY_BYTES",
   "SIDECAR_MAX_MCP_ENVELOPE_BYTES",
@@ -381,13 +303,8 @@ const NUMERIC_SIDECAR_ENV_KEYS = new Set<SidecarOperatorEnvKey>([
 ]);
 
 /**
- * The condition `readPositiveIntEnv` (`runtime-pi/sidecar/helpers.ts`) requires
- * before it will return instead of throwing, minus the per-key ceiling.
- *
- * Deliberately no stricter than that: this gate only decides whether forwarding
- * is SAFE, so being stricter would silently drop values the sidecar would have
- * honoured, while being looser would let a boot crash through. `Number` is what
- * the sidecar uses, so leading/trailing whitespace is tolerated identically.
+ * What `readPositiveIntEnv` (`runtime-pi/sidecar/helpers.ts`) requires before it
+ * returns instead of throwing, minus the per-key ceiling — no stricter, no looser.
  */
 function isPositiveIntegerEnvValue(value: string): boolean {
   const parsed = Number(value);
@@ -395,36 +312,15 @@ function isPositiveIntegerEnvValue(value: string): boolean {
 }
 
 /**
- * Read the operator-tunable env vars from the host's `process.env` and
- * return a record suitable for spreading into a container env. Empty
- * and undefined values are omitted so the container falls back to the
- * compiled defaults rather than seeing an empty string (which would
- * fail `readPositiveByteEnv` validation and crash the sidecar at boot).
+ * Read the operator-tunable env vars from the host's `process.env` into a record
+ * to spread into a container env; empty and undefined values are omitted.
  *
- * MALFORMED numeric values are omitted for the same reason, and this is
- * load-bearing rather than defensive. The sidecar parses the keys in
- * {@link NUMERIC_SIDECAR_ENV_KEYS} with `readPositiveIntEnv`, which THROWS on
- * anything that is not a positive integer — at module scope, on the boot path,
- * inside no `try`. So a single stale `=0` or `=100_000` would not degrade one
- * feature: it would kill the sidecar process and fail every run.
- *
- * That danger is new for three of these keys. Until they were added to
- * {@link SIDECAR_OPERATOR_ENV_KEYS} they were never forwarded in container
- * mode, and `.env.example` told operators in as many words that setting them
- * "has NO effect — the sidecar falls back to its compiled defaults". Making a
- * documented no-op suddenly load-bearing must not turn a value someone set and
- * forgot into a dead run plane. Falling back to the compiled default is exactly
- * what that operator has been getting all along; the warning is what they were
- * missing.
- *
- * Not covered here: a value that parses but exceeds the sidecar's per-key
- * ceiling still throws at boot. That ceiling is sidecar policy
- * (`ABSOLUTE_BODY_CEILING`) and mirroring it here would be the duplicate this
- * codebase keeps paying for. It is also not a regression — it applies only to
- * the two byte caps, which were already forwarded before.
- *
- * Restrict the returned set with `keys` when only a subset is relevant
- * (e.g. the agent container only needs the request-body cap).
+ * Omitting MALFORMED numeric values is load-bearing, not defensive: the sidecar
+ * parses {@link NUMERIC_SIDECAR_ENV_KEYS} with `readPositiveIntEnv`, which THROWS
+ * at module scope on the boot path, inside no `try`. One stale `=0` would kill the
+ * sidecar process and fail every run. A value passing here can still exceed the
+ * sidecar's per-key `ABSOLUTE_BODY_CEILING` and throw there, so this is not the
+ * whole check.
  */
 export function pickOperatorSidecarEnv(
   keys: readonly SidecarOperatorEnvKey[] = SIDECAR_OPERATOR_ENV_KEYS,

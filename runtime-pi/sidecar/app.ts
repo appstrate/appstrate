@@ -17,16 +17,14 @@ import {
   readRequestBodyBounded,
   type SidecarConfig,
   type LlmProxyOauthConfig,
-  type ModelSwap,
 } from "./helpers.ts";
 import { isBlockedEgressUrl } from "./ssrf.ts";
 import {
-  swapRequestModel,
-  swapResponseModelJson,
-  createSseModelSwapStream,
   syntheticAliasErrorBody,
+  isAliasInferenceCall,
   LLM_PASSTHROUGH_RESPONSE_HEADERS,
 } from "./model-swap.ts";
+import { handlePiMessagesRequest } from "./pi-messages-backend.ts";
 import { applyOauthBearerSwap } from "@appstrate/core/oauth-bearer-swap";
 import {
   DEFAULT_INLINE_OUTPUT_TOKENS,
@@ -144,11 +142,7 @@ interface LlmStreamObservation {
   authMode?: "oauth" | "api_key";
 }
 
-async function passUpstream(
-  upstream: Response,
-  observe?: LlmStreamObservation,
-  swap?: ModelSwap,
-): Promise<Response> {
+async function passUpstream(upstream: Response, observe?: LlmStreamObservation): Promise<Response> {
   const responseHeaders: Record<string, string> = {};
   // Shared upstream-response header allowlist (content-type, retry/backoff,
   // x-request-id) — same posture as the platform LLM gateway; everything else
@@ -168,55 +162,6 @@ async function passUpstream(
 
   if (!upstream.body) {
     return new Response(null, { status: upstream.status, headers: responseHeaders });
-  }
-
-  const contentType = (upstream.headers.get("content-type") ?? "").toLowerCase();
-
-  // Model-alias ERROR bodies are SYNTHESIZED, never forwarded. Provider error
-  // payloads are free-form prose that can name the backing anywhere (model id,
-  // hostname, provider vocabulary) — and an alias's whole point is the agent
-  // never learns the backing. So the upstream body stays server-side (logged
-  // for the operator, truncated) and the agent gets a neutral JSON envelope;
-  // status + allowlisted headers still flow for retry/backoff. Applies to ANY
-  // content type on a non-2xx, mirroring the platform gateway (`llm-proxy/
-  // core.ts`); errors are tiny, so buffering them costs nothing.
-  if (swap && !upstream.ok) {
-    let bodySample = "";
-    try {
-      bodySample = await upstream.text();
-    } catch {
-      // body unreadable — log what we have
-    }
-    // Scrub before logging — on the oauth path this body flowed AFTER the
-    // bearer-swap, so an upstream/proxy error that echoes request material
-    // could carry the real subscription bearer. Same no-leak posture as
-    // `logOauthLlmResponse`.
-    const scrubbedSample = scrubSecretMaterial(bodySample);
-    logger.warn("llm alias: upstream error body replaced by synthetic envelope", {
-      targetUrl: observe?.targetUrl,
-      status: upstream.status,
-      contentType: upstream.headers.get("content-type"),
-      bodySample: scrubbedSample.length > 200 ? scrubbedSample.slice(0, 200) + "…" : scrubbedSample,
-    });
-    // The synthesized body is JSON even when the upstream error was text/html —
-    // the allowlist copied the upstream's content-type, so override it.
-    responseHeaders["Content-Type"] = "application/json";
-    return new Response(syntheticAliasErrorBody(swap, upstream.status), {
-      status: upstream.status,
-      headers: responseHeaders,
-    });
-  }
-
-  // Model-alias swap (response real→alias). A non-stream JSON body can't be
-  // rewritten chunk-by-chunk — buffer the whole thing, swap, re-serialize. SSE
-  // is rewritten in-stream below (frame-buffered). Other content types and the
-  // no-swap path keep the zero-copy telemetry passthrough.
-  if (swap && contentType.includes("application/json") && !contentType.includes("event-stream")) {
-    const text = await upstream.text();
-    const rewritten = swapResponseModelJson(text, swap);
-    // Length changed by the rewrite — let Response recompute Content-Length
-    // rather than forward a now-wrong upstream value.
-    return new Response(rewritten, { status: upstream.status, headers: responseHeaders });
   }
 
   const reader = upstream.body.getReader();
@@ -276,16 +221,7 @@ async function passUpstream(
     },
   });
 
-  // Model-alias swap on a streaming (SSE) body: rewrite `model` real→alias in
-  // each frame as it flows. Frame-buffered, so a chunk boundary mid-frame is
-  // handled. The telemetry passthrough (`observed`) stays in front so stream
-  // metrics still reflect the upstream timing.
-  const body =
-    swap && contentType.includes("event-stream")
-      ? observed.pipeThrough(createSseModelSwapStream(swap))
-      : observed;
-
-  return new Response(body, { status: upstream.status, headers: responseHeaders });
+  return new Response(observed, { status: upstream.status, headers: responseHeaders });
 }
 
 /**
@@ -326,22 +262,16 @@ async function logOauthLlmResponse(
   return upstream;
 }
 
-function llmFetchErrorResponse(
-  c: Context,
-  targetUrl: string,
-  err: unknown,
-  swap?: ModelSwap,
-): Response {
+function llmFetchErrorResponse(c: Context, targetUrl: string, err: unknown): Response {
   const code = err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
   let domain: string | undefined;
   try {
     domain = new URL(targetUrl).hostname;
   } catch {}
   const suffix = code ? `: ${code}` : "";
-  // The hostname identifies the backing provider; with an alias it must never
-  // reach the agent. The error `code` (e.g. ConnectionRefused) is generic and
-  // stays — it's useful and names nothing.
-  const domainHint = domain && !swap ? ` (${domain})` : "";
+  // Only non-aliased requests reach an upstream fetch here, so the hostname
+  // keeps its debugging value.
+  const domainHint = domain ? ` (${domain})` : "";
   return c.json({ error: `LLM request failed${suffix}${domainHint}` }, 502);
 }
 
@@ -397,7 +327,7 @@ async function bufferLlmBodyBytesBounded(
   return bytes;
 }
 
-/** Decode a bounded JSON body for the API-key model-alias rewrite path. */
+/** Decode a bounded JSON body as text. */
 async function bufferLlmBodyBounded(c: Context, maxBytes: number): Promise<string | Response> {
   const bytes = await bufferLlmBodyBytesBounded(c, maxBytes);
   if (bytes instanceof Response) return bytes;
@@ -409,29 +339,19 @@ async function bufferLlmBodyBounded(c: Context, maxBytes: number): Promise<strin
  * `/llm` mount prefix, re-append the query string onto the configured base URL,
  * and surface the method. Shared by both `/llm` branches (api_key + oauth);
  * each keeps its own SSRF check (`isBlockedEgressUrl`) and credential handling.
+ *
+ * The stripped `path` is returned alongside the composed URL because the alias
+ * surface check needs exactly that suffix — the same one the in-container SDK
+ * appended to `MODEL_BASE_URL` — and recomputing the slice at the call site
+ * would be a second place for the two to disagree.
  */
-function deriveLlmTarget(c: Context, baseUrl: string): { targetUrl: string; method: string } {
+function deriveLlmTarget(
+  c: Context,
+  baseUrl: string,
+): { targetUrl: string; method: string; path: string } {
   const path = c.req.path.slice("/llm".length) || "/";
   const qs = new URL(c.req.url).search;
-  return { targetUrl: `${baseUrl}${path}${qs}`, method: c.req.method };
-}
-
-/**
- * Buffer an inbound `/llm` request body under the hard byte cap and apply the
- * model-alias swap when one is configured; otherwise return the buffered text
- * verbatim. Returns a 413 `Response` (the caller returns it verbatim) when the
- * body exceeds the cap, or `undefined` for an empty body. api_key-only: the
- * oauth branch buffers via `bufferLlmBodyBounded` directly (401 replay) and
- * never swaps — its config carries no `modelSwap`.
- */
-async function bufferAndSwapRequestBody(
-  c: Context,
-  modelSwap: ModelSwap | undefined,
-): Promise<string | undefined | Response> {
-  const buffered = await bufferLlmBodyBounded(c, MAX_REQUEST_BODY_SIZE);
-  if (buffered instanceof Response) return buffered;
-  const text = buffered;
-  return text && modelSwap ? swapRequestModel(text, modelSwap) : text || undefined;
+  return { targetUrl: `${baseUrl}${path}${qs}`, method: c.req.method, path };
 }
 
 /**
@@ -601,7 +521,64 @@ export function createApp(deps: AppDeps): Hono {
     }
 
     const apiKeyConfig = config.llm; // discriminated narrowing
-    const { targetUrl, method } = deriveLlmTarget(c, apiKeyConfig.baseUrl);
+    const { targetUrl, method, path } = deriveLlmTarget(c, apiKeyConfig.baseUrl);
+
+    // ALIASED runs get a narrowed `/llm/*` surface, not a passthrough. The
+    // agent needs the inference endpoint to do its job; everything else the
+    // vendor happens to serve on the same base URL is opacity it was never
+    // promised — `GET /v1/models` alone returns the vendor's catalogue.
+    // Refused HERE, before the header filter swaps the placeholder for the
+    // real key and before any upstream fetch: the credential must not be
+    // spent on a request we are about to reject.
+    //
+    // Non-aliased runs keep the verbatim passthrough — their contract is
+    // reaching the provider, not hiding it.
+    if (apiKeyConfig.modelSwap) {
+      const swap = apiKeyConfig.modelSwap;
+      if (!isAliasInferenceCall(method, path)) {
+        logger.warn("llm alias: non-inference request refused", {
+          method,
+          path,
+          // The CLIENT protocol only. `backingApiShape` narrows the candidate
+          // vendor set and these logs are operator-visible on a surface whose
+          // whole contract is that the backing stays private.
+          clientApiShape: swap.clientApiShape,
+        });
+        // Same neutral envelope as every other alias refusal — a distinct
+        // shape would itself be a signal to probe with. 404 reads as "no such
+        // endpoint here", which is the truth of the narrowed surface.
+        return new Response(syntheticAliasErrorBody(swap, 404), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // An alias is TERMINATED here, never proxied: the container emits pi-ai's
+      // vendor-neutral `pi-messages` so no vendor request shape or response
+      // dialect ever reaches it, and the sidecar re-originates the call against
+      // the real backing through pi-ai (`pi-messages-backend.ts`). Everything
+      // below — the placeholder→key header swap, the body forward, the response
+      // passthrough — serves non-aliased runs only.
+      const buffered = await bufferLlmBodyBounded(c, MAX_REQUEST_BODY_SIZE);
+      if (buffered instanceof Response) return buffered;
+      return handlePiMessagesRequest(
+        {
+          llm: apiKeyConfig,
+          swap,
+          // Token limits the backend needs to size the upstream call.
+          limits: {
+            ...(config.modelContextWindow !== undefined
+              ? { modelContextWindow: config.modelContextWindow }
+              : {}),
+            ...(config.modelMaxTokens !== undefined
+              ? { modelMaxTokens: config.modelMaxTokens }
+              : {}),
+          },
+        },
+        c.req.raw,
+        buffered,
+      );
+    }
 
     const filtered = filterHeaders(c.req.header());
     const forwardedHeaders: Record<string, string> = {};
@@ -611,22 +588,10 @@ export function createApp(deps: AppDeps): Hono {
         : value;
     }
 
-    // Model-alias swap (request alias→real). The body is normally forwarded as
-    // a zero-copy ReadableStream; for an alias we must buffer it to rewrite the
-    // `model` field. Only aliases pay that cost — every other model stays
-    // zero-copy.
-    let body: string | ReadableStream<Uint8Array> | undefined;
+    // Zero-copy body forward — nothing here rewrites the request.
+    let body: ReadableStream<Uint8Array> | undefined;
     if (method !== "GET" && method !== "HEAD") {
-      if (apiKeyConfig.modelSwap) {
-        // Buffer under a hard byte cap (Content-Length precheck + bounded
-        // streaming read → 413) before the model-alias rewrite. A bare
-        // `.text()` here would buffer an unbounded body into memory.
-        const swapped = await bufferAndSwapRequestBody(c, apiKeyConfig.modelSwap);
-        if (swapped instanceof Response) return swapped;
-        body = swapped;
-      } else {
-        body = c.req.raw.body ?? undefined;
-      }
+      body = c.req.raw.body ?? undefined;
     }
 
     let upstream: Response;
@@ -650,10 +615,10 @@ export function createApp(deps: AppDeps): Hono {
         ...(body instanceof ReadableStream ? { duplex: "half" } : {}),
       });
     } catch (err) {
-      return llmFetchErrorResponse(c, targetUrl, err, apiKeyConfig.modelSwap);
+      return llmFetchErrorResponse(c, targetUrl, err);
     }
 
-    return passUpstream(upstream, { targetUrl, authMode: "api_key" }, apiKeyConfig.modelSwap);
+    return passUpstream(upstream, { targetUrl, authMode: "api_key" });
   });
 
   // OAuth: resolve the real subscription bearer and swap it onto the request,

@@ -40,7 +40,6 @@ import {
   prepareBundleForPi,
   buildRuntimeToolExtensions,
   buildPublishFileExtension,
-  derivePiProvider,
   emitRuntimeReady,
   emitBootProgress,
   startSinkHeartbeat,
@@ -56,6 +55,7 @@ import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-transport";
 import {
+  buildPiModelFromEnv,
   parseRuntimeEnv,
   RuntimeEnvError,
   scrubSinkEnv,
@@ -140,7 +140,8 @@ try {
 // SUCCEEDS, before anything else runs, so a degraded-but-valid configuration is
 // visible at the top of the run's log. The fatal channel above is untouched:
 // these are conditions the run can legitimately proceed under (today: no
-// `MODEL_COST`, i.e. every cost this run reports will be 0).
+// `MODEL_COST`, i.e. this run reports no cost of its own and the platform
+// prices it server-side).
 for (const warning of env.warnings) {
   logLine("warn", "runtime_env_warning", { warning });
 }
@@ -682,27 +683,9 @@ if (declaredRuntimeTools.includes("publish_file")) {
 
 // --- 3. Model + system prompt from env ---
 
-const api = env.modelApi;
-const modelId = env.modelId;
 const systemPrompt = env.agentPrompt;
 
-const model: Model<Api> = {
-  id: modelId,
-  name: modelId,
-  api: api as Api,
-  // Pi SDK AuthStorage key AND its provider-detection input: Pi re-derives
-  // each provider's request shape from `provider` + `baseUrl`, and on a
-  // proxied run `baseUrl` is the sidecar's. Prefer the real backing provider
-  // the platform named, falling back to the api shape's generic key.
-  provider: derivePiProvider(env.modelProvider, api),
-  baseUrl: env.modelBaseUrl ?? "",
-  reasoning: env.modelReasoning,
-  ...(env.modelReasoningLevelMap ? { thinkingLevelMap: env.modelReasoningLevelMap } : {}),
-  input: [...env.modelInput],
-  cost: env.modelCost,
-  contextWindow: env.modelContextWindow,
-  maxTokens: env.modelMaxTokens,
-};
+const model: Model<Api> = buildPiModelFromEnv(env);
 
 // --- 4. Build ExecutionContext from env ---
 
@@ -798,6 +781,9 @@ function buildPiRunner(): PiRunner {
   return createRuntimePiRunner({
     sidecarUrl,
     model,
+    // No rates reached this container (unpriced model, or a withheld alias
+    // rate card). Report no cost rather than a placeholder $0.
+    ...(env.modelCost === undefined ? { unpriced: true } : {}),
     apiKey: env.modelApiKey,
     systemPrompt,
     ...(env.modelTemperature !== undefined ? { temperature: env.modelTemperature } : {}),

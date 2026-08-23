@@ -38,9 +38,10 @@ import {
   type Transport,
 } from "./pi-sdk.ts";
 import { scheduleDeadlineNudges } from "./deadline-nudges.ts";
+import { ALIAS_PI_PROVIDER_KEY, PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "./provider-map.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import {
-  anthropicReasoningBudgetTokens,
+  anthropicThinkingBudgets,
   type ModelReasoningLevel,
 } from "@appstrate/core/model-generation";
 import { deriveResponseReserveTokens } from "@appstrate/core/token-budget";
@@ -125,9 +126,10 @@ function prepareAnthropicThinkingBudgets(
   model: PiModelConfig,
   level: ModelReasoningLevel,
 ): PiThinkingBudgets | undefined {
-  if (model.api !== "anthropic-messages" || level === "off") return undefined;
-  const piLevel: PiThinkingBudgetLevel = level === "xhigh" || level === "max" ? "high" : level;
-  return { [piLevel]: anthropicReasoningBudgetTokens(level) };
+  if (model.api !== "anthropic-messages") return undefined;
+  // The rule lives in core: the sidecar applies the identical one when it
+  // re-originates an aliased run, whose container never reaches this branch.
+  return anthropicThinkingBudgets(level);
 }
 
 /**
@@ -186,12 +188,25 @@ export function prepareRequestedThinkingLevel(
  * deliberately refuses it. Appstrate already resolves and refreshes that
  * OAuth bearer outside Pi; a process-local provider overlay exposes the token
  * as request auth without persisting it or replacing Codex's native serializer.
+ *
+ * {@link ALIAS_PI_PROVIDER_KEY} needs `registerProvider` for a different
+ * reason: `setRuntimeApiKey` only overlays an EXISTING provider, so a canonical
+ * key pi knows no vendor for is dropped and `prepareRequest` later throws.
  */
 export async function setPiRuntimeCredential(
   modelRuntime: ModelRuntime,
   provider: string,
   apiKey: string,
 ): Promise<void> {
+  if (provider === ALIAS_PI_PROVIDER_KEY) {
+    // Provider-config headers are the only ones `pi-messages` puts on the wire.
+    // Alias-only: this header must never reach `openai-codex`.
+    modelRuntime.registerProvider(provider, {
+      apiKey,
+      headers: { [PI_SDK_VERSION_HEADER]: PI_SDK_VERSION },
+    });
+    return;
+  }
   if (provider === "openai-codex") {
     modelRuntime.registerProvider(provider, { apiKey });
     return;
@@ -204,6 +219,12 @@ export interface PiRunnerOptions {
   model: PiModelConfig;
   /** LLM API key. Registered on the runner's {@link ModelRuntime} under `model.provider`. */
   apiKey?: string;
+  /**
+   * No per-token rates for {@link model}; its zero rates are a placeholder the
+   * Pi SDK's required `Model.cost` forced, so the runner omits cost entirely
+   * rather than reporting a fabricated `0`. Token counts are unaffected.
+   */
+  unpriced?: boolean;
   /**
    * Agent's system prompt. This is the static instruction Pi SDK stores
    * on every session; in Appstrate it is the full enriched prompt built
@@ -635,6 +656,7 @@ export class PiRunner implements Runner {
     const bridge = installSessionBridge(session, internalSink, context.runId, {
       terminalTools,
       contextWindow: budget.contextWindow,
+      ...(this.opts.unpriced ? { unpriced: true } : {}),
       // Early-stop: abort the SDK loop as soon as a terminal tool has
       // executed successfully. `session.abort()` resolves once the agent
       // is idle; detached because the bridge callback is synchronous.
@@ -1041,8 +1063,11 @@ export interface SessionBridgeHandle {
   readonly terminalToolCompleted: boolean;
   /** Snapshot of token usage accumulated across the session so far. */
   getUsage(): TokenUsage;
-  /** Snapshot of total LLM cost in USD accumulated across the session so far. */
-  getCost(): number;
+  /**
+   * Snapshot of total LLM cost in USD accumulated so far, or `undefined` on an
+   * {@link SessionBridgeOptions.unpriced} session (the total is placeholder zeros).
+   */
+  getCost(): number | undefined;
   /**
    * Wait until every fire-and-forget `sink.emit(event)` dispatched from
    * the Pi SDK subscribe callback has settled. The Pi SDK callback runs
@@ -1266,6 +1291,8 @@ interface SessionBridgeOptions {
    * it.
    */
   contextWindow?: number;
+  /** No rates back this session's model — see {@link PiRunnerOptions.unpriced}. */
+  unpriced?: boolean;
 }
 
 export function installSessionBridge(
@@ -1286,6 +1313,9 @@ export function installSessionBridge(
   // zero-shape) — assistant turns AND compaction passes.
   const totalUsage: TokenUsage = zeroTokenUsage();
   let totalCost = 0;
+  // Single place the unpriced decision is applied: every emit path reads through
+  // this, so none can leak the placeholder zero. `undefined` omits the field.
+  const reportedCost = (): number | undefined => (options.unpriced ? undefined : totalCost);
 
   /**
    * Fold one Pi `Usage` into the run totals and report its deltas.
@@ -1399,7 +1429,7 @@ export function installSessionBridge(
           // payload would be identical to the previous one and waste
           // a NOTIFY round-trip.
           if (inputDelta > 0 || outputDelta > 0) {
-            fire(buildMetric({ runId, timestamp: Date.now() }, { ...totalUsage }, totalCost));
+            fire(buildMetric({ runId, timestamp: Date.now() }, { ...totalUsage }, reportedCost()));
 
             // Per-turn context-growth breadcrumb. Shares the metric's gate on
             // purpose — a turn the SDK reported with no counters has nothing to
@@ -1505,7 +1535,7 @@ export function installSessionBridge(
             outputTokens: usage.output ?? 0,
           },
         });
-        fire(buildMetric({ runId, timestamp: Date.now() }, { ...totalUsage }, totalCost));
+        fire(buildMetric({ runId, timestamp: Date.now() }, { ...totalUsage }, reportedCost()));
         break;
       }
 
@@ -1568,7 +1598,7 @@ export function installSessionBridge(
       }
 
       case "agent_end": {
-        fire(buildMetric({ runId, timestamp: Date.now() }, { ...totalUsage }, totalCost));
+        fire(buildMetric({ runId, timestamp: Date.now() }, { ...totalUsage }, reportedCost()));
         break;
       }
 
@@ -1584,8 +1614,8 @@ export function installSessionBridge(
     getUsage(): TokenUsage {
       return { ...totalUsage };
     },
-    getCost(): number {
-      return totalCost;
+    getCost(): number | undefined {
+      return reportedCost();
     },
     getTerminalError(): RunError | undefined {
       // Verdict on the LAST assistant turn. `isTerminalErrorStop` /

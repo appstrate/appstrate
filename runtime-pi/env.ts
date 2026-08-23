@@ -16,6 +16,8 @@
  */
 
 import { getErrorMessage } from "@appstrate/core/errors";
+import { derivePiProvider } from "@appstrate/runner-pi/provider-map";
+import type { Api, Model } from "./pi-sdk.ts";
 import { MODEL_API_SHAPES } from "@appstrate/core/sidecar-types";
 import {
   modelNativeReasoningLevelSchema,
@@ -52,8 +54,12 @@ interface RuntimeEnv {
   modelProvider?: string;
   /** Pi SDK input modalities. */
   modelInput: ReadonlyArray<"text" | "image">;
-  /** Per-token cost (input/output/cacheRead/cacheWrite USD). */
-  modelCost: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  /**
+   * Per-token cost (input/output/cacheRead/cacheWrite USD), or ABSENT when the
+   * platform resolved no rates — unpriced, or aliased (the published rate card
+   * names the vendor). Absent means the run reports no cost, never a fake 0.
+   */
+  modelCost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
   /** Pi SDK context window in tokens. */
   modelContextWindow: number;
   /** Pi SDK max completion tokens. */
@@ -213,22 +219,20 @@ function parseModelCost(
   raw: string | undefined,
   issues: string[],
   warnings: string[],
-): { input: number; output: number; cacheRead: number; cacheWrite: number } {
+): { input: number; output: number; cacheRead: number; cacheWrite: number } | undefined {
   const fallback = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   if (!raw) {
-    // The platform only sets MODEL_COST when the resolved model carries rates
-    // (`buildRuntimePiEnv`), so an absent var means the model could not be
-    // priced. The all-zero fallback below is arithmetically fine but silent:
-    // every metric event this run emits will report cost 0, indistinguishable
-    // from a genuinely free model. Report it — non-fatally, see
-    // {@link RuntimeEnv.warnings}. (Server-side, the same run's ledger row is
-    // stamped `pricing_status='unpriced'` from `runs.model_cost`; this line is
-    // the in-container half of the same fact, for operators reading logs.)
+    // The platform sets MODEL_COST only when the model carries rates AND the
+    // run may see them (an aliased model's card names the vendor it hides).
+    // `undefined`, not zeros: a fake `cost: 0` is indistinguishable from a free
+    // model and trips the ledger's cost-divergence warning on an aliased run.
+    // Server-side the same run's ledger row is stamped `pricing_status='unpriced'`
+    // from `runs.model_cost`; this line is its in-container half, for operators.
     warnings.push(
-      "MODEL_COST: absent — no per-token pricing was resolved for this model; " +
-        "this run's reported cost will be 0 regardless of tokens consumed",
+      "MODEL_COST: absent — no per-token pricing reached this container; " +
+        "this run reports no cost of its own (the platform prices it server-side)",
     );
-    return fallback;
+    return undefined;
   }
   let parsed: unknown;
   try {
@@ -415,7 +419,7 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     ...(modelReasoningLevelMap ? { modelReasoningLevelMap } : {}),
     ...(source.MODEL_PROVIDER ? { modelProvider: source.MODEL_PROVIDER } : {}),
     modelInput,
-    modelCost,
+    ...(modelCost !== undefined ? { modelCost } : {}),
     modelContextWindow,
     modelMaxTokens,
     agentPrompt: agentPrompt!,
@@ -426,6 +430,31 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     ...(mcpToolTimeoutMs > 0 ? { mcpToolTimeoutMs } : {}),
     traceparent: source.TRACEPARENT || undefined,
     warnings,
+  };
+}
+
+/**
+ * Build the Pi SDK `Model` record the session is driven with; its `provider` +
+ * `baseUrl` decide the vendor request shape pi-ai emits.
+ */
+export function buildPiModelFromEnv(env: RuntimeEnv): Model<Api> {
+  return {
+    id: env.modelId,
+    name: env.modelId,
+    api: env.modelApi as Api,
+    // Pi re-derives each provider's request shape from `provider` + `baseUrl`.
+    // An aliased container is given no MODEL_PROVIDER and must derive none: the
+    // api-shape fallback yields Appstrate's own key, naming no vendor.
+    provider: derivePiProvider(env.modelProvider, env.modelApi),
+    baseUrl: env.modelBaseUrl ?? "",
+    reasoning: env.modelReasoning,
+    ...(env.modelReasoningLevelMap ? { thinkingLevelMap: env.modelReasoningLevelMap } : {}),
+    input: [...env.modelInput],
+    // `Model.cost` is REQUIRED by the Pi SDK on every settled turn, so an unpriced
+    // run still hands it zeros; the runner's `unpriced` flag stops the 0 escaping.
+    cost: env.modelCost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: env.modelContextWindow,
+    maxTokens: env.modelMaxTokens,
   };
 }
 

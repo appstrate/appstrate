@@ -27,32 +27,113 @@ There are two threat models against that requirement.
   provider/endpoint/model id. **Closed.** The read projection leaves only the
   alias identity plus the portable generation-support vector (see
   `projectAliasedModel`); every binding, pricing and catalog field is `null`.
-- **Threat B — the agent runtime (adversarial code inside the container).**
-  **NOT met today — tracked in appstrate#1198.** The agent needs _some_
-  protocol information to format requests, so a container that speaks the
-  vendor's dialect necessarily observes something about it. What it observes
-  today is wider than that necessity:
+- **Threat B — the agent runtime (adversarial code inside the container).** The
+  agent needs _some_ protocol information to format requests. It gets a
+  vendor-neutral dialect against the sidecar's own endpoint, with no rate card.
+  This is not merely a sandbox-escape concern — the agent's own logs are an
+  Appstrate surface, so an org member who prints the container env reads
+  whatever is in it from the dashboard.
 
-  | reaches the container                       | example (aliased `Appstrate Flash`)              | effect                                         |
-  | ------------------------------------------- | ------------------------------------------------ | ---------------------------------------------- |
-  | `MODEL_PROVIDER`                            | `deepseek`                                       | **names the vendor** (added by appstrate#1196) |
-  | `MODEL_COST`                                | `{"input":0.28,"output":0.42,"cacheRead":0.028}` | **identifies** it — published rate card        |
-  | `MODEL_CONTEXT_WINDOW` / `MODEL_MAX_TOKENS` | `131072` / `8192`                                | identifies it together with the rates          |
-  | `MODEL_API`                                 | `openai-completions`                             | narrows the candidate set                      |
-  | success response body                       | `reasoning_content`                              | vendor vocabulary — structural                 |
+Threat B splits in two, and keeping the halves apart is what makes the
+requirement writable at all: **what the platform discloses** to the container
+(closed, inventoried and CI-gated) versus **what an observer can infer** from
+the model's own behaviour (irreducible). Both are written out under
+"[Threat B in two tiers](#threat-b-in-two-tiers)" at the end of this page; the
+mechanism that closed the first half is the next three sections.
 
-  The response path is NOT the hole: headers are reduced to
-  `LLM_PASSTHROUGH_RESPONSE_HEADERS`, error surfaces are synthesized rather
-  than forwarded, and the `model` field is swapped back to the alias. The hole
-  is the request-side metadata above, and the fact that the container formats
-  requests in the vendor's own dialect.
+## The canonical dialect
 
-  Closing it means the sidecar translating **both** directions — request shape
-  AND response dialect — so the container can stay generic. That is a design
-  change, not a patch; appstrate#1198 carries the inventory, the plan, and the
-  two open questions (whether `MODEL_COST` can be masked without breaking run
-  accounting, and how to keep a compaction-usable context window without
-  handing over an exact fingerprint).
+pi-ai re-derives every vendor quirk **per request** from `model.provider` +
+`model.baseUrl` (`getCompat` / `detectCompat`). A container handed the real
+provider id therefore emits that vendor's own request shape and reads its own
+response frames back — `reasoning_content` vs `reasoning`,
+`prompt_cache_hit_tokens` vs `prompt_tokens_details.cached_tokens`, and fields
+pi-ai never even reads (`system_fingerprint` appears nowhere in it) that still
+cross the wire. Renaming identifying fields would be a **blacklist over a set
+nobody can enumerate**: that set is a property of 14 live vendor APIs, not of
+our source.
+
+So the container speaks a different protocol. pi-ai ships one of its own —
+**`pi-messages`**, a first-class `KnownApi` its source documents as usable by
+any backend, not just the Radius gateway:
+
+- **Request**: `POST <baseUrl>/messages`, `authorization: Bearer <apiKey>`, body
+  `{ model, context, options }` — the model ID only, never the Model record.
+  Zero vendor vocabulary and zero provider/baseUrl branching in the whole
+  implementation.
+- **Response**: an SSE stream of `PiMessagesEvent`, a CLOSED union (`start` /
+  `text_*` / `thinking_*` / `toolcall_*` / `done` / `error`). Nothing
+  vendor-shaped can ride in it. The container reconstructs provider/api/model
+  from its own local Model, never from the wire.
+
+For an aliased run the launcher therefore emits `MODEL_API=pi-messages` and no
+`MODEL_PROVIDER`; the container's Pi model resolves its provider key from
+`PROVIDER_BY_API["pi-messages"]`, which is Appstrate's own `appstrate` — a key
+naming no vendor. Because pi has no builtin for it, the credential must go in
+through `ModelRuntime.registerProvider` rather than `setRuntimeApiKey` (an
+overlay on an EXISTING provider, which for an unknown id deletes the provider
+and fails at request time with `Unknown provider`); `setPiRuntimeCredential`
+handles both that key and `openai-codex` through the same door.
+
+The **sidecar** is the `pi-messages` backend. An aliased run's inference call is
+**terminated and re-originated, never proxied**: `POST /llm/messages` — inside
+the same `/llm/*` handler the surface allowlist already guards, reusing its
+placeholder→real-key swap and SSRF check — deserialises `{model, context,
+options}`, rebuilds the REAL backing's pi-ai `Model` record from the private
+swap descriptor, calls pi-ai's own `streamSimple`, and projects the resulting
+`AssistantMessageEvent`s down to `PiMessagesEvent`s. Everything else in that
+handler (header swap, body forward, response passthrough) serves non-aliased
+runs only. **No quirk table is mirrored anywhere**: `detectCompat` and every
+per-vendor serializer keep running inside pi-ai, one process to the left of the
+container. The projection is a whitelist (each outbound event built field by
+field, never a spread) because pi-ai's `partial` carries `api`, `provider` and
+the real model id on every single event, and because a spread would ship the
+next pi-ai version's new field to the container silently.
+
+Three properties the backend must hold, each with a behavioral CI gate on the
+always-on unit job:
+
+- **`done` carries the real usage.** The platform prices `llm_usage.cost_usd`
+  from those counts. The two OPTIONAL `Usage` members are dropped instead —
+  `cacheWrite1h` is Anthropic-only and `reasoning` is reported only by providers
+  that expose a breakdown, so each is a vendor tell; neither is priced.
+  `usage.cost` is zeroed, and the rebuilt Model carries zero rates, so no rate
+  card can travel.
+- **Errors name nothing.** pi-ai's own error paths interpolate `model.provider`
+  (`No API key provided for provider "<x>"`). The `error` event's message is
+  REPLACED with `syntheticAliasErrorMessage`, same whitelist posture as every
+  other alias error surface. The response stays `200 + SSE` even on failure:
+  pi-ai's `pi-messages` reader treats a non-2xx as a transport failure and never
+  reaches the terminal event, so a refusal must arrive as an error EVENT to read
+  as a failed turn rather than an opaque one.
+- **Re-origination is byte-identical to a native call.**
+  `runtime-pi/sidecar/test/pi-messages-backend.test.ts` captures the request the
+  sidecar originates through pi-ai's `onPayload` hook and compares it against
+  the payload a direct call for the same backing produces, per protocol family.
+  `runtime-pi/test/alias-dialect-opacity.test.ts` is its mirror on the other
+  side: it builds the container model from `buildRuntimePiEnv`'s ACTUAL output
+  and asserts the captured payload is identical across every backing vendor.
+  Both are behavioral — this design transcribes nothing from pi-ai, so it must
+  not acquire a source-text oracle that fires on cosmetic upstream
+  reformatting.
+
+One knob has to be restored on this side rather than forwarded: a classic
+Anthropic call needs a request-scoped thinking budget, and `PiMessagesOptions`
+models none. The rule lives in `anthropicThinkingBudgets`
+(`@appstrate/core/model-generation`) and is applied by the runner on the direct
+path and by the sidecar on the re-originated one.
+
+Two fields deliberately do NOT cross: `toolChoice` (its value space differs per
+vendor, so honouring it would mean the per-vendor mapping table this design
+exists to avoid) and `debug` (which asks a backend for routing metadata about
+itself — the one thing an alias boundary exists not to answer). Neither is
+dropped in silence: `warnOnDiscardedRequestFields` logs the **set difference**
+between what arrived and what this boundary forwards, so an option a future
+pi-ai adds is reported the day it appears rather than vanishing with the tool
+constraint the agent asked for. It warns rather than rejects — these fields are
+advisory in practice, and failing the request would break every aliased run on a
+pi upgrade. The log names fields only, never values or any model identifier:
+sidecar logs are operator-visible and the alias contract holds there too.
 
 ## How resolution works
 
@@ -68,18 +149,22 @@ the alias never reaches upstream. Two layers hide the backing from users:
    of possible backing models, an accepted limitation of making aliases
    configurable without revealing their exact binding. The operator
    create/update responses keep the full shape.
-2. **Inference-path swap** (`@appstrate/core/model-swap`) — rewrites the `model`
-   field alias→real on the request and real→alias on the response, on **both**
-   inference paths:
-   - the in-container **sidecar** proxy (agent runs), and
+2. **Inference-path handling** (`@appstrate/core/model-swap`) — different on the
+   two paths, and the difference is the point:
+   - the **sidecar** (agent runs) TERMINATES the container's canonical dialect
+     and re-originates against the backing, so there is no alias left in a body
+     to rewrite; and
    - the platform **LLM gateway** `/api/llm-proxy/*` (direct API/dashboard
-     calls).
+     calls) PROXIES — its caller already speaks the backing's protocol — so it
+     rewrites `model` alias→real on the request and real→alias on every
+     response branch, including the cached body.
 
 For an adaptive Anthropic backing, an agent-side Pi session cannot infer the
-transport from the public alias id. The run launcher therefore adds only the
-catalogued native effort to the sidecar's private swap descriptor; the sidecar
-restores `thinking.type: "adaptive"` and `output_config.effort` while swapping
-the request model. Neither the backing id nor the adaptive flag enters the
+transport from the public alias id, so the run launcher records the fact on the
+sidecar's private swap descriptor (`anthropicAdaptiveReasoning`). The sidecar
+sets pi-ai's `compat.forceAdaptiveThinking` on the rebuilt Model and pi-ai emits
+the adaptive shape itself, resolving the effort from the backing's own
+`thinkingLevelMap`. Neither the backing id nor the adaptive flag enters the
 agent container.
 
 The usage ledger (`llm_usage`) keeps the real id privately in `real_model` for
@@ -106,22 +191,28 @@ neutral synthesized envelope (`syntheticAliasErrorBody`):
 ```
 
 This is a whitelist by construction — a scrub would be a blacklist where every
-forgotten surface is a new leak. Concretely:
+forgotten surface is a new leak.
 
-- **Non-2xx upstream bodies** (sidecar + gateway) → envelope at the upstream
-  status; the original body goes to server logs (truncated).
+On the **gateway** (`/api/llm-proxy/*`), which proxies a real upstream response:
+
+- **Non-2xx upstream bodies** → envelope at the upstream status; the original
+  body goes to server logs (truncated).
 - **Mid-stream SSE error frames** (Anthropic `type:"error"`, OpenAI-family
   standalone top-level `error`, OpenAI Responses `response.failed`/
   `response.incomplete` with a nested `response.error`) → replaced in-stream.
   Frames carrying `choices` are content and stay on the exact-field path.
-- **Fetch-level failures** (ConnectionRefused / DNS / TLS, sidecar-synthesized 502) → the error `code` survives, the `(hostname)` hint is dropped.
 - **Response headers** → reduced to the shared allowlist
   (`LLM_PASSTHROUGH_RESPONSE_HEADERS`: content-type, retry/RateLimit family,
   x-request-id); `server`, `cf-ray`, `anthropic-*`, `openai-organization`, …
   fingerprint the backing and are dropped.
-- **Locally-synthesized gateway messages** (protocol mismatch, SSRF refusal,
+- **Locally-synthesized messages** (protocol mismatch, SSRF refusal,
   OAuth-subscription rejection, credential label fallback) name the alias only;
   the backing detail is server-log-only.
+
+On the **sidecar** there is no upstream response to sanitize — an aliased run
+never receives one. Its three surfaces are all locally synthesized: a `404` for
+a non-inference call on the narrowed `/llm/*` surface, a `400` for an unusable
+`pi-messages` body, and the terminal `error` event described above.
 
 Status codes and the retry/backoff headers still flow, so client retry
 behavior is preserved. Non-aliased models keep full verbatim passthrough
@@ -132,11 +223,17 @@ detail remains in server logs.
 
 ## Constraints
 
-- **Body-`model` protocols only.** The swap rewrites the `model` field in the
-  JSON body, which exists for `anthropic-messages`, `openai-completions`,
-  `openai-responses`, `openai-codex-responses`, `mistral-conversations`.
-  `google-*`, `azure-*`, and `bedrock-*` carry the model id in the URL path, so
-  an alias there is **rejected** (it would forward the alias verbatim and 404).
+- **Body-`model` protocols only, and BACKING and CLIENT are separate sets.**
+  `isAliasBackingShape` — the invariant `POST/PUT /api/models` and the env-seeded
+  registry both check — admits exactly `anthropic-messages`,
+  `openai-completions`, `openai-responses`, `openai-codex-responses`,
+  `mistral-conversations` (`ALIAS_BACKING_SHAPES`). `google-*`, `azure-*`, and
+  `bedrock-*` carry the model id in the URL path, so an alias there is
+  **rejected** (it would forward the alias verbatim and 404). `pi-messages` is
+  **not** a backing shape: it is the CLIENT dialect, matched by the separate
+  `isAliasClientShape` / `ALIAS_CLIENT_API_SHAPE`. Because sidecar boot pins
+  `clientApiShape` to that dialect, the inference allowlist is a single path
+  (`POST /messages`).
 - **API-key credentials only.** The oauth-subscription sidecar mode is a pure
   bearer-swap and never rewrites the body (`LlmProxyOauthConfig` carries no
   `modelSwap`), so an alias on an oauth-subscription credential is **rejected**
@@ -204,10 +301,114 @@ so the offline generator drops it:
 FEATURED_MODELS_EXCLUDE="deepseek-chat,some-other-backing"
 ```
 
-## Residual exposure (Threat B)
+## Deployment ordering
 
-The container still receives `MODEL_API` (the protocol family) and reaches the
-real endpoint through the sidecar. An adversarial agent can infer the _protocol_
-but not the real `model` id, the upstream id echoed in responses, the endpoint
-host, or the credential. Closing Threat B fully would require a protocol-
-normalizing gateway and is out of scope here.
+The platform and the runtime images (`appstrate-pi`, the sidecar) implement two
+halves of one contract, and they are deployed separately. **Ship the platform
+before or with the runtime images.**
+
+That direction is safe because the sidecar validates its private swap
+descriptor at boot and **fails closed**: an OLD platform that does not yet emit
+`clientApiShape` / `backingApiShape` against a NEW sidecar image gets its
+aliased runs refused, with the offending field named in an operator log (never
+its value). Aliased runs stop; nothing leaks. Non-aliased runs are unaffected —
+they carry no descriptor.
+
+The reverse is the dangerous direction, and nothing detects it. A NEW platform
+against OLD runtime images means the container is told to speak `pi-messages`
+and the sidecar has no `pi-messages` backend to terminate it, and the `/llm/*`
+surface allowlist is not there either — an old sidecar is a total passthrough.
+The aliased run does fail, because its inference call has no route; but it fails
+_after_ the container has had a verbatim proxy to the vendor's own endpoints for
+as long as it lived, which is long enough for one `GET /v1/models`. The platform's own side of the contract
+looks entirely satisfied throughout, so there is no signal to act on: the
+ordering is the control.
+
+## Threat B in two tiers
+
+Collapsing these two is what made the requirement unwritable in the first
+place, because they are different kinds of claim. The first is a property of
+this codebase, enumerable and CI-gated. The second is a property of talking to
+a language model at all, and no plumbing anywhere touches it.
+
+### Tier 1 — what the platform discloses (closed)
+
+Everything an aliased run's container is handed, and nothing else:
+
+| reaches the container                       | example (aliased `Appstrate Flash`) | effect                                          |
+| ------------------------------------------- | ----------------------------------- | ----------------------------------------------- |
+| `MODEL_API`                                 | `pi-messages`                       | the same for every alias — names nothing        |
+| `MODEL_ID`                                  | `appstrate-flash`                   | the public alias the caller already chose       |
+| `MODEL_BASE_URL` / `MODEL_API_KEY`          | sidecar URL / placeholder           | neither reaches upstream                        |
+| `MODEL_CONTEXT_WINDOW` / `MODEL_MAX_TOKENS` | `200000` / `64000`                  | the backing's exact numbers — narrows it        |
+| `MODEL_INPUT`                               | `["text","image"]`                  | already published by the read projection        |
+| success response body                       | `text_delta`, `done`                | closed pi-messages union — no vendor vocabulary |
+
+`MODEL_PROVIDER`, `MODEL_REASONING_LEVEL_MAP` and `MODEL_COST` are **not**
+emitted for an alias. The provider key and the native effort table name the
+vendor outright; a published `{"input":0.28,"output":0.42}` is one catalog
+lookup from a vendor name. The container reports **no cost** in return, not a
+fabricated `0` — the ledger reads a null reported cost as "nothing to compare"
+and prices the row itself from `runs.model_cost` × the reported token counts, so
+what the sandbox knows does not determine what is billed.
+
+The narrowed `/llm/*` surface is what keeps the disclosure list to that table.
+An aliased run gets exactly ONE call — the inference endpoint its client
+protocol uses — `POST /messages` (`isAliasInferenceCall`). Everything
+else is refused with the neutral envelope at 404, before any upstream fetch and
+before the placeholder is swapped for the real key, so the credential is never
+spent on a request being rejected. Without that narrowing a single
+`GET /v1/models` returns the vendor's own catalogue in a **2xx** body, which
+neither the error synthesis (non-2xx only) nor any field rewrite looks at.
+Non-aliased runs keep the verbatim passthrough; their contract is reaching the
+provider, not hiding it.
+
+Three values are sent **exact** rather than masked or withheld, each because
+masking costs something real and buys nothing measurable:
+
+- the two token limits — the container sizes its compaction pass from them
+  (`derivePiCompactionSettings`), and an absent value lands on per-code-path
+  defaults that disagree. Rounding them would not close the tokenizer
+  fingerprint in `usage.input` (tier 2), which separates the vendor families
+  outright on its own;
+- `MODEL_INPUT` — dropping it does not degrade gracefully, it silently disables
+  image input for the whole run, and the modality vector is already disclosed on
+  purpose by the read projection.
+
+What keeps tier 1 closed is not this page.
+`packages/runner-pi/test/alias-env-allowlist.test.ts` pins the COMPLETE set of
+variables an aliased container receives as an exact set, and pins the
+non-aliased set beside it so the assertion states the difference rather than one
+side of it. Any new variable fails it until someone adds it deliberately.
+
+### Tier 2 — what an observer can infer (irreducible)
+
+None of the following is closed, and none of it will be. An organization
+running an agent controls the code inside the container and the prompt going to
+the model, so it can measure the model itself.
+
+- **Ask it.** An agent can simply ask the model who it is. It can also
+  fingerprint the shape of a refusal, the house style of a system-prompt
+  leak attempt, or the tics of a long generation.
+- **Time it.** Time-to-first-token and sustained throughput are stable enough
+  per backing, at a given load, to separate candidates.
+- **Count its tokens.** This is the one that is easy to miss, because it looks
+  like accounting rather than identity. The terminal `done` event carries
+  `usage`, and `usage.input` for a controlled prompt _is_ a tokenizer
+  fingerprint: a fixed probe string tokenizes to a different integer under each
+  vocabulary, and a handful of probes separates the families outright. Nothing
+  here touches it, and nothing should: the count is load-bearing
+  on both sides of the boundary — the container sizes its next compaction from
+  it, and the platform prices `llm_usage.cost_usd` from it. Withholding it
+  would break compaction and billing to buy an inference the org can also get by
+  asking the model to count.
+- **Read the limits.** `MODEL_CONTEXT_WINDOW` / `MODEL_MAX_TOKENS` are the
+  backing's real numbers, so a pair can be looked up in a public catalog. It
+  narrows the candidate set. It does not close it, and it tells an observer
+  nothing the token counts above do not already.
+- **Read the modality vector.** `MODEL_INPUT` / the read projection publish it
+  on purpose, and it narrows the set too.
+
+That is the honest boundary this page opened with, and it is the reason the
+requirement is stated the way it is: the platform does not disclose the backing.
+It cannot make an organization unable to find out.

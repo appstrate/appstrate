@@ -241,6 +241,11 @@ export default tseslint.config(
       "packages/runner-pi/src/pi-sdk.ts",
       "apps/cli/src/lib/pi-sdk.ts",
       "runtime-pi/pi-sdk.ts",
+      // The sidecar image is built from `runtime-pi/sidecar/*.ts` alone, so it
+      // cannot reach the agent's barrel one directory up — it needs its own.
+      // It carries pi-ai to RE-ORIGINATE an aliased run's inference call
+      // against the real backing (`pi-messages-backend.ts`).
+      "runtime-pi/sidecar/pi-sdk.ts",
     ],
     languageOptions: {
       parser: tseslint.parser,

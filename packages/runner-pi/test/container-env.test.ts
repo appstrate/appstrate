@@ -218,6 +218,60 @@ describe("buildRuntimePiEnv", () => {
     expect(env.MODEL_COST).toBe(JSON.stringify({ input: 3, output: 15 }));
   });
 
+  describe("model-alias masking (issue #1198, Threat B)", () => {
+    // The env an aliased run is built from, over a real 200 000/8192 catalog
+    // pair.
+    const aliasedModel = {
+      ...model,
+      aliased: true,
+      input: ["text", "image"],
+      contextWindow: 200_000,
+      maxTokens: 8192,
+      reasoning: true,
+      cost: { input: 3, output: 15 },
+    };
+
+    it("omits MODEL_COST — the published rate card names the vendor", () => {
+      const env = buildRuntimePiEnv({ model: aliasedModel, agentPrompt: "p", ...sidecar });
+      expect(env).not.toHaveProperty("MODEL_COST");
+      // Safe only because the ledger stopped depending on it: the runner row's
+      // `cost_usd` is computed server-side from `runs.model_cost` × the
+      // reported token counts (`writeRunnerLedgerRow`).
+    });
+
+    it("sends the token limits unchanged — the container sizes compaction from them", () => {
+      // The exact `usage.input` count the container already reports is a
+      // stronger tell than the limits, so rounding them bought nothing.
+      const env = buildRuntimePiEnv({ model: aliasedModel, agentPrompt: "p", ...sidecar });
+      expect(env.MODEL_CONTEXT_WINDOW).toBe("200000");
+      expect(env.MODEL_MAX_TOKENS).toBe("8192");
+    });
+
+    it("keeps MODEL_INPUT — dropping it silently disables image input", () => {
+      // `parseModelInput` falls back to `["text"]` on an absent var, so masking
+      // the modality vector would degrade the run rather than hide anything the
+      // read projection does not already publish.
+      const env = buildRuntimePiEnv({ model: aliasedModel, agentPrompt: "p", ...sidecar });
+      expect(env.MODEL_INPUT).toBe(JSON.stringify(["text", "image"]));
+    });
+
+    it("leaves a NON-aliased run byte-for-byte as it was", () => {
+      // A BYOK model the org configured itself has nothing to hide — the org
+      // already knows its own binding.
+      const { aliased: _aliased, ...byokModel } = aliasedModel;
+      const byok = buildRuntimePiEnv({ model: byokModel, agentPrompt: "p", ...sidecar });
+      const explicitlyNotAliased = buildRuntimePiEnv({
+        model: { ...aliasedModel, aliased: false },
+        agentPrompt: "p",
+        ...sidecar,
+      });
+      expect(explicitlyNotAliased).toEqual(byok);
+      expect(byok.MODEL_CONTEXT_WINDOW).toBe("200000");
+      expect(byok.MODEL_MAX_TOKENS).toBe("8192");
+      expect(byok.MODEL_COST).toBe(JSON.stringify({ input: 3, output: 15 }));
+    });
+  });
+
   it("omits MODEL_REASONING when null and emits 'false' when explicitly disabled", () => {
     const env = buildRuntimePiEnv({
       model: { ...model, reasoning: null },

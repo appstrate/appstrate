@@ -1,105 +1,89 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Model-alias swap (LLM-gateway alias pattern) — the inference-data-path half
- * of issue #727. A public vanity id (`alias`, e.g. `appstrate-medium`) is
- * exposed to callers/agents while the real upstream id (`real`, e.g.
- * `deepseek-chat`) stays server-side. Every request arrives with
- * `model: <alias>`; it is rewritten to `<real>` before forwarding upstream, and
- * the provider's echoed `model: <real>` is rewritten back to `<alias>` on the
- * way out — non-stream JSON AND streaming SSE. The caller therefore only ever
- * sees the alias.
- *
- * This module is the single source of truth for the swap, consumed by BOTH
- * inference data paths:
- *   - the in-container sidecar proxy (`runtime-pi/sidecar`), and
- *   - the platform LLM gateway (`apps/api` `/api/llm-proxy/*`).
- *
- * Matching is by EXACT value at the known JSON locations, never a blind string
- * replace — so a model id that happens to appear inside generated content is
- * never clobbered. Known locations:
- *   - top-level `model` — OpenAI chat-completions (request, chunk, completion),
- *     Anthropic (request, non-stream Message), and the OpenAI Responses API
- *     non-stream body,
- *   - `message.model` — Anthropic streaming `message_start` event,
- *   - `response.model` — OpenAI Responses API streaming events
- *     (`response.created` / `response.completed`, etc. carry a `response`
- *     snapshot). Both `openai-responses` and `openai-codex-responses` (codex)
- *     are aliasable, so this nesting MUST be covered or the real id leaks in
- *     the stream.
- *   - `thinking` / `output_config` — request-only correction for an adaptive
- *     Anthropic backing. Pi sees the public alias, so the sidecar restores the
- *     catalogued adaptive shape from its private swap descriptor.
- *
- * ERROR surfaces are handled differently: provider error bodies are free-form
- * prose that can name the backing anywhere (model id, hostname, provider
- * vocabulary), so for an aliased model they are never forwarded at all —
- * {@link syntheticAliasErrorBody} REPLACES them with a neutral envelope
- * (whitelist by construction; a scrub would be a blacklist where every
- * forgotten surface is a new leak). Status code + allowlisted headers
- * ({@link LLM_PASSTHROUGH_RESPONSE_HEADERS}) still flow for retry/backoff.
+ * Model-alias swap: callers see a vanity id (`alias`); the real upstream id
+ * (`real`) stays server-side. Requests are rewritten alias→real and responses
+ * real→alias, in JSON and in SSE, by both the sidecar proxy (`runtime-pi/sidecar`)
+ * and the platform gateway (`apps/api`, `/api/llm-proxy/*`). Matching is by exact
+ * value at known JSON locations, never a blind replace.
  */
 
 import type { ModelApiShape, ModelSwap } from "./sidecar-types.ts";
 
 /**
- * API shapes that carry the model id in the REQUEST BODY (top-level `model`) —
- * the only shapes the swap can rewrite. The remaining shapes (`google-*`,
- * `azure-*`, `bedrock-*`) put the model id in the URL path / deployment segment,
- * which this swap does not touch, so an alias on those would forward `<alias>`
- * verbatim and 404 upstream. Callers MUST reject `aliased` for any shape not in
- * this set (see {@link isAliasableApiShape}).
+ * The protocols an alias can be BACKED by. Only these carry the model id in the
+ * request BODY; url-model shapes cannot back an alias.
  */
-export const ALIASABLE_API_SHAPES: ReadonlySet<ModelApiShape> = new Set<ModelApiShape>([
+const ALIAS_BACKING_SHAPES = [
   "anthropic-messages",
   "openai-completions",
   "openai-responses",
   "openai-codex-responses",
   "mistral-conversations",
-]);
+] as const satisfies readonly ModelApiShape[];
 
-/** True when an alias is technically supportable for this protocol shape. */
-export function isAliasableApiShape(shape: ModelApiShape): boolean {
-  return ALIASABLE_API_SHAPES.has(shape);
+/** A protocol an alias can be BACKED by — never one a client speaks. */
+export type AliasBackingApiShape = (typeof ALIAS_BACKING_SHAPES)[number];
+
+export function isAliasBackingShape(shape: ModelApiShape): shape is AliasBackingApiShape {
+  return (ALIAS_BACKING_SHAPES as readonly ModelApiShape[]).includes(shape);
 }
 
 /**
- * Reason an aliased model fails its configuration invariants (issue #727,
- * Threat A), or `null` when it is well-formed:
- *   - `missing_label` — no explicit label; the derived label would name the
- *     real backing and leak it on `/api/models` and `run.model_label`.
- *   - `non_aliasable_shape` — the protocol carries the model id in the URL, not
- *     the request body, so the swap can't hide the backing.
- *   - `oauth_provider` — the backing credential is an oauth-subscription
- *     provider. The sidecar's oauth `/llm` mode is a pure bearer-swap (no body
- *     rewrite, `LlmProxyOauthConfig` carries no `modelSwap`), so an alias there
- *     could never be swapped — reject at configuration time.
+ * The protocol an ALIASED run's container speaks — pi-ai's vendor-neutral
+ * `pi-messages`. `buildRuntimePiEnv` emits it as `MODEL_API` and the launcher
+ * stamps it on `ModelSwap.clientApiShape`; split the two and the sidecar's inbound
+ * allowlist refuses every call the container makes.
+ */
+export const ALIAS_CLIENT_API_SHAPE: ModelApiShape = "pi-messages";
+
+export function isAliasClientShape(shape: ModelApiShape): boolean {
+  return shape === ALIAS_CLIENT_API_SHAPE;
+}
+
+// Sidecar boot pins `clientApiShape` to the client dialect, so one path is exact.
+const ALIAS_INFERENCE_PATH = "/messages";
+
+/**
+ * True when `(method, path)` is exactly the inference call an aliased client
+ * makes — the allowlist that narrows an ALIASED run's `/llm/*` surface. Without
+ * it, `GET <MODEL_BASE_URL>/v1/models` returns the vendor catalogue in a 2xx body
+ * that neither the error synthesis nor the field rewrite touches. Fails closed:
+ * the path is matched whole, never by prefix.
+ */
+export function isAliasInferenceCall(method: string, path: string): boolean {
+  return method.toUpperCase() === "POST" && path === ALIAS_INFERENCE_PATH;
+}
+
+/**
+ * Reason an aliased model fails its configuration invariants, or `null`:
+ *   - `missing_label` — a derived label names the real backing, leaking it on
+ *     `/api/models` and `run.model_label`.
+ *   - `non_aliasable_shape` — model id in the URL, or the client-only dialect.
+ *   - `oauth_provider` — the oauth `/llm` mode is a pure bearer-swap carrying no
+ *     `modelSwap`, so an alias there could never be swapped.
  */
 export type AliasInvariantViolation = "missing_label" | "non_aliasable_shape" | "oauth_provider";
 
 /**
- * Single source of truth for the model-alias invariants, shared by both trust
- * boundaries that accept an alias: the env-seeded registry (`model-registry`,
- * skips on violation) and the DB `POST /api/models` route (rejects on
- * violation). Each caller maps the returned reason to its own outcome/message.
+ * The alias invariants, shared by the two boundaries that accept one: the
+ * env-seeded registry (skips on violation) and `POST /api/models` (rejects).
  */
 export function checkAliasInvariants(input: {
   label?: string | null;
   apiShape: ModelApiShape;
-  /** Auth mode of the backing credential's provider. */
   authMode: "api_key" | "oauth2";
 }): AliasInvariantViolation | null {
   if (!input.label) return "missing_label";
-  if (!isAliasableApiShape(input.apiShape)) return "non_aliasable_shape";
+  if (!isAliasBackingShape(input.apiShape)) return "non_aliasable_shape";
   if (input.authMode === "oauth2") return "oauth_provider";
   return null;
 }
 
 /**
- * Rewrite the request body's top-level `model` alias→real. Returns the input
- * unchanged when it isn't JSON or the field isn't the alias (defensive: a
- * mismatch means the caller sent something unexpected — forward it verbatim
- * rather than corrupt the body).
+ * Rewrite the request body's top-level `model` alias→real, and restore the
+ * adaptive `thinking` / `output_config` shape an Anthropic backing expects.
+ * A body that isn't JSON, or whose `model` isn't the alias, is left verbatim.
  */
 export function swapRequestModel(bodyText: string, swap: ModelSwap): string {
   try {
@@ -136,12 +120,9 @@ export function swapRequestModel(bodyText: string, swap: ModelSwap): string {
 function rewriteModelRealToAlias(obj: unknown, swap: ModelSwap): void {
   if (!obj || typeof obj !== "object") return;
   const o = obj as Record<string, unknown>;
-  // top-level `model` — OpenAI chat-completions chunk/completion, Anthropic
-  // non-stream Message, OpenAI Responses non-stream body.
   if (o["model"] === swap.real) o["model"] = swap.alias;
-  // `message.model` — Anthropic streaming `message_start`.
-  // `response.model` — OpenAI Responses streaming `response.*` events carry a
-  // `response` snapshot. Both are one-level nestings holding the model id.
+  // `message` (Anthropic `message_start`) and `response` (OpenAI Responses
+  // events) are one-level nestings that also hold the model id.
   for (const key of ["message", "response"] as const) {
     const nested = o[key];
     if (nested && typeof nested === "object") {
@@ -151,10 +132,6 @@ function rewriteModelRealToAlias(obj: unknown, swap: ModelSwap): void {
   }
 }
 
-/**
- * Rewrite a non-stream JSON response body's `model` real→alias. Returns the
- * input unchanged on parse failure.
- */
 export function swapResponseModelJson(bodyText: string, swap: ModelSwap): string {
   try {
     const obj = JSON.parse(bodyText);
@@ -166,18 +143,8 @@ export function swapResponseModelJson(bodyText: string, swap: ModelSwap): string
 }
 
 /**
- * Response headers forwarded to the caller from an upstream LLM provider.
- * Shared posture for both inference data paths (the in-container sidecar
- * proxy on every response, and the platform `/api/llm-proxy/*` gateway on
- * aliased responses):
- *
- *   - `content-type` — required to parse the body
- *   - `retry-after`, `RateLimit*` — required for backoff on 429
- *   - `x-request-id` — provider-side error correlation
- *
- * Everything else (`server: cloudflare`, `cf-ray`, `anthropic-*`,
- * `openai-organization`, Set-Cookie, hop-by-hop) is dropped — those headers
- * fingerprint the backing provider and/or carry credentials.
+ * The only response headers forwarded from an upstream LLM provider: content type,
+ * `retry-after` / `RateLimit*`, `x-request-id`. The rest fingerprint the backing.
  */
 export const LLM_PASSTHROUGH_RESPONSE_HEADERS: readonly string[] = [
   "content-type",
@@ -194,55 +161,43 @@ export const LLM_PASSTHROUGH_RESPONSE_HEADERS: readonly string[] = [
   "x-request-id",
 ];
 
-/**
- * Neutral message used in every synthesized error surface for an aliased
- * model. Deliberately provider-agnostic: an alias's contract is that the
- * caller never learns the backing, so error surfaces are SYNTHESIZED
- * (whitelist by construction), never forwarded-and-scrubbed (blacklist —
- * every forgotten field is a new leak). The upstream detail stays in server
- * logs.
- */
+/** Neutral prose for every synthesized alias error; upstream detail stays in the log. */
 const ALIAS_UPSTREAM_ERROR_MESSAGE = "Upstream model error";
 
 /**
- * Caller-facing body replacing a non-2xx upstream response on an ALIASED
- * model. Nothing from the upstream body survives, so the backing (model id,
- * hostname, provider error vocabulary) cannot leak regardless of what the
- * provider wrote. The status code and the allowlisted headers
- * ({@link LLM_PASSTHROUGH_RESPONSE_HEADERS} — `retry-after`, RateLimit
- * family) still flow, so caller retry/backoff behavior is preserved.
- *
- * The envelope carries BOTH family discriminators — top-level
- * `type: "error"` (Anthropic) and `error.message` (OpenAI family) — so a
- * single shape parses in either SDK regardless of the aliased protocol.
+ * Neutral prose with no protocol envelope: a `pi-messages` `error` event needs a
+ * bare string where {@link syntheticAliasErrorBody} needs an HTTP body. pi-ai's own
+ * error messages interpolate the provider, so none of them may be forwarded.
+ */
+export function syntheticAliasErrorMessage(swap: ModelSwap, status?: number): string {
+  const statusHint = status ? `, status ${status}` : "";
+  return `${ALIAS_UPSTREAM_ERROR_MESSAGE} (model "${swap.alias}"${statusHint})`;
+}
+
+/**
+ * Caller-facing body replacing a non-2xx upstream response on an ALIASED model:
+ * nothing from upstream survives, only the status code and
+ * {@link LLM_PASSTHROUGH_RESPONSE_HEADERS}. Carries both family discriminators
+ * (`type: "error"` and `error.message`) so one shape parses in either SDK.
  */
 export function syntheticAliasErrorBody(swap: ModelSwap, status?: number): string {
-  const statusHint = status ? `, status ${status}` : "";
   return JSON.stringify({
     type: "error",
     error: {
       type: "upstream_error",
-      message: `${ALIAS_UPSTREAM_ERROR_MESSAGE} (model "${swap.alias}"${statusHint})`,
+      message: syntheticAliasErrorMessage(swap, status),
     },
   });
 }
 
-/** Non-null, non-array object — the only shape an error payload can take. */
 function isErrorObject(value: unknown): boolean {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/**
- * True when a parsed SSE frame is an error event:
- *   - Anthropic: `{"type":"error","error":{...}}`,
- *   - OpenAI-family: a standalone top-level `error` object (no `choices`
- *     alongside — the `choices` guard keeps any hybrid frame that also
- *     carries generated content on the exact-field path; content is never
- *     replaced),
- *   - OpenAI Responses terminal failures: `response.failed` /
- *     `response.incomplete` nest it as `{"response":{"error":{...}}}` (a
- *     successful snapshot carries `error: null`, which doesn't match).
- */
+// An error frame is Anthropic's `{"type":"error"}`, an OpenAI-family top-level
+// `error` object, or the OpenAI Responses nesting `{"response":{"error":{…}}}`.
+// The `choices` guard keeps a hybrid frame that also carries generated content on
+// the exact-field path, so content is never replaced.
 function isSseErrorFrame(obj: unknown): boolean {
   if (!obj || typeof obj !== "object") return false;
   const o = obj as Record<string, unknown>;
@@ -252,23 +207,18 @@ function isSseErrorFrame(obj: unknown): boolean {
   return isErrorObject(response) && isErrorObject((response as Record<string, unknown>)["error"]);
 }
 
-/** Rewrite a single SSE line's `model` real→alias (data lines only). */
 function rewriteSseLine(line: string, swap: ModelSwap): string {
   if (!line.startsWith("data:")) return line;
   const payload = line.slice("data:".length).trimStart();
-  // Fast skip: the [DONE] sentinel and any chunk that mentions neither the
-  // real id nor an `"error"` key candidate (the vast majority — content
-  // deltas) need no parse. The `"error"` probe stays a plain substring check:
-  // a false positive just costs one parse, never a wrong rewrite.
+  // Fast skip: [DONE] and chunks naming neither the real id nor `"error"` need no
+  // parse. A false positive on the probe costs a parse, never a wrong rewrite.
   if (payload === "[DONE]" || (!payload.includes(swap.real) && !payload.includes(`"error"`))) {
     return line;
   }
   try {
     const obj = JSON.parse(payload);
-    // Mid-stream error frames carry free-form prose that can name the backing
-    // (real id, hostname). Same posture as {@link syntheticAliasErrorBody}:
-    // REPLACE the frame wholesale, never forward-and-scrub. Error frames carry
-    // no generated content, so nothing meaningful is lost by the caller.
+    // Error frames name the backing in free-form prose, so they are replaced
+    // wholesale; they carry no generated content, so the caller loses nothing.
     if (isSseErrorFrame(obj)) {
       return `data: ${syntheticAliasErrorBody(swap)}`;
     }
@@ -280,10 +230,8 @@ function rewriteSseLine(line: string, swap: ModelSwap): string {
 }
 
 /**
- * Streaming (SSE) response transform: rewrite `model` real→alias in each
- * `data:` JSON frame. Line-buffered so a frame split across chunk boundaries is
- * still rewritten correctly (and multi-byte UTF-8 split across chunks is handled
- * by the streaming TextDecoder).
+ * Streaming (SSE) transform: rewrite `model` real→alias in each `data:` frame.
+ * Line-buffered so a frame split across chunk boundaries is still rewritten.
  */
 export function createSseModelSwapStream(swap: ModelSwap): TransformStream<Uint8Array, Uint8Array> {
   const decoder = new TextDecoder();
@@ -296,9 +244,8 @@ export function createSseModelSwapStream(swap: ModelSwap): TransformStream<Uint8
       if (newlineEnd === -1) return; // no complete line yet — keep buffering
       const ready = buffer.slice(0, newlineEnd + 1);
       buffer = buffer.slice(newlineEnd + 1);
-      // `ready` ends in "\n", so split's final element is "" — rewriteSseLine
-      // returns it untouched ("".startsWith("data:") is false), so a plain map
-      // is correct and needs no trailing-element guard.
+      // `ready` ends in "\n", so split's last element is "" and rewriteSseLine
+      // returns it untouched — hence no trailing-element guard.
       const rewritten = ready
         .split("\n")
         .map((line) => rewriteSseLine(line, swap))

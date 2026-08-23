@@ -61,6 +61,12 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
 #   - @appstrate/core/{errors,ssrf}           getErrorMessage + isBlockedHost/Url,
 #                                             imported by credential-proxy.ts /
 #                                             mcp.ts / ssrf.ts
+#   - @earendil-works/pi-ai (npm, via     re-originates an aliased run's call against
+#     the `pi-sdk.ts` barrel)             the real backing, so pi-ai keeps deriving
+#                                         every vendor quirk itself. Only the five
+#                                         `./api/*` subpaths an alias can be backed
+#                                         by — the package root would pull its whole
+#                                         provider catalog.
 #   - @appstrate/runner-pi/runtime-tools      canonical run_history / recall_memory
 #                                             descriptors (name + description +
 #                                             parameter JSON Schema), imported by

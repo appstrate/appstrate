@@ -229,7 +229,15 @@ describe("run-launcher — sidecar skip decision", () => {
     const llm = counts.capturedSidecarSpec?.llm;
     // Narrow the discriminated union (vend variant carries no modelSwap).
     if (llm?.authMode !== "api_key") throw new Error(`expected api_key llm, got ${llm?.authMode}`);
-    expect(llm.modelSwap).toEqual({ alias: "appstrate-medium", real: "deepseek-chat" });
+    expect(llm.modelSwap).toEqual({
+      alias: "appstrate-medium",
+      real: "deepseek-chat",
+      // The container speaks the canonical dialect; the sidecar terminates it
+      // and re-originates against the backing, which needs the backing catalog.
+      clientApiShape: "pi-messages",
+      backingApiShape: "openai-completions",
+      backing: { providerId: "deepseek", reasoning: false, input: ["text"] },
+    });
 
     // The container is handed the ALIAS as MODEL_ID; the real backing id and
     // the real endpoint never enter the agent env.
@@ -238,6 +246,100 @@ describe("run-launcher — sidecar skip decision", () => {
     expect(env.MODEL_BASE_URL).toBe("http://fake-sidecar.test:19080/llm");
     expect(JSON.stringify(env)).not.toContain("deepseek-chat");
     expect(JSON.stringify(env)).not.toContain("api.deepseek.com");
+  });
+
+  it("masks the alias's identifying model metadata in the container env — but not in the sidecar's", async () => {
+    const { orchestrator, counts } = createCountingFake();
+
+    await runPlatformContainer({
+      runId: "run_alias_mask",
+      context: buildContext("run_alias_mask"),
+      plan: buildRunPlan({
+        llmConfig: {
+          providerId: "deepseek",
+          apiShape: "openai-completions",
+          baseUrl: "https://api.deepseek.com/v1",
+          modelId: "deepseek-chat",
+          apiKey: "sk-real-secret",
+          label: "Appstrate Medium",
+          isSystemModel: true,
+          aliased: true,
+          aliasId: "appstrate-medium",
+          // A real catalog pair: exact enough to look up, which is the point.
+          contextWindow: 200_000,
+          maxTokens: 8192,
+          input: ["text", "image"],
+          cost: { input: 0.28, output: 0.42, cacheRead: 0.028, cacheWrite: 0.28 },
+        },
+      }),
+      sinkCredentials: mintSinkCredentials({
+        runId: "run_alias_mask",
+        appUrl: "http://platform:3000",
+        ttlSeconds: 60,
+      }),
+      orchestrator,
+    });
+
+    const env = counts.capturedAgentEnv ?? {};
+    // The published rate card identifies the vendor on its own, so the
+    // container is told nothing about price. The ledger is unaffected — the
+    // runner row's cost is computed server-side from `runs.model_cost`.
+    expect(env).not.toHaveProperty("MODEL_COST");
+    expect(JSON.stringify(env)).not.toContain("0.28");
+    // The real limits — the container needs both numbers to size compaction,
+    // and the exact `usage.input` count it reports out-tells them anyway.
+    expect(env.MODEL_CONTEXT_WINDOW).toBe("200000");
+    expect(env.MODEL_MAX_TOKENS).toBe("8192");
+    // Modalities survive: dropping MODEL_INPUT silently disables image input.
+    expect(env.MODEL_INPUT).toBe(JSON.stringify(["text", "image"]));
+
+    // The SIDECAR is trusted and its token-budget guard protects against the
+    // REAL upstream limit — feeding it rounded values would be a correctness
+    // regression, not extra safety. Independent path: `applySpecToSidecarEnv`
+    // reads the spec, not the container env.
+    expect(counts.capturedSidecarSpec?.modelContextWindow).toBe(200_000);
+    expect(counts.capturedSidecarSpec?.modelMaxTokens).toBe(8192);
+  });
+
+  it("leaves a NON-aliased run's model metadata untouched", async () => {
+    // A BYOK model the org configured itself has nothing to hide — the org
+    // already knows its own binding, so nothing about these runs may change.
+    const { orchestrator, counts } = createCountingFake();
+
+    await runPlatformContainer({
+      runId: "run_byok_mask",
+      context: buildContext("run_byok_mask"),
+      plan: buildRunPlan({
+        llmConfig: {
+          providerId: "deepseek",
+          apiShape: "openai-completions",
+          baseUrl: "https://api.deepseek.com/v1",
+          modelId: "deepseek-chat",
+          apiKey: "sk-real-secret",
+          label: "DeepSeek Chat",
+          isSystemModel: false,
+          aliased: false,
+          aliasId: "deepseek-chat",
+          contextWindow: 200_000,
+          maxTokens: 8192,
+          input: ["text", "image"],
+          cost: { input: 0.28, output: 0.42, cacheRead: 0.028, cacheWrite: 0.28 },
+        },
+      }),
+      sinkCredentials: mintSinkCredentials({
+        runId: "run_byok_mask",
+        appUrl: "http://platform:3000",
+        ttlSeconds: 60,
+      }),
+      orchestrator,
+    });
+
+    const env = counts.capturedAgentEnv ?? {};
+    expect(env.MODEL_CONTEXT_WINDOW).toBe("200000");
+    expect(env.MODEL_MAX_TOKENS).toBe("8192");
+    expect(env.MODEL_COST).toBe(
+      JSON.stringify({ input: 0.28, output: 0.42, cacheRead: 0.028, cacheWrite: 0.28 }),
+    );
   });
 
   it("keeps adaptive Anthropic reasoning private and restores it in the sidecar", async () => {
@@ -284,6 +386,16 @@ describe("run-launcher — sidecar skip decision", () => {
     expect(llm.modelSwap).toEqual({
       alias: "appstrate-adaptive",
       real: "claude-sonnet-4-6",
+      clientApiShape: "pi-messages",
+      backingApiShape: "anthropic-messages",
+      backing: {
+        providerId: "anthropic",
+        reasoning: true,
+        // The vendor's native effort vocabulary — no longer emitted into the
+        // container, applied by the sidecar when it re-originates.
+        reasoningLevelMap: { max: "max" },
+        input: ["text"],
+      },
       anthropicAdaptiveReasoning: { effort: "max" },
     });
 

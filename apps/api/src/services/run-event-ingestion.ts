@@ -417,17 +417,33 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   //     is already in the `llm_usage` ledger (runner/proxy rows) and the
   //     column is its run-row mirror, so preserve it instead.
   //
-  // No double-counting is possible: preservation writes no ledger row
-  // (only `result.cost > 0` triggers the runner-row fallback below), and
-  // the CAS on `sink_closed_at` guarantees a terminal usage arriving
-  // after this finalize can never re-open the run.
+  // Preserving that snapshot cannot double-bill — but NOT because preservation
+  // skips the ledger. It does write a ledger row: the barrier below is gated on
+  // `terminalCost !== null || tokenUsageIsNonZero(...)`, so a preserved snapshot
+  // carrying tokens goes through it, and that is exactly how a run that died
+  // mid-flight is billed at all.
+  //
+  // What makes it safe is structural, and holds for any number of writes. A run
+  // has at MOST ONE `source="runner"` row (partial unique index
+  // `uq_llm_usage_runner_run_id`), and every write is an UPSERT of the run's
+  // CUMULATIVE total — never an append of a delta. Re-submitting the snapshot
+  // the `appstrate.metric` side channel already wrote is therefore an exact
+  // duplicate, which the strict-inequality advance rule discards as a no-op; a
+  // smaller one is refused outright. Two writes of the same total bill that
+  // total once. Double-counting would need either a second runner row or an
+  // additive write, and the ledger offers neither.
+  //
+  // The other half is ordering, and is unchanged: the CAS on `sink_closed_at`
+  // guarantees a terminal usage arriving after this finalize can never re-open
+  // the run.
   let validatedUsage = validateFinalizeUsage(result.usage, run.id);
   // Non-success without runner-posted usage: the run-row column must keep
   // whatever cumulative snapshot the `appstrate.metric` side-channel last
   // wrote. The COLUMN preservation happens atomically in the CAS below
   // (SQL COALESCE) — a JS read-then-write here would race a concurrent
-  // metric event and clobber a newer snapshot with the stale read. The
-  // read below only feeds the ledger-row fallback (result.cost > 0).
+  // metric event and clobber a newer snapshot with the stale read. The read
+  // below is what the terminal ledger row is PRICED from (`runs.model_cost` ×
+  // these counters) — see the barrier below.
   const preserveLastKnownUsage = validatedUsage === null && status !== "success";
   if (preserveLastKnownUsage) {
     validatedUsage = await readLastKnownUsage(run.id);
@@ -468,25 +484,24 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     }
   }
 
-  // 4b. TERMINAL LEDGER BARRIER — the last point at which this run's runner row
-  //     can still be written. The CAS below flips the run to a terminal status,
-  //     which is exactly what makes its runner row `settled`: from that instant
-  //     a billing cursor may claim the row by its serial id, once, and never
-  //     revisit it (`state/runs.ts:settledSql`). Anything still owed must
-  //     therefore be DURABLY in Postgres before the CAS, not merely scheduled —
-  //     hence `required: true`, which propagates a write failure so the run
-  //     stays open and finalize is retried.
+  // 4b. TERMINAL LEDGER BARRIER — last point at which this run's runner row can
+  //     be written. The CAS below flips the run terminal, which is what makes
+  //     the row `settled`: a billing cursor may then claim it by serial id,
+  //     once. So anything owed must be durably in Postgres BEFORE the CAS —
+  //     hence `required: true`, which keeps the run open for a retry on failure.
   //
-  //     The barrier is NOT conditioned on `result.cost > 0`. Every
-  //     platform-synthesised terminal (`synthesiseFinalize`: stall watchdog,
-  //     boot orphan sweep, container crash/timeout/cancel) builds an empty
-  //     RunResult that never carries `cost` — precisely the paths where the
-  //     run's last cumulative snapshot is most likely to be in doubt. Gating on
-  //     cost meant those runs settled with no barrier at all.
+  //     Not gated on `result.cost > 0`: every platform-synthesised terminal
+  //     (stall watchdog, orphan sweep, crash/timeout/cancel) builds a RunResult
+  //     with no `cost`, and those are exactly the runs whose last snapshot is
+  //     most in doubt. A run that consumed nothing is still skipped.
   //
-  //     A run that consumed nothing (no tokens, no reported cost) has no runner
-  //     row to make durable and is skipped — the barrier exists to pin an
-  //     existing accounting fact, not to mint empty ones.
+  //     The row is priced server-side from `run.modelCost` × the usage passed
+  //     here rather than from `result.cost`. It rarely moves the number: the
+  //     upsert is monotone, so the metric side-channel's own rows already hold
+  //     this run's cost and a lower candidate cannot regress them. What it does
+  //     guarantee is a priced row where the container reported no cost at all —
+  //     an aliased run, which is never given `MODEL_COST`. See
+  //     `resolveRunnerCost`.
   const terminalCost = typeof result.cost === "number" ? result.cost : null;
   if (terminalCost !== null || tokenUsageIsNonZero(validatedUsage)) {
     await writeRunnerLedgerRow(

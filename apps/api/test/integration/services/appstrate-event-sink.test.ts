@@ -12,12 +12,16 @@
  * covered end-to-end by `parity-e2e.test.ts`.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, spyOn } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
-import { persistRunEvent } from "../../../src/services/run-launcher/appstrate-event-sink.ts";
+import {
+  persistRunEvent,
+  writeRunnerLedgerRow,
+} from "../../../src/services/run-launcher/appstrate-event-sink.ts";
+import { logger } from "../../../src/lib/logger.ts";
 import { _resetRunMetricBroadcasterForTests } from "../../../src/services/run-metric-broadcaster.ts";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import { LEGACY_RUNTIME_TOOL_EVENT_TYPES } from "@appstrate/core/runtime-tool-defs";
@@ -151,21 +155,48 @@ describe("persistRunEvent", () => {
     expect(progressLogs[0]!.level).toBe("info");
   });
 
-  it("appstrate.metric → single runner ledger row + tokenUsage snapshot when writeLedger is on", async () => {
-    await persist(
-      event("appstrate.metric", {
-        usage: { input_tokens: 300, output_tokens: 125 },
-        cost: 0.003,
-      }),
-      { writeLedger: true },
-    );
+  // ---------------------------------------------------------------------
+  // Monotonic upsert of the runner row. Every case runs on the PLATFORM shape
+  // (`modelSource` + a rate snapshot), because that is the branch production
+  // takes and the one where `cost_usd` is the platform's own product of
+  // `runs.model_cost` × the reported tokens rather than the container's figure.
+  // Run them without `modelSource` and they silently exercise the remote-origin
+  // pass-through instead, leaving the mechanism that protects real billing
+  // untested on the path it actually protects.
+  //
+  // Consequence worth stating: a cumulative snapshot can no longer advance by
+  // "reporting a bigger cost". It advances by reporting bigger TOKEN counts —
+  // so these tests drive the container's `cost` field in the wrong direction on
+  // purpose, and the row still moves the right way.
+  // ---------------------------------------------------------------------
 
-    const ledgerRows = await db
+  /** Rates shared by the upsert cases below. */
+  const UPSERT_RATES: ModelCost = { input: 3, output: 15 };
+
+  /** Persist a metric event on the platform path, at the shared rates. */
+  function persistPlatformMetric(usage: Record<string, number>, cost: number) {
+    return persist(event("appstrate.metric", { usage, cost }), {
+      writeLedger: true,
+      modelSource: "system",
+      modelCost: UPSERT_RATES,
+    });
+  }
+
+  async function loadRunnerRows() {
+    return db
       .select()
       .from(llmUsage)
       .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
+  }
+
+  it("appstrate.metric → single runner ledger row + tokenUsage snapshot when writeLedger is on", async () => {
+    // 300×3/1e6 + 125×15/1e6 = 0.0009 + 0.001875. The container's 0.003 differs
+    // from that on purpose — it must not be what lands.
+    await persistPlatformMetric({ input_tokens: 300, output_tokens: 125 }, 0.003);
+
+    const ledgerRows = await loadRunnerRows();
     expect(ledgerRows).toHaveLength(1);
-    expect(ledgerRows[0]!.costUsd).toBeCloseTo(0.003, 5);
+    expect(ledgerRows[0]!.costUsd).toBeCloseTo(0.002775, 9);
     expect(ledgerRows[0]!.inputTokens).toBe(300);
     expect(ledgerRows[0]!.outputTokens).toBe(125);
 
@@ -189,88 +220,59 @@ describe("persistRunEvent", () => {
     // `uq_llm_usage_runner_run_id`. The runner emits cumulative
     // running totals on every metric event, so concurrent writers
     // UPSERT with monotonic-max semantics — the highest-seen
-    // `cost_usd` wins regardless of arrival order.
-    const totals = [0.001, 0.003, 0.006, 0.01, 0.015];
-    await Promise.all(
-      totals.map((cost) =>
-        persist(
-          event("appstrate.metric", {
-            usage: { input_tokens: 100, output_tokens: 50 },
-            cost,
-          }),
-          { writeLedger: true },
-        ),
-      ),
-    );
+    // total wins regardless of arrival order.
+    //
+    // The snapshots differ in TOKENS now, since that is what moves a
+    // server-computed cost. The container's `cost` is pinned at 0 across all
+    // five: if it were the recorded value, no writer could ever advance the row.
+    const totals = [
+      { input_tokens: 100, output_tokens: 50 },
+      { input_tokens: 300, output_tokens: 150 },
+      { input_tokens: 600, output_tokens: 300 },
+      { input_tokens: 1_000, output_tokens: 500 },
+      { input_tokens: 1_500, output_tokens: 750 },
+    ];
+    await Promise.all(totals.map((usage) => persistPlatformMetric(usage, 0)));
 
-    const rows = await db
-      .select()
-      .from(llmUsage)
-      .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
+    const rows = await loadRunnerRows();
     expect(rows).toHaveLength(1);
     // Whichever order the writers landed in, the surviving row holds
-    // the maximum cost — never a regressed value.
-    expect(rows[0]!.costUsd).toBeCloseTo(0.015, 5);
+    // the maximum total — never a regressed value.
+    // 1500×3/1e6 + 750×15/1e6 = 0.0045 + 0.01125.
+    expect(rows[0]!.costUsd).toBeCloseTo(0.01575, 9);
+    expect(rows[0]!.inputTokens).toBe(1_500);
   });
 
-  it("monotonic upsert: a smaller subsequent cost cannot regress the recorded value", async () => {
-    // First emit — cost 0.01, tokens 200/100
-    await persist(
-      event("appstrate.metric", {
-        usage: { input_tokens: 200, output_tokens: 100 },
-        cost: 0.01,
-      }),
-      { writeLedger: true },
-    );
+  it("monotonic upsert: a smaller subsequent snapshot cannot regress the recorded value", async () => {
+    // First emit — tokens 200/100 → 200×3/1e6 + 100×15/1e6 = 0.0006 + 0.0015.
+    await persistPlatformMetric({ input_tokens: 200, output_tokens: 100 }, 0.01);
 
-    // Second emit — REGRESSES to cost 0.005 (a finalize fallback that
-    // raced an earlier metric event with a higher running total). The
-    // monotonic guard MUST keep the higher value.
-    await persist(
-      event("appstrate.metric", {
-        usage: { input_tokens: 50, output_tokens: 25 },
-        cost: 0.005,
-      }),
-      { writeLedger: true },
-    );
+    // Second emit — REGRESSES to a quarter of the tokens (a finalize fallback
+    // that raced an earlier metric event with a higher running total), while the
+    // container simultaneously claims a HIGHER cost than the first event did.
+    // Both halves matter: the guard must keep the larger recomputed value, and
+    // the container's louder claim must not be able to raise the row.
+    await persistPlatformMetric({ input_tokens: 50, output_tokens: 25 }, 99);
 
-    const rows = await db
-      .select()
-      .from(llmUsage)
-      .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
+    const rows = await loadRunnerRows();
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.costUsd).toBeCloseTo(0.01, 5);
+    expect(rows[0]!.costUsd).toBeCloseTo(0.0021, 9);
     expect(rows[0]!.inputTokens).toBe(200);
     expect(rows[0]!.outputTokens).toBe(100);
   });
 
-  it("monotonic upsert: a larger subsequent cost replaces the recorded value (streaming totals)", async () => {
-    // Three increasing emits — each must replace the previous row.
-    await persist(
-      event("appstrate.metric", { usage: { input_tokens: 100, output_tokens: 0 }, cost: 0.001 }),
-      {
-        writeLedger: true,
-      },
-    );
-    await persist(
-      event("appstrate.metric", { usage: { input_tokens: 200, output_tokens: 50 }, cost: 0.005 }),
-      {
-        writeLedger: true,
-      },
-    );
-    await persist(
-      event("appstrate.metric", { usage: { input_tokens: 350, output_tokens: 120 }, cost: 0.012 }),
-      {
-        writeLedger: true,
-      },
-    );
+  it("monotonic upsert: a larger subsequent snapshot replaces the recorded value (streaming totals)", async () => {
+    // Three increasing emits — each must replace the previous row. The
+    // container's cost stays 0 throughout, so every advance here is the
+    // platform's own arithmetic over the cumulative counters.
+    await persistPlatformMetric({ input_tokens: 100, output_tokens: 0 }, 0);
+    await persistPlatformMetric({ input_tokens: 200, output_tokens: 50 }, 0);
+    await persistPlatformMetric({ input_tokens: 350, output_tokens: 120 }, 0);
 
-    const rows = await db
-      .select()
-      .from(llmUsage)
-      .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
+    const rows = await loadRunnerRows();
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.costUsd).toBeCloseTo(0.012, 5);
+    // 350×3/1e6 + 120×15/1e6 = 0.00105 + 0.0018.
+    expect(rows[0]!.costUsd).toBeCloseTo(0.00285, 9);
     expect(rows[0]!.inputTokens).toBe(350);
     expect(rows[0]!.outputTokens).toBe(120);
   });
@@ -395,6 +397,265 @@ describe("persistRunEvent", () => {
       expect(row!.costUsd).toBe(0);
       expect(row!.inputTokens).toBe(42);
       expect(row!.pricingStatus).toBe("unpriced");
+    });
+  });
+
+  /**
+   * The ledger row's `cost_usd` is computed by the PLATFORM, from
+   * `runs.model_cost` × the reported token counts — never taken from the `cost`
+   * the agent container reports alongside them. The container is the sandbox the
+   * platform is isolating, and `llm_usage.cost_usd` is the sole number the cloud
+   * billing module debits credits from.
+   *
+   * Every test here makes the container's figure DIFFER from the correct product
+   * on purpose, so an assertion passing by coincidence is impossible.
+   */
+  describe("runner row cost is server-computed", () => {
+    /** Claude-Sonnet-class rates, chosen so the products are exact in binary. */
+    const rates: ModelCost = { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 };
+
+    function persistLedger(
+      e: RunEvent,
+      opts: { modelSource: string | null; modelCost: ModelCost | null },
+    ) {
+      return persist(e, { writeLedger: true, ...opts });
+    }
+
+    async function runnerRow() {
+      const [row] = await db
+        .select()
+        .from(llmUsage)
+        .where(and(eq(llmUsage.runId, runId), eq(llmUsage.source, "runner")));
+      return row;
+    }
+
+    it("prices the row from runs.model_cost × reported tokens, ignoring the container's number", async () => {
+      await persistLedger(
+        event("appstrate.metric", {
+          usage: {
+            input_tokens: 1_000_000,
+            output_tokens: 200_000,
+            cache_read_input_tokens: 500_000,
+            cache_creation_input_tokens: 100_000,
+          },
+          // A container claiming a wildly inflated total. Before this became
+          // server-computed it would have been billed verbatim.
+          cost: 999,
+        }),
+        { modelSource: "system", modelCost: rates },
+      );
+
+      // 1M×3 + 0.2M×15 + 0.5M×0.3 + 0.1M×3.75 = 3 + 3 + 0.15 + 0.375
+      const row = await runnerRow();
+      expect(row!.costUsd).toBeCloseTo(6.525, 9);
+      expect(row!.costUsd).not.toBe(999);
+      expect(row!.pricingStatus).toBe("priced");
+    });
+
+    it("a container UNDER-reporting is corrected upward just the same", async () => {
+      // The recompute is not a cap on the container's claim — it replaces it in
+      // both directions. A runner that reports 0 (the shape a container with no
+      // `MODEL_COST` produces, which is where this change is headed) must still
+      // be billed for what it consumed.
+      await persistLedger(
+        event("appstrate.metric", {
+          usage: { input_tokens: 400_000, output_tokens: 100_000 },
+          cost: 0,
+        }),
+        { modelSource: "org", modelCost: rates },
+      );
+
+      // 0.4M×3 + 0.1M×15 = 1.2 + 1.5
+      expect((await runnerRow())!.costUsd).toBeCloseTo(2.7, 9);
+    });
+
+    it("tokens but NO rate snapshot → costUsd 0 classified `unpriced`, whatever the container claimed", async () => {
+      // The absent-pricing zero, and the reason `pricing_status` exists: the
+      // platform cannot price this run, so it records a 0 that says so rather
+      // than laundering the container's unverifiable number into the ledger.
+      await persistLedger(
+        event("appstrate.metric", {
+          usage: { input_tokens: 900, output_tokens: 300 },
+          cost: 0.42,
+        }),
+        { modelSource: "system", modelCost: null },
+      );
+
+      const row = await runnerRow();
+      expect(row!.costUsd).toBe(0);
+      expect(row!.pricingStatus).toBe("unpriced");
+      // The consumption itself is still on the row — an unpriced run is not an
+      // unrecorded one.
+      expect(row!.inputTokens).toBe(900);
+      expect(row!.outputTokens).toBe(300);
+    });
+
+    it("a malformed rate snapshot prices at 0, never NaN", async () => {
+      // `runs.model_cost` is JSONB. The same `modelCostSchema` narrowing that
+      // keeps a malformed snapshot from claiming `priced` must also feed the
+      // arithmetic — otherwise `computeTokenCost` multiplies by an absent
+      // `input` rate and writes NaN into a billing column.
+      await persistLedger(
+        event("appstrate.metric", {
+          usage: { input_tokens: 1_000, output_tokens: 500 },
+          cost: 0.01,
+        }),
+        { modelSource: "system", modelCost: {} as unknown as ModelCost },
+      );
+
+      const row = await runnerRow();
+      expect(Number.isNaN(row!.costUsd)).toBe(false);
+      expect(row!.costUsd).toBe(0);
+      expect(row!.pricingStatus).toBe("unpriced");
+    });
+
+    it("remote-origin run (model_source NULL) keeps the runner's reported cost", async () => {
+      // A remote run resolved no platform model, so there are no rates to
+      // recompute with — the same fact that leaves its `pricing_status` NULL.
+      // Zeroing it instead would erase the only cost a remote run with no proxy
+      // rows ever has.
+      await persistLedger(
+        event("appstrate.metric", {
+          usage: { input_tokens: 900, output_tokens: 300 },
+          cost: 0.02,
+        }),
+        { modelSource: null, modelCost: null },
+      );
+
+      const row = await runnerRow();
+      expect(row!.costUsd).toBeCloseTo(0.02, 9);
+      expect(row!.credentialSource).toBeNull();
+      expect(row!.pricingStatus).toBeNull();
+    });
+
+    it("a cost-only metric on a platform run mints no row", async () => {
+      // The degenerate-event guard now keys on the input the cost is DERIVED
+      // from. With no usage snapshot the recompute is exactly 0, so the row
+      // would be all-zero and pin no accounting fact.
+      await persistLedger(event("appstrate.metric", { cost: 0.5 }), {
+        modelSource: "system",
+        modelCost: rates,
+      });
+
+      expect(await runnerRow()).toBeUndefined();
+    });
+
+    // The cutover instrument: while the container still reports a cost of its
+    // own, a disagreement with the server's number is the only way a formula
+    // divergence becomes visible on real traffic. Its FIRING POLICY is the
+    // tested part — one line per run, at the terminal write, carrying the full
+    // gap — because the alternative (one per metric event) buries the very
+    // incident it reports: a broken formula diverges on every platform run at
+    // once.
+    describe("reported-cost divergence warn", () => {
+      const DIVERGENCE_MESSAGE =
+        "llm_usage: runner-reported cost diverges from the server-computed cost";
+
+      /** Divergence lines only — `pricing-provenance` warns on this logger too. */
+      function divergenceCalls(spy: ReturnType<typeof spyOn<typeof logger, "warn">>) {
+        return spy.mock.calls.filter(([message]) => message === DIVERGENCE_MESSAGE);
+      }
+
+      it("stays silent on mid-run metric events, then reports the FULL gap once at the terminal write", async () => {
+        const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          // Three cumulative snapshots, each with a container cost that
+          // diverges further from the platform's product. Server cost climbs
+          // 0.3 → 0.6 → 0.9 (rates below); the container claims 1, 2, then 3.
+          for (const [inputTokens, claimed] of [
+            [100_000, 1],
+            [200_000, 2],
+            [300_000, 3],
+          ] as const) {
+            await persistLedger(
+              event("appstrate.metric", {
+                usage: { input_tokens: inputTokens, output_tokens: 0 },
+                cost: claimed,
+              }),
+              { modelSource: "system", modelCost: { input: 3, output: 15 } },
+            );
+          }
+
+          // Not one line yet: every mid-run gap is a strict prefix of the
+          // terminal one, so reporting them adds nothing and multiplies noise.
+          expect(divergenceCalls(warnSpy)).toHaveLength(0);
+
+          // The terminal ledger barrier — the run's last write, and this
+          // producer's natural once-per-run hook.
+          await writeRunnerLedgerRow(
+            { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+            runId,
+            {
+              cost: 3,
+              usage: { input_tokens: 300_000, output_tokens: 0 },
+              modelSource: "system",
+              modelCost: { input: 3, output: 15 },
+            },
+            { required: true },
+          );
+
+          const calls = divergenceCalls(warnSpy);
+          expect(calls).toHaveLength(1);
+          // The magnitude an operator acts on is the WHOLE gap, not the first
+          // small one: 3 claimed against 0.9 computed, i.e. the terminal 2.1 —
+          // never the 0.7 the first snapshot diverged by.
+          const fields = calls[0]![1] as Record<string, unknown>;
+          expect(fields).toMatchObject({ runId, orgId: ctx.orgId, reportedCostUsd: 3 });
+          expect(fields["costUsd"]).toBeCloseTo(0.9, 9);
+          expect(fields["deltaUsd"]).toBeCloseTo(2.1, 9);
+        } finally {
+          warnSpy.mockRestore();
+        }
+      });
+
+      it("says nothing when the two numbers agree, or when there is no second number", async () => {
+        const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          // Agreement: 100k×3/1e6 = 0.3, which is what the container reports.
+          await writeRunnerLedgerRow(
+            { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+            runId,
+            {
+              cost: 0.3,
+              usage: { input_tokens: 100_000, output_tokens: 0 },
+              modelSource: "system",
+              modelCost: { input: 3, output: 15 },
+            },
+            { required: true },
+          );
+          expect(divergenceCalls(warnSpy)).toHaveLength(0);
+
+          // Remote-origin: the reported number IS the recorded one, so there
+          // are never two numbers to disagree.
+          await writeRunnerLedgerRow(
+            { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+            runId,
+            {
+              cost: 99,
+              usage: { input_tokens: 500_000, output_tokens: 0 },
+              modelSource: null,
+              modelCost: null,
+            },
+            { required: true },
+          );
+          expect(divergenceCalls(warnSpy)).toHaveLength(0);
+        } finally {
+          warnSpy.mockRestore();
+        }
+      });
+    });
+
+    it("a cost-only metric on a remote-origin run still mints its row", async () => {
+      // The mirror image: the reported cost IS this row's derivation input, so
+      // dropping the event would drop a spend fact.
+      await persistLedger(event("appstrate.metric", { cost: 0.5 }), {
+        modelSource: null,
+        modelCost: null,
+      });
+
+      const row = await runnerRow();
+      expect(row!.costUsd).toBeCloseTo(0.5, 9);
+      expect(row!.inputTokens).toBe(0);
     });
   });
 

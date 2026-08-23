@@ -97,6 +97,14 @@ async function seedSinkRun(
     modelSource?: string | null;
     runOrigin?: "platform" | "remote";
     tokenUsage?: Record<string, number> | null;
+    /**
+     * Kickoff rate snapshot. Defaults to none, which is the `unpriced` run —
+     * every ledger row the finalize barrier writes for it costs 0, because the
+     * barrier's cost is computed SERVER-side from these rates × the reported
+     * tokens (`resolveRunnerCost`), never from `result.cost`. A test that needs
+     * the barrier to carry money must therefore hand the run its rates.
+     */
+    modelCost?: { input: number; output: number } | null;
   } = {},
 ): Promise<string> {
   const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
@@ -108,6 +116,7 @@ async function seedSinkRun(
     status: "running",
     runOrigin: overrides.runOrigin ?? "platform",
     modelSource: overrides.modelSource ?? "system",
+    modelCost: overrides.modelCost ?? null,
     sinkSecretEncrypted: encrypt(RUN_SECRET),
     sinkExpiresAt: new Date(Date.now() + 3600_000),
     startedAt: new Date(),
@@ -313,14 +322,20 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
     // stored total already dominates. Reporting that as a billing loss produced
     // ~25 bogus error lines per container lifetime in production (issue #997),
     // every one of them with a refused amount of 0.
-    const runId = await seedSinkRun(ctx, { tokenUsage: { input_tokens: 100, output_tokens: 50 } });
+    // The rates are the run's own snapshot, and the $5 below is their product
+    // with the tokens — not `result.cost`, which the barrier ignores.
+    // 1M×3/1e6 + 0.5M×4/1e6 = 3 + 2.
+    const runId = await seedSinkRun(ctx, {
+      tokenUsage: { input_tokens: 1_000_000, output_tokens: 500_000 },
+      modelCost: { input: 3, output: 4 },
+    });
 
     // 1. The container's own finalize: cost + usage, barrier writes, CAS settles.
     const run = await getRunSinkContext(runId);
     const result = emptyRunResult();
     result.status = "success";
     result.cost = 5;
-    result.usage = { input_tokens: 100, output_tokens: 50 };
+    result.usage = { input_tokens: 1_000_000, output_tokens: 500_000 };
     await finalizeRun({ run: run!, result });
 
     const settled = await listLlmUsage({});
@@ -334,8 +349,8 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
     // The row is untouched (post-settlement immutability holds) …
     const row = await runnerRow(runId);
     expect(row!.costUsd).toBe(5);
-    expect(row!.inputTokens).toBe(100);
-    expect(row!.outputTokens).toBe(50);
+    expect(row!.inputTokens).toBe(1_000_000);
+    expect(row!.outputTokens).toBe(500_000);
     // … and the run keeps the terminal status its first finalize won.
     const [runRow] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
     expect(runRow!.status).toBe("success");
@@ -608,6 +623,32 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
     expect(await listLlmUsage({})).toEqual([]);
   });
 
+  it("a run that DIED without terminal usage is still priced, from its preserved snapshot", async () => {
+    // The counterpart to the case above, and the one that makes the runner
+    // row's cost server-computed without dropping spend. A watchdog kill or a
+    // container crash synthesises a terminal `RunResult` carrying neither cost
+    // nor usage — so the only record of what the run consumed is the cumulative
+    // snapshot the `appstrate.metric` side channel last wrote onto
+    // `runs.tokenUsage`. Finalize hands that snapshot to the terminal barrier
+    // (`readLastKnownUsage`), which is precisely what the recompute prices.
+    //
+    // If the barrier could ever be reached with a null usage, this is the run
+    // that would silently settle at $0 having really spent money.
+    const runId = await seedSinkRun(ctx, {
+      tokenUsage: { input_tokens: 800_000, output_tokens: 40_000 },
+      modelCost: { input: 3, output: 15 },
+    });
+
+    await synthesisedFinalize(runId);
+
+    // 0.8M×3/1e6 + 0.04M×15/1e6 = 2.4 + 0.6.
+    const row = await runnerRow(runId);
+    expect(row!.costUsd).toBeCloseTo(3, 9);
+    expect(row!.inputTokens).toBe(800_000);
+    expect(row!.outputTokens).toBe(40_000);
+    expect(row!.pricingStatus).toBe("priced");
+  });
+
   it("a run cannot settle with a stale total: a failed barrier write leaves it non-terminal", async () => {
     // The barrier is what makes settlement safe — but only if a FAILED barrier
     // write actually stops the CAS. If `required: true` ever stopped
@@ -619,7 +660,10 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
     // A CHECK constraint that rejects the terminal snapshot's cost simulates
     // the transient Postgres fault. Dropped in `finally` (with IF EXISTS) so a
     // failing assertion cannot leak it into the rest of the process.
-    const runId = await seedSinkRun(ctx);
+    // Rates so the terminal snapshot below prices to exactly $7 — the barrier
+    // computes the cost from them and the reported tokens, so `result.cost`
+    // alone can no longer aim at the CHECK constraint.
+    const runId = await seedSinkRun(ctx, { modelCost: { input: 10, output: 20 } });
     // The run already has a durable cumulative total of $3.
     await recordLlmUsage(
       {
@@ -643,6 +687,8 @@ describe("llm_usage settlement — terminal barrier and post-settlement immutabi
       const result = emptyRunResult();
       result.status = "success";
       // The terminal snapshot the barrier must make durable: $7, superseding $3.
+      // 0.5M×10/1e6 + 0.1M×20/1e6 = 5 + 2.
+      result.usage = { input_tokens: 500_000, output_tokens: 100_000 };
       result.cost = 7;
 
       // Pin the failure to the simulated barrier fault. Without naming the

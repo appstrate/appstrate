@@ -32,6 +32,21 @@ export function anthropicReasoningBudgetTokens(level: Exclude<ModelReasoningLeve
   return ANTHROPIC_REASONING_BUDGET_TOKENS[level];
 }
 
+/**
+ * Request-scoped thinking budget for a classic (non-adaptive) Anthropic call,
+ * shaped for pi-ai's `SimpleStreamOptions.thinkingBudgets`. The returned key is
+ * pi's clamped slot — it collapses `xhigh` and `max` onto `high` — not the
+ * requested level. Applied both by the runner and by the sidecar re-originating
+ * an aliased run.
+ */
+export function anthropicThinkingBudgets(
+  level: ModelReasoningLevel,
+): Partial<Record<Exclude<ModelReasoningLevel, "off" | "xhigh" | "max">, number>> | undefined {
+  if (level === "off") return undefined;
+  const piSlot = level === "xhigh" || level === "max" ? "high" : level;
+  return { [piSlot]: anthropicReasoningBudgetTokens(level) };
+}
+
 /** Map every portable reasoning level without duplicating the vocabulary. */
 export function mapModelReasoningLevels<T>(
   map: (level: ModelReasoningLevel) => T,

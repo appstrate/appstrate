@@ -4,7 +4,8 @@ import { createCipheriv, randomBytes } from "node:crypto";
 
 import { createApp, buildSidecarRuntimeDeps, SIDECAR_IDLE_TIMEOUT_SECONDS } from "./app.ts";
 import { createForwardProxy } from "./forward-proxy.ts";
-import type { LlmProxyConfig, ModelSwap } from "./helpers.ts";
+import type { LlmProxyConfig } from "./helpers.ts";
+import { parseModelSwapEnv } from "./model-swap.ts";
 import { logger } from "./logger.ts";
 import { OAuthTokenCache } from "./oauth-token-cache.ts";
 import {
@@ -91,11 +92,10 @@ function readLlmConfigFromEnv(): LlmProxyConfig | undefined {
       placeholder: process.env.PI_PLACEHOLDER || "sk-placeholder",
       // Model-alias swap (api-key path only — the oauth mode carries no
       // modelSwap; aliases are rejected platform-side for oauth providers).
-      // A malformed payload is a launcher bug — let JSON.parse throw rather
-      // than silently disable the swap (which would leak the real id to the
-      // agent).
+      // A malformed or incomplete payload is a launcher bug: `parseModelSwapEnv`
+      // throws at boot rather than silently disabling the swap and leaking the real id.
       ...(process.env.PI_MODEL_SWAP_JSON
-        ? { modelSwap: JSON.parse(process.env.PI_MODEL_SWAP_JSON) as ModelSwap }
+        ? { modelSwap: parseModelSwapEnv(process.env.PI_MODEL_SWAP_JSON) }
         : {}),
     };
   }

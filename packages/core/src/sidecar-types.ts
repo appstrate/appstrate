@@ -10,7 +10,7 @@
  */
 
 import type { IntegrationManifest } from "./integration.ts";
-import type { ModelNativeReasoningLevel } from "./model-generation.ts";
+import type { ModelNativeReasoningLevel, ModelReasoningLevel } from "./model-generation.ts";
 
 /**
  * Manifest `auths.{key}.delivery.http` block — the header-render config the
@@ -518,8 +518,13 @@ export type LlmProxyConfig = LlmProxyApiKeyConfig | LlmProxyOauthConfig;
  * platform's model-provider registry, and the OAuth token cache all reference
  * a single source of truth — drift between the three previously caused 401s
  * to surface as "unknown apiShape" rather than a real auth failure.
+ *
+ * `pi-messages` is pi-ai's own vendor-neutral protocol rather than a vendor's:
+ * an aliased run's container speaks it, so no vendor-shaped request or response
+ * crosses into the container. See `docs/architecture/MODEL_ALIASES.md`.
  */
 export const MODEL_API_SHAPES = [
+  "pi-messages",
   "anthropic-messages",
   "openai-completions",
   "openai-responses",
@@ -565,6 +570,23 @@ export interface ModelSwap {
   /** Real upstream model id forwarded to the provider. */
   real: string;
   /**
+   * Protocol the CLIENT of this boundary speaks (`pi-messages` for an aliased
+   * run's container). Never inferred from {@link backingApiShape}.
+   */
+  clientApiShape: ModelApiShape;
+  /* The sidecar's inbound allowlist keys on THIS field; keying it on
+     `backingApiShape` would refuse every aliased call. */
+  /**
+   * Protocol this boundary speaks UPSTREAM; differs from {@link clientApiShape}
+   * when it terminates and re-originates. Never reaches the agent container.
+   */
+  backingApiShape: ModelApiShape;
+  /**
+   * Catalog the sidecar rebuilds the real pi-ai `Model` record from. Required
+   * exactly when `clientApiShape !== backingApiShape`; enforced at sidecar boot.
+   */
+  backing?: ModelSwapBacking;
+  /**
    * Request-scoped Anthropic transport correction for an adaptive backing.
    * Pi cannot infer adaptive support from a hidden alias id, so the sidecar
    * restores the catalogued request shape without exposing this fact to the
@@ -573,6 +595,24 @@ export interface ModelSwap {
   anthropicAdaptiveReasoning?: {
     effort: Exclude<ModelNativeReasoningLevel, "none">;
   };
+}
+
+/**
+ * Backing model catalog, private to the platform↔sidecar channel and never
+ * emitted into the agent container — only what a pi-ai `Model` record needs.
+ */
+export interface ModelSwapBacking {
+  /**
+   * pi provider key of the real vendor. Drives pi-ai's per-vendor request
+   * shaping, which on an aliased run happens here, not in the container.
+   */
+  providerId: string;
+  /** Whether the backing supports extended thinking at all. */
+  reasoning: boolean;
+  /** Native thinking-level mapping; the container receives only the portable level. */
+  reasoningLevelMap?: Partial<Record<ModelReasoningLevel, ModelNativeReasoningLevel>>;
+  /** Input modalities the backing accepts — pi-ai gates image content on them. */
+  input: ReadonlyArray<string>;
 }
 
 export interface LlmProxyApiKeyConfig {

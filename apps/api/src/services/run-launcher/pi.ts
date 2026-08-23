@@ -25,7 +25,8 @@
 import { logger } from "../../lib/logger.ts";
 import type { AppstrateRunPlan } from "./types.ts";
 import { buildPlatformSystemPrompt } from "./prompt-builder.ts";
-import { buildRuntimePiEnv } from "@appstrate/runner-pi";
+import { buildRuntimePiEnv, derivePiProvider } from "@appstrate/runner-pi";
+import { ALIAS_CLIENT_API_SHAPE } from "@appstrate/core/model-swap";
 import {
   assertOauthRunIsolation,
   assertOauthRunNotAliased,
@@ -48,7 +49,7 @@ import { runWithSpan, currentTraceparent, recordContainerSpawn } from "@appstrat
 
 import { getEnv } from "@appstrate/env";
 import { getModelProvider } from "../model-providers/registry.ts";
-import type { LlmProxyConfig, SidecarLaunchSpec } from "@appstrate/core/sidecar-types";
+import type { LlmProxyConfig, ModelSwap, SidecarLaunchSpec } from "@appstrate/core/sidecar-types";
 import { toNativeModelReasoningLevel } from "@appstrate/core/model-generation";
 
 /**
@@ -259,10 +260,25 @@ async function runPlatformContainerImpl(
       requestedReasoningLevel,
       llmConfig.generation,
     );
-    const modelSwap = llmConfig.aliased
+    const modelSwap: ModelSwap | undefined = llmConfig.aliased
       ? {
           alias: llmConfig.aliasId,
           real: llmConfig.modelId,
+          // The container speaks the canonical dialect whatever the backing is:
+          // it restricts this run's `/llm/*` surface to that dialect's one
+          // endpoint, and tells the sidecar to terminate rather than proxy.
+          clientApiShape: ALIAS_CLIENT_API_SHAPE,
+          backingApiShape: llmConfig.apiShape,
+          // What the sidecar rebuilds the backing's pi-ai Model from. Private
+          // to this channel — none of it reaches `containerEnv` below.
+          backing: {
+            providerId: derivePiProvider(llmConfig.providerId, llmConfig.apiShape),
+            reasoning: llmConfig.reasoning ?? false,
+            ...(llmConfig.generation?.reasoning.nativeLevels
+              ? { reasoningLevelMap: llmConfig.generation.reasoning.nativeLevels }
+              : {}),
+            input: llmConfig.input ?? ["text"],
+          },
           ...(llmConfig.apiShape === "anthropic-messages" &&
           llmConfig.generation?.reasoning.adaptive === true &&
           requestedReasoningLevel !== "off" &&
@@ -345,8 +361,10 @@ async function runPlatformContainerImpl(
         api: llmConfig.apiShape,
         modelId,
         baseUrl: llmConfig.baseUrl,
-        // Platform-side only — resolves the wire quirks the sidecar-proxied
-        // container can no longer detect for itself (`MODEL_COMPAT`).
+        // The vendor key pi-ai derives a request shape from. A sidecar-proxied
+        // run replaces MODEL_BASE_URL with the sidecar's, erasing one of the two
+        // inputs compat detection reads; without it every provider would get
+        // plain-OpenAI bytes. An aliased run needs no vendor key at all.
         providerId: llmConfig.providerId,
         apiKey: llmApiKey,
         // When the sidecar is skipped, the agent talks to the upstream
@@ -359,6 +377,9 @@ async function runPlatformContainerImpl(
         reasoning: llmConfig.reasoning,
         reasoningLevelMap: llmConfig.generation?.reasoning.nativeLevels,
         cost: llmConfig.cost,
+        // WHAT this run is, not which vars to mask: `buildRuntimePiEnv` owns
+        // the alias policy for the container env contract.
+        aliased: !!llmConfig.aliased,
       },
       generation: plan.generationConfig,
       agentPrompt: prompt,
