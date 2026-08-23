@@ -11,27 +11,22 @@
 import type { ModelApiShape, ModelSwap } from "./sidecar-types.ts";
 
 /**
- * The upstream inference endpoint each protocol an alias can be BACKED by calls,
- * as the path suffix its SDK appends to the base URL. Only these shapes carry the
- * model id in the request BODY; url-model shapes cannot back an alias.
+ * The protocols an alias can be BACKED by. Only these carry the model id in the
+ * request BODY; url-model shapes cannot back an alias.
  */
-export const ALIAS_BACKING_INFERENCE_PATHS = {
-  "anthropic-messages": "/v1/messages",
-  "openai-completions": "/chat/completions",
-  "openai-responses": "/responses",
-  "openai-codex-responses": "/codex/responses",
-  "mistral-conversations": "/v1/chat/completions",
-} as const satisfies Partial<Record<ModelApiShape, string>>;
+const ALIAS_BACKING_SHAPES = [
+  "anthropic-messages",
+  "openai-completions",
+  "openai-responses",
+  "openai-codex-responses",
+  "mistral-conversations",
+] as const satisfies readonly ModelApiShape[];
 
 /** A protocol an alias can be BACKED by — never one a client speaks. */
-export type AliasBackingApiShape = keyof typeof ALIAS_BACKING_INFERENCE_PATHS;
-
-export const ALIAS_BACKING_SHAPES: ReadonlySet<ModelApiShape> = new Set<ModelApiShape>(
-  Object.keys(ALIAS_BACKING_INFERENCE_PATHS) as AliasBackingApiShape[],
-);
+export type AliasBackingApiShape = (typeof ALIAS_BACKING_SHAPES)[number];
 
 export function isAliasBackingShape(shape: ModelApiShape): shape is AliasBackingApiShape {
-  return ALIAS_BACKING_SHAPES.has(shape);
+  return (ALIAS_BACKING_SHAPES as readonly ModelApiShape[]).includes(shape);
 }
 
 /**
@@ -46,30 +41,18 @@ export function isAliasClientShape(shape: ModelApiShape): boolean {
   return shape === ALIAS_CLIENT_API_SHAPE;
 }
 
-/**
- * Inference path keyed by the CLIENT's protocol — the backings plus `pi-messages`,
- * composed from {@link ALIAS_BACKING_INFERENCE_PATHS} so the two cannot drift.
- */
-export const ALIAS_INFERENCE_PATHS = {
-  ...ALIAS_BACKING_INFERENCE_PATHS,
-  "pi-messages": "/messages",
-} as const satisfies Partial<Record<ModelApiShape, string>>;
-
-// Widened view for a lookup keyed by ANY shape. Plain assignment, no cast: an
-// unlisted shape reads `undefined`, which is what makes the check fail closed.
-const INFERENCE_PATH_BY_SHAPE: Readonly<Partial<Record<ModelApiShape, string>>> =
-  ALIAS_INFERENCE_PATHS;
+// Sidecar boot pins `clientApiShape` to the client dialect, so one path is exact.
+const ALIAS_INFERENCE_PATH = "/messages";
 
 /**
- * True when `(method, path)` is exactly the inference call this alias's CLIENT
+ * True when `(method, path)` is exactly the inference call an aliased client
  * makes — the allowlist that narrows an ALIASED run's `/llm/*` surface. Without
  * it, `GET <MODEL_BASE_URL>/v1/models` returns the vendor catalogue in a 2xx body
- * that neither the error synthesis nor the field rewrite touches. Keys on
- * `clientApiShape`, never `backingApiShape`, and fails closed on an exact match.
+ * that neither the error synthesis nor the field rewrite touches. Fails closed:
+ * the path is matched whole, never by prefix.
  */
-export function isAliasInferenceCall(swap: ModelSwap, method: string, path: string): boolean {
-  const inferencePath = INFERENCE_PATH_BY_SHAPE[swap.clientApiShape];
-  return inferencePath !== undefined && method.toUpperCase() === "POST" && path === inferencePath;
+export function isAliasInferenceCall(method: string, path: string): boolean {
+  return method.toUpperCase() === "POST" && path === ALIAS_INFERENCE_PATH;
 }
 
 /**

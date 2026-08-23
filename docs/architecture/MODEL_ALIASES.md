@@ -231,9 +231,9 @@ detail remains in server logs.
   `bedrock-*` carry the model id in the URL path, so an alias there is
   **rejected** (it would forward the alias verbatim and 404). `pi-messages` is
   **not** a backing shape: it is the CLIENT dialect, matched by the separate
-  `isAliasClientShape` / `ALIAS_CLIENT_API_SHAPE`. The sidecar's inference
-  allowlist (`ALIAS_INFERENCE_PATHS`) keys on `clientApiShape`, so it composes
-  the backing paths with `pi-messages` → `/messages`.
+  `isAliasClientShape` / `ALIAS_CLIENT_API_SHAPE`. Because sidecar boot pins
+  `clientApiShape` to that dialect, the inference allowlist is a single path
+  (`POST /messages`).
 - **API-key credentials only.** The oauth-subscription sidecar mode is a pure
   bearer-swap and never rewrites the body (`LlmProxyOauthConfig` carries no
   `modelSwap`), so an alias on an oauth-subscription credential is **rejected**
@@ -354,7 +354,7 @@ what the sandbox knows does not determine what is billed.
 
 The narrowed `/llm/*` surface is what keeps the disclosure list to that table.
 An aliased run gets exactly ONE call — the inference endpoint its client
-protocol uses (`ALIAS_INFERENCE_PATHS` / `isAliasInferenceCall`). Everything
+protocol uses — `POST /messages` (`isAliasInferenceCall`). Everything
 else is refused with the neutral envelope at 404, before any upstream fetch and
 before the placeholder is swapped for the real key, so the credential is never
 spent on a request being rejected. Without that narrowing a single

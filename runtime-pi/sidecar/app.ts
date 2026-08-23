@@ -535,7 +535,7 @@ export function createApp(deps: AppDeps): Hono {
     // reaching the provider, not hiding it.
     if (apiKeyConfig.modelSwap) {
       const swap = apiKeyConfig.modelSwap;
-      if (!isAliasInferenceCall(swap, method, path)) {
+      if (!isAliasInferenceCall(method, path)) {
         logger.warn("llm alias: non-inference request refused", {
           method,
           path,

@@ -61,15 +61,12 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
 #   - @appstrate/core/{errors,ssrf}           getErrorMessage + isBlockedHost/Url,
 #                                             imported by credential-proxy.ts /
 #                                             mcp.ts / ssrf.ts
-#   - @earendil-works/pi-ai (npm, via the                the sidecar is a `pi-messages`
-#     `pi-sdk.ts` barrel)                                 BACKEND for an ALIASED run: it
-#                                                         terminates the container's
-#     canonical dialect and re-originates the call against the real backing, so every
-#     vendor quirk keeps being derived by pi-ai itself rather than mirrored here. Only
-#     the five `./api/*` subpaths an alias can be backed by are imported — the package
-#     root would pull its ~616 KB provider catalog. Cost: +0.31 MB on the compiled
-#     binary (90 222 456 -> 90 550 136 bytes, linux/arm64). See
-#     docs/architecture/MODEL_ALIASES.md.
+#   - @earendil-works/pi-ai (npm, via     re-originates an aliased run's call against
+#     the `pi-sdk.ts` barrel)             the real backing, so pi-ai keeps deriving
+#                                         every vendor quirk itself. Only the five
+#                                         `./api/*` subpaths an alias can be backed
+#                                         by — the package root would pull its whole
+#                                         provider catalog.
 #   - @appstrate/runner-pi/runtime-tools      canonical run_history / recall_memory
 #                                             descriptors (name + description +
 #                                             parameter JSON Schema), imported by
