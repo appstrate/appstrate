@@ -929,13 +929,6 @@ async function removeVolumesMatching(predicate: (name: string) => boolean): Prom
 // --- Orphaned container cleanup ---
 
 /**
- * Container states that are inert: the workload is over and the row is
- * pure residue. Matches what `docker container prune` itself reclaims,
- * minus `created` — see {@link isReclaimableContainer}.
- */
-const TERMINAL_CONTAINER_STATES = new Set(["exited", "dead"]);
-
-/**
  * Can the daemon-wide sweep reclaim this container?
  *
  * `appstrate.managed=true` marks a per-run resource but says NOTHING about
@@ -970,11 +963,11 @@ const TERMINAL_CONTAINER_STATES = new Set(["exited", "dead"]);
  * stops them by id first (`listOrphanRunIds` → `stopByRunId`), which turns
  * them into `exited` rows that the next branch here reclaims.
  */
-export function isReclaimableContainer(
+function isReclaimableContainer(
   container: Pick<ListedContainer, "State" | "Created">,
-  now: number = Date.now(),
+  now: number,
 ): boolean {
-  if (TERMINAL_CONTAINER_STATES.has(container.State)) return true;
+  if (container.State === "exited" || container.State === "dead") return true;
   if (container.State !== "created") return false;
   const ageMs = now - container.Created * 1000;
   return ageMs > getEnv().RUN_BOOT_DEADLINE_SECONDS * 1000;

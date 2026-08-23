@@ -12,6 +12,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { getEnv } from "@appstrate/env";
 import {
   cleanupOrphanedContainers,
   removeContainersByRun,
@@ -36,8 +37,8 @@ interface EngineCall {
 const realFetch = globalThis.fetch;
 let calls: EngineCall[];
 
-/** Container ids whose DELETE the stubbed daemon rejects with a 500. */
-let removalFailures: Set<string>;
+/** Container id -> HTTP status the stubbed daemon answers its DELETE with. */
+let removalStatus: Map<string, number>;
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -76,10 +77,9 @@ function stubEngine(containers: StubContainer[], options: { inspect404?: boolean
       return json({ State: { Status: "exited", ExitCode: 0 } });
     }
     if (method === "DELETE") {
-      const id = url.pathname.replace("/containers/", "");
-      return removalFailures.has(id)
-        ? new Response("daemon is busy", { status: 500 })
-        : new Response(null, { status: 204 });
+      const id = url.pathname.replace("/containers/", "").replace(/\?.*$/, "");
+      const status = removalStatus.get(id) ?? 204;
+      return new Response(status === 204 ? null : `daemon said ${status}`, { status });
     }
     if (method === "POST") return new Response(null, { status: 204 });
     throw new Error(`unstubbed Docker call: ${method} ${url.pathname}`);
@@ -95,7 +95,7 @@ function removedIds(): string[] {
 
 beforeEach(() => {
   calls = [];
-  removalFailures = new Set();
+  removalStatus = new Map();
 });
 
 afterEach(() => {
@@ -124,6 +124,20 @@ describe("cleanupOrphanedContainers", () => {
     expect(report.containers).toBe(3);
   });
 
+  it("puts the created cutoff exactly at the run boot deadline", async () => {
+    // Not a round number picked for the test: past this point the platform's
+    // own liveness contract says no run may still be provisioning.
+    const deadline = getEnv().RUN_BOOT_DEADLINE_SECONDS;
+    stubEngine([
+      { Id: "just-inside", State: "created", ageSeconds: deadline - 5 },
+      { Id: "just-outside", State: "created", ageSeconds: deadline + 5 },
+    ]);
+
+    await cleanupOrphanedContainers();
+
+    expect(removedIds()).toEqual(["just-outside"]);
+  });
+
   it("lists with all=true — the default listing hides every non-running row", async () => {
     stubEngine([{ Id: "exited-1", State: "exited" }]);
 
@@ -141,7 +155,10 @@ describe("cleanupOrphanedContainers", () => {
       { Id: "exited-2", State: "exited" },
       { Id: "exited-3", State: "exited" },
     ]);
-    removalFailures = new Set(["exited-2", "exited-3"]);
+    removalStatus = new Map([
+      ["exited-2", 500],
+      ["exited-3", 500],
+    ]);
 
     const report = await cleanupOrphanedContainers();
 
@@ -151,16 +168,7 @@ describe("cleanupOrphanedContainers", () => {
 
   it("treats an already-gone container as reclaimed — the postcondition is 'gone'", async () => {
     stubEngine([{ Id: "exited-1", State: "exited" }]);
-    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-      const url = new URL(typeof input === "string" ? input : input.toString());
-      if (url.pathname === "/containers/json") {
-        return json([{ Id: "exited-1", State: "exited", Created: 0, Labels: {} }]);
-      }
-      if (url.pathname === "/networks") return json([]);
-      if (url.pathname === "/volumes") return json({ Volumes: [] });
-      if (init?.method === "DELETE") return new Response("no such container", { status: 404 });
-      throw new Error("unstubbed");
-    }) as typeof fetch;
+    removalStatus = new Map([["exited-1", 404]]);
 
     const report = await cleanupOrphanedContainers();
 
