@@ -56,11 +56,64 @@ function workspaceDirFor(runId: string): string {
 }
 
 /**
+ * Name of the ownership marker written into every run workspace.
+ *
+ * Holds the pid of the platform process that created the run. It is the
+ * ONLY thing that lets a boot-time sweep tell "residue of my own crashed
+ * self" apart from "a live sibling instance's run" — the `appstrate-ws-*`
+ * naming convention and the uid say nothing about which instance owns a
+ * directory, and two `bun run dev` sessions on one host share both (#1130).
+ *
+ * A pid is deliberately enough: pids are global, so `kill(pid, 0)` answers
+ * the ownership question from any working directory, which matters because
+ * DATA_DIR is cwd-relative and a sibling worktree's pidfiles are invisible
+ * from here. Pid reuse can only make a dead owner look alive — it defers a
+ * reclaim, it never causes a wrongful kill.
+ */
+const OWNER_MARKER_FILE = ".appstrate-owner";
+
+/** Absolute path of a run's ownership marker. */
+function ownerMarkerPathFor(runId: string): string {
+  return join(workspaceDirFor(runId), OWNER_MARKER_FILE);
+}
+
+/**
+ * Is this run owned by a platform process that is still alive?
+ *
+ * `false` means the run is reclaimable: the marker is missing (a workspace
+ * from before this mechanism existed, or one whose run already finished and
+ * had its workspace removed), unparsable, or names a dead process.
+ *
+ * A marker naming THIS process is also reclaimable. Every caller runs during
+ * boot, before this instance has created a single run, so our own pid on a
+ * pre-existing marker can only be a recycled pid from a previous life.
+ */
+async function ownerIsAlive(runId: string): Promise<boolean> {
+  const text = await Bun.file(ownerMarkerPathFor(runId))
+    .text()
+    .catch(() => "");
+  const pid = Number(text.trim());
+  if (!Number.isFinite(pid) || pid <= 0 || pid === process.pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Scan `os.tmpdir()` for orphaned per-run workspace directories
  * (`appstrate-ws-*`) owned by THIS process's uid and remove them.
- * Boot-time recovery only — runs marked failed by `lib/boot.ts` are by
- * definition not holding any of these dirs, so removing them is safe.
- * Returns the count of dirs reclaimed for the {@link CleanupReport}.
+ * Boot-time recovery only. Returns the count of dirs reclaimed for the
+ * {@link CleanupReport}.
+ *
+ * A workspace whose {@link OWNER_MARKER_FILE} names a live platform process
+ * is preserved: `os.tmpdir()` is shared by every instance on the host
+ * regardless of working directory, so this sweep sees the live runs of
+ * sibling instances — including ones started from another worktree, which
+ * the cwd-relative DATA_DIR sweep cannot even see. Deleting those wiped a
+ * running agent's `/workspace` mid-run (#1130).
  *
  * The uid filter avoids two problems on shared hosts:
  *   - Reaping a workspace owned by another platform instance (running
@@ -86,6 +139,10 @@ async function reapOrphanWorkspaceDirs(): Promise<number> {
       if (myUid >= 0) {
         const st = await stat(path);
         if (st.uid !== myUid) continue;
+      }
+      if (await ownerIsAlive(name.slice(WORKSPACE_DIR_PREFIX.length))) {
+        logger.info("Preserved workspace of a live sibling instance", { workspace: name });
+        continue;
       }
       await rm(path, { recursive: true, force: true });
       count++;
@@ -250,6 +307,17 @@ export class ProcessOrchestrator implements RunOrchestrator {
 
     for (const name of entries) {
       const dir = join(DATA_DIR, name);
+      // `name` is the runId — see createIsolationBoundary. A boundary whose
+      // owning platform process is still alive belongs to a sibling instance
+      // started from this same working directory (two `bun run dev`, or a
+      // redeploy overlapping the old process). SIGKILLing its workloads and
+      // deleting its boundary killed live runs at every sibling boot (#1130).
+      // Our own residue always fails this check: a crashed platform's pid is
+      // dead, which is exactly what makes its runs reclaimable.
+      if (await ownerIsAlive(name)) {
+        logger.info("Preserved run boundary of a live sibling instance", { runId: name });
+        continue;
+      }
       const files = ((await readdir(dir).catch(() => [])) as unknown as string[]) ?? [];
       for (const f of files) {
         if (!f.endsWith(".pid")) continue;
@@ -266,6 +334,10 @@ export class ProcessOrchestrator implements RunOrchestrator {
           continue;
         }
         try {
+          // The owner is gone but its workload outlived it: a `kill -9` of the
+          // platform orphans the agent subprocess, which keeps running (and
+          // burning tokens) with nobody supervising it. This sweep is its only
+          // reaper — the DB pass finds no in-memory handle after a restart.
           process.kill(pid, "SIGKILL");
           workloads++;
         } catch {
@@ -309,7 +381,13 @@ export class ProcessOrchestrator implements RunOrchestrator {
       // 0o700: the workspace sits under the shared `os.tmpdir()` and
       // holds the agent's run inputs/outputs — keep it readable only by
       // the platform uid, not world-readable to other local users.
-      mkdir(workspacePath, { recursive: true, mode: 0o700 }),
+      //
+      // The ownership marker is written immediately after the mkdir, not
+      // raced against it: a boundary that exists without a marker reads as
+      // reclaimable residue to every sibling's boot sweep.
+      mkdir(workspacePath, { recursive: true, mode: 0o700 }).then(() =>
+        Bun.write(ownerMarkerPathFor(runId), String(process.pid)),
+      ),
     ]);
     if (!opts?.skipSidecar) this.sidecarPorts.set(runId, port);
     return {

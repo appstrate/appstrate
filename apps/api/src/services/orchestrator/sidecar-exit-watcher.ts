@@ -42,9 +42,7 @@ export class SidecarExitWatcher {
     this.watchedRuns.add(runId);
     try {
       const exitCode = await this.dependencies.waitForExit(containerId);
-      const expectedContainerExit = this.expectedExits.delete(containerId);
-      const expectedRunExit = this.expectedRunExits.delete(runId);
-      if (expectedContainerExit || expectedRunExit) return;
+      if (this.consumeExpectation(runId, containerId)) return;
 
       if (exitCode !== 0) {
         const tail = await this.readLogTail(containerId);
@@ -56,6 +54,12 @@ export class SidecarExitWatcher {
         });
       }
     } catch (error) {
+      // The expectation is consumed on this path too. Teardown force-removes
+      // the sidecar, so `waitForExit` can lose the container mid-poll and
+      // reject rather than return — a removal WE asked for must not surface
+      // as a watcher error just because it was observed as a disappearance
+      // instead of an exit code.
+      if (this.consumeExpectation(runId, containerId)) return;
       this.dependencies.onWatcherError({ runId, containerId, error });
     } finally {
       this.watchedContainers.delete(containerId);
@@ -63,6 +67,17 @@ export class SidecarExitWatcher {
       this.expectedExits.delete(containerId);
       this.expectedRunExits.delete(runId);
     }
+  }
+
+  /**
+   * Consume any pending teardown expectation for this exit, container-scoped
+   * or run-scoped. Both are deleted unconditionally so a single exit cannot
+   * leave a stale marker behind for a later, genuinely unexpected one.
+   */
+  private consumeExpectation(runId: string, containerId: string): boolean {
+    const expectedContainerExit = this.expectedExits.delete(containerId);
+    const expectedRunExit = this.expectedRunExits.delete(runId);
+    return expectedContainerExit || expectedRunExit;
   }
 
   expectExitDuring<T>(containerId: string, teardown: () => Promise<T>): Promise<T> {

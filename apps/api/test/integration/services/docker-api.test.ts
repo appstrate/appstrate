@@ -25,6 +25,7 @@ import {
   ensureImagePin,
   IMAGE_PIN_PREFIX,
 } from "../../../src/services/docker.ts";
+import { DockerContainerDisappearedError } from "../../../src/services/docker-errors.ts";
 
 // ─── Constants ──────────────────────────────────────────────
 
@@ -348,6 +349,24 @@ describeRequiresDocker("waitForExit", () => {
     },
     TIMEOUT,
   );
+
+  it(
+    "rejects instead of reporting SIGKILL when the container disappears mid-poll (#1130)",
+    async () => {
+      // Returning 137 here asserted an OOM kill that never happened and sent
+      // the investigation after a memory ceiling. The exit status of a
+      // container that is gone is unknowable — say so.
+      const id = await createRawContainer(["sleep", "60"]);
+      await startContainer(id);
+
+      const exit = waitForExit(id);
+      await removeContainer(id);
+      untrackContainer(id);
+
+      await expect(exit).rejects.toThrow(DockerContainerDisappearedError);
+    },
+    TIMEOUT,
+  );
 });
 
 // ─── stopContainer ──────────────────────────────────────────
@@ -495,13 +514,15 @@ describeRequiresDocker("removeNetwork", () => {
 
 describeRequiresDocker("cleanupOrphanedContainers", () => {
   it(
-    "cleans up labeled containers and networks",
+    "reclaims terminal containers and orphan networks",
     async () => {
-      // Create containers with the managed label
-      const id1 = await createRawContainer(["sleep", "60"]);
-      const id2 = await createRawContainer(["sleep", "60"]);
+      // Two managed containers that have run to completion — inert residue.
+      const id1 = await createRawContainer(["true"]);
+      const id2 = await createRawContainer(["true"]);
       await startContainer(id1);
       await startContainer(id2);
+      await waitForExit(id1);
+      await waitForExit(id2);
 
       // Create a network with matching name pattern
       const netName = `appstrate-exec-test-${uid()}`;
@@ -525,6 +546,55 @@ describeRequiresDocker("cleanupOrphanedContainers", () => {
 
       // Clear cleanup tracking since cleanupOrphanedContainers handled removal
       containersToCleanup.length = 0;
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "preserves a running managed container while reclaiming a terminal one (#1130)",
+    async () => {
+      // The regression: `appstrate.managed=true` is shared by every instance
+      // on the daemon, so a boot sweep that force-removes everything carrying
+      // it kills a sibling instance's live agent and sidecar mid-run.
+      const live = await createRawContainer(["sleep", "60"]);
+      const residue = await createRawContainer(["true"]);
+      await startContainer(live);
+      await startContainer(residue);
+      await waitForExit(residue);
+
+      const result = await cleanupOrphanedContainers();
+
+      // The terminal one is gone...
+      const residueRes = await fetch(`${DOCKER_URL}/containers/${residue}/json`);
+      expect(residueRes.status).toBe(404);
+      untrackContainer(residue);
+      expect(result.containers).toBeGreaterThanOrEqual(1);
+
+      // ...and the running one is untouched, still running.
+      const liveRes = await fetch(`${DOCKER_URL}/containers/${live}/json`);
+      expect(liveRes.status).toBe(200);
+      const liveState = (await liveRes.json()) as { State: { Status: string } };
+      expect(liveState.State.Status).toBe("running");
+    },
+    TIMEOUT,
+  );
+
+  it(
+    "preserves a freshly created container that has never started (#1130)",
+    async () => {
+      // A sibling instance sits in `created` between createWorkload and
+      // startWorkload. `POST /stop` on such a container returns 304 and
+      // leaves it `created`, so it can never be made terminal — only the
+      // boot-deadline age check may reclaim it, and a fresh one is far
+      // below that threshold.
+      const provisioning = await createRawContainer(["sleep", "60"]);
+
+      await cleanupOrphanedContainers();
+
+      const res = await fetch(`${DOCKER_URL}/containers/${provisioning}/json`);
+      expect(res.status).toBe(200);
+      const state = (await res.json()) as { State: { Status: string } };
+      expect(state.State.Status).toBe("created");
     },
     TIMEOUT,
   );
