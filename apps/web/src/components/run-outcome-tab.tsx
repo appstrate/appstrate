@@ -17,15 +17,14 @@
  * first means scrolling past it to reach the thing itself. On the common single
  * -file run the file IS the answer, so the pane opens on it.
  *
- * The files therefore take one of two SHAPES, both above Output:
+ * The "Fichiers produits" card always lists what the run produced. Above it,
+ * when the run produced exactly ONE file, that file's viewer is HOISTED out of
+ * the card and is the first thing on the pane — the derived rule #1177 features
+ * a file only at exactly one, so several are listed and the reader picks.
  *
- *   - exactly ONE produced file → the viewer is HOISTED out of any card and is
- *     the first thing on the pane. No "Fichiers produits" card at all: the
- *     viewer already carries the file's name and its download button, so the
- *     card would wrap one file in a title, then list that same file underneath
- *     the preview of itself.
- *   - SEVERAL → no featured viewer (the derived rule #1177 gives one only at
- *     exactly one), so the "Fichiers produits" card with the list leads instead.
+ * The single file therefore appears twice, and that is on purpose: the viewer
+ * shows the file, the row carries what the viewer cannot — size, date, download
+ * and delete. Dropping the card there would take those away to save a line.
  *
  * Each section is present only when the run has that kind of outcome, and a run
  * that produced none of the three says so once instead of stacking three empty
@@ -163,14 +162,17 @@ export function RunOutcomeView({
 
   return (
     <div>
-      {hasFiles &&
-        (singleFileShape ? (
-          featured ? (
-            <RunFeaturedFile id={featured.id} name={featured.name} />
-          ) : (
-            <RunFeaturedFilePlaceholder />
-          )
-        ) : (
+      {hasFiles && (
+        <>
+          {/* The presented artefact leads the page. The card below still lists
+              it — the row is where its size, date, download and delete live,
+              which the viewer does not carry. */}
+          {singleFileShape &&
+            (featured ? (
+              <RunFeaturedFile id={featured.id} name={featured.name} />
+            ) : (
+              <RunFeaturedFilePlaceholder />
+            ))}
           <SectionCard title={t("run.sectionProducedFiles")}>
             {/* No purpose filter: this list is produced files by construction. */}
             <FileListPanel
@@ -186,7 +188,8 @@ export function RunOutcomeView({
               </p>
             )}
           </SectionCard>
-        ))}
+        </>
+      )}
 
       {hasOutput && (
         <SectionCard title={t("run.sectionOutput")}>

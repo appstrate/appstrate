@@ -249,15 +249,15 @@ describe("what the run produced LEADS the pane", () => {
     return index;
   }
 
-  it("puts the single produced file above Output, and in no card", () => {
+  it("puts the single produced file's viewer first, then its card, then Output", () => {
     // The file is what the run is FOR; the `output` tool's JSON is metadata
-    // about it. And one file under a "Fichiers produits" title would be listed
-    // as a single row directly beneath a full-size preview of itself.
+    // about it. The card still follows the viewer: the row is where the file's
+    // size, date, download and delete live, none of which the viewer carries.
     const html = outcome([file({ name: "rapport.md" })], { output: { verdict: "ok" } });
-    expect(at(html, `aria-label="${filesFr["run.featuredLabel"]}"`)).toBeLessThan(
-      at(html, agentsFr["run.sectionOutput"]),
-    );
-    expect(html).not.toContain(agentsFr["run.sectionProducedFiles"]);
+    const viewer = at(html, `aria-label="${filesFr["run.featuredLabel"]}"`);
+    const card = at(html, agentsFr["run.sectionProducedFiles"]);
+    expect(viewer).toBeLessThan(card);
+    expect(card).toBeLessThan(at(html, agentsFr["run.sectionOutput"]));
   });
 
   it("puts the files card above Output when the run produced SEVERAL", () => {
@@ -281,13 +281,18 @@ describe("what the run produced LEADS the pane", () => {
 
   it("holds the top slot while the list loads on a single-file run", () => {
     // `producedFileCount` is known on the first paint, `featured` only once
-    // /api/files answers. Painting the card in that window and swapping it for
-    // the hoisted viewer would be a layout jump on every open — the same class
-    // of bug the `hasFiles` count already fixed once.
+    // /api/files answers. Without the placeholder the pane would open with the
+    // card at the top and push it down a frame later, once the viewer appeared
+    // above it — a layout jump on every open, the same class of bug the
+    // `hasFiles` count already fixed once.
     const html = outcome([], { producedFileCount: 1, isLoading: true, output: { verdict: "ok" } });
-    expect(html).not.toContain(agentsFr["run.sectionProducedFiles"]);
-    // The placeholder reserves the viewer's exact footprint, above Output.
-    expect(at(html, VIEWER_HEIGHT_CLASS)).toBeLessThan(at(html, agentsFr["run.sectionOutput"]));
+    // The placeholder reserves the viewer's exact footprint, above the card.
+    expect(at(html, VIEWER_HEIGHT_CLASS)).toBeLessThan(
+      at(html, agentsFr["run.sectionProducedFiles"]),
+    );
+    expect(at(html, agentsFr["run.sectionProducedFiles"])).toBeLessThan(
+      at(html, agentsFr["run.sectionOutput"]),
+    );
   });
 
   it("believes the resolved list over a stale count that disagrees", () => {
