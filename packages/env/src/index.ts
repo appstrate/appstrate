@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { createEnvGetter } from "@appstrate/core/env";
+import { findImageTagMismatch } from "@appstrate/core/image-ref";
 
 // Boolean-from-string env transform: `"true"`/`"1"` (case-insensitive) → true,
 // anything else → false. Shared by every on/off flag so the parse semantics
@@ -897,6 +898,29 @@ const envSchema = z
   .refine((env) => env.NODE_ENV !== "production" || isProductionSafeUrl(env.APP_URL), {
     message: "APP_URL must use https:// when NODE_ENV=production (http://localhost is allowed)",
     path: ["APP_URL"],
+  })
+  // `PI_IMAGE` and `SIDECAR_IMAGE` are a version contract, not two independent
+  // knobs: the agent runtime and the sidecar speak a wire protocol that changes
+  // in the same commit, so a pair pinned to two different release tags boots
+  // fine and then fails runs with an opaque upstream error naming neither image
+  // (#1195). Detectable here, before anything starts.
+  //
+  // Deliberately NOT conditioned on `RUN_ADAPTER`. The rule is a property of
+  // the two values, and every backend that consumes them wants it: the docker
+  // orchestrator reads both at run time, and the firecracker rootfs build
+  // (`modules/firecracker/scripts/build-rootfs.sh`) reads both from this same
+  // environment to bake a guest image — a mismatched pair there produces the
+  // identical failure. Backends that ignore the vars (process) inherit the
+  // matching defaults, so the rule is a no-op for them rather than a hazard,
+  // and branching on a backend id would put a closed list of backends back in
+  // the codebase that the orchestrator registry exists to keep open.
+  //
+  // A digest-pinned ref is exempt (see `findImageTagMismatch`): digests
+  // identify different images by construction, so there is nothing to compare.
+  .refine((env) => !findImageTagMismatch(env.PI_IMAGE, env.SIDECAR_IMAGE), {
+    message:
+      "PI_IMAGE and SIDECAR_IMAGE must be pinned to the same tag — the agent runtime and the sidecar speak a wire protocol that changes in lockstep, and a mismatched pair boots fine then fails runs with an opaque upstream error (#1195). Rebuild both with `bun run docker:build:runtime`, or pin both refs to the same release tag.",
+    path: ["SIDECAR_IMAGE"],
   })
   // The untrusted-preview origin must actually BE a different origin. See the
   // long note on USERCONTENT_URL above for what a same-host value costs: it is

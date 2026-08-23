@@ -20,15 +20,15 @@
  *
  * ## Build stamp
  *
- * Both images carry `org.opencontainers.image.revision` (+ `.version`,
- * `.created`), fed from this repo's git HEAD. The platform compares the two
- * revisions after pre-pulling at boot and warns when they differ
- * (`services/orchestrator/runtime-image-pair.ts`). Without a stamp both
- * labels read `unknown`, compare equal, and a mismatched pair stays invisible
- * — which is the state dev builds were in before this script existed.
+ * Both images carry `org.opencontainers.image.revision`, fed from this repo's
+ * git HEAD. The platform compares the two revisions after pre-pulling at boot
+ * and warns when they differ (`services/orchestrator/runtime-image-pair.ts`).
+ * Without a stamp both labels read `unknown`, compare equal, and a mismatched
+ * pair stays invisible — the state dev builds were in before this script
+ * existed.
  *
- * CI does not use this script: the release workflow builds multi-arch images
- * via buildx and stamps the same three labels from the release tag + SHA.
+ * CI does not use this script: release.yml gets the same label from
+ * metadata-action, preview.yml from its own `BUILD_REVISION` build-arg.
  */
 
 import { resolve, dirname } from "node:path";
@@ -97,22 +97,14 @@ async function buildImage(image: RuntimeImage, buildArgs: readonly string[]): Pr
 }
 
 const revision = await resolveRevision();
-// The root manifest carries no `version` (it is a private monorepo root), so
-// the nearest release tag is the only version a local build has — and it is
-// the more useful one anyway: "v1.0.0-beta.51-3-g09b15fe" says which release
-// this host's images are ahead of. `--match "v*"` keeps package-publish tags
-// (`core@7.0.0`, `afps-shared@0.3.1`) out of the answer.
-const version =
-  (await git("describe", "--tags", "--always", "--dirty", "--match", "v*")) || "unknown";
-const created = new Date().toISOString();
 
-const buildArgs = [
-  `BUILD_VERSION=${version}`,
-  `BUILD_REVISION=${revision}`,
-  `BUILD_CREATED=${created}`,
-];
+// `BUILD_VERSION` is deliberately not fed: a local build has no release
+// version, and nothing reads `org.opencontainers.image.version` — the pair
+// check compares `.revision`. It stays at the Dockerfiles' "unknown" default,
+// which is the honest answer.
+const buildArgs = [`BUILD_REVISION=${revision}`, `BUILD_CREATED=${new Date().toISOString()}`];
 
-console.log(`Building runtime image pair — revision ${revision}, version ${version}`);
+console.log(`Building runtime image pair — revision ${revision}`);
 
 for (const image of IMAGES) {
   await buildImage(image, buildArgs);
