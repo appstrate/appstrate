@@ -37,7 +37,7 @@ import {
 } from "@appstrate/db/storage";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { StorageAlreadyExistsError, UPLOAD_MAX_BYTES } from "@appstrate/core/storage";
-import { UPLOAD_URI_PREFIX, UPLOAD_ID_RE } from "@appstrate/core/document-uri";
+import { UPLOAD_URI_PREFIX, UPLOAD_ID_RE } from "@appstrate/core/file-uri";
 import { MAX_FILENAME_LEN, sanitizeFilename } from "@appstrate/core/naming";
 import { getEnv } from "@appstrate/env";
 import type { Actor } from "@appstrate/connect";
@@ -250,7 +250,7 @@ export async function createUpload(params: CreateUploadParams): Promise<CreateUp
   // the aggregates + insert only. Consumed / expired uploads are excluded, so
   // they free budget the instant they leave the active set.
   await db.transaction(async (tx) => {
-    // Lock the org row (same lock the durable documents quota takes) to
+    // Lock the org row (same lock the durable files quota takes) to
     // serialise this org's concurrent creates.
     await tx
       .select({ id: organizations.id })
@@ -353,7 +353,7 @@ interface UploadAccessContext {
  * allowed — that shape is only reachable for rows written before end-user
  * attribution existed, and those drain within `UPLOAD_RETENTION_HOURS`. A
  * recorded owner that does not match the actor is rejected by the caller as a
- * 404 (indistinguishable from missing — same convention as the documents ACL).
+ * 404 (indistinguishable from missing — same convention as the files ACL).
  */
 function actorOwnsUpload(
   row: { createdBy: string | null; endUserId: string | null },
@@ -381,7 +381,7 @@ function ownershipClaimFilter(actor: Actor): SQL {
  * Read declared metadata for a set of staged uploads — without claiming or
  * downloading them. Verifies each exists, belongs to the caller's tenant, and
  * has not expired (same error shapes as consume). Used to enforce the per-run
- * document cap on *declared* sizes before any bytes are streamed: the per-file
+ * file cap on *declared* sizes before any bytes are streamed: the per-file
  * `bytes === size` check in consume keeps each actual size ≤ its declared size,
  * so a declared total under the cap bounds the actual total too.
  */
@@ -398,7 +398,7 @@ export async function peekUploads(
     // Hide cross-tenant existence AND cross-actor ownership behind the same
     // not-found as a missing row — an upload is readable only by its creator, so
     // a non-owner must not be able to probe existence (same convention as the
-    // documents ACL).
+    // files ACL).
     if (
       !row ||
       row.orgId !== ctx.orgId ||

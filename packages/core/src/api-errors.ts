@@ -247,17 +247,19 @@ export function payloadTooLarge(detail: string): ApiError {
 }
 
 /**
- * 413 with a distinct `document_count_exceeded` problem type — the number of
- * documents a run may reference as input or publish as output
- * (`RUN_MAX_DOCUMENTS`) would be exceeded. Mirrors the per-file 413
+ * 413 with a distinct `file_count_exceeded` problem type — the number of
+ * files a run may reference as input or publish as output
+ * (`RUN_MAX_DOCUMENTS`, an env var deliberately NOT renamed with the concept:
+ * renaming it is an ops migration on every deployment for zero user-visible
+ * gain) would be exceeded. Mirrors the per-file 413
  * ({@link payloadTooLarge}) but branches separately so a client can tell "too
  * many files" from "one file too big".
  */
-export function documentCountExceeded(detail: string): ApiError {
+export function fileCountExceeded(detail: string): ApiError {
   return new ApiError({
     status: 413,
-    code: "document_count_exceeded",
-    title: "Document Count Exceeded",
+    code: "file_count_exceeded",
+    title: "File Count Exceeded",
     detail,
   });
 }

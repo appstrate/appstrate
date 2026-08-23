@@ -453,7 +453,7 @@ describe("cleanupExpiredUploads", () => {
       .set({ consumedAt: new Date(Date.now() - 60 * 60 * 1000) })
       .where(eq(uploads.id, id));
 
-    // A slow sink standing in for a large document streaming into a workspace.
+    // A slow sink standing in for a large file streaming into a workspace.
     // It signals when it has begun, then blocks on an explicit gate the test
     // releases — so "mid-stream" is a fact, not a timing guess.
     let streamStarted: () => void;

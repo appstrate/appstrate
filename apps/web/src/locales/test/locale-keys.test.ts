@@ -166,7 +166,7 @@ describe("t() keys", () => {
  * failure is how a dead-key guard becomes decorative.
  */
 const DYNAMIC_KEY_PREFIXES = [
-  "filter.", // components/document-list-panel.tsx — t(`filter.${p}`)
+  "filter.", // components/file-list-panel.tsx — t(`filter.${p}`)
   "integration.auth.type.", // components/integration-connect/{inline-connect-button,integration-connection-picker}.tsx
   "integration.connect.fields.", // components/integration-connect/credential-fields.tsx
   "library.tab.", // pages/library-page.tsx — t(`library.tab.${tab}`)
@@ -176,7 +176,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "models.generation.levels.", // packages/ui — model-generation-labels.ts buildGenerationLabels()
   "models.generation.levelsShort.", // packages/ui — model-generation-labels.ts buildGenerationLabels()
   "run.artifacts.code.", // components/run-artifacts.ts — artifactFailureCodeKey()
-  "run.connSource.", // components/run-info-tab.tsx — t(`run.connSource.${c.source}`)
+  "run.connSource.", // components/run-configuration-tab.tsx — t(`run.connSource.${c.source}`)
   "run.status.", // packages/module-chat/src/ui/run-events.ts — runStatusLineKey()
   "status.", // components/status-badge.tsx — t(`status.${status}`)
 ];

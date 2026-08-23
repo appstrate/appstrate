@@ -20,7 +20,7 @@
 
 import { z } from "zod";
 import { runStatusValues, TERMINAL_RUN_STATUSES } from "@appstrate/db/run-status";
-import { documentUri, parseDocumentUri } from "@appstrate/core/document-uri";
+import { fileUri, parseFileUri, PUBLISHED_FILE_LOG_EVENTS } from "@appstrate/core/file-uri";
 import { asRecord, unwrapResult } from "./tool-result.ts";
 
 /** Operation ids whose result launches a run we can follow. */
@@ -35,9 +35,9 @@ export function isTerminalStatus(status: string | null | undefined): status is R
 /**
  * Automatic artefacts belong to a call that mounted live, never to completed
  * history. Capture this result once at card mount; later phase changes must not
- * revoke a live card's eligibility before its final document event arrives.
+ * revoke a live card's eligibility before its final file event arrives.
  */
-export function isPrimaryAutoPresentationEligible(
+export function isRunAutoPresentEligible(
   phase: "pending" | "running" | "success" | "error",
   initialStatus: string | null | undefined,
 ): boolean {
@@ -102,16 +102,6 @@ const runUpdateLiteSchema = z.object({
 type RunUpdateLite = z.infer<typeof runUpdateLiteSchema>;
 
 /**
- * The one extra field the full run resource carries beyond realtime updates.
- * It is the authoritative CURRENT primary selection, unlike append-only
- * `document.published` logs which also retain superseded selections.
- */
-const runResourceLiteSchema = runUpdateLiteSchema.extend({
-  primary_document_id: z.string().nullable().optional(),
-});
-type RunResourceLite = z.infer<typeof runResourceLiteSchema>;
-
-/**
  * Pull the launched run id out of a tool-call result. The invoke-operation
  * envelope is `{ status, body }` (the run resource lives in `body`); the
  * bundled `run_and_wait` tool returns the run resource at the top level. Try
@@ -174,8 +164,11 @@ export function parseRunUpdateFrame(raw: string): RunUpdateLite | undefined {
  * transient launch status (`pending`), so without this the card would read
  * "Lancement" for an already-running run until the first live frame arrives.
  */
-export function parseRunResource(body: unknown): RunResourceLite | undefined {
-  const parsed = runResourceLiteSchema.safeParse(body);
+export function parseRunResource(body: unknown): RunUpdateLite | undefined {
+  // Same lifecycle subset as a `run_update` frame. Zod strips every other key,
+  // so a server still sending retired fields (`primary_document_id`) parses
+  // unchanged — they are ignored, never asserted away.
+  const parsed = runUpdateLiteSchema.safeParse(body);
   return parsed.success ? parsed.data : undefined;
 }
 
@@ -281,7 +274,7 @@ export interface VisibleLogEntry {
  * card tickers through one entry at a time. ONLY `event === "log"` rows qualify:
  * those come from the agent's explicit `log` runtime tool (sink tags them so),
  * never the auto-emitted runtime lifecycle / tool-call breadcrumbs (which share
- * `type='progress'` but keep `event='progress'`), nor `output`/`document`/system
+ * `type='progress'` but keep `event='progress'`), nor `output`/`file`/system
  * rows. Keeps ascending `id` order (same as `mergeLogs`), so the last element is
  * the most recent line; `id` doubles as the React key the line animates on.
  */
@@ -304,11 +297,11 @@ export function visibleLogEntries(logs: readonly RunLogLine[]): VisibleLogEntry[
 }
 
 /**
- * A document surfaced in a run card: the stable id + uri (for chaining) plus a
+ * A file surfaced in a run card: the stable id + uri (for chaining) plus a
  * display name. `mime`/`size` are optional (present in the persisted tool
  * result, absent on some log frames).
  */
-export interface ChatRunDocument {
+export interface ChatRunFile {
   id: string;
   uri: string;
   name: string;
@@ -316,104 +309,289 @@ export interface ChatRunDocument {
   size?: number;
 }
 
-function asChatRunDocument(raw: unknown): ChatRunDocument | undefined {
+/**
+ * Display name AND download filename for a file that carries none. The sink
+ * writes `name: null` whenever the emitter omitted it
+ * (`appstrate-event-sink.ts` → `file.published`), so a nameless frame is
+ * reachable, not hypothetical. Dropping such a frame would be the worse
+ * failure by far: the count of produced files IS the auto-present rule, so one
+ * missing file turns a two-file run into a single-file run and opens the wrong
+ * thing. A chip with a generic label still opens, still downloads, and — once
+ * the run is terminal — is relabelled by the authoritative `/api/files` read.
+ *
+ * Exported and shared by every nameless-file site in the module (the run-card
+ * chips, the thread's sent-attachment chips, the model-facing attachment line,
+ * the run-notice code span) — the fallback WAS hand-written at six of them,
+ * which is how the same file could read `file` on the card and something else
+ * in the thread.
+ *
+ * NOT translated, deliberately, and that is load-bearing at
+ * `fileActivation`: this same string becomes the name the browser saves the
+ * download under, so a localized value would save the file as
+ * «Fichier sans nom» for one reader and something else for the next. The chip
+ * LABEL is a different question and gets `t("file.previewOf" | "file.downloadOf")`
+ * with the translated `file.unnamed` placeholder inside it; `file.unnamed`
+ * ("ce fichier") is a sentence fragment for that interpolation, not a name a
+ * chip can wear on its own.
+ */
+export const UNNAMED_FILE = "file";
+
+function asChatRunFile(raw: unknown): ChatRunFile | undefined {
   const r = asRecord(raw);
   if (!r) return undefined;
-  // `id` in the tool result; `document_id` in the `document.published` log frame.
-  const id = nonEmptyString(r.id) ?? nonEmptyString(r.document_id);
-  const uri = nonEmptyString(r.uri) ?? (id ? documentUri(id) : undefined);
-  const name = nonEmptyString(r.name);
-  if (!id || !uri || !name) return undefined;
-  const doc: ChatRunDocument = { id, uri, name };
+  // `id` in the tool result; `file_id` in the `file.published` log frame; the
+  // pre-#1177 frames used `document_id` — read it too (same reason the legacy
+  // `event` tag stays accepted: persisted frames are immutable once written).
+  const id = nonEmptyString(r.id) ?? nonEmptyString(r.file_id) ?? nonEmptyString(r.document_id);
+  const uri = nonEmptyString(r.uri) ?? (id ? fileUri(id) : undefined);
+  const name = nonEmptyString(r.name) ?? UNNAMED_FILE;
+  if (!id || !uri) return undefined;
+  const file: ChatRunFile = { id, uri, name };
   const mime = nonEmptyString(r.mime);
-  if (mime) doc.mime = mime;
-  if (typeof r.size === "number") doc.size = r.size;
-  return doc;
+  if (mime) file.mime = mime;
+  if (typeof r.size === "number") file.size = r.size;
+  return file;
 }
 
 /**
- * Pull the published `documents` list out of a persisted run_and_wait tool
- * result (`documents` at the top level, or nested under the invoke envelope's
- * `body`). Empty when the run produced none — survives reload because it reads
- * the persisted message part, not live state.
+ * The keys a persisted `run_and_wait` result can carry its published file list
+ * under, canonical first. `files` is what the tool writes today; `documents` is
+ * the pre-#1177 spelling and stays readable FOREVER — this payload IS the
+ * reload-safe source (it exists precisely because run logs get pruned), so a
+ * conversation reopened from before the rename would otherwise come back with
+ * no chips at all, permanently, once its logs are gone.
  */
-export function extractRunDocuments(result: unknown): ChatRunDocument[] {
+const PUBLISHED_FILE_RESULT_KEYS = ["files", "documents"] as const;
+
+/** First `PUBLISHED_FILE_RESULT_KEYS` entry present on `record` as an array. */
+function rawFileList(record: Record<string, unknown> | null | undefined): unknown[] | undefined {
+  if (!record) return undefined;
+  for (const key of PUBLISHED_FILE_RESULT_KEYS) {
+    const value = record[key];
+    if (Array.isArray(value)) return value;
+  }
+  return undefined;
+}
+
+/**
+ * Pull the published file list out of a persisted run_and_wait tool result (at
+ * the top level, or nested under the invoke envelope's `body`; under either
+ * accepted key). Empty when the run produced none — survives reload because it
+ * reads the persisted message part, not live state.
+ */
+export function extractRunFiles(result: unknown): ChatRunFile[] {
   const unwrapped = asRecord(unwrapResult(result));
   if (!unwrapped) return [];
-  const raw = Array.isArray(unwrapped.documents)
-    ? unwrapped.documents
-    : Array.isArray(asRecord(unwrapped.body)?.documents)
-      ? (asRecord(unwrapped.body)!.documents as unknown[])
-      : [];
-  const out: ChatRunDocument[] = [];
+  const raw = rawFileList(unwrapped) ?? rawFileList(asRecord(unwrapped.body)) ?? [];
+  const out: ChatRunFile[] = [];
   for (const item of raw) {
-    const doc = asChatRunDocument(item);
-    if (doc) out.push(doc);
+    const file = asChatRunFile(item);
+    if (file) out.push(file);
   }
   return out;
 }
 
 /**
- * Extract published documents from the live run log stream — the
- * `type='result' event='document'` frames the sink persists for each
- * `document.published` event. Lets the card show a chip the moment an agent
- * publishes, before the run terminates.
+ * Extract published files from the live run log stream — the
+ * `type='result' event='file'` frames the sink persists for each
+ * `file.published` event (and the legacy `event='document'` frames written
+ * before #1177). Lets the card show a chip the moment an agent publishes,
+ * before the run terminates.
+ *
+ * These frames are publications, i.e. files the agent PRODUCED: the only
+ * emitters are the `publish_file` runtime tool and the end-of-run
+ * `outputs/` sweep. Input files a run merely consumed never appear here, so
+ * this list is exactly the population the auto-present rule counts.
+ *
+ * Historical frames carry extra fields (notably the retired `presentation`);
+ * only the known keys are read, so a legacy line parses like any other.
  */
-export function publishedDocumentsFromLogs(logs: readonly RunLogLine[]): ChatRunDocument[] {
-  const out: ChatRunDocument[] = [];
+export function publishedFilesFromLogs(logs: readonly RunLogLine[]): ChatRunFile[] {
+  const out: ChatRunFile[] = [];
   for (const line of logs) {
-    if (line.event !== "document") continue;
+    if (!line.event || !PUBLISHED_FILE_LOG_EVENTS.includes(line.event)) continue;
     if (!line.data || typeof line.data !== "object") continue;
-    const doc = asChatRunDocument(line.data);
-    if (doc) out.push(doc);
+    const file = asChatRunFile(line.data);
+    if (file) out.push(file);
   }
   return out;
 }
 
-/** The last primary publication in an ordered log list (last-successful-wins). */
-export function primaryDocumentFromLogs(logs: readonly RunLogLine[]): ChatRunDocument | undefined {
-  let primary: ChatRunDocument | undefined;
-  for (const line of logs) {
-    if (line.event !== "document" || !line.data || typeof line.data !== "object") continue;
-    if (asRecord(line.data)?.presentation !== "primary") continue;
-    const doc = asChatRunDocument(line.data);
-    if (doc) primary = doc;
-  }
-  return primary;
+/**
+ * One page of `GET /api/files?run_id=…&purpose=agent_output`, narrowed to what
+ * this run PRODUCED.
+ */
+interface ProducedFileList {
+  /** The rows on this page that this run produced. */
+  files: ChatRunFile[];
+  /**
+   * The server holds rows beyond this page (`hasMore` on the list envelope).
+   * The route clamps `limit` to 100 and exposes no cursor field — paging is
+   * `startingAfter=<last id>` — so a run that produced more than 100 files is
+   * silently truncated here unless the caller says so.
+   *
+   * This does NOT endanger the auto-present rule: a truncated page holds at
+   * least 100 entries, never exactly 1, so {@link autoPresentFile} answers
+   * `undefined` either way. It is a display concern only — do not build a
+   * pager for it.
+   */
+  hasMore: boolean;
 }
 
 /**
- * Merge two regular document lists, deduping by id while letting newer display
- * metadata win. Presentation is intentionally not projected into this type:
- * `primary` is only an automatic-open signal, never a different document kind.
+ * The run's produced files, read from `GET /api/files?run_id=…` — the same
+ * endpoint (and the same predicate) the run page's Outcome pane uses. This is
+ * the AUTHORITATIVE set: the log stream is a truncatable window
+ * (`?limit=1000`, ascending, cursor never followed), and the end-of-run
+ * `file.published` frames are the last rows a run writes, so a chatty run
+ * pushes exactly the frames this card needs out of the page.
+ *
+ * Returns `undefined` — NOT an empty page — when `payload` is not a list
+ * envelope at all (an error body, a truncated response, anything unparseable).
+ * The two are opposite kinds of answer and the completion signal turns on
+ * telling them apart: an envelope listing zero rows is a run that produced
+ * nothing, which is a complete answer; a body that is not an envelope is no
+ * answer at all. See {@link shouldRaiseSweepDone}.
+ *
+ * Both halves of the filter are load-bearing and `purpose` alone is NOT
+ * enough: the endpoint answers the run's whole CONTAINER, so a file chained in
+ * as INPUT from an earlier run is listed here while still carrying
+ * `purpose: "agent_output"` — it was produced by that earlier run. Ownership is
+ * decided by the row's own `run_id`.
+ *
+ * The produced-by-this-run predicate exists in THREE places and they must not
+ * drift: `producedRunFiles()` in `apps/web/src/lib/files.ts` (the run page),
+ * this function (the chat card), and `fetchRunFiles()` in
+ * `@appstrate/core/run-and-wait-client` (the server-side `run_and_wait`
+ * payload). All three agree with the server's own predicate. The duplication is
+ * deliberate: `@appstrate/module-chat` is an optional package the web shell
+ * consumes, and a package may not import from `apps/web`.
  */
-export function mergeRunDocuments(
-  a: readonly ChatRunDocument[],
-  b: readonly ChatRunDocument[],
-): ChatRunDocument[] {
-  const byId = new Map<string, ChatRunDocument>();
-  for (const doc of [...a, ...b]) {
-    const previous = byId.get(doc.id);
-    byId.set(doc.id, previous ? { ...previous, ...doc } : doc);
+export function producedFilesFromFileList(
+  payload: unknown,
+  runId: string,
+): ProducedFileList | undefined {
+  const envelope = asRecord(payload);
+  const rows = envelope?.data;
+  if (!Array.isArray(rows)) return undefined;
+  const out: ChatRunFile[] = [];
+  for (const row of rows) {
+    const r = asRecord(row);
+    if (!r) continue;
+    if (r.purpose !== "agent_output" || r.run_id !== runId) continue;
+    const file = asChatRunFile(r);
+    if (file) out.push(file);
+  }
+  return { files: out, hasMore: envelope?.hasMore === true };
+}
+
+/**
+ * How one of the reads the completion signal depends on turned out.
+ * `"not-attempted"` is not a failure: it says this settle path never claimed
+ * that read in the first place.
+ */
+export type SweepRead = "ok" | "failed" | "not-attempted";
+
+/**
+ * Should `sweepDone` — "this run's produced-file set is complete and
+ * trustworthy" — be raised, given how the reads that back the claim turned out?
+ *
+ * The invariant, and the whole reason this is a function and not an inlined
+ * `finally`: **no evidence, no flag; and no flag means nothing is presented,
+ * never an error and never a spinner.** A read that merely FINISHED is not
+ * evidence — the previous shape swallowed a 500 from `/api/files` and raised
+ * the flag anyway, which is how a two-file run whose second publication frame
+ * fell outside the log window auto-opened the first of its two files.
+ *
+ *  - `status` must be terminal: `sweepDone` says the read finished, the status
+ *    says the run is over. Both are required.
+ *  - `producedFileRead` must be `"ok"`: the response was 2xx AND the payload
+ *    parsed as the list envelope. An envelope listing ZERO files IS `"ok"` —
+ *    a run that produced nothing is a legitimate, complete answer.
+ *  - `logSweep` blocks only when it was attempted and FAILED. The card's set is
+ *    the UNION of the log frames and the authoritative read, and the
+ *    authoritative half alone already covers everything the run produced, so a
+ *    frame the sweep missed can only delay a chip, never remove one. But a
+ *    sweep that errored yields `[]`, which is indistinguishable from "this run
+ *    wrote no frames", and the tail path attempts one precisely because frames
+ *    can land in the same tick as the terminal status. Withholding there costs
+ *    nothing (no flag ⇒ nothing presented, card unchanged) and is the only
+ *    reading that keeps "no evidence, no flag" literal. The no-tail path never
+ *    attempts a final sweep and reports `"not-attempted"`.
+ */
+export function shouldRaiseSweepDone(args: {
+  status: string | null | undefined;
+  producedFileRead: SweepRead;
+  logSweep: SweepRead;
+}): boolean {
+  if (!isTerminalStatus(args.status)) return false;
+  if (args.producedFileRead !== "ok") return false;
+  return args.logSweep !== "failed";
+}
+
+/**
+ * The derived auto-present rule (issue #1177). Nothing the agent declares takes
+ * part in it: the run either produced exactly ONE file — which is then opened
+ * for the user — or it did not, and the card just lists what there is.
+ *
+ *  - 0 produced files  → nothing to present.
+ *  - exactly 1         → that one.
+ *  - N > 1             → nothing; the user picks from the chips.
+ *
+ * Gated on a SETTLED run because a run that publishes three files emits them one
+ * at a time: a mid-stream count of 1 is not the final count, and opening on it
+ * would auto-present the first of three.
+ *
+ * "Settled" is asserted by a POSITIVE signal, `sweepDone` — raised by
+ * `useRunLogStream` only after it has actually completed a full read of the
+ * run's produced-file set (final log sweep + the authoritative
+ * `GET /api/files` read). The absence of a live tail is NOT that signal and
+ * must not be used as one: the hook's `live` starts `false` and only turns true
+ * on the SSE handshake, which loses a race against the two plain GETs the same
+ * effect fires, and stays false forever when no SSE can be opened at all. Under
+ * a `!live` gate both cases read as "settled" on a set nothing ever completed.
+ *
+ * Terminal status is still required on top: `sweepDone` says the read finished,
+ * the status says the run is over.
+ */
+export function autoPresentFile(args: {
+  files: readonly ChatRunFile[];
+  status: RunStatus | undefined;
+  sweepDone: boolean;
+}): ChatRunFile | undefined {
+  if (!isTerminalStatus(args.status) || !args.sweepDone) return undefined;
+  return args.files.length === 1 ? args.files[0] : undefined;
+}
+
+/**
+ * Merge two regular file lists, deduping by id while letting newer display
+ * metadata win. Every produced file is the same kind of thing — there is no
+ * featured/secondary distinction to project.
+ */
+export function mergeRunFiles(a: readonly ChatRunFile[], b: readonly ChatRunFile[]): ChatRunFile[] {
+  const byId = new Map<string, ChatRunFile>();
+  for (const file of [...a, ...b]) {
+    const previous = byId.get(file.id);
+    byId.set(file.id, previous ? { ...previous, ...file } : file);
   }
   return [...byId.values()];
 }
 
 /**
- * An attachment's resolved content: a downloadable stored document, or an inert
+ * An attachment's resolved content: a downloadable stored file, or an inert
  * placeholder.
  *
  * The `@assistant-ui/react-ai-sdk` converter routes user `file` parts OUT of a
  * message's content and exposes them as `message.attachments` instead — the
  * wire URI ends up on the attachment's first content part (the `image` field
- * for an image part, `data` for a file part). Only a `document://` URI is
- * downloadable: the content route serves stored documents. A just-sent
- * optimistic `upload://` URI (materialized to `document://` only in the
+ * for an image part, `data` for a file part). Only an `appfile://` URI is
+ * downloadable: the content route serves stored files. A just-sent
+ * optimistic `upload://` URI (materialized to `appfile://` only in the
  * server-persisted copy), or anything unparseable, is inert — the raw URI is
  * carried along so the renderer can still resolve a local preview for it (the
  * staged-image cache is keyed by `upload://` URI).
  */
-type ResolvedAttachment = { kind: "document"; id: string } | { kind: "inert"; uri?: string };
+type ResolvedAttachment = { kind: "file"; id: string } | { kind: "inert"; uri?: string };
 
 /** Minimal structural view of an assistant-ui attachment content part. */
 interface AttachmentContentPart {
@@ -427,8 +605,8 @@ export function resolveAttachmentContent(
 ): ResolvedAttachment {
   const part = content?.[0];
   const uri = part?.type === "image" ? part.image : part?.type === "file" ? part.data : undefined;
-  const id = typeof uri === "string" ? parseDocumentUri(uri) : null;
-  if (id) return { kind: "document", id };
+  const id = typeof uri === "string" ? parseFileUri(uri) : null;
+  if (id) return { kind: "file", id };
   return typeof uri === "string" ? { kind: "inert", uri } : { kind: "inert" };
 }
 

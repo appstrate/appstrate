@@ -773,7 +773,7 @@ const UNENRICHED_SCHEDULE_FIELDS = {
  *
  * These used to be derived client-side: each card fetched
  * `GET /api/schedules/:id/runs` (up to 20 enriched rows, each with its own
- * unread EXISTS and document subqueries) purely to count three things, so a
+ * unread EXISTS and file subqueries) purely to count three things, so a
  * dashboard listing N schedules issued N extra HTTP requests and ~2N SQL
  * queries. Serving them from the list the cards already have removes the fan-out
  * entirely.

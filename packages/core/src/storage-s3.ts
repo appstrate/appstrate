@@ -163,8 +163,8 @@ export function createS3Storage(config: S3StorageConfig): Storage {
       // `partSize` is pinned to the 5 MiB S3 floor and `queueSize` to 1 so the
       // in-flight buffer is one part (~5 MiB) rather than the SDK default of
       // queueSize 4 × 5 MiB = ~20 MiB. This keeps per-stream memory bounded and
-      // predictable when many documents stream concurrently; the trade-off is no
-      // parallel part upload per object, which is fine for input documents
+      // predictable when many files stream concurrently; the trade-off is no
+      // parallel part upload per object, which is fine for input files
       // (modest sizes, latency dominated by the copy itself, not part fan-out).
       //
       // `exclusive` maps to `If-None-Match: *` — lib-storage forwards the param
@@ -414,7 +414,7 @@ export function createS3Storage(config: S3StorageConfig): Storage {
       const cmd = new GetObjectCommand({
         Bucket: config.bucket,
         Key: makeKey(bucket, path),
-        // Same builder as the proxy-stream branch (`routes/documents.ts`), so a
+        // Same builder as the proxy-stream branch (`routes/files.ts`), so a
         // non-ASCII name survives the presigned download instead of degrading
         // to a quote-stripped ASCII-only `filename=`.
         ...(opts?.filename

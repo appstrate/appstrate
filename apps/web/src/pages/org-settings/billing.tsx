@@ -35,7 +35,7 @@ export function OrgSettingsBillingPage() {
   const checkoutMutation = useCheckout();
   const portalMutation = usePortal();
 
-  // Storage entitlement — core data (organizations.documents_bytes_*), shown
+  // Storage entitlement — core data (organizations.files_bytes_*), shown
   // next to the credit gauge because the plan drives the storage limit in
   // cloud mode. Same source (useOrgStorage) as the org-settings/general storage
   // section. Gated on the billing flag to mirror the credit fetch above.

@@ -28,7 +28,7 @@ import {
   formatBudgetDuration,
 } from "@appstrate/core/chat-turn-metadata";
 import {
-  runAndWaitStepsWithDocuments,
+  runAndWaitStepsWithFiles,
   type RunAndWaitClientOptions,
   type RunAndWaitStep,
 } from "@appstrate/core/run-and-wait-client";
@@ -109,7 +109,7 @@ export function decideRunAndWaitBudget(
 }
 
 /**
- * {@link runAndWaitStepsWithDocuments}, bounded by the hosting turn's deadline.
+ * {@link runAndWaitStepsWithFiles}, bounded by the hosting turn's deadline.
  * The chat's `run_and_wait` calls THIS — the gate, the `maxMs` derivation and the
  * launching-session link exist once.
  *
@@ -125,7 +125,7 @@ export function decideRunAndWaitBudget(
 export async function* runAndWaitStepsWithinTurnBudget(
   rawArgs: unknown,
   opts: Omit<RunAndWaitClientOptions, "maxMs"> & { budget: TurnBudgetContext },
-  steps: typeof runAndWaitStepsWithDocuments = runAndWaitStepsWithDocuments,
+  steps: typeof runAndWaitStepsWithFiles = runAndWaitStepsWithFiles,
   linkRun: typeof stampChatSessionOnRun = stampChatSessionOnRun,
 ): AsyncGenerator<RunAndWaitStep> {
   const { budget, ...clientOpts } = opts;

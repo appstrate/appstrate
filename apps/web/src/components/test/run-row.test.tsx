@@ -44,7 +44,7 @@ function makeRun(overrides: Partial<EnrichedRun> = {}): EnrichedRun {
     packageId: "@acme/reporter",
     started_at: STARTED_AT,
     duration: 4200,
-    document_counts: { input: 2, output: 1 },
+    file_counts: { input: 2, output: 1 },
     proxy_label: "eu-proxy",
     user_name: "Alice",
     package_ephemeral: true,
@@ -58,12 +58,19 @@ function makeRun(overrides: Partial<EnrichedRun> = {}): EnrichedRun {
   } as unknown as EnrichedRun;
 }
 
+/**
+ * `renderToStaticMarkup` escapes the apostrophes the French copy is full of
+ * (the type chip's `title`, for one); decode them back so an assertion can be
+ * written with the literal bundle string instead of a hand-escaped copy.
+ */
 function render(node: ReactElement): string {
   return renderToStaticMarkup(
     <I18nextProvider i18n={i18n}>
       <MemoryRouter>{node}</MemoryRouter>
     </I18nextProvider>,
-  );
+  )
+    .replace(/&#x27;/g, "'")
+    .replace(/&quot;/g, '"');
 }
 
 describe("RunRow variant=list (default)", () => {
@@ -76,9 +83,17 @@ describe("RunRow variant=list (default)", () => {
     expect(html).toContain(STARTED_AT_LABEL);
   });
 
-  it("renders the input and output document counters", () => {
-    expect(html).toContain("2 document(s) en entrée");
-    expect(html).toContain("1 document(s) en sortie");
+  it("renders the input and output file counters", () => {
+    expect(html).toContain("2 fichier(s) en entrée");
+    expect(html).toContain("1 fichier(s) en sortie");
+  });
+
+  it("marks an inline row, and leaves a catalogued-agent row unmarked", () => {
+    // In a list the type chip is the exception, not the rule: every row of an
+    // agent's run list saying "AGENT" is noise nobody reads.
+    expect(html).toContain(agentsFr["runs.inlineBadge"]);
+    const agentRun = render(<RunRow run={makeRun({ package_ephemeral: false })} />);
+    expect(agentRun).not.toContain(agentsFr["runs.agentBadge"]);
   });
 
   it("stays a navigable link and grows no details trigger", () => {
@@ -92,11 +107,10 @@ describe("RunRow variant=detail", () => {
 
   it("drops the columns the page header and tabs already carry", () => {
     expect(html).not.toContain("#42");
-    expect(html).not.toContain("Inline");
     expect(html).not.toContain("Alice");
     expect(html).not.toContain(STARTED_AT_LABEL);
-    expect(html).not.toContain("2 document(s) en entrée");
-    expect(html).not.toContain("1 document(s) en sortie");
+    expect(html).not.toContain("2 fichier(s) en entrée");
+    expect(html).not.toContain("1 fichier(s) en sortie");
   });
 
   it("renders a static row instead of a link", () => {
@@ -109,6 +123,24 @@ describe("RunRow variant=detail", () => {
     // A <button> is focusable by default — an explicit tabindex="-1" would be
     // the only way to lose that, so assert it is absent.
     expect(html).not.toContain('tabindex="-1"');
+  });
+
+  it("names the run TYPE, which nothing else on the detail page does", () => {
+    // An inline run and a run of a catalogued agent read identically on this
+    // page — same title shape, same status, same tabs — while behaving
+    // differently (no version, no re-run for an inline one). The chip is the
+    // only thing that tells them apart, so it renders for BOTH kinds.
+    expect(html).toContain(agentsFr["runs.inlineBadge"]);
+    expect(html).toContain(agentsFr["runs.inlineBadgeTitle"]);
+    expect(html).not.toContain(agentsFr["runs.agentBadge"]);
+
+    const agentRun = render(
+      <RunRow run={makeRun({ package_ephemeral: false })} variant="detail" />,
+    );
+    expect(agentRun).toContain(agentsFr["runs.agentBadge"]);
+    expect(agentRun).toContain(agentsFr["runs.agentBadgeTitle"]);
+    // Neutral chip, not a second coloured badge competing with the status one.
+    expect(agentRun).toContain("border-border");
   });
 
   it("keeps the badges that explain a missing Re-run / Cancel button inline", () => {
@@ -188,19 +220,22 @@ describe("RunRow live elapsed timer", () => {
 describe("RunRowDetails (the panel body)", () => {
   const html = render(<RunRowDetails run={makeRun()} />);
 
-  it("carries the INLINE badge, which no other surface renders", () => {
-    expect(html).toContain(agentsFr["runs.inlineBadge"]);
+  it("leaves the run type to the top line, which now names it for both kinds", () => {
+    // The panel used to be the only place the INLINE badge appeared on the
+    // detail page. `RunTypeBadge` renders it inline instead — keeping a second
+    // copy behind a click is the duplication this pass removes.
+    expect(html).not.toContain(agentsFr["runs.inlineBadge"]);
   });
 
-  it("groups the document counters into a single line", () => {
-    // The Documents tab badge shows a total; only the in/out split lives here.
+  it("groups the file counters into a single line", () => {
+    // The Files tab badge shows a total; only the in/out split lives here.
     expect(html).toContain("2 en entrée · 1 en sortie");
   });
 
-  it("leaves the facts the Info tab owns to the Info tab", () => {
-    // Trigger, start date and proxy are rendered by `run-info-tab.tsx`
-    // (`run.infoTrigger` l.149, `run.infoStartedAt` l.173, `run.infoProxy`
-    // l.179). Re-listing them here is the duplication #1046 removes.
+  it("leaves the facts the Exécution and Configuration panes own to them", () => {
+    // Trigger is rendered by `run-configuration-tab.tsx` (`run.infoTrigger`),
+    // start date and proxy by `run-execution-tab.tsx` (`run.infoStartedAt`,
+    // `run.infoProxy`). Re-listing them here is the duplication #1046 removes.
     //
     // Not a vacuous assertion: `makeRun()` carries a trigger, a proxy label and
     // a start date, and the `variant=list` suite above proves the same fixture
@@ -253,12 +288,11 @@ describe("RunRowDetails (the panel body)", () => {
       <RunRowDetails
         run={makeRun({
           package_ephemeral: false,
-          document_counts: { input: 0, output: 0 },
+          file_counts: { input: 0, output: 0 },
         })}
       />,
     );
-    expect(bare).not.toContain(agentsFr["runs.inlineBadge"]);
-    expect(bare).not.toContain(agentsFr["run.tabDocuments"]);
+    expect(bare).not.toContain(agentsFr["run.tabFiles"]);
     // The token total is structural — a run that consumed nothing still shows 0.
     expect(bare).toContain(agentsFr["run.usageTokensTotal"]);
   });

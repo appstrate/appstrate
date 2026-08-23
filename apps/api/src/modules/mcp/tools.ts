@@ -38,24 +38,25 @@ import type {
 import {
   launchRunAndWait,
   waitForRunAndWaitCompletion,
-  fetchRunDocuments,
-  type RunAndWaitDocument,
+  fetchRunFiles,
+  type RunAndWaitFile,
 } from "@appstrate/core/run-and-wait-client";
-import { parseDocumentUri, documentUri } from "@appstrate/core/document-uri";
+import { parseFileUri, fileUri } from "@appstrate/core/file-uri";
+import { CONTEXT_FREE_FILENAMES_PHRASE } from "@appstrate/afps-runtime/bundle";
 import type { Actor } from "@appstrate/connect";
 import { getCatalog, collectReferencedSchemas, type CatalogOperation } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
 import type { AppScope } from "../../lib/scope.ts";
 import {
-  getDocumentForActor,
-  streamDocumentContent,
-  projectDocumentMetadata,
-  type DocumentCapabilities,
-} from "../../services/documents.ts";
+  getFileForActor,
+  streamFileContent,
+  projectFileMetadata,
+  type FileCapabilities,
+} from "../../services/files.ts";
 import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
 import { isTextShapedContentType } from "@appstrate/core/mime";
 import { asString, textResult } from "./tool-results.ts";
-import { buildPackageDocumentTools } from "./package-document-tools.ts";
+import { buildPackageFileTools } from "./package-file-tools.ts";
 
 /** Issue an in-process request back through the platform app. */
 export type Dispatch = (req: Request) => Promise<Response>;
@@ -66,10 +67,10 @@ export type McpToolName =
   | "describe_operation"
   | "invoke_operation"
   | "run_and_wait"
-  | "list_documents"
-  | "read_document"
-  | "validate_package_document"
-  | "import_package_document"
+  | "list_files"
+  | "read_file"
+  | "validate_package_file"
+  | "import_package_file"
   | "get_runtime_capabilities"
   | "get_me";
 
@@ -113,7 +114,7 @@ export interface McpToolContext {
   permissions: ReadonlySet<string>;
   /**
    * The resolved caller identity (from the same forwarded auth the dispatched
-   * requests carry). Lets the document resource provider call the documents
+   * requests carry). Lets the file resource provider call the files
    * service DIRECTLY — no in-process HTTP round-trip, so it works identically
    * across FS / S3-proxy / S3-presigned storage (the 307-redirect a fetch
    * cannot follow no longer degrades the read).
@@ -198,29 +199,29 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-// --- documents (resource_link + resources/read + list_documents) -----------
-// The `document://` URI prefix, id shape, and parser are the canonical,
-// dependency-free helpers from `@appstrate/core/document-uri` (imported above)
-// — the tool layer stays free of the documents service's DB/storage graph
+// --- files (resource_link + resources/read + list_files) -----------
+// The `appfile://` URI prefix, id shape, and parser are the canonical,
+// dependency-free helpers from `@appstrate/core/file-uri` (imported above)
+// — the tool layer stays free of the files service's DB/storage graph
 // while sharing one contract.
 
 /**
- * Ceiling on inlining a document's bytes into a `resources/read` text block.
+ * Ceiling on inlining a file's bytes into a `resources/read` text block.
  * Above it (or for a non-textual mime) the read returns metadata only — MCP has
  * no partial-content standard, so we keep it simple.
  */
 const RESOURCE_TEXT_MAX_BYTES = 1024 * 1024;
 
 /**
- * Ceiling on inlining a NON-textual document's RAW bytes as a base64 `blob` in a
+ * Ceiling on inlining a NON-textual file's RAW bytes as a base64 `blob` in a
  * `resources/read` result. Base64 inflates 4/3, so a 700 KiB raw cap keeps the
  * encoded payload (~933 KiB) under the ~1 MB practical MCP response limit. Above
  * it (either kind) the read returns metadata only.
  */
 const RESOURCE_BLOB_MAX_BYTES = 700 * 1024;
 
-/** A published run document → the MCP `resource_link` content block (spec 2025-06-18). */
-function documentResourceLink(doc: RunAndWaitDocument): {
+/** A published run file → the MCP `resource_link` content block (spec 2025-06-18). */
+function fileResourceLink(doc: RunAndWaitFile): {
   type: "resource_link";
   uri: string;
   name: string;
@@ -234,7 +235,7 @@ function documentResourceLink(doc: RunAndWaitDocument): {
     name: doc.name,
     mimeType: doc.mime,
     size: doc.size,
-    description: `Document published by this run — read it with read_document or pass its URI to a follow-up run_and_wait input file field.`,
+    description: `File published by this run — read it with read_file or pass its URI to a follow-up run_and_wait input file field.`,
   };
 }
 
@@ -786,7 +787,7 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       "waits. For an inline run, `manifest` is a PARTIAL canonical AFPS manifest: normally set " +
       "only a concise task-specific `display_name` plus task dependencies/configuration. The " +
       "platform derives `name` and fills omitted AFPS boilerplate, `runtime_tools` (log, output, " +
-      "publish_document), and an open object output schema. Defaults apply only " +
+      "publish_file), and an open object output schema. Defaults apply only " +
       "to fields you omit; " +
       "every field you provide replaces its default exactly, with no array or nested-object merge. " +
       "That includes `runtime_tools: []`, which stays empty and disables every default runtime tool. " +
@@ -795,18 +796,16 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       "shows only lines emitted through `log`, so instruct the run to log meaningful steps whenever " +
       "that tool is selected. Never use an id or a generic display name such as `one-shot`. " +
       "File deliverables: every file the run writes under its workspace `outputs/` directory is " +
-      "published as a document when the run ends and returned here as a `resource_link` — when the " +
+      "published as a file when the run ends and returned here as a `resource_link` — when the " +
       "goal is a downloadable file (report, CSV, image…), instruct the run's `prompt` to write it " +
       "into `outputs/` with a descriptive, task-specific filename that remains understandable " +
-      "outside this run; never use context-free names such as `report.md`, `summary.md`, or " +
-      "`output.md`. When selected (by default, or explicitly), `publish_document`'s own " +
-      "description defines when and how the run should select a primary deliverable. " +
+      `outside this run; never use context-free names such as ${CONTEXT_FREE_FILENAMES_PHRASE}. ` +
       "For several files or an executable package, instruct the run to build a `.zip` or `.afps` " +
       "archive with its normal shell tools, then publish that single archive with " +
-      "`publish_document`. " +
-      "Content merely returned in the output payload never becomes a document. " +
+      "`publish_file`. " +
+      "Content merely returned in the output payload never becomes a file. " +
       "Chaining runs (kind:inline): feed earlier runs' deliverables to a later one by passing " +
-      "their `document://` URIs in `context_documents` — never by copying their content into " +
+      "their `appfile://` URIs in `context_files` — never by copying their content into " +
       "`prompt`. " +
       "Prefer an existing agent over an inline manifest when one matches the intent.",
     annotations: {
@@ -838,8 +837,8 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
           description:
             "Run input, validated against the agent's input schema (either kind — for " +
             "kind:inline, against `manifest.input.schema`). File fields (typed `format: uri` " +
-            "with a `contentMediaType`) accept `document://` and `upload://` URIs directly — " +
-            "pass an attached document's `document://` URI verbatim and the file is streamed " +
+            "with a `contentMediaType`) accept `appfile://` and `upload://` URIs directly — " +
+            "pass an attached file's `appfile://` URI verbatim and the file is streamed " +
             "into the run's workspace.",
           additionalProperties: true,
         },
@@ -880,7 +879,7 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
               type: "array",
               description:
                 "Exact runtime-tool selection. Omit for " +
-                "log/output/publish_document defaults; " +
+                "log/output/publish_file defaults; " +
                 "an explicit [] disables them all.",
               items: { type: "string" },
             },
@@ -900,7 +899,7 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
             "alongside `manifest` (never nested inside it). Tell the run to call the `log` tool " +
             "to report each meaningful step — those lines are what the chat shows live. When the " +
             "run produces files, require descriptive, task-specific names that remain clear " +
-            "outside this run; never generic names such as `report.md`, `summary.md`, or `output.md`.",
+            `outside this run; never generic names such as ${CONTEXT_FREE_FILENAMES_PHRASE}.`,
         },
         connection_overrides: {
           type: "object",
@@ -916,14 +915,14 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
             "alongside `manifest`/`input` — pass the object itself; JSON-encoding it is " +
             "refused before the launch.",
         },
-        context_documents: {
+        context_files: {
           type: "array",
           items: { type: "string" },
           description:
-            "kind:inline ONLY. `document://` URIs — typically straight from a previous run's " +
-            "`documents` result — mounted read-only into this run's `documents/` directory and " +
+            "kind:inline ONLY. `appfile://` URIs — typically straight from a previous run's " +
+            "`files` result — mounted read-only into this run's `files/` directory and " +
             "listed in its prompt. This is how you chain runs: to give a run the output of " +
-            "earlier runs, pass their `document://` URIs here VERBATIM. Never copy a previous " +
+            "earlier runs, pass their `appfile://` URIs here VERBATIM. Never copy a previous " +
             "run's content into `prompt`: re-typing it costs tokens twice, and every URL, figure " +
             "and date you retype is one you can get wrong — the file itself cannot be. No " +
             "manifest change is needed; the platform declares the input field for you. For " +
@@ -1029,25 +1028,25 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       outcome: "invoked",
     });
 
-    // Enrich the terminal result with the run's published documents (D6). The
-    // SAME enrichment the chat gets from `runAndWaitStepsWithDocuments`, reused
-    // via `fetchRunDocuments` (best-effort, empty on any failure). Beyond echoing
+    // Enrich the terminal result with the run's published files (D6). The
+    // SAME enrichment the chat gets from `runAndWaitStepsWithFiles`, reused
+    // via `fetchRunFiles` (best-effort, empty on any failure). Beyond echoing
     // them in the text payload, each is returned as an MCP `resource_link`
     // content block (spec 2025-06-18) so an external client (claude.ai, …)
     // consumes them natively — read one with `resources/read`, or chain its
-    // `document://` URI into a follow-up run's input file field.
+    // `appfile://` URI into a follow-up run's input file field.
     if (!final.isError) {
-      const documents = await fetchRunDocuments(runId, {
+      const files = await fetchRunFiles(runId, {
         origin: ctx.origin,
         headers: dispatchHeaders,
         fetch: dispatchFetch,
         signal,
       });
-      if (documents.length > 0) {
+      if (files.length > 0) {
         return {
           content: [
-            { type: "text", text: JSON.stringify({ ...final.payload, documents }, null, 2) },
-            ...documents.map(documentResourceLink),
+            { type: "text", text: JSON.stringify({ ...final.payload, files }, null, 2) },
+            ...files.map(fileResourceLink),
           ],
           isError: false,
         };
@@ -1059,10 +1058,10 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
   return { descriptor, handler };
 }
 
-// --- list_documents --------------------------------------------------------
+// --- list_files --------------------------------------------------------
 
-const DEFAULT_DOCUMENT_LIST_LIMIT = 20;
-const MAX_DOCUMENT_LIST_LIMIT = 100;
+const DEFAULT_FILE_LIST_LIMIT = 20;
+const MAX_FILE_LIST_LIMIT = 100;
 
 /** Dispatch an in-process GET, forwarding the caller's auth + trusted marker. */
 function dispatchGet(ctx: McpToolContext, url: URL): Promise<Response> {
@@ -1071,8 +1070,8 @@ function dispatchGet(ctx: McpToolContext, url: URL): Promise<Response> {
   return ctx.dispatch(new Request(url.toString(), { method: "GET", headers }));
 }
 
-/** Project a `DocumentDto` onto the compact row the list tool returns. */
-function projectDocumentRow(raw: unknown): Record<string, unknown> | null {
+/** Project a `FileDto` onto the compact row the list tool returns. */
+function projectFileRow(raw: unknown): Record<string, unknown> | null {
   const r = asRecord(raw);
   const id = asString(r?.id);
   const uri = asString(r?.uri);
@@ -1084,13 +1083,13 @@ function projectDocumentRow(raw: unknown): Record<string, unknown> | null {
     name,
     mime: asString(r?.mime) ?? "application/octet-stream",
     size: typeof r?.size === "number" ? r.size : 0,
-    // Casing mirrors DocumentDto (CASING_CONVENTIONS.md 4b): `packageId`/`createdAt`
+    // Casing mirrors FileDto (CASING_CONVENTIONS.md 4b): `packageId`/`createdAt`
     // camelCase carve-outs; `run_id` a snake_case domain field.
     run_id: asString(r?.run_id) ?? null,
     packageId: asString(r?.packageId) ?? null,
     createdAt: asString(r?.createdAt) ?? null,
     // Surface the same access capabilities the REST DTO carries (computed by the
-    // one `getDocumentCapabilities`), so the model can tell before a
+    // one `getFileCapabilities`), so the model can tell before a
     // `resources/read` whether it will get bytes (`downloadable`) or an opaque
     // reference (`capabilities.metadata` false).
     downloadable: r?.downloadable === true,
@@ -1098,17 +1097,17 @@ function projectDocumentRow(raw: unknown): Record<string, unknown> | null {
   };
 }
 
-function buildListDocumentsTool(ctx: McpToolContext): AppstrateToolDefinition {
+function buildListFilesTool(ctx: McpToolContext): AppstrateToolDefinition {
   const descriptor: Tool = {
-    name: "list_documents",
+    name: "list_files",
     description:
-      "List the documents visible to you — files you attached to this conversation " +
+      "List the files visible to you — files you attached to this conversation " +
       "(`user_upload`) and deliverables agents published from runs (`agent_output`). Filter by " +
-      "`run_id`, `chat_session_id`, or `purpose`. Each row carries a `document://` URI you can " +
-      "pass verbatim into a run_and_wait input file field (to feed a document to another agent) " +
-      "or read with read_document. Returns `{ documents: [...], has_more }`.",
+      "`run_id`, `chat_session_id`, or `purpose`. Each row carries an `appfile://` URI you can " +
+      "pass verbatim into a run_and_wait input file field (to feed a file to another agent) " +
+      "or read with read_file. Returns `{ files: [...], has_more }`.",
     annotations: {
-      title: "List documents",
+      title: "List files",
       readOnlyHint: true,
       idempotentHint: true,
       openWorldHint: false,
@@ -1118,11 +1117,11 @@ function buildListDocumentsTool(ctx: McpToolContext): AppstrateToolDefinition {
       properties: {
         run_id: {
           type: "string",
-          description: "Only documents produced by / attached to this run.",
+          description: "Only files produced by / attached to this run.",
         },
         chat_session_id: {
           type: "string",
-          description: "Only documents attached to this chat session.",
+          description: "Only files attached to this chat session.",
         },
         purpose: {
           type: "string",
@@ -1131,9 +1130,9 @@ function buildListDocumentsTool(ctx: McpToolContext): AppstrateToolDefinition {
         },
         limit: {
           type: "integer",
-          description: `Max results (default ${DEFAULT_DOCUMENT_LIST_LIMIT}, max ${MAX_DOCUMENT_LIST_LIMIT}).`,
+          description: `Max results (default ${DEFAULT_FILE_LIST_LIMIT}, max ${MAX_FILE_LIST_LIMIT}).`,
           minimum: 1,
-          maximum: MAX_DOCUMENT_LIST_LIMIT,
+          maximum: MAX_FILE_LIST_LIMIT,
         },
       },
     },
@@ -1149,44 +1148,42 @@ function buildListDocumentsTool(ctx: McpToolContext): AppstrateToolDefinition {
     const purpose = asString(args.purpose);
     if (purpose === "user_upload" || purpose === "agent_output") query.purpose = purpose;
     if (typeof args.limit === "number") {
-      query.limit = Math.min(Math.max(1, Math.floor(args.limit)), MAX_DOCUMENT_LIST_LIMIT);
+      query.limit = Math.min(Math.max(1, Math.floor(args.limit)), MAX_FILE_LIST_LIMIT);
     }
 
-    const url = new URL("/api/documents", ctx.origin);
+    const url = new URL("/api/files", ctx.origin);
     applyQuery(url, query);
     const response = await dispatchGet(ctx, url);
     // Reuse container-inherited ACL + scope resolution of the REST route; on any
     // non-2xx surface it verbatim so the model sees the real error.
     if (!response.ok) {
-      emit(ctx, { tool: "list_documents", durationMs: performance.now() - start });
+      emit(ctx, { tool: "list_files", durationMs: performance.now() - start });
       return readResponse(response);
     }
     const body = asRecord(await response.json().catch(() => undefined));
     const data = Array.isArray(body?.data) ? body.data : [];
-    const documents = data
-      .map(projectDocumentRow)
-      .filter((d): d is Record<string, unknown> => d !== null);
+    const files = data.map(projectFileRow).filter((d): d is Record<string, unknown> => d !== null);
 
     emit(ctx, {
-      tool: "list_documents",
+      tool: "list_files",
       durationMs: performance.now() - start,
-      resultCount: documents.length,
+      resultCount: files.length,
     });
-    return textResult({ documents, has_more: body?.hasMore === true });
+    return textResult({ files, has_more: body?.hasMore === true });
   };
 
   return { descriptor, handler };
 }
 
-function buildReadDocumentTool(ctx: McpToolContext): AppstrateToolDefinition {
+function buildReadFileTool(ctx: McpToolContext): AppstrateToolDefinition {
   const descriptor: Tool = {
-    name: "read_document",
+    name: "read_file",
     description:
-      "Read a document:// URI through the same document ACL and storage path as resources/read. " +
-      "Small text and binary documents are returned as embedded MCP resources; oversized or " +
-      "non-downloadable documents return capability-aware metadata.",
+      "Read an appfile:// URI through the same file ACL and storage path as resources/read. " +
+      "Small text and binary files are returned as embedded MCP resources; oversized or " +
+      "non-downloadable files return capability-aware metadata.",
     annotations: {
-      title: "Read document",
+      title: "Read file",
       readOnlyHint: true,
       idempotentHint: true,
       openWorldHint: false,
@@ -1196,12 +1193,12 @@ function buildReadDocumentTool(ctx: McpToolContext): AppstrateToolDefinition {
       additionalProperties: false,
       required: ["uri"],
       properties: {
-        uri: { type: "string", description: "A document:// URI returned by list_documents." },
+        uri: { type: "string", description: "An appfile:// URI returned by list_files." },
       },
     },
   };
 
-  const provider = buildDocumentResourceProvider(ctx);
+  const provider = buildFileResourceProvider(ctx);
   const handler = async (
     args: Record<string, unknown>,
     extra: AppstrateRequestExtra,
@@ -1217,18 +1214,18 @@ function buildReadDocumentTool(ctx: McpToolContext): AppstrateToolDefinition {
   return { descriptor, handler };
 }
 
-// --- resources/read for document:// ----------------------------------------
+// --- resources/read for appfile:// ----------------------------------------
 
 /**
- * The `resources/read` provider for `document://doc_xxx` URIs — lets an MCP
- * client read a document referenced by a `resource_link` (or a known
- * `document://` URI) WITHOUT going through the REST API.
+ * The `resources/read` provider for `appfile://doc_xxx` URIs — lets an MCP
+ * client read a file referenced by a `resource_link` (or a known
+ * `appfile://` URI) WITHOUT going through the REST API.
  *
- * Authorization + scope resolution call the documents SERVICE directly with the
- * MCP session's resolved actor (`getDocumentForActor`), which enforces the same
+ * Authorization + scope resolution call the files SERVICE directly with the
+ * MCP session's resolved actor (`getFileForActor`), which enforces the same
  * container ACL the REST route does (a foreign/unknown id is a 404 → surfaced as
- * an MCP error) and derives the caller's {@link DocumentCapabilities} from the
- * one `getDocumentCapabilities`. The bytes are read via `streamDocumentContent`
+ * an MCP error) and derives the caller's {@link FileCapabilities} from the
+ * one `getFileCapabilities`. The bytes are read via `streamFileContent`
  * — NOT an in-process `GET /content` — so there is no 307-presigned-redirect the
  * reader cannot follow: the read behaves identically on FS, S3-proxy, and
  * S3-presigned deployments (the bug this replaces).
@@ -1240,22 +1237,22 @@ function buildReadDocumentTool(ctx: McpToolContext): AppstrateToolDefinition {
  *    JSON, including the capabilities and (when downloadable) the REST content
  *    URL hint. When the caller lacks `metadata` (a non-creator upload) the JSON
  *    itself is degraded (generic name + mime, no sha256), flowing from the same
- *    {@link projectDocumentMetadata} the DTO uses.
+ *    {@link projectFileMetadata} the DTO uses.
  *
- * Deliberately provides NO `list()` (documents are not enumerated under
+ * Deliberately provides NO `list()` (files are not enumerated under
  * `resources/list` per the plan/spec — they surface only via `resource_link`);
  * omitting it makes `resources/list` return empty.
  */
-export function buildDocumentResourceProvider(ctx: McpToolContext): AppstrateResourceProvider {
+export function buildFileResourceProvider(ctx: McpToolContext): AppstrateResourceProvider {
   /** Metadata-only JSON block — degraded per the caller's capabilities. */
   const metadataOnly = (
     docId: string,
     uri: string,
     row: { size: number; name: string; mime: string; sha256: string },
-    caps: DocumentCapabilities,
+    caps: FileCapabilities,
     note: string,
   ): ReadResourceResult => {
-    const view = projectDocumentMetadata(row, caps);
+    const view = projectFileMetadata(row, caps);
     return {
       contents: [
         {
@@ -1270,9 +1267,7 @@ export function buildDocumentResourceProvider(ctx: McpToolContext): AppstrateRes
             size: row.size,
             downloadable: caps.download,
             capabilities: caps,
-            ...(caps.download
-              ? { content_url: `${ctx.origin}/api/documents/${docId}/content` }
-              : {}),
+            ...(caps.download ? { content_url: `${ctx.origin}/api/files/${docId}/content` } : {}),
             note,
           }),
         },
@@ -1282,19 +1277,19 @@ export function buildDocumentResourceProvider(ctx: McpToolContext): AppstrateRes
 
   return {
     read: async (uri: string): Promise<ReadResourceResult> => {
-      const docId = parseDocumentUri(uri);
+      const docId = parseFileUri(uri);
       if (!docId) {
-        throw new McpError(ErrorCode.InvalidParams, `Not a document resource URI: ${uri}`);
+        throw new McpError(ErrorCode.InvalidParams, `Not a file resource URI: ${uri}`);
       }
 
-      const resolved = await getDocumentForActor(ctx.scope, ctx.actor, docId, ctx.permissions);
+      const resolved = await getFileForActor(ctx.scope, ctx.actor, docId, ctx.permissions);
       if (!resolved) {
-        throw new McpError(ErrorCode.InvalidParams, `Document not found: ${uri}`);
+        throw new McpError(ErrorCode.InvalidParams, `File not found: ${uri}`);
       }
       const { row, capabilities } = resolved;
       // Canonicalise the URI to the resolved id (the caller may have passed any
       // valid form) so the returned `contents[].uri` is stable.
-      const canonicalUri = documentUri(row.id);
+      const canonicalUri = fileUri(row.id);
 
       // Not downloadable (e.g. another member's upload): metadata only, degraded.
       if (!capabilities.download) {
@@ -1309,13 +1304,13 @@ export function buildDocumentResourceProvider(ctx: McpToolContext): AppstrateRes
 
       // Downloadable → serve the bytes from storage directly (no 307 to follow).
       if (isTextShapedMime(normalizeMime(row.mime)) && row.size <= RESOURCE_TEXT_MAX_BYTES) {
-        const stream = await streamDocumentContent(row.storageKey);
+        const stream = await streamFileContent(row.storageKey);
         if (stream) {
           const text = await new Response(stream).text();
           return { contents: [{ uri: canonicalUri, mimeType: row.mime, text }] };
         }
       } else if (row.size <= RESOURCE_BLOB_MAX_BYTES) {
-        const stream = await streamDocumentContent(row.storageKey);
+        const stream = await streamFileContent(row.storageKey);
         if (stream) {
           const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
           const blob = Buffer.from(bytes).toString("base64");
@@ -1381,15 +1376,69 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
 }
 
 /** Build the per-request tool set. Handlers close over the caller's auth context. */
+/**
+ * Pre-#1177 tool names, kept CALLABLE but withheld from `tools/list`.
+ *
+ * The server advertises `tools: { listChanged: false }`, which tells a client
+ * the list is stable for the life of its session — so a client that listed
+ * before an upgrade and calls `list_documents` after it is behaving correctly,
+ * and would otherwise get `-32602 Unknown tool` in the middle of a
+ * conversation. They stay HIDDEN because the point of the rename is the
+ * model's view of the tool surface: two entries for one capability, one of them
+ * named after a thing the tool does not do, is the problem being fixed.
+ *
+ * Read as: retired name → the canonical tool it forwards to.
+ */
+export const RETIRED_MCP_TOOL_NAMES: Readonly<Record<string, McpToolName>> = {
+  list_documents: "list_files",
+  read_document: "read_file",
+  validate_package_document: "validate_package_file",
+  import_package_document: "import_package_file",
+};
+
+/** Pre-#1177 argument names, normalized before the canonical handler runs. */
+const RETIRED_MCP_TOOL_ARGS: Readonly<Record<string, string>> = {
+  document_uri: "file_uri",
+};
+
+/**
+ * One hidden alias definition per retired name whose canonical tool is present.
+ * The alias shares the canonical HANDLER (so telemetry, audit and permissions
+ * are identical) and only renames retired arguments on the way in.
+ */
+function retiredToolAliases(tools: AppstrateToolDefinition[]): AppstrateToolDefinition[] {
+  const byName = new Map(tools.map((t) => [t.descriptor.name, t]));
+  const aliases: AppstrateToolDefinition[] = [];
+  for (const [retired, canonical] of Object.entries(RETIRED_MCP_TOOL_NAMES)) {
+    const target = byName.get(canonical);
+    if (!target) continue; // canonical tool not offered to this caller
+    aliases.push({
+      descriptor: { ...target.descriptor, name: retired },
+      hidden: true,
+      handler: (args, extra) => {
+        const normalized: Record<string, unknown> = { ...args };
+        for (const [from, to] of Object.entries(RETIRED_MCP_TOOL_ARGS)) {
+          if (from in normalized && !(to in normalized)) {
+            normalized[to] = normalized[from];
+            delete normalized[from];
+          }
+        }
+        return target.handler(normalized, extra);
+      },
+    });
+  }
+  return aliases;
+}
+
 export function buildMcpTools(ctx: McpToolContext): AppstrateToolDefinition[] {
   const tools = [
     buildSearchTool(ctx),
     buildDescribeTool(ctx),
     buildInvokeTool(ctx),
     buildRunAndWaitTool(ctx),
-    buildListDocumentsTool(ctx),
-    buildReadDocumentTool(ctx),
-    ...buildPackageDocumentTools(ctx),
+    buildListFilesTool(ctx),
+    buildReadFileTool(ctx),
+    ...buildPackageFileTools(ctx),
   ];
   // get_me dispatches to GET /api/me/context. A consumer that already injects
   // that payload into its own system prompt (the chat module) drops the tool —
@@ -1397,5 +1446,5 @@ export function buildMcpTools(ctx: McpToolContext): AppstrateToolDefinition[] {
   // kept either way: the operation index is injected too, but its `best_match`
   // schema still saves a describe_operation round-trip, so it is not redundant.
   if (!ctx.contextInjected) tools.push(buildGetMeTool(ctx));
-  return tools;
+  return [...tools, ...retiredToolAliases(tools)];
 }

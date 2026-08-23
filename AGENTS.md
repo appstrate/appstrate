@@ -251,48 +251,53 @@ describe("GET /api/my-resource", () => {
 its steps report false green or false red locally, and each one below has cost
 real time. Establish which you are looking at BEFORE changing code.
 
-### `verify:dead-code` (knip) is falsely red inside a git worktree
+### `verify:dead-code` (knip) — what it does and does not derive
 
-In a `git worktree`, knip reports ~161 "unused exports", ~284 "unused exported
-types" and 6 "unused files" — including public exports of `packages/ui` and
-`@appstrate/core`. The same commit is **clean** in a plain `git clone`. Since
-`pre-push` runs `bun run check`, this blocks every push from a worktree.
+Fixed 2026-08-23. This section is kept because the failure mode is easy to
+re-introduce with one careless edit to `knip.config.ts`.
 
-Measured on one commit, three environments:
+Until then, `bun run check` failed locally on `//#verify:dead-code` with ~161
+"unused exports", ~284 "unused exported types" and 6 "unused files" — on an
+untouched `main` as well as on any branch. None of it was real, and because the
+`pre-push` hook runs `bun run check`, it blocked every local push.
 
-| environment                                          | knip               |
-| ---------------------------------------------------- | ------------------ |
-| `git clone` of the commit                            | clean, exit 0      |
-| `git worktree add` + `bun install --frozen-lockfile` | 161 unused exports |
-| main checkout with a dirty tree                      | clean, exit 0      |
+The cause, read out of knip 5.88.1's own `dist/`:
 
-Ruled out by experiment, so do not re-investigate these: bun version drift
-(`--frozen-lockfile` in the worktree changes nothing), a missing
-`@appstrate/cloud` link (161 → 160), and the turbo cache (both measurements were
-direct knip calls). The mechanism itself was NOT established — the likeliest
-candidate is that in a worktree `.git` is a _file_ rather than a directory, which
-appears to stop knip treating the files in a published package's `exports` map as
-entries, so their public exports read as dead. Treat that as a hypothesis; the
-clone-vs-worktree result above is the part that is measured.
+- `ConfigurationChief.js:27` is the **only** place entry defaults are produced,
+  and they are filename patterns: `{index,cli,main}.{exts}` at the package root
+  and under `src/`.
+- Nothing in that `dist/` reads `manifest.exports`, `manifest.main` or
+  `manifest.module`. The one read of `manifest.bin` collects binary **names**
+  for the `ignoreBinaries` check, not entry paths.
+- Declaring `entry` for a workspace **replaces** the filename defaults above.
 
-**Never un-export a symbol because of this report.** `knip.config.ts` states
-outright that it does not judge whether a _published_ package's public export
-still has a reader (`@appstrate/core`, `@appstrate/afps-runtime`,
-`@appstrate/module-*`), so any finding aimed at one is a false positive by
-construction.
+So knip never derives an entry from a package manifest, and a workspace that
+declares `entry` loses even the filename defaults. Every workspace here that
+declared one had silently lost its real entry points, and each loss cascaded:
+`packages/afps-runtime/bin/afps.ts` unreachable makes its whole `src/**` look
+dead, which was most of the 161.
 
-To get a true verdict — and a push that passes `pre-push` honestly, with no
-`--no-verify`:
+**The rule when you touch `knip.config.ts`:** if a workspace declares `entry`,
+open its `package.json` and re-declare every `exports` target, every `bin`
+target, and `main`/`module` if present. Those files are reached by npm consumers
+and by the `MODULES` loader resolving a specifier — neither of which knip can
+see. Do not collapse them into a broad glob such as `src/*.ts!`: that is wider
+than the real export map and would hide a genuinely dead root-level file.
 
-```sh
-git clone --no-hardlinks --quiet --branch <branch> <worktree-path> /tmp/verify
-cd /tmp/verify && cp <worktree-path>/.env .env && bun install --frozen-lockfile
-BETTER_AUTH_SECRET=ci-dummy-secret bun run check   # expect 34/34, Cached: 0
-git remote set-url origin <github url> && git push
-```
+**Never un-export a symbol, and never add an `ignore*`, to make this gate quiet.**
+The published packages' public exports have readers out of tree. If a finding
+survives a correct entry list, it is either real dead code or a symbol exported
+with no reader at all — fix it at the source, or report it.
 
-Without a clone, diff the worktree's knip output against the same command on the
-base commit: only symbols absent from the base are real.
+An earlier version of this section blamed `git worktree`, on the strength of one
+clone that came back clean. That was wrong. Measured and refuted since, each
+independently: worktree vs `git clone`, `--frozen-lockfile` vs a plain
+`bun install`, the knip version (5.88.1 on both sides), the presence of a `.env`,
+the turbo cache (the task is `"cache": false`, and CI logs `cache bypass`), and
+the bun version (1.3.11 local vs the `packageManager`-pinned 1.3.14 — tested at
+1.3.14, identical output). CI was green throughout with the same config, and
+that divergence is still unexplained; it stopped mattering once the config was
+made correct rather than merely quiet on one machine.
 
 ### Other false signals from the same chain
 

@@ -359,7 +359,7 @@ export const NON_CANONICAL_EVENTS: readonly { label: string; event: RunEvent }[]
   },
   {
     // `report.appended` was canonical until the report tool was retired in
-    // favour of durable `outputs/` documents — a stale emitter is now
+    // favour of durable `outputs/` files — a stale emitter is now
     // third-party as far as the runtime is concerned.
     label: "retired report.appended",
     event: { ...base, type: "report.appended", content: "# Report" },

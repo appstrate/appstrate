@@ -24,16 +24,16 @@ import {
 } from "@appstrate/ui/components/tooltip";
 import { $api } from "../../api/client";
 import { Badge } from "../../components/status-badge";
-import { DocumentPreview } from "../../components/document-preview";
-import { DocumentViewer } from "../../components/document-viewer";
-import { useDocument, useDocumentDownload, useDocuments } from "../../hooks/use-documents";
+import { FilePreview } from "../../components/file-preview";
+import { FileViewer } from "../../components/file-viewer";
+import { useFile, useFileDownload, useFiles } from "../../hooks/use-files";
 import { useOrgOnlyScope, useOrgScope } from "../../hooks/use-org-scope";
 import { formatDateField } from "../../lib/format-date";
 import type {
   ConversationSidebarAction,
   ConversationSidebarState,
   ConversationSidebarTab,
-  SidebarDocument,
+  SidebarFile,
 } from "./conversation-sidebar-state";
 
 const CONVERSATION_CONTEXT_PANEL_ID = "conversation-context-panel";
@@ -43,7 +43,7 @@ function useConversationTabs() {
   return [
     { id: "preview", Icon: EyeIcon, label: t("context.tabs.preview") },
     { id: "runs", Icon: ActivityIcon, label: t("context.tabs.runs") },
-    { id: "documents", Icon: FilesIcon, label: t("context.tabs.documents") },
+    { id: "files", Icon: FilesIcon, label: t("context.tabs.files") },
     { id: "info", Icon: InfoIcon, label: t("context.tabs.info") },
   ] as const satisfies readonly {
     id: ConversationSidebarTab;
@@ -101,20 +101,14 @@ function PanelState({ children }: { children: ReactNode }) {
   );
 }
 
-function PreviewTab({
-  document,
-  onOpenModal,
-}: {
-  document: SidebarDocument | null;
-  onOpenModal: () => void;
-}) {
-  const { t } = useTranslation(["chat", "documents"]);
-  const download = useDocumentDownload();
-  const { data, isLoading, error } = useDocument(document?.id ?? "");
+function PreviewTab({ file, onOpenModal }: { file: SidebarFile | null; onOpenModal: () => void }) {
+  const { t } = useTranslation(["chat", "files"]);
+  const download = useFileDownload();
+  const { data, isLoading, error } = useFile(file?.id ?? "");
 
-  if (!document) return <PanelState>{t("context.preview.empty", { ns: "chat" })}</PanelState>;
+  if (!file) return <PanelState>{t("context.preview.empty", { ns: "chat" })}</PanelState>;
 
-  const name = document.name || data?.name || t("context.document.untitled", { ns: "chat" });
+  const name = file.name || data?.name || t("context.file.untitled", { ns: "chat" });
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
@@ -126,8 +120,8 @@ function PreviewTab({
             variant="ghost"
             size="icon"
             className="size-8"
-            aria-label={t("row.download", { ns: "documents" })}
-            onClick={() => void download(document.id, name)}
+            aria-label={t("row.download", { ns: "files" })}
+            onClick={() => void download(file.id, name)}
           >
             <DownloadIcon className="size-4" />
           </Button>
@@ -143,12 +137,7 @@ function PreviewTab({
         </Button>
       </div>
       <div className="flex min-h-0 flex-1 p-3">
-        <DocumentViewer
-          documentId={document.id}
-          document={data}
-          isLoading={isLoading}
-          error={error}
-        />
+        <FileViewer fileId={file.id} file={data} isLoading={isLoading} error={error} />
       </div>
     </div>
   );
@@ -219,17 +208,17 @@ function ConversationRuns({
   );
 }
 
-function ConversationDocuments({
+function ConversationFiles({
   conversationId,
   active,
   onSelect,
 }: {
   conversationId: string | null;
   active: boolean;
-  onSelect: (document: SidebarDocument) => void;
+  onSelect: (file: SidebarFile) => void;
 }) {
   const { t } = useTranslation("chat");
-  const query = useDocuments({
+  const query = useFiles({
     contextChatSessionId: conversationId ?? undefined,
     limit: 100,
     enabled: active && !!conversationId,
@@ -238,25 +227,25 @@ function ConversationDocuments({
   if (!conversationId) return <PanelState>{t("context.unsaved")}</PanelState>;
   if (query.isLoading) return <PanelState>{t("context.loading")}</PanelState>;
   if (query.error) return <PanelState>{t("context.error")}</PanelState>;
-  const documents = query.data?.data ?? [];
-  if (documents.length === 0) return <PanelState>{t("context.documents.empty")}</PanelState>;
+  const files = query.data?.data ?? [];
+  if (files.length === 0) return <PanelState>{t("context.files.empty")}</PanelState>;
 
   return (
     <div className="divide-y">
-      {documents.map((document) => (
+      {files.map((file) => (
         <button
-          key={document.id}
+          key={file.id}
           type="button"
           className="hover:bg-muted/50 flex w-full items-center gap-3 px-3 py-3 text-left"
-          onClick={() => onSelect({ id: document.id, name: document.name })}
+          onClick={() => onSelect({ id: file.id, name: file.name })}
         >
           <FileIcon className="text-muted-foreground size-4 shrink-0" />
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium">{document.name}</span>
+            <span className="block truncate text-sm font-medium">{file.name}</span>
             <span className="text-muted-foreground block truncate text-xs">
-              {document.purpose === "user_upload"
-                ? t("context.documents.attachment")
-                : t("context.documents.output")}
+              {file.purpose === "user_upload"
+                ? t("context.files.attachment")
+                : t("context.files.output")}
             </span>
           </span>
           <ChevronRightIcon className="text-muted-foreground size-4 shrink-0" />
@@ -329,7 +318,7 @@ export function ConversationSidebar({
   const tabs = useConversationTabs();
   const activeTab = tabs.find(({ id }) => id === state.activeTab) ?? tabs[0];
   const ActiveTabIcon = activeTab.Icon;
-  const showDocument = (document: SidebarDocument) => dispatch({ type: "show-document", document });
+  const showFile = (file: SidebarFile) => dispatch({ type: "show-file", file });
 
   return (
     <>
@@ -367,19 +356,15 @@ export function ConversationSidebar({
           <div className="min-h-0 flex-1 overflow-auto">
             {state.activeTab === "preview" ? (
               <PreviewTab
-                document={state.selectedDocument}
+                file={state.selectedFile}
                 onOpenModal={() => dispatch({ type: "open-modal" })}
               />
             ) : null}
             {state.activeTab === "runs" ? (
               <ConversationRuns conversationId={conversationId} active />
             ) : null}
-            {state.activeTab === "documents" ? (
-              <ConversationDocuments
-                conversationId={conversationId}
-                active
-                onSelect={showDocument}
-              />
+            {state.activeTab === "files" ? (
+              <ConversationFiles conversationId={conversationId} active onSelect={showFile} />
             ) : null}
             {state.activeTab === "info" ? (
               <ConversationInfo conversationId={conversationId} active />
@@ -387,11 +372,8 @@ export function ConversationSidebar({
           </div>
         </aside>
       ) : null}
-      {state.modalDocument ? (
-        <DocumentPreview
-          doc={state.modalDocument}
-          onClose={() => dispatch({ type: "close-modal" })}
-        />
+      {state.modalFile ? (
+        <FilePreview file={state.modalFile} onClose={() => dispatch({ type: "close-modal" })} />
       ) : null}
     </>
   );

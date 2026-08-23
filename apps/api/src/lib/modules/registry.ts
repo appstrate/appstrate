@@ -29,9 +29,9 @@ import {
 } from "../../services/chat-subscription.ts";
 import {
   resolveChatAttachment,
-  detachOrDeleteContainedDocuments,
-  setOrgDocumentStorageLimit,
-} from "../../services/documents.ts";
+  detachOrDeleteContainedFiles,
+  setOrgFileStorageLimit,
+} from "../../services/files.ts";
 
 // ---------------------------------------------------------------------------
 // Registry — env-driven module specifiers
@@ -130,23 +130,29 @@ function buildPlatformServices(): PlatformServices {
     recordChatUsage,
     checkUsageAllowed,
     // Chat attachments — materialize a composer upload into a chat-session-scoped
-    // document (or validate an existing document) and hand back its stable
-    // `document://` URI. The module has no DB access, so it crosses here.
+    // file (or validate an existing file) and hand back its stable
+    // `appfile://` URI. The module has no DB access, so it crosses here.
     resolveChatAttachment,
-    // Chat session teardown — detach-or-delete the session's contained documents
+    // Chat session teardown — detach-or-delete the session's contained files
     // before the session row is removed (the module has no DB/storage access).
-    cleanupSessionDocuments: (chatSessionId, tx) =>
-      detachOrDeleteContainedDocuments(
+    cleanupSessionFiles: (chatSessionId, tx) =>
+      detachOrDeleteContainedFiles(
         { chatSessionId },
         // `tx` is opaque in the core contract (no Drizzle dep there); it is the
         // chat module's own open transaction handle, so the teardown runs in the
         // same tx as the `chat_sessions` delete.
-        tx as Parameters<typeof detachOrDeleteContainedDocuments>[1],
+        tx as Parameters<typeof detachOrDeleteContainedFiles>[1],
       ),
-    // Per-org document storage limit — a metering/plan module (cloud) writes the
+    // Per-org file storage limit — a metering/plan module (cloud) writes the
     // org's technical byte ceiling here; the platform enforces it on every write.
     // Billing-neutral: the core stores a byte limit, never a plan/price.
-    setDocumentStorageLimit: setOrgDocumentStorageLimit,
+    setFileStorageLimit: setOrgFileStorageLimit,
+    // Deprecated pre-#1177 spelling of the SAME implementation. Out-of-tree
+    // modules (cloud) bind this off the live services object rather than off
+    // their pinned types, so the rename alone does not reach them and their
+    // next boot would `TypeError` on a deploy clock we do not control. Drop
+    // this line once every out-of-tree consumer binds `setFileStorageLimit`.
+    setDocumentStorageLimit: setOrgFileStorageLimit,
   };
 }
 

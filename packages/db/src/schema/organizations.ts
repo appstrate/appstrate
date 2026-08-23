@@ -41,24 +41,24 @@ export const organizations = pgTable("organizations", {
   // to the system-flagged proxy then `PROXY_URL`. No FK (a system id is not a DB
   // row); stale custom ids are cleared on delete and ignored by the resolver.
   defaultProxyId: text("default_proxy_id"),
-  // Running total of durable document bytes stored by this org. Maintained
-  // transactionally alongside `documents` insert/delete so the synchronous
+  // Running total of durable file bytes stored by this org. Maintained
+  // transactionally alongside `files` insert/delete so the synchronous
   // org-storage quota check (`ORG_STORAGE_QUOTA_BYTES`) needs no aggregate
   // scan. bigint (mode: number) — total storage far exceeds the int4 ceiling.
   // FK cascade deletes (run/chat-session/end-user/application removed) drop
-  // `documents` rows WITHOUT the app-level decrement, so the counter can drift
-  // high; `reconcileOrgDocumentBytes()` (documents.ts GC loop, ~daily) recomputes
-  // it from `SUM(documents.size)` and corrects the drift.
-  documentsBytesUsed: bigint("documents_bytes_used", { mode: "number" }).notNull().default(0),
-  // Per-org durable-document storage limit, in bytes. NULL = no per-org override
+  // `files` rows WITHOUT the app-level decrement, so the counter can drift
+  // high; `reconcileOrgFileBytes()` (files.ts GC loop, ~daily) recomputes
+  // it from `SUM(files.size)` and corrects the drift.
+  filesBytesUsed: bigint("files_bytes_used", { mode: "number" }).notNull().default(0),
+  // Per-org durable-file storage limit, in bytes. NULL = no per-org override
   // (the org falls back to the global env quota). Resolution order the write path
-  // enforces (see `effectiveOrgStorageLimit` in documents.ts):
-  //   organizations.documents_bytes_limit ?? env.ORG_STORAGE_QUOTA_BYTES ?? unlimited
+  // enforces (see `effectiveOrgStorageLimit` in files.ts):
+  //   organizations.files_bytes_limit ?? env.ORG_STORAGE_QUOTA_BYTES ?? unlimited
   // Pilotable per-org by the out-of-repo cloud module via the narrow
-  // `PlatformServices.setDocumentStorageLimit` capability. The core stays
+  // `PlatformServices.setFileStorageLimit` capability. The core stays
   // billing-neutral: this is a technical byte ceiling, never a plan or price.
-  // bigint (mode: number) — mirrors `documents_bytes_used` above.
-  documentsBytesLimit: bigint("documents_bytes_limit", { mode: "number" }),
+  // bigint (mode: number) — mirrors `files_bytes_used` above.
+  filesBytesLimit: bigint("files_bytes_limit", { mode: "number" }),
   createdBy: text("created_by").references(() => user.id),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

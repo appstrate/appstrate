@@ -9,7 +9,7 @@ export const metaPaths = {
       description:
         "Returns the OpenAPI 3.1 specification as JSON. The response carries a strong `ETag` " +
         "that is stable for the lifetime of the deployment — send it back as `If-None-Match` " +
-        "to revalidate a cached copy and get a `304 Not Modified` instead of the full document.",
+        "to revalidate a cached copy and get a `304 Not Modified` instead of the full file.",
       security: [],
       parameters: [
         {

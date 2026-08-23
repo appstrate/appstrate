@@ -2,7 +2,7 @@
 
 import { describe, it, expect, afterEach } from "bun:test";
 import { _resetCacheForTesting } from "@appstrate/env";
-import { getModuleRegistry } from "../../../src/lib/modules/registry.ts";
+import { getModuleRegistry, buildModuleInitContext } from "../../../src/lib/modules/registry.ts";
 
 /**
  * `getModuleRegistry` reads `MODULES` through the cached `getEnv()` snapshot
@@ -53,5 +53,26 @@ describe("getModuleRegistry", () => {
   it("parses comma-separated specifiers, trims whitespace, drops empty segments", () => {
     setModulesEnv(" @scope/module , @acme/analytics ,,");
     expect(getModuleRegistry()).toEqual(["@scope/module", "@acme/analytics"]);
+  });
+});
+
+/**
+ * `setDocumentStorageLimit` is the pre-#1177 spelling of `setFileStorageLimit`,
+ * kept as a deprecated alias because out-of-tree modules (cloud) bind the
+ * capability off the LIVE services object the platform injects, not off their
+ * pinned `PlatformServices` types — the rename never reaches their read, so
+ * dropping the name would `TypeError` their next boot on a deploy clock this
+ * repo does not control. Both names MUST resolve to the same implementation.
+ */
+describe("buildModuleInitContext().services — storage-limit capability", () => {
+  it("exposes both the canonical name and the deprecated alias", () => {
+    const { services } = buildModuleInitContext();
+    expect(typeof services.setFileStorageLimit).toBe("function");
+    expect(typeof services.setDocumentStorageLimit).toBe("function");
+  });
+
+  it("binds the alias to the very same function as the canonical name", () => {
+    const { services } = buildModuleInitContext();
+    expect(services.setDocumentStorageLimit).toBe(services.setFileStorageLimit);
   });
 });

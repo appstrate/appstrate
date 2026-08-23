@@ -51,13 +51,13 @@ import { dispatchInProcess } from "../../lib/platform-app.ts";
 import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "./audiences.ts";
 import {
   buildMcpTools,
-  buildDocumentResourceProvider,
+  buildFileResourceProvider,
   FORWARDED_AUTH_HEADERS,
   type Dispatch,
   type McpObserver,
 } from "./tools.ts";
 import { buildOperationIndex } from "./catalog.ts";
-import { canImportPackageDocuments } from "./package-document-tools.ts";
+import { canImportPackageFiles } from "./package-file-tools.ts";
 
 const MCP_SERVER_VERSION = "1.0.0";
 /** Path prefix owning the per-org sub-tree. `:org` is the organization id. */
@@ -145,7 +145,7 @@ export function buildServerInstructions(
     ? "Your caller context — who you are acting for, your role in this organization, and which integrations are already connected (prefer those when building or configuring an agent) — is already provided to you; there is no get_me tool, do not look for one."
     : "Start by calling get_me to learn who you are acting for, your role in this organization, and which integrations are already connected (prefer those when building or configuring an agent).";
   const packageImportGuidance = packageImportAvailable
-    ? "Call `import_package_document` only when validation returns BOTH `valid: true` AND `importable: true`, and the user asked to add/install the package."
+    ? "Call `import_package_file` only when validation returns BOTH `valid: true` AND `importable: true`, and the user asked to add/install the package."
     : "Package import is not available to this caller. If validation succeeds, report the result without claiming you can install it.";
   return `Appstrate runs autonomous AI agents in sandboxed Docker containers. The tools here let you discover and call any operation of the Appstrate REST API — their own descriptions tell you how. ${grounding} The operation index at the end of these instructions lists the operations available to your role by tag; it is your primary way to find an operation. Default to picking an operationId straight from that index, then call describe_operation for its input schema and invoke_operation to run it. Reach for search_operations only when the index is genuinely ambiguous or a capability you expect isn't listed — not as a routine first step. Never guess an operationId or body shape: describe_operation (or search_operations' best_match) is the source of truth for the input schema. When you need a newly launched run's progress or result, prefer the run_and_wait tool directly; it already owns launch plus waiting and declares its own schema. The runAgent and runInline operations remain available through describe_operation and invoke_operation for intentionally fire-and-forget runs.
 
@@ -157,8 +157,8 @@ This MCP server is scoped to ONE organization — the one this endpoint serves �
 
 ## Beyond the per-operation schemas
 - Runs are asynchronous: triggering one returns the created run resource (use its \`id\`), then it moves pending→running→success|failed|timeout|cancelled. When you need the result of a run you are launching now, prefer \`run_and_wait\` over manually composing \`runAgent\`/\`runInline\` plus \`getRun\`; it handles launch and waiting in one call. Use \`getRun\` with \`query: { wait: true }\` when you are inspecting or waiting on an existing run that was not launched through \`run_and_wait\` in this turn.
-- Shortcut — \`run_and_wait\` launches a run, exposes the created run to chat for live progress, then waits internally and returns \`{ id, packageId, status, done:true, result?, error? }\` once the run is terminal. Prefer it for launch-and-wait flows; use the fully discoverable \`runAgent\` or \`runInline\` operations when you deliberately want to launch without waiting. Do not call \`getRun\` after \`run_and_wait\` merely to wait again. For an inline run, pass a PARTIAL canonical AFPS \`manifest\`: normally set a concise task-specific \`display_name\` plus the dependencies/configuration needed for the task. The platform derives \`name\` and defaults omitted boilerplate, \`runtime_tools\` (log, output, publish_document), and an open object output schema. Every provided field replaces its default exactly; arrays and nested objects are never merged, so \`runtime_tools: []\` stays empty. You may override every field with a complete deterministic manifest; a strict \`output.schema\` requires an explicit runtime tool selection containing \`output\`. The chat shows ONLY lines the run emits via \`log\`, so instruct it in the top-level \`prompt\` to log meaningful steps whenever that tool is selected.
-- MCP package authoring — call \`get_runtime_capabilities\` first, have one inline run create the manifest + executable files, package them from the package root with the available shell tools (for example \`python3 -m zipfile -c package.afps manifest.json <entry-point> ...\`), then publish that archive with \`publish_document\` and pass the returned \`document://\` URI to \`validate_package_document\`. ${packageImportGuidance} If conflicts make it non-importable, report them instead of attempting a doomed mutation. Archive bytes stay server-side throughout.
+- Shortcut — \`run_and_wait\` launches a run, exposes the created run to chat for live progress, then waits internally and returns \`{ id, packageId, status, done:true, result?, error? }\` once the run is terminal. Prefer it for launch-and-wait flows; use the fully discoverable \`runAgent\` or \`runInline\` operations when you deliberately want to launch without waiting. Do not call \`getRun\` after \`run_and_wait\` merely to wait again. For an inline run, pass a PARTIAL canonical AFPS \`manifest\`: normally set a concise task-specific \`display_name\` plus the dependencies/configuration needed for the task. The platform derives \`name\` and defaults omitted boilerplate, \`runtime_tools\` (log, output, publish_file), and an open object output schema. Every provided field replaces its default exactly; arrays and nested objects are never merged, so \`runtime_tools: []\` stays empty. You may override every field with a complete deterministic manifest; a strict \`output.schema\` requires an explicit runtime tool selection containing \`output\`. The chat shows ONLY lines the run emits via \`log\`, so instruct it in the top-level \`prompt\` to log meaningful steps whenever that tool is selected.
+- MCP package authoring — call \`get_runtime_capabilities\` first, have one inline run create the manifest + executable files, package them from the package root with the available shell tools (for example \`python3 -m zipfile -c package.afps manifest.json <entry-point> ...\`), then publish that archive with \`publish_file\` and pass the returned \`appfile://\` URI to \`validate_package_file\`. ${packageImportGuidance} If conflicts make it non-importable, report them instead of attempting a doomed mutation. Archive bytes stay server-side throughout.
 - Streaming/SSE operations (live logs, realtime) cannot be called through this server; fetch logs or poll instead.
 - Wire JSON is snake_case, except universal id/timestamp fields (id, createdAt…) which stay camelCase.
 - Heavy list responses — list operations paginate with \`query: { limit, offset }\`, and some (e.g. \`listIntegrations\`) also take a \`fields\` selector (comma-separated projection; describe_operation shows it when available). On heavy lists request only the fields you need — e.g. \`fields: "id,active,block_user_connections"\` on \`listIntegrations\` — and read a single row's detail operation when you need its full \`manifest\`.
@@ -182,7 +182,7 @@ function forwardAuthHeaders(src: Headers): Headers {
 
 /**
  * Resolve the org+app scope for the MCP session so a tool can call an app-scoped
- * service directly (the document resource provider). Mirrors `requireAppContext`
+ * service directly (the file resource provider). Mirrors `requireAppContext`
  * for this org-pinned surface: a strategy-pinned application (API key) wins; an
  * `X-Application-Id` header (validated to belong to the org) is honoured next;
  * otherwise it falls back to the org's default application — the documented MCP
@@ -329,7 +329,7 @@ export function createMcpRouter(): Hono<AppEnv> {
     const authHeaders = forwardAuthHeaders(c.req.raw.headers);
     const dispatch: Dispatch = dispatchInProcess;
     // The caller identity + app scope for tools that call a service directly (the
-    // document resource provider). Resolved the same way the in-process
+    // file resource provider). Resolved the same way the in-process
     // sub-dispatch would, so direct and dispatched paths stay consistent.
     const actor = getActor(c);
     const scope = await resolveMcpAppScope(c, org);
@@ -394,10 +394,10 @@ export function createMcpRouter(): Hono<AppEnv> {
       scope,
     };
     const tools = buildMcpTools(toolCtx);
-    // `resources/read` for `document://doc_xxx` — resolves through the same
-    // forwarded-auth in-process dispatch as the tools (documents are NOT listed
+    // `resources/read` for `appfile://doc_xxx` — resolves through the same
+    // forwarded-auth in-process dispatch as the tools (files are NOT listed
     // under `resources/list`; they surface only via `resource_link`).
-    const resources = buildDocumentResourceProvider(toolCtx);
+    const resources = buildFileResourceProvider(toolCtx);
     const server = createMcpServer(
       tools,
       { name: "appstrate", version: MCP_SERVER_VERSION },
@@ -405,7 +405,7 @@ export function createMcpRouter(): Hono<AppEnv> {
         instructions: buildServerInstructions(
           permissions,
           contextInjected,
-          canImportPackageDocuments({ permissions, actor }),
+          canImportPackageFiles({ permissions, actor }),
         ),
         resources,
       },

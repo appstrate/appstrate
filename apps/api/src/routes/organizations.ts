@@ -39,7 +39,7 @@ import {
   updateInvitationRole,
 } from "../services/invitations.ts";
 import { provisionDefaultAgentForOrg } from "../services/default-agent.ts";
-import { effectiveOrgStorageLimit } from "../services/documents.ts";
+import { effectiveOrgStorageLimit } from "../services/files.ts";
 import { getEnv } from "@appstrate/env";
 import { isPlatformAdmin } from "@appstrate/db/auth-policy";
 import { createDefaultApplication } from "../services/applications.ts";
@@ -204,15 +204,15 @@ async function buildOrgDetail(orgId: string) {
     throw notFound("Organization not found");
   }
 
-  // Storage consumption vs. the org's document storage limit. `used_bytes` is
-  // the transactionally-maintained `organizations.documents_bytes_used` counter.
-  // `limit_bytes` is the raw per-org override (`documents_bytes_limit`), null
+  // Storage consumption vs. the org's file storage limit. `used_bytes` is
+  // the transactionally-maintained `organizations.files_bytes_used` counter.
+  // `limit_bytes` is the raw per-org override (`files_bytes_limit`), null
   // when no override is set. `effective_limit_bytes` is what the write path
   // actually enforces — the override, else the global `ORG_STORAGE_QUOTA_BYTES`,
   // else null (unlimited) — resolved through the same `effectiveOrgStorageLimit`
-  // the documents service gates writes against.
+  // the files service gates writes against.
   const storageQuota = getEnv().ORG_STORAGE_QUOTA_BYTES;
-  const effectiveLimit = effectiveOrgStorageLimit(org.documentsBytesLimit, storageQuota);
+  const effectiveLimit = effectiveOrgStorageLimit(org.filesBytesLimit, storageQuota);
 
   return {
     id: org.id,
@@ -220,8 +220,8 @@ async function buildOrgDetail(orgId: string) {
     slug: org.slug,
     createdAt: org.createdAt,
     storage: {
-      used_bytes: org.documentsBytesUsed,
-      limit_bytes: org.documentsBytesLimit ?? null,
+      used_bytes: org.filesBytesUsed,
+      limit_bytes: org.filesBytesLimit ?? null,
       effective_limit_bytes: effectiveLimit ?? null,
     },
     members: members.map((m) => ({

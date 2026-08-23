@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import { Badge } from "./status-badge";
 import { RunTrigger } from "./run-trigger";
 import { RunTokensReadout } from "./run-tokens-readout";
+import { RunTypeBadge } from "./run-type-badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { cn } from "@appstrate/ui/cn";
@@ -35,15 +36,17 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
 }
 
 /**
- * The three facts the `detail` variant drops from its always-visible line that
- * have nowhere else to live. Deliberately NOT here — the Info tab is their sole
+ * The facts the `detail` variant drops from its always-visible line that have
+ * nowhere else to live. Deliberately NOT here — another pane is their sole
  * owner, and duplicating them was the crowding this pass removes:
- *   - trigger, start date, proxy → `run-info-tab.tsx` (`run.infoTrigger`,
- *     `run.infoStartedAt`, `run.infoProxy`)
- *   - the four token buckets → same tab; only their SUM is here, because that
- *     is the figure #1046 demotes from the header and the tab never shows it
+ *   - trigger → `run-configuration-tab.tsx` (`run.infoTrigger`)
+ *   - start date, proxy → `run-execution-tab.tsx` (`run.infoStartedAt`,
+ *     `run.infoProxy`)
+ *   - the four token buckets → same pane; only their SUM is here, because that
+ *     is the figure #1046 demotes from the header and the pane never shows it
  *   - `#N` → the page title
- * The Documents tab badge shows a total, never the in/out split, so the split
+ *   - the run TYPE → the top line itself, in both variants, via `RunTypeBadge`
+ * The Fichiers tab badge shows a total, never the in/out split, so the split
  * stays.
  *
  * Exported as a testing affordance: the popover keeps its content unmounted
@@ -51,19 +54,14 @@ function DetailRow({ label, children }: { label: string; children: ReactNode }) 
  */
 export function RunRowDetails({ run }: { run: EnrichedRun }) {
   const { t } = useTranslation(["agents"]);
-  const inputDocs = run.document_counts.input;
-  const outputDocs = run.document_counts.output;
+  const inputFiles = run.file_counts.input;
+  const outputFiles = run.file_counts.output;
 
   return (
     <div className="space-y-2">
-      {run.package_ephemeral === true && (
-        <span className="border-border text-muted-foreground inline-block rounded border px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase">
-          {t("runs.inlineBadge")}
-        </span>
-      )}
-      {(inputDocs > 0 || outputDocs > 0) && (
-        <DetailRow label={t("run.tabDocuments")}>
-          {t("run.detailsDocuments", { input: inputDocs, output: outputDocs })}
+      {(inputFiles > 0 || outputFiles > 0) && (
+        <DetailRow label={t("run.tabFiles")}>
+          {t("run.detailsFiles", { input: inputFiles, output: outputFiles })}
         </DetailRow>
       )}
       <DetailRow label={t("run.usageTokensTotal")}>
@@ -133,10 +131,10 @@ export function RunRow({
   const isLive = isRunning && run.started_at != null;
   const finalDuration = run.duration ? formatDuration(run.duration) : "";
 
-  // `document_counts` is a non-optional field of the run DTO — every list and
+  // `file_counts` is a non-optional field of the run DTO — every list and
   // detail endpoint computes it — so read it straight.
-  const inputDocs = run.document_counts.input;
-  const outputDocs = run.document_counts.output;
+  const inputFiles = run.file_counts.input;
+  const outputFiles = run.file_counts.output;
 
   const content = (
     <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -147,11 +145,13 @@ export function RunRow({
       )}
       {agentName && <span className="truncate font-medium">{agentName}</span>}
       <Badge status={run.status} compact unread={isUnread} />
-      {!isDetail && isInline && (
-        <span className="border-border text-muted-foreground shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium tracking-wide uppercase">
-          {t("runs.inlineBadge")}
-        </span>
-      )}
+      {/* Run TYPE — inline vs catalogued agent. Always on the detail page's top
+          bar: nothing else there tells the two apart, and they behave
+          differently (no version, no re-run for an inline run). In a list the
+          chip is inline-only, as before — every row of an agent's run list
+          saying "AGENT" is noise, while an inline row among them is the
+          exception worth marking. */}
+      {(isDetail || isInline) && <RunTypeBadge run={run} />}
       {/* These two stay inline in BOTH variants: they are the reason the
           Re-run / Cancel buttons beside them are missing. Hiding them behind a
           click would leave that absence unexplained. */}
@@ -173,31 +173,33 @@ export function RunRow({
       )}
 
       {/* Trigger, proxy and (below) the start date are list-only: on the detail
-          page the Info tab already owns all three, so they are dropped outright
-          rather than moved into the panel. */}
+          page other panes already own all three — trigger in
+          `run-configuration-tab.tsx`, proxy and start date in
+          `run-execution-tab.tsx` (see this file's `RunRowDetails` note) — so
+          they are dropped outright rather than moved into the panel. */}
       {!isDetail && <RunTrigger run={run} />}
 
       {!isDetail && run.proxy_label && (
         <Shield size={12} className="text-muted-foreground hidden shrink-0 sm:block" />
       )}
       <div className="ml-auto flex shrink-0 items-center gap-2">
-        {/* Document counts duplicate the Documents tab badge on the detail page. */}
-        {!isDetail && inputDocs > 0 && (
+        {/* File counts duplicate the Files tab badge on the detail page. */}
+        {!isDetail && inputFiles > 0 && (
           <span
             className="text-muted-foreground flex items-center gap-0.5 text-xs"
-            title={t("run.inputDocuments", { count: inputDocs })}
+            title={t("run.inputFiles", { count: inputFiles })}
           >
             <FileInput size={12} className="shrink-0" />
-            {inputDocs}
+            {inputFiles}
           </span>
         )}
-        {!isDetail && outputDocs > 0 && (
+        {!isDetail && outputFiles > 0 && (
           <span
             className="text-muted-foreground flex items-center gap-0.5 text-xs"
-            title={t("run.outputDocuments", { count: outputDocs })}
+            title={t("run.outputFiles", { count: outputFiles })}
           >
             <FileOutput size={12} className="shrink-0" />
-            {outputDocs}
+            {outputFiles}
           </span>
         )}
         {/* How long the run took is a primary figure, not a wide-viewport

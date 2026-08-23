@@ -4,7 +4,7 @@
  * Appstrate platform system prompt — thin shim over the runtime's
  * `buildPlatformPromptInputs` + `renderPlatformPrompt`. Derivation of
  * every section (System / Environment / Tools / Skills / Input /
- * Documents / Config / Checkpoint / Memory / Output Format) happens in
+ * Files / Config / Checkpoint / Memory / Output Format) happens in
  * the runtime from the parsed Bundle; this function only adds the
  * overrides that are platform-specific:
  *
@@ -60,9 +60,16 @@ export async function buildPlatformSystemPrompt(
   plan: AppstrateRunPlan,
 ): Promise<string> {
   const executionMode = getExecutionMode();
+  // `./files/` since issue #1177 — the directory `runtime-pi/provision.ts`
+  // streams the run's input files into. DEPLOY ORDER: the runtime image must be
+  // at or ahead of the platform. A pre-#1177 image provisions `./documents/`
+  // only, so a platform announcing `./files/` to it points the agent at a
+  // directory that is not there; the reverse skew is covered image-side by a
+  // `documents` → `files` symlink. Both directions are a prompt-level miss, not
+  // an error — the bytes are provisioned either way.
   const uploads = plan.files?.map((f) => ({
     name: f.name,
-    path: `./documents/${f.workspaceName}`,
+    path: `./files/${f.workspaceName}`,
     size: f.size,
     ...(f.type ? { type: f.type } : {}),
   }));
@@ -102,7 +109,7 @@ export async function buildPlatformSystemPrompt(
         }
       : {}),
     // Deliverables convention (Phase 2): files the agent writes under
-    // `./outputs/` are swept and published as durable run documents at
+    // `./outputs/` are swept and published as durable run files at
     // finalize. Rendered as a platform-managed section BEFORE the raw prompt
     // (see renderPlatformPrompt) so the raw user prompt stays strictly last.
     deliverables: true,

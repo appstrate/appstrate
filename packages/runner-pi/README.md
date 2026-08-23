@@ -56,7 +56,7 @@ From `.`:
   `emitRuntimeReady`, `emitBootProgress`, `startSinkHeartbeat`.
 - **Runtime tools** — `RUNTIME_INJECTED_TOOLS` and friends,
   `buildRuntimeToolFactories`, `callToolResultToPi`, `buildRuntimeToolExtensions`,
-  `buildPublishDocumentExtension`, `spillResourcesToWorkspace`.
+  `buildPublishFileExtension`, `spillResourcesToWorkspace`.
 
 ## What it handles
 

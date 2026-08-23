@@ -6,6 +6,277 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING: `document` is now `file`, everywhere the concept is named
+  (#1177).** `publish_document` accepted Markdown, HTML, source code, a PDF, an
+  image — anything on the agent's filesystem — but "document" promises a Word or
+  a PDF to whoever reads the tool description, the model included. The word was
+  a false friend, so the concept is renamed from the schema to the wire.
+
+  Every wire-visible and persisted spelling keeps a READ alias; only what gets
+  written changes. What breaks anyway is listed under "What a consumer has to
+  do" below — read that list before upgrading.
+
+  | Surface             | Before                                                                                    | After                                                                     |
+  | ------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+  | Runtime tool        | `publish_document`                                                                        | `publish_file`                                                            |
+  | URI scheme          | `document://<id>`                                                                         | `appfile://<id>`                                                          |
+  | REST                | `/api/documents/*`, `/api/runs/{id}/documents[/{name}]`, `/preview/documents/{id}`        | `/api/files/*`, `/api/runs/{id}/files[/{name}]`, `/preview/files/{id}`    |
+  | MCP tools           | `list_documents`, `read_document`, `import_package_document`, `validate_package_document` | `list_files`, `read_file`, `import_package_file`, `validate_package_file` |
+  | Run event / run log | `document.published`, `event: "document"`                                                 | `file.published`, `event: "file"`                                         |
+  | Run DTO             | `document_counts`                                                                         | `file_counts`                                                             |
+  | Inline launch body  | `context_documents`                                                                       | `context_files`                                                           |
+  | Upload header       | `X-Document-Name`                                                                         | `X-File-Name`                                                             |
+  | Permission resource | `documents:read`, `documents:delete`                                                      | `files:read`, `files:delete`                                              |
+  | Problem code        | `document_count_exceeded`                                                                 | `file_count_exceeded`                                                     |
+  | Tables              | `documents`, `document_links`                                                             | `files`, `file_links`                                                     |
+  | French UI           | « Documents »                                                                             | « Fichiers »                                                              |
+
+  `appfile://` rather than `file://`: the latter already means the local
+  filesystem and is what MCP uses for local resources, so an opaque platform id
+  under it is ambiguous to the model and to every MCP client.
+
+  **Deliberately NOT renamed**, each because renaming it would move live data or
+  cost an ops migration for no user-visible gain: the `doc_` row-id prefix
+  (already in every row and every storage key); the `documents` storage bucket
+  and the `documents/` `storage_key` prefix (every stored object begins with it —
+  renaming orphans them all, with no error until a download 404s on a file that
+  is physically still there); the `document_deleted` value in
+  `storage_deletion_jobs.reason`; and the environment variables
+  `DOCUMENT_MAX_FILE_BYTES`, `DOCUMENT_RETENTION_DAYS`, `RUN_MAX_DOCUMENTS` and
+  `WORKSPACE_MAX_DOCS_BYTES`. See `docs/ENV.md` and
+  `docs/architecture/FILES.md`.
+
+  **What a consumer has to do:**
+
+  1. **`/api/documents/*` and `/api/runs/{id}/documents[/{name}]` still work,
+     as deprecated aliases.** Same handlers, same guards, marked
+     `deprecated: true` in the OpenAPI document with a `Deprecated` suffix on
+     each `operationId`. A generated client regenerated against the new spec
+     gets both. Move to `/api/files/*`; the aliases exist for callers pinned to
+     the old URLs, not as a permanent second contract.
+  2. **The run resource field `document_counts` is now `file_counts`, and
+     `primary_document_id` is gone.** There is NO response-side alias for
+     either: an out-of-tree API consumer still reading them gets `undefined`,
+     silently, with a `200`. This repo has already broken a consumer exactly
+     this way (`github-action` sending a removed field), so it is spelled out
+     rather than left to the diff. Read `file_counts.{input,output}`; for "which
+     file to show", see the derived rule under Removed.
+  3. **Five RFC 9457 problem codes are renamed, and NONE of them has a read
+     alias.** The code is a string a client branches on; an unrecognised value
+     falls to whatever the client's default arm does, silently.
+
+     | Before                    | After                 | Raised by                                                                                       |
+     | ------------------------- | --------------------- | ----------------------------------------------------------------------------------------------- |
+     | `document_count_exceeded` | `file_count_exceeded` | `413`, `RUN_MAX_DOCUMENTS` over-cap (`@appstrate/core/api-errors`)                              |
+     | `document_in_use`         | `file_in_use`         | `409`, `DELETE /api/files/{id}` on a file a live run still links (`services/files.ts`)          |
+     | `document_unavailable`    | `file_unavailable`    | `409`, an input file deleted between resolve and run creation (`services/state/runs.ts`)        |
+     | `duplicate_document_name` | `duplicate_file_name` | `400`, colliding workspace names in a run's input manifest (`services/run-file-naming.ts`)      |
+     | `document_uri_in_prompt`  | `file_uri_in_prompt`  | field-level code inside the `400 validation_failed` on an inline run (`services/inline-run.ts`) |
+
+     The limits and the statuses are unchanged; only the strings moved.
+
+  4. **`publish_document` is now `publish_file` and no longer accepts
+     `presentation`.** A persisted manifest declaring
+     `runtime_tools: ["publish_document"]` keeps working — the id is
+     canonicalized on read, never dropped, and a manifest saved afterwards
+     writes only `publish_file`. This was the sharpest edge in the change:
+     `dropRetiredRuntimeTools()` silently DELETES runtime-tool ids it does not
+     recognise, so a bare rename would not have errored, it would have stripped
+     the tool from every agent that had selected it, with nothing in any log.
+     A caller that still sends `presentation` has it ignored, not rejected.
+  5. **The four MCP tools are renamed; the old names stay callable but hidden.**
+     `list_documents`, `read_document`, `import_package_document` and
+     `validate_package_document` forward to the canonical handler and rename a
+     `document_uri` argument to `file_uri` on the way in. They are withheld from
+     `tools/list` because the point of the rename is what the model sees. The
+     server advertises `tools: { listChanged: false }`, so a client that listed
+     before the upgrade and calls an old name after it is behaving correctly and
+     must not get `-32602 Unknown tool` mid-conversation.
+
+     One MCP break is NOT covered by any alias, and it is client-facing: a
+     dynamically-registering client whose published Client ID Metadata Document
+     still declares `documents:read` / `documents:write` now fails registration
+     with `invalid_scope`. `@better-auth/cimd` lists `scope` in
+     `ALLOWED_METADATA_FIELDS` and feeds it into
+     `createOAuthClientEndpoint(..., { isRegister: true })`, which validates
+     every requested scope against the server's set and throws on anything
+     outside it. The scope-canonicalising hook cannot help here:
+     `SCOPE_BEARING_PATHS` matches INBOUND request paths, and a metadata
+     document is fetched outbound by the server. Nothing is silently
+     mis-granted — registration is refused outright — but the client's own
+     metadata has to be updated to the `files:` spelling. Tell any partner
+     registering through CIMD before you deploy.
+
+  6. **The four OpenTelemetry metric series are renamed:
+     `appstrate.documents.created`, `.deleted`, `.storage_limit_rejections` and
+     `.partial_publications` are now `appstrate.files.*`.** Nothing errors —
+     dashboards, alerts and recording rules built on the old series simply go to
+     zero and stay there. Repoint them, and check any alert whose condition is
+     "below threshold": those fire, and the ones that are "above threshold" go
+     quiet without ever telling you why.
+  7. **`@appstrate/core`: the `./document-uri` subpath is now `./file-uri`**,
+     with `DOCUMENT_URI_PREFIX` → `FILE_URI_PREFIX`, `isDocumentUri` →
+     `isFileUri`, `parseDocumentUri` → `parseFileUri`, `documentUri()` →
+     `fileUri()`, `extractDocumentIds[FromText]` → `extractFileIds[FromText]`,
+     plus renames on `./permissions`, `./telemetry`, `./api-errors`, `./module`
+     and `./run-and-wait-client`. **Core is NOT published from this branch.**
+     `cloud` and `connect-helper` stay on the currently published version, but
+     the pin only protects them at the TYPE level: `cloud` binds
+     `services.setDocumentStorageLimit` off the LIVE services object this
+     platform injects at boot, so what keeps it working here is the deprecated
+     `setDocumentStorageLimit` alias kept beside the canonical
+     `setFileStorageLimit` — temporary, and the only thing holding that seam
+     together. The eventual major needs a matching code change in `cloud`, not
+     just a version bump. See `packages/core/CHANGELOG.md`.
+  8. **Migrations `0042` through `0045` run automatically at boot.** `0042`
+     drops the `presentation` column with its partial unique index and CHECK.
+     `0043` is a pure `ALTER … RENAME` of the tables, columns, enum type,
+     indexes and constraints — catalog-only, no table rewrite, no data movement,
+     no window where a constraint is absent. `0044` rewrites stored
+     `documents:*` permission scope strings to `files:*` across `api_keys` and
+     the four `oauth_*` scope columns; `0045` does the same for the two
+     space-delimited `text` scope columns the array pattern cannot reach
+     (`cli_refresh_tokens.scope`, `device_codes.scope`). All four are idempotent
+     and converge from a partially-applied state. Third-party provider scopes
+     (`integrations.scopes_granted`, `application_social_providers.scopes`) are
+     deliberately untouched.
+
+     **Migration `0043` is irreversible, and the rollback is a hard outage,
+     not a degraded mode.** There is no down migration in the repo and `0043`
+     creates no compatibility view. Once boot has applied it, the previous
+     release's code queries `documents`, `document_links` and
+     `organizations.documents_bytes_*` — none of which exist under those names
+     any more. **Take a database snapshot immediately before the deploy**; it
+     is the only fast way back. To reverse by hand:
+
+     ```sql
+     ALTER TABLE "files" RENAME TO "documents";
+     ALTER TABLE "file_links" RENAME TO "document_links";
+     ALTER TABLE "document_links" RENAME COLUMN "file_id" TO "document_id";
+     ALTER TABLE "organizations" RENAME COLUMN "files_bytes_used" TO "documents_bytes_used";
+     ALTER TABLE "organizations" RENAME COLUMN "files_bytes_limit" TO "documents_bytes_limit";
+     ALTER TYPE "public"."file_purpose" RENAME TO "document_purpose";
+     ```
+
+     Constraint and index names are cosmetic to the old code and can be left
+     alone. `0042` is not reversible at all — the `presentation` column and its
+     data are dropped, and only the snapshot brings them back.
+
+     `0044` / `0045` need reversing too, and the reason is not obvious:
+     they rewrote stored `documents:*` scope strings to `files:*` in
+     `api_keys.scopes`, the four `oauth_*` scope columns and the two
+     space-delimited `cli_refresh_tokens.scope` / `device_codes.scope`
+     columns. It is the NEW code that canonicalizes a legacy scope on read
+     (`canonicalPermissions`); the pre-#1177 code has no `files` resource at
+     all (`CORE_RESOURCE_NAMES` lists `documents`) and drops an unknown scope
+     **silently** rather than rejecting it — so after a code-only rollback
+     every affected key and token keeps authenticating and quietly grants
+     less than it was issued with. Rewrite `files:` back to `documents:` in
+     those seven columns, or restore the snapshot.
+
+  9. **Deploy order: roll the PLATFORM first, then the runtime image.** Two
+     things moved on the container boundary and the skew is NOT symmetric:
+     the run container's input directory is `workspace/files/` (was
+     `workspace/documents/`), and a published file is uploaded to
+     `POST /api/runs/{id}/files` (was `…/documents`).
+
+     - **New platform + old image — prompt-level miss.** `prompt-builder.ts`
+       announces `./files/<name>`; a pre-#1177 image provisioned `documents/`
+       only, so the agent is pointed at a directory that is not there. The
+       bytes ARE provisioned and the manifest carries both a `files` and a
+       `documents` key, so a run that goes looking still finds them.
+     - **New image + old platform — HARD FAILURE.** The previous release
+       registers `/runs/:runId/documents` and nothing else; `runtime-pi`'s
+       uploader posts unconditionally to `/files` with no fallback, so
+       **every `publish_file` call 404s**, the run finishes with no
+       deliverable, and nothing in the platform log says why. The image-side
+       `documents` → `files` symlink (`runtime-pi/provision.ts`) covers the
+       INPUT path across this skew; it cannot cover the upload.
+
+     `PI_IMAGE` defaults to `appstrate-pi:latest` and is operator-controlled,
+     so an eager pull lands the new image on the old platform by accident.
+     Pin the tag, or upgrade the platform first.
+
+  Read compatibility that needs no action, and is permanent: `document://` URIs
+  parse everywhere `appfile://` does (historical `runs.input` rows are full of
+  them); run logs written as `event: "document"` still render; the ingestion
+  route accepts a `document.published` event and an `X-Document-Name` header
+  from a runtime image older than the platform, and ignores the retired
+  `X-Document-Presentation`; `POST /api/runs/inline` accepts `context_documents`
+  as well as `context_files`; and `documents:read` / `documents:delete` scopes
+  minted before migration `0044` still grant.
+
+- **The run page is four fixed tabs: Outcome, Fichiers, Exécution,
+  Configuration.** The previous set (Résultat / Deliverable / logs / memory /
+  files / info) grew by accretion, mixed three unrelated questions across five
+  panes, and made two of them appear and disappear per run — so the strip had a
+  different shape depending on which run you opened. Now every pane renders for
+  every run: **Outcome** is what the run produced (the `output` tool's value,
+  the files it produced, the memory it wrote), **Fichiers** is every file
+  attached to the run — imported and produced, **Exécution** is how it ran
+  (logs, execution details, usage, per-turn breakdown, input payload,
+  identifiers), **Configuration** is how it was set up (agent, version, trigger,
+  connections).
+
+  « Résultat » is now « Output »: the section is literally what the `output`
+  tool emitted, not a verdict on the run. The top bar states whether a run is an
+  inline run or an agent run.
+
+  Every retired tab hash still resolves — `#deliverable`, `#result` and
+  `#memory` → `outcome`, `#documents` → `files`, `#logs` and `#info` →
+  `execution` — so a bookmark, a back-history entry or a link pasted into an old
+  chat message lands on the pane that absorbed it instead of silently falling
+  back to the default.
+
+### Removed
+
+- **`presentation: "primary"`, and everything behind it.** The
+  `publish_document` argument, the `documents.presentation` column, its partial
+  unique index `uq_documents_run_primary`, its CHECK constraint, the
+  `X-Document-Presentation` ingestion header, and the derived run-DTO field
+  `primary_document_id` are all gone (migration `0042`).
+
+  It conflated two different questions — how important a file is, and whether
+  the UI opens it — and forced at most one per run, which made the producing
+  agent arbitrate a presentation decision that was never its call: an agent that
+  wrote three peer files had to crown one or leave the run looking empty.
+
+  What replaced it is derived from what the run produced, computed client-side
+  and applied identically on the run page and in the chat: **0 produced files →
+  nothing is featured; exactly 1 → it is shown by default; N → all listed, none
+  opened, the user picks.** Only files with `purpose = 'agent_output'` whose own
+  `run_id` is this run count — never an input, and never a file chained in from
+  an earlier run via `appfile://` (which is listed in the run's container while
+  still carrying `purpose: 'agent_output'`, because an earlier run produced it).
+  Nothing server-side stores or computes it, which is why the dropped column
+  needed no replacement pointer: there is no second place left to go stale when
+  a file is deleted, expires, or is detached. In the chat the rule additionally
+  waits for a settled run, because a run publishing three files emits them one
+  at a time and a mid-stream count of 1 is not the final count.
+
+  A `presentation` argument sent by a stale caller is ignored rather than
+  rejected — losing a real deliverable over a dead argument would be the worse
+  failure — and a runtime image older than the platform may still send
+  `X-Document-Presentation`, which the ingestion route reads as nothing and
+  never answers `400` to.
+
+### Fixed
+
+- **A file attached in the chat now becomes an input of the inline run it
+  triggers.** It did not, for two independent reasons that had to be fixed
+  together: the chat system prompt never told the model that a top-level
+  `context_files` argument existed, so it had no way to pass the attachment on;
+  and the shared `run_and_wait` launch client
+  (`packages/core/src/run-and-wait-client.ts`) read only the canonical
+  `context_files` name and dropped the legacy `context_documents` spelling
+  before the HTTP call — an allowlist builds the launch body, so a model that
+  reached for the argument under its pre-#1177 name, from an earlier turn or a
+  stale tool listing, watched it disappear with no 400 from the route that
+  accepts it forever. The run started anyway, with no error and no file — the agent
+  simply worked without the attachment the user had just given it.
+
 ### Added
 
 - **The `check` chain now fails on dead exports** (`bun run verify:dead-code`,

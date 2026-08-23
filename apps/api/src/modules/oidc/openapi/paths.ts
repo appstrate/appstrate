@@ -103,7 +103,7 @@ const updateClientRequest = {
       type: "array",
       items: { type: "string" },
       description:
-        "OAuth scopes granted to this client. Must be a subset of `/api/oauth/scopes`. Existing access tokens retain the scopes they were minted with; updating this field only affects subsequent authorizations.",
+        'OAuth scopes granted to this client. Must be a subset of `/api/oauth/scopes` — but a RETIRED spelling is accepted and silently rewritten, not rejected: the service canonicalizes each scope before validating it and persists the canonical form (`canonicalizeValidScopes`, `services/oauth-admin.ts`), so a client sending `["documents:read"]` gets a `200` and reads back `["files:read"]`. That is deliberate — a client registered before #1177 must not be refused for asking for a scope it already holds — but nothing in the response explains the substitution, so diff the echoed value rather than assuming it round-trips. Existing access tokens retain the scopes they were minted with; updating this field only affects subsequent authorizations.',
     },
     disabled: { type: "boolean" },
     isFirstParty: { type: "boolean" },

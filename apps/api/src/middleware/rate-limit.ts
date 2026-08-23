@@ -7,6 +7,7 @@ import type { AppEnv } from "../types/index.ts";
 import { getRateLimiterFactory } from "../infra/index.ts";
 import { ApiError } from "../lib/errors.ts";
 import { getClientIp } from "../lib/client-ip.ts";
+import { canonicalFilesPath } from "../lib/legacy-file-paths.ts";
 
 async function createLimiter(
   points: number,
@@ -26,10 +27,10 @@ export function resetRateLimiters(): void {
 
 /**
  * The path component of a limiter key: the matched ROUTE PATTERN, never the
- * concrete path.
+ * concrete path, and always in its CANONICAL spelling.
  *
- * `c.req.path` is the literal URL, so `/api/documents/{id}/content` used to get
- * one bucket PER DOCUMENT: 120 requests/min each, every one able to proxy up to
+ * `c.req.path` is the literal URL, so `/api/files/{id}/content` used to get
+ * one bucket PER FILE: 120 requests/min each, every one able to proxy up to
  * 100 MiB — i.e. 120 × N downloads/min for N ids, which is no limit at all. The
  * same geometry applied to every `:param` route (previews, per-run reads, …).
  * Keying on the pattern gives the route ONE bucket per identity, which is what
@@ -40,10 +41,18 @@ export function resetRateLimiters(): void {
  * catch-all middleware (`app.use("*", …)`), where the pattern carries no
  * information and collapsing every endpoint into one bucket would be wrong: we
  * fall back to the concrete path there.
+ *
+ * Keying on the pattern has one trap the concrete path did not have: a
+ * DEPRECATED ALIAS is a second registered pattern for the same handler
+ * (`/api/documents/:id` beside `/api/files/:id`, #1177), so it would key into
+ * its own bucket and hand a client that alternates spellings twice the budget
+ * the endpoint declares. `canonicalFilesPath` collapses the alias onto its
+ * canonical pattern — in ONE place, from the same segment pair the OpenAPI
+ * alias derivation uses, so the next alias cannot reintroduce the split.
  */
 function limiterPath(c: Context<AppEnv>): string {
   const pattern = c.req.routePath;
-  return pattern && !pattern.includes("*") ? pattern : c.req.path;
+  return canonicalFilesPath(pattern && !pattern.includes("*") ? pattern : c.req.path);
 }
 
 /** Extract retryAfter (seconds) from rate-limiter-flexible rejection. */
@@ -217,7 +226,7 @@ export const rateLimitByRunId = createRateLimitMiddleware({
  * `middleware/verify-run-signature.ts` before it trusts anything.
  *
  * The run-HMAC routes take their identity from the `:runId` path param, so the
- * fine-grained `rateLimitByRunId` / `rateLimitRunDocuments` limiters can only
+ * fine-grained `rateLimitByRunId` / `rateLimitRunFiles` limiters can only
  * be applied AFTER the signature proves the caller is that run — applying them
  * first lets anyone who knows a runId burn a legitimate run's ingestion budget
  * with unsigned garbage. But with nothing in front, every attempt (including a
@@ -293,14 +302,14 @@ export async function recordRunSinkAuthFailure(c: Context<AppEnv>): Promise<void
 }
 
 /**
- * Per-run rate limiter for document uploads (`POST /api/runs/:runId/documents`),
+ * Per-run rate limiter for file uploads (`POST /api/runs/:runId/files`),
  * kept SEPARATE from `rateLimitByRunId` (event ingestion): the end-of-run
  * `outputs/` sweep can burst many small file uploads at once and must neither
  * consume the run's event-stream budget nor be throttled by it (a shared
  * limiter would let a sweep 429 itself). Same runId-keyed anti-evasion property.
  */
-export const rateLimitRunDocuments = createRateLimitMiddleware({
-  category: "run-document",
-  extractKey: (c) => `run-document:${c.req.param("runId") ?? "unknown"}`,
+export const rateLimitRunFiles = createRateLimitMiddleware({
+  category: "run-file",
+  extractKey: (c) => `run-file:${c.req.param("runId") ?? "unknown"}`,
   emitHeaders: false,
 });

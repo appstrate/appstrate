@@ -85,8 +85,8 @@ export {
 export {
   buildRuntimeToolExtensions,
   type BuildRuntimeToolExtensionsOptions,
-  buildPublishDocumentExtension,
-  type BuildPublishDocumentExtensionOptions,
+  buildPublishFileExtension,
+  type BuildPublishFileExtensionOptions,
 } from "./runtime-tools/runtime-tool-extensions.ts";
 
 export {

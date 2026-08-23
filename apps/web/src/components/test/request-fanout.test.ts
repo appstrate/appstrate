@@ -15,7 +15,7 @@
  *
  * Source-scanned rather than rendered: these modules import the SPA's typed API
  * client, which uses `import.meta.glob` and cannot be evaluated by the bun test
- * runner (the same reason `document-preview.test.ts` scans its component).
+ * runner (the same reason `file-preview.test.ts` scans its component).
  */
 
 import { describe, it, expect } from "bun:test";

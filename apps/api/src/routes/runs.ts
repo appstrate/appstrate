@@ -40,9 +40,9 @@ import { getActor } from "../lib/actor.ts";
 import { getAppScope } from "../lib/scope.ts";
 import { getInlineRunLimits } from "../services/run-limits.ts";
 import {
-  assertContextDocumentsFieldAvailable,
-  injectContextDocuments,
-  normalizeContextDocumentUris,
+  assertContextFilesFieldAvailable,
+  injectContextFiles,
+  normalizeContextFileUris,
   triggerInlineRun,
 } from "../services/inline-run.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
@@ -112,10 +112,23 @@ const inlineRunBodySchema = z
     generation: modelGenerationSettingsSchema.optional(),
     proxyId: z.string().nullable().optional(),
     /**
-     * `document://` URIs to mount read-only into the run's `documents/` directory
+     * `appfile://` URIs to mount read-only into the run's input-file directory
      * without declaring a file field in the manifest (fan-in by reference). Entry
-     * shape is checked downstream by `normalizeContextDocumentUris` so the error
+     * shape is checked downstream by `normalizeContextFileUris` so the error
      * names the offending URI rather than a Zod path.
+     */
+    context_files: z.array(z.unknown()).optional(),
+    /**
+     * `context_documents` — the pre-#1177 spelling of {@link context_files},
+     * accepted forever.
+     *
+     * This body schema is `.strict()`, so an UNDECLARED field is a 400 and a
+     * field the route reads but does not declare is stripped before the handler
+     * ever sees it: either way the caller's files vanish. The repo has been bitten
+     * by exactly that (#1189 — a launch-body field no surface allowlisted was
+     * dropped in silence and the model looped with no error to show). Declaring
+     * the legacy name keeps an unmodified caller working; `context_files` wins
+     * when both are present.
      */
     context_documents: z.array(z.unknown()).optional(),
     /**
@@ -237,7 +250,7 @@ export function createRunsRouter() {
       );
 
       // Single canonical prefix — `run_` — shared with inline + remote origins.
-      // Minted BEFORE input parsing so input documents can be streamed straight
+      // Minted BEFORE input parsing so input files can be streamed straight
       // into this run's workspace namespace during consume (no buffering them in
       // API memory until the run row exists). The run row is still created later
       // with this same id.
@@ -245,7 +258,7 @@ export function createRunsRouter() {
 
       // Flips true the instant the pipeline launches (run row inserted, workload
       // dispatched). Past that point the run OWNS its workspace — a later failure
-      // (e.g. the read-back below) must NOT delete a live run's input documents.
+      // (e.g. the read-back below) must NOT delete a live run's input files.
       let launched = false;
       try {
         // Per-application settings first: they carry the editor defaults and
@@ -272,8 +285,8 @@ export function createRunsRouter() {
         const {
           input: parsedInput,
           uploadedFiles,
-          pendingDocuments,
-          consumedDocumentIds,
+          pendingFiles,
+          consumedFileIds,
           modelIdOverride,
           generationConfigOverride,
           proxyIdOverride,
@@ -324,14 +337,14 @@ export function createRunsRouter() {
           // `undefined`; map that to NULL so an input-less run persists
           // `runs.input` as SQL NULL (one representation across all origins).
           input: parsedInput ?? null,
-          // File metadata for prompt context — the document bytes were already
+          // File metadata for prompt context — the file bytes were already
           // streamed into the run workspace during consume.
           files: uploadedFiles,
-          // Staged uploads to materialize into durable `documents` rows after
-          // the run row exists (input already rewritten to `document://` ids).
-          pendingDocuments,
-          // `document://` inputs to protect via `document_links` (chaining).
-          consumedDocumentIds,
+          // Staged uploads to materialize into durable `files` rows after
+          // the run row exists (input already rewritten to `appfile://` ids).
+          pendingFiles,
+          // `appfile://` inputs to protect via `file_links` (chaining).
+          consumedFileIds,
           modelId: modelIdOverride ?? preflightModelId,
           generationConfig: preflightGenerationConfig,
           generationConfigOverride: generationConfigOverride ?? null,
@@ -379,7 +392,7 @@ export function createRunsRouter() {
         }
         return c.json(row, 201);
       } catch (err) {
-        // Roll back any input documents streamed into the run workspace before
+        // Roll back any input files streamed into the run workspace before
         // the run launched (size/MIME mismatch, failed preflight, …). Once
         // `prepareAndExecuteRun` resolves the run owns its own teardown, so a
         // post-launch failure (e.g. the read-back throwing) must NOT delete a
@@ -684,25 +697,27 @@ export function createRunsRouter() {
       // note there. No second read of the body here.
       const body = await readJsonBody(c, inlineRunBodySchema);
 
-      // Preflight BEFORE any input document streams — a bad manifest or
+      // Preflight BEFORE any input file streams — a bad manifest or
       // readiness problem 4xxes without touching storage.
       const preflight = await runInlinePreflight({ orgId, applicationId, actor, body });
 
-      // ----- Context documents (fan-in by reference) -----
+      // ----- Context files (fan-in by reference) -----
       // Both entry paths land on ONE synthesized reserved input field, and the
       // synthesis must happen HERE: `parseRequestInput` below reads the input
       // schema off `preflight.manifest`, so the field has to be declared before
       // it walks the input. Everything after this block is the ordinary file
-      // path — ACL (`getDocumentForActor`), byte + count caps, streaming into
-      // `documents/`, `document_links` — and the platform prompt announces the
-      // mounted documents exactly as it does for an uploaded file.
-      assertContextDocumentsFieldAvailable(preflight.manifest, body.input);
+      // path — ACL (`getFileForActor`), byte + count caps, streaming into
+      // `documents/`, `file_links` — and the platform prompt announces the
+      // mounted files exactly as it does for an uploaded file.
+      assertContextFilesFieldAvailable(preflight.manifest, body.input);
       // B2 — the explicit argument. Shape-checked first: a malformed URI 400s
-      // without spending a document lookup.
-      const explicitDocumentUris = normalizeContextDocumentUris(body.context_documents);
-      const { manifest: effectiveManifest, inputPatch } = injectContextDocuments(
+      // without spending a file lookup.
+      const explicitFileUris = normalizeContextFileUris(
+        body.context_files ?? body.context_documents,
+      );
+      const { manifest: effectiveManifest, inputPatch } = injectContextFiles(
         preflight.manifest,
-        explicitDocumentUris,
+        explicitFileUris,
       );
       const effectivePreflight = inputPatch
         ? { ...preflight, manifest: effectiveManifest }
@@ -710,14 +725,14 @@ export function createRunsRouter() {
 
       // Same input machinery as POST /agents/:scope/:name/run: file fields
       // (`format: uri` + `contentMediaType`) resolve `upload://` /
-      // `document://` / inline `data:` URIs through the container ACL + caps
+      // `appfile://` / inline `data:` URIs through the container ACL + caps
       // and stream the bytes into this run's workspace. Minted before parsing
-      // for the same reason as the agent route (documents stream straight
+      // for the same reason as the agent route (files stream straight
       // into the run's workspace namespace).
       const runId = `run_${crypto.randomUUID()}`;
       // Flips true the instant `triggerInlineRun` launches the pipeline. Past
       // that point the run OWNS its workspace — a later failure (e.g. the
-      // read-back below) must NOT delete a live run's input documents.
+      // read-back below) must NOT delete a live run's input files.
       let launched = false;
       try {
         const parsed = await parseRequestInput(
@@ -767,7 +782,7 @@ export function createRunsRouter() {
         }
         return c.json(row, 201);
       } catch (err) {
-        // Roll back any input documents streamed into the run workspace before
+        // Roll back any input files streamed into the run workspace before
         // the run launched — same pre-launch teardown as the agent route. Once
         // `triggerInlineRun` has launched the pipeline the run owns its own
         // teardown, so a post-launch failure must NOT delete its workspace.
@@ -802,8 +817,8 @@ export function createRunsRouter() {
       await runInlinePreflight({ orgId, applicationId, actor, body, mode: "accumulate" });
       // Same reserved-name rule as the run endpoint — a manifest that validates
       // here must be runnable there.
-      assertContextDocumentsFieldAvailable(body.manifest, body.input);
-      normalizeContextDocumentUris(body.context_documents);
+      assertContextFilesFieldAvailable(body.manifest, body.input);
+      normalizeContextFileUris(body.context_files ?? body.context_documents);
 
       // Structured validation result. Failures never reach this line — the
       // preflight throws problem+json ApiErrors (accumulated) — so a 200

@@ -6,7 +6,7 @@ import { listOrgsWithUnsupportedApiVersion } from "../services/organizations.ts"
 import { expireOldInvitations } from "../services/invitations.ts";
 import { cleanupExpiredKeys } from "../services/api-keys.ts";
 import { cleanupExpiredUploads, startUploadGc } from "../services/uploads.ts";
-import { cleanupExpiredDocuments, startDocumentGc } from "../services/documents.ts";
+import { cleanupExpiredFiles, startFileGc } from "../services/files.ts";
 import { startStorageDeletionWorker } from "../services/storage-deletion.ts";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import { logger } from "./logger.ts";
@@ -445,12 +445,12 @@ export async function bootBackground(): Promise<{ agentsHealthy: boolean }> {
           error: getErrorMessage(err),
         });
       }),
-    cleanupExpiredDocuments()
+    cleanupExpiredFiles()
       .then((count) => {
-        if (count > 0) logger.info("Removed expired documents", { count });
+        if (count > 0) logger.info("Removed expired files", { count });
       })
       .catch((err) => {
-        logger.warn("Could not clean up expired documents", {
+        logger.warn("Could not clean up expired files", {
           error: getErrorMessage(err),
         });
       }),
@@ -458,12 +458,12 @@ export async function bootBackground(): Promise<{ agentsHealthy: boolean }> {
 
   await Promise.all(parallelInits);
 
-  // Kick off the recurring upload + document sweeps once initial cleanup is scheduled.
+  // Kick off the recurring upload + file sweeps once initial cleanup is scheduled.
   startUploadGc();
-  startDocumentGc();
+  startFileGc();
   // Transactional storage-deletion outbox worker: drains any boot-time backlog
   // immediately, then polls for due jobs. Purges S3/FS objects whose DB rows
-  // were deleted (documents, uploads, run workspaces, org/app/end-user cascades).
+  // were deleted (files, uploads, run workspaces, org/app/end-user cascades).
   startStorageDeletionWorker();
 
   return { agentsHealthy };
@@ -670,7 +670,7 @@ async function warnOnUnserveableApiVersionPins(): Promise<void> {
 /**
  * Boot-time reachability probe for `USERCONTENT_URL` (issue #1001).
  *
- * The platform *signs* preview URLs (`services/documents.ts` → `mintPreviewUrl`)
+ * The platform *signs* preview URLs (`services/files.ts` → `mintPreviewUrl`)
  * but never fetches them — so if `USERCONTENT_URL` is set to a host the browser
  * cannot reach, every `preview_url` this instance mints is dead with zero
  * server-side trace. This probe fires ONE unauthenticated GET at the preview
@@ -690,7 +690,7 @@ export async function probeUsercontentReachability(): Promise<void> {
   // Replicate `mintPreviewUrl`'s slash-trim so we probe the exact base we sign.
   let base = env.USERCONTENT_URL;
   while (base.endsWith("/")) base = base.slice(0, -1);
-  const url = `${base}/preview/documents/_probe`;
+  const url = `${base}/preview/files/_probe`;
   const status: number | null = await fetch(url, {
     method: "GET",
     redirect: "manual",
@@ -703,7 +703,7 @@ export async function probeUsercontentReachability(): Promise<void> {
   logger.error(
     `USERCONTENT_URL preview probe did not return 401 (got ${status ?? "no response"}). ` +
       `Every preview_url this instance signs points at ${base} — if that host is unrouted, all ` +
-      `document previews are dead with no server-side trace. NOTE: this probe reaches the host from ` +
+      `file previews are dead with no server-side trace. NOTE: this probe reaches the host from ` +
       `INSIDE the container network; a failure here can be a false positive when hairpin-NAT / ` +
       `split-horizon DNS prevents the container from reaching its own public hostname while browsers ` +
       `reach it fine. Verify a preview actually fails before acting.`,

@@ -95,7 +95,7 @@ interface RunPlatformContainerInput {
   /**
    * Injectable workspace provisioning — production defaults to the
    * run-workspace storage helpers. The agent fetches the bundle itself at
-   * startup; input documents were already streamed into the workspace during
+   * startup; input files were already streamed into the workspace during
    * upload-consume. Tests substitute a capturing stub.
    */
   uploadBundle?: typeof uploadRunBundle;
@@ -384,10 +384,10 @@ async function runPlatformContainerImpl(
           ? boundary.sidecarEndpoints.llmProxyUrl
           : undefined,
       outputSchema: hasOutputSchema ? plan.outputSchema : undefined,
-      // Forward the effective per-file document cap so the runtime's outputs
+      // Forward the effective per-file cap so the runtime's outputs
       // sweep agrees with the server-authoritative gate (avoids silently
       // skipping large deliverables when an operator raises the platform cap).
-      documentMaxFileBytes: getEnv().DOCUMENT_MAX_FILE_BYTES,
+      maxFileBytes: getEnv().DOCUMENT_MAX_FILE_BYTES,
       forwardProxyUrl: skipSidecar ? undefined : boundary.sidecarEndpoints.forwardProxyUrl,
       noProxy: skipSidecar ? undefined : boundary.sidecarEndpoints.noProxy,
       sink: {
@@ -412,10 +412,10 @@ async function runPlatformContainerImpl(
 
     // Sidecar + agent + bundle upload in parallel. The AFPS bundle is uploaded
     // to run-scoped storage; the agent container fetches and extracts it itself
-    // at startup (`GET /api/runs/:runId/workspace`). Input documents were
+    // at startup (`GET /api/runs/:runId/workspace`). Input files were
     // already streamed into the same run-workspace namespace during
     // upload-consume — the agent fetches each one (`GET
-    // /api/runs/:runId/documents/:name`) and streams it to disk, never buffering
+    // /api/runs/:runId/files/:name`) and streams it to disk, never buffering
     // the whole payload. This replaces the old seed-into-the-run-volume
     // delivery, whose correctness depended on the volume driver — a tmpfs-backed
     // `local` volume is NOT shared between the short-lived seed helper and the

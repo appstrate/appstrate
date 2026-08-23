@@ -34,4 +34,4 @@ export const I18N_LANGUAGE_STORAGE_KEY = "i18nextLng";
  * Suspense boundary, so a disabled module costs nothing — same rule as its
  * code chunk.
  */
-export const I18N_BOOT_NAMESPACES = ["common", "agents", "settings", "documents"] as const;
+export const I18N_BOOT_NAMESPACES = ["common", "agents", "settings", "files"] as const;

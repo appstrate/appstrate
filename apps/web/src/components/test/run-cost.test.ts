@@ -4,7 +4,8 @@
  * The run cost readout exists so a run the platform could NOT price stops
  * rendering a confident `$0.0000`. The web test runner has no DOM, so this
  * exercises the pure mapping both surfaces share (`run-cost.ts`), plus source
- * scans proving the header and the Info tab really route through it — a second
+ * scans proving the header (`run-detail.tsx`) and the Exécution pane
+ * (`run-execution-tab.tsx`) really route through it — a second
  * hand-rolled `toFixed(4)` on either surface is exactly the drift this split
  * was made to prevent.
  */
@@ -82,7 +83,7 @@ describe("cost readout wiring", () => {
   });
 
   it("both surfaces delegate to the shared readout instead of formatting a cost", () => {
-    for (const relative of ["../../pages/run-detail.tsx", "../run-info-tab.tsx"]) {
+    for (const relative of ["../../pages/run-detail.tsx", "../run-execution-tab.tsx"]) {
       const source = read(relative);
       expect(source).toContain("<RunCostReadout");
       expect(source).toContain("pricingStatus={run.cost_pricing_status}");

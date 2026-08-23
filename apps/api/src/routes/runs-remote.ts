@@ -23,6 +23,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs } from "@appstrate/db/schema";
 import { getEnv } from "@appstrate/env";
+import { FILE_URI_PREFIX, UPLOAD_URI_PREFIX } from "@appstrate/core/file-uri";
 import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { idempotency } from "../middleware/idempotency.ts";
@@ -144,7 +145,7 @@ const ExtendSinkBodySchema = z
 
 /**
  * Reject platform-stored file inputs on remote runs. `upload://` and
- * `document://` file-field values reference bytes the platform holds; a remote
+ * `appfile://` file-field values reference bytes the platform holds; a remote
  * run executes on the caller's host, whose workspace the platform never
  * provisions — those bytes can never be delivered there, so the remote agent
  * would silently find no file. Fail loud and early instead. `data:` URIs are
@@ -157,9 +158,15 @@ function assertNoPlatformFileRefs(
   input: Record<string, unknown>,
 ): void {
   for (const ref of collectFileRefs(inputSchema, input)) {
-    if (ref.kind === "upload" || ref.kind === "document") {
+    if (ref.kind === "upload" || ref.kind === "file") {
+      // The ref's `kind` is a DISCRIMINANT, not a URI scheme: the `file` kind is
+      // carried by `appfile://`, never `file://` — which names the caller's
+      // local filesystem and is precisely the scheme this project refused. Map
+      // kind → scheme off the shared constants so the wire-visible message can
+      // never advertise a scheme the platform does not accept.
+      const scheme = ref.kind === "upload" ? UPLOAD_URI_PREFIX : FILE_URI_PREFIX;
       throw invalidRequest(
-        `Field '${ref.fieldName}' references a platform-stored file (${ref.kind}://) which is ` +
+        `Field '${ref.fieldName}' references a platform-stored file (${scheme}) which is ` +
           "not supported on remote runs — the run executes on the caller's host, whose workspace " +
           "the platform does not provision. Inline the content as a " +
           "'data:<mime>;name=<file>;base64,<payload>' URI instead.",
@@ -308,7 +315,7 @@ export function createRunsRemoteRouter() {
         return buildShadowLoadedPackage(shadowId, preflight.manifest, preflight.prompt);
       }
 
-      // Reject platform-stored file inputs (upload:// / document://) that can
+      // Reject platform-stored file inputs (upload:// / appfile://) that can
       // never reach a remote host's workspace. Applies to both source shapes:
       // `agentForRun.manifest` is the resolved manifest in either branch.
       const fileInputSchema = agentForRun.manifest.input?.schema;

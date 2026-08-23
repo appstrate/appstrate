@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db } from "../../helpers/db.ts";
 import { eq } from "drizzle-orm";
-import { packages, documents, runs, chatSessions } from "@appstrate/db/schema";
+import { packages, files, runs, chatSessions } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
 import {
   addOrgMember,
@@ -213,18 +213,13 @@ describe("listGlobalRuns", () => {
     expect(result.total).toBe(0);
   });
 
-  async function seedRunDocument(
-    runId: string,
-    purpose: "agent_output" | "user_upload",
-    presentation: "primary" | null = null,
-  ) {
+  async function seedRunFile(runId: string, purpose: "agent_output" | "user_upload") {
     const docId = `doc_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
-    await db.insert(documents).values({
+    await db.insert(files).values({
       id: docId,
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       purpose,
-      presentation,
       runId,
       storageKey: `documents/${ctx.defaultAppId}/${docId}/out.txt`,
       name: "out.txt",
@@ -235,16 +230,16 @@ describe("listGlobalRuns", () => {
     return docId;
   }
 
-  const seedOutputDocument = (runId: string) => seedRunDocument(runId, "agent_output");
+  const seedOutputFile = (runId: string) => seedRunFile(runId, "agent_output");
 
-  it("reports document_counts: input from run.input URIs, output from documents rows", async () => {
+  it("reports file_counts: input from run.input URIs, output from files rows", async () => {
     const pkg = await seedPackage({
       id: `@globalruns/agent-${crypto.randomUUID().slice(0, 8)}`,
       orgId: ctx.orgId,
       createdBy: ctx.user.id,
     });
-    // Two distinct input document URIs (one duplicated → deduped to 2), plus a
-    // malformed one that must be ignored by extractDocumentIds.
+    // Two distinct input file URIs (one duplicated → deduped to 2), plus a
+    // malformed one that must be ignored by extractFileIds.
     const withDocs = await seedRun({
       packageId: pkg.id,
       orgId: ctx.orgId,
@@ -252,33 +247,56 @@ describe("listGlobalRuns", () => {
       status: "success",
       startedAt: new Date(),
       input: {
-        file: "document://doc_aaaaaaaa",
-        again: "document://doc_aaaaaaaa",
-        nested: { other: "document://doc_bbbbbbbb" },
-        bogus: "document://doc_x",
+        file: "appfile://doc_aaaaaaaa",
+        again: "appfile://doc_aaaaaaaa",
+        nested: { other: "appfile://doc_bbbbbbbb" },
+        bogus: "appfile://doc_x",
       },
     });
-    const primaryDocumentId = await seedRunDocument(withDocs.id, "agent_output", "primary");
-    await seedOutputDocument(withDocs.id);
-    await seedOutputDocument(withDocs.id);
+    await seedOutputFile(withDocs.id);
+    await seedOutputFile(withDocs.id);
+    await seedOutputFile(withDocs.id);
 
-    // A run with null input and no documents → both counts zero.
+    // A run with null input and no files → both counts zero.
     const empty = await seedPackageRun();
 
     const result = await listGlobalRuns({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
     const byId = Object.fromEntries(result.data.map((r) => [r.id, r]));
 
-    expect(byId[withDocs.id]?.document_counts).toEqual({ input: 2, output: 3 });
-    expect(byId[withDocs.id]?.primary_document_id).toBe(primaryDocumentId);
-    expect(byId[empty.id]?.document_counts).toEqual({ input: 0, output: 0 });
-    expect(byId[empty.id]?.primary_document_id).toBeNull();
+    expect(byId[withDocs.id]?.file_counts).toEqual({ input: 2, output: 3 });
+    expect(byId[empty.id]?.file_counts).toEqual({ input: 0, output: 0 });
+    // The derived presentation rule (0 → nothing, 1 → shown, N → a list) reads
+    // ONLY this count. The run projection carries no primary/featured field for
+    // a client to prefer over it.
+    expect(byId[withDocs.id]).not.toHaveProperty("primary_file_id");
+    expect(byId[empty.id]).not.toHaveProperty("primary_file_id");
   });
 
-  it("does not count a materialized INPUT upload as an output document", async () => {
+  it("exposes the produced-file count a client derives its presentation from", async () => {
+    // The three cases the client-side rule distinguishes, end to end.
+    const zero = await seedPackageRun();
+    const one = await seedPackageRun();
+    await seedOutputFile(one.id);
+    const many = await seedPackageRun();
+    await seedOutputFile(many.id);
+    await seedOutputFile(many.id);
+
+    const result = await listGlobalRuns({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+    const byId = Object.fromEntries(result.data.map((r) => [r.id, r]));
+
+    expect(byId[zero.id]?.file_counts.output).toBe(0);
+    expect(byId[one.id]?.file_counts.output).toBe(1);
+    expect(byId[many.id]?.file_counts.output).toBe(2);
+    for (const run of [zero, one, many]) {
+      expect(byId[run.id]).not.toHaveProperty("primary_file_id");
+    }
+  });
+
+  it("does not count a materialized INPUT upload as an output file", async () => {
     // A run triggered with one file input and publishing nothing. The
     // materialized `user_upload` carries the SAME run_id as any output would, so
     // an unfiltered count reported it twice — once as input (from the run's
-    // `document://` URI) and once as output.
+    // `appfile://` URI) and once as output.
     const pkg = await seedPackage({
       id: `@globalruns/agent-${crypto.randomUUID().slice(0, 8)}`,
       orgId: ctx.orgId,
@@ -292,15 +310,15 @@ describe("listGlobalRuns", () => {
       startedAt: new Date(),
       input: {},
     });
-    const docId = await seedRunDocument(run.id, "user_upload");
+    const docId = await seedRunFile(run.id, "user_upload");
     await db
       .update(runs)
-      .set({ input: { file: `document://${docId}` } })
+      .set({ input: { file: `appfile://${docId}` } })
       .where(eq(runs.id, run.id));
 
     const result = await listGlobalRuns({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
     const row = result.data.find((r) => r.id === run.id);
-    expect(row?.document_counts).toEqual({ input: 1, output: 0 });
+    expect(row?.file_counts).toEqual({ input: 1, output: 0 });
   });
 
   it("orders by startedAt DESC and paginates", async () => {

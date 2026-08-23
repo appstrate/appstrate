@@ -62,9 +62,7 @@ const RunDetailPage = lazy(() =>
   import("./pages/run-detail").then((m) => ({ default: m.RunDetailPage })),
 );
 const RunsPage = lazy(() => import("./pages/runs-page").then((m) => ({ default: m.RunsPage })));
-const DocumentsPage = lazy(() =>
-  import("./pages/documents").then((m) => ({ default: m.DocumentsPage })),
-);
+const FilesPage = lazy(() => import("./pages/files").then((m) => ({ default: m.FilesPage })));
 const SchedulesListPage = lazy(() =>
   import("./pages/schedules-list").then((m) => ({ default: m.SchedulesListPage })),
 );
@@ -181,6 +179,22 @@ const PreferencesDevicesPage = lazy(() =>
 );
 
 /** Suspense boundary for lazy route elements — same fallback as module pages. */
+/**
+ * `/documents` → `/files`, carrying the query string and the hash across.
+ *
+ * A bare string `to` is `parsePath`'d by react-router, which defaults `search`
+ * and `hash` to `""` — so the redirect dropped exactly the deep links it exists
+ * to keep. The gallery preview is url-addressable (`file-list-panel.tsx` puts
+ * the open file in `?preview=`), so `/documents?preview=doc_123` was a
+ * shareable link that landed on the gallery with nothing open.
+ */
+function LegacyDocumentsRedirect() {
+  const location = useLocation();
+  return (
+    <Navigate to={{ pathname: "/files", search: location.search, hash: location.hash }} replace />
+  );
+}
+
 function LazyRoute({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<LoadingState />}>{children}</Suspense>;
 }
@@ -622,13 +636,22 @@ export function App() {
               }
             />
             <Route
-              path="/documents"
+              path="/files"
               element={
                 <LazyRoute>
-                  <DocumentsPage />
+                  <FilesPage />
                 </LazyRoute>
               }
             />
+            {/*
+             * The gallery was `/documents` until #1177. Kept as a redirect for
+             * the same reason `run-detail-tabs.ts` keeps its retired tab hashes
+             * and the API keeps its `/api/documents/*` aliases: the old path is
+             * in bookmarks, in back-history and in links already pasted
+             * elsewhere, and without this it falls through to the catch-all and
+             * lands the user on the dashboard with no explanation.
+             */}
+            <Route path="/documents" element={<LegacyDocumentsRedirect />} />
             <Route
               path="/schedules"
               element={

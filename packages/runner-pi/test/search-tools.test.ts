@@ -40,7 +40,7 @@ describe("enableSearchTools", () => {
     // The regression this guards: `setActiveToolsByName` REPLACES the active
     // set, so a widening that passed only the search tools would strip every
     // Appstrate runtime + integration tool off the surface.
-    const extensionTools = ["output", "publish_document", "gmail__api_call"];
+    const extensionTools = ["output", "publish_file", "gmail__api_call"];
     const session = createFakeSession({
       toolRegistry: [...PI_BUILTINS, ...extensionTools],
       activeTools: [...PI_DEFAULT_ACTIVE, ...extensionTools],

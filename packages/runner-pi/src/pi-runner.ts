@@ -744,7 +744,7 @@ const OUTPUT_REPROMPT_EVENT = "output_reprompt";
  * and already paid for; it is not research.
  *
  * Everything else stays out: no `bash`, no `edit`/`write`, no
- * `publish_document`, no memory write, no integration tool.
+ * `publish_file`, no memory write, no integration tool.
  */
 const OUTPUT_REPROMPT_TOOLS = [OUTPUT_TERMINAL_TOOL, "read"];
 

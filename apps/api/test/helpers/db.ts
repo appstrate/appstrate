@@ -55,10 +55,10 @@ function resetFsStorage(): void {
  * running alone touch only core tables.
  */
 const CORE_TABLES = [
-  // Leaf tables (no dependents). `documents` references runs / organizations /
+  // Leaf tables (no dependents). `files` references runs / organizations /
   // applications / chat_sessions (all ON DELETE CASCADE), so it must be deleted
   // BEFORE any of them — placed first to guarantee that ordering.
-  "documents",
+  "files",
   // Standalone outbox table (no FKs) — deletion jobs must not leak between tests.
   "storage_deletion_jobs",
   // Leaf tables (no dependents)

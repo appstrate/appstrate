@@ -595,7 +595,7 @@ describe("getRuntimeTools", () => {
   });
 
   // Non-regression: `report` was a real runtime tool until it was replaced by
-  // durable `outputs/` documents. Agents saved back then still carry the id;
+  // durable `outputs/` files. Agents saved back then still carry the id;
   // the editor must ignore it, never render a phantom checkbox for it, and
   // never surface a validation error to the user because of it.
   it("drops a retired tool id (`report`) it can no longer render", () => {

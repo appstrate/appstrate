@@ -1,26 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
+import { readFileSync } from "node:fs";
+import { runProducedFilesPath } from "@appstrate/core/run-and-wait-client";
+import { fileURLToPath } from "node:url";
 import {
+  autoPresentFile,
   buildRunPageHref,
   buildRunSseUrl,
   extractAgentLabel,
-  extractRunDocuments,
+  extractRunFiles,
   extractRunId,
   extractRunPackageId,
   extractRunStatus,
-  isPrimaryAutoPresentationEligible,
+  isRunAutoPresentEligible,
   isRunLaunchOp,
   isTerminalStatus,
   mergeLogs,
-  mergeRunDocuments,
+  mergeRunFiles,
   orgAppFromHeaders,
   parseLogListResponse,
   parseRunLogFrame,
   parseRunResource,
   parseRunUpdateFrame,
-  primaryDocumentFromLogs,
-  publishedDocumentsFromLogs,
+  producedFilesFromFileList,
+  publishedFilesFromLogs,
+  shouldRaiseSweepDone,
   resolveAttachmentContent,
   safeJsonParse,
   runStatusLineKey,
@@ -39,10 +44,10 @@ describe("run-events helpers", () => {
     expect(isTerminalStatus("failed")).toBe(true);
     expect(isTerminalStatus("running")).toBe(false);
     expect(isTerminalStatus(undefined)).toBe(false);
-    expect(isPrimaryAutoPresentationEligible("pending", "pending")).toBe(true);
-    expect(isPrimaryAutoPresentationEligible("running", "running")).toBe(true);
-    expect(isPrimaryAutoPresentationEligible("success", "success")).toBe(false);
-    expect(isPrimaryAutoPresentationEligible("running", "success")).toBe(false);
+    expect(isRunAutoPresentEligible("pending", "pending")).toBe(true);
+    expect(isRunAutoPresentEligible("running", "running")).toBe(true);
+    expect(isRunAutoPresentEligible("success", "success")).toBe(false);
+    expect(isRunAutoPresentEligible("running", "success")).toBe(false);
 
     // Keys, not sentences — the host translator renders them (no literal text
     // ships from this module).
@@ -111,6 +116,8 @@ describe("run-events helpers", () => {
       startedAt: "2026-06-30T00:00:00Z",
       completedAt: null,
       duration: null,
+      // Retired field a not-yet-deployed server may still send (#1177): dropped
+      // like any other extra, never a parse failure.
       primary_document_id: "doc_primary",
       agentScope: "@inline",
       cost: 0,
@@ -118,7 +125,7 @@ describe("run-events helpers", () => {
     expect(run?.status).toBe("running");
     expect(run?.packageId).toBe("@inline/run");
     expect(run?.startedAt).toBe("2026-06-30T00:00:00Z");
-    expect(run?.primary_document_id).toBe("doc_primary");
+    expect(run).not.toHaveProperty("primary_document_id");
     // Malformed body (no status) → undefined, so the seed is skipped.
     expect(parseRunResource({ id: "run_1" })).toBeUndefined();
     expect(parseRunResource(null)).toBeUndefined();
@@ -144,17 +151,17 @@ describe("run-events helpers", () => {
     ]);
   });
 
-  it("extracts published documents from the persisted run_and_wait result", () => {
+  it("extracts published files from the persisted run_and_wait result", () => {
     // Top-level (run_and_wait tool result shape).
     expect(
-      extractRunDocuments({
+      extractRunFiles({
         id: "run_1",
         status: "success",
         done: true,
-        documents: [
+        files: [
           {
             id: "doc_1",
-            uri: "document://doc_1",
+            uri: "appfile://doc_1",
             name: "report.html",
             mime: "text/html",
             size: 12,
@@ -162,103 +169,88 @@ describe("run-events helpers", () => {
         ],
       }),
     ).toEqual([
-      { id: "doc_1", uri: "document://doc_1", name: "report.html", mime: "text/html", size: 12 },
+      { id: "doc_1", uri: "appfile://doc_1", name: "report.html", mime: "text/html", size: 12 },
     ]);
 
     // Nested under the invoke_operation envelope's `body`.
     expect(
-      extractRunDocuments({
-        body: { id: "run_1", documents: [{ id: "doc_2", uri: "document://doc_2", name: "a.pdf" }] },
+      extractRunFiles({
+        body: { id: "run_1", files: [{ id: "doc_2", uri: "appfile://doc_2", name: "a.pdf" }] },
       }),
-    ).toEqual([{ id: "doc_2", uri: "document://doc_2", name: "a.pdf" }]);
+    ).toEqual([{ id: "doc_2", uri: "appfile://doc_2", name: "a.pdf" }]);
 
-    // No documents → empty.
-    expect(extractRunDocuments({ id: "run_1", status: "success" })).toEqual([]);
-    expect(extractRunDocuments(null)).toEqual([]);
+    // No files → empty.
+    expect(extractRunFiles({ id: "run_1", status: "success" })).toEqual([]);
+    expect(extractRunFiles(null)).toEqual([]);
   });
 
-  it("extracts published documents from live document log frames", () => {
+  it("extracts published files from live file log frames", () => {
     const logs: RunLogLine[] = [
       { id: 1, event: "log", message: "working" },
       {
         id: 2,
         type: "result",
-        event: "document",
+        event: "file",
         data: {
-          document_id: "doc_9",
-          uri: "document://doc_9",
+          file_id: "doc_9",
+          uri: "appfile://doc_9",
           name: "out.csv",
           mime: "text/csv",
           size: 40,
+          // Legacy field on historical log lines (#1177) — read past, never
+          // projected into the file and never a parse failure.
           presentation: "primary",
         },
       },
       { id: 3, event: "progress" },
     ];
-    expect(publishedDocumentsFromLogs(logs)).toEqual([
+    expect(publishedFilesFromLogs(logs)).toEqual([
       {
         id: "doc_9",
-        uri: "document://doc_9",
+        uri: "appfile://doc_9",
         name: "out.csv",
         mime: "text/csv",
         size: 40,
       },
     ]);
-    expect(primaryDocumentFromLogs(logs)?.id).toBe("doc_9");
   });
 
-  it("merges regular document lists without projecting primary presentation", () => {
-    const persisted = [{ id: "doc_1", uri: "document://doc_1", name: "report" }];
+  it("merges regular file lists without projecting any featured flag", () => {
+    const persisted = [{ id: "doc_1", uri: "appfile://doc_1", name: "report" }];
     const live = [
       {
         id: "doc_1",
-        uri: "document://doc_1",
+        uri: "appfile://doc_1",
         name: "report.html",
         mime: "text/html",
       },
-      { id: "doc_2", uri: "document://doc_2", name: "data.json" },
+      { id: "doc_2", uri: "appfile://doc_2", name: "data.json" },
     ];
-    const merged = mergeRunDocuments(persisted, live);
+    const merged = mergeRunFiles(persisted, live);
     expect(merged.map((d) => d.id)).toEqual(["doc_1", "doc_2"]);
     expect(merged[0]).toEqual({
       id: "doc_1",
-      uri: "document://doc_1",
+      uri: "appfile://doc_1",
       name: "report.html",
       mime: "text/html",
     });
   });
 
-  it("uses the last primary log when a run replaces its featured output", () => {
-    const logs: RunLogLine[] = [
-      {
-        id: 1,
-        event: "document",
-        data: { document_id: "doc_a", name: "a.md", presentation: "primary" },
-      },
-      {
-        id: 2,
-        event: "document",
-        data: { document_id: "doc_b", name: "b.md", presentation: "primary" },
-      },
-    ];
-    expect(primaryDocumentFromLogs(logs)?.id).toBe("doc_b");
-  });
-
-  it("resolves a sent attachment's content to a downloadable document or inert", () => {
+  it("resolves a sent attachment's content to a downloadable file or inert", () => {
     // Image part: the converter puts the URI in the `image` field.
     expect(
       resolveAttachmentContent([
-        { type: "image", image: "document://doc_abcd1234", filename: "photo.png" },
+        { type: "image", image: "appfile://doc_abcd1234", filename: "photo.png" },
       ]),
-    ).toEqual({ kind: "document", id: "doc_abcd1234" });
+    ).toEqual({ kind: "file", id: "doc_abcd1234" });
 
     // File part: the URI lives in the `data` field instead.
-    expect(resolveAttachmentContent([{ type: "file", data: "document://doc_efgh5678" }])).toEqual({
-      kind: "document",
+    expect(resolveAttachmentContent([{ type: "file", data: "appfile://doc_efgh5678" }])).toEqual({
+      kind: "file",
       id: "doc_efgh5678",
     });
 
-    // Just-sent optimistic upload:// (not yet materialized to document://) →
+    // Just-sent optimistic upload:// (not yet materialized to appfile://) →
     // inert, but the raw URI is kept so the staged-image cache can be probed.
     expect(resolveAttachmentContent([{ type: "file", data: "upload://upl_abcd1234" }])).toEqual({
       kind: "inert",
@@ -291,5 +283,445 @@ describe("run-events helpers", () => {
       orgId: "o2",
       applicationId: "a2",
     });
+  });
+});
+
+/**
+ * The derived presentation rule that replaced the agent-declared
+ * `presentation: "primary"` (issue #1177). The count of files the run PRODUCED
+ * is the whole rule — nothing the model says takes part in it.
+ */
+describe("autoPresentFile", () => {
+  const file = (id: string): { id: string; uri: string; name: string } => ({
+    id,
+    uri: `appfile://${id}`,
+    name: `${id}.md`,
+  });
+  /** A settled run: terminal status, and the produced-file sweep completed. */
+  const settled = { status: "success" as const, sweepDone: true };
+
+  it("presents nothing when the run produced no file", () => {
+    expect(autoPresentFile({ files: [], ...settled })).toBeUndefined();
+  });
+
+  it("presents the single produced file, with nothing declared by the agent", () => {
+    expect(autoPresentFile({ files: [file("doc_1")], ...settled })).toEqual(file("doc_1"));
+  });
+
+  it("presents nothing when the run produced several files — the user picks", () => {
+    const three = [file("doc_1"), file("doc_2"), file("doc_3")];
+    expect(autoPresentFile({ files: three, ...settled })).toBeUndefined();
+  });
+
+  it("waits for the run to settle: a mid-stream count of 1 is not the final count", () => {
+    // Same first file, four moments of the same run. Only the last one — the
+    // terminal status WITH the produced-file sweep completed — may present
+    // anything.
+    const one = [file("doc_1")];
+    expect(autoPresentFile({ files: one, status: "running", sweepDone: false })).toBeUndefined();
+    expect(autoPresentFile({ files: one, status: undefined, sweepDone: false })).toBeUndefined();
+    // Terminal, but the sweep that would reveal files 2 and 3 has not landed.
+    // This is the exact window the old `!live` gate mistook for "settled": the
+    // one-shot `GET /runs/:id` answers `success` while the SSE is still
+    // handshaking, so `live` was still its initial `false`.
+    expect(autoPresentFile({ files: one, status: "success", sweepDone: false })).toBeUndefined();
+    expect(autoPresentFile({ files: one, status: "success", sweepDone: true })).toEqual(
+      file("doc_1"),
+    );
+  });
+
+  it("still presents the single file of a run that failed", () => {
+    // A failed run that nonetheless published one file has a result to show.
+    expect(autoPresentFile({ files: [file("doc_1")], status: "failed", sweepDone: true })).toEqual(
+      file("doc_1"),
+    );
+  });
+
+  it("ignores a legacy `presentation` field on the log line", () => {
+    // Three files, one of them flagged primary by an old runtime image. The
+    // flag changes nothing: three produced files present nothing.
+    const logs: RunLogLine[] = [
+      { id: 1, event: "file", data: { file_id: "doc_a", name: "a.md" } },
+      {
+        id: 2,
+        event: "file",
+        data: { file_id: "doc_b", name: "b.md", presentation: "primary" },
+      },
+      { id: 3, event: "file", data: { file_id: "doc_c", name: "c.md" } },
+    ];
+    const files = publishedFilesFromLogs(logs);
+    expect(files.map((d) => d.id)).toEqual(["doc_a", "doc_b", "doc_c"]);
+    expect(autoPresentFile({ files, ...settled })).toBeUndefined();
+
+    // And a lone file flagged `primary` is presented because it is the ONLY
+    // one, not because it was flagged.
+    const lone = publishedFilesFromLogs([logs[1]!]);
+    expect(autoPresentFile({ files: lone, ...settled })?.id).toBe("doc_b");
+  });
+
+  it("counts only publications: a run's input attachments are not produced files", () => {
+    // Input files reach a run through its `input` payload, never as a
+    // `file.published` frame — only the publish tool and the `outputs/`
+    // sweep emit those. A run that consumed two inputs and produced one file
+    // is a single-file run.
+    const logs: RunLogLine[] = [
+      { id: 1, event: "input", data: { file_id: "doc_in_1", name: "brief.pdf" } },
+      { id: 2, event: "log", message: "reading doc_in_2" },
+      { id: 3, event: "file", data: { file_id: "doc_out", name: "report.md" } },
+    ];
+    const files = publishedFilesFromLogs(logs);
+    expect(files.map((d) => d.id)).toEqual(["doc_out"]);
+    expect(autoPresentFile({ files, ...settled })?.id).toBe("doc_out");
+
+    // A run that only consumed inputs produced nothing to present.
+    expect(
+      autoPresentFile({ files: publishedFilesFromLogs(logs.slice(0, 2)), ...settled }),
+    ).toBeUndefined();
+  });
+
+  it("is the card's only auto-presentation path, fired at most once", () => {
+    // No DOM in this runner, so the wiring is asserted on the source: the card
+    // must derive its candidate from the rule (not from a server field), must
+    // present through the host opener only, and must keep the once-only ref —
+    // a file published after the panel opened never closes or swaps it.
+    const card = readFileSync(
+      fileURLToPath(new URL("../src/ui/chat-run-progress-card.tsx", import.meta.url)),
+      "utf8",
+    );
+    expect(card).toContain("autoPresentFile({ files, status: effectiveStatus, sweepDone })");
+    // The counted set unions the authoritative `/api/files` read on top of the
+    // log frames — the log window is capped and drops a chatty run's
+    // end-of-run publications.
+    expect(card).toContain("producedFiles");
+    expect(card).toContain("if (hasAutoPresented.current) return;");
+    expect(card).toContain("hasAutoPresented.current = true;");
+    // The retired agent-declared selection has no reader left anywhere.
+    expect(card).not.toContain("primary");
+    expect(card).not.toContain("presentation:");
+  });
+});
+
+/**
+ * The authoritative produced-file source (issue #1177 follow-up). The log
+ * window is capped and ascending, so the end-of-run publication frames of a
+ * chatty run fall outside it; `GET /api/files?run_id=…` is the source that
+ * cannot be truncated away, and it is what the run page reads too.
+ */
+describe("producedFilesFromFileList", () => {
+  const row = (over: Record<string, unknown>) => ({
+    id: "doc_x",
+    name: "x.md",
+    mime: "text/markdown",
+    size: 3,
+    purpose: "agent_output",
+    run_id: "run_1",
+    ...over,
+  });
+
+  it("maps the list rows to chips, deriving the canonical uri from the id", () => {
+    const payload = { object: "list", data: [row({ id: "doc_a", name: "a.md" })] };
+    expect(producedFilesFromFileList(payload, "run_1")).toEqual({
+      files: [
+        { id: "doc_a", uri: "appfile://doc_a", name: "a.md", mime: "text/markdown", size: 3 },
+      ],
+      hasMore: false,
+    });
+  });
+
+  it("reports a truncated page instead of hiding it", () => {
+    // The route clamps `limit` to 100 and answers `hasMore` with no cursor
+    // field. Discarding it truncated a >100-file run's chips row silently.
+    // It never endangers the auto-present rule — a truncated page holds at
+    // least 100 rows, never exactly 1 — so surfacing it is the whole fix.
+    const payload = { object: "list", data: [row({ id: "doc_a" })], hasMore: true };
+    expect(producedFilesFromFileList(payload, "run_1")?.hasMore).toBe(true);
+  });
+
+  it("drops a file the run only CONSUMED, even though it is `agent_output`", () => {
+    // `GET /api/files?run_id=X` answers the run's whole container: a file
+    // chained in from an earlier run via `appfile://` is listed here and still
+    // carries `purpose: "agent_output"` — it was produced by that earlier run.
+    // Counting it would make a one-file run look like a two-file run and
+    // silently switch the auto-present rule off.
+    const payload = {
+      data: [
+        row({ id: "doc_in", run_id: "run_0" }),
+        row({ id: "doc_out" }),
+        row({ id: "doc_upload", purpose: "user_upload" }),
+      ],
+    };
+    expect(producedFilesFromFileList(payload, "run_1")?.files.map((f) => f.id)).toEqual([
+      "doc_out",
+    ]);
+  });
+
+  it("answers `undefined` on a malformed or errored payload — no evidence at all", () => {
+    // Union-never-subtract: nothing is added to the card, which stays on its
+    // log-derived chips. And `undefined` is NOT an empty page: the completion
+    // signal turns on telling "the run produced nothing" apart from "the read
+    // did not answer" (see `shouldRaiseSweepDone`).
+    expect(producedFilesFromFileList(undefined, "run_1")).toBeUndefined();
+    expect(producedFilesFromFileList({ error: "boom" }, "run_1")).toBeUndefined();
+    expect(producedFilesFromFileList({ data: "nope" }, "run_1")).toBeUndefined();
+  });
+
+  it("treats an envelope listing ZERO files as a real, complete answer", () => {
+    // A run that produced nothing is a legitimate outcome, not a failure.
+    expect(producedFilesFromFileList({ object: "list", data: [] }, "run_1")).toEqual({
+      files: [],
+      hasMore: false,
+    });
+  });
+});
+
+/**
+ * A publication frame with no name. The sink writes `name: null` whenever the
+ * emitter omitted one (`appstrate-event-sink.ts` → `file.published`), so this
+ * is a shape that exists on the wire, not a hypothetical.
+ */
+describe("nameless publication frames", () => {
+  it("keeps the file, with a placeholder name, instead of dropping it", () => {
+    const logs: RunLogLine[] = [
+      { id: 1, type: "result", event: "file", data: { file_id: "doc_1", name: null } },
+      { id: 2, type: "result", event: "file", data: { file_id: "doc_2", name: "b.md" } },
+    ];
+    const files = publishedFilesFromLogs(logs);
+    // Two produced files, so nothing is auto-presented. Dropping the nameless
+    // one would leave a count of 1 and open the WRONG file.
+    expect(files.map((f) => f.id)).toEqual(["doc_1", "doc_2"]);
+    expect(files[0]?.name).toBe("file");
+    expect(autoPresentFile({ files, status: "success", sweepDone: true })).toBeUndefined();
+  });
+
+  it("still refuses a frame with no id at all — there is nothing to open", () => {
+    expect(publishedFilesFromLogs([{ id: 1, event: "file", data: { name: "orphan.md" } }])).toEqual(
+      [],
+    );
+  });
+});
+
+/**
+ * The completion signal the auto-present rule waits on.
+ *
+ * The decision itself — "given how the authoritative read and the log sweep
+ * turned out, and the run status, may the flag be raised?" — is
+ * `shouldRaiseSweepDone`, and it is tested here against real inputs, failures
+ * included. It used to be an inlined `finally` in `use-run-log-stream.ts` that
+ * could only be pinned by grepping that file's SOURCE TEXT; those assertions
+ * were not coverage. They passed unchanged for a hook that swallowed a 500 from
+ * `/api/files` and raised the flag anyway, and one of them (`setSweepDone(true)`
+ * appears exactly twice) actively blocked the fix.
+ */
+describe("shouldRaiseSweepDone", () => {
+  const settled = { status: "success", producedFileRead: "ok", logSweep: "ok" } as const;
+
+  it("raises the flag when the run is over and both reads answered", () => {
+    expect(shouldRaiseSweepDone(settled)).toBe(true);
+  });
+
+  it("refuses to settle when the authoritative read did not answer", () => {
+    // THE defect this rule exists for. `/api/files` answering 500 or 401 is an
+    // ordinary transient failure, and the read that swallowed it still
+    // "finished" — which is not the same as having produced evidence.
+    expect(shouldRaiseSweepDone({ ...settled, producedFileRead: "failed" })).toBe(false);
+    expect(shouldRaiseSweepDone({ ...settled, producedFileRead: "not-attempted" })).toBe(false);
+  });
+
+  it("refuses to settle when the final log sweep was attempted and failed", () => {
+    // An errored sweep yields `[]`, indistinguishable from a run that wrote no
+    // frames — and the card's set is the UNION of the frames and the read.
+    expect(shouldRaiseSweepDone({ ...settled, logSweep: "failed" })).toBe(false);
+  });
+
+  it("does not require a log sweep the settle path never attempted", () => {
+    // The no-tail path (no org/app context, or no EventSource) reads
+    // `/api/files` and nothing else; the authoritative read IS the evidence
+    // there, and demanding a sweep that was never fired would leave that path
+    // permanently unsettled.
+    expect(shouldRaiseSweepDone({ ...settled, logSweep: "not-attempted" })).toBe(true);
+  });
+
+  it("never settles a run that is not over", () => {
+    // A mid-stream count of 1 is not the final count: a run publishing three
+    // files emits them one at a time.
+    expect(shouldRaiseSweepDone({ ...settled, status: "running" })).toBe(false);
+    expect(shouldRaiseSweepDone({ ...settled, status: undefined })).toBe(false);
+  });
+
+  it("does not settle a two-file run on the one file the log window kept", () => {
+    // End to end, the reachable failure: a run publishes 2 files, the second
+    // `file.published` frame falls outside the capped log window, and
+    // `/api/files` — the read that exists to cover exactly that case — answers
+    // 500. Settling here auto-opens the FIRST of two files.
+    const fromLogs = publishedFilesFromLogs([
+      { id: 1, type: "result", event: "file", data: { file_id: "doc_1", name: "a.md" } },
+    ]);
+    expect(fromLogs).toHaveLength(1);
+    const sweepDone = shouldRaiseSweepDone({
+      status: "success",
+      producedFileRead: "failed",
+      logSweep: "ok",
+    });
+    expect(sweepDone).toBe(false);
+    expect(autoPresentFile({ files: fromLogs, status: "success", sweepDone })).toBeUndefined();
+  });
+});
+
+/**
+ * The two guards that survive as source-text greps. There is NO DOM harness in
+ * this repo (no jsdom, no happy-dom, no testing-library), so `useRunLogStream`
+ * cannot be instantiated and these two facts have no other observer. Every
+ * POSITIVE assertion this block used to carry is gone: asserting that a source
+ * file contains `await readProducedFiles();` passed for the defect above and
+ * failed on a rename — the opposite of coverage.
+ */
+describe("useRunLogStream source guards", () => {
+  const hook = readFileSync(
+    fileURLToPath(new URL("../src/ui/use-run-log-stream.ts", import.meta.url)),
+    "utf8",
+  );
+
+  it("no longer exposes a liveness flag anything could mistake for settlement", () => {
+    // `live` started `false`, flipped only on the SSE handshake (losing the
+    // race against the two plain GETs fired in the same tick) and never flipped
+    // at all when no SSE was opened. Nothing but a grep can see it come back.
+    expect(hook).not.toContain("setLive");
+    expect(hook).not.toContain("es.onopen");
+  });
+
+  it("reads the produced-file set from the authoritative endpoint, filtered", () => {
+    // Two halves, because neither alone can see the whole claim. The hook no
+    // longer spells the URL out — it and `fetchRunFiles` share one builder — so
+    // the invariant itself is asserted directly on that builder, and only the
+    // fact that the hook REACHES it stays a grep: without a DOM harness nothing
+    // can observe the call. Dropping `purpose` (or the `run_id` this list is
+    // keyed on) would list files the run merely CONSUMED and silently switch
+    // the auto-present rule off.
+    expect(hook).toContain("runProducedFilesPath(runId)");
+    const path = runProducedFilesPath("run_abc");
+    expect(path).toContain("purpose=agent_output");
+    expect(path).toContain("run_id=run_abc");
+  });
+});
+
+/**
+ * Pre-#1177 wire compatibility. A chat session opened today replays run logs
+ * and tool results written BEFORE the rename: they tag the frame
+ * `event: "document"`, carry `document_id`, and address the file with the
+ * `document://` scheme. Every one of those must still surface a chip — a reader
+ * that only knows the new spelling would show an old conversation with no
+ * files at all, and nothing anywhere would report an error.
+ */
+describe("legacy `document` wire shapes", () => {
+  const settled = { status: "success" as const, sweepDone: true };
+
+  it('still produces a chip from a pre-rename `event: "document"` log frame', () => {
+    const logs: RunLogLine[] = [
+      {
+        id: 1,
+        type: "result",
+        event: "document",
+        data: { document_id: "doc_legacy1", name: "rapport.md", mime: "text/markdown", size: 12 },
+      },
+    ];
+    expect(publishedFilesFromLogs(logs)).toEqual([
+      {
+        id: "doc_legacy1",
+        // No `uri` on the frame — derived through core's `fileUri()`, which
+        // emits the canonical scheme even for a legacy id.
+        uri: "appfile://doc_legacy1",
+        name: "rapport.md",
+        mime: "text/markdown",
+        size: 12,
+      },
+    ]);
+  });
+
+  it("keeps a legacy frame's own `document://` URI verbatim", () => {
+    const logs: RunLogLine[] = [
+      {
+        id: 1,
+        event: "document",
+        data: { document_id: "doc_legacy2", uri: "document://doc_legacy2", name: "a.pdf" },
+      },
+    ];
+    expect(publishedFilesFromLogs(logs)[0]?.uri).toBe("document://doc_legacy2");
+  });
+
+  it("feeds the derived presentation rule from legacy frames alone", () => {
+    // One legacy publication = a single-file run, exactly as a new-tag frame.
+    const one = publishedFilesFromLogs([
+      { id: 1, event: "document", data: { document_id: "doc_only", name: "only.md" } },
+    ]);
+    expect(autoPresentFile({ files: one, ...settled })?.id).toBe("doc_only");
+
+    // Mixed old/new tags in the same run still count as two — nothing presented.
+    const mixed = publishedFilesFromLogs([
+      { id: 1, event: "document", data: { document_id: "doc_old", name: "old.md" } },
+      { id: 2, event: "file", data: { file_id: "doc_new", name: "new.md" } },
+    ]);
+    expect(mixed.map((f) => f.id)).toEqual(["doc_old", "doc_new"]);
+    expect(autoPresentFile({ files: mixed, ...settled })).toBeUndefined();
+  });
+
+  it("resolves a historical `document://` attachment URI", () => {
+    // Persisted chat messages from before the rename carry the old scheme in
+    // their file parts; core's `parseFileUri` accepts both, and nothing here
+    // re-implements scheme parsing with a hardcoded prefix.
+    expect(resolveAttachmentContent([{ type: "image", image: "document://doc_abcd1234" }])).toEqual(
+      { kind: "file", id: "doc_abcd1234" },
+    );
+    expect(resolveAttachmentContent([{ type: "file", data: "document://doc_efgh5678" }])).toEqual({
+      kind: "file",
+      id: "doc_efgh5678",
+    });
+  });
+
+  it("still reads a persisted tool result whose items carry `document_id`", () => {
+    expect(
+      extractRunFiles({
+        body: { id: "run_1", files: [{ document_id: "doc_x", name: "x.md" }] },
+      }),
+    ).toEqual([{ id: "doc_x", uri: "appfile://doc_x", name: "x.md" }]);
+  });
+
+  it("still reads a persisted tool result whose list sits under `documents`", () => {
+    // The run_and_wait payload key was `documents` until #1177. This payload is
+    // the RELOAD-SAFE source of a run card's chips — it exists precisely
+    // because run logs get pruned — so a conversation reopened from before the
+    // rename must still find its files here, top level or under the envelope.
+    expect(
+      extractRunFiles({
+        id: "run_1",
+        status: "success",
+        done: true,
+        documents: [
+          {
+            id: "doc_1",
+            uri: "document://doc_1",
+            name: "report.html",
+            mime: "text/html",
+            size: 12,
+          },
+        ],
+      }),
+    ).toEqual([
+      { id: "doc_1", uri: "document://doc_1", name: "report.html", mime: "text/html", size: 12 },
+    ]);
+
+    expect(
+      extractRunFiles({
+        body: { id: "run_1", documents: [{ document_id: "doc_2", name: "a.pdf" }] },
+      }),
+    ).toEqual([{ id: "doc_2", uri: "appfile://doc_2", name: "a.pdf" }]);
+  });
+
+  it("prefers the canonical `files` key when a payload carries both", () => {
+    expect(
+      extractRunFiles({
+        files: [{ id: "doc_new", name: "new.md" }],
+        documents: [{ id: "doc_old", name: "old.md" }],
+      }).map((f) => f.id),
+    ).toEqual(["doc_new"]);
   });
 });

@@ -73,7 +73,7 @@ describe("refusalCode", () => {
     ).toBe("quota_exceeded");
   });
 
-  it("reads the same document off a bare string error", () => {
+  it("reads the same file off a bare string error", () => {
     expect(refusalCode(problem({ status: 401, code: "needs_reconnection" }))).toBe(
       "needs_reconnection",
     );

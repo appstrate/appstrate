@@ -142,7 +142,7 @@ export const runs = pgTable(
     // (PiRunner emits `input_tokens` / `output_tokens` / … directly from
     // the Pi SDK), the AFPS `tokenUsageSchema` validated on ingestion in
     // `apps/api/src/services/adapters/types.ts`, and the frontend reader
-    // in `run-info-tab.tsx`. Do NOT rename to camelCase without a data
+    // in `run-execution-tab.tsx`. Do NOT rename to camelCase without a data
     // migration and a coordinated wire-schema bump — the JSONB payloads
     // already in production use snake_case.
     tokenUsage: jsonb("token_usage").$type<TokenUsage>(),
@@ -223,7 +223,7 @@ export const runs = pgTable(
     /**
      * Chat session that launched this run, when it came from `run_and_wait`.
      * This is first-class relationship data: the chat context sidebar filters
-     * runs and their documents by it without parsing messages or JSON metadata.
+     * runs and their files by it without parsing messages or JSON metadata.
      */
     chatSessionId: text("chat_session_id"),
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),

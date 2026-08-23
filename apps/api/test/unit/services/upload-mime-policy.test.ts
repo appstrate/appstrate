@@ -81,7 +81,7 @@ describe("sniffedMimeMatchesDeclared", () => {
   it("two specific container types never satisfy each other", () => {
     // Refinement is parent↔child only — when the sniffer DID identify the
     // concrete format, a different concrete declaration is a real mismatch.
-    // Notably keeps macro-enabled documents out of macro-free declarations.
+    // Notably keeps macro-enabled files out of macro-free declarations.
     expect(sniffedMimeMatchesDeclared(XLSX, DOCX)).toBe(false);
     expect(sniffedMimeMatchesDeclared(XLSX, "application/vnd.ms-excel.sheet.macroenabled.12")).toBe(
       false,

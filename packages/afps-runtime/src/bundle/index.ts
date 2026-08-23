@@ -81,6 +81,7 @@ export {
 } from "./prompt-renderer.ts";
 export {
   renderPlatformPrompt,
+  CONTEXT_FREE_FILENAMES_PHRASE,
   type PlatformPromptOptions,
   type PlatformPromptTool,
   type PlatformPromptIntegration,

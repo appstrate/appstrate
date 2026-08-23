@@ -2,10 +2,10 @@
 
 import { describe, expect, it } from "bun:test";
 import {
-  fetchRunDocuments,
+  fetchRunFiles,
   launchRunAndWait,
   runAndWaitSteps,
-  runAndWaitStepsWithDocuments,
+  runAndWaitStepsWithFiles,
 } from "../src/run-and-wait-client.ts";
 import { agentManifestSchema } from "../src/validation.ts";
 
@@ -217,19 +217,19 @@ describe("run_and_wait client", () => {
     ]);
   });
 
-  it("enriches the terminal step with the run's published documents", async () => {
+  it("enriches the terminal step with the run's published files", async () => {
     const fetchImpl = fakeFetch(async (input) => {
       const url = String(input);
       if (url.endsWith("/run")) {
         return jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "pending" });
       }
-      if (url.includes("/api/documents")) {
+      if (url.includes("/api/files")) {
         return jsonResponse({
           object: "list",
           data: [
             {
               id: "doc_1",
-              uri: "document://doc_1",
+              uri: "appfile://doc_1",
               name: "report.html",
               mime: "text/html",
               size: 2048,
@@ -245,7 +245,7 @@ describe("run_and_wait client", () => {
     });
 
     const steps: Record<string, unknown>[] = [];
-    for await (const step of runAndWaitStepsWithDocuments(
+    for await (const step of runAndWaitStepsWithFiles(
       { kind: "agent", scope: "@acme", name: "writer" },
       { origin: "https://test.local", headers: { authorization: "Bearer tok" }, fetch: fetchImpl },
     )) {
@@ -263,10 +263,10 @@ describe("run_and_wait client", () => {
       packageId: "@acme/writer",
       status: "success",
       done: true,
-      documents: [
+      files: [
         {
           id: "doc_1",
-          uri: "document://doc_1",
+          uri: "appfile://doc_1",
           name: "report.html",
           mime: "text/html",
           size: 2048,
@@ -275,31 +275,31 @@ describe("run_and_wait client", () => {
     });
   });
 
-  it("leaves the payload document-free when the run published none", async () => {
+  it("leaves the payload file-free when the run published none", async () => {
     const fetchImpl = fakeFetch(async (input) => {
       const url = String(input);
       if (url.endsWith("/run")) {
         return jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "pending" });
       }
-      if (url.includes("/api/documents")) {
+      if (url.includes("/api/files")) {
         return jsonResponse({ object: "list", data: [], hasMore: false });
       }
       return jsonResponse({ id: "run_1", packageId: "@acme/writer", status: "success" });
     });
 
     const steps: Record<string, unknown>[] = [];
-    for await (const step of runAndWaitStepsWithDocuments(
+    for await (const step of runAndWaitStepsWithFiles(
       { kind: "agent", scope: "@acme", name: "writer" },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     )) {
       steps.push(step.payload);
     }
-    expect(steps[1]).not.toHaveProperty("documents");
+    expect(steps[1]).not.toHaveProperty("files");
   });
 
-  it("fetchRunDocuments keeps only documents this run produced", async () => {
-    // The documents container of a run also holds the documents mounted as its
-    // INPUT — a chained `document://` from an earlier run carries
+  it("fetchRunFiles keeps only files this run produced", async () => {
+    // The files container of a run also holds the files mounted as its
+    // INPUT — a chained `appfile://` from an earlier run carries
     // `purpose: 'agent_output'` too, so only its `run_id` distinguishes it.
     const fetchImpl = fakeFetch(async () =>
       jsonResponse({
@@ -307,7 +307,7 @@ describe("run_and_wait client", () => {
         data: [
           {
             id: "doc_in",
-            uri: "document://doc_in",
+            uri: "appfile://doc_in",
             name: "input.pdf",
             mime: "application/pdf",
             size: 10,
@@ -316,7 +316,7 @@ describe("run_and_wait client", () => {
           },
           {
             id: "doc_out",
-            uri: "document://doc_out",
+            uri: "appfile://doc_out",
             name: "report.html",
             mime: "text/html",
             size: 20,
@@ -325,7 +325,7 @@ describe("run_and_wait client", () => {
           },
           {
             id: "doc_detached",
-            uri: "document://doc_detached",
+            uri: "appfile://doc_detached",
             name: "orphan.txt",
             mime: "text/plain",
             size: 30,
@@ -338,7 +338,7 @@ describe("run_and_wait client", () => {
     );
 
     await expect(
-      fetchRunDocuments("run_1", {
+      fetchRunFiles("run_1", {
         origin: "https://test.local",
         headers: {},
         fetch: fetchImpl,
@@ -346,7 +346,7 @@ describe("run_and_wait client", () => {
     ).resolves.toEqual([
       {
         id: "doc_out",
-        uri: "document://doc_out",
+        uri: "appfile://doc_out",
         name: "report.html",
         mime: "text/html",
         size: 20,
@@ -354,10 +354,10 @@ describe("run_and_wait client", () => {
     ]);
   });
 
-  it("fetchRunDocuments swallows a non-2xx response", async () => {
+  it("fetchRunFiles swallows a non-2xx response", async () => {
     const fetchImpl = fakeFetch(async () => jsonResponse({ error: "nope" }, 500));
     await expect(
-      fetchRunDocuments("run_1", {
+      fetchRunFiles("run_1", {
         origin: "https://test.local",
         headers: {},
         fetch: fetchImpl,
@@ -391,7 +391,7 @@ describe("launchRunAndWait launch body", () => {
     type: "agent",
     version: "1.0.0",
     dependencies: {},
-    runtime_tools: ["log", "output", "publish_document"],
+    runtime_tools: ["log", "output", "publish_file"],
     output: { schema: { type: "object", properties: {}, additionalProperties: true } },
     ...overrides,
   });
@@ -420,7 +420,7 @@ describe("launchRunAndWait launch body", () => {
         kind: "inline",
         manifest: { display_name: "Analyse café" },
         prompt: "do it",
-        input: { screenshot: "document://doc_abc12345" },
+        input: { screenshot: "appfile://doc_abc12345" },
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
@@ -435,7 +435,7 @@ describe("launchRunAndWait launch body", () => {
           display_name: "Analyse café",
         }),
         prompt: expect.stringContaining("do it"),
-        input: { screenshot: "document://doc_abc12345" },
+        input: { screenshot: "appfile://doc_abc12345" },
       },
     });
     const body = captured()?.body as { manifest?: unknown } | undefined;
@@ -549,9 +549,9 @@ describe("launchRunAndWait launch body", () => {
   });
 
   // Fan-in by reference: the tool argument has to survive body construction,
-  // otherwise the model is told the documents were delivered and nothing is
+  // otherwise the model is told the files were delivered and nothing is
   // mounted — the silent failure this feature exists to remove.
-  it("kind:inline forwards context_documents", async () => {
+  it("kind:inline forwards context_files", async () => {
     const { fetchImpl, captured } = captureLaunch();
 
     await launchRunAndWait(
@@ -559,17 +559,17 @@ describe("launchRunAndWait launch body", () => {
         kind: "inline",
         manifest: { name: "tmp" },
         prompt: "compile",
-        context_documents: ["document://doc_abc12345", "document://doc_def67890"],
+        context_files: ["appfile://doc_abc12345", "appfile://doc_def67890"],
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
 
     expect(captured()?.body).toMatchObject({
-      context_documents: ["document://doc_abc12345", "document://doc_def67890"],
+      context_files: ["appfile://doc_abc12345", "appfile://doc_def67890"],
     });
   });
 
-  it("kind:inline omits an empty context_documents", async () => {
+  it("kind:inline omits an empty context_files", async () => {
     const { fetchImpl, captured } = captureLaunch();
 
     await launchRunAndWait(
@@ -577,7 +577,7 @@ describe("launchRunAndWait launch body", () => {
         kind: "inline",
         manifest: { name: "tmp" },
         prompt: "do it",
-        context_documents: [],
+        context_files: [],
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
@@ -588,7 +588,89 @@ describe("launchRunAndWait launch body", () => {
     });
   });
 
-  it("kind:agent rejects context_documents before dispatch (never silently drops it)", async () => {
+  // The pre-#1177 spelling. `POST /runs/inline` accepts it forever, so the
+  // client that builds the launch body must too: reading only the canonical
+  // name dropped the argument BEFORE the HTTP call, and the route never got the
+  // chance to answer with its field-precise 400 — the run launched with nothing
+  // mounted and every layer reported success. A model reaches for the old name
+  // from its own transcript, or from a tool listing taken before the upgrade
+  // (`tools.listChanged: false`).
+  it("kind:inline canonicalizes the legacy context_documents spelling", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "compile",
+        context_documents: ["appfile://doc_abc12345"],
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    const body = captured()?.body as Record<string, unknown>;
+    expect(body).toMatchObject({ context_files: ["appfile://doc_abc12345"] });
+    // One spelling on the wire, whatever the model spelled.
+    expect(body).not.toHaveProperty("context_documents");
+  });
+
+  it("kind:inline prefers context_files when both spellings are present", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "compile",
+        context_files: ["appfile://doc_abc12345"],
+        context_documents: ["appfile://doc_def67890"],
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(captured()?.body).toMatchObject({ context_files: ["appfile://doc_abc12345"] });
+  });
+
+  // A wrong-typed argument used to be indistinguishable from an absent one:
+  // dropped on the floor, run launched with no file, nothing anywhere saying so.
+  it("refuses a context_files that is not an array instead of dropping it", async () => {
+    for (const value of ["appfile://doc_abc12345", '["appfile://doc_abc12345"]', 42]) {
+      const { fetchImpl, captured } = captureLaunch();
+
+      const result = await launchRunAndWait(
+        { kind: "inline", manifest: { name: "tmp" }, prompt: "compile", context_files: value },
+        { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+      );
+
+      expect(result.ok).toBe(false);
+      expect(
+        String((result as { step: { payload: { error?: string } } }).step.payload.error),
+      ).toMatch(/`context_files` must be a JSON array of appfile:\/\/ URIs/);
+      // Nothing was launched — the model gets the signal, not a fileless run.
+      expect(captured()).toBeUndefined();
+    }
+  });
+
+  it("names the legacy spelling in its own shape refusal", async () => {
+    const { fetchImpl } = captureLaunch();
+
+    const result = await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { name: "tmp" },
+        prompt: "compile",
+        context_documents: "appfile://doc_abc12345",
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(
+      String((result as { step: { payload: { error?: string } } }).step.payload.error),
+    ).toMatch(/`context_documents` must be a JSON array/);
+  });
+
+  it("kind:agent rejects the legacy spelling too (never silently drops it)", async () => {
     const { fetchImpl, captured } = captureLaunch();
 
     const result = await launchRunAndWait(
@@ -596,7 +678,27 @@ describe("launchRunAndWait launch body", () => {
         kind: "agent",
         scope: "@acme",
         name: "writer",
-        context_documents: ["document://doc_abc12345"],
+        context_documents: ["appfile://doc_abc12345"],
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(
+      String((result as { step: { payload: { error?: string } } }).step.payload.error),
+    ).toMatch(/only supported for kind:'inline'/);
+    expect(captured()).toBeUndefined();
+  });
+
+  it("kind:agent rejects context_files before dispatch (never silently drops it)", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    const result = await launchRunAndWait(
+      {
+        kind: "agent",
+        scope: "@acme",
+        name: "writer",
+        context_files: ["appfile://doc_abc12345"],
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );

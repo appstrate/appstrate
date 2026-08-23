@@ -39,7 +39,7 @@ import { ChatRunProgressCard } from "./chat-run-progress-card.tsx";
 import {
   buildRunPageHref,
   extractAgentLabel,
-  extractRunDocuments,
+  extractRunFiles,
   extractRunId,
   extractRunPackageId,
   extractRunStatus,
@@ -236,8 +236,24 @@ export function ToolCallCard({
 
 type AnyToolProps = ToolCallMessagePartProps<Record<string, unknown>, unknown>;
 
-/** Render run-launch tool calls as in-chat run progress while launch/run state is available. */
-function buildRunLaunch(props: AnyToolProps, runId: string | undefined): React.ReactNode {
+/**
+ * Render run-launch tool calls as in-chat run progress while launch/run state is
+ * available.
+ *
+ * A real component, not a `build…()` helper called inline: `ChatRunProgressCard`
+ * memoizes its file set on the `initialFiles` prop, and this is where that array
+ * is derived. Computed inline it was a fresh array every time THIS component
+ * rendered — which assistant-ui does once per stream chunk while the tool part
+ * is live — so the memo missed on each of those, the auto-present candidate was
+ * a new object, and the effect that opens it re-ran (only a ref kept the result
+ * correct). Note the card's own 500 ms log ticker is NOT the trigger: it is
+ * state inside the child, and a child's re-render never re-invokes this
+ * extraction. Hooks need a component, and `InvokeOperationToolUI` reaches this
+ * branch conditionally, so the `useMemo` cannot live in its `render`.
+ */
+function RunLaunchCard(props: AnyToolProps): React.ReactNode {
+  const runId = extractRunId(props.result);
+  const initialFiles = React.useMemo(() => extractRunFiles(props.result), [props.result]);
   const unwrapped = unwrapResult(props.result);
   const meta = definedEntries({
     tool_call_id: props.toolCallId,
@@ -272,7 +288,7 @@ function buildRunLaunch(props: AnyToolProps, runId: string | undefined): React.R
       agentLabel={agentLabel}
       runHref={runId ? buildRunPageHref(packageId, runId) : undefined}
       initialPackageId={packageId}
-      initialDocuments={extractRunDocuments(props.result)}
+      initialFiles={initialFiles}
       phase={phase}
       errorText={phase === "error" ? extractErrorMessage(unwrapped) : undefined}
       modalTitle={modalTitle}
@@ -318,7 +334,7 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
     // the error renders inside the panel). Never falls back to the generic card:
     // a component swap would change the block's height mid-stream.
     if (isRunLaunchOp(opId)) {
-      return buildRunLaunch(props, extractRunId(result));
+      return <RunLaunchCard {...props} />;
     }
 
     const rule = OP_RULES.find((r) => r.re.test(opId)) ?? { Icon: ZapIcon, label: "Opération" };
@@ -393,18 +409,12 @@ export const GetMeToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>
   ),
 });
 
-/**
- * Render `run_and_wait` like other run launch tools. Chat emits the run id as a
- * preliminary result. The progress panel is mounted for the call's whole life
- * (launch failures render inside it) — no generic-card fallback swap.
- */
-function RunAndWaitCard(props: AnyToolProps): React.ReactNode {
-  return buildRunLaunch(props, extractRunId(props.result));
-}
-
 // `run_and_wait` is its own MCP tool (not invoke_operation), so it needs its own
-// UI — a component (not a plain render fn) to keep the render path consistent.
+// UI — the same component the invoke-operation run-launch branch renders. Chat
+// emits the run id as a preliminary result; the progress panel is mounted for
+// the call's whole life (launch failures render inside it) — no generic-card
+// fallback swap.
 export const RunAndWaitToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
   toolName: "run_and_wait",
-  render: (props: AnyToolProps) => <RunAndWaitCard {...props} />,
+  render: (props: AnyToolProps) => <RunLaunchCard {...props} />,
 });

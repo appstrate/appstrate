@@ -21,7 +21,7 @@ import { sql } from "drizzle-orm";
  * retry at the capped backoff interval.
  *
  * Deliberately has NO foreign keys. A job must outlive the org / app / run /
- * document row it was created for — the whole point is to survive the cascade
+ * file row it was created for — the whole point is to survive the cascade
  * that removed those rows.
  */
 export const storageDeletionJobs = pgTable(
@@ -29,14 +29,26 @@ export const storageDeletionJobs = pgTable(
   {
     /** `sdj_` prefixed identifier (app-generated). */
     id: text("id").primaryKey(),
-    /** Storage bucket (e.g. "documents", "uploads"). */
+    /**
+     * Storage bucket (e.g. "documents", "uploads"). The `documents` value is
+     * LIVE DATA — the bucket literal was deliberately NOT renamed with the
+     * concept in #1177, because every stored object's key starts with it.
+     */
     bucket: text("bucket").notNull(),
     /** Object key WITHIN the bucket (no bucket prefix). */
     storageKey: text("storage_key").notNull(),
     /**
      * Why the object is being purged — one of `document_deleted`,
-     * `org_deleted`, `application_deleted`, `end_user_deleted`,
-     * `run_workspace_deleted`, `upload_expired`, `materialization_failed`.
+     * `document_expired`, `org_deleted`, `application_deleted`,
+     * `end_user_deleted`, `run_workspace_deleted`, `version_deleted`,
+     * `upload_expired`, `materialization_failed`.
+     *
+     * The two `document_*` labels are kept at their pre-#1177 spelling: they
+     * are persisted free-text values on live rows that no migration rewrites,
+     * and the label buys nothing by being renamed — while renaming ONE of them
+     * would leave production holding two spellings of the same class of event,
+     * so an operator grouping by `reason` sees it split.
+     *
      * Free text (audit/metric label), not a constrained enum.
      */
     reason: text("reason").notNull(),

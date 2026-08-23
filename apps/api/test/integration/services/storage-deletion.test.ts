@@ -4,14 +4,14 @@
  * Integration tests for the transactional storage-deletion outbox (tier0, FS
  * storage):
  *
- *  - `deleteDocument` deletes the row AND enqueues a pending deletion job in the
+ *  - `deleteFile` deletes the row AND enqueues a pending deletion job in the
  *    SAME transaction; a failing worker delete leaves the job pending; a later
  *    pass completes it.
  *  - worker pass: success → completedAt; failure → attempts+1, backoff, lastError.
  *  - dead letter: a job past the threshold appears in the dead list; retry resets it.
- *  - `deleteOrganization` enqueues documents + uploads keys before the FK cascade.
+ *  - `deleteOrganization` enqueues files + uploads keys before the FK cascade.
  *  - `deleteEndUser` enqueues the end-user's staged upload key before the cascade.
- *  - `cleanupExpiredDocuments` enqueues instead of best-effort deleting.
+ *  - `cleanupExpiredFiles` enqueues instead of best-effort deleting.
  *  - concurrent worker passes don't double-claim (SKIP LOCKED).
  */
 
@@ -20,7 +20,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   applications,
-  documents,
+  files,
   uploads,
   runs,
   organizations,
@@ -30,10 +30,10 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import {
-  createDocumentFromStream,
-  deleteDocument,
-  cleanupExpiredDocuments,
-} from "../../../src/services/documents.ts";
+  createFileFromStream,
+  deleteFile,
+  cleanupExpiredFiles,
+} from "../../../src/services/files.ts";
 import { deleteOrganization } from "../../../src/services/organizations.ts";
 import { createEndUser, deleteEndUser } from "../../../src/services/end-users.ts";
 import { createApplication, deleteApplication } from "../../../src/services/applications.ts";
@@ -68,7 +68,7 @@ async function seedRunRow(
   return id;
 }
 
-/** Publish an `agent_output` document from a run's streaming channel; returns the row. */
+/** Publish an `agent_output` file from a run's streaming channel; returns the row. */
 async function publishDoc(
   scope: Scope,
   runId: string,
@@ -79,7 +79,7 @@ async function publishDoc(
     endUserId: null,
   },
 ) {
-  const { row } = await createDocumentFromStream(scope, runId, actor, null, {
+  const { row } = await createFileFromStream(scope, runId, actor, null, {
     name,
     mime: "text/plain",
     body: new Blob([new TextEncoder().encode(content)]).stream(),
@@ -104,15 +104,15 @@ describe("storage-deletion outbox", () => {
     void app;
   });
 
-  it("deleteDocument removes the row and enqueues a pending job in the same tx; worker completes it", async () => {
+  it("deleteFile removes the row and enqueues a pending job in the same tx; worker completes it", async () => {
     const runId = await seedRunRow(scope);
     const doc = await publishDoc(scope, runId, "d.txt", "some bytes");
     const { bucket, inKey } = split(doc.storageKey);
 
-    await deleteDocument(scope, doc.id);
+    await deleteFile(scope, doc.id);
 
     // Row gone.
-    expect(await db.select().from(documents).where(eq(documents.id, doc.id))).toHaveLength(0);
+    expect(await db.select().from(files).where(eq(files.id, doc.id))).toHaveLength(0);
 
     // Exactly one pending job for the object.
     const jobs = await db
@@ -278,7 +278,7 @@ describe("storage-deletion outbox", () => {
     const manifestKey = `${runId}/manifest.json`;
     const manifest = new TextEncoder().encode(
       JSON.stringify({
-        documents: [
+        files: [
           { name: "A", workspace_name: "a.txt", size: 1 },
           { name: "B", workspace_name: "b.txt", size: 1 },
         ],
@@ -302,6 +302,8 @@ describe("storage-deletion outbox", () => {
 
     const failed = await processStorageDeletionJobs({ deleteFile, downloadFile, rand: () => 0 });
     expect(failed.failed).toBe(1);
+    // `documents/` is the run-workspace STORAGE prefix and did not move with the
+    // #1177 rename — see `runWorkspaceFileKey`.
     expect(deleted).toEqual([`${runId}/documents/a.txt`, `${runId}/documents/b.txt`]);
     expect(deleted).not.toContain(manifestKey);
 
@@ -320,7 +322,7 @@ describe("storage-deletion outbox", () => {
     ]);
   });
 
-  it("deleteOrganization enqueues documents + uploads keys before the FK cascade", async () => {
+  it("deleteOrganization enqueues files + uploads keys before the FK cascade", async () => {
     const runId = await seedRunRow(scope, "success");
     const doc = await publishDoc(scope, runId, "org-doc.txt", "org bytes");
     const { bucket: docBucket, inKey: docKey } = split(doc.storageKey);
@@ -346,7 +348,7 @@ describe("storage-deletion outbox", () => {
       await db.select().from(organizations).where(eq(organizations.id, scope.orgId)),
     ).toHaveLength(0);
 
-    // A deletion job exists for the document object and the upload object.
+    // A deletion job exists for the file object and the upload object.
     const docJob = await db
       .select()
       .from(storageDeletionJobs)
@@ -380,7 +382,7 @@ describe("storage-deletion outbox", () => {
     const doc = await publishDoc(appScope, runId, "app-doc.txt", "application bytes");
     const { inKey: docKey } = split(doc.storageKey);
     const [before] = await db
-      .select({ used: organizations.documentsBytesUsed })
+      .select({ used: organizations.filesBytesUsed })
       .from(organizations)
       .where(eq(organizations.id, scope.orgId));
     expect(before!.used).toBe(doc.size);
@@ -391,7 +393,7 @@ describe("storage-deletion outbox", () => {
       0,
     );
     const [after] = await db
-      .select({ used: organizations.documentsBytesUsed })
+      .select({ used: organizations.filesBytesUsed })
       .from(organizations)
       .where(eq(organizations.id, scope.orgId));
     expect(after!.used).toBe(0);
@@ -440,7 +442,7 @@ describe("storage-deletion outbox", () => {
       .where(eq(runs.id, runId));
     expect(survivingRun).toEqual({ endUserId: null });
     const [org] = await db
-      .select({ used: organizations.documentsBytesUsed })
+      .select({ used: organizations.filesBytesUsed })
       .from(organizations)
       .where(eq(organizations.id, scope.orgId));
     expect(org!.used).toBe(0);
@@ -465,25 +467,29 @@ describe("storage-deletion outbox", () => {
     ).toHaveLength(0);
   });
 
-  it("cleanupExpiredDocuments enqueues the purge instead of best-effort deleting", async () => {
+  it("cleanupExpiredFiles enqueues the purge instead of best-effort deleting", async () => {
     const runId = await seedRunRow(scope);
     const doc = await publishDoc(scope, runId, "old.txt", "expired bytes");
     const { inKey } = split(doc.storageKey);
     // Make it eligible for the expiry sweep.
     await db
-      .update(documents)
+      .update(files)
       .set({ expiresAt: new Date(Date.now() - 1000) })
-      .where(eq(documents.id, doc.id));
+      .where(eq(files.id, doc.id));
 
-    const removed = await cleanupExpiredDocuments();
+    const removed = await cleanupExpiredFiles();
     expect(removed).toBeGreaterThanOrEqual(1);
-    expect(await db.select().from(documents).where(eq(documents.id, doc.id))).toHaveLength(0);
+    expect(await db.select().from(files).where(eq(files.id, doc.id))).toHaveLength(0);
 
     const jobs = await db
       .select()
       .from(storageDeletionJobs)
       .where(eq(storageDeletionJobs.storageKey, inKey));
     expect(jobs).toHaveLength(1);
+    // Pre-#1177 spelling on purpose — `reason` is a persisted free-text label
+    // on live rows that no migration rewrites, so it stays aligned with its
+    // sibling `document_deleted` rather than splitting production into two
+    // spellings of the same event.
     expect(jobs[0]!.reason).toBe("document_expired");
     expect(jobs[0]!.completedAt).toBeNull();
   });

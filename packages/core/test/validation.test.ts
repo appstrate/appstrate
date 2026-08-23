@@ -152,7 +152,7 @@ describe("validateManifest", () => {
   });
 
   // `report` was a selectable runtime tool until it was replaced by durable
-  // `outputs/` documents. How an unknown id is treated depends on the
+  // `outputs/` files. How an unknown id is treated depends on the
   // DIRECTION of the call, and both halves matter:
   //
   //   - author input (default) MUST reject — `["lgo"]` is a typo, and
@@ -346,6 +346,85 @@ describe("validateManifest", () => {
     const { manifest, dropped } = dropRetiredRuntimeTools(stored);
     expect(manifest).toBe(stored);
     expect(dropped).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------------
+  // #1177 — `publish_document` → `publish_file`.
+  //
+  // THE acceptance criterion of the issue. `runtime_tools` is persisted inside
+  // agent manifests, including published ZIPs that are immutable by
+  // construction. `dropRetiredRuntimeTools` keeps only ids it recognises and
+  // SILENTLY deletes the rest, so a bare rename would not error — it would
+  // quietly strip the tool from every agent that already selected it, and the
+  // agent would stop publishing files with nothing in any log.
+  // -------------------------------------------------------------------------
+
+  it("a persisted manifest selecting `publish_document` still gets the tool", () => {
+    const result = validateManifest(
+      validAgentManifest({ runtime_tools: ["log", "publish_document"] }),
+      { retiredRuntimeTools: "drop" },
+    );
+    expect(result.valid).toBe(true);
+    // Resolved, not dropped.
+    expect(result.valid && result.droppedRuntimeTools).toEqual([]);
+    expect((result.manifest as Record<string, unknown>).runtime_tools).toEqual([
+      "log",
+      "publish_file",
+    ]);
+  });
+
+  it("an author saving `publish_document` writes the canonical id, no error", () => {
+    // The author direction rejects unknown ids — but a RENAMED id is not
+    // unknown. It must validate and come back canonicalized, so the manifest
+    // persisted from this save carries only the new spelling.
+    const result = validateManifest(validAgentManifest({ runtime_tools: ["publish_document"] }));
+    expect(result.valid).toBe(true);
+    expect((result.manifest as Record<string, unknown>).runtime_tools).toEqual(["publish_file"]);
+  });
+
+  it("a manifest naming BOTH spellings collapses to one canonical entry", () => {
+    for (const policy of [undefined, { retiredRuntimeTools: "drop" as const }]) {
+      const result = validateManifest(
+        validAgentManifest({ runtime_tools: ["publish_file", "publish_document"] }),
+        policy,
+      );
+      expect(result.valid).toBe(true);
+      expect((result.manifest as Record<string, unknown>).runtime_tools).toEqual(["publish_file"]);
+    }
+  });
+
+  it("dropRetiredRuntimeTools rewrites the stored bytes to the canonical id", () => {
+    // What the publish path serialises into the integrity-hashed ZIP: key order
+    // and unknown fields survive, only the legacy id is rewritten in place.
+    const stored = {
+      name: "@test/my-agent",
+      runtime_tools: ["log", "publish_document"],
+      custom_field: "must-survive",
+      type: "agent",
+    };
+    const { manifest, dropped } = dropRetiredRuntimeTools(stored);
+    expect(dropped).toEqual([]);
+    expect(Object.keys(manifest)).toEqual(Object.keys(stored));
+    expect(manifest.custom_field).toBe("must-survive");
+    expect(manifest.runtime_tools).toEqual(["log", "publish_file"]);
+  });
+
+  it("a legacy id is never reported as dropped, and never empties the key", () => {
+    const { manifest, dropped } = dropRetiredRuntimeTools({
+      type: "agent",
+      name: "@test/a",
+      runtime_tools: ["publish_document"],
+    });
+    expect(dropped).toEqual([]);
+    expect(manifest.runtime_tools).toEqual(["publish_file"]);
+  });
+
+  it("an unknown id is still rejected on the author path even next to a legacy id", () => {
+    const result = validateManifest(
+      validAgentManifest({ runtime_tools: ["publish_document", "lgo"] }),
+    );
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.startsWith("runtime_tools"))).toBe(true);
   });
 
   it("agent with no output schema is valid without the `output` runtime tool", () => {

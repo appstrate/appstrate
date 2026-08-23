@@ -17,7 +17,7 @@ import {
   buildOperationIndex,
   type CatalogOperation,
 } from "../../catalog.ts";
-import { buildMcpTools, type Dispatch } from "../../tools.ts";
+import { buildMcpTools, RETIRED_MCP_TOOL_NAMES, type Dispatch } from "../../tools.ts";
 import { internalDispatchHeader } from "../../../../lib/internal-dispatch.ts";
 import { validateManifest } from "@appstrate/core/validation";
 
@@ -77,6 +77,74 @@ describe("mcp catalog", () => {
       expect(op.pathTemplate.startsWith("/api/mcp")).toBe(false);
       expect(op.pathTemplate.startsWith("/.well-known/oauth-protected-resource")).toBe(false);
     }
+  });
+});
+
+describe("retired pre-#1177 tool names", () => {
+  beforeEach(() => resetCatalog());
+
+  /**
+   * The server advertises `tools: { listChanged: false }` — a client is
+   * entitled to cache the tool list for the life of its session, so one that
+   * listed before an upgrade will call `list_documents` after it and get
+   * `-32602 Unknown tool` mid-conversation. The aliases stay HIDDEN because the
+   * point of #1177 is the model's view of the tool surface.
+   */
+  it("registers every retired name, and never lists one", () => {
+    const tools = buildMcpTools({
+      origin: "https://test.local",
+      authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
+      permissions: new Set(["mcp:read", "mcp:invoke", "agents:write"]),
+      dispatch: async () =>
+        new Response("{}", { status: 200, headers: { "content-type": "application/json" } }),
+      actor: { type: "user", id: "user_1" },
+      scope: { orgId: "org_1", applicationId: "app_1" },
+    });
+    const listed = new Set(tools.filter((t) => !t.hidden).map((t) => t.descriptor.name));
+    const registered = new Set(tools.map((t) => t.descriptor.name));
+
+    for (const [retired, canonical] of Object.entries(RETIRED_MCP_TOOL_NAMES)) {
+      expect(registered.has(retired)).toBe(true);
+      expect(listed.has(retired)).toBe(false);
+      // Every alias points at a tool that is actually offered.
+      expect(listed.has(canonical)).toBe(true);
+    }
+  });
+
+  it("forwards a retired name to the canonical handler", async () => {
+    const { byName, calls } = makeTools(["mcp:read"]);
+    await byName.get("list_documents")!.handler({}, noExtra);
+    await byName.get("list_files")!.handler({}, noExtra);
+    // `dispatch` is a stub that echoes a constant for every request, so
+    // comparing the two RESULTS proves nothing — an alias wired to the wrong
+    // canonical tool would compare equal. Assert the request each one actually
+    // dispatched instead.
+    expect(calls).toHaveLength(2);
+    expect(new URL(calls[0]!.url).pathname).toBe("/api/files");
+    expect(calls[0]!.url).toBe(calls[1]!.url);
+    expect(calls[0]!.method).toBe(calls[1]!.method);
+  });
+
+  it("renames the retired document_uri argument on the way in", async () => {
+    const { byName } = makeTools(["mcp:read", "mcp:invoke", "agents:write"]);
+    // `validate_package_file` reads `file_uri`; a caller pinned to the old
+    // vocabulary sends `document_uri`. Without the rename the tool answers
+    // "file_uri is required" for an argument the caller did supply.
+    // Reaching the URI-PARSE failure is the whole signal: it can only happen
+    // once the argument has been renamed (`doc_x` is too short for FILE_ID_RE,
+    // so the parse rejects before any DB lookup — this stays a pure unit test).
+    await expect(
+      byName
+        .get("validate_package_document")!
+        .handler({ document_uri: "appfile://doc_x" }, noExtra),
+    ).rejects.toThrow(/Not a file URI/);
+    // Negative control: the canonical tool gets no rename, so the very same
+    // arguments stop at the "required" guard before any lookup happens. If this
+    // stopped holding, the assertion above would no longer distinguish a working
+    // rename from a missing one.
+    await expect(
+      byName.get("validate_package_file")!.handler({ document_uri: "appfile://doc_x" }, noExtra),
+    ).rejects.toThrow(/file_uri is required/);
   });
 });
 
@@ -477,31 +545,37 @@ describe("buildMcpTools contextInjected", () => {
       actor: { type: "user", id: "user_1" },
       scope: { orgId: "org_1", applicationId: "app_1" },
     });
-    const names = tools.map((t) => t.descriptor.name).sort();
+    // Only the ADVERTISED surface — the retired pre-#1177 aliases are hidden
+    // (`hidden: true`), so `tools/list` never shows them. Covered separately by
+    // "keeps the retired pre-#1177 tool names callable but unlisted".
+    const names = tools
+      .filter((t) => !t.hidden)
+      .map((t) => t.descriptor.name)
+      .sort();
     // get_me is redundant for a context-injected caller; search_operations stays
     // (its best_match schema is not covered by the injected operation index).
     expect(names).toEqual([
       "describe_operation",
       "get_runtime_capabilities",
       "invoke_operation",
-      "list_documents",
-      "read_document",
+      "list_files",
+      "read_file",
       "run_and_wait",
       "search_operations",
-      "validate_package_document",
+      "validate_package_file",
     ]);
   });
 
   it("exposes package import only to authorized organization users", () => {
-    expect(makeTools(["mcp:read", "mcp:invoke"]).byName.has("import_package_document")).toBe(false);
+    expect(makeTools(["mcp:read", "mcp:invoke"]).byName.has("import_package_file")).toBe(false);
     expect(
-      makeTools(["mcp:read", "mcp:invoke", "agents:write"]).byName.has("import_package_document"),
+      makeTools(["mcp:read", "mcp:invoke", "agents:write"]).byName.has("import_package_file"),
     ).toBe(true);
     expect(
       makeTools(["mcp:read", "mcp:invoke", "agents:write"], false, {
         type: "end_user",
         id: "eu_1",
-      }).byName.has("import_package_document"),
+      }).byName.has("import_package_file"),
     ).toBe(false);
   });
 

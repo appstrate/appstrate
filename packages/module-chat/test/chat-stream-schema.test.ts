@@ -3,8 +3,9 @@
 /**
  * `chatStreamSchema` file-part validation (superRefine) — a pure, DB-free
  * validation-level check that the chat channel only accepts attachments
- * addressed by an `upload://` or `document://` URI, rejecting inline `data:`
- * bytes and arbitrary URLs (attachments must flow through the document store).
+ * addressed by an `upload://` or `appfile://` URI (plus the historical
+ * `document://` spelling), rejecting inline `data:` bytes and arbitrary URLs
+ * (attachments must flow through the file store).
  */
 
 import { describe, it, expect } from "bun:test";
@@ -27,7 +28,15 @@ describe("chatStreamSchema file-part validation", () => {
     expect(result.success).toBe(true);
   });
 
-  it("accepts a document:// file part", () => {
+  it("accepts an appfile:// file part", () => {
+    const result = chatStreamSchema.safeParse(messageWithFileUrl("appfile://doc_abcdefgh"));
+    expect(result.success).toBe(true);
+  });
+
+  it("still accepts a historical document:// file part", () => {
+    // Chat messages persisted before #1177 carry the old scheme; a reload
+    // replays them through this same schema, so rejecting it would make an old
+    // conversation unsendable.
     const result = chatStreamSchema.safeParse(messageWithFileUrl("document://doc_abcdefgh"));
     expect(result.success).toBe(true);
   });

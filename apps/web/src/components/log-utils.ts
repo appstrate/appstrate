@@ -105,7 +105,8 @@ function readNumber(value: unknown, fallback: number): number {
 
 /**
  * Project the raw run logs into the per-turn breakdown rendered by the run
- * Info tab. Pure and total: rows that are not turn breadcrumbs, or whose
+ * Exécution pane (`TurnsTable` in `run-execution-tab.tsx`). Pure and total:
+ * rows that are not turn breadcrumbs, or whose
  * payload is malformed/absent, are skipped rather than throwing.
  *
  * Runs that predate the breadcrumb emit no such rows at all — an empty array
@@ -258,7 +259,7 @@ export function buildLogEntries(
       Object.assign(output, log.data);
     } else if (log.event === "report" && log.type === "result") {
       // Dead channel: the `report` runtime tool was replaced by durable
-      // `outputs/` documents. Rows written before the removal stay in the DB
+      // `outputs/` files. Rows written before the removal stay in the DB
       // but are skipped here — falling through to the generic branch would
       // render them as a truncated, contextless log line.
     } else if (log.event === "run_completed") {
@@ -266,7 +267,8 @@ export function buildLogEntries(
     } else if (isTurnRow(log)) {
       // Per-turn breadcrumbs are a structured series, not narration: a heavy
       // run emits ~108 of them and they would drown the agent's own log lines.
-      // They are rendered as a table in the run Info tab (`buildTurnRows`).
+      // They are rendered as a table in the run Exécution pane
+      // (`buildTurnRows` → `TurnsTable` in `run-execution-tab.tsx`).
       // Same precedent as the dead `report` channel above.
     } else {
       const logData = log.data ?? {};

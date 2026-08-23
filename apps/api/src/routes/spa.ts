@@ -20,7 +20,7 @@ const INDEX_HTML = "./apps/web/dist/index.html";
 
 /**
  * The SPA document's `Content-Security-Policy` — **one directive, `frame-src`**,
- * naming the single origin the platform embeds: the document-preview origin.
+ * naming the single origin the platform embeds: the file-preview origin.
  *
  * This is the parent-side half of the agent-HTML preview containment. The
  * preview response's own CSP cannot close the NAVIGATION channel: its
@@ -38,7 +38,7 @@ const INDEX_HTML = "./apps/web/dist/index.html";
  *
  * What this closes is every cross-origin NAVIGATION out of the frame. It is not
  * a general exfiltration control — see `buildPreviewCsp` in
- * `apps/api/src/services/document-preview.ts` for the named WebRTC/STUN
+ * `apps/api/src/services/file-preview.ts` for the named WebRTC/STUN
  * residual, which no header here or on the preview response covers.
  *
  * It also does not stop the frame navigating WITHIN the allowed origin, and what
@@ -54,7 +54,7 @@ const INDEX_HTML = "./apps/web/dist/index.html";
  *    302 — measured in Chrome — so an open redirect on the app origin cannot
  *    launder the navigation back out to an attacker's host.
  *
- * A path-scoped `frame-src <appOrigin>/preview/documents/` would tighten the
+ * A path-scoped `frame-src <appOrigin>/preview/files/` would tighten the
  * default mode further. Deliberately not taken: `'self'` tracks whatever origin
  * actually served this document, while a path source expression has to spell out
  * a scheme + host, so it silently stops matching — and the preview frame silently

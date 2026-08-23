@@ -71,10 +71,10 @@ let containerSpawn: Histogram | undefined;
 let llmLatency: Histogram | undefined;
 let processAnomaly: Counter | undefined;
 let storageDeletionResult: Counter | undefined;
-let documentsCreated: Counter | undefined;
-let documentsDeleted: Counter | undefined;
-let documentsStorageLimitRejections: Counter | undefined;
-let documentsPartialPublications: Counter | undefined;
+let filesCreated: Counter | undefined;
+let filesDeleted: Counter | undefined;
+let filesStorageLimitRejections: Counter | undefined;
+let filesPartialPublications: Counter | undefined;
 
 // Last-value snapshot of the storage-deletion outbox backlog, pushed by the
 // worker once per pass (via the telemetry façade) and read lazily by the three
@@ -290,24 +290,21 @@ function createInstruments(m: Meter): void {
     description: "Pending storage-deletion jobs past the dead-letter attempt threshold.",
   }).addCallback((result) => result.observe(storageDeletionDeadLetters));
 
-  // Documents lifecycle counters (documents-hardening). Created/deleted track
-  // the durable-document population churn; storage_limit_rejections + partial_publications
+  // Files lifecycle counters (documents-hardening). Created/deleted track
+  // the durable-file population churn; storage_limit_rejections + partial_publications
   // are the health signals (a write refused for want of quota; a run that lost a
   // deliverable at finalize). `purpose` on `created` is a 2-value dimension
   // (agent_output|user_upload) — bounded, no clamp needed.
-  documentsCreated = m.createCounter("appstrate.documents.created", {
-    description: "Count of durable documents committed, tagged by purpose.",
+  filesCreated = m.createCounter("appstrate.files.created", {
+    description: "Count of durable files committed, tagged by purpose.",
   });
-  documentsDeleted = m.createCounter("appstrate.documents.deleted", {
-    description: "Count of document rows removed (explicit delete, teardown, or retention GC).",
+  filesDeleted = m.createCounter("appstrate.files.deleted", {
+    description: "Count of file rows removed (explicit delete, teardown, or retention GC).",
   });
-  documentsStorageLimitRejections = m.createCounter(
-    "appstrate.documents.storage_limit_rejections",
-    {
-      description: "Count of writes rejected for overrunning the org storage limit (403).",
-    },
-  );
-  documentsPartialPublications = m.createCounter("appstrate.documents.partial_publications", {
+  filesStorageLimitRejections = m.createCounter("appstrate.files.storage_limit_rejections", {
+    description: "Count of writes rejected for overrunning the org storage limit (403).",
+  });
+  filesPartialPublications = m.createCounter("appstrate.files.partial_publications", {
     description:
       "Count of runs finalized with a partial artifacts summary (a deliverable was lost).",
   });
@@ -525,24 +522,24 @@ export function recordStorageDeletionResult(attrs: { result: string }): void {
   storageDeletionResult?.add(1, { result: attrs.result });
 }
 
-export function recordDocumentCreated(attrs: { purpose: string }): void {
+export function recordFileCreated(attrs: { purpose: string }): void {
   if (!enabled) return;
-  documentsCreated?.add(1, { purpose: attrs.purpose });
+  filesCreated?.add(1, { purpose: attrs.purpose });
 }
 
-export function recordDocumentDeleted(count: number): void {
+export function recordFileDeleted(count: number): void {
   if (!enabled) return;
-  documentsDeleted?.add(count);
+  filesDeleted?.add(count);
 }
 
-export function recordDocumentStorageLimitRejection(): void {
+export function recordFileStorageLimitRejection(): void {
   if (!enabled) return;
-  documentsStorageLimitRejections?.add(1);
+  filesStorageLimitRejections?.add(1);
 }
 
-export function recordDocumentPartialPublication(): void {
+export function recordFilePartialPublication(): void {
   if (!enabled) return;
-  documentsPartialPublications?.add(1);
+  filesPartialPublications?.add(1);
 }
 
 export function recordContainerSpawn(
@@ -613,9 +610,9 @@ export async function _resetObservabilityForTesting(): Promise<void> {
   llmLatency = undefined;
   processAnomaly = undefined;
   storageDeletionResult = undefined;
-  documentsCreated = undefined;
-  documentsDeleted = undefined;
-  documentsStorageLimitRejections = undefined;
-  documentsPartialPublications = undefined;
+  filesCreated = undefined;
+  filesDeleted = undefined;
+  filesStorageLimitRejections = undefined;
+  filesPartialPublications = undefined;
   queueDepthProvider = null;
 }

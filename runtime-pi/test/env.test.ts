@@ -278,16 +278,16 @@ describe("scrubSinkEnv", () => {
 
     scrubSinkEnv(source);
 
-    // The captured struct still has everything the sink and the document
+    // The captured struct still has everything the sink and the file
     // uploader need.
     expect(env.sink.secret).toBe(VALID.APPSTRATE_SINK_SECRET);
     expect(env.sink.url).toBe(VALID.APPSTRATE_SINK_URL);
     expect(env.sink.finalizeUrl).toBe(VALID.APPSTRATE_SINK_FINALIZE_URL);
     // The environment no longer does. An agent driven by a prompt injection
-    // (an email body, a fetched page, an input document) that runs
+    // (an email body, a fetched page, an input file) that runs
     // `env | grep SINK` gets nothing: without the run HMAC key it cannot forge
-    // a `status: "success"` finalize, nor POST documents straight to
-    // `/api/runs/:id/documents` past the `runtime_tools` gate.
+    // a `status: "success"` finalize, nor POST files straight to
+    // `/api/runs/:id/files` past the `runtime_tools` gate.
     expect(source.APPSTRATE_SINK_SECRET).toBeUndefined();
     expect(source.APPSTRATE_SINK_URL).toBeUndefined();
     expect(source.APPSTRATE_SINK_FINALIZE_URL).toBeUndefined();

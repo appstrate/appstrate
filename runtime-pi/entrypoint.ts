@@ -39,7 +39,7 @@ import type { ExtensionFactory, Api, Model } from "./pi-sdk.ts";
 import {
   prepareBundleForPi,
   buildRuntimeToolExtensions,
-  buildPublishDocumentExtension,
+  buildPublishFileExtension,
   derivePiProvider,
   emitRuntimeReady,
   emitBootProgress,
@@ -48,6 +48,7 @@ import {
   type PiRunner,
 } from "@appstrate/runner-pi";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { canonicalizeRuntimeToolIds } from "@appstrate/core/runtime-tools-catalog";
 import type { IntegrationBootReport } from "@appstrate/core/sidecar-types";
 import { readBundleFromFile, parsePackageIdentity } from "@appstrate/afps-runtime/bundle";
 import { HttpSink, attachStdoutBridge } from "@appstrate/afps-runtime/sinks";
@@ -68,8 +69,8 @@ import {
   drainAndEmitInto,
   type RuntimeEventDrainer,
 } from "@appstrate/core/runtime-event-drain";
-import { provisionWorkspace, provisionDocuments, type ProvisionDeps } from "./provision.ts";
-import { createRunDocumentUploader, sweepOutputs, summarizeArtifacts } from "./publish.ts";
+import { provisionWorkspace, provisionFiles, type ProvisionDeps } from "./provision.ts";
+import { createRunFileUploader, sweepOutputs, summarizeArtifacts } from "./publish.ts";
 import type { SweepResult } from "./publish.ts";
 
 /**
@@ -184,23 +185,23 @@ const sink = new HttpSink({
 const bridge = attachStdoutBridge({ sink, runId: AGENT_RUN_ID });
 const bridgedSink = bridge.sink;
 
-// --- 0b. Document publishing (run → platform) ---
+// --- 0b. File publishing (run → platform) ---
 // Server `${sha256}:${name}` identities and canonical source-path → sha256
-// identities this run has published, shared by the `publish_document` tool and
+// identities this run has published, shared by the `publish_file` tool and
 // the end-of-run outputs sweep. The source identity prevents an unchanged file
 // published under a display-name override from being swept again, while the
 // server identity still allows two distinct files with identical bytes but
 // different names. The uploader streams a workspace file to
-// POST /api/runs/:id/documents, signed with the same run HMAC as the workspace
+// POST /api/runs/:id/files, signed with the same run HMAC as the workspace
 // provisioning fetches.
-const publishedDocumentKeys = new Set<string>();
-const publishedDocumentSourceHashes = new Map<string, string>();
-const uploadRunDocument = createRunDocumentUploader({
+const publishedFileKeys = new Set<string>();
+const publishedFileSourceHashes = new Map<string, string>();
+const uploadRunFile = createRunFileUploader({
   sinkUrl: env.sink.url,
   sinkSecret: env.sink.secret,
   workspace: env.workspaceDir,
-  publishedKeys: publishedDocumentKeys,
-  publishedSourceHashes: publishedDocumentSourceHashes,
+  publishedKeys: publishedFileKeys,
+  publishedSourceHashes: publishedFileSourceHashes,
 });
 
 /**
@@ -387,10 +388,10 @@ const piSdkWarmup = loadPiCodingAgentSdk()
 const provisionStart = performance.now();
 
 // Self-provision the workspace before anything reads it: the AFPS bundle
-// (fatal on any miss — see provisionWorkspace) and the input documents
-// (streamed per-file to `documents/<name>`; absent is fine). Run in parallel —
-// they write disjoint paths (bundle → workspace root, documents →
-// `documents/`), share no state, and neither is read until after both resolve,
+// (fatal on any miss — see provisionWorkspace) and the input files
+// (streamed per-file to `files/<name>`; absent is fine). Run in parallel —
+// they write disjoint paths (bundle → workspace root, files →
+// `files/`), share no state, and neither is read until after both resolve,
 // so overlapping their fetches shaves cold-start latency. On failure either
 // one calls `die()` (process.exit), so the first fault wins and the other is
 // abandoned with the process.
@@ -400,7 +401,7 @@ const provisionDeps: ProvisionDeps = {
   workspace: WORKSPACE,
   die,
 };
-await Promise.all([provisionWorkspace(provisionDeps), provisionDocuments(provisionDeps)]);
+await Promise.all([provisionWorkspace(provisionDeps), provisionFiles(provisionDeps)]);
 
 // The bundle is unconditionally present here: `provisionWorkspace` above either
 // wrote `agent-package.afps` into the workspace or called `die()` (process.exit)
@@ -471,10 +472,18 @@ await progress("bundle loaded", { bundlePrepareMs: phaseTimings.bundlePrepareMs 
 
 // The agent's selected runtime tools (`manifest.runtime_tools`), read once from
 // the root package manifest. Reused by the no-sidecar extension registration,
-// the `publish_document` gate, and the PiRunner's terminal-tool decision.
-const declaredRuntimeTools: string[] =
-  (bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined)
-    ?.runtime_tools ?? [];
+// the `publish_file` gate, and the PiRunner's terminal-tool decision.
+//
+// Canonicalized here too (#1177). The platform already rewrites the retired
+// `publish_document` spelling into the bundle it builds, but the platform and
+// this image deploy independently: a NEW image running against an OLDER
+// platform receives the raw stored ids, and the gates below are exact string
+// matches. Resolving the alias in one place, at the single read, is what keeps
+// that version skew from silently unregistering the publish tool.
+const declaredRuntimeTools: string[] = canonicalizeRuntimeToolIds(
+  (bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: unknown[] } | undefined)
+    ?.runtime_tools ?? [],
+).ids;
 
 // --- 2c. Phase C: wire sidecar-backed tools via MCP ---
 // Every sidecar-backed capability is surfaced as a typed Pi tool whose
@@ -653,17 +662,17 @@ if (sidecarUrl) {
   );
 }
 
-// --- 2e. publish_document runtime tool (opt-in via manifest.runtime_tools) ---
+// --- 2e. publish_file runtime tool (opt-in via manifest.runtime_tools) ---
 // Unlike the four pure event-emitter runtime tools (served by the sidecar over
-// MCP, or registered in-process on the no-sidecar path), `publish_document`
+// MCP, or registered in-process on the no-sidecar path), `publish_file`
 // performs an HTTP upload back to the platform — so it is ALWAYS registered
-// in-process here (the sidecar has no path to the documents route), gated on
+// in-process here (the sidecar has no path to the files route), gated on
 // the agent selecting it. It carries the run's HMAC signer via the injected
-// `uploadRunDocument`; its `document.published` event rides the bridged sink.
-if (declaredRuntimeTools.includes("publish_document")) {
+// `uploadRunFile`; its `file.published` event rides the bridged sink.
+if (declaredRuntimeTools.includes("publish_file")) {
   extensionFactories.push(
-    buildPublishDocumentExtension({
-      uploader: uploadRunDocument,
+    buildPublishFileExtension({
+      uploader: uploadRunFile,
       emit: (event) => {
         void bridgedSink.handle(event as RunEvent);
       },
@@ -813,7 +822,7 @@ const DEFAULT_DOCUMENT_MAX_FILE_BYTES = 100 * 1024 * 1024;
  * keeps the two in lockstep — an operator who raises the platform cap no longer
  * sees large deliverables silently skipped here.
  */
-function resolveDocumentMaxFileBytes(): number {
+function resolveMaxFileBytes(): number {
   const raw = process.env.DOCUMENT_MAX_FILE_BYTES;
   if (raw !== undefined && raw !== "") {
     const parsed = Number(raw);
@@ -822,13 +831,13 @@ function resolveDocumentMaxFileBytes(): number {
   return DEFAULT_DOCUMENT_MAX_FILE_BYTES;
 }
 
-const OUTPUTS_SWEEP_MAX_FILE_BYTES = resolveDocumentMaxFileBytes();
+const OUTPUTS_SWEEP_MAX_FILE_BYTES = resolveMaxFileBytes();
 
 /**
  * Auto-publish everything under `workspace/outputs/` that was not already
  * published explicitly. Runs at finalize time, BEFORE the finalize event is
- * posted, so the swept documents surface as run events. Best-effort — per-file
- * failures never block finalize (regardless of whether the `publish_document`
+ * posted, so the swept files surface as run events. Best-effort — per-file
+ * failures never block finalize (regardless of whether the `publish_file`
  * tool was enabled), but they are COLLECTED into the returned {@link SweepResult}
  * so the caller can stamp a terminal artifacts summary onto the finalize
  * payload. Returns `null` only when the scan itself faulted (never on a per-file
@@ -836,10 +845,10 @@ const OUTPUTS_SWEEP_MAX_FILE_BYTES = resolveDocumentMaxFileBytes();
  */
 async function runOutputsSweep(): Promise<SweepResult | null> {
   return sweepOutputs({
-    uploader: uploadRunDocument,
+    uploader: uploadRunFile,
     workspace: WORKSPACE,
-    publishedKeys: publishedDocumentKeys,
-    publishedSourceHashes: publishedDocumentSourceHashes,
+    publishedKeys: publishedFileKeys,
+    publishedSourceHashes: publishedFileSourceHashes,
     maxFileBytes: OUTPUTS_SWEEP_MAX_FILE_BYTES,
     emit: (event) => {
       void bridgedSink.handle(event as RunEvent);
@@ -860,7 +869,7 @@ async function runOutputsSweep(): Promise<SweepResult | null> {
 //      failure, so we drain-until-empty + bounded retry through the SAME bridged
 //      sink the per-call drains use.
 //   2. The outputs sweep — auto-publish `workspace/outputs/` deliverables so
-//      their `document.published` events ride the run stream before it closes.
+//      their `file.published` events ride the run stream before it closes.
 // PiRunner owns its finalize, so wrapping the sink is the only injection point
 // that runs BEFORE the stdout-bridge merges its aggregate into the finalize POST.
 const piEventSink: typeof bridgedSink = {

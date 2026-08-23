@@ -375,7 +375,7 @@ export function skipAuth(path: string, publicPaths: Set<string>, headers?: Heade
   // Unified-runner run-scoped routes: event ingestion
   // (`/api/runs/:runId/events[/finalize|/heartbeat]`) and the agent
   // workspace self-provisioning fetches (`/api/runs/:runId/workspace`,
-  // `/documents`, `/documents/:name`). All authenticate via a Standard
+  // `/files`, `/files/:name`). All authenticate via a Standard
   // Webhooks HMAC signature at the route layer — not via JWT / API key /
   // cookie.
   if (REMOTE_RUN_EVENT_PATH_PATTERN.test(path)) return true;
@@ -393,8 +393,12 @@ export function skipAuth(path: string, publicPaths: Set<string>, headers?: Heade
   return false;
 }
 
+// `documents` is the deprecated pre-#1177 spelling of `files` — a runtime image
+// older than the platform still calls it, and its requests carry a run HMAC and
+// NO session, so leaving it out of this pattern turns every one of them into a
+// 401 the image reports as a fatal provisioning fault.
 const REMOTE_RUN_EVENT_PATH_PATTERN =
-  /^\/api\/runs\/[^/]+\/(events(\/finalize|\/heartbeat)?|workspace|documents(\/[^/]+)?)$/;
+  /^\/api\/runs\/[^/]+\/(events(\/finalize|\/heartbeat)?|workspace|(files|documents)(\/[^/]+)?)$/;
 
 /**
  * Device-flow + CLI-token content-type shim.

@@ -1272,10 +1272,12 @@ const CODE_TO_SPEC_ALLOWLIST = new Set<string>([
   "GET /*",
   // Dev-time docs page served as plain text, not part of the JSON API.
   "GET /llms.txt",
-  // Cookie-less HTML document preview — serves untrusted agent HTML (text/html)
+  // Cookie-less HTML file preview — serves untrusted agent HTML (text/html)
   // from a hardened, session-less route OUTSIDE /api, authorized by a signed
   // token in the URL. Not a JSON API endpoint; intentionally undocumented in the
-  // OpenAPI surface (no typed client, no SDK consumer).
+  // OpenAPI surface (no typed client, no SDK consumer). Second entry: the
+  // deprecated pre-#1177 path, on the same handler.
+  "GET /preview/files/{id}",
   "GET /preview/documents/{id}",
   // MCP per-org endpoint method-not-allowed catch-all: `app.all(MCP_PATH, …)`
   // throws 405 for every verb other than the documented POST + GET channels.
