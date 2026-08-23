@@ -333,8 +333,9 @@ bun test                 # All tests — requires Docker
 bun run db:generate      # Generate Drizzle migrations from schema changes
 bun run db:migrate       # Apply migrations manually (boot applies them automatically)
 bun run build            # Build everything (turbo)
-bun run build-runtime    # Build agent Docker image (only if you modify runtime-pi/)
-bun run build-sidecar    # Build sidecar Docker image (only if you modify runtime-pi/sidecar/)
+bun run build-runtime    # Rebuild the runtime image PAIR — appstrate-pi + appstrate-sidecar
+                         # (only if you modify runtime-pi/; the two are a version contract
+                         #  and are never built one at a time)
 ```
 
 ### Testing

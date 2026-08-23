@@ -19,6 +19,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { SIDECAR_MEMORY_BYTES, SIDECAR_NANO_CPUS } from "./constants.ts";
 import { buildBaseSidecarEnv } from "./sidecar-env.ts";
 import { SidecarExitWatcher } from "./sidecar-exit-watcher.ts";
+import { warnOnRuntimeImageRevisionDrift } from "./runtime-image-pair.ts";
 
 class DockerWorkloadHandle implements WorkloadHandle {
   constructor(
@@ -127,6 +128,16 @@ export class DockerOrchestrator implements RunOrchestrator {
     ]);
     this.verifiedImages.add(env.PI_IMAGE);
     this.verifiedImages.add(env.SIDECAR_IMAGE);
+
+    // Both images are now on the host: compare their build stamps. Same tag on
+    // both refs (already gated at boot) still permits two different builds —
+    // `:latest` rebuilt on one side only is the dominant dev failure — and a
+    // mismatched pair otherwise stays invisible until a run fails with an
+    // opaque upstream error. Advisory: never blocks initialize.
+    await warnOnRuntimeImageRevisionDrift({
+      piImage: env.PI_IMAGE,
+      sidecarImage: env.SIDECAR_IMAGE,
+    });
   }
 
   async shutdown(): Promise<void> {
