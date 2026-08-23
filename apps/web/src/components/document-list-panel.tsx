@@ -24,32 +24,42 @@ import {
 } from "../hooks/use-documents";
 import { ErrorState, EmptyState } from "./page-states";
 import { CardGrid } from "./card-grid";
+import { DataTable, columnMenu, visibleColumns } from "./data-table";
+import type { ColumnMenuSpec } from "./list-toolbar";
 import { DocumentTile } from "./document-tile";
+import { useDocumentColumns } from "./document-columns";
 import { DocumentPreview } from "./document-preview";
 import { ConfirmModal } from "./confirm-modal";
+import { documentPreviewHref } from "../lib/documents";
+import { useColumnVisibility } from "../stores/column-visibility-store";
 
 export type PurposeFilter = "all" | "agent_output" | "user_upload";
 
 const PURPOSE_TABS: PurposeFilter[] = ["all", "agent_output", "user_upload"];
+const ignorePurposeChange = () => undefined;
 
 export function DocumentListPanel({
   documents,
   isLoading,
   error,
-  purpose,
-  onPurposeChange,
+  purpose = "all",
+  onPurposeChange = ignorePurposeChange,
   empty,
   showRunLink,
   runId,
   footer,
   onDeleted,
   onKept,
+  display = "cards",
+  showPurposeTabs = true,
+  toolbar,
+  tableLabel,
 }: {
   documents: DocumentDto[];
   isLoading: boolean;
   error: unknown;
-  purpose: PurposeFilter;
-  onPurposeChange: (p: PurposeFilter) => void;
+  purpose?: PurposeFilter;
+  onPurposeChange?: (p: PurposeFilter) => void;
   empty: { message: string; hint?: string; compact?: boolean };
   /** Gallery tiles link to the producing run. */
   showRunLink?: boolean;
@@ -69,6 +79,13 @@ export function DocumentListPanel({
    * the pinned row loses its expiry badge without a full remount.
    */
   onKept?: (id: string) => void;
+  /** The main Documents page is table-only; compact run tabs keep the gallery. */
+  display?: "cards" | "table";
+  /** The main page puts this dimension in ListToolbar instead of a tab strip. */
+  showPurposeTabs?: boolean;
+  /** Apparatus owned by the caller, built from the table's real columns. */
+  toolbar?: (context: { columns: ColumnMenuSpec }) => ReactNode;
+  tableLabel?: string;
 }) {
   const { t } = useTranslation("documents");
   const download = useDocumentDownload();
@@ -77,6 +94,7 @@ export function DocumentListPanel({
   const location = useLocation();
   const navigate = useNavigate();
   const [pendingDelete, setPendingDelete] = useState<DocumentDto | null>(null);
+  const visibility = useColumnVisibility("documents");
 
   // Preview is URL-addressable via a `?preview=<doc_id>` param so it can be
   // deep-linked and shared, and the browser back button closes it. A deep-linked
@@ -144,56 +162,79 @@ export function DocumentListPanel({
     );
   };
 
+  const pendingKeepId = keepDoc.isPending ? (keepDoc.variables?.params.path.id ?? null) : null;
+  const allColumns = useDocumentColumns({
+    pendingKeepId,
+    showRunLink,
+    onDownload: (doc) => void download(doc.id, doc.name),
+    onKeep,
+    onDelete,
+  });
+  const columns = visibleColumns(allColumns, visibility.hidden);
+  const emptyState = (
+    <EmptyState message={empty.message} hint={empty.hint} compact={empty.compact} icon={FileText} />
+  );
+
   return (
     <>
-      <div className="mb-4 flex items-center gap-1">
-        {PURPOSE_TABS.map((p) => (
-          <Button
-            key={p}
-            variant={purpose === p ? "secondary" : "ghost"}
-            size="sm"
-            onClick={() => onPurposeChange(p)}
-          >
-            {t(`filter.${p}`)}
-          </Button>
-        ))}
-      </div>
+      {toolbar?.({ columns: columnMenu(allColumns, visibility) })}
+
+      {showPurposeTabs && (
+        <div className="mb-4 flex items-center gap-1">
+          {PURPOSE_TABS.map((p) => (
+            <Button
+              key={p}
+              variant={purpose === p ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => onPurposeChange(p)}
+            >
+              {t(`filter.${p}`)}
+            </Button>
+          ))}
+        </div>
+      )}
 
       <div className="flex flex-col gap-3">
-        {/* The gallery is a card grid and always was — it just drew its own,
-            with the states above it in the wrong order (loading before failure,
-            so a 500 under a stale page showed a spinner). `min` is 10rem here:
-            these cards are thumbnails, and the family's 20rem default would
-            make each one a poster. */}
-        <CardGrid
-          items={documents}
-          min="10rem"
-          itemKey={(doc) => doc.id}
-          isLoading={isLoading}
-          isError={Boolean(error)}
-          error={<ErrorState message={getErrorMessage(error)} compact />}
-          empty={
-            <EmptyState
-              message={empty.message}
-              hint={empty.hint}
-              compact={empty.compact}
-              icon={FileText}
-            />
-          }
-          renderCard={(doc) => (
-            <DocumentTile
-              doc={doc}
-              onDownload={download}
-              onDelete={onDelete}
-              onKeep={onKeep}
-              onPreview={(d) => setPreviewParam(d.id)}
-              showRunLink={showRunLink}
-              direction={runId ? (doc.run_id === runId ? "output" : "input") : undefined}
-            />
-          )}
-        />
-        {/* "Load more" belongs to a list that has rows to extend. */}
-        {documents.length > 0 && footer}
+        {display === "table" ? (
+          <DataTable
+            label={tableLabel ?? t("tableLabel")}
+            columns={columns}
+            rows={documents}
+            rowKey={(doc) => doc.id}
+            rowHref={(doc) =>
+              doc.capabilities.preview ? documentPreviewHref(location, doc.id) : undefined
+            }
+            rowLabel={(doc) => doc.name}
+            isLoading={isLoading}
+            isError={Boolean(error)}
+            error={<ErrorState message={getErrorMessage(error)} compact />}
+            empty={emptyState}
+          />
+        ) : (
+          /* Run-detail documents stay a thumbnail gallery. The main Documents
+             destination chooses the table above and offers no view switch yet. */
+          <CardGrid
+            items={documents}
+            min="10rem"
+            itemKey={(doc) => doc.id}
+            isLoading={isLoading}
+            isError={Boolean(error)}
+            error={<ErrorState message={getErrorMessage(error)} compact />}
+            empty={emptyState}
+            renderCard={(doc) => (
+              <DocumentTile
+                doc={doc}
+                onDownload={download}
+                onDelete={onDelete}
+                onKeep={onKeep}
+                onPreview={(d) => setPreviewParam(d.id)}
+                showRunLink={showRunLink}
+                direction={runId ? (doc.run_id === runId ? "output" : "input") : undefined}
+              />
+            )}
+          />
+        )}
+        {(display === "table" || documents.length > 0) && footer}
       </div>
 
       <ConfirmModal

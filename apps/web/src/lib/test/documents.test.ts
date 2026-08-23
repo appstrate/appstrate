@@ -4,6 +4,7 @@ import { describe, expect, it } from "bun:test";
 import { File as FileIcon, FileArchive, FileCode, FileImage, FileText } from "lucide-react";
 import {
   documentExpiryInfo,
+  documentPreviewHref,
   documentRunHref,
   isImageMime,
   isMarkdownDoc,
@@ -47,6 +48,26 @@ describe("documentRunHref", () => {
   it("returns undefined without a run or a package id", () => {
     expect(documentRunHref(doc({ run_id: null, packageId: "@acme/writer" }))).toBeUndefined();
     expect(documentRunHref(doc({ run_id: "run_1", packageId: null }))).toBeUndefined();
+  });
+});
+
+describe("documentPreviewHref", () => {
+  it("adds the addressable preview while preserving filters and the hash", () => {
+    expect(
+      documentPreviewHref(
+        { pathname: "/documents", search: "?purpose=user_upload&foo=bar", hash: "#recent" },
+        "doc_1",
+      ),
+    ).toBe("/documents?purpose=user_upload&foo=bar&preview=doc_1#recent");
+  });
+
+  it("replaces an existing preview id", () => {
+    expect(
+      documentPreviewHref(
+        { pathname: "/documents", search: "?preview=doc_old", hash: "" },
+        "doc_new",
+      ),
+    ).toBe("/documents?preview=doc_new");
   });
 });
 

@@ -20,10 +20,10 @@ interface ListViewState {
  * servers are the same catalogue rendered three times, and someone who wants
  * the table for one wants it for the others.
  */
-function createListViewStore(storageKey: string) {
+function createListViewStore(storageKey: string, defaultView: ListView = "cards") {
   const stored = localStorage.getItem(storageKey);
   return create<ListViewState>()((set) => ({
-    view: stored === "table" ? "table" : "cards",
+    view: stored === "cards" || stored === "table" ? stored : defaultView,
     setView: (view) => {
       localStorage.setItem(storageKey, view);
       set({ view });
@@ -32,3 +32,4 @@ function createListViewStore(storageKey: string) {
 }
 
 export const usePackageViewStore = createListViewStore("appstrate-package-view");
+export const useIntegrationViewStore = createListViewStore("appstrate-integration-view", "table");

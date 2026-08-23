@@ -17,7 +17,11 @@ import { useOrgStorage } from "../hooks/use-org-storage";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { useDocuments, type DocumentDto } from "../hooks/use-documents";
 import { PageHeader } from "../components/page-header";
-import { DocumentListPanel, type PurposeFilter } from "../components/document-list-panel";
+import { DocumentListPanel } from "../components/document-list-panel";
+import { ListFooter, ListToolbar } from "../components/list-toolbar";
+import { useListParams } from "../lib/list-params";
+
+const PURPOSES = ["agent_output", "user_upload"] as const;
 
 /**
  * A single storage-usage line ("X used / Y limit") with a conditional warning
@@ -59,14 +63,43 @@ export function DocumentsPage() {
 }
 
 function DocumentsPageContent() {
+  const list = useListParams(["purpose"]);
+  const purposes = list.values("purpose", PURPOSES);
+  const effectivePurpose = purposes.length === 1 ? purposes[0] : undefined;
+
+  // The filter signature remounts only the pagination accumulator. This is the
+  // same derived reset used by the other lists: no effect mirrors URL state,
+  // and changing the filter cannot leave pages from the previous answer mixed
+  // into the next one.
+  return (
+    <DocumentsCollection
+      key={purposes.join(",")}
+      purposes={purposes}
+      effectivePurpose={effectivePurpose}
+      onPurposeChange={list.setValues("purpose")}
+      onReset={list.reset}
+    />
+  );
+}
+
+function DocumentsCollection({
+  purposes,
+  effectivePurpose,
+  onPurposeChange,
+  onReset,
+}: {
+  purposes: Array<(typeof PURPOSES)[number]>;
+  effectivePurpose: (typeof PURPOSES)[number] | undefined;
+  onPurposeChange: (values: string[]) => void;
+  onReset: () => void;
+}) {
   const { t } = useTranslation(["documents", "common"]);
 
-  const [purpose, setPurpose] = useState<PurposeFilter>("all");
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [loadedPages, setLoadedPages] = useState<DocumentDto[]>([]);
 
   const { data, isLoading, error } = useDocuments({
-    purpose: purpose === "all" ? undefined : purpose,
+    purpose: effectivePurpose,
     startingAfter: cursor,
     limit: 25,
   });
@@ -88,11 +121,10 @@ function DocumentsPageContent() {
     return out;
   }, [loadedPages, currentPage]);
 
-  const resetPaging = (next: PurposeFilter) => {
-    setPurpose(next);
-    setCursor(undefined);
-    setLoadedPages([]);
-  };
+  const filtering = purposes.length > 0;
+  const countLabel = hasMore
+    ? t("page.countLoaded", { count: documents.length })
+    : t("page.count", { count: documents.length });
 
   return (
     <div>
@@ -104,30 +136,55 @@ function DocumentsPageContent() {
         documents={documents}
         isLoading={isLoading}
         error={error}
-        purpose={purpose}
-        onPurposeChange={resetPaging}
-        empty={{ message: t("page.empty"), hint: t("page.emptyHint") }}
+        display="table"
+        showPurposeTabs={false}
+        tableLabel={t("tableLabel")}
+        toolbar={({ columns }) => (
+          <ListToolbar
+            filters={[
+              {
+                id: "purpose",
+                label: t("column.purpose"),
+                values: purposes,
+                onChange: onPurposeChange,
+                options: [
+                  { value: "agent_output", label: t("filter.agent_output") },
+                  { value: "user_upload", label: t("filter.user_upload") },
+                ],
+              },
+            ]}
+            onReset={onReset}
+            columns={columns}
+          />
+        )}
+        empty={
+          filtering
+            ? { message: t("page.noMatch"), compact: true }
+            : { message: t("page.empty"), hint: t("page.emptyHint") }
+        }
         showRunLink
         onDeleted={(id) => setLoadedPages((prev) => prev.filter((d) => d.id !== id))}
         onKept={(id) =>
           setLoadedPages((prev) => prev.map((d) => (d.id === id ? { ...d, expiresAt: null } : d)))
         }
         footer={
-          hasMore && (
-            <Button
-              variant="outline"
-              className="mt-2"
-              onClick={() => {
-                const last = currentPage[currentPage.length - 1];
-                if (last) {
-                  setLoadedPages((prev) => [...prev, ...currentPage]);
-                  setCursor(last.id);
-                }
-              }}
-            >
-              {t("page.loadMore")}
-            </Button>
-          )
+          <ListFooter count={isLoading || error ? undefined : countLabel}>
+            {hasMore && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  const last = currentPage[currentPage.length - 1];
+                  if (last) {
+                    setLoadedPages((prev) => [...prev, ...currentPage]);
+                    setCursor(last.id);
+                  }
+                }}
+              >
+                {t("page.loadMore")}
+              </Button>
+            )}
+          </ListFooter>
         }
       />
     </div>

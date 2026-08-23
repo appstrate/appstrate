@@ -9,7 +9,7 @@ says where things stand, why the non-obvious calls were made, and what is still
 open — so the work can be picked up cold.
 
 **Picking it up cold, read in this order:** "How the work goes" just below,
-then **"Open", which now opens on NEXT, IN ORDER** — three numbered blocks that
+then **"Open", which now opens on NEXT, IN ORDER**: the numbered blocks that
 are the work, written for someone with no other context. Then "Form pattern",
 which the first of those blocks is entirely about, and "The grammar", which
 frames the rest. The sections in between describe what is already built, and are
@@ -160,6 +160,11 @@ two, the agent package itself included — so the memory panel and the connectio
 picker had never once been seen with anything in them. The reading that
 reframed step A.2 was only possible after that, and it found three different
 things where the plan said one.
+
+The integration catalogue is a permanent lab screen now
+(`/integrations?catalogue=1`). It covers the addressable `PanelDialog` itself,
+not only the collection behind it, so the catalogue's cards, filters, empty and
+error states stay visible at desktop and phone widths.
 
 The guard watches the browser rather than scanning the source, and that is the
 whole design. The obvious version greps the hooks for their endpoint strings;
@@ -357,15 +362,16 @@ Runs is the first column set (`dt-runs`): number, agent, status, trigger,
 run's error was invisible on the very screen whose job is to say which one
 broke.
 
+Integrations and the main Documents destination joined the table family on 23
+August. Documents has Name, Purpose, Type, Size, Created, Retention and Actions;
+Integrations has Name, Origin, Version, Status and Actions. Both sets are in the
+column-floor guard and keep identity plus Actions at tier one.
+
 Still open on the table, deliberately:
 
 - **Sortable heads.** The reference has them (`.th-sort`, `.th-sort.active svg`
   in `--accent`). `GET /api/runs` takes no sort parameter, so the head would
   either lie or sort one page of fifteen. It waits for the endpoint.
-- **Integrations** are the one list still card-only. That page is its own
-  (its own tabs, its own client-side search over the loaded catalogue), so it
-  is also where a real `lt-search` can land first — the data is already in the
-  browser there.
 - The heavy scenario pages at fifteen rows like the real screen does, so what
   it proves is pagination and the widest content, not volume in one viewport.
   The 200 rows are still the right fixture: they are what makes "Page 1 sur 14"
@@ -547,6 +553,9 @@ are system, which are running, at what version, down one column.
   link to a list should open on the reader's habit rather than impose the
   sender's. One store for the whole family — someone who wants the table for
   agents wants it for skills.
+- Integrations has its own localStorage key and defaults to the table. It is a
+  separate collection preference, so switching the package family to cards
+  does not silently move integrations with it.
 - **The count is unconditional now, and it is under the body, not on the bar.**
   It used to render only while a search was running, on the reasoning that with
   nothing filtering it repeats what is on screen. That reasoning does not
@@ -1112,10 +1121,12 @@ included (`lib/list-params.ts`).
    seeing that is the whole of what this entry now says. Read and LOOKED AT on
    22 August, once the fixtures made the three reachable at all:
 
-   - **Documents is a CARD GRID**, not a third body. It drew
+   - **Documents inside a run is a CARD GRID**, not a third body. It drew
      `repeat(auto-fill, minmax(10rem, 1fr))` by hand — the same technique
      `CardGrid` already owns, at a smaller floor. DONE 22 August: the floor is
-     a prop and the gallery is on the family's grid.
+     a prop and the run's gallery is on the family's grid. The main Documents
+     destination is table-only as of 23 August; that later product decision
+     does not change the compact, thumbnail-led run context.
    - **Memory is the third body.** Rows stacked, one row a self-contained
      BLOCK rather than cells aligned into columns, in two tiers (pinned slots
      over the archive) inside collapsible sections that carry their own count.
@@ -1662,7 +1673,84 @@ entered the known systemd-unit spinner. It was interrupted after the same
 infrastructure failure reproduced across the DB-backed groups; the touched web
 package remains green.
 
-**8. Accessibility, which nothing here has ever checked.** The branch
+**8. ~~Harmonise the main Documents and Integrations collections.~~ Done 23
+August.** Documents is table-only for now, by explicit product decision. Its
+card view is deferred until that view can be judged on its own. The run-detail
+Documents tab remains the compact thumbnail gallery it already was. The main
+page now uses `ListToolbar`, `DataTable` and `ListFooter`, with one comparable
+fact in each of Name, Purpose, Type, Size, Created and Retention. Actions keeps
+the real server capabilities: Download is direct, while Open run, Keep and
+Delete are secondary. Preview remains a real URL (`?preview=<id>`), and opening
+it preserves the purpose filter plus unrelated URL state.
+
+The purpose filter is in the URL. There is deliberately no search field:
+`GET /api/documents` is paginated and has no `q`, so client-side search would
+pretend to cover documents it had never loaded. The footer says how many rows
+are loaded while `hasMore` is true, becomes the final count when the endpoint
+is exhausted, and still renders an honest zero for a filtered miss. Storage
+usage and keyset Load more remain.
+
+Integrations no longer has the mixed `Activated / Installed` tabs. The main
+collection is the organisation's administrable set: every custom integration,
+including inactive custom records, plus activated system integrations. That is
+the explicit `local || active` predicate, with a contract test so an inactive
+custom object cannot become unreachable. The endpoint is drained page by page
+before client-side search or filters are offered. Search is therefore honest;
+Status and Origin are the two URL filters. Authentication is excluded because
+one integration may declare several auth methods, so one summary-row value
+would be ambiguous rather than a reliable filter.
+
+The previous decision that Integrations should have no view switch is
+superseded. It was correct for the old page only because that page mixed two
+collections, the organisation's integrations and the system catalogue. Once
+the catalogue moved to its own addressable `PanelDialog`, cards and table became
+two views of one main collection, so the switch is coherent. It has a separate
+local preference and defaults to the table. The catalogue itself stays cards,
+with its own honest search and Status filter. They use distinct
+`catalogue_q`/`catalogue_status` URL keys, so a shared catalogue URL reproduces
+what its sender was looking at without colliding with the main collection.
+Active state is one state badge, while origin and version are plain facts. Its
+cards keep the real route to the detail and activation flow. Non-admins may
+browse and consult; only admins see `+ Custom integration`.
+
+Both list actions live at the right of the toolbar. `+ Custom integration`
+keeps `/integrations/new`, and `Browse catalogue` pushes `?catalogue=1`; browser
+Back reverses catalogue filters in order and then closes the panel. The close
+control returns directly to the location from which the catalogue was opened,
+so Back from the closed page cannot reopen it. A cold catalogue URL closes by
+removing its catalogue-only keys. No install endpoint or authentication
+taxonomy was invented.
+
+The lab covers Documents, Integrations and the catalogue across nominal,
+empty, heavy and error at 1440 and 390: 24 captures, no missing fixture. The
+nominal and error surfaces were inspected visually. The empty scenario still
+lands on the documented onboarding flow, so a zero-result integration URL was
+also exercised directly. Opening the catalogue, browser Back, the card switch
+and mobile viewport width were exercised in Playwright. Geometry sweeps report
+zero overflow at every width. Documents measures 1096px with seven columns at
+1440 and 348px with Name 232px plus Actions 80px at 390. Integrations measures
+1096px with five columns at 1440 and 348px with Name 264px plus Actions 48px at 390.
+
+The fixed-point review found three standards gaps. The all-pages integration
+query now uses the typed-client `[method, path, init]` key shape, the catalogue
+filters moved from component state into their distinct URL keys, and the
+Origin/Status classifications used by filters, cards and columns come from one
+pair of helpers. The Spec axis raised the root gate limitation below and
+questioned the catalogue close implementation. The latter was checked against
+the two simultaneous contracts instead of changed mechanically: pushed filters
+make Back undo the latest filter first, while the close control traverses the
+known catalogue history depth and does not leave an entry that can reopen it.
+Both paths were exercised in the browser.
+
+The touched web package is green for `TEST_TIER=0 bun test apps/web` (601 pass).
+`bun run check` is green after providing the worktree's documented ignored
+`.env`, with the same nine pre-existing warnings. Root `bun test` could not
+reach a useful summary: Docker was unavailable in preload, database cleanup
+then returned `ECONNREFUSED`, and the systemd-unit spinner kept timing out. It
+was interrupted after the same infrastructure failure described by the prior
+blocks; no touched web test remains failing.
+
+**9. Accessibility, which nothing here has ever checked.** The branch
 re-declares ARIA roles on the table because this file demands it, and that is
 the whole of it: not one contrast ratio, keyboard path or touch target has ever
 been measured. Meanwhile the last days added dozens of controls — icon buttons
@@ -1886,7 +1974,8 @@ decision, twice — do not start it), and library browsing through `PanelDialog`
   takes the org's identity down with it the day the site is redone. The cost is
   not the column, it is validation, a resized variant, deletion with the org,
   and the settings screen.
-- **Library browsing** (skills, integrations, templates) reuses `PanelDialog`.
+- **Library browsing** (skills and templates) reuses `PanelDialog`.
+  Integrations uses it already, as recorded in Open block 7.
 - **The page-action rule is applied to LIST screens only.** On a screen with a
   list, the action sits at the right end of the bar; a screen without one keeps
   it at title height in `PageHeader`. Olivier's ask is that it be the same place
@@ -1894,30 +1983,14 @@ decision, twice — do not start it), and library browsing through `PanelDialog`
   content. Getting there means the bar (or something bar-shaped) on every screen
   that has an action, which is a sweep of the detail and settings pages, done on
   purpose rather than in passing.
-- ~~**Integrations is the one list still card-only.**~~ Reframed and done on 22
-  August, and the reframing is the point. The entry treated integrations as ONE
-  list that was missing its table. The product owner corrected it: that screen
-  holds **two different kinds of thing**, and they do not want the same body.
-
-  - **The org's own integrations** — installed, and under the rule coming next,
-    installed MEANS activated, since installing will require filling the
-    activation form. Those are platform objects like its agents, its skills and
-    its MCP servers, so they take **the table those take**: the same
-    `usePackageColumns`, not a lookalike. An integration projects onto the same
-    `CardItem` the other package lists read, so the reuse is literal.
-  - **The catalogue Appstrate offers** — what you BROWSE to choose one. Cards,
-    because a card carries a description at a length you can read, which is
-    what choosing needs. That is the recorded reason cards stayed for the
-    package family, and it is the half of the old entry that was right.
-
-  So it is not a view toggle. A toggle offers two ways of seeing ONE list; here
-  there are two lists, and each has the body its job asks for.
-
-  Reusing the package column set surfaced a defect it had been carrying: only
-  an AGENT can be running or be run, so the `state` column and the run action
-  are dead on skills and MCP servers — a column of em dashes, on two of the
-  three lists, since the set was written. `usePackageColumns` takes what the
-  list HOLDS now and drops both when nothing in it can ever be run.
+- ~~**Integrations is the one list still card-only.**~~ Superseded by the 23
+  August product decision recorded in Open block 7. The 22 August decision
+  correctly separated the organisation collection from the catalogue, but its
+  conclusion, no switch, still assumed both had to remain beside one another on
+  the page. The catalogue now lives in its own `PanelDialog`. The remaining
+  main body is one collection, so its cards/table switch is honest. It uses a
+  dedicated integration column set because Origin, Version and activation
+  Status are integration facts, not the package family's running state.
 
 ## Chat
 

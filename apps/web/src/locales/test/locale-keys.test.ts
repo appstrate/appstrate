@@ -160,6 +160,8 @@ describe("t() keys", () => {
  */
 const DYNAMIC_KEY_PREFIXES = [
   "filter.", // components/document-list-panel.tsx — t(`filter.${p}`)
+  "purpose.", // components/document-columns.tsx — t(`purpose.${doc.purpose}`)
+  "type.", // components/document-columns.tsx — t(`type.${mimeKind(doc.mime)}`)
   "generation.level.", // packages/module-chat/src/ui/model-select.tsx
   "generation.levelShort.", // packages/module-chat/src/ui/model-select.tsx
   "integration.auth.type.", // components/integration-connect/{inline-connect-button,integration-connection-picker}.tsx

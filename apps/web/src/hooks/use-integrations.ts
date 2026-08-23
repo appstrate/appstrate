@@ -125,6 +125,43 @@ export function useIntegrations() {
   );
 }
 
+/**
+ * Fetch the complete integration corpus for list surfaces that search and
+ * filter client-side. The endpoint is paginated at 100 rows, so treating its
+ * default first page as a complete catalogue would make the toolbar lie as
+ * soon as an organisation crosses that boundary.
+ */
+export function useAllIntegrations() {
+  const scope = useOrgScope();
+  return useQuery({
+    queryKey: [
+      "get",
+      "/api/integrations",
+      { params: { query: { limit: 100, offset: 0 }, header: scope.header } },
+    ],
+    enabled: scope.enabled,
+    queryFn: async (): Promise<IntegrationSummaryWire[]> => {
+      const all: IntegrationSummaryWire[] = [];
+      const limit = 100;
+      let offset = 0;
+
+      for (;;) {
+        const { data: page } = await client.GET("/api/integrations", {
+          params: {
+            query: { limit, offset },
+            header: scope.header,
+          },
+        });
+        if (!page) throw new Error("Integration catalogue returned no response body");
+        const rows = page.data as IntegrationSummaryWire[];
+        all.push(...rows);
+        if (!page.hasMore || rows.length === 0) return all;
+        offset += rows.length;
+      }
+    },
+  });
+}
+
 export function useIntegrationDetail(packageId: string | undefined) {
   const scope = useOrgScope();
   return $api.useQuery(

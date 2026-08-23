@@ -5,18 +5,26 @@ import { useQuery } from "@tanstack/react-query";
 import { Icon, loadIcon } from "@iconify/react";
 import { Puzzle } from "lucide-react";
 
-const BOX = "size-10 shrink-0 rounded-md";
+const BOX = { sm: "size-7", md: "size-10" } as const;
 
-function PlaceholderIcon() {
+type IntegrationIconSize = keyof typeof BOX;
+
+function boxClass(size: IntegrationIconSize): string {
+  return `${BOX[size]} shrink-0 rounded-md`;
+}
+
+function PlaceholderIcon({ size }: { size: IntegrationIconSize }) {
   return (
-    <div className={`bg-muted text-muted-foreground flex items-center justify-center ${BOX}`}>
-      <Puzzle size={20} />
+    <div
+      className={`bg-muted text-muted-foreground flex items-center justify-center ${boxClass(size)}`}
+    >
+      <Puzzle className={size === "sm" ? "size-4" : "size-5"} />
     </div>
   );
 }
 
-function SkeletonIcon() {
-  return <div className={`bg-muted animate-pulse ${BOX}`} aria-hidden="true" />;
+function SkeletonIcon({ size }: { size: IntegrationIconSize }) {
+  return <div className={`bg-muted animate-pulse ${boxClass(size)}`} aria-hidden="true" />;
 }
 
 /**
@@ -26,7 +34,7 @@ function SkeletonIcon() {
  * flight, the icon once resolved, the neutral placeholder when the id resolves
  * to nothing.
  */
-function IconifyIcon({ id }: { id: string }) {
+function IconifyIcon({ id, size }: { id: string; size: IntegrationIconSize }) {
   const { isPending, isError } = useQuery({
     queryKey: ["iconify-icon", id],
     queryFn: () => loadIcon(id),
@@ -35,21 +43,21 @@ function IconifyIcon({ id }: { id: string }) {
     retry: false,
   });
 
-  if (isPending) return <SkeletonIcon />;
-  if (isError) return <PlaceholderIcon />;
-  return <Icon icon={id} className={`${BOX} p-1.5`} />;
+  if (isPending) return <SkeletonIcon size={size} />;
+  if (isError) return <PlaceholderIcon size={size} />;
+  return <Icon icon={id} className={`${boxClass(size)} ${size === "sm" ? "p-1" : "p-1.5"}`} />;
 }
 
-function UrlIcon({ src }: { src: string }) {
+function UrlIcon({ src, size }: { src: string; size: IntegrationIconSize }) {
   const [state, setState] = useState<"loading" | "ok" | "error">("loading");
-  if (state === "error") return <PlaceholderIcon />;
+  if (state === "error") return <PlaceholderIcon size={size} />;
   return (
     <>
-      {state === "loading" && <SkeletonIcon />}
+      {state === "loading" && <SkeletonIcon size={size} />}
       <img
         src={src}
         alt=""
-        className={`${BOX} object-contain ${state === "ok" ? "" : "hidden"}`}
+        className={`${boxClass(size)} object-contain ${state === "ok" ? "" : "hidden"}`}
         onLoad={() => setState("ok")}
         onError={() => setState("error")}
       />
@@ -63,8 +71,14 @@ function UrlIcon({ src }: { src: string }) {
  * so a skeleton shows while loading and a neutral placeholder on failure or
  * when no `icon` is declared.
  */
-export function IntegrationIcon({ src }: { src?: string }) {
-  if (!src) return <PlaceholderIcon />;
+export function IntegrationIcon({
+  src,
+  size = "md",
+}: {
+  src?: string;
+  size?: IntegrationIconSize;
+}) {
+  if (!src) return <PlaceholderIcon size={size} />;
   const isUrl = /^(https?:)?\/\//.test(src) || src.startsWith("data:");
-  return isUrl ? <UrlIcon src={src} /> : <IconifyIcon id={src} />;
+  return isUrl ? <UrlIcon src={src} size={size} /> : <IconifyIcon id={src} size={size} />;
 }

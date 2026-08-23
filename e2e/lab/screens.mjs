@@ -24,6 +24,7 @@ export const SCREENS = [
   { path: "/skills", name: "skills" },
   { path: "/mcp-servers", name: "mcp-servers" },
   { path: "/integrations", name: "integrations" },
+  { path: "/integrations?catalogue=1", name: "integration-catalogue" },
   { path: "/integrations/@appstrate/google-drive", name: "integration-detail" },
   {
     path: "/integrations/@appstrate/google-drive#configuration",

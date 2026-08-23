@@ -17,6 +17,7 @@ import {
   FileVideo,
   type LucideIcon,
 } from "lucide-react";
+import type { Location } from "react-router-dom";
 
 /** Minimal shape the helpers read — a structural subset of the `DocumentDto`. */
 export interface DocumentLike {
@@ -90,6 +91,21 @@ export function mimeIconFor(mime: string): LucideIcon {
 export function documentRunHref(doc: DocumentLike): string | undefined {
   if (!doc.run_id || !doc.packageId) return undefined;
   return `/agents/${doc.packageId}/runs/${encodeURIComponent(doc.run_id)}`;
+}
+
+/**
+ * Addressable preview URL for a table row. Existing filters, unrelated query
+ * keys and the hash survive, so opening a document is one reversible location
+ * change rather than local UI state.
+ */
+export function documentPreviewHref(
+  location: Pick<Location, "pathname" | "search" | "hash">,
+  id: string,
+): string {
+  const params = new URLSearchParams(location.search);
+  params.set("preview", id);
+  const search = params.toString();
+  return `${location.pathname}${search ? `?${search}` : ""}${location.hash}`;
 }
 
 /** Documents inside this window (or already past) get the amber "expiring" state. */

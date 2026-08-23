@@ -31,6 +31,8 @@ import { useOAuthClientColumns } from "../../modules/oidc/components/oauth-clien
 import { useCliSessionColumns } from "../../pages/org-settings/cli-session-columns.tsx";
 import { useEndUserColumns } from "../../pages/end-user-columns.tsx";
 import { useWebhookColumns } from "../../modules/webhooks/components/webhook-columns.tsx";
+import { useDocumentColumns } from "../document-columns.tsx";
+import { useIntegrationListColumns } from "../../pages/integration-list-columns.tsx";
 import { render } from "./run-fixture.tsx";
 
 /**
@@ -172,6 +174,22 @@ const SETS = {
       }),
     ),
   webhooks: () => columnsFrom(() => useWebhookColumns()),
+  documents: () =>
+    columnsFrom(() =>
+      useDocumentColumns({
+        pendingKeepId: null,
+        showRunLink: true,
+        onDownload: () => {},
+        onKeep: () => {},
+        onDelete: () => {},
+      }),
+    ),
+  integrations: () =>
+    columnsFrom(() =>
+      useIntegrationListColumns({
+        onOpen: () => {},
+      }),
+    ),
 };
 
 describe.each(Object.entries(SETS))("the %s column set", (_name, load) => {
