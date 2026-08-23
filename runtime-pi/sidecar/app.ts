@@ -28,6 +28,7 @@ import {
   isAliasInferenceCall,
   LLM_PASSTHROUGH_RESPONSE_HEADERS,
 } from "./model-swap.ts";
+import { handlePiMessagesRequest } from "./pi-messages-backend.ts";
 import { applyOauthBearerSwap } from "@appstrate/core/oauth-bearer-swap";
 import {
   DEFAULT_INLINE_OUTPUT_TOKENS,
@@ -625,11 +626,14 @@ export function createApp(deps: AppDeps): Hono {
     // reaching the provider, not hiding it.
     if (apiKeyConfig.modelSwap) {
       const swap = apiKeyConfig.modelSwap;
-      if (!isAliasInferenceCall(swap.apiShape, method, path)) {
+      if (!isAliasInferenceCall(swap, method, path)) {
         logger.warn("llm alias: non-inference request refused", {
           method,
           path,
-          apiShape: swap.apiShape,
+          // The CLIENT protocol only. `backingApiShape` narrows the candidate
+          // vendor set and these logs are operator-visible on a surface whose
+          // whole contract is that the backing stays private.
+          clientApiShape: swap.clientApiShape,
         });
         // Same neutral envelope as every other alias refusal — a distinct
         // shape would itself be a signal to probe with. 404 reads as "no such
@@ -638,6 +642,37 @@ export function createApp(deps: AppDeps): Hono {
           status: 404,
           headers: { "Content-Type": "application/json" },
         });
+      }
+
+      // The alias speaks a protocol this boundary TERMINATES rather than
+      // proxies: the container emits pi-ai's vendor-neutral `pi-messages` so
+      // that no vendor request shape or response dialect ever reaches it, and
+      // the sidecar re-originates the call against the real backing through
+      // pi-ai (`pi-messages-backend.ts`). Everything below this branch — the
+      // placeholder→key header swap, the verbatim body forward, the response
+      // passthrough — is the PROXY path, and none of it applies.
+      if (swap.clientApiShape !== swap.backingApiShape) {
+        const buffered = await bufferLlmBodyBounded(c, MAX_REQUEST_BODY_SIZE);
+        if (buffered instanceof Response) return buffered;
+        return handlePiMessagesRequest(
+          {
+            llm: apiKeyConfig,
+            swap,
+            // The REAL limits. The sidecar is trusted with them (its own
+            // token-budget guard already depends on that); only the container's
+            // copy is rounded onto the masking ladder.
+            limits: {
+              ...(config.modelContextWindow !== undefined
+                ? { modelContextWindow: config.modelContextWindow }
+                : {}),
+              ...(config.modelMaxTokens !== undefined
+                ? { modelMaxTokens: config.modelMaxTokens }
+                : {}),
+            },
+          },
+          c.req.raw,
+          buffered,
+        );
       }
     }
 

@@ -38,9 +38,10 @@ import {
   type Transport,
 } from "./pi-sdk.ts";
 import { scheduleDeadlineNudges } from "./deadline-nudges.ts";
+import { ALIAS_PI_PROVIDER_KEY } from "./provider-map.ts";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import {
-  anthropicReasoningBudgetTokens,
+  anthropicThinkingBudgets,
   type ModelReasoningLevel,
 } from "@appstrate/core/model-generation";
 import { deriveResponseReserveTokens } from "@appstrate/core/token-budget";
@@ -125,9 +126,11 @@ function prepareAnthropicThinkingBudgets(
   model: PiModelConfig,
   level: ModelReasoningLevel,
 ): PiThinkingBudgets | undefined {
-  if (model.api !== "anthropic-messages" || level === "off") return undefined;
-  const piLevel: PiThinkingBudgetLevel = level === "xhigh" || level === "max" ? "high" : level;
-  return { [piLevel]: anthropicReasoningBudgetTokens(level) };
+  if (model.api !== "anthropic-messages") return undefined;
+  // The rule itself lives in core: the sidecar has to apply the identical one
+  // when it re-originates an ALIASED run, whose container speaks `pi-messages`
+  // and never reaches this branch.
+  return anthropicThinkingBudgets(level);
 }
 
 /**
@@ -182,17 +185,30 @@ export function prepareRequestedThinkingLevel(
 /**
  * Install an ephemeral credential on Pi 0.84's ModelRuntime.
  *
- * OpenAI Codex is OAuth-only in Pi's built-in catalog, so `setRuntimeApiKey`
- * deliberately refuses it. Appstrate already resolves and refreshes that
- * OAuth bearer outside Pi; a process-local provider overlay exposes the token
- * as request auth without persisting it or replacing Codex's native serializer.
+ * `setRuntimeApiKey` is a credential OVERLAY on an EXISTING provider: it stores
+ * the key and then recomposes the provider, which for an id pi has no builtin,
+ * models.json entry or extension registration for resolves to
+ * `models.deleteProvider(...)`. The key is stored, the provider is gone, and
+ * the failure lands one layer away at request time — `ModelRuntime.prepareRequest`
+ * throws `Unknown provider: <id>` on the first turn. Two ids here are therefore
+ * registered rather than overlaid, for different reasons:
+ *
+ *   - `openai-codex` — OAuth-only in pi's builtin catalog, so `setRuntimeApiKey`
+ *     deliberately refuses it. Appstrate already resolves and refreshes that
+ *     OAuth bearer outside pi; a process-local provider overlay exposes the
+ *     token as request auth without persisting it or replacing Codex's native
+ *     serializer.
+ *   - {@link ALIAS_PI_PROVIDER_KEY} — an ALIASED run's container is bound to
+ *     Appstrate's own provider key precisely BECAUSE pi has no such vendor;
+ *     `registerProvider` composes it with no base, and the `pi-messages` api
+ *     implementation is resolved from pi's api registry.
  */
 export async function setPiRuntimeCredential(
   modelRuntime: ModelRuntime,
   provider: string,
   apiKey: string,
 ): Promise<void> {
-  if (provider === "openai-codex") {
+  if (provider === "openai-codex" || provider === ALIAS_PI_PROVIDER_KEY) {
     modelRuntime.registerProvider(provider, { apiKey });
     return;
   }

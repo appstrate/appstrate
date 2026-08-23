@@ -104,7 +104,9 @@ const apiKeySpec = buildSpec({
   modelSwap: {
     alias: "public-alias",
     real: "real-model-id",
-    apiShape: "openai-completions" as const,
+    clientApiShape: "pi-messages" as const,
+    backingApiShape: "openai-completions" as const,
+    backing: { providerId: "openai", reasoning: false, input: ["text"] },
   },
 });
 

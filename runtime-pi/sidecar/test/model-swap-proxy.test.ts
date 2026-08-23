@@ -11,13 +11,18 @@ import { describe, it, expect, mock } from "bun:test";
 import { createApp, type AppDeps } from "../app.ts";
 import { parseModelSwapEnv } from "../model-swap.ts";
 
-// `openai-completions` backing: the OpenAI SDK posts `/chat/completions`
-// (the `/v1` lives in the base URL), so that is the ONE path an aliased run
-// of this shape is allowed to reach — see `isAliasInferenceCall`.
+// `openai-completions` on BOTH sides: this file exercises the PROXY path, the
+// one an alias takes when its client already speaks the backing's protocol
+// (the platform `/api/llm-proxy/*` gateway). The OpenAI SDK posts
+// `/chat/completions` (the `/v1` lives in the base URL), so that is the ONE
+// path such a run is allowed to reach — see `isAliasInferenceCall`. An agent
+// container never lands here: its `clientApiShape` is `pi-messages`, which
+// routes to the re-origination backend instead.
 const SWAP = {
   alias: "appstrate-medium",
   real: "deepseek-chat",
-  apiShape: "openai-completions" as const,
+  clientApiShape: "openai-completions" as const,
+  backingApiShape: "openai-completions" as const,
 };
 
 function makeDeps(fetchFn: typeof fetch): AppDeps {
@@ -82,7 +87,8 @@ describe("/llm/* model-alias swap (api_key)", () => {
     deps.config.llm.modelSwap = {
       alias: "appstrate-adaptive",
       real: "claude-sonnet-4-6",
-      apiShape: "anthropic-messages",
+      clientApiShape: "anthropic-messages",
+      backingApiShape: "anthropic-messages",
       anthropicAdaptiveReasoning: { effort: "max" },
     };
 
@@ -329,7 +335,7 @@ describe("/llm/* alias surface restriction", () => {
   it("drives the allowlist from the descriptor as it arrives over PI_MODEL_SWAP_JSON", async () => {
     // Ties the boot-time boundary to the request-time enforcement: the swap the
     // sidecar actually runs on is whatever `parseModelSwapEnv` returned, so the
-    // allowed path must follow the `apiShape` that crossed the env var.
+    // allowed path must follow the `clientApiShape` that crossed the env var.
     let seenUrl = "";
     const fetchFn = mock(async (url: string) => {
       seenUrl = url;
@@ -345,7 +351,8 @@ describe("/llm/* alias surface restriction", () => {
       JSON.stringify({
         alias: "appstrate-medium",
         real: "deepseek-chat",
-        apiShape: "openai-completions",
+        clientApiShape: "openai-completions",
+        backingApiShape: "openai-completions",
       }),
     );
     const app = createApp(deps);
@@ -379,7 +386,8 @@ describe("/llm/* alias surface restriction", () => {
     deps.config.llm.modelSwap = {
       alias: "appstrate-opus",
       real: "claude-sonnet-4-6",
-      apiShape: "anthropic-messages",
+      clientApiShape: "anthropic-messages",
+      backingApiShape: "anthropic-messages",
     };
     const app = createApp(deps);
 
@@ -397,5 +405,92 @@ describe("/llm/* alias surface restriction", () => {
       body: JSON.stringify({ model: "appstrate-opus", messages: [] }),
     });
     expect(refused.status).toBe(404);
+  });
+});
+
+/**
+ * The route-level join for an ALIASED AGENT run: the descriptor's two protocols
+ * differ, so `/llm/messages` must reach the `pi-messages` backend instead of the
+ * proxy — and every other path must still be refused. Getting this wrong in
+ * either direction is invisible in the unit tests on each side: conflating the
+ * two shapes either refuses every aliased run or re-opens the passthrough.
+ */
+describe("/llm/* re-origination routing (aliased agent run)", () => {
+  function reoriginatingDeps(fetchFn: typeof fetch): AppDeps {
+    const deps = makeDeps(fetchFn);
+    if (deps.config.llm?.authMode !== "api_key") throw new Error("expected api_key llm");
+    // pi-ai fetches through `globalThis.fetch`, not the injected `fetchFn`, so
+    // the backing URL must be unreachable or this suite would egress for real.
+    // `.invalid` is the reserved never-resolving TLD (RFC 2606) — a loopback
+    // address would instead be refused by the `/llm/*` SSRF floor (403) before
+    // the alias branch this test is about is ever reached.
+    deps.config.llm.baseUrl = "https://alias-backing.invalid";
+    deps.config.llm.modelSwap = {
+      alias: "appstrate-medium",
+      real: "deepseek-chat",
+      clientApiShape: "pi-messages",
+      backingApiShape: "openai-completions",
+      backing: { providerId: "deepseek", reasoning: false, input: ["text"] },
+    };
+    return deps;
+  }
+
+  it("terminates POST /llm/messages instead of proxying it", async () => {
+    // The upstream fetch is what the PROXY path would make. pi-ai does its own
+    // fetch through `globalThis.fetch`, so this stub firing at all would mean
+    // the request took the proxy branch.
+    const fetchFn = mock(
+      async () => new Response("{}", { status: 200 }),
+    ) as unknown as typeof fetch;
+    const app = createApp(reoriginatingDeps(fetchFn));
+
+    const res = await app.request("/llm/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "appstrate-medium",
+        context: { messages: [{ role: "user", content: "hi", timestamp: 0 }] },
+        options: {},
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("text/event-stream");
+    const body = await res.text();
+    // pi-ai reports the refused connection as an error EVENT, so reaching a
+    // well-formed terminal frame at all proves the backend ran the stream.
+    const frames = body
+      .split("\n\n")
+      .filter((chunk) => chunk.startsWith("data: "))
+      .map((chunk) => JSON.parse(chunk.slice("data: ".length)) as Record<string, unknown>);
+    expect(frames).toHaveLength(1);
+    expect(frames[0]!["type"]).toBe("error");
+    // The neutral envelope — pi-ai's own prose interpolates the provider.
+    expect(frames[0]!["errorMessage"]).toBe('Upstream model error (model "appstrate-medium")');
+    expect(body).not.toContain("deepseek");
+    // The PROXY branch's fetch never fired.
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("still refuses every other path, including the BACKING's inference path", async () => {
+    const fetchFn = mock(
+      async () => new Response("{}", { status: 200 }),
+    ) as unknown as typeof fetch;
+    const app = createApp(reoriginatingDeps(fetchFn));
+
+    for (const [method, path] of [
+      // What the backing speaks. Keying the allowlist on `backingApiShape`
+      // would have allowed this and refused `/messages` — the exact inversion.
+      ["POST", "/llm/chat/completions"],
+      ["GET", "/llm/v1/models"],
+      ["POST", "/llm/v1/messages"],
+    ] as const) {
+      const res = await app.request(path, {
+        method,
+        headers: { "Content-Type": "application/json" },
+      });
+      expect({ path, status: res.status }).toEqual({ path, status: 404 });
+    }
+    expect(fetchFn).not.toHaveBeenCalled();
   });
 });

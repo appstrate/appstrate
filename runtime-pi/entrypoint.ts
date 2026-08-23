@@ -40,7 +40,6 @@ import {
   prepareBundleForPi,
   buildRuntimeToolExtensions,
   buildPublishFileExtension,
-  derivePiProvider,
   emitRuntimeReady,
   emitBootProgress,
   startSinkHeartbeat,
@@ -56,6 +55,7 @@ import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-transport";
 import {
+  buildPiModelFromEnv,
   parseRuntimeEnv,
   RuntimeEnvError,
   scrubSinkEnv,
@@ -683,32 +683,12 @@ if (declaredRuntimeTools.includes("publish_file")) {
 
 // --- 3. Model + system prompt from env ---
 
-const api = env.modelApi;
-const modelId = env.modelId;
 const systemPrompt = env.agentPrompt;
 
-const model: Model<Api> = {
-  id: modelId,
-  name: modelId,
-  api: api as Api,
-  // Pi SDK AuthStorage key AND its provider-detection input: Pi re-derives
-  // each provider's request shape from `provider` + `baseUrl`, and on a
-  // proxied run `baseUrl` is the sidecar's. Prefer the real backing provider
-  // the platform named, falling back to the api shape's generic key.
-  provider: derivePiProvider(env.modelProvider, api),
-  baseUrl: env.modelBaseUrl ?? "",
-  reasoning: env.modelReasoning,
-  ...(env.modelReasoningLevelMap ? { thinkingLevelMap: env.modelReasoningLevelMap } : {}),
-  input: [...env.modelInput],
-  // `Model.cost` is REQUIRED by the Pi SDK and dereferenced unconditionally on
-  // every settled turn (`calculateCost` reads `model.cost.tiers` — omitting it
-  // throws mid-stream, it does not degrade), so an unpriced run still has to
-  // hand the SDK a rate shape. Zero is the only honest one, and it stays
-  // SDK-internal: `unpriced` below stops the runner emitting the 0 it produces.
-  cost: env.modelCost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-  contextWindow: env.modelContextWindow,
-  maxTokens: env.modelMaxTokens,
-};
+// Built by `buildPiModelFromEnv` (env.ts) rather than inline, so the
+// launcher-env → model-record → wire-shape join has one implementation that a
+// test can actually exercise end to end — the alias-opacity gates depend on it.
+const model: Model<Api> = buildPiModelFromEnv(env);
 
 // --- 4. Build ExecutionContext from env ---
 

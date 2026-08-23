@@ -16,6 +16,8 @@
  */
 
 import { getErrorMessage } from "@appstrate/core/errors";
+import { derivePiProvider } from "@appstrate/runner-pi";
+import type { Api, Model } from "./pi-sdk.ts";
 import { MODEL_API_SHAPES } from "@appstrate/core/sidecar-types";
 import {
   modelNativeReasoningLevelSchema,
@@ -442,6 +444,45 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     ...(mcpToolTimeoutMs > 0 ? { mcpToolTimeoutMs } : {}),
     traceparent: source.TRACEPARENT || undefined,
     warnings,
+  };
+}
+
+/**
+ * Build the Pi SDK `Model` record the run's session is driven with, from the
+ * parsed environment.
+ *
+ * Lives here rather than inline in `entrypoint.ts` because it is the second
+ * half of the same contract: `buildRuntimePiEnv` writes the variables,
+ * {@link parseRuntimeEnv} reads them, and this turns them into the record whose
+ * `provider` + `baseUrl` decide the vendor request shape pi-ai puts on the
+ * wire. That last step is what an ALIASED run's opacity depends on, and a copy
+ * of it inside a top-level boot script is a copy no test can join to the
+ * launcher's actual output.
+ */
+export function buildPiModelFromEnv(env: RuntimeEnv): Model<Api> {
+  return {
+    id: env.modelId,
+    name: env.modelId,
+    api: env.modelApi as Api,
+    // Pi SDK AuthStorage key AND its provider-detection input: Pi re-derives
+    // each provider's request shape from `provider` + `baseUrl`, and on a
+    // proxied run `baseUrl` is the sidecar's. Prefer the real backing provider
+    // the platform named, falling back to the api shape's generic key — which
+    // for an aliased run's `pi-messages` IS the answer, Appstrate's own key,
+    // because the platform deliberately names no vendor.
+    provider: derivePiProvider(env.modelProvider, env.modelApi),
+    baseUrl: env.modelBaseUrl ?? "",
+    reasoning: env.modelReasoning,
+    ...(env.modelReasoningLevelMap ? { thinkingLevelMap: env.modelReasoningLevelMap } : {}),
+    input: [...env.modelInput],
+    // `Model.cost` is REQUIRED by the Pi SDK and dereferenced unconditionally on
+    // every settled turn (`calculateCost` reads `model.cost.tiers` — omitting it
+    // throws mid-stream, it does not degrade), so an unpriced run still has to
+    // hand the SDK a rate shape. Zero is the only honest one, and it stays
+    // SDK-internal: the runner's `unpriced` flag stops it emitting the 0.
+    cost: env.modelCost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: env.modelContextWindow,
+    maxTokens: env.modelMaxTokens,
   };
 }
 

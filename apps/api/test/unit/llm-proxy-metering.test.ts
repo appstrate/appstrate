@@ -250,7 +250,12 @@ describe("guardSseTeardown", () => {
       headers: { "content-type": "text/event-stream" },
     });
     const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
-      swap: { alias: "alias-model", real: "real-model", apiShape: "anthropic-messages" as const },
+      swap: {
+        alias: "alias-model",
+        real: "real-model",
+        clientApiShape: "anthropic-messages" as const,
+        backingApiShape: "anthropic-messages" as const,
+      },
       recordUsage: collectUsage().recordUsage,
     });
     const out = await readAll(res.body!);
@@ -288,7 +293,11 @@ describe("forwardMeteredResponse — aliased error synthesis and header allowlis
   const swap = {
     alias: "appstrate-medium",
     real: "deepseek-SECRET",
-    apiShape: "anthropic-messages" as const,
+    // The gateway PROXIES: its caller already speaks the backing's protocol,
+    // so both fields carry the same shape (unlike the sidecar on an aliased
+    // agent run, whose client speaks `pi-messages`).
+    clientApiShape: "anthropic-messages" as const,
+    backingApiShape: "anthropic-messages" as const,
   };
 
   it("replaces an aliased upstream error body with the synthetic envelope and strips fingerprinting headers", async () => {

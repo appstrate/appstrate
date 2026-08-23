@@ -11,7 +11,7 @@
  */
 
 import { createLogger } from "@appstrate/core/logger";
-import { maskAliasedTokenLimits } from "@appstrate/core/model-swap";
+import { ALIAS_CLIENT_API_SHAPE, maskAliasedTokenLimits } from "@appstrate/core/model-swap";
 import type {
   ModelNativeReasoningLevel,
   ModelReasoningLevel,
@@ -29,6 +29,10 @@ export interface RuntimePiModelConfig {
    * emitted as `MODEL_PROVIDER`. On a sidecar-proxied run `MODEL_BASE_URL` is
    * the sidecar's, so this is the only input left for Pi to recognise which
    * provider it is talking to and emit that provider's request shape.
+   *
+   * Withheld for an {@link aliased} run — see the masking block in
+   * {@link buildRuntimePiEnv}. Pass it anyway: the flag, not the caller,
+   * decides what an alias hides.
    */
   providerId?: string | null;
   /** LLM API key. When unset, MODEL_API_KEY / MODEL_BASE_URL are not emitted. */
@@ -162,9 +166,25 @@ export interface RuntimePiEnvOptions {
 export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, string> {
   const { model } = opts;
 
+  // --- Model-alias dialect (issue #1198, Threat B) ---
+  //
+  // An aliased run's container speaks pi-ai's own vendor-neutral protocol
+  // instead of the backing's. That is the whole of what `MODEL_API` decides:
+  // pi-ai re-derives every vendor quirk per request from `model.provider` +
+  // `model.baseUrl`, so a container told `openai-completions` + `deepseek`
+  // emits DeepSeek's request shape and reads DeepSeek's response frames
+  // (`reasoning_content`, `prompt_cache_hit_tokens`, `system_fingerprint`) —
+  // vendor vocabulary nobody can enumerate, because it is a property of 14
+  // live vendor APIs rather than of our source. `pi-messages` has a closed
+  // event union and zero provider branching, so there is nothing vendor-shaped
+  // left for the container to observe. The sidecar terminates it and
+  // re-originates through pi-ai against the real backing, one process to the
+  // left, where all the quirk logic still runs unmirrored.
+  const api = model.aliased ? ALIAS_CLIENT_API_SHAPE : model.api;
+
   const env: Record<string, string> = {
     AGENT_PROMPT: opts.agentPrompt,
-    MODEL_API: model.api,
+    MODEL_API: api,
     MODEL_ID: model.modelId,
   };
 
@@ -237,7 +257,14 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
   // 'developer'`). A direct run keeps its real base URL, so Pi's own
   // detection already works — but the key is correct there too, and the
   // entrypoint applies the same fallback either way.
-  if (model.providerId) env.MODEL_PROVIDER = model.providerId;
+  //
+  // An ALIASED run emits it at all: naming the vendor is the leak, and there
+  // is nothing left for the name to configure — the `pi-messages` request
+  // shape is the same whatever the backing. The entrypoint's
+  // `derivePiProvider` falls back to `PROVIDER_BY_API["pi-messages"]`, which
+  // is Appstrate's own key, so the container is bound to a provider that names
+  // no vendor rather than to one it was told to forget.
+  if (model.providerId && !model.aliased) env.MODEL_PROVIDER = model.providerId;
 
   // --- Model-alias masking (issue #1198, Threat B) ---
   //
@@ -259,7 +286,19 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
   if (limits.contextWindow != null) env.MODEL_CONTEXT_WINDOW = String(limits.contextWindow);
   if (limits.maxTokens != null) env.MODEL_MAX_TOKENS = String(limits.maxTokens);
   if (model.reasoning != null) env.MODEL_REASONING = model.reasoning ? "true" : "false";
-  if (model.reasoningLevelMap && Object.keys(model.reasoningLevelMap).length > 0) {
+  // The native mapping is a table of the VENDOR's own effort vocabulary
+  // (`{"high":"xhigh"}` vs `{"high":"high"}` vs a null-marked level), so it
+  // narrows the candidate set on its own — and on an aliased run nothing in
+  // the container reads it any more: the portable level crosses the wire as
+  // `options.reasoning` and the sidecar applies the backing's mapping
+  // (`ModelSwapBacking.reasoningLevelMap`) when it re-originates.
+  // `MODEL_REASONING` itself stays: a container that thinks its model cannot
+  // reason never sends a level at all.
+  if (
+    !model.aliased &&
+    model.reasoningLevelMap &&
+    Object.keys(model.reasoningLevelMap).length > 0
+  ) {
     env.MODEL_REASONING_LEVEL_MAP = JSON.stringify(model.reasoningLevelMap);
   }
   if (opts.generation?.temperature != null) {

@@ -164,8 +164,19 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
   // dashboard `jwt_user`) never sees the backing. The request `model` was
   // already rewritten alias→real by `request.rewriteModel` above. This mirrors
   // the in-container sidecar path; both share `@appstrate/core/model-swap`.
+  //
+  // Both protocol fields carry the SAME shape here, and that is the honest
+  // statement of what this boundary does: unlike the sidecar (which terminates
+  // the container's canonical dialect and re-originates), the gateway PROXIES —
+  // its caller already speaks the backing's protocol, so there is no backing
+  // catalog to carry and no model record to rebuild.
   const swap: ModelSwap | null = resolved.aliased
-    ? { alias: presetId, real: resolved.modelId, apiShape: resolved.apiShape }
+    ? {
+        alias: presetId,
+        real: resolved.modelId,
+        clientApiShape: resolved.apiShape,
+        backingApiShape: resolved.apiShape,
+      }
     : null;
 
   // Response-cache lookup. The cache is keyed on `(orgId, presetId,

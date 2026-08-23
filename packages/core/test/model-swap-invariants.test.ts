@@ -22,7 +22,7 @@ import {
   ALIASABLE_API_SHAPES,
 } from "../src/model-swap.ts";
 import { deriveResponseReserveTokens, isUsableMaxOutputTokens } from "../src/token-budget.ts";
-import type { ModelApiShape } from "../src/sidecar-types.ts";
+import type { ModelApiShape, ModelSwap } from "../src/sidecar-types.ts";
 
 describe("checkAliasInvariants", () => {
   const wellFormed = {
@@ -70,6 +70,9 @@ describe("checkAliasInvariants", () => {
       "openai-responses",
       "openai-codex-responses",
       "mistral-conversations",
+      // pi-ai's own protocol also carries the id as a top-level body `model`,
+      // so a gateway that speaks it is aliasable on the same terms.
+      "pi-messages",
     ];
     for (const shape of bodyModelShapes) {
       expect(isAliasableApiShape(shape)).toBe(true);
@@ -89,6 +92,22 @@ describe("checkAliasInvariants", () => {
  * strips), taken from the SDK sources rather than inferred.
  */
 describe("isAliasInferenceCall", () => {
+  /**
+   * A swap whose CLIENT speaks `shape`. The predicate reads only that field —
+   * the backing's own protocol is a different fact and deliberately not the one
+   * the inbound allowlist keys on (an aliased container posts `/messages`
+   * whatever the vendor behind the sidecar is), so every case here varies the
+   * client shape and pins the backing to something else.
+   */
+  function clientSwap(shape: ModelApiShape): ModelSwap {
+    return {
+      alias: "appstrate-medium",
+      real: "some-backing",
+      clientApiShape: shape,
+      backingApiShape: "anthropic-messages",
+    };
+  }
+
   const expectedPaths: ReadonlyArray<[ModelApiShape, string]> = [
     // `@anthropic-ai/sdk` — `messages.create` posts '/v1/messages'.
     ["anthropic-messages", "/v1/messages"],
@@ -100,6 +119,9 @@ describe("isAliasInferenceCall", () => {
     ["openai-codex-responses", "/codex/responses"],
     // pi-ai resolves 'v1/chat/completions' against a slash-terminated base URL.
     ["mistral-conversations", "/v1/chat/completions"],
+    // pi-ai's own vendor-neutral protocol posts '<baseUrl>/messages'. This is
+    // the one an ALIASED container speaks — see `ALIAS_CLIENT_API_SHAPE`.
+    ["pi-messages", "/messages"],
   ];
 
   it("maps every aliasable shape to its SDK's inference path", () => {
@@ -117,42 +139,74 @@ describe("isAliasInferenceCall", () => {
 
   it("accepts POST on each shape's own inference path", () => {
     for (const [shape, path] of expectedPaths) {
-      expect(isAliasInferenceCall(shape, "POST", path)).toBe(true);
+      expect(isAliasInferenceCall(clientSwap(shape), "POST", path)).toBe(true);
     }
+  });
+
+  it("keys on the CLIENT protocol, never the backing's", () => {
+    // The interaction that makes this predicate subtle. An aliased run's
+    // container speaks `pi-messages` while the backing speaks whatever the
+    // vendor does, so reading the backing's path would refuse EVERY aliased
+    // run — and reading no path at all would re-open the passthrough the
+    // allowlist exists to close.
+    const aliasedRun: ModelSwap = {
+      alias: "appstrate-medium",
+      real: "deepseek-chat",
+      clientApiShape: "pi-messages",
+      backingApiShape: "openai-completions",
+    };
+    expect(isAliasInferenceCall(aliasedRun, "POST", "/messages")).toBe(true);
+    expect(isAliasInferenceCall(aliasedRun, "POST", "/chat/completions")).toBe(false);
   });
 
   it("refuses another shape's inference path", () => {
     // The families overlap textually (`/v1/chat/completions` is Mistral's, not
     // OpenAI's), so the check is per shape, never "any known inference path".
-    expect(isAliasInferenceCall("openai-completions", "POST", "/v1/chat/completions")).toBe(false);
-    expect(isAliasInferenceCall("anthropic-messages", "POST", "/chat/completions")).toBe(false);
-    expect(isAliasInferenceCall("openai-responses", "POST", "/codex/responses")).toBe(false);
+    expect(
+      isAliasInferenceCall(clientSwap("openai-completions"), "POST", "/v1/chat/completions"),
+    ).toBe(false);
+    expect(
+      isAliasInferenceCall(clientSwap("anthropic-messages"), "POST", "/chat/completions"),
+    ).toBe(false);
+    expect(isAliasInferenceCall(clientSwap("openai-responses"), "POST", "/codex/responses")).toBe(
+      false,
+    );
   });
 
   it("refuses every non-POST method, including on the right path", () => {
     for (const method of ["GET", "HEAD", "PUT", "DELETE", "PATCH", "OPTIONS"]) {
-      expect(isAliasInferenceCall("openai-completions", method, "/chat/completions")).toBe(false);
+      expect(
+        isAliasInferenceCall(clientSwap("openai-completions"), method, "/chat/completions"),
+      ).toBe(false);
     }
   });
 
   it("accepts a lower-cased method (HTTP does not fix the casing a client sends)", () => {
-    expect(isAliasInferenceCall("openai-completions", "post", "/chat/completions")).toBe(true);
+    expect(
+      isAliasInferenceCall(clientSwap("openai-completions"), "post", "/chat/completions"),
+    ).toBe(true);
   });
 
   it("refuses the vendor catalogue read that motivated the allowlist", () => {
     for (const [shape] of expectedPaths) {
-      expect(isAliasInferenceCall(shape, "GET", "/v1/models")).toBe(false);
-      expect(isAliasInferenceCall(shape, "POST", "/v1/models")).toBe(false);
+      expect(isAliasInferenceCall(clientSwap(shape), "GET", "/v1/models")).toBe(false);
+      expect(isAliasInferenceCall(clientSwap(shape), "POST", "/v1/models")).toBe(false);
     }
   });
 
   it("matches the path exactly — no prefix, suffix or trailing-slash slack", () => {
-    expect(isAliasInferenceCall("openai-completions", "POST", "/chat/completions/")).toBe(false);
-    expect(isAliasInferenceCall("openai-completions", "POST", "/chat/completions/extra")).toBe(
+    expect(
+      isAliasInferenceCall(clientSwap("openai-completions"), "POST", "/chat/completions/"),
+    ).toBe(false);
+    expect(
+      isAliasInferenceCall(clientSwap("openai-completions"), "POST", "/chat/completions/extra"),
+    ).toBe(false);
+    expect(isAliasInferenceCall(clientSwap("openai-completions"), "POST", "chat/completions")).toBe(
       false,
     );
-    expect(isAliasInferenceCall("openai-completions", "POST", "chat/completions")).toBe(false);
-    expect(isAliasInferenceCall("openai-completions", "POST", "/v1/chat/completions")).toBe(false);
+    expect(
+      isAliasInferenceCall(clientSwap("openai-completions"), "POST", "/v1/chat/completions"),
+    ).toBe(false);
   });
 
   it("fails closed for a url-model shape (no entry ⇒ nothing is allowed)", () => {
@@ -163,8 +217,8 @@ describe("isAliasInferenceCall", () => {
       "bedrock-converse-stream",
     ];
     for (const shape of urlModelShapes) {
-      expect(isAliasInferenceCall(shape, "POST", "/v1/messages")).toBe(false);
-      expect(isAliasInferenceCall(shape, "POST", "/chat/completions")).toBe(false);
+      expect(isAliasInferenceCall(clientSwap(shape), "POST", "/v1/messages")).toBe(false);
+      expect(isAliasInferenceCall(clientSwap(shape), "POST", "/chat/completions")).toBe(false);
     }
   });
 });

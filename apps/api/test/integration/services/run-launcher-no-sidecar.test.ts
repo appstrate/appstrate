@@ -232,7 +232,11 @@ describe("run-launcher — sidecar skip decision", () => {
     expect(llm.modelSwap).toEqual({
       alias: "appstrate-medium",
       real: "deepseek-chat",
-      apiShape: "openai-completions",
+      // The container speaks the canonical dialect; the sidecar terminates it
+      // and re-originates against the backing, which needs the backing catalog.
+      clientApiShape: "pi-messages",
+      backingApiShape: "openai-completions",
+      backing: { providerId: "deepseek", reasoning: false, input: ["text"] },
     });
 
     // The container is handed the ALIAS as MODEL_ID; the real backing id and
@@ -382,7 +386,16 @@ describe("run-launcher — sidecar skip decision", () => {
     expect(llm.modelSwap).toEqual({
       alias: "appstrate-adaptive",
       real: "claude-sonnet-4-6",
-      apiShape: "anthropic-messages",
+      clientApiShape: "pi-messages",
+      backingApiShape: "anthropic-messages",
+      backing: {
+        providerId: "anthropic",
+        reasoning: true,
+        // The vendor's native effort vocabulary — no longer emitted into the
+        // container, applied by the sidecar when it re-originates.
+        reasoningLevelMap: { max: "max" },
+        input: ["text"],
+      },
       anthropicAdaptiveReasoning: { effort: "max" },
     });
 

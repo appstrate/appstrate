@@ -25,7 +25,8 @@
 import { logger } from "../../lib/logger.ts";
 import type { AppstrateRunPlan } from "./types.ts";
 import { buildPlatformSystemPrompt } from "./prompt-builder.ts";
-import { buildRuntimePiEnv } from "@appstrate/runner-pi";
+import { buildRuntimePiEnv, derivePiProvider } from "@appstrate/runner-pi";
+import { ALIAS_CLIENT_API_SHAPE } from "@appstrate/core/model-swap";
 import {
   assertOauthRunIsolation,
   assertOauthRunNotAliased,
@@ -48,7 +49,7 @@ import { runWithSpan, currentTraceparent, recordContainerSpawn } from "@appstrat
 
 import { getEnv } from "@appstrate/env";
 import { getModelProvider } from "../model-providers/registry.ts";
-import type { LlmProxyConfig, SidecarLaunchSpec } from "@appstrate/core/sidecar-types";
+import type { LlmProxyConfig, ModelSwap, SidecarLaunchSpec } from "@appstrate/core/sidecar-types";
 import { toNativeModelReasoningLevel } from "@appstrate/core/model-generation";
 
 /**
@@ -259,14 +260,30 @@ async function runPlatformContainerImpl(
       requestedReasoningLevel,
       llmConfig.generation,
     );
-    const modelSwap = llmConfig.aliased
+    const modelSwap: ModelSwap | undefined = llmConfig.aliased
       ? {
           alias: llmConfig.aliasId,
           real: llmConfig.modelId,
-          // Lets the sidecar restrict this run's `/llm/*` surface to the one
-          // inference endpoint this protocol calls; everything else (a vendor
-          // catalogue read, say) is refused before any upstream fetch.
-          apiShape: llmConfig.apiShape,
+          // The container speaks the canonical dialect, whatever the backing
+          // is. Two effects, both required: it restricts this run's `/llm/*`
+          // surface to the one endpoint that dialect calls (everything else —
+          // a vendor catalogue read, say — is refused before any upstream
+          // fetch), and it tells the sidecar to TERMINATE that protocol rather
+          // than proxy it.
+          clientApiShape: ALIAS_CLIENT_API_SHAPE,
+          backingApiShape: llmConfig.apiShape,
+          // Everything the sidecar needs to rebuild the backing's pi-ai Model
+          // and re-originate the call. Private to this channel: none of it is
+          // in `containerEnv` below, and `derivePiProvider` is applied HERE so
+          // the sidecar mirrors no provider mapping table of its own.
+          backing: {
+            providerId: derivePiProvider(llmConfig.providerId, llmConfig.apiShape),
+            reasoning: llmConfig.reasoning ?? false,
+            ...(llmConfig.generation?.reasoning.nativeLevels
+              ? { reasoningLevelMap: llmConfig.generation.reasoning.nativeLevels }
+              : {}),
+            input: llmConfig.input ?? ["text"],
+          },
           ...(llmConfig.apiShape === "anthropic-messages" &&
           llmConfig.generation?.reasoning.adaptive === true &&
           requestedReasoningLevel !== "off" &&

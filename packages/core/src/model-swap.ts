@@ -78,6 +78,11 @@ import type { ModelApiShape, ModelSwap } from "./sidecar-types.ts";
  *     (`resolveCodexUrl`) and appends `/codex/responses`.
  *   - `mistral-conversations`  — pi-ai resolves `v1/chat/completions` against
  *     the base URL (slash-terminated first, so the prefix survives).
+ *   - `pi-messages`            — pi-ai posts `<baseUrl>/messages`. Not a
+ *     vendor endpoint: it is the canonical dialect an ALIASED run's container
+ *     speaks to the sidecar, which terminates it there. The same literal also
+ *     serves a genuine pi-messages BACKING (a gateway implementing the
+ *     protocol), which is why one entry covers both readers.
  *
  * A shape absent from this table is one the alias swap cannot serve at all —
  * `google-*`, `azure-*` and `bedrock-*` carry the model id in the URL path /
@@ -87,12 +92,26 @@ import type { ModelApiShape, ModelSwap } from "./sidecar-types.ts";
  * rather than restated: one list, no mirror to police.
  */
 export const ALIAS_INFERENCE_PATHS = {
+  "pi-messages": "/messages",
   "anthropic-messages": "/v1/messages",
   "openai-completions": "/chat/completions",
   "openai-responses": "/responses",
   "openai-codex-responses": "/codex/responses",
   "mistral-conversations": "/v1/chat/completions",
 } as const satisfies Partial<Record<ModelApiShape, string>>;
+
+/**
+ * The protocol an ALIASED run's agent container speaks — pi-ai's own
+ * vendor-neutral `pi-messages`, never the backing's.
+ *
+ * One constant, two readers that must agree exactly: `buildRuntimePiEnv` emits
+ * it as the container's `MODEL_API`, and the run launcher stamps it on
+ * `ModelSwap.clientApiShape`, which is what the sidecar's inbound allowlist
+ * keys on ({@link isAliasInferenceCall}). Split them and the sidecar refuses
+ * every call the container makes, with a 404 whose neutral envelope says
+ * nothing about why.
+ */
+export const ALIAS_CLIENT_API_SHAPE: ModelApiShape = "pi-messages";
 
 /**
  * Widened view of the table for a lookup keyed by ANY shape. Plain assignment
@@ -124,9 +143,9 @@ export function isAliasableApiShape(shape: ModelApiShape): boolean {
 }
 
 /**
- * True when `(method, path)` is exactly the inference call `shape` needs —
- * the allowlist the sidecar narrows an ALIASED run's `/llm/*` surface down to
- * (issue #1198, Threat B).
+ * True when `(method, path)` is exactly the inference call this alias's CLIENT
+ * makes — the allowlist the sidecar narrows an ALIASED run's `/llm/*` surface
+ * down to (issue #1198, Threat B).
  *
  * Without this, `/llm/*` is a total passthrough: an adversarial agent inside
  * the container can `GET <MODEL_BASE_URL>/v1/models` and read the vendor's own
@@ -136,14 +155,22 @@ export function isAliasableApiShape(shape: ModelApiShape): boolean {
  * An alias's contract is that the backing stays hidden, and inference is the
  * only thing the run legitimately needs, so everything else is refused.
  *
+ * It takes the whole {@link ModelSwap} rather than a bare shape so the choice
+ * between the two protocols the descriptor now carries is made HERE, once. The
+ * inbound path is a property of what the CLIENT speaks
+ * ({@link ModelSwap.clientApiShape}) — an aliased container posts
+ * `/messages` no matter which vendor is behind the sidecar — and a call site
+ * handed a bare shape would sooner or later pass `backingApiShape`, refusing
+ * every aliased run.
+ *
  * Fail-closed on both axes: an unknown/url-model shape has no entry, and the
  * comparison is exact — no trailing-slash or case normalisation, because the
  * SDK emits a fixed literal and a normaliser would be one more parser to get
  * wrong at a security boundary. Method is upper-cased only because HTTP does
  * not guarantee the casing the client sent.
  */
-export function isAliasInferenceCall(shape: ModelApiShape, method: string, path: string): boolean {
-  const inferencePath = INFERENCE_PATH_BY_SHAPE[shape];
+export function isAliasInferenceCall(swap: ModelSwap, method: string, path: string): boolean {
+  const inferencePath = INFERENCE_PATH_BY_SHAPE[swap.clientApiShape];
   return inferencePath !== undefined && method.toUpperCase() === "POST" && path === inferencePath;
 }
 
@@ -384,6 +411,19 @@ export const LLM_PASSTHROUGH_RESPONSE_HEADERS: readonly string[] = [
 const ALIAS_UPSTREAM_ERROR_MESSAGE = "Upstream model error";
 
 /**
+ * The neutral error PROSE for an aliased model, without any protocol envelope
+ * around it. Two shapes need it and they are not the same shape: an HTTP error
+ * body ({@link syntheticAliasErrorBody}, built on this) and a `pi-messages`
+ * `error` event, whose `errorMessage` is a bare string. pi-ai's own error paths
+ * interpolate `model.provider` into their messages, so nothing it produces may
+ * be forwarded — this replaces it wholesale, same whitelist posture.
+ */
+export function syntheticAliasErrorMessage(swap: ModelSwap, status?: number): string {
+  const statusHint = status ? `, status ${status}` : "";
+  return `${ALIAS_UPSTREAM_ERROR_MESSAGE} (model "${swap.alias}"${statusHint})`;
+}
+
+/**
  * Caller-facing body replacing a non-2xx upstream response on an ALIASED
  * model. Nothing from the upstream body survives, so the backing (model id,
  * hostname, provider error vocabulary) cannot leak regardless of what the
@@ -396,12 +436,11 @@ const ALIAS_UPSTREAM_ERROR_MESSAGE = "Upstream model error";
  * single shape parses in either SDK regardless of the aliased protocol.
  */
 export function syntheticAliasErrorBody(swap: ModelSwap, status?: number): string {
-  const statusHint = status ? `, status ${status}` : "";
   return JSON.stringify({
     type: "error",
     error: {
       type: "upstream_error",
-      message: `${ALIAS_UPSTREAM_ERROR_MESSAGE} (model "${swap.alias}"${statusHint})`,
+      message: syntheticAliasErrorMessage(swap, status),
     },
   });
 }

@@ -218,6 +218,7 @@ export async function readRequestBodyBounded(
 export type {
   SidecarConfig,
   LlmProxyConfig,
+  LlmProxyApiKeyConfig,
   LlmProxyOauthConfig,
   ModelSwap,
 } from "@appstrate/core/sidecar-types";
