@@ -123,9 +123,13 @@ Primary source of truth: the `@appstrate/env` Zod schema (`packages/env/src/inde
 Issue #1177 renamed the `document` concept to `file` from the schema up: the
 tables are `files` / `file_links`, the URI scheme is `appfile://`, the routes are
 `/api/files/*`. Four environment variables kept their pre-rename spelling for a
-while; they no longer do. **There is no alias** — an `.env` still carrying an old
-name is simply not read, and the limit silently reverts to its default. Grep your
-`.env`, compose file, secret store and CI for the left column:
+while; they no longer do. **There is no alias, and boot now refuses while an old
+name is still set**, naming the replacement. That refusal exists because the
+failure it replaces was silent: Zod strips unknown keys, so an `.env` carrying an
+old name used to parse cleanly with the limit back at its default — and for
+`DOCUMENT_RETENTION_DAYS` the default is "no expiry at all", so an operator who
+set it for data minimisation lost it on upgrade without a line of output. Grep
+your `.env`, compose file, secret store and CI for the left column:
 
 | Was                        | Now                         | Governs                               |
 | -------------------------- | --------------------------- | ------------------------------------- |

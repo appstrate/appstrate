@@ -355,7 +355,7 @@ These complement the phase-3 storage-deletion gauges (`appstrate.storage_deletio
 
 ## Environment variables
 
-Four of these were spelled `DOCUMENT_MAX_FILE_BYTES`, `DOCUMENT_RETENTION_DAYS`, `RUN_MAX_DOCUMENTS` and `WORKSPACE_MAX_DOCS_BYTES` before the rename was finished at the physical layer. **There is no alias**: an `.env` still carrying an old name is not read, and the limit silently reverts to its default — so the upgrade includes grepping every `.env`, compose file, secret store and CI config. Values and semantics are unchanged. The full old → new table is in `docs/ENV.md`.
+Four of these were spelled `DOCUMENT_MAX_FILE_BYTES`, `DOCUMENT_RETENTION_DAYS`, `RUN_MAX_DOCUMENTS` and `WORKSPACE_MAX_DOCS_BYTES` before the rename was finished at the physical layer. **There is no alias**, and boot refuses while an old name is still set, naming the replacement — so the upgrade still includes grepping every `.env`, compose file, secret store and CI config, but a missed one is now a boot failure rather than a limit that silently reverts to its default. Values and semantics are unchanged. The full old → new table is in `docs/ENV.md`.
 
 | Variable                              | Default                     | Purpose                                                                                                                                                                                                        |
 | ------------------------------------- | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

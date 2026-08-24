@@ -18,6 +18,18 @@ const TRACKED = [
   "PI_IMAGE",
   "SIDECAR_IMAGE",
   "APP_VERSION",
+  // The retired file-limit names and their replacements. Both halves are
+  // tracked: `restore()` only cleans what is listed here, so a test that sets a
+  // retired name would otherwise leave it set for every test after it — which
+  // is exactly how the control below first failed.
+  "DOCUMENT_MAX_FILE_BYTES",
+  "DOCUMENT_RETENTION_DAYS",
+  "RUN_MAX_DOCUMENTS",
+  "WORKSPACE_MAX_DOCS_BYTES",
+  "FILE_MAX_BYTES",
+  "FILE_RETENTION_DAYS",
+  "RUN_MAX_FILES",
+  "WORKSPACE_MAX_FILES_BYTES",
 ] as const;
 
 type Snap = Record<(typeof TRACKED)[number], string | undefined>;
@@ -528,5 +540,53 @@ describe("APP_VERSION / PI_IMAGE / SIDECAR_IMAGE are a version contract", () => 
     expect(() => getEnv()).toThrow(
       /PI_IMAGE tag latest.*Out of step: PI_IMAGE and SIDECAR_IMAGE, which disagree with each other/s,
     );
+  });
+});
+
+describe("retired file-limit env names are refused, not ignored", () => {
+  let s: Snap;
+
+  beforeEach(() => {
+    s = snap();
+    setBaseEnv();
+    _resetCacheForTesting();
+  });
+
+  afterEach(() => {
+    restore(s);
+    _resetCacheForTesting();
+  });
+
+  // The four names #1177 retired, each with what replaced it. Zod strips
+  // unknown keys, so before this guard an `.env` carrying an old name parsed
+  // cleanly and the limit fell back to its default — in silence.
+  const RENAMES: [string, string][] = [
+    ["DOCUMENT_MAX_FILE_BYTES", "FILE_MAX_BYTES"],
+    ["DOCUMENT_RETENTION_DAYS", "FILE_RETENTION_DAYS"],
+    ["RUN_MAX_DOCUMENTS", "RUN_MAX_FILES"],
+    ["WORKSPACE_MAX_DOCS_BYTES", "WORKSPACE_MAX_FILES_BYTES"],
+  ];
+
+  for (const [retired, replacement] of RENAMES) {
+    it(`aborts boot on ${retired}, naming ${replacement}`, () => {
+      process.env[retired] = "30";
+      expect(() => getEnv()).toThrow(new RegExp(`${retired}.*${replacement}`, "s"));
+    });
+  }
+
+  it("control: the replacement name parses normally", () => {
+    // Without this the four assertions above would pass just as well against a
+    // schema that rejected every file-limit variable.
+    process.env.FILE_RETENTION_DAYS = "30";
+    expect(getEnv().FILE_RETENTION_DAYS).toBe(30);
+  });
+
+  it("the silent revert is what the guard prevents: retention would become permanent", () => {
+    // `retentionExpiry` returns null for an undefined value, so `expires_at` is
+    // null and files never expire. An operator who set DOCUMENT_RETENTION_DAYS
+    // for data-minimisation lost it on upgrade with no output at all — which is
+    // why this one is a boot failure rather than a warning.
+    process.env.DOCUMENT_RETENTION_DAYS = "30";
+    expect(() => getEnv()).toThrow(/no longer read/);
   });
 });

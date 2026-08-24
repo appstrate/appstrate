@@ -104,6 +104,18 @@ const describeRuntimeImageMismatch = (m: RuntimeImageTagMismatch): string => {
 // hand-maintained table is intentional: Zod defaults are entangled with
 // transforms/refinements that don't extract cleanly via static analysis.
 
+/**
+ * Env vars retired by the `document` -> `file` rename (#1177), mapped to what
+ * replaced them. Boot refuses while one is still set — see the superRefine
+ * below for why silence is the wrong answer here.
+ */
+const RETIRED_ENV_RENAMES: Record<string, string> = {
+  DOCUMENT_MAX_FILE_BYTES: "FILE_MAX_BYTES",
+  DOCUMENT_RETENTION_DAYS: "FILE_RETENTION_DAYS",
+  RUN_MAX_DOCUMENTS: "RUN_MAX_FILES",
+  WORKSPACE_MAX_DOCS_BYTES: "WORKSPACE_MAX_FILES_BYTES",
+};
+
 const envSchema = z
   .object({
     // Node environment — gates production-only invariants (e.g. APP_URL https)
@@ -980,6 +992,33 @@ const envSchema = z
       // carries "BOTH images have to move".
       path: [mismatch.oddOneOut === "sidecar" ? "SIDECAR_IMAGE" : "PI_IMAGE"],
     });
+  })
+  // The four file-limit variables were renamed by #1177 with no alias, and Zod
+  // strips unknown keys — so an `.env` still carrying an old name booted
+  // cleanly with the limit silently back at its default. That is not a cosmetic
+  // regression for two of them: `DOCUMENT_RETENTION_DAYS` unset makes
+  // `retentionExpiry` return null, so `expires_at` is null and files NEVER
+  // expire; `DOCUMENT_MAX_FILE_BYTES` unset reverts a tightened per-file cap to
+  // 100 MiB. An operator who set either for data-minimisation loses it without
+  // a single line of output.
+  //
+  // Read from raw `process.env` rather than the parsed object, because the
+  // parsed object is exactly where these no longer exist. Same shape as
+  // `retiredScopeRenames()` in the oidc module, which this branch wrote for the
+  // retired `documents:*` scope spellings — a retired name should say what
+  // replaced it, not evaporate.
+  .superRefine((_env, ctx) => {
+    for (const [retired, replacement] of Object.entries(RETIRED_ENV_RENAMES)) {
+      if (process.env[retired] === undefined) continue;
+      ctx.addIssue({
+        code: "custom",
+        message:
+          `${retired} was renamed to ${replacement} (#1177) and is no longer read. ` +
+          `Leaving it set would silently revert the limit to its default. ` +
+          `Rename it in your .env.`,
+        path: [replacement],
+      });
+    }
   })
   // The untrusted-preview origin must actually BE a different origin. See the
   // long note on USERCONTENT_URL above for what a same-host value costs: it is
