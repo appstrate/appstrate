@@ -41,7 +41,9 @@
  * sidecar can import it without pulling the Pi SDK into its bundle.
  */
 
-import Ajv, { type ValidateFunction } from "ajv";
+import type { ValidateFunction } from "ajv";
+import { asJSONSchemaObject } from "./form.ts";
+import { compileCached } from "./schema-validation.ts";
 import {
   EVENT_EMITTER_RUNTIME_TOOLS,
   type EventEmitterRuntimeTool,
@@ -121,8 +123,6 @@ export interface BuildRuntimeToolDefsOptions {
   outputSchema?: Record<string, unknown> | null;
 }
 
-const ajv = new Ajv({ allErrors: true, strict: false });
-
 function withEvents(text: string, events: RuntimeToolEvent[]): RuntimeToolResult {
   // Stamp a production-time `timestamp` on every canonical event at the single
   // point they are wrapped. Canonical run events (`log.written`, …) carry a
@@ -145,12 +145,34 @@ function toolError(text: string): RuntimeToolResult {
 }
 
 function buildOutputDef(outputSchema: Record<string, unknown> | null): RuntimeToolDef {
+  // Compile through the ONE shared Ajv2020 instance and its cache
+  // (`@appstrate/core/schema-validation`), not a private second instance.
+  //
+  // This used to be `new Ajv(...)` — the draft-07 default export, with no
+  // ajv-formats. The server validates the SAME `output.schema` on the 2020-12
+  // dialect with formats (`validateOutput` → `compileCached`), so a schema
+  // using `prefixItems`, `$dynamicRef` or `format` got two different verdicts
+  // on the two sides of the container boundary. That is the exact drift this
+  // in-container check exists to prevent.
+  //
+  // A private instance was doubly wrong: it never called `removeSchema`, so it
+  // retained every compiled schema AND threw "schema with key or id … already
+  // exists" the second time a schema carrying `$id` was compiled in the same
+  // process — which the `catch` below then swallowed into `validator = null`.
+  //
+  // A compile failure is now RECORDED, not swallowed. `if (validator && …)`
+  // meant an uncompilable schema silently accepted every payload: the agent saw
+  // a clean success and the run failed later, server-side, at the post-hoc
+  // check this tool exists to pre-empt. The server's `compileCached` throws on
+  // such a schema, so refusing here changes the failure's timing and legibility,
+  // not the run's outcome.
   let validator: ValidateFunction | null = null;
+  let schemaCompileError: string | null = null;
   if (outputSchema) {
     try {
-      validator = ajv.compile(outputSchema);
-    } catch {
-      validator = null;
+      validator = compileCached(asJSONSchemaObject(outputSchema));
+    } catch (err) {
+      schemaCompileError = err instanceof Error ? err.message : String(err);
     }
   }
   const dataSchema: Record<string, unknown> = outputSchema
@@ -185,6 +207,13 @@ function buildOutputDef(outputSchema: Record<string, unknown> | null): RuntimeTo
     },
     handler: async (rawArgs) => {
       const { data } = (rawArgs ?? {}) as { data?: Record<string, unknown> };
+      if (schemaCompileError) {
+        return toolError(
+          `This agent's declared output schema cannot be compiled: ${schemaCompileError}\n\n` +
+            "No output can be recorded until the manifest's `output.schema` is a valid " +
+            "JSON Schema 2020-12 document. This is not something the run can work around.",
+        );
+      }
       if (validator && !validator(data)) {
         const errors = (validator.errors ?? [])
           .map((e) => `  - ${e.instancePath || "/"} ${e.message}`)
