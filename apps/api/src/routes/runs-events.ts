@@ -17,7 +17,6 @@
  */
 
 import { Hono } from "hono";
-import type { Handler } from "hono";
 import { z } from "zod";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
@@ -376,7 +375,7 @@ export function createRunsEventsRouter() {
   // enumerates this, then fetches each file by name. A 404 means the run
   // carries no input files (the common case), which the runtime treats as
   // an empty file set — not a fault.
-  const filesManifest: Handler<AppEnv> = async (c) => {
+  router.get("/runs/:runId/files", verifyRunSignature, eventLimiter, async (c) => {
     const run = c.get("run")!;
     const manifest = await downloadRunFilesManifest(run.id);
     if (!manifest) throw notFound(`no input files for run ${run.id}`);
@@ -390,8 +389,7 @@ export function createRunsEventsRouter() {
     // safe single-segment name before this point.
     assertUniqueWorkspaceNames(manifest.files.map((d) => d.workspace_name));
     return c.json(manifest);
-  };
-  router.get("/runs/:runId/files", verifyRunSignature, eventLimiter, filesManifest);
+  });
 
   // POST /api/runs/:runId/files — agent-published run output (Phase 2).
   //
@@ -411,7 +409,7 @@ export function createRunsEventsRouter() {
   // Signature before limiter — see the MIDDLEWARE ORDER note at the top of
   // this router. Here the budget being protected is the run's finalize
   // `outputs/` sweep.
-  const publishFile: Handler<AppEnv> = async (c) => {
+  router.post("/runs/:runId/files", verifyRunUploadSignature, fileLimiter, async (c) => {
     const run = c.get("run")!;
 
     // Only a live run may publish — a file arriving after finalize (or
@@ -493,22 +491,20 @@ export function createRunsEventsRouter() {
       },
       deduped ? 200 : 201,
     );
-  };
-  router.post("/runs/:runId/files", verifyRunUploadSignature, fileLimiter, publishFile);
+  });
 
   // GET /api/runs/:runId/files/:name — a single input file, streamed
   // straight from storage so neither the platform nor the agent buffers the
   // whole payload. The agent streams the response body to `files/<name>`.
   // A 404 on a file the manifest listed is a fatal provisioning fault.
-  const fetchFile: Handler<AppEnv> = async (c) => {
+  router.get("/runs/:runId/files/:name", verifyRunSignature, eventLimiter, async (c) => {
     const run = c.get("run")!;
     const name = c.req.param("name")!;
     const stream = await downloadRunFileStream(run.id, name);
     if (!stream) throw notFound(`file ${name} not found for run ${run.id}`);
     c.header("Content-Type", "application/octet-stream");
     return c.body(stream);
-  };
-  router.get("/runs/:runId/files/:name", verifyRunSignature, eventLimiter, fetchFile);
+  });
 
   return router;
 }

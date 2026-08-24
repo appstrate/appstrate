@@ -26,7 +26,6 @@
  */
 
 import { Hono } from "hono";
-import type { Handler } from "hono";
 import { getEnv } from "@appstrate/env";
 import type { AppEnv } from "../types/index.ts";
 import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
@@ -72,7 +71,7 @@ export function createFilesRouter() {
   // casing follows the wire DTO (CASING_CONVENTIONS.md carve-out 4b): `packageId`
   // and the `startingAfter` pagination param are camelCase; `run_id` /
   // `chat_session_id` are snake_case domain fields.
-  const list: Handler<AppEnv> = async (c) => {
+  router.get("/files", rateLimit(120), requirePermission("files", "read"), async (c) => {
     const scope = getAppScope(c);
     const actor = getActor(c);
 
@@ -93,78 +92,80 @@ export function createFilesRouter() {
 
     const page = await listFilesForActor(scope, actor, filters, c.get("permissions"));
     return c.json(page);
-  };
-  router.get("/files", rateLimit(120), requirePermission("files", "read"), list);
+  });
 
   // GET /api/files/:id — metadata DTO. Token-minting route (the single GET
   // mints the signed `preview_url`), so it is rate-limited like the others.
-  const getOne: Handler<AppEnv> = async (c) => {
+  router.get("/files/:id", rateLimit(120), requirePermission("files", "read"), async (c) => {
     const scope = getAppScope(c);
     const actor = getActor(c);
     const resolved = await getFileForActor(scope, actor, c.req.param("id")!, c.get("permissions"));
     if (!resolved) throw notFound("File not found");
     return c.json(toFileDto(resolved.row, actor, resolved.capabilities, { mintPreview: true }));
-  };
-  router.get("/files/:id", rateLimit(120), requirePermission("files", "read"), getOne);
+  });
 
   // GET /api/files/:id/content — download the bytes. Gated by the derived
   // `downloadable` flag (a user upload is served only to its creator). 307 to a
   // presigned GET when storage supports it (S3 with a public endpoint), else
   // proxy-stream. Content-Disposition: attachment.
-  const content: Handler<AppEnv> = async (c) => {
-    const scope = getAppScope(c);
-    const actor = getActor(c);
-    const resolved = await getFileForActor(scope, actor, c.req.param("id")!);
-    if (!resolved) throw notFound("File not found");
-    if (!resolved.capabilities.download) {
-      throw forbidden("This file is not downloadable by the current actor");
-    }
-    const { row } = resolved;
+  router.get(
+    "/files/:id/content",
+    rateLimit(120),
+    requirePermission("files", "read"),
+    async (c) => {
+      const scope = getAppScope(c);
+      const actor = getActor(c);
+      const resolved = await getFileForActor(scope, actor, c.req.param("id")!);
+      if (!resolved) throw notFound("File not found");
+      if (!resolved.capabilities.download) {
+        throw forbidden("This file is not downloadable by the current actor");
+      }
+      const { row } = resolved;
 
-    // RFC 9530 representation digest of the stored bytes — exposed only when
-    // the caller has the `metadata` capability (so a private upload's hash is
-    // never disclosed to a non-creator; download already implies metadata
-    // for these).
-    const reprDigest = resolved.capabilities.metadata ? reprDigestSha256(row.sha256) : undefined;
+      // RFC 9530 representation digest of the stored bytes — exposed only when
+      // the caller has the `metadata` capability (so a private upload's hash is
+      // never disclosed to a non-creator; download already implies metadata
+      // for these).
+      const reprDigest = resolved.capabilities.metadata ? reprDigestSha256(row.sha256) : undefined;
 
-    const parsed = parseStorageKey(row.storageKey);
-    const presigned = parsed
-      ? await createDownloadUrl(parsed.bucket, parsed.path, {
-          filename: row.name,
-          contentType: row.mime,
-        })
-      : null;
-    if (presigned) {
-      // The presigned GET serves the bytes from the blob store (we can't set
-      // headers on that response), but carry the digest on the 307 so a
-      // client that inspects the redirect still learns the authoritative hash.
-      if (reprDigest) c.header("Repr-Digest", reprDigest);
-      return c.redirect(presigned, 307);
-    }
+      const parsed = parseStorageKey(row.storageKey);
+      const presigned = parsed
+        ? await createDownloadUrl(parsed.bucket, parsed.path, {
+            filename: row.name,
+            contentType: row.mime,
+          })
+        : null;
+      if (presigned) {
+        // The presigned GET serves the bytes from the blob store (we can't set
+        // headers on that response), but carry the digest on the 307 so a
+        // client that inspects the redirect still learns the authoritative hash.
+        if (reprDigest) c.header("Repr-Digest", reprDigest);
+        return c.redirect(presigned, 307);
+      }
 
-    const stream = await streamFileContent(row.storageKey);
-    if (!stream) throw notFound("File content not found");
-    return new Response(stream, {
-      status: 200,
-      headers: {
-        "Content-Type": row.mime,
-        // The MIME is agent/uploader-controlled — forbid content-type
-        // sniffing so a mislabelled body can never be reinterpreted as
-        // active content (S3). Attachment disposition already prevents
-        // inline rendering.
-        "X-Content-Type-Options": "nosniff",
-        "Content-Length": String(row.size),
-        "Content-Disposition": attachmentDisposition(row.name),
-        "Cache-Control": "private, no-store",
-        ...(reprDigest ? { "Repr-Digest": reprDigest } : {}),
-      },
-    });
-  };
-  router.get("/files/:id/content", rateLimit(120), requirePermission("files", "read"), content);
+      const stream = await streamFileContent(row.storageKey);
+      if (!stream) throw notFound("File content not found");
+      return new Response(stream, {
+        status: 200,
+        headers: {
+          "Content-Type": row.mime,
+          // The MIME is agent/uploader-controlled — forbid content-type
+          // sniffing so a mislabelled body can never be reinterpreted as
+          // active content (S3). Attachment disposition already prevents
+          // inline rendering.
+          "X-Content-Type-Options": "nosniff",
+          "Content-Length": String(row.size),
+          "Content-Disposition": attachmentDisposition(row.name),
+          "Cache-Control": "private, no-store",
+          ...(reprDigest ? { "Repr-Digest": reprDigest } : {}),
+        },
+      });
+    },
+  );
 
   // DELETE /api/files/:id — allowed for a caller with the `files:delete`
   // permission (owner/admin) OR the file's own creator.
-  const remove: Handler<AppEnv> = async (c) => {
+  router.delete("/files/:id", rateLimit(60), async (c) => {
     const scope = getAppScope(c);
     const actor = getActor(c);
     const resolved = await getFileForActor(scope, actor, c.req.param("id")!, c.get("permissions"));
@@ -183,15 +184,14 @@ export function createFilesRouter() {
       before: { name: row.name, size: row.size, mime: row.mime, purpose: row.purpose },
     });
     return c.body(null, 204);
-  };
-  router.delete("/files/:id", rateLimit(60), remove);
+  });
 
   // POST /api/files/:id/keep — "keep"/pin: clear the file's retention
   // deadline (`expires_at = NULL`) so the expiry GC never sweeps it. Same
   // authorization as delete (the `files:delete` permission OR the file's
   // own creator). Idempotent — pinning an already-permanent file is a no-op
   // that returns 200 with the (unchanged) file. Returns the updated DTO.
-  const keep: Handler<AppEnv> = async (c) => {
+  router.post("/files/:id/keep", rateLimit(60), async (c) => {
     const scope = getAppScope(c);
     const actor = getActor(c);
     const resolved = await getFileForActor(scope, actor, c.req.param("id")!, c.get("permissions"));
@@ -216,8 +216,7 @@ export function createFilesRouter() {
       });
     }
     return c.json(toFileDto(updated, actor, resolved.capabilities));
-  };
-  router.post("/files/:id/keep", rateLimit(60), keep);
+  });
 
   return router;
 }
@@ -265,7 +264,7 @@ export function createFilePreviewRouter() {
   const router = new Hono<AppEnv>();
 
   // Cookie-less → no user/API-key identity to key on; rate-limit by client IP.
-  const preview: Handler<AppEnv> = async (c) => {
+  router.get("/preview/files/:id", rateLimitByIp(120), async (c) => {
     const env = getEnv();
 
     // Token IS the authorization — a missing/invalid/expired token is 401,
@@ -408,8 +407,7 @@ export function createFilePreviewRouter() {
         "Cross-Origin-Resource-Policy": corp,
       },
     });
-  };
-  router.get("/preview/files/:id", rateLimitByIp(120), preview);
+  });
 
   return router;
 }

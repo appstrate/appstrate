@@ -182,6 +182,23 @@ export function turnMetadataFromMessage(message: unknown): AppstrateTurnMetadata
   return turn as unknown as AppstrateTurnMetadata;
 }
 
+/**
+ * Did this turn stop because it ran out of budget?
+ *
+ * The `||` is NOT redundant, and the two fields are not one boolean written
+ * twice — which is what today's single writer makes them look like
+ * (`pi-turn-closure.ts` sets both from `input.stepCapReached`). Persisted rows
+ * predate that writer: before the chat unified on one engine there were TWO,
+ * in different files, and they computed different things —
+ * `maxStepsReached: completedSteps >= CHAT_MAX_STEPS` on one path,
+ * `toolStepBudgetReached: input.stepCapReached` on the other. A stored turn can
+ * therefore carry either field alone, or both with different values.
+ *
+ * A chat message is immutable once written, so collapsing the pair would
+ * silently re-answer this question for those rows. `maxStepsReached` stays the
+ * SHAPE GATE above for the same reason: it is the field every historical writer
+ * emitted.
+ */
 export function turnLimitReached(message: unknown): boolean {
   const turn = turnMetadataFromMessage(message);
   return Boolean(turn?.maxStepsReached || turn?.toolStepBudgetReached);
