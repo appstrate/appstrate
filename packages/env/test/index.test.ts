@@ -472,6 +472,31 @@ describe("APP_VERSION / PI_IMAGE / SIDECAR_IMAGE are a version contract", () => 
     expect(() => getEnv()).toThrow(/platform build 1\.0\.0-beta\.52.*Out of step: the platform/s);
   });
 
+  it("anchors the platform-outlier issue on a variable the operator can set", () => {
+    // `oddOneOut` has three values. In this trio the two images agree with each
+    // other and disagree with the platform, so `oddOneOut === "platform"` and
+    // BOTH images have to move. The path used to be a two-way ternary that sent
+    // this case to SIDECAR_IMAGE — the one variable the message says is not
+    // individually at fault — and nothing asserted the path, so it went unseen.
+    process.env.APP_VERSION = "v1.0.0-beta.52";
+    process.env.PI_IMAGE = "ghcr.io/appstrate/appstrate-pi:1.0.0-beta.51";
+    process.env.SIDECAR_IMAGE = "ghcr.io/appstrate/appstrate-sidecar:1.0.0-beta.51";
+
+    // Match the PATH prefix only. The message body legitimately names all three
+    // variables, so asserting over the whole line proves nothing.
+    let paths: string[] = [];
+    try {
+      getEnv();
+    } catch (err) {
+      paths = [...String((err as Error).message).matchAll(/^\s*- ([A-Z_]+):/gm)].map(
+        (m) => m[1] as string,
+      );
+    }
+    expect(paths, "no issue path parsed — the error format changed").not.toEqual([]);
+    expect(paths).toContain("PI_IMAGE");
+    expect(paths).not.toContain("SIDECAR_IMAGE");
+  });
+
   it("boots the health-container e2e trio (APP_VERSION=health-container-e2e, images :local)", () => {
     // scripts/health-container-e2e.sh + test/setup/docker-compose.health-e2e.yml,
     // verbatim. This is a CI job: if it cannot get past getEnv(), the container

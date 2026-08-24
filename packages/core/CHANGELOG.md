@@ -90,6 +90,21 @@ them, it only names them in docblocks.
 
 ### Added
 
+- **Alias-opacity surface** (`./model-swap`, #1202) — `ALIAS_CLIENT_API_SHAPE`,
+  `AliasBackingApiShape`, `isAliasBackingShape`, `isAliasClientShape`,
+  `isAliasInferenceCall`, `syntheticAliasErrorMessage`, and `ModelSwapBacking`
+  (`./sidecar-types`). Together they let a caller-facing surface answer about an
+  aliased model without naming the vendor behind it.
+- **`isImageMime`** (`./mime`) — the one image-media-type test, replacing four
+  copies.
+- **`runProducedFilesPath`** (`./run-and-wait-client`) — the run-scoped files
+  path, so callers stop building it by hand.
+- **`anthropicThinkingBudgets`** (`./model-generation`) — the reasoning-budget
+  table, published now that two runtimes read it.
+- **`MAX_CACHED_VALIDATORS`** (`./schema-validation`) and **`OCI_REVISION_LABEL`,
+  `ParsedImageRef`, `RuntimeImageMember`, `RuntimeImageTagMismatch`,
+  `RuntimeImageTrio`** (`./image-ref`) — the bounds and types behind the
+  compiled-validator cache and the image trio check.
 - **`authorDefaults(schema)`** (`./form`) — the top-level properties of a JSON
   Schema that declare a `default`, as a plain value map. This is the author
   layer of input resolution, published so the platform and the CLI compute it
@@ -111,16 +126,15 @@ them, it only names them in docblocks.
   rename reached the physical layer, and the old shape is no longer accepted,
   which is what made the `document://` prefix unreachable (see Removed).
 - **`PUBLISHED_FILE_LOG_EVENTS`** (`./file-uri`) — every `run_logs.event` tag
-  that announces a published file, canonical first: `["file", "document"]`. It
-  lives beside `FILE_URI_PREFIX` because it is the same kind of
+  that announces a published file. It is `["file"]`: no retired spelling
+  survives, for the reason stated under "No read alias survives this release"
+  above. It lives beside `FILE_URI_PREFIX` because it is the same kind of
   thing — pure data about a wire spelling that two independent readers (the web
-  shell's run page and the chat module's run card) must agree on. Two copies of
-  a compatibility list is how one of them silently stops matching and a file
-  list never refreshes, with no error anywhere. The old tag stays readable
-  forever, and unlike the retired `document://` scheme it has live values
-  behind it: `"document"` is what every release up to and including
-  `v1.0.0-beta.51` wrote, a `run_logs` row is immutable once written, and the
-  run page renders rows the current build never emitted.
+  shell's run page and the chat module's run card) must agree on, and two
+  copies of it is how one of them silently stops matching and a file list never
+  refreshes, with no error anywhere. It stays a list rather than a bare string
+  so a future second tag is a data change here, not a predicate change in both
+  readers.
 - **`isFileProducedByRun`, `AGENT_OUTPUT_FILE_PURPOSE`** (`./file-uri`) — the
   one predicate answering "was this file row produced by this run, as opposed
   to merely consumed by it". Both halves of the pair are load-bearing:
@@ -178,7 +192,20 @@ them, it only names them in docblocks.
 
 ### Changed
 
-- **`./document-uri` → `./file-uri`**, with the symbol renames listed above.
+- **`ModelSwap`** (`./sidecar-types`) gains two **required** members,
+  `clientApiShape` and `backingApiShape`. This is the one breaking change in
+  this release that hits a CONSTRUCTOR rather than a reader: code that builds a
+  `ModelSwap` against 7.0.0 does not compile against 8.0.0. Both are needed
+  because an aliased call is re-originated against the real backing — the
+  client speaks one protocol shape and the backing another, and the sidecar's
+  inbound allowlist keys on the CLIENT one (keying it on the backing would
+  refuse every aliased call). The optional `backing` member is additive.
+- **`./document-uri` → `./file-uri`**, symbol by symbol so a consumer can find
+  the name it is holding: `DOCUMENT_URI_PREFIX` → `FILE_URI_PREFIX`,
+  `DOCUMENT_ID_RE` → `FILE_ID_RE`, `isDocumentUri` → `isFileUri`,
+  `parseDocumentUri` → `parseFileUri`, `documentUri` → `fileUri`,
+  `extractDocumentIds` → `extractFileIds`, `extractDocumentIdsFromText` →
+  `extractFileIdsFromText`. The `upload://` helpers are unchanged.
   No deprecated subpath alias is kept: the module is consumed in-tree only, and
   both out-of-tree consumers stay on the published version.
 - **`findImageTagMismatch` → `findRuntimeImageTagMismatch`** (`./image-ref`),
@@ -197,10 +224,10 @@ them, it only names them in docblocks.
   `FileUploader`, `PublishedDocument` → `PublishedFile`,
   `DocumentPublishedEvent` → `FilePublishedEvent` (field `document_id` →
   `file_id`), `documentPublishedEvent` → `filePublishedEvent`, and the canonical
-  event `document.published` → `file.published`. The legacy tool id is accepted
-  on any persisted manifest and normalized to the canonical one by
-  `validateManifest` / `dropRetiredRuntimeTools`; a manifest saved afterwards
-  writes only `publish_file`, and a manifest naming both collapses to one entry.
+  event `document.published` → `file.published`. The legacy id is NOT accepted
+  and NOT normalized: `publish_document` is refused on author input and
+  dropped-with-a-report on read (`canonicalizeRuntimeToolIds`), never guessed
+  at. See the `ACCEPTED_RUNTIME_TOOL_IDS` note under Changed.
 - **`CoreResources.documents` → `CoreResources.files`** (`./permissions`), with
   `documents` removed from `CORE_RESOURCE_NAMES`. A stored `documents:read` /
   `documents:delete` scope no longer grants anything — see Removed.
@@ -282,8 +309,18 @@ them, it only names them in docblocks.
   Its last caller was deleted with the alias-opacity change (#1202); the
   adaptive-Anthropic branch it still carried had become a second implementation
   of the live `compat: { forceAdaptiveThinking: true }` path. Verified to have
-  no reader in this repo, in `cloud`, or in `connect-helper`. Every other
-  `./model-swap` export is untouched.
+  no reader in this repo, in `cloud`, or in `connect-helper`.
+- **`ALIASABLE_API_SHAPES`, `isAliasableApiShape`** (`./model-swap`) — the
+  set of protocol shapes an alias could be backed by, and its membership test.
+  Replaced by `AliasBackingApiShape` + `isAliasBackingShape`, which name the
+  same concept from the side that matters at the sidecar's inbound allowlist.
+- **`canonicalizeApiToolName`** (`./integration`) — collapsed to the identity
+  function once the raw long-auth-key `api_call` aliases went, so its six call
+  sites now test the name directly. Not re-exported under another name: there
+  is nothing left to canonicalize.
+- **`NpmVendorInput`, `PypiVendorInput`, `PypiRegistryResponse`**
+  (`./mcp-server-bundle`) — un-exported, not deleted. They describe the vendor
+  helpers' internal inputs and had no reader outside their own modules.
 - **`InlineRunBody.config`** (`./platform-types`) — the inline-run routes no
   longer accept the field.
 - **`publish_document.presentation`** (`./runtime-tool-defs`) — the

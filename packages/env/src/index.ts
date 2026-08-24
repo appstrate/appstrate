@@ -969,9 +969,16 @@ const envSchema = z
     ctx.addIssue({
       code: "custom",
       message: describeRuntimeImageMismatch(mismatch),
-      // Anchor on the ref the operator has to change when exactly one image is
-      // the outlier; otherwise keep the pair rule's original anchor.
-      path: [mismatch.oddOneOut === "pi" ? "PI_IMAGE" : "SIDECAR_IMAGE"],
+      // Anchor on a ref the operator can actually change. `oddOneOut` has
+      // THREE values, not two: when it is "platform" the two images agree with
+      // each other and disagree with the build launching them, so both have to
+      // move and neither is "the outlier". The previous two-way ternary sent
+      // that case to SIDECAR_IMAGE — naming the one variable the message says
+      // is not individually at fault. `APP_VERSION` is not the answer either:
+      // it is baked into the image by the Dockerfile, so an operator cannot
+      // set it. PI_IMAGE is where they start; `describeRuntimeImageMismatch`
+      // carries "BOTH images have to move".
+      path: [mismatch.oddOneOut === "sidecar" ? "SIDECAR_IMAGE" : "PI_IMAGE"],
     });
   })
   // The untrusted-preview origin must actually BE a different origin. See the

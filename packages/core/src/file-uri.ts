@@ -44,8 +44,21 @@
 export const FILE_URI_PREFIX = "appfile://";
 
 /**
- * Every `run_logs.event` tag that announces a published file. The sink writes
- * `"file"` (`type='result' event='file'`), and that is the whole set.
+ * The `run_logs.event` tag the sink WRITES to announce a published file
+ * (`type='result' event='file'`).
+ *
+ * Exported separately from the reader-side set below so the writer consumes the
+ * same value instead of spelling the literal: the set called itself "the
+ * agreement point three readers share", but the one party that produces the tag
+ * was not reading it. A shared list the writer does not consume is two copies
+ * wearing one name.
+ */
+export const PUBLISHED_FILE_LOG_EVENT = "file";
+
+/**
+ * Every `run_logs.event` tag that announces a published file — the set readers
+ * filter on. Derived from {@link PUBLISHED_FILE_LOG_EVENT}, so writer and
+ * readers cannot disagree.
  *
  * It used to carry the pre-#1177 `"document"` spelling as well, because a
  * `run_logs` row is immutable once written and every release up to
@@ -53,12 +66,11 @@ export const FILE_URI_PREFIX = "appfile://";
  * row carrying it exists any more. A deployment that somehow held one would
  * render that row without its file attachment — not an error, just an absence.
  *
- * Stays a list rather than a bare string, and stays HERE, because it is the
- * agreement point three independent readers share (the web shell's run page,
- * the chat module's run card, and the event sink that writes the tag). Two
- * copies of it is how one of them silently stops matching.
+ * Stays a LIST rather than collapsing to the string, because the readers'
+ * question is membership: a second tag would then be a data change here rather
+ * than a predicate change in each reader.
  */
-export const PUBLISHED_FILE_LOG_EVENTS: readonly string[] = ["file"];
+export const PUBLISHED_FILE_LOG_EVENTS: readonly string[] = [PUBLISHED_FILE_LOG_EVENT];
 
 /**
  * `files.purpose` of a file an agent published from a run. The other purposes

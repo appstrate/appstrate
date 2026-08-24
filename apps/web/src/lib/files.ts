@@ -85,9 +85,10 @@ export function featuredRunFile<T extends Pick<FileLike, "purpose" | "run_id">>(
 
 /**
  * Does this run-log `event` tag announce a published file? The accepted set
- * (current + pre-#1177 spelling) lives in `@appstrate/core/file-uri`, shared
- * with the chat module's run card: a tag one of them misses is a file list
- * that silently never refreshes, with no error anywhere.
+ * lives in `@appstrate/core/file-uri` and is built from the tag the sink
+ * writes, shared with the chat module's run card: a tag one of them misses is
+ * a file list that silently never refreshes, with no error anywhere. No
+ * pre-#1177 spelling is accepted — none survives the rename.
  */
 export function isPublishedFileLogEvent(event: string | null | undefined): boolean {
   return !!event && PUBLISHED_FILE_LOG_EVENTS.includes(event);

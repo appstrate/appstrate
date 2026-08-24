@@ -393,9 +393,9 @@ export function extractRunFiles(result: unknown): ChatRunFile[] {
 /**
  * Extract published files from the live run log stream — the
  * `type='result' event='file'` frames the sink persists for each
- * `file.published` event (and the legacy `event='document'` frames written
- * before #1177). Lets the card show a chip the moment an agent publishes,
- * before the run terminates.
+ * `file.published` event. Lets the card show a chip the moment an agent
+ * publishes, before the run terminates. No pre-#1177 `event='document'` frame
+ * is read — that spelling is gone with the rest of the rename.
  *
  * These frames are publications, i.e. files the agent PRODUCED: the only
  * emitters are the `publish_file` runtime tool and the end-of-run

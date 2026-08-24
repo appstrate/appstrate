@@ -293,15 +293,13 @@ const agentManifestObjectSchema = afpsAgentManifestObjectSchema.extend({
   // `_meta`, because it is woven through the run pipeline (catalog
   // validation, prompt builder, sidecar tool registration) and namespacing
   // it would be disproportionate.
-  // The enum is {@link ACCEPTED_RUNTIME_TOOL_IDS} (canonical ids PLUS the
-  // retired spellings), not the canonical list: `runtime_tools` is persisted
-  // inside manifests — published ZIPs included, which are immutable by
-  // construction — so a stored legacy id must PARSE, or every agent that
-  // selected the tool under its old name becomes unvalidatable. Resolving the
-  // legacy id to its canonical form is not done here (a Zod `.transform()`
-  // makes the field unrepresentable in the generated AFPS JSON Schema, erasing
-  // the enum): `validateManifest` canonicalizes structurally before parsing,
-  // so `manifest.runtime_tools` is always canonical on the way out.
+  // The enum is {@link ACCEPTED_RUNTIME_TOOL_IDS}, which is the canonical list
+  // and nothing else — there are no retired spellings left to accept. An id
+  // the platform does not know is DROPPED structurally by
+  // `dropRetiredRuntimeTools` before Zod ever sees it, and the drop is
+  // reported to the caller rather than guessed at. Resolution is deliberately
+  // not a Zod `.transform()`: that makes the field unrepresentable in the
+  // generated AFPS JSON Schema and erases the enum.
   runtime_tools: z.array(z.enum(ACCEPTED_RUNTIME_TOOL_IDS)).optional(),
 });
 

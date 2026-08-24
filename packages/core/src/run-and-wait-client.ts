@@ -652,9 +652,9 @@ export async function launchRunAndWait(
     if (inputArg.input) launchBody.input = inputArg.input;
     // Fan-in by reference: entries forwarded verbatim; the route resolves each
     // URI through the file ACL and declares the reserved input field itself.
-    // Always under the CANONICAL name — a legacy `context_documents` argument
-    // is canonicalized here rather than relayed, so the wire carries one
-    // spelling however the model spelled it.
+    // One spelling reaches the wire because only one is accepted: the retired
+    // `context_documents` is REFUSED upstream by `unknownArgumentsError`, not
+    // canonicalized here.
     if (contextFiles) launchBody.context_files = contextFiles;
   } else {
     return {

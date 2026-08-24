@@ -15,7 +15,7 @@
 
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import { isPlainObject } from "@appstrate/core/safe-json";
-import { fileUri } from "@appstrate/core/file-uri";
+import { fileUri, PUBLISHED_FILE_LOG_EVENT } from "@appstrate/core/file-uri";
 import type { Db } from "@appstrate/db/client";
 import { modelCostSchema, type ModelCost } from "@appstrate/core/module";
 import { computeTokenCost, type TokenPricingStatus } from "@appstrate/afps-runtime/runner";
@@ -80,17 +80,17 @@ export async function persistRunEvent(
     case FILE_PUBLISHED_EVENT_TYPE: {
       // The `files` row already exists (POST /api/runs/:id/files); this event
       // only persists a run_log so the file streams over the run_log SSE. The
-      // `"file"` tag written below must stay the first member of
-      // `PUBLISHED_FILE_LOG_EVENTS` (`@appstrate/core/file-uri`) — every reader
-      // filters run_log lines on that list, and retired values must stay in it
-      // for historical rows.
+      // tag comes from `PUBLISHED_FILE_LOG_EVENT` (`@appstrate/core/file-uri`),
+      // which is also what the readers' membership set is built from — writing
+      // the literal here is what let a "shared" list have an unshared writer.
+      // The set carries no retired spelling: none survives the rename.
       const fileId = typeof event.file_id === "string" ? event.file_id : null;
       if (fileId) {
         await appendRunLog(
           scope,
           runId,
           "result",
-          "file",
+          PUBLISHED_FILE_LOG_EVENT,
           null,
           {
             file_id: fileId,

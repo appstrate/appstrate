@@ -59,6 +59,33 @@ the very next core release (`X.0.1`, `X.1.0`, anything non-major) fails hard on
 a consumer still pinned to `^(X-1)`. That is what keeps the gate's teeth: an
 unbumped consumer does not stay quiet, it blocks the next publish.
 
+## 4. Refresh the published-export baseline
+
+`packages/core/test/published-export-baseline.json` records the export set of
+the version ON NPM. `packages/core/test/export-surface.test.ts` diffs HEAD
+against it and fails when an export vanished without the CHANGELOG's
+`[Unreleased]` section naming it — the only guard on that surface, because
+`knip.config.ts` lists every core subpath as an entry (its readers are out of
+tree) and therefore never reports a core export as unused.
+
+Regenerate it from the TARBALL, after the publish lands:
+
+```sh
+cd "$(mktemp -d)" && npm pack @appstrate/core@X.Y.Z --silent && tar -xzf ./*.tgz
+bun -e 'const {exportedNames}=await import(process.env.REPO+"/packages/core/test/helpers/export-surface.ts");
+  const n=await exportedNames("package/src");
+  await Bun.write(process.env.REPO+"/packages/core/test/published-export-baseline.json",
+    JSON.stringify({version:"X.Y.Z",exports:Object.keys(n).sort()},null,2)+"\n")'
+```
+
+Not from the workspace and not from a git tag: `cloud/node_modules/@appstrate/core`
+is a symlink into this monorepo, so a green local typecheck says nothing about
+what a consumer can resolve. The tarball is the only source that does.
+
+Skipping this step does not break the build — it makes the next release's diff
+span two versions, so the `[Unreleased]` section is asked to document changes
+that already shipped.
+
 ## What the gate actually checks
 
 `scripts/check-consumer-versions.ts` compares each consumer's declared

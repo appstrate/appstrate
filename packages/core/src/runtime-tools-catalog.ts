@@ -96,10 +96,16 @@ export const RUNTIME_TOOL_CATALOG: readonly RuntimeToolCatalogEntry[] = [
 // ---------------------------------------------------------------------------
 
 /**
- * Every `runtime_tools` id a PERSISTED manifest may legitimately carry. It is
- * the list the Zod `runtime_tools` enum and the generated AFPS JSON Schema are
- * built from, and it is exactly {@link SELECTABLE_RUNTIME_TOOLS}: there are no
- * retired spellings to accept any more.
+ * {@link SELECTABLE_RUNTIME_TOOLS}, retyped as the non-empty MUTABLE tuple
+ * `z.enum()` requires — that is the whole of the difference, and the only
+ * reason this second binding exists. `[...X] as const` yields a readonly tuple,
+ * which `z.enum` will not take.
+ *
+ * It is NOT a drift guard. The commit that removed the alias table defended
+ * keeping both names on the grounds that the OpenAPI schema should import
+ * ACCEPTED "so the request-body enum cannot silently become the editor's list
+ * the next time the two differ". They cannot differ: this is defined as a
+ * spread of that one.
  *
  * There used to be an alias table here mapping `publish_document` forward to
  * `publish_file` (#1177), kept because `runtime_tools` is persisted inside
