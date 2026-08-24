@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { BrainCircuit, KeyRound, Plus } from "lucide-react";
@@ -28,6 +27,7 @@ import {
 } from "../../hooks/use-model-provider-credentials";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { useConnectionTest } from "../../hooks/use-connection-test";
+import { NavigateKeepingState } from "../../components/navigate-keeping-state";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { CredentialFormModal } from "../../components/credential-form-modal";
 import { ConfirmModal } from "../../components/confirm-modal";
@@ -191,7 +191,7 @@ export function OrgSettingsModelsPage() {
   const updatePkMutation = useUpdateModelProviderCredential();
   const deletePkMutation = useDeleteModelProviderCredential();
 
-  if (!isAdmin) return <Navigate to="/org-settings/general" replace />;
+  if (!isAdmin) return <NavigateKeepingState to="/org-settings/general" />;
 
   return (
     <>

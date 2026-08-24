@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { CreditCard } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -13,6 +12,7 @@ import { PlanGrid } from "../../components/plan-card";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
 import { formatDateField } from "../../lib/markdown";
 import { toast } from "sonner";
+import { NavigateKeepingState } from "../../components/navigate-keeping-state";
 
 const STATUS_I18N: Record<string, string> = {
   past_due: "billing.statusPastDue",
@@ -45,7 +45,7 @@ export function OrgSettingsBillingPage() {
     percent: storagePercent,
   } = useOrgStorage({ enabled: features.billing });
 
-  if (!features.billing) return <Navigate to="/org-settings/general" replace />;
+  if (!features.billing) return <NavigateKeepingState to="/org-settings/general" />;
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
   if (!billing) {

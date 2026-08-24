@@ -119,12 +119,9 @@ const OnboardingDoneStep = lazy(() =>
 const OnboardingWaitingStep = lazy(() =>
   import("./pages/onboarding/waiting-step").then((m) => ({ default: m.OnboardingWaitingStep })),
 );
-const OrgSettingsLayout = lazy(() =>
-  import("./pages/org-settings/layout").then((m) => ({ default: m.OrgSettingsLayout })),
-);
-const WorkspaceSettingsLayout = lazy(() =>
-  import("./pages/workspace-settings/layout").then((m) => ({
-    default: m.WorkspaceSettingsLayout,
+const UnifiedSettingsLayout = lazy(() =>
+  import("./pages/settings/layout").then((m) => ({
+    default: m.UnifiedSettingsLayout,
   })),
 );
 const OrgSettingsGeneralPage = lazy(() =>
@@ -141,6 +138,11 @@ const OrgSettingsProxiesPage = lazy(() =>
 );
 const OrgSettingsOAuthPage = lazy(() =>
   import("./pages/org-settings/oauth").then((m) => ({ default: m.OrgSettingsOAuthPage })),
+);
+const OrgSettingsMcpAccessPage = lazy(() =>
+  import("./pages/org-settings/mcp-access").then((m) => ({
+    default: m.OrgSettingsMcpAccessPage,
+  })),
 );
 const OrgSettingsBillingPage = lazy(() =>
   import("./pages/org-settings/billing").then((m) => ({ default: m.OrgSettingsBillingPage })),
@@ -362,6 +364,7 @@ export function App() {
       <Route path="proxies" element={<OrgSettingsProxiesPage />} />
       <Route path="oauth" element={<OrgSettingsOAuthPage />} />
       <Route path="cli-sessions" element={<OrgSettingsCliSessionsPage />} />
+      <Route path="mcp-access" element={<OrgSettingsMcpAccessPage />} />
       <Route path="billing" element={<OrgSettingsBillingPage />} />
     </>
   );
@@ -896,24 +899,14 @@ export function App() {
               <Route path="connections" element={<PreferencesConnectionsPage />} />
             </Route>
             <Route
-              path="/org-settings"
               element={
                 <LazyRoute>
-                  <OrgSettingsLayout />
+                  <UnifiedSettingsLayout />
                 </LazyRoute>
               }
             >
-              {orgSettingsRoutes}
-            </Route>
-            <Route
-              path="/workspace-settings"
-              element={
-                <LazyRoute>
-                  <WorkspaceSettingsLayout />
-                </LazyRoute>
-              }
-            >
-              {workspaceSettingsRoutes}
+              <Route path="/org-settings">{orgSettingsRoutes}</Route>
+              <Route path="/workspace-settings">{workspaceSettingsRoutes}</Route>
             </Route>
           </Routes>
         )}

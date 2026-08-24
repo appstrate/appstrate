@@ -71,11 +71,13 @@ export function useOrg() {
   useAutoSelect(orgs.length > 0 ? orgs : undefined, currentOrgId, setOrgId);
 
   const switchOrg = useCallback(
-    (orgId: string) => {
+    (orgId: string, applicationId?: string) => {
       if (orgId === orgStore.getState().id) return;
       orgStore.getState().setId(orgId);
-      // Reset application selection when org changes
-      appStore.getState().setId(null);
+      // A caller that already resolved the destination workspace can apply the
+      // complete context in one tick. Other callers retain the resolver's
+      // default-selection behaviour by omitting it.
+      appStore.getState().setId(applicationId ?? null);
       // Clear all cached data since it is org-scoped
       queryClient.removeQueries({ predicate: (q) => q.queryKey[0] !== "orgs" });
     },

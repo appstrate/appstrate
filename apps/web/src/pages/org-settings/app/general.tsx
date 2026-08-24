@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { AppWindow, Plus, X } from "lucide-react";
 import { usePermissions } from "../../../hooks/use-permissions";
@@ -49,6 +49,7 @@ function GeneralForm({
   };
 }) {
   const { t } = useTranslation(["settings", "common"]);
+  const location = useLocation();
   const navigate = useNavigate();
   const updateMutation = useUpdateApplication();
   const deleteMutation = useDeleteApplication();
@@ -197,7 +198,7 @@ function GeneralForm({
             {
               onSuccess: () => {
                 setConfirmOpen(false);
-                navigate("/org-settings/applications");
+                navigate("/org-settings/applications", { state: location.state });
               },
             },
           );

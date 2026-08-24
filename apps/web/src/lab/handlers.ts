@@ -34,10 +34,15 @@ type EndUserPatch = f.JsonRequest<"/api/end-users/{id}", "patch">;
 
 const changedEndUsers = new Map<string, LabEndUser>();
 const deletedEndUsers = new Set<string>();
+const dashboardSsoByOrg = new Map<string, boolean>();
 
 export function resetEndUserLabState(): void {
   changedEndUsers.clear();
   deletedEndUsers.clear();
+}
+
+export function resetSettingsLabState(): void {
+  dashboardSsoByOrg.clear();
 }
 
 function endUserFixture(id: string): LabEndUser | null {
@@ -71,6 +76,10 @@ function isPermanentPackageDetail(headers: Headers): boolean {
 
 function isEndUserPatch(body: unknown): body is EndUserPatch {
   return typeof body === "object" && body !== null && !Array.isArray(body);
+}
+
+function orgIdFromSettingsUrl(url: URL): string {
+  return decodeURIComponent(url.pathname.split("/")[3] ?? "");
 }
 
 /** `heavy` swaps the list bodies; `empty` empties them; `nominal` is as authored. */
@@ -228,7 +237,29 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   {
     method: "GET",
     pattern: /^\/api\/orgs\/[^/]+\/settings$/,
-    handler: () => ({ status: 200, body: f.orgSettings }),
+    handler: (url) => ({
+      status: 200,
+      body: {
+        ...f.orgSettings,
+        dashboard_sso_enabled:
+          dashboardSsoByOrg.get(orgIdFromSettingsUrl(url)) ?? f.orgSettings.dashboard_sso_enabled,
+      },
+    }),
+  },
+  {
+    method: "PUT",
+    pattern: /^\/api\/orgs\/[^/]+\/settings$/,
+    handler: (url, scenario, _headers, body) => {
+      const enabled =
+        typeof body === "object" &&
+        body !== null &&
+        "dashboard_sso_enabled" in body &&
+        typeof body.dashboard_sso_enabled === "boolean"
+          ? body.dashboard_sso_enabled
+          : (f.orgSettings.dashboard_sso_enabled ?? false);
+      if (scenario !== "error") dashboardSsoByOrg.set(orgIdFromSettingsUrl(url), enabled);
+      return { status: 200, body: { ...f.orgSettings, dashboard_sso_enabled: enabled } };
+    },
   },
   {
     method: "GET",

@@ -45,24 +45,36 @@ export function McpClientConnect({ serverName, url }: McpClientConnectProps) {
         <p className="text-muted-foreground mb-1 text-xs font-medium">
           {t("orgSettings.mcpEndpointLabel")}
         </p>
-        <CopyBlock value={cfg.url} />
+        <CopyBlock value={cfg.url} multiline />
         <p className="text-muted-foreground mt-1 text-xs">{t("orgSettings.mcpEndpointHint")}</p>
       </div>
 
       {/* Tier 2: per-client convenience snippets. */}
       <Tabs defaultValue="claude-code">
-        <TabsList className="flex-wrap">
-          <TabsTrigger value="claude-code">Claude Code</TabsTrigger>
-          <TabsTrigger value="claude-desktop">Claude Desktop</TabsTrigger>
-          <TabsTrigger value="cursor">Cursor</TabsTrigger>
-          <TabsTrigger value="vscode">VS Code</TabsTrigger>
-          <TabsTrigger value="json">JSON</TabsTrigger>
-          <TabsTrigger value="mcp-remote">{t("orgSettings.mcpTabLegacy")}</TabsTrigger>
+        <TabsList className="h-auto w-full flex-wrap justify-start max-sm:grid max-sm:grid-cols-2">
+          <TabsTrigger className="max-sm:w-full" value="claude-code">
+            Claude Code
+          </TabsTrigger>
+          <TabsTrigger className="max-sm:w-full" value="claude-desktop">
+            Claude Desktop
+          </TabsTrigger>
+          <TabsTrigger className="max-sm:w-full" value="cursor">
+            Cursor
+          </TabsTrigger>
+          <TabsTrigger className="max-sm:w-full" value="vscode">
+            VS Code
+          </TabsTrigger>
+          <TabsTrigger className="max-sm:w-full" value="json">
+            JSON
+          </TabsTrigger>
+          <TabsTrigger className="max-sm:w-full" value="mcp-remote">
+            {t("orgSettings.mcpTabLegacy")}
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="claude-code" className="space-y-2">
           <p className="text-muted-foreground text-xs">{t("orgSettings.mcpClaudeCodeHint")}</p>
-          <CopyBlock value={cfg.claudeCodeCommand} />
+          <CopyBlock value={cfg.claudeCodeCommand} multiline />
         </TabsContent>
 
         <TabsContent value="claude-desktop" className="space-y-2">

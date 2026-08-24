@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { CheckCircle2, FlaskConical, Globe, Plus, Trash2 } from "lucide-react";
@@ -27,6 +26,7 @@ import { ConfirmModal } from "../../components/confirm-modal";
 import { ErrorState, EmptyState } from "../../components/page-states";
 import { TestResultSpan } from "../../components/test-result-span";
 import { TableRowActions } from "../../components/table-row-actions";
+import { NavigateKeepingState } from "../../components/navigate-keeping-state";
 
 /**
  * The proxy column set. A proxy has no page of its own, so the row is static
@@ -217,7 +217,7 @@ export function OrgSettingsProxiesPage() {
 
   // Every hook first, THEN the guard: the column set is a hook now, and a
   // return above it makes the call conditional.
-  if (!isAdmin) return <Navigate to="/org-settings/general" replace />;
+  if (!isAdmin) return <NavigateKeepingState to="/org-settings/general" />;
 
   return (
     <>

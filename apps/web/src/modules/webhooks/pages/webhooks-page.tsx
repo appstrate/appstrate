@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
+import { useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Plus, Webhook } from "lucide-react";
 import { usePermissions } from "@/hooks/use-permissions";
@@ -14,6 +15,7 @@ import { WebhookCreateModal } from "../components/webhook-create-modal";
 import { getErrorMessage } from "@appstrate/core/errors";
 
 export function WebhooksPage() {
+  const location = useLocation();
   const { t } = useTranslation(["settings", "common"]);
   const { isAdmin } = usePermissions();
   const [createOpen, setCreateOpen] = useState(false);
@@ -37,7 +39,8 @@ export function WebhooksPage() {
         columns={columns}
         rows={webhooks ?? []}
         rowKey={(wh) => wh.id}
-        rowHref={(wh) => `/webhooks/${wh.id}`}
+        rowHref={(wh) => `/workspace-settings/webhooks/${wh.id}`}
+        rowState={() => location.state}
         rowLabel={(wh) => wh.url}
         isLoading={isLoading}
         isError={Boolean(error)}

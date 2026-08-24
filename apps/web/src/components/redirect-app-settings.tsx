@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Navigate, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
+import { NavigateKeepingState } from "./navigate-keeping-state";
 
 /**
  * `/org-settings/app/:tab` → `/workspace-settings/:tab`.
@@ -10,5 +11,5 @@ import { Navigate, useParams } from "react-router-dom";
  */
 export function RedirectAppSettings() {
   const { tab } = useParams<{ tab: string }>();
-  return <Navigate to={`/workspace-settings/${tab ?? "general"}`} replace />;
+  return <NavigateKeepingState to={`/workspace-settings/${tab ?? "general"}`} />;
 }

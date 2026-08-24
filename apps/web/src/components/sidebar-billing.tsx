@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Coins } from "lucide-react";
 import { useAppConfig } from "../hooks/use-app-config";
@@ -12,8 +12,10 @@ import {
   SidebarMenuItem,
   SidebarMenuButton,
 } from "@appstrate/ui/components/sidebar";
+import { openAsModal } from "../lib/modal-route";
 
 export function SidebarBilling() {
+  const location = useLocation();
   const { t } = useTranslation();
   const { features } = useAppConfig();
   const { data: billing } = useBilling({ enabled: features.billing });
@@ -48,7 +50,7 @@ export function SidebarBilling() {
               children: tooltipContent,
             }}
           >
-            <Link to="/org-settings/billing">
+            <Link to="/org-settings/billing" state={openAsModal(location)}>
               <Coins size={16} />
             </Link>
           </SidebarMenuButton>
@@ -62,6 +64,7 @@ export function SidebarBilling() {
       <div className="group-data-[collapsible=icon]:hidden">
         <Link
           to="/org-settings/billing"
+          state={openAsModal(location)}
           className="hover:bg-sidebar-accent block rounded-md px-2 py-2 transition-colors"
         >
           <div className="mb-1.5 flex items-center justify-between text-xs">

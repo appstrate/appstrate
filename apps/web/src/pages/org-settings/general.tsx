@@ -5,8 +5,6 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Building, HardDrive, AlertTriangle } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { Checkbox } from "@appstrate/ui/components/checkbox";
-import { Label } from "@appstrate/ui/components/label";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { formatBytes } from "@appstrate/core/format";
@@ -15,15 +13,12 @@ import { SettingsGroup, SettingRow } from "../../components/settings/setting-row
 import { InlineTextSetting } from "../../components/settings/inline-text-setting";
 import { useOrg } from "../../hooks/use-org";
 import { usePermissions } from "../../hooks/use-permissions";
-import { useAppConfig } from "../../hooks/use-app-config";
-import { useOrgSettings, useUpdateOrgSettings } from "../../hooks/use-org-settings";
 import { useOrgStorage } from "../../hooks/use-org-storage";
 import { getUsageBarColor, USAGE_WARN } from "../../lib/usage-severity";
 import { useQueryClient } from "@tanstack/react-query";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { Spinner } from "../../components/spinner";
 import { EmptyState } from "../../components/page-states";
-import { McpClientConnect } from "../../components/org-settings/mcp-client-connect";
 import { orgKeys } from "../../lib/query-keys";
 import { toast } from "sonner";
 
@@ -32,9 +27,6 @@ export function OrgSettingsGeneralPage() {
   const navigate = useNavigate();
   const { currentOrg } = useOrg();
   const { isOwner, isAdmin } = usePermissions();
-  const { features } = useAppConfig();
-  const { data: orgSettings } = useOrgSettings();
-  const updateSettingsMutation = useUpdateOrgSettings();
   const queryClient = useQueryClient();
   const orgId = currentOrg?.id;
 
@@ -143,52 +135,6 @@ export function OrgSettingsGeneralPage() {
           </div>
         </>
       )}
-
-      {isAdmin && features.oidc && (
-        <SettingsGroup title={t("orgSettings.advancedSection")}>
-          <SettingRow
-            variant="toggle"
-            label={
-              <Label htmlFor="dashboard-sso" className="cursor-pointer">
-                {t("orgSettings.dashboardSsoTitle")}
-              </Label>
-            }
-            description={t("orgSettings.dashboardSsoDesc")}
-            status={updateSettingsMutation.isPending && <Spinner />}
-          >
-            <Checkbox
-              id="dashboard-sso"
-              checked={orgSettings?.dashboard_sso_enabled ?? false}
-              disabled={updateSettingsMutation.isPending}
-              onCheckedChange={(checked) =>
-                updateSettingsMutation.mutate(
-                  {
-                    params: { path: { orgId: currentOrg.id } },
-                    body: { dashboard_sso_enabled: checked === true },
-                  },
-                  {
-                    onError: (err) => {
-                      toast.error(t("error.prefix", { message: getErrorMessage(err) }));
-                    },
-                  },
-                )
-              }
-            />
-          </SettingRow>
-        </SettingsGroup>
-      )}
-
-      <div className="text-muted-foreground mt-8 mb-4 text-sm font-medium">
-        {t("orgSettings.mcpSection")}
-      </div>
-      <div className="border-border bg-card mb-4 rounded-lg border p-5">
-        <h3 className="text-sm font-semibold">{t("orgSettings.mcpTitle")}</h3>
-        <p className="text-muted-foreground mt-1 mb-3 text-sm">{t("orgSettings.mcpDesc")}</p>
-        <McpClientConnect
-          serverName={`appstrate-${currentOrg.slug}`}
-          url={`${window.location.origin}/api/mcp/o/${currentOrg.id}`}
-        />
-      </div>
 
       {isOwner && (
         <>

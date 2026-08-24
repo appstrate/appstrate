@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { AppWindow, Plus } from "lucide-react";
 import { usePermissions } from "../../hooks/use-permissions";
@@ -20,12 +20,13 @@ export function OrgSettingsApplicationsPage() {
   const { isAdmin } = usePermissions();
   const { data: applications, isLoading, error } = useApplications();
   const [createOpen, setCreateOpen] = useState(false);
+  const location = useLocation();
   const navigate = useNavigate();
   const { switchApp } = useAppSwitcher();
 
   const handleAppClick = (applicationId: string) => {
     switchApp(applicationId);
-    navigate("/org-settings/app/general");
+    navigate("/workspace-settings/general", { state: location.state });
   };
 
   // Above the admin gate: a hook called after an early return is a hook called

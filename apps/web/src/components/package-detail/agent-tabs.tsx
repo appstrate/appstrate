@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { MemoryPanel } from "../persistence/memory-panel";
@@ -22,6 +22,7 @@ import { RunAgentButton } from "../run-agent-button";
 import { ApiKeyCreateModal } from "../api-key-create-modal";
 import { Ban, CalendarClock, Play } from "lucide-react";
 import { EmptyState } from "../page-states";
+import { openAsModal } from "../../lib/modal-route";
 
 export function AgentRunsTab({
   packageId,
@@ -177,6 +178,7 @@ function buildCurlMultipartExample(params: CurlParams): string {
 // ─── Agent API Tab ─────────────────────────────────────────────────────
 
 export function AgentApiTab({ packageId }: { packageId: string }) {
+  const location = useLocation();
   const { t } = useTranslation(["agents", "common"]);
   const { data: detail } = usePackageDetail("agent", packageId);
   const { data: apiKeys, isLoading: keysLoading } = useApiKeys();
@@ -265,7 +267,11 @@ export function AgentApiTab({ packageId }: { packageId: string }) {
               <span className="text-muted-foreground shrink-0 text-xs">{t("api.keyMasked")}</span>
             )}
           </div>
-          <Link to="/org-settings/app/api-keys" className="text-primary text-xs hover:underline">
+          <Link
+            to="/workspace-settings/api-keys"
+            state={openAsModal(location)}
+            className="text-primary text-xs hover:underline"
+          >
             {t("api.manageKeys")}
           </Link>
         </div>

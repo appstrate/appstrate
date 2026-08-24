@@ -37,3 +37,20 @@ export function useIsModalRoute(): boolean {
 export function openAsModal(current: Location): ModalState {
   return { backgroundLocation: current };
 }
+
+/** Complete router target for closing a modal without losing filters or anchors. */
+export function modalReturnTarget(background: Location | null): {
+  to: { pathname: string; search: string; hash: string };
+  state: unknown;
+} {
+  return background
+    ? {
+        to: {
+          pathname: background.pathname,
+          search: background.search,
+          hash: background.hash,
+        },
+        state: background.state,
+      }
+    : { to: { pathname: "/", search: "", hash: "" }, state: null };
+}

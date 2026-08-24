@@ -119,8 +119,8 @@ export function OrgSwitcher({ variant = "chip" }: { variant?: "chip" | "row" | "
    */
   const applyContext = (orgId: string, applicationId: string) => {
     const orgChanged = orgId !== currentOrg.id;
-    if (orgChanged) switchOrg(orgId);
-    switchApp(applicationId);
+    if (orgChanged) switchOrg(orgId, applicationId);
+    else switchApp(applicationId);
     setOpen(false);
     if (orgChanged) {
       navigate(location.pathname.startsWith("/chat") ? "/chat" : "/", { replace: true });

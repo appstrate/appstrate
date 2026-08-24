@@ -137,6 +137,7 @@ run it at all:
 ```bash
 bun run lab:shots     # screens × scenarios × widths → PNGs, and the guard below
 bun run lab:measure   # one table's real geometry across a sweep of widths
+bun run lab:settings  # settings context, remount, routing, Back/Close and mobile guard
 ```
 
 `e2e/lab/`, not `apps/web/scripts/`, for one boring reason: `@playwright/test`
@@ -145,6 +146,13 @@ resolves from the `e2e` workspace and nowhere else, and putting it under
 branch. Parameters are environment variables (`LAB_URL`, `LAB_SCREENS`,
 `LAB_SCENARIOS`, `LAB_WIDTHS`, `LAB_ROUTE`, `LAB_SELECTOR`, `LAB_OUT`). It is
 not application code, it never ships, and it deserves no abstraction.
+
+`lab:settings` is deliberately behavioural rather than another screenshot
+walker. It asserts the organisation-to-workspace dependency and content key,
+Back and complete Close restoration, the legacy workspace redirect, and the
+two independent mobile scope groups. Pixels cannot tell whether the previous
+URL kept its query, hash and router state, so that contract needs a browser
+assertion of its own.
 
 **`lab:shots` is also the FIXTURE GUARD.** `mock-fetch` already logs
 `[lab] no fixture for GET /api/…`; the script listens for that line and exits
@@ -770,8 +778,9 @@ answer.
 
 ## Settings
 
-Three surfaces, one rendering: **organisation**, **workspace**, **account**
-(preferences). All three are routed modals over the page you were on.
+Two settings surfaces, one rendering. **Organisation and workspace share one
+routed modal**, while **account preferences stay separate** because they belong
+to the person rather than either product scope.
 
 - **A real URL.** The previous location rides in navigation state
   (`lib/modal-route.ts`); the main route tree renders THAT location while the
@@ -784,21 +793,36 @@ Three surfaces, one rendering: **organisation**, **workspace**, **account**
   overlay silently became a full page.
 - Both panes scroll, the dialog itself never does. Nested scrolling is what
   makes these surfaces confusing, not scrolling.
-- On a phone the rail becomes a select at the top of the content.
-- **Rail head** = "PARAMÈTRES" over the NAME of what is configured. Every group
-  keeps its label, one-group surfaces included: the label states the KIND where
-  the head gives only the name ("Tractr" does not say it is an organisation),
-  and it keeps the three surfaces built the same way. A group-count rule was
-  tried and reverted — it optimised inside a surface and cost consistency
-  between them.
-- **Workspace settings are their own surface**, not a section of the org's:
-  everything under them is scoped by `X-Application-Id`. Both are opened by the
-  gears on the switcher rows, and the gear only appears on the CURRENT org or
-  workspace — configuring one you are not in would have to switch context
-  silently first.
+- The desktop rail has **two large independent menu sections**, not two
+  selectors stacked in one head. ORGANISATION owns its organisation dropdown
+  and org-scoped pages. WORKSPACE starts lower, after the full organisation
+  navigation, and owns its workspace dropdown and workspace-scoped pages. The
+  active section has its own rail and surface emphasis, so the scope of a deed
+  is never inferred from the selected name alone.
+- On a phone both sections survive as two compact framed groups. Each keeps its
+  own context selector and its own page selector. One flattened select was the
+  old answer; it erased the distinction this structure exists to make.
+- Sharing a shell does **not** share an API scope. Organisation pages remain
+  keyed by the org and workspace pages remain keyed by org + application with
+  `X-Application-Id`. The content outlet remounts on the id belonging to its
+  active scope, so a switch cannot leave the previous workspace's local UI
+  state standing under the new workspace name.
+- Changing organisation first resolves that org's workspace list, then chooses
+  the last one used there, its default, or its first valid entry, in that order.
+  Org and workspace are applied together. The current settings route stays the
+  same kind: an org page remains its analogous org page, and a workspace page
+  remains its analogous workspace page when permissions allow it.
 - The four **developer** screens (API keys, OAuth clients, End-Users, Webhooks)
   are one family, all org+workspace scoped. Two of them used to be in the main
   nav while two were already in settings.
+- **Collaborator SSO owns its activation.** Its destination is visible to an
+  org admin whenever OIDC exists, even while disabled; the toggle, disabled
+  explanation and client table live together there. Hiding the destination
+  behind the toggle was the circular navigation that put the toggle in General.
+- **MCP access is its own organisation destination.** It means connecting
+  Claude Code, Cursor, VS Code or another client to the organisation endpoint;
+  it is deliberately not named like installed MCP servers or integration
+  connections. The raw endpoint and all client tabs moved intact from General.
 
 ## Form pattern
 
@@ -2016,7 +2040,81 @@ bounded range. Schedules still needs a server-computed occurrences range with
 the scheduler's exact recurrence, timezone and DST semantics; never reproduce
 cron in the browser.
 
-**11. Accessibility, which nothing here has ever checked.** The branch
+**11. ~~One settings shell, two explicit scopes.~~ Done 23 August.** Organisation
+and workspace settings now traverse one pathless routed layout while retaining
+their existing `/org-settings/*` and `/workspace-settings/*` URLs. Account
+Preferences remains its own modal. The desktop rail is two large sections:
+Organisation dropdown then all organisation pages, followed lower down by a
+separate Workspace dropdown and its pages. A two-pixel scope rail plus the
+active item's surface makes the active scope explicit. Below `md`, those same
+sections become two framed groups, each with its context and page selects; they
+are not flattened into one ambiguous menu.
+
+Changing organisation fetches the destination's workspaces with the explicit
+org header before changing either store. It chooses the remembered workspace
+when still valid, then the default, then the first one. The org and resolved
+workspace are applied in the same tick, the current route stays on its analogous
+org or workspace page, and a keyed outlet remounts organisation content by org
+and workspace content by org + application. Changing only the workspace keeps
+the route and remounts only the workspace subtree. Typed query keys and request
+headers remain scoped exactly as before; the shared shell does not merge the
+backend contracts. The workspace group remains admin-only, and every prior
+OIDC, billing and webhooks feature gate is preserved as data in one navigation
+definition, which is the seam future capability checks can replace without a
+permission backend being invented here.
+
+Collaborator SSO no longer creates its own circular navigation. Its page is
+visible to an org admin whenever OIDC is available, independently of
+`dashboard_sso_enabled`; the toggle, the disabled explanation and the existing
+OAuth client table live together. The lab gained the missing PUT fixture so
+the transition off and back to the same URL can be exercised. General also
+lost the unrelated MCP block. `MCP access` is a dedicated organisation page,
+distinct from installed MCP-server packages and integration connections, with
+the raw endpoint and all six existing client tabs intact.
+
+Cold org and workspace URLs, the legacy `/org-settings/app/:tab` redirect,
+scope-to-scope Back, close-to-background, organisation switching, remembered
+workspace fallback, workspace remount and the mobile selectors were exercised
+in Chrome Stable. The first phone inspection caught a real defect the DOM
+widths did not: the six MCP tab triggers wrapped out of a fixed 36px track and
+painted over their content. Their mobile list is a real two-column, three-row
+track now. The first error capture caught the inverse: the SSO page kept a
+loading spinner during query retries, so the first failure reason now draws the
+standard error state while retrying can continue.
+
+The four affected lab screens produce 32 captures across nominal, empty, heavy
+and error at 1440 and 390 with no fixture hole. At 1440 the dialog is 1080px,
+its rail is 224px and the Organisation / Workspace sections occupy separate
+410px / 309px bands. At 390 they are separate 294px × 134px groups. The sweep
+at 1440, 1024, 768, 767, 640 and 390 reports zero viewport, dialog and content
+overflow.
+
+The fixed-point Spec/Standards passes caught routing contracts that the first
+pixel and DOM passes could not see. Close restored only the background path and
+dropped its search, hash and state; Webhook detail, post-delete returns,
+workspace deletion, Billing and the agent API-key link could leave the modal
+through legacy or stateless routes; feature and permission guards used plain
+`Navigate`; and a late organisation-workspace request could still mutate the
+stores after the dialog unmounted. Close now restores the complete location,
+all reachable transitions carry the modal state onto canonical routes, every
+settings guard uses `NavigateKeepingState`, and an unmount/request identity
+guard cancels the late continuation. Active rail links gained `aria-current`,
+and the two mobile page selectors now have scope-specific programmatic labels.
+
+Those review failures are now guarded two ways: source-level route contract
+tests protect every transition and guard, while `bun run lab:settings` mounts
+the real router in Chrome and exercises dependent organisation/workspace
+selection, keyed remount, Back, complete Close, the legacy redirect and the two
+mobile groups. It is green. The full nominal lab walk is 64 captures over 32
+screens at 1440 and 390 with no fixture hole; the affected four-screen walk is
+also green across all four scenarios. `TEST_TIER=0 bun test apps/web` is green
+(617 pass), and `bun run check` is green (33/33) with the same nine pre-existing
+warnings. Root `bun test` reproduced the known infrastructure failure before a
+useful suite summary: preload could not connect to the OrbStack Docker socket,
+then tests that depend on preload state failed. It was interrupted after the
+failure was established; no touched web test remains failing.
+
+**12. Accessibility, which nothing here has ever checked.** The branch
 re-declares ARIA roles on the table because this file demands it, and that is
 the whole of it: not one contrast ratio, keyboard path or touch target has ever
 been measured. Meanwhile the last days added dozens of controls — icon buttons

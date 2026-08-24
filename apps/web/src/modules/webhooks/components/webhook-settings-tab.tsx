@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
 import { Label } from "@appstrate/ui/components/label";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
@@ -26,6 +26,7 @@ import type { WebhookEvent, WebhookInfo } from "../hooks/use-webhooks";
  */
 export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
   const { t } = useTranslation(["settings", "common"]);
+  const location = useLocation();
   const navigate = useNavigate();
   const updateMutation = useUpdateWebhook();
   const deleteMutation = useDeleteWebhook();
@@ -86,7 +87,7 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
       { params: { path: { id: webhook.id } } },
       {
         onSuccess: () => {
-          navigate("/webhooks");
+          navigate("/workspace-settings/webhooks", { state: location.state });
         },
       },
     );
