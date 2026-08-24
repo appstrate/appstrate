@@ -26,7 +26,7 @@
  */
 
 import { rm } from "node:fs/promises";
-import * as clack from "@clack/prompts";
+import { confirm, exitWithError, logWarn, EXIT_CANCELLED } from "../lib/ui.ts";
 import { runCommand } from "../lib/install/os.ts";
 import { resolveInstall } from "../lib/install/project.ts";
 import { reportRunning, resolveRunningUrls } from "../lib/install/report.ts";
@@ -107,7 +107,7 @@ async function runCompose(dir: string, projectName: string, args: string[]): Pro
 async function reportRunningStack(dir: string, projectName: string): Promise<void> {
   const urls = await resolveRunningUrls(dir);
   if (!urls) {
-    clack.log.warn(
+    logWarn(
       `Stack is up, but ${dir}/.env is missing or unreadable — skipping the status banner.\n` +
         `Manage the stack with \`appstrate logs -f\` / \`appstrate stop\`.`,
     );
@@ -174,30 +174,31 @@ export async function uninstallCommand(opts: UninstallOptions = {}): Promise<voi
 
   if (purge) {
     if (!autoConfirm) {
-      // The non-TTY case is handled by clack itself (Ctrl-C → exit 130);
-      // we re-frame stdout-piped scripts with a dedicated guard so the
-      // operator gets an actionable hint instead of a frozen prompt.
+      // Refuse before prompting when there is no terminal to prompt on:
+      // `confirm` would throw the generic "stdin is not a TTY" message, and
+      // an operator piping this command deserves to be told about `--yes`
+      // instead.
       if (!process.stdin.isTTY) {
         throw new Error(
           `\`appstrate uninstall --purge\` is destructive and requires confirmation.\n` +
             `Re-run with --yes (or APPSTRATE_YES=1) to proceed non-interactively.`,
         );
       }
-      const ok = await clack.confirm({
-        message:
-          `Permanently destroy this Appstrate install?\n` +
+      // `confirm` (lib/ui.ts) owns the Ctrl-C branch: it renders "Cancelled."
+      // and exits 130 without returning. What is left here is the explicit
+      // "no" answer, which gets its own wording on the same exit code —
+      // matching every other prompt in this CLI keeps shell-script wrappers
+      // (`if appstrate uninstall --purge; then …`) coherent.
+      const ok = await confirm(
+        `Permanently destroy this Appstrate install?\n` +
           `  • dir: ${dir} (compose file, .env, .appstrate/)\n` +
           `  • named volumes: Postgres data, Redis data, MinIO data\n` +
           `  • project: ${projectName}\n` +
           `This cannot be undone.`,
-        initialValue: false,
-      });
-      if (clack.isCancel(ok) || ok !== true) {
-        clack.cancel("Uninstall cancelled.");
-        // `process.exit(130)` matches the Ctrl-C exit code used by every
-        // other prompt in this CLI — keeps shell-script wrappers (`if
-        // appstrate uninstall --purge; then …`) coherent.
-        process.exit(130);
+        false,
+      );
+      if (!ok) {
+        exitWithError("Uninstall cancelled.", undefined, EXIT_CANCELLED);
       }
     }
     await runCompose(dir, projectName, ["down", "-v"]);

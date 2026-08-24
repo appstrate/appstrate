@@ -17,9 +17,18 @@
  * unit-testable without a real KVM host.
  */
 
-import * as clack from "@clack/prompts";
 import { dirname, isAbsolute, normalize } from "node:path";
-import { intro, outro, askText, confirm, exitWithError, withSpinner } from "../lib/ui.ts";
+import {
+  intro,
+  outro,
+  askText,
+  cancel,
+  confirm,
+  exitWithError,
+  note,
+  select,
+  withSpinner,
+} from "../lib/ui.ts";
 import { CLI_VERSION, DEV_CLI_VERSION } from "../lib/version.ts";
 import {
   RUNNER_BIN_PATH,
@@ -286,10 +295,11 @@ export async function resolveInstallConfig(
     !opts.yes &&
     process.stdin.isTTY
   ) {
-    const chosen = await clack.select<"unix" | "tcp">({
-      message: "How does the platform reach this daemon?",
-      initialValue: "unix",
-      options: [
+    // `select` (lib/ui.ts) owns the Ctrl-C branch — "Cancelled." on exit 130,
+    // the same treatment every other prompt in this CLI gets.
+    const chosen = await select<"unix" | "tcp">(
+      "How does the platform reach this daemon?",
+      [
         {
           value: "unix",
           label: `Unix socket at ${RUNNER_DEFAULT_SOCKET_PATH}`,
@@ -301,11 +311,8 @@ export async function resolveInstallConfig(
           hint: "Remote platform — reachable over the network",
         },
       ],
-    });
-    if (clack.isCancel(chosen)) {
-      clack.cancel("Cancelled.");
-      process.exit(130);
-    }
+      "unix",
+    );
     if (chosen === "unix") socketPath = RUNNER_DEFAULT_SOCKET_PATH;
   }
 
@@ -548,7 +555,7 @@ function printPreflight(pf: PreflightResult): void {
     const base = `${glyph} ${c.label}: ${c.detail}`;
     return c.ok || !c.remedy ? base : `${base}\n    → ${c.remedy}`;
   });
-  clack.note(lines.join("\n"), "Host preflight");
+  note(lines.join("\n"), "Host preflight");
 }
 
 function printPostInstall(config: RunnerConfig, source: TokenSource, healthy: boolean): void {
@@ -583,7 +590,7 @@ function printPostInstall(config: RunnerConfig, source: TokenSource, healthy: bo
         `and use https:// in FIRECRACKER_RUNNER_URL — the wire carries run credentials.`,
       ];
 
-  clack.note(
+  note(
     [
       `Platform config (set on the containerized platform):`,
       `  RUN_ADAPTER=firecracker`,
@@ -740,14 +747,14 @@ export async function runnerDoctorCommand(opts: RunnerDoctorOptions = {}): Promi
     : `✗ jailer: missing at ${report.jailer.path} — the daemon refuses to boot with ` +
       `FIRECRACKER_JAILER=on (the default); re-run \`appstrate runner install\` to fetch it`;
 
-  clack.note(
-    [...pfLines, "", svcLine, healthLine, artLine, jailerLine].join("\n"),
-    "Runner diagnostics",
-  );
+  note([...pfLines, "", svcLine, healthLine, artLine, jailerLine].join("\n"), "Runner diagnostics");
   if (report.ok) {
     outro("Runner is healthy.");
   } else {
-    clack.cancel("Runner has issues — see the diagnostics above.");
+    // Not `exitWithError`: `doctor` reports, it does not abort. The process
+    // runs to completion and only sets a non-zero code, so a wrapper script
+    // can branch on it while the diagnostics above stay on screen.
+    cancel("Runner has issues — see the diagnostics above.");
     process.exitCode = 1;
   }
 }
@@ -928,7 +935,7 @@ export async function runnerUninstallCommand(opts: RunnerUninstallOptions = {}):
             `This removes:\n${willRemove}\n\nRe-run with --yes (or APPSTRATE_YES=1) to proceed.`,
         );
       }
-      clack.note(willRemove, "This will remove");
+      note(willRemove, "This will remove");
       if (!(await confirm(`Remove the ${RUNNER_SERVICE_NAME} daemon?`, false))) {
         outro("Uninstall cancelled — nothing was removed.");
         return;
@@ -969,7 +976,7 @@ export async function runnerUninstallCommand(opts: RunnerUninstallOptions = {}):
       },
       "appstrate-runner removed",
     );
-    clack.note(removed.map((p) => `  • ${p}`).join("\n"), "Removed");
+    note(removed.map((p) => `  • ${p}`).join("\n"), "Removed");
     outro(
       removeData
         ? "Runner fully uninstalled."

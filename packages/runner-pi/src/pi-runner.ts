@@ -583,14 +583,14 @@ export class PiRunner implements Runner {
       // 401/retry silently (the platform's kickoff fail-fast should prevent
       // this, so reaching here means a run bypassed that guard). Surface a
       // line on the surprising path.
-      // runner-pi intentionally avoids a logger dep — same console.error
-      // JSON convention as the compaction-wait + sink-heartbeat paths.
-      console.error(
-        JSON.stringify({
+      // runner-pi intentionally avoids a logger dep — same JSON-line-on-stderr
+      // convention as the compaction-wait + sink-heartbeat paths.
+      process.stderr.write(
+        `${JSON.stringify({
           level: "warn",
           msg: "[pi-runner] no API key for model — provider calls will be unauthenticated",
           provider: model.provider,
-        }),
+        })}\n`,
       );
     }
 
@@ -1020,14 +1020,14 @@ export async function waitForCompactionToSettle(
     if (Date.now() >= deadline) {
       // Only surface a line on the surprising path — happy-path
       // compactions resolve silently. runner-pi intentionally avoids
-      // a logger dep, so the existing console.error convention from
-      // sink-heartbeat applies.
-      console.error(
-        JSON.stringify({
+      // a logger dep, so the existing JSON-line-on-stderr convention
+      // from sink-heartbeat applies.
+      process.stderr.write(
+        `${JSON.stringify({
           level: "warn",
           msg: "[pi-runner] compaction wait timed out",
           timeoutMs,
-        }),
+        })}\n`,
       );
       return;
     }

@@ -9,11 +9,11 @@
  * package manager. See `docs/cli/upgrades.md` for the full matrix.
  */
 
-import * as clack from "@clack/prompts";
 import { INSTALL_SOURCE, upgradeHint, type InstallSource } from "../lib/install-source.ts";
 import { CLI_VERSION } from "../lib/version.ts";
 import { formatProgress, type ProgressFn } from "../lib/download.ts";
-import { spinner } from "../lib/ui.ts";
+import { exitWithError, intro, outro, spinner } from "../lib/ui.ts";
+import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 import {
   detectPlatform,
   performCurlUpdate,
@@ -38,7 +38,7 @@ interface SelfUpdateOptions {
   currentVersion?: string;
   /** Override platform detection for tests. Production reads `process.platform/arch`. */
   platform?: PlatformInfo;
-  /** Logger override for tests; production uses `console.error`. */
+  /** Logger override for tests; production writes through the command sink. */
   log?: (line: string) => void;
   /** Download-progress sink; the command wrapper wires a spinner. */
   onProgress?: ProgressFn;
@@ -155,8 +155,11 @@ export async function runSelfUpdate(opts: SelfUpdateOptions = {}): Promise<SelfU
  * Commander entry point — does the I/O. Wraps `runSelfUpdate` so a successful
  * call exits 0 and a failure exits with the chosen non-zero code.
  */
-export async function selfUpdateCommand(opts: SelfUpdateOptions = {}): Promise<never> {
-  clack.intro(`Appstrate self-update`);
+export async function selfUpdateCommand(
+  opts: SelfUpdateOptions = {},
+  io: CommandIO = DEFAULT_IO,
+): Promise<never> {
+  intro(`Appstrate self-update`, io);
   // Live download progress so a 113 MB binary is not a silent multi-minute gap
   // (issue #821). The spinner starts on the first byte-tick and stops once the
   // run finishes; it degrades to a static line on a non-TTY (piped installs).
@@ -164,7 +167,7 @@ export async function selfUpdateCommand(opts: SelfUpdateOptions = {}): Promise<n
   // no-op update must not paint a download line). The `finally` carries the
   // same obligation the helper would: a spinner that outlives its scope keeps
   // painting from a `setInterval` for the rest of the process (issue #1180).
-  const spin = spinner();
+  const spin = spinner(io);
   let spinning = false;
   const onProgress: ProgressFn = (p) => {
     if (!spinning) {
@@ -183,10 +186,12 @@ export async function selfUpdateCommand(opts: SelfUpdateOptions = {}): Promise<n
   if (spinning) {
     spin.stop(result.exitCode === SELF_UPDATE_EXIT.OK ? "Download complete" : "Download failed");
   }
-  if (result.exitCode === SELF_UPDATE_EXIT.OK) {
-    clack.outro(result.message);
-  } else {
-    clack.cancel(result.message);
+  if (result.exitCode !== SELF_UPDATE_EXIT.OK) {
+    // `exitWithError` renders through `io.cancel` (production: `clack.cancel`)
+    // and exits with the channel-specific code, so the two-line
+    // "cancel then exit" pair no longer has to be repeated here.
+    exitWithError(result.message, io, result.exitCode);
   }
-  process.exit(result.exitCode);
+  outro(result.message, io);
+  io.exit(result.exitCode);
 }

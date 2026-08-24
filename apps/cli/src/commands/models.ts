@@ -12,6 +12,7 @@
 import { resolveActiveProfile, requireLoggedIn } from "../lib/config.ts";
 import { listModelPresets, PROXY_SUPPORTED_APIS } from "../lib/models.ts";
 import { exitWithError } from "../lib/ui.ts";
+import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 
 interface ModelsListOptions {
   profile?: string;
@@ -21,9 +22,12 @@ interface ModelsListOptions {
   proxyOnly?: boolean;
 }
 
-export async function modelsListCommand(opts: ModelsListOptions): Promise<void> {
+export async function modelsListCommand(
+  opts: ModelsListOptions,
+  io: CommandIO = DEFAULT_IO,
+): Promise<void> {
   const { profileName, profile } = await resolveActiveProfile(opts.profile);
-  requireLoggedIn(profileName, profile);
+  requireLoggedIn(profileName, profile, io);
 
   try {
     let models = await listModelPresets(profileName);
@@ -32,12 +36,12 @@ export async function modelsListCommand(opts: ModelsListOptions): Promise<void> 
     }
 
     if (opts.json) {
-      process.stdout.write(JSON.stringify(models, null, 2) + "\n");
+      io.stdout.write(JSON.stringify(models, null, 2) + "\n");
       return;
     }
 
     if (models.length === 0) {
-      process.stdout.write("(no models)\n");
+      io.stdout.write("(no models)\n");
       return;
     }
 
@@ -50,9 +54,11 @@ export async function modelsListCommand(opts: ModelsListOptions): Promise<void> 
       if (m.needs_reconnection === true) suffixes.push("needs-reconnection");
       if (!PROXY_SUPPORTED_APIS.has(m.apiShape)) suffixes.push("proxy-unsupported");
       const suffix = suffixes.length > 0 ? ` [${suffixes.join(", ")}]` : "";
-      process.stdout.write(`  ${m.id.padEnd(36)}  ${m.apiShape.padEnd(24)}  ${m.label}${suffix}\n`);
+      io.stdout.write(`  ${m.id.padEnd(36)}  ${m.apiShape.padEnd(24)}  ${m.label}${suffix}\n`);
     }
   } catch (err) {
-    exitWithError(err);
+    // `io` is forwarded so the terminal error and the exit reach the caller's
+    // sink; the default would fire the real `process.exit`.
+    exitWithError(err, io);
   }
 }

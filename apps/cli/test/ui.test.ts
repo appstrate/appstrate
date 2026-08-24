@@ -126,6 +126,49 @@ describe("withSpinner", () => {
   });
 
   /**
+   * Redirected output must not receive cursor motion (`> install.log`).
+   *
+   * `@clack/prompts` writes `cursor.up` / `cursor.to(0)` / `erase.down()`
+   * unconditionally between frames — the only thing it gates is one extra
+   * newline, on `isCI = process.env.CI === "true"`. So a developer piping
+   * `appstrate install` on a box with no `CI` set got the escapes in the file.
+   * `spinner()` now branches on `process.stdout.isTTY` and emits the start
+   * label and the resolved stop label as plain lines instead.
+   *
+   * A child process owns the observation: `runIsolated` gives it a piped
+   * stdout, which is exactly the non-TTY condition under test, and a buffer no
+   * other suite can write to. The second `runIsolated` is the control — the
+   * same start/tick/stop against bare clack, in the same non-TTY child, so a
+   * green assertion cannot come from the escapes having never been there. Both
+   * bodies sleep past one 80ms paint tick; without it clack's first frame
+   * never fires and the control would be vacuously escape-free.
+   */
+  it("emits plain lines, not cursor escapes, when stdout is not a TTY", async () => {
+    const [guarded, control] = await Promise.all([
+      runIsolated(`
+        const { withSpinner } = await import(${UI_MODULE});
+        await withSpinner(
+          "Downloading",
+          async (s) => { s.message("Downloading — 50%"); await Bun.sleep(250); },
+          "Downloaded",
+        );
+      `),
+      runIsolated(`
+        const clack = await import("@clack/prompts");
+        const s = clack.spinner();
+        s.start("Downloading");
+        await Bun.sleep(250);
+        s.stop("Downloaded");
+      `),
+    ]);
+    expect(guarded.stdout).toBe("Downloading\nDownloaded\n");
+    // eslint-disable-next-line no-control-regex -- asserting on ANSI CSI bytes
+    expect(guarded.stdout).not.toMatch(/\x1b\[/);
+    // eslint-disable-next-line no-control-regex -- same, for the control
+    expect(control.stdout).toMatch(/\x1b\[/);
+  });
+
+  /**
    * The defect this helper exists for. A clack spinner paints from a
    * `setInterval` that only `stop()` clears; every site that hand-rolled
    * start/await/stop leaked that interval when the body threw, and under

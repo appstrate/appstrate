@@ -21,16 +21,20 @@ import { revokeCliRefreshToken } from "../lib/device-flow.ts";
 import { normalizeInstance } from "../lib/instance-url.ts";
 import { getProfile } from "../lib/config.ts";
 import { CLI_CLIENT_ID } from "../lib/cli-client.ts";
+import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 
 interface LogoutOptions {
   profile?: string;
 }
 
-export async function logoutCommand(opts: LogoutOptions): Promise<void> {
+export async function logoutCommand(
+  opts: LogoutOptions,
+  io: CommandIO = DEFAULT_IO,
+): Promise<void> {
   const config = await readConfig();
   const profileName = resolveProfileName(opts.profile, config);
 
-  intro(`Appstrate logout — profile "${profileName}"`);
+  intro(`Appstrate logout — profile "${profileName}"`, io);
 
   const tokens = await loadTokens(profileName);
   if (!tokens) {
@@ -39,7 +43,7 @@ export async function logoutCommand(opts: LogoutOptions): Promise<void> {
     // login where the config row was written but the keyring entry
     // didn't make it (or vice-versa).
     await deleteProfile(profileName);
-    outro("Already signed out.");
+    outro("Already signed out.", io);
     return;
   }
 
@@ -58,7 +62,7 @@ export async function logoutCommand(opts: LogoutOptions): Promise<void> {
     // Non-fatal: the refresh-token family may already be revoked on
     // the server (reuse detection, or a prior partial logout). The
     // local wipe below returns us to a consistent clean state.
-    process.stderr.write(
+    io.stderr.write(
       `warning: could not revoke refresh token server-side (${formatError(err)}); continuing with local cleanup.\n`,
     );
   }
@@ -74,5 +78,5 @@ export async function logoutCommand(opts: LogoutOptions): Promise<void> {
   await deleteTokens(profileName);
   await deleteProfile(profileName);
 
-  outro(`Signed out of "${profileName}".`);
+  outro(`Signed out of "${profileName}".`, io);
 }

@@ -68,6 +68,12 @@ const globalIoBan = (target, selector) => ({
   message: `CLI tests must not take over the global ${target} (by assignment or \`spyOn\`). \`bun test\` runs every package in one process, so a global capture buffer also collects what other suites, libraries and the runner write — the assertion then fails non-deterministically and names an innocent test (issue #1180). Pass the command an injected CommandIO instead: createMemoryIO() from test/helpers/memory-io.ts.`,
 });
 
+// Message for both halves of the clack funnel below (direct `clack.x()` and
+// `clack.log.x()`). Declared once so the two selectors can never disagree
+// about what the rule is for.
+const CLACK_FUNNEL_MESSAGE =
+  "Render through a `lib/ui.ts` wrapper (intro / outro / note / logInfo / logWarn / spinner / withSpinner / select / confirm / askText / cancel / exitWithError), never `clack.*` directly. Only `ui.ts` hands clack an `output`, so a direct call writes to the process-global stdout and is invisible to an injected CommandIO — the coupling issue #1180 is about. `clack.spinner()` additionally leaks its paint interval when the body throws; use `withSpinner`, or `spinner()` + a `finally` for a conditional start.";
+
 const AUTH_CLIENT_BAN = {
   // Matches "../lib/auth-client", "../../lib/auth-client" and
   // "@/lib/auth-client". Only hooks/use-auth.ts (the seam) may import it.
@@ -100,12 +106,10 @@ export default tseslint.config(
     //     was honest in intent and inert in fact.
     //   - `*.ts` (no slash) matches root-level files only, so this does not
     //     silently pull in arbitrary nested config files.
-    // Note on `console.*`: the repo routes application logging through
-    // `@appstrate/core/logger`, but that is a convention, not an eslint rule —
-    // `no-console` is enabled nowhere in this file, so widening the file set
-    // adds no ban for these scripts to trip over. Nothing to relax; printing a
-    // report to a developer's terminal stays the correct thing for a CLI script
-    // to do, and no scoped exception is needed to keep it that way.
+    // Note on `console.*`: `no-console` is NOT set here. It is enabled in its
+    // own block below, over application source only — deliberately not over
+    // `scripts/**` or `**/test/**`, which this block does cover. See that block
+    // for why.
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/src/**/*.{ts,tsx}", "**/test/**/*.ts", "scripts/**/*.ts", "*.ts"],
     languageOptions: {
@@ -118,6 +122,51 @@ export default tseslint.config(
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
       "preserve-caught-error": "off",
+    },
+  },
+  {
+    // `console.*` ban — application source only (CLAUDE.md: "No `console.*`:
+    // use `@appstrate/core/logger`", and in `apps/cli` the `CommandIO` sink in
+    // `src/lib/io.ts`). Until now that rule was enforced by review alone:
+    // `no-console` is not part of `js.configs.recommended` and was set nowhere
+    // in this file, so the convention had no gate behind it.
+    //
+    // Why application source and not everything eslint covers:
+    //   - `scripts/**` (and the root `*.ts` config files) are report-printing
+    //     CLI utilities — `verify-openapi`, `detect-breaking-changes`,
+    //     `setup`, `check-consumer-versions`. Printing a report to the
+    //     developer's terminal IS their output contract; there is no logger to
+    //     route through and no sink to inject. They are covered by the general
+    //     block above for every other rule, and simply not matched here.
+    //   - `**/test/**` prints diagnostics on failure (the OpenAPI response
+    //     validators dump their error list before asserting). A test's console
+    //     line goes to the person reading the failure, not to a log pipeline.
+    //   - `apps/web` and `packages/ui` are in scope: a stray `console.log`
+    //     shipped to the browser bundle is exactly the thing worth catching.
+    //
+    // Two carve-outs inside the scope, both for directories that live under
+    // `src/` but are not source:
+    //   - `src/**/scripts/**` — dev tooling parked beside the module it
+    //     exercises rather than in the root `scripts/` directory
+    //     (`apps/api/src/modules/firecracker/scripts/dev/smoke.ts` prints its
+    //     `==> boot microVM` / `SMOKE PASS` progress). Same class as
+    //     `scripts/**`, same reason, so it gets the same treatment instead of
+    //     20 inline disables.
+    //   - `src/**/test/**` — a module's tests live inside its `src` tree
+    //     (`apps/api/src/modules/*/test/**`), and they are tests like any
+    //     other.
+    //
+    // NOT in scope, and it should be: `runtime-pi/**` (the agent image
+    // entrypoint + sidecar) has no `src/` segment, so it matches none of the
+    // general blocks either — eslint lints it for the Pi-SDK import guard and
+    // nothing else. Adding it here needs its own `languageOptions.parser`
+    // (espree cannot parse the TypeScript) and would newly surface every other
+    // rule over that directory, which is a change of its own, not a rider on
+    // this one.
+    files: ["apps/*/src/**/*.{ts,tsx}", "packages/*/src/**/*.{ts,tsx}"],
+    ignores: ["**/src/**/scripts/**", "**/src/**/test/**"],
+    rules: {
+      "no-console": "error",
     },
   },
   {
@@ -135,26 +184,51 @@ export default tseslint.config(
     },
   },
   {
-    // Unguarded-spinner guard (issue #1180). A clack spinner paints from a
-    // `setInterval` that only `stop()` clears, so a `start()` whose body throws
-    // leaks a writer for the rest of the process — invisible in the shipped CLI
-    // (the error exits it), fatal under `bun test`, where one process runs every
-    // suite and the frames land in someone else's capture. `withSpinner`
-    // (src/lib/ui.ts) owns the start/stop pair; `ui.ts` itself is where the one
-    // remaining `clack.spinner()` call lives.
+    // `@clack/prompts` funnel (issue #1180). Every byte the CLI renders through
+    // clack must go through a `lib/ui.ts` wrapper, because that is the only
+    // layer that hands clack an `output` — the seam a test injects a
+    // `CommandIO` into instead of swapping the process-global streams. A direct
+    // `clack.note(...)` / `clack.intro(...)` / `clack.log.warn(...)` writes to
+    // the real stdout by name and is invisible to any injected sink.
+    //
+    // The original form of this rule banned `clack.spinner` alone, which was
+    // the acute case: a spinner paints from a `setInterval` that only `stop()`
+    // clears, so a `start()` whose body throws leaks a writer for the rest of
+    // the process — invisible in the shipped CLI (the error exits it), fatal
+    // under `bun test`, where one process runs every suite and the frames land
+    // in someone else's capture. `withSpinner` owns the start/stop pair. The
+    // other 29 call sites had the same destination problem without the leak,
+    // and a guard naming one of thirty reads as coverage it does not have.
+    //
+    // Two selectors: `clack.x(...)` and `clack.log.x(...)` (`clack.log` is a
+    // namespace object, so the direct-member selector cannot see through it).
+    // `clack.isCancel(...)` is allow-listed — it is a type predicate over a
+    // returned symbol, renders nothing, and has no sink to route through.
+    // Bare MEMBER REFERENCES (`typeof clack.select`, `deps.note ?? clack.note`)
+    // are deliberately out of scope: `commands/install.ts` uses them as the
+    // production default of its own prompt-DI seams, and a call through such a
+    // local is not a call on `clack`.
+    //
+    // `lib/ui.ts` is the funnel itself; `lib/io.ts` owns `DEFAULT_IO.cancel`,
+    // which is wired to `clack.cancel` there on purpose so the dependency arrow
+    // stays `ui.ts → io.ts` and never the reverse.
     //
     // Re-declares `no-restricted-syntax` for a subset of the Zod block above,
     // which fully REPLACES its options here — hence the explicit spread.
     files: ["apps/cli/src/**/*.ts"],
-    ignores: ["apps/cli/src/lib/ui.ts"],
+    ignores: ["apps/cli/src/lib/ui.ts", "apps/cli/src/lib/io.ts"],
     rules: {
       "no-restricted-syntax": [
         "error",
         ...ZOD4_STRING_FORMAT_BANS,
         {
-          selector: "CallExpression[callee.object.name='clack'][callee.property.name='spinner']",
-          message:
-            "Use `withSpinner` from lib/ui.ts — it stops the spinner on every exit path. A raw `clack.spinner()` leaks its paint interval when the body throws (issue #1180). For a conditional start, use `spinner()` from lib/ui.ts and stop it in a `finally`.",
+          selector:
+            "CallExpression[callee.object.name='clack']:not([callee.property.name='isCancel'])",
+          message: CLACK_FUNNEL_MESSAGE,
+        },
+        {
+          selector: "CallExpression[callee.object.object.name='clack']",
+          message: CLACK_FUNNEL_MESSAGE,
         },
       ],
     },

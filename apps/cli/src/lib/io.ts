@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Injectable stdout / stderr / exit seam, shared by every command.
+ * Injectable stdout / stderr / exit seam.
  *
  * **The flake it prevents (issue #1180).** `bun test` runs the whole repo in
  * a single process, so a suite that swaps the *global* `process.stdout.write`
@@ -12,13 +12,39 @@
  * innocent command when it does. Handing each command its own sink removes
  * the shared mutable state instead of trying to time around it.
  *
- * This generalises two seams that already existed in this CLI:
- * `ApiCommandIO` in `src/commands/api/types.ts` (now an extension of
- * `CommandIO`) and the `writeStdout` option of `src/commands/run/sink.ts`.
+ * **How far it actually reaches.** A command takes it as a trailing
+ * `io: CommandIO = DEFAULT_IO` parameter (`commands/org.ts` is the reference
+ * shape), and the `lib/ui.ts` wrappers each forward one. Thirteen of the
+ * seventeen command modules do; four deliberately do not, and the seam is not
+ * a claim about them:
+ *
+ *   - `commands/run.ts` + `commands/run/*` own a *different* output
+ *     architecture. `attachStdoutBridge` reassigns the process-global
+ *     `process.stdout.write` on purpose — that is how canonical tool events
+ *     emitted as JSON lines get aspirated — and the sinks take explicit
+ *     `writeStdout` / `writeStderr` writers so their own emissions can bypass
+ *     that interceptor via the bridge's `writeRaw` (see the docstring in
+ *     `commands/run/sink.ts`). A `CommandIO` layered on top would be a second
+ *     seam over the same bytes, not a unification.
+ *   - `commands/runner.ts` and `commands/lifecycle.ts` are host-level
+ *     installers whose user-visible output already goes through `lib/ui.ts`;
+ *     nothing injects a sink into them today, so they are reachable the day a
+ *     test needs one but are not pre-threaded.
+ *   - `commands/install.ts` is the same case, plus its own older prompt-DI
+ *     seams (`deps.select` / `deps.note` / `deps.warn`).
+ *
+ * `ApiCommandIO` (`src/commands/api/types.ts`) is the one true extension: it
+ * adds `onSigint` / `stdinStream` on top of `CommandIO` and spreads
+ * `DEFAULT_IO` rather than re-implementing it. The `writeStdout` option of
+ * `commands/run/sink.ts` is NOT an instance of this seam and was never
+ * migrated onto it — `sink.ts` and `commands/run/remote-runner.ts` each still
+ * declare their own writer pair, for the bridge reason above.
  *
  * Four members, deliberately — no colour, TTY or logger abstraction. A
  * command that needs more than "write bytes, exit" keeps that logic in the
- * command; widening the seam would put it in everyone's way.
+ * command; widening the seam would put it in everyone's way. (The one TTY
+ * decision the CLI does make — repaint or plain lines — lives in
+ * `lib/ui.ts`'s `spinner`, which reads `process.stdout.isTTY` directly.)
  */
 
 import * as clack from "@clack/prompts";

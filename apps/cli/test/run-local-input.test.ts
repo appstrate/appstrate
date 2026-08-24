@@ -19,7 +19,7 @@ import {
   resolveLocalInput,
   validateLocalInput,
   LockedInputFieldError,
-} from "../src/commands/run.ts";
+} from "../src/commands/run/input.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
 import { ExitError } from "./helpers/process-exit.ts";
 
