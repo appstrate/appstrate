@@ -7,7 +7,6 @@ import type { AppEnv } from "../types/index.ts";
 import { getRateLimiterFactory } from "../infra/index.ts";
 import { ApiError } from "../lib/errors.ts";
 import { getClientIp } from "../lib/client-ip.ts";
-import { canonicalFilesPath } from "../lib/legacy-file-paths.ts";
 
 async function createLimiter(
   points: number,
@@ -27,7 +26,7 @@ export function resetRateLimiters(): void {
 
 /**
  * The path component of a limiter key: the matched ROUTE PATTERN, never the
- * concrete path, and always in its CANONICAL spelling.
+ * concrete path.
  *
  * `c.req.path` is the literal URL, so `/api/files/{id}/content` used to get
  * one bucket PER FILE: 120 requests/min each, every one able to proxy up to
@@ -42,17 +41,15 @@ export function resetRateLimiters(): void {
  * information and collapsing every endpoint into one bucket would be wrong: we
  * fall back to the concrete path there.
  *
- * Keying on the pattern has one trap the concrete path did not have: a
- * DEPRECATED ALIAS is a second registered pattern for the same handler
- * (`/api/documents/:id` beside `/api/files/:id`, #1177), so it would key into
- * its own bucket and hand a client that alternates spellings twice the budget
- * the endpoint declares. `canonicalFilesPath` collapses the alias onto its
- * canonical pattern — in ONE place, from the same segment pair the OpenAPI
- * alias derivation uses, so the next alias cannot reintroduce the split.
+ * One consequence to keep in mind when adding routes: TWO registered patterns
+ * bound to the SAME handler are two buckets, so a client that alternates
+ * between them gets twice the budget the endpoint declares. That is why an
+ * endpoint gets exactly one registered spelling — the `/api/documents…` aliases
+ * that used to need collapsing here are gone (#1177).
  */
 function limiterPath(c: Context<AppEnv>): string {
   const pattern = c.req.routePath;
-  return canonicalFilesPath(pattern && !pattern.includes("*") ? pattern : c.req.path);
+  return pattern && !pattern.includes("*") ? pattern : c.req.path;
 }
 
 /** Extract retryAfter (seconds) from rate-limiter-flexible rejection. */

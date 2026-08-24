@@ -119,19 +119,6 @@ const inlineRunBodySchema = z
      */
     context_files: z.array(z.unknown()).optional(),
     /**
-     * `context_documents` — the pre-#1177 spelling of {@link context_files},
-     * accepted forever.
-     *
-     * This body schema is `.strict()`, so an UNDECLARED field is a 400 and a
-     * field the route reads but does not declare is stripped before the handler
-     * ever sees it: either way the caller's files vanish. The repo has been bitten
-     * by exactly that (#1189 — a launch-body field no surface allowlisted was
-     * dropped in silence and the model looped with no error to show). Declaring
-     * the legacy name keeps an unmodified caller working; `context_files` wins
-     * when both are present.
-     */
-    context_documents: z.array(z.unknown()).optional(),
-    /**
      * Per-integration connection picks for this run (resolver mechanism #2).
      * Declared here so the parse keeps the field for the preflight's readiness
      * gate, which runs BEFORE `parseRequestInput` and would otherwise never see
@@ -712,9 +699,7 @@ export function createRunsRouter() {
       assertContextFilesFieldAvailable(preflight.manifest, body.input);
       // B2 — the explicit argument. Shape-checked first: a malformed URI 400s
       // without spending a file lookup.
-      const explicitFileUris = normalizeContextFileUris(
-        body.context_files ?? body.context_documents,
-      );
+      const explicitFileUris = normalizeContextFileUris(body.context_files);
       const { manifest: effectiveManifest, inputPatch } = injectContextFiles(
         preflight.manifest,
         explicitFileUris,
@@ -818,7 +803,7 @@ export function createRunsRouter() {
       // Same reserved-name rule as the run endpoint — a manifest that validates
       // here must be runnable there.
       assertContextFilesFieldAvailable(body.manifest, body.input);
-      normalizeContextFileUris(body.context_files ?? body.context_documents);
+      normalizeContextFileUris(body.context_files);
 
       // Structured validation result. Failures never reach this line — the
       // preflight throws problem+json ApiErrors (accumulated) — so a 200

@@ -103,10 +103,7 @@ const globalBodyLimit = bodyLimit(env.API_BODY_LIMIT_BYTES);
 // Matches the agent-output ingestion POST — its body is a raw file stream
 // (up to DOCUMENT_MAX_FILE_BYTES, 100 MiB by default) enforced mid-stream by
 // the route's own counting cap, so the global JSON-sized cap must not reject it.
-// `documents` is the deprecated pre-#1177 spelling of the same route — a
-// runtime image older than the platform still posts there, and the body cap
-// must be lifted for it too or the upload dies on the global JSON-sized limit.
-const RUN_FILE_UPLOAD_PATH = /^\/api\/runs\/[^/]+\/(files|documents)$/;
+const RUN_FILE_UPLOAD_PATH = /^\/api\/runs\/[^/]+\/files$/;
 app.use("*", async (c, next) => {
   if (c.req.path === "/api/uploads/_content") return next();
   if (c.req.method === "POST" && RUN_FILE_UPLOAD_PATH.test(c.req.path)) return next();
@@ -225,11 +222,6 @@ const APP_SCOPED_PREFIXES = [
   "/api/integrations",
   "/api/uploads",
   "/api/files",
-  // Deprecated pre-#1177 spelling of `/api/files`, registered on the same
-  // handlers in `routes/files.ts`. It MUST be listed here too: without an
-  // app-scoped prefix match, `requireAppContext()` never runs, `applicationId`
-  // is never pinned, and the handler's `getAppScope()` throws a bare 500.
-  "/api/documents",
 ];
 
 const appContextMiddleware = requireAppContext();

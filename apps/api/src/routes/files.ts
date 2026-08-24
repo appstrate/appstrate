@@ -23,18 +23,6 @@
  * DELETE/keep deliberately stay ungated at layer 1: they are authorized by
  * `capabilities.delete` / `capabilities.keep`, which grant the file's own
  * creator (an end-user cleaning up its own upload holds no org permission).
- *
- * DEPRECATED ALIASES — every path below is ALSO registered under its pre-#1177
- * `/api/documents…` spelling, on the SAME handler and the same guards. The
- * aliases exist because the caller set is not all ours: a pinned SPA build, the
- * CLI, MCP clients and third-party integrations all hold the old URLs. They are
- * duplicate literal registrations rather than a rewrite middleware for one
- * reason: `scripts/verify-openapi.ts` proves spec and code are the same set in
- * BOTH directions (§5 Code ⊆ Spec, §5b Spec ⊆ Code) by statically scanning
- * `router.METHOD("literal", …)` calls. A rewrite middleware would make every
- * deprecated path spec-only and force an allowlist entry — buying brevity by
- * switching off the gate that keeps the published contract honest. The aliases
- * carry `deprecated: true` in `openapi/paths/files.ts`.
  */
 
 import { Hono } from "hono";
@@ -108,7 +96,6 @@ export function createFilesRouter() {
     return c.json(page);
   };
   router.get("/files", rateLimit(120), requirePermission("files", "read"), list);
-  router.get("/documents", rateLimit(120), requirePermission("files", "read"), list);
 
   // GET /api/files/:id — metadata DTO. Token-minting route (the single GET
   // mints the signed `preview_url`), so it is rate-limited like the others.
@@ -120,7 +107,6 @@ export function createFilesRouter() {
     return c.json(toFileDto(resolved.row, actor, resolved.capabilities, { mintPreview: true }));
   };
   router.get("/files/:id", rateLimit(120), requirePermission("files", "read"), getOne);
-  router.get("/documents/:id", rateLimit(120), requirePermission("files", "read"), getOne);
 
   // GET /api/files/:id/content — download the bytes. Gated by the derived
   // `downloadable` flag (a user upload is served only to its creator). 307 to a
@@ -176,7 +162,6 @@ export function createFilesRouter() {
     });
   };
   router.get("/files/:id/content", rateLimit(120), requirePermission("files", "read"), content);
-  router.get("/documents/:id/content", rateLimit(120), requirePermission("files", "read"), content);
 
   // DELETE /api/files/:id — allowed for a caller with the `files:delete`
   // permission (owner/admin) OR the file's own creator.
@@ -201,7 +186,6 @@ export function createFilesRouter() {
     return c.body(null, 204);
   };
   router.delete("/files/:id", rateLimit(60), remove);
-  router.delete("/documents/:id", rateLimit(60), remove);
 
   // POST /api/files/:id/keep — "keep"/pin: clear the file's retention
   // deadline (`expires_at = NULL`) so the expiry GC never sweeps it. Same
@@ -235,7 +219,6 @@ export function createFilesRouter() {
     return c.json(toFileDto(updated, actor, resolved.capabilities));
   };
   router.post("/files/:id/keep", rateLimit(60), keep);
-  router.post("/documents/:id/keep", rateLimit(60), keep);
 
   return router;
 }
@@ -277,9 +260,7 @@ export function createFilesRouter() {
  *
  * Path `/preview/files/:id` is a dedicated top-level namespace — it does NOT
  * share the `/files` SPA page prefix, so it can never be shadowed by (nor
- * shadow) the client-side gallery route or the static SPA fallback. The
- * pre-#1177 `/preview/documents/:id` spelling is kept as a deprecated alias on
- * the same handler.
+ * shadow) the client-side gallery route or the static SPA fallback.
  */
 export function createFilePreviewRouter() {
   const router = new Hono<AppEnv>();
@@ -430,10 +411,6 @@ export function createFilePreviewRouter() {
     });
   };
   router.get("/preview/files/:id", rateLimitByIp(120), preview);
-  // Deprecated pre-#1177 spelling. `preview_url` is minted fresh on every
-  // single-file GET so nothing durable points here, but a preview tab a user
-  // left open — or an SPA build served from cache — still holds the old path.
-  router.get("/preview/documents/:id", rateLimitByIp(120), preview);
 
   return router;
 }

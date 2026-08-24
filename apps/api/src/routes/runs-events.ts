@@ -65,18 +65,6 @@ const CloudEventEnvelopeSchema = z
     time: z.iso.datetime(),
     datacontenttype: z.literal("application/json"),
     data: z.record(z.string(), z.unknown()),
-    // OPTIONAL CloudEvents attribute (§3.1). The runtime NO LONGER emits it:
-    // the URIs it carried (`schemas.afps.dev/v0/events/*`) were never served,
-    // and they asserted a payload shape AFPS deliberately leaves open — the
-    // specification reserves event namespaces, not shapes. See
-    // `@appstrate/afps-runtime`'s `events/cloudevents.ts` header.
-    //
-    // Accepted anyway, and this is load-bearing: runtime images built before
-    // the removal keep stamping it, and this schema is `.strict()`, so
-    // dropping the field would 400 every canonical event coming from an older
-    // image. Ingestion never read it (`envelopeToRunEvent` consumes
-    // `data`/`type`/`time` only), so accepting and ignoring costs nothing.
-    dataschema: z.string().min(1).optional(),
     sequence: z.number().int().nonnegative(),
   })
   .strict();
@@ -401,9 +389,6 @@ export function createRunsEventsRouter() {
     return c.json(manifest);
   };
   router.get("/runs/:runId/files", verifyRunSignature, eventLimiter, filesManifest);
-  // Deprecated pre-#1177 spelling — a runtime-pi image older than the platform
-  // still calls it. Same handler, same HMAC. See RUNTIME SKEW below.
-  router.get("/runs/:runId/documents", verifyRunSignature, eventLimiter, filesManifest);
 
   // POST /api/runs/:runId/files — agent-published run output (Phase 2).
   //
@@ -445,33 +430,18 @@ export function createRunsEventsRouter() {
     // value outside the encoder's alphabet, an over-long one, or a malformed
     // escape is a typed 400 rather than a guess, so a mis-encoded client fails
     // loudly instead of silently storing a corrupted deliverable name.
-    //
-    // RUNTIME SKEW: `X-Document-Name` is the pre-#1177 spelling and is accepted
-    // forever. The runtime-pi image and the platform deploy independently, so a
-    // running container built before the rename still sends the old header; it
-    // holds the deliverable's only name, and rejecting it would silently turn
-    // every publish from an older image into a 400. The new name wins when both
-    // are present. `runtime-pi/publish.ts` emits only `X-File-Name`.
-    const legacyName = c.req.header("X-Document-Name");
-    const rawName = c.req.header("X-File-Name") ?? legacyName;
-    const nameHeader = c.req.header("X-File-Name") ? "X-File-Name" : "X-Document-Name";
+    const rawName = c.req.header("X-File-Name");
     if (!rawName) throw invalidRequest("X-File-Name header is required", "X-File-Name");
     const decodedName = decodeFilenameHeader(rawName);
     if (decodedName === null) {
       throw invalidRequest(
-        `${nameHeader} must be a percent-encoded (encodeURIComponent) UTF-8 filename`,
-        nameHeader,
+        "X-File-Name must be a percent-encoded (encodeURIComponent) UTF-8 filename",
+        "X-File-Name",
       );
     }
     const name = sanitizeFilename(decodedName);
     const mime = c.req.header("Content-Type");
     if (!mime) throw invalidRequest("Content-Type header is required", "Content-Type");
-    // `X-Document-Presentation` is RETIRED (issue #1177). That is its real
-    // spelling — there was never an `X-File-Presentation`: the header was
-    // retired BEFORE the `document` → `file` rename, so no image ever emitted a
-    // `file`-spelled one. A runtime-pi image older than the platform still sends
-    // `X-Document-Presentation`; the header is read by nobody and must never be
-    // a 400 — the deliverable matters, its retired presentation hint does not.
 
     const body = c.req.raw.body;
     if (!body) throw invalidRequest("request body is required");
@@ -522,8 +492,6 @@ export function createRunsEventsRouter() {
     );
   };
   router.post("/runs/:runId/files", verifyRunUploadSignature, fileLimiter, publishFile);
-  // Deprecated pre-#1177 spelling — the same skew argument as the header above.
-  router.post("/runs/:runId/documents", verifyRunUploadSignature, fileLimiter, publishFile);
 
   // GET /api/runs/:runId/files/:name — a single input file, streamed
   // straight from storage so neither the platform nor the agent buffers the
@@ -538,8 +506,6 @@ export function createRunsEventsRouter() {
     return c.body(stream);
   };
   router.get("/runs/:runId/files/:name", verifyRunSignature, eventLimiter, fetchFile);
-  // Deprecated pre-#1177 spelling — same skew argument.
-  router.get("/runs/:runId/documents/:name", verifyRunSignature, eventLimiter, fetchFile);
 
   return router;
 }

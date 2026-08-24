@@ -3,10 +3,9 @@
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 
 /**
- * One entry of the run input-file manifest. Shared by the canonical `files`
- * array and its deprecated `documents` twin so the two cannot describe
- * different shapes; a TS const rather than a component `$ref` because it is an
- * inline detail of one response, not a published contract object.
+ * One entry of the run input-file manifest. A TS const rather than a component
+ * `$ref` because it is an inline detail of one response, not a published
+ * contract object.
  */
 const runFileManifestEntry = {
   type: "object",
@@ -450,19 +449,6 @@ const canonicalRunsPaths = {
                     "the agent in its prompt. A manifest (or `input`) that already declares " +
                     "`_context_files` is rejected with a `400` — the name is reserved.",
                 },
-                context_documents: {
-                  type: "array",
-                  items: { type: "string" },
-                  deprecated: true,
-                  description:
-                    "DEPRECATED — the pre-#1177 spelling of `context_files`, same contract. " +
-                    "Declared because the server accepts it (`body.context_files ?? " +
-                    "body.context_documents`, `routes/runs.ts`) and the body schema is " +
-                    "`additionalProperties: false`: omitting it here would publish a contract " +
-                    "that FORBIDS a field the server honours, and a generated SDK or a " +
-                    "validating gateway would reject exactly the pinned legacy caller the " +
-                    "alias exists for. `context_files` wins when both are present.",
-                },
                 connection_overrides: {
                   type: "object",
                   description:
@@ -679,17 +665,6 @@ const canonicalRunsPaths = {
                   description:
                     "Same field as `POST /api/runs/inline` — validated here for shape and for the " +
                     "reserved `_context_files` name collision, never mounted.",
-                },
-                context_documents: {
-                  type: "array",
-                  items: { type: "string" },
-                  deprecated: true,
-                  description:
-                    "DEPRECATED — the pre-#1177 spelling of `context_files`, accepted here for " +
-                    "the same reason as on `POST /api/runs/inline`: the body schema is " +
-                    "`additionalProperties: false`, so a field the server honours has to be " +
-                    "declared or the published contract forbids it. `context_files` wins when " +
-                    "both are present.",
                 },
                 connection_overrides: {
                   type: "object",
@@ -1368,12 +1343,6 @@ const canonicalRunsPaths = {
                 time: { type: "string", format: "date-time" },
                 datacontenttype: { const: "application/json" },
                 data: { type: "object" },
-                dataschema: {
-                  type: "string",
-                  format: "uri",
-                  description:
-                    "OPTIONAL CloudEvents attribute identifying a JSON Schema the `data` payload adheres to. Deprecated and no longer emitted by the Appstrate runtime — the URIs it carried were never served, and AFPS leaves RunEvent payloads open by design. Still accepted, and ignored, so runtime images built before the removal keep working.",
-                },
                 sequence: { type: "integer", minimum: 0 },
               },
             },
@@ -1644,19 +1613,10 @@ const canonicalRunsPaths = {
         {
           name: "X-File-Name",
           in: "header",
-          required: false,
+          required: true,
           schema: { type: "string" },
           description:
-            "Display name for the file, percent-encoded with `encodeURIComponent` (an HTTP header value cannot carry a raw non-ASCII filename). The server decodes it strictly and returns 400 on a malformed encoding, then sanitises the decoded name (path separators, control characters and `..` collapsed, 255 chars max). **Exactly one of `X-File-Name` or the deprecated `X-Document-Name` must be present** — a request with neither is a 400. Not marked `required` because a pre-#1177 runtime image sends only `X-Document-Name` and the handler accepts it; marking it required would make the very image the alias exists for non-conformant against this document, and a generated SDK or validating gateway would reject it before the server ever saw it. `X-File-Name` wins when both are present.",
-        },
-        {
-          name: "X-Document-Name",
-          in: "header",
-          required: false,
-          deprecated: true,
-          schema: { type: "string" },
-          description:
-            "DEPRECATED — the pre-#1177 spelling of `X-File-Name`, identical encoding rules. Still accepted because the runtime image and the platform deploy independently: a container built before the rename sends this header and it carries the deliverable's only name. Never emitted by a current runtime.",
+            "Display name for the file, percent-encoded with `encodeURIComponent` (an HTTP header value cannot carry a raw non-ASCII filename). The server decodes it strictly and returns 400 on a malformed encoding, then sanitises the decoded name (path separators, control characters and `..` collapsed, 255 chars max). A request without it is a 400.",
         },
         {
           name: "Content-Type",
@@ -1832,40 +1792,4 @@ const canonicalRunsPaths = {
   },
 } as const;
 
-/**
- * Deprecated pre-#1177 `/api/runs/{runId}/documents…` aliases of the three
- * run-scoped file endpoints. Same handlers, same HMAC — see the DEPRECATED
- * ALIASES note in `routes/files.ts` for why they are registered AND documented
- * rather than rewritten. Derived from the canonical entries so they cannot
- * drift.
- */
-const DEPRECATED_RUN_FILE_PATHS = [
-  "/api/runs/{runId}/files",
-  "/api/runs/{runId}/files/{name}",
-] as const;
-
-const deprecatedRunFilePaths = Object.fromEntries(
-  DEPRECATED_RUN_FILE_PATHS.map((canonicalPath) => {
-    const operations = canonicalRunsPaths[canonicalPath] as Record<string, unknown>;
-    const out: Record<string, unknown> = {};
-    for (const [method, op] of Object.entries(operations)) {
-      const operation = op as { operationId: string; summary?: string; description?: string };
-      out[method] = {
-        ...operation,
-        operationId: `${operation.operationId}Deprecated`,
-        deprecated: true,
-        summary: `${operation.summary ?? operation.operationId} (deprecated)`,
-        description:
-          `DEPRECATED — use \`${canonicalPath}\`. Pre-#1177 spelling of the same operation, ` +
-          `served by the same handler; a runtime image older than the platform still calls ` +
-          `it.\n\n${operation.description ?? ""}`,
-      };
-    }
-    return [canonicalPath.replace("/files", "/documents"), out];
-  }),
-);
-
-export const runsPaths = {
-  ...canonicalRunsPaths,
-  ...deprecatedRunFilePaths,
-};
+export const runsPaths = canonicalRunsPaths;

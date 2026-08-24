@@ -19,11 +19,16 @@
  * answer with its field-precise 400 either. The run just starts with no file
  * and every layer reports success.
  *
- * Both spellings are covered. `context_documents` is the pre-#1177 name the
- * inline route accepts forever; a model reaches for it from its own transcript
- * (an earlier turn of the same conversation) or from a tool listing taken
- * before the upgrade — the MCP server advertises `tools.listChanged: false`,
- * so calling the old shape afterwards is correct client behaviour.
+ * Both spellings are covered. `context_documents` is the pre-#1177 ARGUMENT
+ * name of the `run_and_wait` tool, and a model reaches for it from its own
+ * transcript (an earlier turn of the same conversation) or from a tool listing
+ * taken before the upgrade — the MCP server advertises `tools.listChanged:
+ * false`, so calling the old shape afterwards is correct client behaviour. It
+ * survives ONLY as a tool argument: `run-and-wait-client` canonicalizes it to
+ * `context_files` while building the launch body, and the HTTP route no longer
+ * knows the old name at all (its body schema is `.strict()`, so a raw
+ * `context_documents` on the wire is a 400). That canonicalization is exactly
+ * what this case pins.
  */
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
@@ -144,7 +149,7 @@ describe("inline run launched from the chat with an attached file", () => {
     await expectFileIsRunInput(launched.launch.runId, uri, fileId);
   });
 
-  it("makes the attached file an input of the run under the legacy spelling", async () => {
+  it("makes the attached file an input of the run under the legacy tool-argument spelling", async () => {
     const { uri, fileId } = await attachToChat();
 
     const launched = await launchFromChat({

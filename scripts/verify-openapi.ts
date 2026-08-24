@@ -1046,7 +1046,7 @@ for (const m of indexSrc.matchAll(
   const ident = exprRaw.replace(/\(\s*\)$/, "").trim();
 
   // Resolve identifier
-  let factory: string | "__default__" = ident;
+  let factory: string;
   let file: string | undefined;
 
   if (isCall) {
@@ -1275,10 +1275,8 @@ const CODE_TO_SPEC_ALLOWLIST = new Set<string>([
   // Cookie-less HTML file preview — serves untrusted agent HTML (text/html)
   // from a hardened, session-less route OUTSIDE /api, authorized by a signed
   // token in the URL. Not a JSON API endpoint; intentionally undocumented in the
-  // OpenAPI surface (no typed client, no SDK consumer). Second entry: the
-  // deprecated pre-#1177 path, on the same handler.
+  // OpenAPI surface (no typed client, no SDK consumer).
   "GET /preview/files/{id}",
-  "GET /preview/documents/{id}",
   // MCP per-org endpoint method-not-allowed catch-all: `app.all(MCP_PATH, …)`
   // throws 405 for every verb other than the documented POST + GET channels.
   // These three are the catch-all, not real endpoints.
@@ -1752,5 +1750,4 @@ console.log(`  ${"=".repeat(50)}`);
 console.log(`  ${exitCode === 0 ? "ALL CHECKS PASSED" : "SOME CHECKS FAILED"}`);
 console.log(`  ${"=".repeat(50)}\n`);
 
-// @ts-ignore Bun's type definitions for process.exit are incorrect (they say it returns never, but it actually returns void), so we ignore the type error here.
 process.exit(exitCode);
