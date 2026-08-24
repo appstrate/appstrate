@@ -45,7 +45,12 @@
 -- Both rewrote persisted `documents:*` permission scopes into `files:*`, and
 -- both existed to complement a read-time canonicalization
 -- (`canonicalPermissions()`) that has since been deleted from the codebase.
--- Their own headers state the platform works WITHOUT them.
+-- Their own headers state the platform works WITHOUT them — which held only
+-- while the canonicalization stood. With BOTH halves gone a stored
+-- `documents:read` is neither rewritten nor translated, and the credential
+-- carrying it silently grants less. `0046_legacy_permission_scope_strings`
+-- restores the data rewrite (the read alias stays deleted); read it for the
+-- full account.
 --
 -- The cost, written down rather than discovered: a database that already
 -- applied them carries a `drizzle.__drizzle_migrations` watermark of
