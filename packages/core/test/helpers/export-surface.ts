@@ -33,10 +33,26 @@ export async function exportedNames(root: string): Promise<Record<string, string
         found[m[1]!] ??= rel;
       }
 
-      // `export { A, B as C };` — a re-export LIST, not `export … from "…"`,
-      // whose source module already contributed the name. `[^}]` cannot leave
-      // its own statement, unlike a lazy any-character class.
-      for (const m of src.matchAll(/^export\s*\{([^}]*)\}\s*;/gm)) {
+      // Two list forms, and BOTH are needed.
+      //
+      //   `export { A, B as C };`            — a local re-export list
+      //   `export { A } from "…";`           — a re-export from another module
+      //
+      // The second was skipped at first, justified by "the source module
+      // already contributed the name". That holds for an INTRA-package
+      // re-export (`from "./foo.ts"`), whose source this walker visits — and is
+      // false for an external one, which it never visits. `./mime` and `./ssrf`
+      // are exactly that: nine names re-exported straight from
+      // `@appstrate/afps-shared`, including the whole SSRF surface
+      // (`isBlockedHost`, `guardedFetch`, `SsrfBlockedError`, …). They were
+      // absent from both the baseline and the current scan, so nothing FAILED —
+      // they were simply outside the guard, which is the worse of the two
+      // outcomes. Re-adding a name the walker already saw is a no-op (`??=`),
+      // so one unconditional pattern is right and needs no source-kind test.
+      //
+      // `[^}]` cannot leave its own statement, unlike a lazy any-character
+      // class — see the `[\s\S]*?` trap in test/supply-chain-barrels.test.ts.
+      for (const m of src.matchAll(/^export\s*(?:type\s*)?\{([^}]*)\}\s*(?:;|from\s*"[^"]*";)/gm)) {
         for (const raw of (m[1] ?? "").split(",")) {
           const spec = raw.trim();
           if (!spec) continue;
