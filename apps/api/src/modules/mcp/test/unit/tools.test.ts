@@ -529,13 +529,10 @@ describe("buildMcpTools contextInjected", () => {
       actor: { type: "user", id: "user_1" },
       scope: { orgId: "org_1", applicationId: "app_1" },
     });
-    // Only the ADVERTISED surface — the retired pre-#1177 aliases are hidden
-    // (`hidden: true`), so `tools/list` never shows them. Covered separately by
-    // "keeps the retired pre-#1177 tool names callable but unlisted".
-    const names = tools
-      .filter((t) => !t.hidden)
-      .map((t) => t.descriptor.name)
-      .sort();
+    // The whole registered surface IS the advertised surface: no retired name
+    // is registered, listed or hidden — see "registers no retired name, listed
+    // or hidden" above.
+    const names = tools.map((t) => t.descriptor.name).sort();
     // get_me is redundant for a context-injected caller; search_operations stays
     // (its best_match schema is not covered by the injected operation index).
     expect(names).toEqual([

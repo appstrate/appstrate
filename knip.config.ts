@@ -114,8 +114,11 @@ const config: KnipConfig = {
     // `main`, so there are no manifest entries to re-declare here.
     ".": {
       entry: [
-        // Operator backstops, documented in docs/architecture/FILES.md and
-        // CHANGELOG.md respectively. Run by hand, never imported.
+        // Operator backstops. Run by hand, never imported — but REACHABLE:
+        // `bun run audit:storage-orphans` / `bun run audit:empty-integrations`.
+        // They had no package.json entry for a while, which made this exemption
+        // a claim about a script nothing could invoke: 800 lines kept alive by
+        // the list that was supposed to justify keeping them.
         "scripts/storage-orphans.ts",
         "scripts/audit-empty-integration-selections.ts",
         // Dev utility that mints a CONFORMANCE_TOKENS bearer, documented in
