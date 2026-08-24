@@ -8,9 +8,10 @@
  * so discovery stays in one place and both scripts see the same view of module
  * contributions without booting the platform.
  *
- * We scan `apps/api/src/modules/*​/index.ts` directly rather than going through
- * the module loader because the loader requires a full init context (DB, Redis,
- * etc.) that build-time scripts don't have.
+ * We scan the `index.ts` of each directory under `apps/api/src/modules/`
+ * directly rather than going through the module loader, because the loader
+ * requires a full init context (DB, Redis, etc.) that build-time scripts
+ * don't have.
  */
 import { readdirSync, existsSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -72,8 +73,8 @@ export function discoverWorkspaceModuleDirs(packagesDir: string): WorkspaceModul
 }
 
 /**
- * Scan `apps/api/src/modules/*​/index.ts` and return the merged OpenAPI
- * contributions of every discovered module.
+ * Scan the `index.ts` of each directory under `apps/api/src/modules/` and
+ * return the merged OpenAPI contributions of every discovered module.
  */
 export async function collectModuleOpenApi(): Promise<CollectedModuleOpenApi> {
   const scriptDir = dirname(fileURLToPath(import.meta.url));

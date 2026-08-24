@@ -87,8 +87,27 @@ export default tseslint.config(
     ],
   },
   {
+    // The general TS config. `scripts/**/*.ts` and the root-level `*.ts` config
+    // files (knip.config.ts, commitlint.config.ts) are in here deliberately, and
+    // on the SAME rule set as application source rather than a relaxed one:
+    //   - They are ordinary TypeScript run by Bun, not a different dialect, and
+    //     several of them (verify-openapi, detect-breaking-changes,
+    //     check-consumer-versions, verify-module-contract) ARE the CI gates —
+    //     a gate that is itself unchecked is the weakest link in the chain.
+    //   - Before this, `turbo.json` claimed `scripts/**/*.ts` and `knip.config.ts`
+    //     as `//#lint` inputs while eslint answered "File ignored because no
+    //     matching configuration was supplied" for every one of them: the gate
+    //     was honest in intent and inert in fact.
+    //   - `*.ts` (no slash) matches root-level files only, so this does not
+    //     silently pull in arbitrary nested config files.
+    // Note on `console.*`: the repo routes application logging through
+    // `@appstrate/core/logger`, but that is a convention, not an eslint rule —
+    // `no-console` is enabled nowhere in this file, so widening the file set
+    // adds no ban for these scripts to trip over. Nothing to relax; printing a
+    // report to a developer's terminal stays the correct thing for a CLI script
+    // to do, and no scoped exception is needed to keep it that way.
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
-    files: ["**/src/**/*.{ts,tsx}", "**/test/**/*.ts"],
+    files: ["**/src/**/*.{ts,tsx}", "**/test/**/*.ts", "scripts/**/*.ts", "*.ts"],
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.node,
@@ -105,7 +124,12 @@ export default tseslint.config(
     // Zod 4 regression guard: string formats are top-level functions
     // (z.email(), z.url(), z.uuid()) — the Zod 3 method forms are deprecated
     // and must not creep back in.
-    files: ["**/src/**/*.{ts,tsx}", "**/test/**/*.ts"],
+    // Scripts and root config files are in scope too: they parse manifests and
+    // API payloads with Zod like everything else. This block stays ABOVE the
+    // `**/test/**` and `apps/cli/src/**` blocks that re-declare
+    // `no-restricted-syntax`, so those still win (with the bans re-spread) for
+    // the files they cover — including `scripts/test/**`.
+    files: ["**/src/**/*.{ts,tsx}", "**/test/**/*.ts", "scripts/**/*.ts", "*.ts"],
     rules: {
       "no-restricted-syntax": ["error", ...ZOD4_STRING_FORMAT_BANS],
     },

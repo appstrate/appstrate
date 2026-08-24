@@ -32,8 +32,8 @@
         "runtime-pi/**/*.{ts,tsx,js,jsx,mjs,cjs}",
         "scripts/**/*.ts",
         "test/**/*.ts",
-        "eslint.config.mjs",
-        "knip.config.ts",
+        "*.ts",
+        "*.mjs",
         "package.json"
       ]
     },
@@ -41,6 +41,9 @@
       "inputs": [
         "apps/*/src/**",
         "packages/*/src/**",
+        "scripts/**/*.ts",
+        "*.ts",
+        "*.mjs",
         ".prettierrc",
         ".prettierignore",
         "package.json"
