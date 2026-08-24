@@ -17,6 +17,7 @@ const TRACKED = [
   "USERCONTENT_URL",
   "PI_IMAGE",
   "SIDECAR_IMAGE",
+  "APP_VERSION",
 ] as const;
 
 type Snap = Record<(typeof TRACKED)[number], string | undefined>;
@@ -44,6 +45,7 @@ function setBaseEnv(): void {
   delete process.env.USERCONTENT_URL;
   delete process.env.PI_IMAGE;
   delete process.env.SIDECAR_IMAGE;
+  delete process.env.APP_VERSION;
 }
 
 describe("BETTER_AUTH_SECRETS namespace-collision scrub", () => {
@@ -434,7 +436,11 @@ describe("USERCONTENT_URL must be a genuinely separate preview origin", () => {
   });
 });
 
-describe("PI_IMAGE / SIDECAR_IMAGE are a version contract", () => {
+// The full case table for the rule itself lives on the pure function, in
+// `packages/core/test/image-ref.test.ts`. What is left here is the wiring: that
+// the schema calls it at all, and that it feeds it APP_VERSION — the value the
+// trio rule added, and the only way a *matched pair* can now abort boot.
+describe("APP_VERSION / PI_IMAGE / SIDECAR_IMAGE are a version contract", () => {
   let s: Snap;
 
   beforeEach(() => {
@@ -448,31 +454,15 @@ describe("PI_IMAGE / SIDECAR_IMAGE are a version contract", () => {
     _resetCacheForTesting();
   });
 
-  it("both unset is valid — the defaults are the matching dev pair", () => {
+  it("all three unset is valid — the defaults are the matching dev triple", () => {
     expect(getEnv().PI_IMAGE).toBe("appstrate-pi:latest");
     expect(getEnv().SIDECAR_IMAGE).toBe("appstrate-sidecar:latest");
   });
 
-  it("accepts a release pair pinned to the same tag", () => {
+  it("aborts boot when the runtime pair is one release behind the platform", () => {
+    process.env.APP_VERSION = "v1.0.0-beta.52";
     process.env.PI_IMAGE = "ghcr.io/appstrate/appstrate-pi:1.0.0-beta.51";
     process.env.SIDECAR_IMAGE = "ghcr.io/appstrate/appstrate-sidecar:1.0.0-beta.51";
-    expect(getEnv().SIDECAR_IMAGE).toBe("ghcr.io/appstrate/appstrate-sidecar:1.0.0-beta.51");
-  });
-
-  it("rejects a pair one release apart (#1195 — the mismatched couple)", () => {
-    process.env.PI_IMAGE = "ghcr.io/appstrate/appstrate-pi:1.0.0-beta.51";
-    process.env.SIDECAR_IMAGE = "ghcr.io/appstrate/appstrate-sidecar:1.0.0-beta.50";
-    expect(() => getEnv()).toThrow(/PI_IMAGE and SIDECAR_IMAGE must be pinned to the same tag/);
-  });
-
-  it("rejects a half-done upgrade (one ref still on the local :latest default)", () => {
-    process.env.SIDECAR_IMAGE = "ghcr.io/appstrate/appstrate-sidecar:1.0.0-beta.51";
-    expect(() => getEnv()).toThrow(/PI_IMAGE and SIDECAR_IMAGE must be pinned to the same tag/);
-  });
-
-  it("accepts a digest pin — digests identify different images, nothing to compare", () => {
-    process.env.PI_IMAGE = `ghcr.io/appstrate/appstrate-pi@sha256:${"a".repeat(64)}`;
-    process.env.SIDECAR_IMAGE = "ghcr.io/appstrate/appstrate-sidecar:1.0.0-beta.51";
-    expect(getEnv().SIDECAR_IMAGE).toBe("ghcr.io/appstrate/appstrate-sidecar:1.0.0-beta.51");
+    expect(() => getEnv()).toThrow(/platform build 1\.0\.0-beta\.52.*Out of step: the platform/s);
   });
 });

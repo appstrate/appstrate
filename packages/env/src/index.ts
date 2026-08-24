@@ -2,7 +2,10 @@
 
 import { z } from "zod";
 import { createEnvGetter } from "@appstrate/core/env";
-import { findImageTagMismatch } from "@appstrate/core/image-ref";
+import {
+  findRuntimeImageTagMismatch,
+  type RuntimeImageTagMismatch,
+} from "@appstrate/core/image-ref";
 
 // Boolean-from-string env transform: `"true"`/`"1"` (case-insensitive) → true,
 // anything else → false. Shared by every on/off flag so the parse semantics
@@ -52,6 +55,42 @@ const urlHost = (v: string): string | null => {
   } catch {
     return null;
   }
+};
+
+// Boot error for a runtime-image version trio that disagrees. Built here rather
+// than in `@appstrate/core/image-ref` because the wording is operator-facing
+// boot copy, like every other message in this file; core owns the rule and
+// reports only what it compared.
+//
+// The message has to answer three questions the operator cannot answer from a
+// failed run: what each of the three currently claims, which one stands apart,
+// and what to set. The last one is not "pin both images to the same tag" any
+// more — it is "pin both images to the PLATFORM's version", and the shipped
+// compose files already do exactly that from one `APPSTRATE_VERSION`.
+const describeRuntimeImageMismatch = (m: RuntimeImageTagMismatch): string => {
+  const observed = [
+    ...(m.platformVersion ? [`platform build ${m.platformVersion}`] : []),
+    `PI_IMAGE tag ${m.piTag}`,
+    `SIDECAR_IMAGE tag ${m.sidecarTag}`,
+  ].join(", ");
+
+  const outOfStep =
+    m.oddOneOut === "platform"
+      ? "the platform — PI_IMAGE and SIDECAR_IMAGE agree with each other but not with the build they are launched by, so BOTH images have to move"
+      : m.oddOneOut === "pi"
+        ? "PI_IMAGE"
+        : m.oddOneOut === "sidecar"
+          ? "SIDECAR_IMAGE"
+          : m.platformVersion
+            ? "all three — no two of them agree"
+            : "PI_IMAGE and SIDECAR_IMAGE, which disagree with each other";
+
+  return (
+    "The platform, PI_IMAGE and SIDECAR_IMAGE must all carry the same version — the agent runtime and the sidecar speak a wire protocol to each other, and both speak a container boundary to the platform, and all of it changes in the same commit. A trio that disagrees boots fine and then fails runs with an opaque upstream error naming none of the three (#1195 for the pair, #1177 for the platform boundary). " +
+    `Observed: ${observed}. Out of step: ${outOfStep}. ` +
+    "Pin both image refs to the platform's own version — the shipped docker-compose derives the platform image and both runtime images from a single ${APPSTRATE_VERSION}, which is the layout to copy — or rebuild both locally with `bun run docker:build:runtime` and run the platform from source. " +
+    "Exempt, deliberately: a digest-pinned ref (either half — a digest identifies an image by content, there is no version to compare), and a platform with no release identity (a source run, or an image built without APP_VERSION), which drops out of the comparison and leaves the two images checked against each other."
+  );
 };
 
 // ─── Schema ──────────────────────────────────────────────────
@@ -899,14 +938,26 @@ const envSchema = z
     message: "APP_URL must use https:// when NODE_ENV=production (http://localhost is allowed)",
     path: ["APP_URL"],
   })
-  // `PI_IMAGE` and `SIDECAR_IMAGE` are a version contract, not two independent
-  // knobs: the agent runtime and the sidecar speak a wire protocol that changes
-  // in the same commit, so a pair pinned to two different release tags boots
-  // fine and then fails runs with an opaque upstream error naming neither image
-  // (#1195). Detectable here, before anything starts.
+  // The platform, `PI_IMAGE` and `SIDECAR_IMAGE` are a version contract, not
+  // three independent knobs: the agent runtime and the sidecar speak a wire
+  // protocol to each other, and both speak a container boundary to the
+  // platform, and all of it changes in the same commit. A trio that disagrees
+  // boots fine and then fails runs with an opaque upstream error naming none of
+  // the three (#1195 for the pair, #1177 for the platform boundary). Detectable
+  // here, before anything starts. The rule itself, both carve-outs and the
+  // worked examples live with the comparison in `@appstrate/core/image-ref`.
+  //
+  // The platform's own version is `APP_VERSION` — already declared above,
+  // already baked into the image by the Dockerfile (`ARG` → `ENV`, fed by the
+  // release workflow's `github.ref_name`), already surfaced on /health. No new
+  // variable, and no file read at boot: the root `package.json` carries no
+  // version field at all, and the release tag is the identity the image tags
+  // are cut from anyway. A build with no release identity (`dev`, the
+  // Dockerfile's ARG default and the source-run fallback) drops out of the
+  // comparison, which is what keeps dev boxes and preview deployments booting.
   //
   // Deliberately NOT conditioned on `RUN_ADAPTER`. The rule is a property of
-  // the two values, and every backend that consumes them wants it: the docker
+  // the values, and every backend that consumes them wants it: the docker
   // orchestrator reads both at run time, and the firecracker rootfs build
   // (`modules/firecracker/scripts/build-rootfs.sh`) reads both from this same
   // environment to bake a guest image — a mismatched pair there produces the
@@ -915,12 +966,24 @@ const envSchema = z
   // and branching on a backend id would put a closed list of backends back in
   // the codebase that the orchestrator registry exists to keep open.
   //
-  // A digest-pinned ref is exempt (see `findImageTagMismatch`): digests
-  // identify different images by construction, so there is nothing to compare.
-  .refine((env) => !findImageTagMismatch(env.PI_IMAGE, env.SIDECAR_IMAGE), {
-    message:
-      "PI_IMAGE and SIDECAR_IMAGE must be pinned to the same tag — the agent runtime and the sidecar speak a wire protocol that changes in lockstep, and a mismatched pair boots fine then fails runs with an opaque upstream error (#1195). Rebuild both with `bun run docker:build:runtime`, or pin both refs to the same release tag.",
-    path: ["SIDECAR_IMAGE"],
+  // `superRefine`, not `refine`, because the message has to name which of the
+  // three is out of step and what each one currently claims — a fixed string
+  // cannot, and "one of your three images is wrong" is the opaque error this
+  // check exists to replace.
+  .superRefine((env, ctx) => {
+    const mismatch = findRuntimeImageTagMismatch({
+      platformVersion: env.APP_VERSION,
+      piImage: env.PI_IMAGE,
+      sidecarImage: env.SIDECAR_IMAGE,
+    });
+    if (!mismatch) return;
+    ctx.addIssue({
+      code: "custom",
+      message: describeRuntimeImageMismatch(mismatch),
+      // Anchor on the ref the operator has to change when exactly one image is
+      // the outlier; otherwise keep the pair rule's original anchor.
+      path: [mismatch.oddOneOut === "pi" ? "PI_IMAGE" : "SIDECAR_IMAGE"],
+    });
   })
   // The untrusted-preview origin must actually BE a different origin. See the
   // long note on USERCONTENT_URL above for what a same-host value costs: it is
