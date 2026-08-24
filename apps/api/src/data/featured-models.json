@@ -1,16 +1,16 @@
 {
   "anthropic": ["claude-opus-5", "claude-sonnet-5", "claude-fable-5"],
-  "cerebras": ["zai-glm-4.7", "gpt-oss-120b"],
+  "cerebras": ["gpt-oss-120b"],
   "deepseek": ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat"],
   "fireworks-ai": [
-    "accounts/fireworks/models/glm-5p2",
-    "accounts/fireworks/models/kimi-k2p7-code",
-    "accounts/fireworks/models/minimax-m3"
+    "accounts/fireworks/models/nemotron-lightning-3p5-30b-a3b",
+    "accounts/fireworks/models/muse-glimmer-30b",
+    "accounts/fireworks/models/qwen3p8-max"
   ],
-  "google-ai": ["gemini-3.7-flash", "gemini-3.5-flash-lite", "gemini-3.6-flash"],
+  "google-ai": ["gemini-3.7-flash", "gemini-flash-latest", "gemini-3.5-flash-lite"],
   "groq": ["qwen/qwen3.6-27b", "openai/gpt-oss-safeguard-20b", "openai/gpt-oss-120b"],
   "mistral": ["mistral-medium-2604", "mistral-medium-latest", "mistral-small-2603"],
-  "moonshot": ["kimi-k2.6", "kimi-k2.5", "kimi-k2-thinking"],
+  "moonshot": ["kimi-k3", "kimi-k2.6", "kimi-k2.5"],
   "openai": ["gpt-5.6", "gpt-5.6-luna", "gpt-5.6-sol"],
   "together-ai": ["Qwen/Qwen3.5-397B-A17B", "moonshotai/Kimi-K2.5", "openai/gpt-oss-120b"],
   "xai": ["grok-4.6", "grok-4.5", "grok-4.3"],
