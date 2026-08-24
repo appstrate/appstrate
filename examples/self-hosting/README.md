@@ -486,6 +486,24 @@ Appstrate:
 - **Traefik**: no body limit by default; if you use the `buffering`
   middleware, set `maxRequestBodyBytes` ≥ `104857600`.
 
+### Streaming responses (chat + live run logs)
+
+The settings above cover the REQUEST direction. The RESPONSE direction matters
+too: Appstrate streams chat tokens and run logs over Server-Sent Events, and a
+proxy that buffers responses turns a live feed into one batch delivered when the
+turn ends. Appstrate sets `X-Accel-Buffering: no` on every SSE response, which
+nginx honours — but two things are worth checking on your own deployment:
+
+- **nginx**: the header is enough. Add `proxy_buffering off;` on the Appstrate
+  location if you have overridden buffering behaviour elsewhere.
+- **Compression**: do NOT gzip `text/event-stream`. A compressor holds bytes
+  until a flush boundary, so it delays the first token by design. nginx's
+  `gzip_types` excludes it by default; if you enable compression in Traefik or
+  Caddy, confirm `text/event-stream` is not in the compressed set.
+- **Traefik**: responses are not buffered unless you configure the `buffering`
+  middleware. If you do, it must not apply to `/api/chat`, `/api/realtime` or
+  the run-log endpoints.
+
 Only direct-presign S3 mode (`S3_PUBLIC_ENDPOINT` set) bypasses the proxy —
 browsers then PUT straight at the public S3 endpoint. Its bucket CORS policy
 must allow the request headers returned in the upload descriptor, including
