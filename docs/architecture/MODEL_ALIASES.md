@@ -306,10 +306,11 @@ FEATURED_MODELS_EXCLUDE="deepseek-chat,some-other-backing"
 The platform and the runtime images (`appstrate-pi`, the sidecar) implement two
 halves of one contract. A version-tag trio rule now refuses the disagreement
 outright: `findRuntimeImageTagMismatch` (`@appstrate/core/image-ref`, enforced by
-the `@appstrate/env` schema) **fails boot** unless `PI_IMAGE` and
-`SIDECAR_IMAGE` carry the same tag as the platform's own `APP_VERSION`. So the
-ordinary released deployment cannot reach either skew below, in either
-direction — it does not start.
+the `@appstrate/env` schema) **fails boot** unless `PI_IMAGE` and `SIDECAR_IMAGE`
+carry the same tag as each other and — whenever all three values are release
+versions — as the platform's own `APP_VERSION`. So the ordinary released
+deployment, the one pinned to `{{version}}` by the CLI, cannot reach either skew
+below in either direction: it does not start.
 
 The old-platform / new-images direction is safe on its own merits as well,
 which is what keeps the exempt cases below benign in that direction: the
@@ -336,18 +337,28 @@ carve-outs are deliberate, and one gap is structural:
 - **A digest-pinned `PI_IMAGE` or `SIDECAR_IMAGE`** silences the comparison
   outright — an operator pinning digests has taken explicit control of image
   identity, and takes this ordering rule with it.
-- **A platform with no build identity** (`APP_VERSION` unset, empty, or `dev` —
-  a source run, a preview deployment) drops out of the trio, degrading the rule
-  to the pair rule. The two images are then still checked against each other,
-  but not against the platform, which is precisely this section's direction.
+- **A platform with no build identity** — `APP_VERSION` unset, empty, `dev` (a
+  source run, a preview deployment) or any other non-release build stamp
+  (`health-container-e2e`, what the health-container e2e job builds with) —
+  drops out of the trio, degrading the rule to the pair rule. The two images are
+  then still checked against each other, but not against the platform, which is
+  precisely this section's direction.
+- **Images pinned to an alias tag family.** `release.yml` publishes `latest`,
+  `{{major}}.{{minor}}` and `sha-<sha>` for the same image as `{{version}}`, and
+  `APP_VERSION` is a git ref name that can only ever equal a `{{version}}` tag.
+  A deployment on any alias family is coherent, so the platform drops out there
+  too — and the rule cannot order it. `:latest` on both refs is the case that
+  matters: it is the documented compat fallback for consumers that skip the CLI,
+  and it is indistinguishable, from configuration alone, from a hand-edited
+  `.env` that floats the runtime images past a pinned platform.
 - **A floating tag rebuilt on one side** (`:latest`) passes the comparison by
   construction: both tags are equal and only the bytes moved.
-  `services/orchestrator/runtime-image-pair.ts` catches that case by comparing
-  the images' `org.opencontainers.image.revision` stamps after the pre-pull, but
-  it only **warns**, and it compares the pair to each other — never to the
-  platform.
+  `services/orchestrator/runtime-image-pair.ts` catches that case — and the one
+  above with it — by comparing the images' `org.opencontainers.image.revision`
+  stamps after the pre-pull, but it only **warns**, and it compares the pair to
+  each other — never to the platform.
 
-In all three, **ship the platform before or with the runtime images.**
+In all four, **ship the platform before or with the runtime images.**
 
 ## Threat B in two tiers
 

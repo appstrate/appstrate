@@ -59,13 +59,29 @@ import type { KnipConfig } from "knip";
  * nothing: most of the patterns match no file in most workspaces, and knip
  * reports each one as a configuration hint. 65 of those hints is where a
  * *stale* entry hides, and a stale entry is what cost this config 6 dead
- * files and ~450 phantom unused exports. `verify:dead-code` therefore runs
- * with hints ON: every pattern below must match at least one file.
+ * files and ~450 phantom unused exports. Hence `treatConfigHintsAsErrors`
+ * below: every pattern in this file must match at least one file, and
+ * `verify:dead-code` fails when one stops doing so.
  *
  * The one gap the plugin leaves is called out at `apps/api` below.
  */
 
 const config: KnipConfig = {
+  /**
+   * Makes the rule the header states actually a rule. Without it knip prints
+   * configuration hints and still exits 0, so a pattern that has stopped
+   * matching anything — the exact failure mode this config is built to avoid —
+   * scrolls past in a green CI log. Set here rather than as a
+   * `--treat-config-hints-as-errors` flag on the script so it travels with the
+   * patterns it governs.
+   *
+   * It costs nothing to keep green: every entry and ignore below is justified
+   * by what reaches it, and a justification that has expired is precisely what
+   * should fail. When it does fire, the fix is to delete the stale pattern —
+   * never to unset this.
+   */
+  treatConfigHintsAsErrors: true,
+
   /**
    * Invoked through `npx`/`bunx` or a shell builtin, so no manifest lists
    * them: `playwright` (e2e job + `test:e2e` script), `which`/`mktemp`

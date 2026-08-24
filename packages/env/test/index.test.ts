@@ -440,6 +440,12 @@ describe("USERCONTENT_URL must be a genuinely separate preview origin", () => {
 // `packages/core/test/image-ref.test.ts`. What is left here is the wiring: that
 // the schema calls it at all, and that it feeds it APP_VERSION — the value the
 // trio rule added, and the only way a *matched pair* can now abort boot.
+//
+// Plus the trios the repo itself boots. Those belong here and not only on the
+// pure function, because "does this configuration start the platform?" is a
+// question about `getEnv()`, and the two configurations below — the
+// health-container e2e job and the alias tag families `release.yml` publishes —
+// were both aborting boot while every case on the pure function passed.
 describe("APP_VERSION / PI_IMAGE / SIDECAR_IMAGE are a version contract", () => {
   let s: Snap;
 
@@ -464,5 +470,38 @@ describe("APP_VERSION / PI_IMAGE / SIDECAR_IMAGE are a version contract", () => 
     process.env.PI_IMAGE = "ghcr.io/appstrate/appstrate-pi:1.0.0-beta.51";
     process.env.SIDECAR_IMAGE = "ghcr.io/appstrate/appstrate-sidecar:1.0.0-beta.51";
     expect(() => getEnv()).toThrow(/platform build 1\.0\.0-beta\.52.*Out of step: the platform/s);
+  });
+
+  it("boots the health-container e2e trio (APP_VERSION=health-container-e2e, images :local)", () => {
+    // scripts/health-container-e2e.sh + test/setup/docker-compose.health-e2e.yml,
+    // verbatim. This is a CI job: if it cannot get past getEnv(), the container
+    // never reaches its own healthcheck.
+    process.env.APP_VERSION = "health-container-e2e";
+    process.env.PI_IMAGE = "appstrate-health-e2e:local";
+    process.env.SIDECAR_IMAGE = "appstrate-health-e2e:local";
+    expect(getEnv().PI_IMAGE).toBe("appstrate-health-e2e:local");
+  });
+
+  for (const tag of ["latest", "1.0", "sha-abc1234"]) {
+    it(`boots a released platform against runtime images pinned to :${tag}`, () => {
+      // `release.yml` publishes `{{version}}`, `{{major}}.{{minor}}`,
+      // `sha-<sha>` and `latest` for the same image, and every shipped compose
+      // file derives all three images from one ${APPSTRATE_VERSION}. The
+      // platform's APP_VERSION is a git ref name and can only ever equal a
+      // `{{version}}` tag, so these trios are coherent.
+      process.env.APP_VERSION = "v1.0.0-beta.51";
+      process.env.PI_IMAGE = `ghcr.io/appstrate/appstrate-pi:${tag}`;
+      process.env.SIDECAR_IMAGE = `ghcr.io/appstrate/appstrate-sidecar:${tag}`;
+      expect(getEnv().SIDECAR_IMAGE).toBe(`ghcr.io/appstrate/appstrate-sidecar:${tag}`);
+    });
+  }
+
+  it("still aborts boot when the two runtime refs sit in different tag families", () => {
+    process.env.APP_VERSION = "v1.0.0-beta.51";
+    process.env.PI_IMAGE = "ghcr.io/appstrate/appstrate-pi:latest";
+    process.env.SIDECAR_IMAGE = "ghcr.io/appstrate/appstrate-sidecar:1.0.0-beta.51";
+    expect(() => getEnv()).toThrow(
+      /PI_IMAGE tag latest.*Out of step: PI_IMAGE and SIDECAR_IMAGE, which disagree with each other/s,
+    );
   });
 });

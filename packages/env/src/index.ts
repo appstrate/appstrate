@@ -89,7 +89,7 @@ const describeRuntimeImageMismatch = (m: RuntimeImageTagMismatch): string => {
     "The platform, PI_IMAGE and SIDECAR_IMAGE must all carry the same version — the agent runtime and the sidecar speak a wire protocol to each other, and both speak a container boundary to the platform, and all of it changes in the same commit. A trio that disagrees boots fine and then fails runs with an opaque upstream error naming none of the three (#1195 for the pair, #1177 for the platform boundary). " +
     `Observed: ${observed}. Out of step: ${outOfStep}. ` +
     "Pin both image refs to the platform's own version — the shipped docker-compose derives the platform image and both runtime images from a single ${APPSTRATE_VERSION}, which is the layout to copy — or rebuild both locally with `bun run docker:build:runtime` and run the platform from source. " +
-    "Exempt, deliberately: a digest-pinned ref (either half — a digest identifies an image by content, there is no version to compare), and a platform with no release identity (a source run, or an image built without APP_VERSION), which drops out of the comparison and leaves the two images checked against each other."
+    "Exempt, deliberately: a digest-pinned ref (either half — a digest identifies an image by content, there is no version to compare), and any value that is not a release version — a platform with no release identity (a source run, an image built without APP_VERSION), or images pinned to one of the alias tag families the release publishes alongside the version (`latest`, `1.0`, `sha-<sha>`). In those the platform drops out of the comparison and the two images are still checked against each other."
   );
 };
 
@@ -936,9 +936,14 @@ const envSchema = z
   // release workflow's `github.ref_name`), already surfaced on /health. No new
   // variable, and no file read at boot: the root `package.json` carries no
   // version field at all, and the release tag is the identity the image tags
-  // are cut from anyway. A build with no release identity (`dev`, the
-  // Dockerfile's ARG default and the source-run fallback) drops out of the
-  // comparison, which is what keeps dev boxes and preview deployments booting.
+  // are cut from anyway. The platform only joins the comparison when all three
+  // values are release versions — `APP_VERSION` is a git ref name, so it can
+  // equal an image tag only in the one family the two namespaces share. Any
+  // other build stamp (`dev`, the Dockerfile ARG default and the source-run
+  // fallback; `health-container-e2e`, what the health e2e job builds with) or
+  // any alias tag family the release also publishes (`latest`, `1.0`,
+  // `sha-<sha>`) takes it out, which is what keeps dev boxes, preview
+  // deployments, that CI job and `:latest` consumers booting.
   //
   // Deliberately NOT conditioned on `RUN_ADAPTER`. The rule is a property of
   // the values, and every backend that consumes them wants it: the docker

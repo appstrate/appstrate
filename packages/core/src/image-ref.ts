@@ -40,21 +40,10 @@
  * see. Neither subsumes the other.
  */
 
+import { isValidVersion, normalizeVersion } from "./semver.ts";
+
 /** OCI label carrying the commit an image was built from. */
 export const OCI_REVISION_LABEL = "org.opencontainers.image.revision";
-
-/**
- * The build-identity string a platform carries when it has none.
- *
- * It is a real value, not an absence: the Dockerfile declares
- * `ARG APP_VERSION=dev`, so every image built without the release workflow's
- * build-arg reports `dev` rather than leaving `APP_VERSION` unset — and
- * `apps/api/src/lib/version.ts` reports the same string for a source run. Both
- * mean "this build has no release identity", so both are treated as unknown
- * here: a platform that cannot name its own version has nothing to compare the
- * runtime images against.
- */
-const UNVERSIONED_BUILD = "dev";
 
 export interface ParsedImageRef {
   /** Everything before the tag / digest, registry host included. */
@@ -98,8 +87,9 @@ export type RuntimeImageMember = "platform" | "pi" | "sidecar";
 export interface RuntimeImageTrio {
   /**
    * The platform's own build identity — `APP_VERSION`, stamped into the image
-   * at build time. Absent, empty or `dev` means "no release identity", which
-   * takes the platform out of the comparison entirely.
+   * at build time. Anything that is not a release version (absent, empty,
+   * `dev`, `health-container-e2e`, …) means "no release identity", which takes
+   * the platform out of the comparison entirely.
    */
   readonly platformVersion: string | undefined;
   readonly piImage: string;
@@ -127,18 +117,43 @@ export interface RuntimeImageTagMismatch {
 }
 
 /**
- * `APP_VERSION` is the git ref name the release workflow was triggered on
- * (`v1.0.0-beta.51`); the image tags come from metadata-action's
- * `{{version}}` pattern (`1.0.0-beta.51`). Same release, one `v` apart — strip
- * it, or every released deployment would fail this check.
+ * The release version a value names, or `undefined` when it names none.
  *
- * Only a `v` immediately followed by a digit is a version prefix; a tag named
- * `vnext` is a tag named `vnext`.
+ * The platform and the image tags are drawn from two different namespaces:
+ * `APP_VERSION` is the git ref name the release workflow was triggered on
+ * (`v1.0.0-beta.51`), while the image tags come from metadata-action's
+ * `{{version}}` pattern (`1.0.0-beta.51`). Same release, one `v` apart — hence
+ * the normalization, without which every released deployment would fail this
+ * check.
+ *
+ * The predicate that follows the normalization is the load-bearing half. The
+ * question is not "does this value have an identity?" but "is this a value an
+ * image tag can be equal to?", and only a release version is. Everything else
+ * a build stamps or a registry serves lives in a namespace where equality is
+ * not defined:
+ *
+ *  - `dev` — the Dockerfile's `ARG APP_VERSION=dev`, and the string
+ *    `apps/api/src/lib/version.ts` reports for a source run.
+ *  - `health-container-e2e` — what `scripts/health-container-e2e.sh` builds
+ *    with, against images tagged `:local`.
+ *  - `latest`, `{{major}}.{{minor}}` (`1.0`) and `sha-<sha>` — the three
+ *    *other* tag families `release.yml` publishes for the very same image as
+ *    `{{version}}`. `:latest` is the documented compat fallback for consumers
+ *    that skip the CLI, and every shipped compose file derives all three
+ *    images from one `${APPSTRATE_VERSION}`, so pinning any of them presents a
+ *    coherent trio.
+ *
+ * `semver.valid` is the arbiter: it accepts `1.0.0-beta.51` (with or without
+ * the `v`) and rejects all six strings above. Requiring the round trip back to
+ * the input keeps a hypothetical `:v1.0.0` tag out too — the comparison below
+ * is literal, so a value that had to be rewritten to parse cannot be compared
+ * against a raw tag without inventing a mismatch.
  */
-function normalizePlatformVersion(version: string | undefined): string | undefined {
-  const trimmed = version?.trim();
-  if (!trimmed || trimmed === UNVERSIONED_BUILD) return undefined;
-  return /^v\d/.test(trimmed) ? trimmed.slice(1) : trimmed;
+function releaseVersion(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  const normalized = normalizeVersion(trimmed);
+  return isValidVersion(normalized) ? normalized : undefined;
 }
 
 interface ComparedMember {
@@ -160,25 +175,52 @@ function findOddOneOut(members: readonly ComparedMember[]): RuntimeImageMember |
 }
 
 /**
- * Compare the versions the three members of the runtime-image contract claim,
- * and report the disagreement when there is one.
+ * Compare the versions the members of the runtime-image contract claim, and
+ * report the disagreement when there is one.
  *
- * Returns `null` — "nothing to say" — in two cases, both of them carve-outs
- * that predate the platform joining the comparison and whose semantics are
- * unchanged by it:
+ * The two halves of the rule are not symmetric, and conflating them is what
+ * made an earlier version of it unsatisfiable outside a release build:
+ *
+ *  - **pi ↔ sidecar is always compared, literally.** Every shipped compose
+ *    file sets both refs from one `${APPSTRATE_VERSION}`, and `.env.example`
+ *    presents them as a pair, so any difference between the two is a half-done
+ *    edit — whatever tag family it is in. `:latest` against `:1.0.0` is caught
+ *    for the same reason `:1.0.0` against `:0.9.0` is.
+ *  - **The platform joins only when all three values are release versions.**
+ *    Its value is a git ref name, not a tag, so it can be *equal* to a tag only
+ *    in the one family (`{{version}}`) the two namespaces share. Comparing it
+ *    against `latest`, `1.0`, `sha-abc1234` or `local` does not detect skew: it
+ *    rejects a coherent deployment and tells the operator to pin an image to a
+ *    tag that was never published.
+ *
+ * Returns `null` — "nothing to say" — in three cases:
  *
  *  - **Either runtime ref is digest-pinned with no tag.** Digests identify
  *    images by content, so there is no version to compare, and one digest-
  *    pinned half silences the whole comparison: an operator pinning digests has
  *    taken explicit control of image identity.
- *  - **The platform has no build identity** (unset / empty / `dev`). It then
- *    simply drops out of the trio and the rule degrades to exactly the pair
- *    rule it grew from — which is what keeps the zero-config dev box
- *    (`appstrate-pi:latest` + `appstrate-sidecar:latest`, run from source) and
- *    every preview deployment (images stamped, platform built without
- *    `APP_VERSION`) passing.
+ *  - **The platform has no release identity** (unset / empty / `dev` / any
+ *    other non-version build stamp). It drops out and the rule degrades to
+ *    exactly the pair rule it grew from — which is what keeps the zero-config
+ *    dev box (`appstrate-pi:latest` + `appstrate-sidecar:latest`, run from
+ *    source), every preview deployment, and the health-container e2e
+ *    (`APP_VERSION=health-container-e2e` against `:local` images) passing.
+ *  - **The images are pinned to a non-version tag family.** Same reason, from
+ *    the other side: `release.yml` publishes `latest`, `{{major}}.{{minor}}`
+ *    and `sha-<sha>` for the same image as `{{version}}`, and a deployment on
+ *    any of them is coherent.
  *
- * Everything else compares the tags literally, all comparable members at once.
+ * What that last carve-out gives up, deliberately: a *versioned* platform with
+ * both images floating on `:latest` is no longer rejected. It cannot be. The
+ * platform's `APP_VERSION` is baked at build time and reads the same whether
+ * the image was pulled by version tag or by `:latest`, so this function cannot
+ * distinguish "operator hand-edited `.env` to float the runtime images" from
+ * "operator runs the whole trio on `:latest`", which is a documented, supported
+ * deployment. Tag comparison structurally cannot see it — the *same tag, two
+ * builds* drift is exactly what the OCI-revision guard in
+ * `apps/api/src/services/orchestrator/runtime-image-pair.ts` exists to catch,
+ * by comparing the `org.opencontainers.image.revision` stamps of the images
+ * actually present on the host.
  */
 export function findRuntimeImageTagMismatch(
   trio: RuntimeImageTrio,
@@ -188,7 +230,13 @@ export function findRuntimeImageTagMismatch(
 
   if (!pi.tag || !sidecar.tag) return null;
 
-  const platformVersion = normalizePlatformVersion(trio.platformVersion);
+  const platformRelease = releaseVersion(trio.platformVersion);
+  const platformVersion =
+    platformRelease !== undefined &&
+    releaseVersion(pi.tag) === pi.tag &&
+    releaseVersion(sidecar.tag) === sidecar.tag
+      ? platformRelease
+      : undefined;
 
   const members: ComparedMember[] = [
     ...(platformVersion ? [{ member: "platform" as const, value: platformVersion }] : []),

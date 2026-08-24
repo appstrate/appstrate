@@ -15,6 +15,17 @@
  * about what it must NOT reject: the zero-config dev box, a matching release
  * pin, a registry host carrying a port, a digest pin, and any platform with no
  * release identity of its own to compare against.
+ *
+ * How the "must NOT reject" half is chosen matters, because it was chosen
+ * wrongly once. The first version of this table enumerated the *sentinels the
+ * implementation checked* — `undefined`, `"dev"`, `"  "` — and every one of
+ * them passed, while `APP_VERSION=health-container-e2e` against `:local`
+ * images (`scripts/health-container-e2e.sh`, an existing CI job) and every
+ * alias tag `release.yml` publishes (`latest`, `1.0`, `sha-<sha>`) aborted
+ * boot. The table proved the sentinels, not the deployments. Derive the
+ * accepted cases from what the repo actually builds and publishes —
+ * `grep -rn "APP_VERSION" .github scripts Dockerfile` is the whole list — and
+ * add a case here whenever a new one appears.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -86,7 +97,9 @@ describe("findRuntimeImageTagMismatch — the trio agrees", () => {
     ).toBeNull();
   });
 
-  it("only strips a `v` that prefixes a version — `vnext` is a tag named vnext", () => {
+  it("accepts a matched pair on a tag family that is not a version at all", () => {
+    // `vnext` is not a release version on either side, so the platform drops
+    // out and the pair is held to each other — and agrees.
     expect(
       findRuntimeImageTagMismatch({
         platformVersion: "vnext",
@@ -94,6 +107,85 @@ describe("findRuntimeImageTagMismatch — the trio agrees", () => {
         sidecarImage: `${SIDECAR}:vnext`,
       }),
     ).toBeNull();
+  });
+});
+
+// Every one of these is a trio the repo itself produces, and every one of them
+// aborted boot before the release-version predicate existed. They are the case
+// class the first version of this table missed entirely.
+describe("findRuntimeImageTagMismatch — the platform's stamp is not a version", () => {
+  it("accepts the health-container e2e trio (APP_VERSION=health-container-e2e, images :local)", () => {
+    // scripts/health-container-e2e.sh builds with
+    // `--build-arg APP_VERSION=health-container-e2e` and points PI_IMAGE /
+    // SIDECAR_IMAGE at `appstrate-health-e2e:local`
+    // (test/setup/docker-compose.health-e2e.yml). Comparing a build stamp
+    // against a tag from a different namespace can only ever fail.
+    expect(
+      findRuntimeImageTagMismatch({
+        platformVersion: "health-container-e2e",
+        piImage: "appstrate-health-e2e:local",
+        sidecarImage: "appstrate-health-e2e:local",
+      }),
+    ).toBeNull();
+  });
+
+  it("still holds the pair to each other under a non-version platform stamp", () => {
+    expect(
+      findRuntimeImageTagMismatch({
+        platformVersion: "health-container-e2e",
+        piImage: "appstrate-health-e2e:local",
+        sidecarImage: `${SIDECAR}:1.0.0-beta.51`,
+      }),
+    ).toEqual({
+      platformVersion: undefined,
+      piTag: "local",
+      sidecarTag: "1.0.0-beta.51",
+      oddOneOut: undefined,
+    });
+  });
+});
+
+// `release.yml` publishes FOUR tag families for one image — `{{version}}`,
+// `{{major}}.{{minor}}`, `sha-<sha>` and `latest` — and every shipped compose
+// file derives all three images from a single `${APPSTRATE_VERSION}`. Pinning
+// any of the three non-`{{version}}` families therefore presents a coherent
+// trio, which the rule must accept: `APP_VERSION` is the git ref name and can
+// only ever equal a `{{version}}` tag.
+describe("findRuntimeImageTagMismatch — the images are on an alias tag family", () => {
+  const PLATFORM = "v1.0.0-beta.51";
+
+  for (const [family, tag] of [
+    ["latest — the documented compat fallback for consumers that skip the CLI", "latest"],
+    ["{{major}}.{{minor}}", "1.0"],
+    ["sha-<sha>", "sha-abc1234"],
+  ] as const) {
+    it(`accepts a versioned platform against a matched pair on ${family}`, () => {
+      expect(
+        findRuntimeImageTagMismatch({
+          platformVersion: PLATFORM,
+          piImage: `${PI}:${tag}`,
+          sidecarImage: `${SIDECAR}:${tag}`,
+        }),
+      ).toBeNull();
+    });
+  }
+
+  it("still rejects two different alias families across the pair", () => {
+    // The platform is out of the comparison, but the pair rule is not: both
+    // refs come from one `${APPSTRATE_VERSION}` in every compose file we ship,
+    // so two families across them is a half-done edit.
+    expect(
+      findRuntimeImageTagMismatch({
+        platformVersion: PLATFORM,
+        piImage: `${PI}:latest`,
+        sidecarImage: `${SIDECAR}:sha-abc1234`,
+      }),
+    ).toEqual({
+      platformVersion: undefined,
+      piTag: "latest",
+      sidecarTag: "sha-abc1234",
+      oddOneOut: undefined,
+    });
   });
 });
 
@@ -152,18 +244,24 @@ describe("findRuntimeImageTagMismatch — the platform is in the comparison", ()
     ).toBeUndefined();
   });
 
-  it("rejects floating :latest runtime images under a versioned platform", () => {
-    // The hole this rule closes: the schema defaults are `…:latest`, so a
-    // released image with a hand-edited `.env` floats its runtime images
-    // forward while its own bytes stay pinned. An eager pull then lands a
-    // newer runtime image on an older platform.
+  it("does NOT reject floating :latest runtime images under a versioned platform", () => {
+    // Recorded as a deliberate blind spot, not an oversight. The schema
+    // defaults are `…:latest`, so a released image with a hand-edited `.env`
+    // floats its runtime images forward while its own bytes stay pinned, and an
+    // eager pull lands a newer runtime image on an older platform. Tag
+    // comparison cannot see it: `APP_VERSION` is baked at build time and reads
+    // the same whether the platform image was pulled by version tag or by
+    // `:latest`, so this trio is byte-identical to the supported all-`:latest`
+    // deployment. Only the OCI-revision guard
+    // (`apps/api/src/services/orchestrator/runtime-image-pair.ts`), which reads
+    // the images actually present on the host, can distinguish them.
     expect(
       findRuntimeImageTagMismatch({
         platformVersion: "v1.0.0-beta.52",
         piImage: "appstrate-pi:latest",
         sidecarImage: "appstrate-sidecar:latest",
-      })?.oddOneOut,
-    ).toBe("platform");
+      }),
+    ).toBeNull();
   });
 });
 
