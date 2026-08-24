@@ -5,7 +5,7 @@ import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
 import type { ResumableStreamContext } from "assistant-stream/resumable";
 import { finalizeChatStream } from "../src/finalize-stream.ts";
 import { getResumableContext } from "../src/resumable.ts";
-import { extractAssistantMessages } from "../src/stream-parse.ts";
+import { extractAssistantMessage } from "../src/stream-parse.ts";
 
 /**
  * The live-resume guarantee: a turn's bytes are recorded under its stream id so a
@@ -35,7 +35,7 @@ describe("resumable streams", () => {
 
     const resumed = await getResumableContext().resume(streamId);
     expect(resumed).not.toBeNull();
-    const [msg] = await extractAssistantMessages(resumed!);
+    const msg = await extractAssistantMessage(resumed!);
     expect(msg?.role).toBe("assistant");
     const text = (msg?.parts ?? []).map((p) => (p.type === "text" ? p.text : "")).join("");
     expect(text).toBe("hello world");

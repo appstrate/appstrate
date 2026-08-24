@@ -64,7 +64,7 @@ export function toPiToolResult(payload: unknown): PiToolResult {
   };
 }
 
-/** Adapt an MCP `CallToolResult` to Pi's `AgentToolResult` (text/image blocks only). */
+/** Adapt an MCP `CallToolResult` to Pi's `AgentToolResult` (every block as text). */
 export function mcpResultToPi(result: {
   content: Array<Record<string, unknown>>;
   structuredContent?: unknown;

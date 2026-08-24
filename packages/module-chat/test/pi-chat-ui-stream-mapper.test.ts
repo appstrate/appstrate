@@ -264,3 +264,37 @@ describe("PiChatUiStreamMapper", () => {
     expect(chunks).toEqual([]);
   });
 });
+
+describe("PiChatUiStreamMapper — step counting and block ids", () => {
+  it("counts model calls only — not the user echo, not tool results", () => {
+    const mapper = new PiChatUiStreamMapper();
+    // Pi emits message_start/message_end for the prompt and for every tool
+    // result too; counting those made `stepCount` several times the real
+    // number of model calls.
+    mapper.map({ type: "message_start", message: { role: "user" } });
+    mapper.map({ type: "message_end", message: { role: "user" } });
+    mapper.map({ type: "message_start", message: { role: "assistant" } });
+    mapper.map({ type: "message_end", message: { role: "assistant", stopReason: "toolUse" } });
+    mapper.map({ type: "message_start", message: { role: "toolResult" } });
+    mapper.map({ type: "message_end", message: { role: "toolResult" } });
+    mapper.map({ type: "message_start", message: { role: "assistant" } });
+    mapper.map({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
+
+    expect(mapper.stepCount()).toBe(2);
+  });
+
+  it("keeps content-block ids unique across interleaved messages", () => {
+    const mapper = new PiChatUiStreamMapper();
+    const ids: string[] = [];
+    for (const role of ["assistant", "toolResult", "assistant"]) {
+      mapper.map({ type: "message_start", message: { role } });
+      const chunks = mapper.map({
+        type: "message_update",
+        message: {},
+        assistantMessageEvent: { type: "text_start", contentIndex: 0, partial: {} },
+      });
+      for (const c of chunks) if (c.type === "text-start") ids.push(c.id);
+    }
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+});

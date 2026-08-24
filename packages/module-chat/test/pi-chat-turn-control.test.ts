@@ -11,84 +11,6 @@ import {
   type AfterToolCallOverride,
   type PiChatToolLoopSession,
 } from "../src/pi-chat/turn-control.ts";
-import {
-  ChatTurnDeadlineError,
-  isChatTurnDeadline,
-  resolveTurnClosure,
-  turnDeadlineNoticeText,
-  turnNoticeChunks,
-} from "../src/pi-chat/pi-turn-closure.ts";
-import { PiChatUiStreamMapper } from "../src/pi-chat/ui-stream-mapper.ts";
-
-const TEN_MINUTES = 10 * 60_000;
-
-describe("turn abort causes", () => {
-  it("recognises the deadline reason", () => {
-    expect(isChatTurnDeadline(new ChatTurnDeadlineError(TEN_MINUTES))).toBe(true);
-  });
-
-  it("does not mistake an explicit stop for a deadline", () => {
-    expect(isChatTurnDeadline(new Error("stopped by user"))).toBe(false);
-    expect(isChatTurnDeadline("AbortError")).toBe(false);
-    expect(isChatTurnDeadline(undefined)).toBe(false);
-  });
-});
-
-describe("resolveTurnClosure", () => {
-  it("reports a deadline-killed turn as finishReason:'deadline'", () => {
-    const closure = resolveTurnClosure({
-      aborted: true,
-      abortReason: new ChatTurnDeadlineError(TEN_MINUTES),
-      // What the incident produced: the last completed step was a tool call.
-      finishReason: "tool-calls",
-    });
-    expect(closure).toEqual({ finishReason: "deadline", deadlineReached: true });
-  });
-
-  it("leaves an explicit stop untouched (distinct path)", () => {
-    const closure = resolveTurnClosure({
-      aborted: true,
-      abortReason: new Error("stopped by user"),
-      finishReason: "tool-calls",
-    });
-    expect(closure).toEqual({ finishReason: "tool-calls", deadlineReached: false });
-  });
-
-  it("leaves a turn that ended on its own untouched", () => {
-    const closure = resolveTurnClosure({
-      aborted: false,
-      abortReason: undefined,
-      finishReason: "stop",
-    });
-    expect(closure).toEqual({ finishReason: "stop", deadlineReached: false });
-  });
-
-  it("keeps a genuine engine error visible instead of claiming a deadline", () => {
-    const closure = resolveTurnClosure({
-      aborted: true,
-      abortReason: new ChatTurnDeadlineError(TEN_MINUTES),
-      finishReason: "error",
-    });
-    expect(closure).toEqual({ finishReason: "error", deadlineReached: false });
-  });
-});
-
-describe("deadline notice", () => {
-  it("writes a real, non-empty text part (not an error chunk)", () => {
-    const chunks = turnNoticeChunks("notice-1", turnDeadlineNoticeText(TEN_MINUTES));
-    expect(chunks.map((c) => c.type)).toEqual(["text-start", "text-delta", "text-end"]);
-    expect(chunks.some((c) => c.type === "error")).toBe(false);
-    const delta = chunks.find((c) => c.type === "text-delta") as { delta: string };
-    expect(delta.delta.length).toBeGreaterThan(0);
-  });
-
-  it("states the time limit, the surviving runs, and how to resume", () => {
-    const text = turnDeadlineNoticeText(TEN_MINUTES);
-    expect(text).toContain("10 minutes");
-    expect(text).toContain("arrière-plan");
-    expect(text).toContain("message");
-  });
-});
 
 /** Minimal stand-in for the Pi `AgentSession` slice the step cap drives. */
 function fakeSession(inner?: PiChatToolLoopSession["agent"]["afterToolCall"]) {
@@ -179,40 +101,6 @@ describe("createStepCapController", () => {
       terminate: true,
     });
     expect(seen).toEqual([{ n: 1 }, { n: 2 }]);
-  });
-});
-
-describe("PiChatUiStreamMapper.stepCount", () => {
-  it("counts model calls only — not the user echo, not tool results", () => {
-    const mapper = new PiChatUiStreamMapper();
-    // Pi emits message_start/message_end for the prompt and for every tool
-    // result too; counting those made `stepCount` several times the real
-    // number of model calls.
-    mapper.map({ type: "message_start", message: { role: "user" } });
-    mapper.map({ type: "message_end", message: { role: "user" } });
-    mapper.map({ type: "message_start", message: { role: "assistant" } });
-    mapper.map({ type: "message_end", message: { role: "assistant", stopReason: "toolUse" } });
-    mapper.map({ type: "message_start", message: { role: "toolResult" } });
-    mapper.map({ type: "message_end", message: { role: "toolResult" } });
-    mapper.map({ type: "message_start", message: { role: "assistant" } });
-    mapper.map({ type: "message_end", message: { role: "assistant", stopReason: "stop" } });
-
-    expect(mapper.stepCount()).toBe(2);
-  });
-
-  it("keeps content-block ids unique across interleaved messages", () => {
-    const mapper = new PiChatUiStreamMapper();
-    const ids: string[] = [];
-    for (const role of ["assistant", "toolResult", "assistant"]) {
-      mapper.map({ type: "message_start", message: { role } });
-      const chunks = mapper.map({
-        type: "message_update",
-        message: {},
-        assistantMessageEvent: { type: "text_start", contentIndex: 0, partial: {} },
-      });
-      for (const c of chunks) if (c.type === "text-start") ids.push(c.id);
-    }
-    expect(new Set(ids).size).toBe(ids.length);
   });
 });
 

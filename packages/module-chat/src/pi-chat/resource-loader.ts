@@ -4,11 +4,29 @@ import type { ExtensionFactory, PiCodingAgentSdk } from "@appstrate/runner-pi";
 
 type PiChatResourceLoaderSdk = Pick<PiCodingAgentSdk, "DefaultResourceLoader" | "SettingsManager">;
 
+/**
+ * Working directory and agent home of a chat turn's disposable Pi session.
+ *
+ * They are constants, not options: chat writes no session file, loads no
+ * package resource and keeps no durable Pi state (see
+ * `structured-session.ts`), so every caller — the resource loader, the agent
+ * session, the in-memory SessionManager — must name the SAME two paths, and
+ * nothing gets to choose others.
+ */
+export const PI_CHAT_CWD = "/tmp";
+export const PI_CHAT_AGENT_DIR = "/tmp/pi-chat";
+
 interface CreatePiChatResourceLoaderOptions extends PiChatResourceLoaderSdk {
-  cwd: string;
-  agentDir: string;
   systemPrompt: string;
   extensionFactories: ExtensionFactory[];
+  /**
+   * Injection seam for the resource-policy test ONLY, which proves discovery is
+   * disabled by seeding a skill, an extension and an `AGENTS.md` in a scratch
+   * directory and checking none of them load. Production never passes these —
+   * it takes {@link PI_CHAT_CWD} / {@link PI_CHAT_AGENT_DIR}.
+   */
+  cwd?: string;
+  agentDir?: string;
 }
 
 const EMPTY_RESOLVED_PATHS = {
@@ -47,10 +65,10 @@ function disablePackageDiscovery(resourceLoader: object): void {
 export async function createPiChatResourceLoader({
   DefaultResourceLoader,
   SettingsManager,
-  cwd,
-  agentDir,
   systemPrompt,
   extensionFactories,
+  cwd = PI_CHAT_CWD,
+  agentDir = PI_CHAT_AGENT_DIR,
 }: CreatePiChatResourceLoaderOptions): Promise<
   InstanceType<PiCodingAgentSdk["DefaultResourceLoader"]>
 > {

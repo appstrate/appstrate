@@ -227,7 +227,7 @@ describe("structured Pi session reconstruction", () => {
     expect(turn.history.some((message) => message.role === "toolResult")).toBe(false);
   });
 
-  it("carries tool-result images through instead of inlining base64 as text", () => {
+  it("replays the forwarder's image pointer as text (the only shape a chat tool emits)", () => {
     const thread: UIMessage[] = [
       { id: "u1", role: "user", parts: [{ type: "text", text: "Capture" }] },
       {
@@ -239,8 +239,10 @@ describe("structured Pi session reconstruction", () => {
             toolName: "screenshot",
             toolCallId: "call_img",
             state: "output-available",
+            // What `mcpResultToPi` actually persists for an MCP image block —
+            // a text pointer, never the base64 payload.
+            output: { content: [{ type: "text", text: "[image image/png]" }] },
             input: {},
-            output: { content: [{ type: "image", data: "AAAB", mimeType: "image/png" }] },
           },
         ],
       } as unknown as UIMessage,
@@ -250,7 +252,7 @@ describe("structured Pi session reconstruction", () => {
     const result = buildStructuredPiTurn(thread, MODEL, OPTIONS).history.find(
       (message) => message.role === "toolResult",
     );
-    expect(result?.content).toEqual([{ type: "image", data: "AAAB", mimeType: "image/png" }]);
+    expect(result?.content).toEqual([{ type: "text", text: "[image image/png]" }]);
   });
 
   it("reports a context estimate so a long history cannot look empty to compaction", () => {

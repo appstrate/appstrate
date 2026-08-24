@@ -7,7 +7,9 @@
  *   - `chat_sessions` / `chat_messages` persistence (tables live in the core
  *     schema per the "modules own no tables" rule — this module only reads
  *     and writes them).
- *   - REST surface under `/api/chat/*` (sessions CRUD + message append).
+ *   - REST surface under `/api/chat/*`: session CRUD, history READ, resume and
+ *     stop. Messages are written by `POST /api/chat` alone (server-authoritative
+ *     persistence — see routes.ts); there is no message-append endpoint.
  *     Auto-exposed over MCP through the `mcp` module's `invoke_operation`
  *     once documented in the OpenAPI spec — no dedicated MCP tool needed.
  *   - Full-page React UI exported from `@appstrate/module-chat/ui`

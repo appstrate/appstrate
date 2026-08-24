@@ -44,22 +44,14 @@ import type { AgentSessionEvent } from "./pi-events.ts";
 import { buildPlatformMcpTools } from "./mcp-tools.ts";
 import { releaseOnClose, type PiChatSlot } from "./concurrency.ts";
 import { createStepCapController, type PiChatSession } from "./turn-control.ts";
-import { classifyClientTurnError, clientTurnErrorMarker } from "../turn-error.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
-import {
-  buildPiTurnMetadata,
-  piFailureChunks,
-  ChatTurnDeadlineError,
-  resolveTurnClosure,
-  turnDeadlineNoticeText,
-  turnNoticeChunks,
-} from "./pi-turn-closure.ts";
+import { ChatTurnDeadlineError, closePiTurn } from "./pi-turn-closure.ts";
 import {
   PI_CHAT_MODEL_RUNTIME_CREATE_OPTIONS,
   type ResolvedPiChatModelBinding,
 } from "./model-binding.ts";
 import { buildStructuredPiTurn, reconstructPiSession } from "./structured-session.ts";
-import { createPiChatResourceLoader } from "./resource-loader.ts";
+import { createPiChatResourceLoader, PI_CHAT_AGENT_DIR, PI_CHAT_CWD } from "./resource-loader.ts";
 
 export interface PiChatInput {
   /** Capacity reserved by the route before it persists the user turn. */
@@ -243,8 +235,6 @@ export function runPiChat(input: PiChatInput): Response {
         const resourceLoader = await createPiChatResourceLoader({
           DefaultResourceLoader,
           SettingsManager,
-          cwd: "/tmp",
-          agentDir: "/tmp/pi-chat",
           extensionFactories: [
             ...mcpTools.extensionFactories,
             ...authExtensions,
@@ -254,8 +244,8 @@ export function runPiChat(input: PiChatInput): Response {
         });
 
         const { session } = await createAgentSession({
-          cwd: "/tmp",
-          agentDir: "/tmp/pi-chat",
+          cwd: PI_CHAT_CWD,
+          agentDir: PI_CHAT_AGENT_DIR,
           model: sessionModel,
           thinkingLevel,
           modelRuntime,
@@ -329,50 +319,38 @@ export function runPiChat(input: PiChatInput): Response {
           if (!turnAbort.signal.aborted) throw err;
         }
 
-        // Invariant: an errored turn ALWAYS surfaces a visible error. Raw Pi /
-        // provider text is classified before it crosses the stream or
-        // persistence boundary; the client localizes the stable category.
+        // Close the turn through the shared emitter (`pi-turn-closure.ts`) — the
+        // same sequence the catch below uses. Invariant: an errored turn ALWAYS
+        // surfaces a visible error. Raw Pi / provider text is classified there,
+        // before it crosses the stream or persistence boundary; the client
+        // localizes the stable category.
         const meta = mapper.result();
-        const rawError =
-          meta.errorText ?? (meta.finishReason === "error" ? "unknown model error" : undefined);
-        const clientError = rawError ? classifyClientTurnError(rawError) : undefined;
-        if (clientError) write({ type: "error", errorText: clientTurnErrorMarker(clientError) });
-
         const stepCount = mapper.stepCount();
-        const closure = resolveTurnClosure({
+        const closing = closePiTurn({
+          error:
+            meta.errorText ?? (meta.finishReason === "error" ? "unknown model error" : undefined),
+          finishReason: meta.finishReason,
+          streamStarted,
           aborted: turnAbort.signal.aborted,
           abortReason: turnAbort.signal.reason,
-          finishReason: meta.finishReason,
+          stepCount,
+          // Both flags report the CAP, not arithmetic: a turn that never hit
+          // the budget must not claim it did just because a retry pushed the
+          // model-call count to the ceiling.
+          stepCapReached: stepCap.fired(),
+          ...(mapper.lastToolName() ? { lastToolName: mapper.lastToolName() } : {}),
         });
         // Same invariant, second failure mode: a turn killed by the deadline
-        // used to end in complete silence. It gets a REAL text part — an
-        // `error` chunk is transient and never becomes a persisted message part.
-        if (closure.deadlineReached) {
+        // used to end in complete silence. The emitter gives it a REAL text part
+        // — an `error` chunk is transient and never becomes a persisted part.
+        if (closing.deadlineReached) {
           logger.warn("chat turn deadline reached", {
             chatSessionId: input.chatSessionId,
             stepCount,
             deadlineMs: CHAT_TURN_DEADLINE_MS,
           });
-          const notice = turnNoticeChunks(
-            crypto.randomUUID(),
-            turnDeadlineNoticeText(CHAT_TURN_DEADLINE_MS),
-          );
-          for (const chunk of notice) write(chunk);
         }
-
-        write({
-          type: "finish",
-          messageMetadata: buildPiTurnMetadata({
-            finishReason: closure.finishReason,
-            ...(clientError ? { clientError } : {}),
-            stepCount,
-            // Both flags report the CAP, not arithmetic: a turn that never hit
-            // the budget must not claim it did just because a retry pushed the
-            // model-call count to the ceiling.
-            stepCapReached: stepCap.fired(),
-            ...(mapper.lastToolName() ? { lastToolName: mapper.lastToolName() } : {}),
-          }),
-        });
+        for (const chunk of closing.chunks) write(chunk);
 
         // Meter the turn (fire-and-forget by the caller). We hand the platform
         // seam the token counts + the model's catalog rates and let it compute
@@ -405,17 +383,20 @@ export function runPiChat(input: PiChatInput): Response {
             err: String(err),
             chatSessionId: input.chatSessionId,
           });
-          for (const chunk of piFailureChunks({
-            error: err,
+          const aborted = turnAbort.signal.aborted;
+          const closing = closePiTurn({
+            // An abort is a normal ending (the user already knows) — there is
+            // no error to surface, and the turn finishes as a plain stop.
+            ...(aborted ? {} : { error: err }),
+            finishReason: aborted ? "stop" : "error",
             streamStarted,
-            aborted: turnAbort.signal.aborted,
+            aborted,
             abortReason: turnAbort.signal.reason,
             stepCount: mapper.stepCount(),
             stepCapReached: stepCap?.fired() ?? false,
             ...(mapper.lastToolName() ? { lastToolName: mapper.lastToolName() } : {}),
-          })) {
-            write(chunk);
-          }
+          });
+          for (const chunk of closing.chunks) write(chunk);
         }
       } finally {
         clearTimeout(deadline);

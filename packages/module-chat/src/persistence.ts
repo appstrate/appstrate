@@ -136,19 +136,16 @@ export async function persistUserMessage(sessionId: string, message: UIMessage):
 }
 
 /**
- * Persist one assistant message when the stream finalizes, chained onto `parentId`
- * — the user turn for the first assistant message, or the previous assistant
- * message when a single turn emits several. Returns the persisted message id so
- * the next message in the turn can chain onto it.
+ * Persist the turn's assistant message when the stream finalizes, chained onto
+ * `parentId` — the user turn that prompted it.
  */
 export async function persistAssistantMessage(
   sessionId: string,
   message: UIMessage,
   parentId: string | null,
-): Promise<string> {
-  const { messageId, seq } = await upsertMessage(sessionId, message, parentId);
+): Promise<void> {
+  const { seq } = await upsertMessage(sessionId, message, parentId);
   await touchSession(sessionId, "assistant", seq);
-  return messageId;
 }
 
 /**
@@ -160,9 +157,10 @@ export async function persistAssistantMessage(
  * Goes through the same single writer as every other message (`upsertMessage` →
  * `touchSession`), so ordering, the `parent_id` chain, the title derivation and
  * the unread watermark behave identically. Persisted with the ASSISTANT role
- * (not `system`): a mid-transcript system message is not a shape the ai-sdk
- * `convertToModelMessages` path accepts without the `allowSystemInMessages`
- * compat flag, and the notice reads naturally as something the assistant says.
+ * (not `system`): the engine's history projection (`buildStructuredPiTurn`)
+ * keeps only `user` and `assistant` — a mid-transcript system message would be
+ * dropped on the next turn, and refused outright by `chatStreamSchema` on the
+ * way back in — and the notice reads naturally as something the assistant says.
  *
  * `messageId` is CALLER-CHOSEN and must be derived from the event, not random:
  * an already-present id makes this a no-op (returns false) so a replayed

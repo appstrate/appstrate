@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Chat API — session CRUD + opaque history entries.
+ * Chat API — session CRUD + history READ.
  *
- * Sessions are personal: every query filters by (orgId, userId). The
- * message store follows assistant-ui's NATIVE history-adapter contract
- * (ported from the appstrate-chat satellite): the client encodes each tree
- * node with its format adapter and POSTs `{ id, parent_id, format,
- * content }`; the server stores it verbatim (upsert on the client id) and
- * only peeks inside for a best-effort title. The live conversation flows
- * through `POST /api/chat` (streaming) — the history endpoints are pure
- * persistence.
+ * Sessions are personal: every query filters by (orgId, userId).
+ *
+ * Persistence is server-authoritative and `POST /api/chat` is its ONLY writer:
+ * it stores the user turn before inference and the assistant turn when the
+ * stream finalizes (`persistence.ts`, `finalize-stream.ts`). The routes below
+ * therefore never accept a message — `GET /api/chat/sessions/:id` returns the
+ * stored tree nodes for the client's read-only history adapter, in the
+ * `{ id, parent_id, format, content }` shape assistant-ui's `ai-sdk/v6` format
+ * adapter decodes.
  *
  * Rate limiting: `services.http.rateLimit` (platform capability), captured into
  * the router's `ChatPlatformDeps` at module init (see index.ts).

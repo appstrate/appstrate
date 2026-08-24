@@ -18,6 +18,7 @@ import type { Api, Message } from "@appstrate/runner-pi";
 import { messagesWithAttachmentsAsText } from "../attachments.ts";
 import { redactConnectPayload, splitJsonText } from "../connect-offer.ts";
 import { uiMessageText } from "../message-text.ts";
+import { PI_CHAT_CWD } from "./resource-loader.ts";
 
 export interface PiHistoryModel {
   api: Api;
@@ -50,7 +51,6 @@ interface StructuredPiTurn {
 
 interface SessionManagerLike {
   appendMessage(message: Message): string;
-  buildSessionContext(): { messages: unknown[] };
   getSessionFile(): string | undefined;
 }
 
@@ -118,10 +118,13 @@ function json(value: unknown): string {
 }
 
 /**
- * Convert one tool output into Pi tool-result content. Image blocks are carried
- * through as `ImageContent` (Pi serializes them natively) instead of being
- * JSON-stringified — a base64 payload inlined into a text block would be both
- * useless to the model and a context bomb.
+ * Convert one persisted tool output into Pi tool-result content.
+ *
+ * TEXT ONLY, because that is all a chat tool can produce: every tool a turn can
+ * call goes through `mcp-tools.ts`, whose forwarder renders an MCP image block
+ * as the pointer `[image <mime>]` and whose `run_and_wait` result is JSON text.
+ * Replay must reproduce what the live turn showed the model, so a block type
+ * the live path cannot emit has no branch here either.
  */
 function toolResultContent(value: unknown): ToolResultContent {
   if (value && typeof value === "object") {
@@ -129,22 +132,13 @@ function toolResultContent(value: unknown): ToolResultContent {
     if (Array.isArray(content)) {
       const blocks = content.flatMap((part): ToolResultContent => {
         if (!part || typeof part !== "object") return [];
-        const type = (part as { type?: unknown }).type;
-        if (type === "text") {
-          return [
-            {
-              type: "text",
-              text: splitJsonText(String((part as { text?: unknown }).text ?? "")).text,
-            },
-          ];
-        }
-        if (type === "image") {
-          const { data, mimeType } = part as { data?: unknown; mimeType?: unknown };
-          if (typeof data === "string" && typeof mimeType === "string") {
-            return [{ type: "image", data, mimeType }];
-          }
-        }
-        return [];
+        if ((part as { type?: unknown }).type !== "text") return [];
+        return [
+          {
+            type: "text",
+            text: splitJsonText(String((part as { text?: unknown }).text ?? "")).text,
+          },
+        ];
       });
       if (blocks.length > 0) return blocks;
     }
@@ -324,7 +318,7 @@ export function reconstructPiSession<T extends SessionManagerLike>(
   SessionManager: SessionManagerFactory<T>,
   history: Message[],
 ): T {
-  const session = SessionManager.inMemory("/tmp");
+  const session = SessionManager.inMemory(PI_CHAT_CWD);
   for (const message of history) session.appendMessage(message);
   return session;
 }

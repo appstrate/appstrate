@@ -107,7 +107,7 @@ export function turnNoticeChunks(id: string, text: string): UIMessageChunk[] {
 }
 
 /** Build the persisted terminal metadata shared by every Pi exit path. */
-export function buildPiTurnMetadata(input: {
+function buildPiTurnMetadata(input: {
   finishReason: ChatTurnFinishReason;
   clientError?: ClientTurnError;
   stepCount: number;
@@ -132,9 +132,33 @@ export function buildPiTurnMetadata(input: {
   });
 }
 
-/** Close a Pi turn whose setup or prompt escaped with an exception. */
-export function piFailureChunks(input: {
-  error: unknown;
+/** What {@link closePiTurn} produced. */
+interface PiTurnClosure {
+  /** The chunks to write, in order: optional `start`, error, deadline notice, `finish`. */
+  chunks: UIMessageChunk[];
+  /** The turn was cut by the wall-clock ceiling — the caller logs it. */
+  deadlineReached: boolean;
+}
+
+/**
+ * Close a Pi chat turn — the ONE place the closing sequence happens.
+ *
+ * Both of the engine's exits (the loop returning, and an exception escaping
+ * setup or the prompt) end the same way: classify the error, surface it as an
+ * `error` chunk, resolve the closure, write the deadline notice if the ceiling
+ * was reached, and finish with the turn metadata. They differed only in where
+ * `finishReason` came from and whether a leading `start` was still owed, so
+ * both are parameters here rather than a second copy of the sequence.
+ *
+ * `error` is the RAW error to surface, or `undefined` when the turn has none.
+ * Suppression is the caller's call: an aborted turn passes `undefined` (a stop
+ * is a normal ending), while a turn whose loop reported `finishReason: "error"`
+ * passes the model's own error text even though it never threw.
+ */
+export function closePiTurn(input: {
+  error?: unknown;
+  finishReason: ChatTurnFinishReason;
+  /** A `start` chunk was already written for this turn (no leading one is owed). */
   streamStarted: boolean;
   aborted: boolean;
   abortReason: unknown;
@@ -142,14 +166,14 @@ export function piFailureChunks(input: {
   stepCapReached: boolean;
   lastToolName?: string;
   newId?: () => string;
-}): UIMessageChunk[] {
+}): PiTurnClosure {
   const newId = input.newId ?? (() => crypto.randomUUID());
   const closure = resolveTurnClosure({
     aborted: input.aborted,
     abortReason: input.abortReason,
-    finishReason: input.aborted ? "stop" : "error",
+    finishReason: input.finishReason,
   });
-  const clientError = input.aborted ? undefined : classifyClientTurnError(input.error);
+  const clientError = input.error === undefined ? undefined : classifyClientTurnError(input.error);
   const chunks: UIMessageChunk[] = [];
 
   if (!input.streamStarted) chunks.push({ type: "start", messageId: newId() });
@@ -169,5 +193,5 @@ export function piFailureChunks(input: {
       ...(input.lastToolName ? { lastToolName: input.lastToolName } : {}),
     }),
   });
-  return chunks;
+  return { chunks, deadlineReached: closure.deadlineReached };
 }

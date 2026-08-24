@@ -50,42 +50,25 @@ function sseToChunks(byteStream: ReadableStream<Uint8Array>): ReadableStream<UIM
 }
 
 /**
- * Drain the stream and return the FINAL state of EACH assembled message, in
- * order of first appearance. `readUIMessageStream` re-emits an evolving snapshot
- * per message as chunks arrive, so we key a Map by message id (last snapshot
- * wins). The engine emits a single top-level `start` per turn today, so the
- * multi-message handling is defensive — but it is what makes a future
- * multi-message engine safe to add without silently dropping or duplicating
- * content. Reading the whole stream is what drives generation to completion on
- * this teed branch.
+ * Drain the stream and return the turn's assistant message, or `undefined` when
+ * it produced none.
+ *
+ * A turn carries exactly ONE top-level `start`, from exactly one of three
+ * writers: `engine.ts` writes it before iterating the Pi session; `closePiTurn`
+ * writes it only when that never happened (a setup failure); and
+ * `PiChatUiStreamMapper.map` emits the per-turn `start-step`/`finish-step`
+ * boundaries but never a `start`. So `readUIMessageStream` re-emits an evolving
+ * snapshot of a single message and the LAST one is the whole turn.
+ *
+ * Reading the stream to the end is what drives generation to completion on this
+ * teed branch — the disconnect-survival guarantee (see `finalize-stream.ts`).
  */
-export async function extractAssistantMessages(
+export async function extractAssistantMessage(
   byteStream: ReadableStream<Uint8Array>,
-): Promise<UIMessage[]> {
-  const byId = new Map<string, UIMessage>();
+): Promise<UIMessage | undefined> {
+  let last: UIMessage | undefined;
   for await (const message of readUIMessageStream({ stream: sseToChunks(byteStream) })) {
-    // Map insertion order is fixed at first `set` of a key; re-setting updates
-    // the snapshot without moving it — so order = first appearance, value = last.
-    byId.set(message.id, message);
+    last = message;
   }
-  const snapshots = [...byId.values()];
-  // ai-sdk v6 `readUIMessageStream` carries parts forward across a mid-stream
-  // `start` boundary (it relabels the message id rather than resetting parts),
-  // so each later snapshot is cumulative: message N begins with everything
-  // message N-1 already held. Persisting that verbatim would duplicate the
-  // earlier messages' content in the later rows — strip the carried prefix.
-  // Comparing against the PREVIOUS snapshot (itself cumulative) covers the
-  // whole run of prior messages.
-  return snapshots.map((message, i) => {
-    if (i === 0) return message;
-    const prevParts = snapshots[i - 1]!.parts;
-    const carried =
-      prevParts.length > 0 &&
-      message.parts.length >= prevParts.length &&
-      prevParts.every(
-        (part, j) =>
-          part === message.parts[j] || JSON.stringify(part) === JSON.stringify(message.parts[j]),
-      );
-    return carried ? { ...message, parts: message.parts.slice(prevParts.length) } : message;
-  });
+  return last?.role === "assistant" ? last : undefined;
 }

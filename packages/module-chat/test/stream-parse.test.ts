@@ -2,16 +2,16 @@
 
 import { describe, it, expect, mock } from "bun:test";
 import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
-import { extractAssistantMessages } from "../src/stream-parse.ts";
+import { extractAssistantMessage } from "../src/stream-parse.ts";
 import { logger } from "../src/logger.ts";
 
 /**
  * The server persists the assistant turn by parsing a teed copy of the engine's
  * AI SDK UI-message stream (SSE bytes). These tests feed a real encoded stream
- * through the parser and assert the assembled assistant messages — the data that
+ * through the parser and assert the assembled assistant message — the data that
  * gets written to chat_messages when the stream finalizes.
  */
-describe("extractAssistantMessages", () => {
+describe("extractAssistantMessage", () => {
   function encode(
     execute: Parameters<typeof createUIMessageStream>[0]["execute"],
   ): ReadableStream<Uint8Array> {
@@ -36,42 +36,15 @@ describe("extractAssistantMessages", () => {
       writer.write({ type: "finish" });
     });
 
-    const messages = await extractAssistantMessages(body);
-    expect(messages).toHaveLength(1);
-    expect(messages[0]?.role).toBe("assistant");
-    expect(messages[0]?.id).toBe("asst_1");
-    expect(textOf(messages[0]!)).toBe("Hello world");
+    const message = await extractAssistantMessage(body);
+    expect(message?.role).toBe("assistant");
+    expect(message?.id).toBe("asst_1");
+    expect(textOf(message!)).toBe("Hello world");
   });
 
-  it("returns an empty array for an empty stream", async () => {
+  it("returns undefined for an empty stream", async () => {
     const body = encode(async () => {});
-    expect(await extractAssistantMessages(body)).toEqual([]);
-  });
-
-  it("keeps every message of a multi-message turn, in first-appearance order", async () => {
-    const body = encode(async ({ writer }) => {
-      writer.write({ type: "start", messageId: "asst_a" });
-      writer.write({ type: "text-start", id: "a" });
-      writer.write({ type: "text-delta", id: "a", delta: "first" });
-      writer.write({ type: "text-end", id: "a" });
-      writer.write({ type: "finish" });
-      writer.write({ type: "start", messageId: "asst_b" });
-      writer.write({ type: "text-start", id: "b" });
-      writer.write({ type: "text-delta", id: "b", delta: "second" });
-      writer.write({ type: "text-end", id: "b" });
-      writer.write({ type: "finish" });
-    });
-
-    // The guarantee: when a turn carries more than one message id, EVERY id
-    // survives as a distinct entry, in first-appearance order — earlier ones are
-    // no longer dropped. ai-sdk v6 `readUIMessageStream` carries parts forward
-    // across `start` boundaries within one stream (the later snapshot is
-    // cumulative); the extractor strips that carried prefix so each persisted
-    // message holds ONLY its own content — no duplication across rows.
-    const messages = await extractAssistantMessages(body);
-    expect(messages.map((m) => m.id)).toEqual(["asst_a", "asst_b"]);
-    expect(textOf(messages[0]!)).toBe("first");
-    expect(textOf(messages[1]!)).toBe("second");
+    expect(await extractAssistantMessage(body)).toBeUndefined();
   });
 
   it("drains a multi-event stream to completion (the disconnect-proof read)", async () => {
@@ -82,8 +55,8 @@ describe("extractAssistantMessages", () => {
       writer.write({ type: "text-end", id: "a" });
       writer.write({ type: "finish" });
     });
-    const messages = await extractAssistantMessages(body);
-    expect(messages[0]?.id).toBe("asst_2");
+    const message = await extractAssistantMessage(body);
+    expect(message?.id).toBe("asst_2");
   });
 
   it("preserves finish message metadata on the persisted assistant message", async () => {
@@ -106,7 +79,7 @@ describe("extractAssistantMessages", () => {
       });
     });
 
-    const [message] = await extractAssistantMessages(body);
+    const message = await extractAssistantMessage(body);
     expect((message as { metadata?: unknown } | undefined)?.metadata).toEqual({
       appstrate: {
         turn: {
@@ -147,9 +120,9 @@ describe("extractAssistantMessages", () => {
     const original = logger.error;
     logger.error = errorSpy as unknown as typeof logger.error;
     try {
-      const messages = await extractAssistantMessages(corrupted);
-      expect(messages.map((m) => m.id)).toEqual(["asst_ok"]);
-      expect(textOf(messages[0]!)).toBe("ok");
+      const message = await extractAssistantMessage(corrupted);
+      expect(message?.id).toBe("asst_ok");
+      expect(textOf(message!)).toBe("ok");
       // Two malformed frames, but the log fires only once per stream.
       expect(errorSpy).toHaveBeenCalledTimes(1);
       expect(errorSpy.mock.calls[0]?.[0]).toBe("chat sse frame parse failed");
