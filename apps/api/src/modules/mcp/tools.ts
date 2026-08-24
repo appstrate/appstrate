@@ -1375,61 +1375,20 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
   return { descriptor, handler };
 }
 
-/** Build the per-request tool set. Handlers close over the caller's auth context. */
 /**
- * Pre-#1177 tool names, kept CALLABLE but withheld from `tools/list`.
+ * Build the per-request tool set. Handlers close over the caller's auth
+ * context.
  *
- * The server advertises `tools: { listChanged: false }`, which tells a client
- * the list is stable for the life of its session — so a client that listed
- * before an upgrade and calls `list_documents` after it is behaving correctly,
- * and would otherwise get `-32602 Unknown tool` in the middle of a
- * conversation. They stay HIDDEN because the point of the rename is the
- * model's view of the tool surface: two entries for one capability, one of them
- * named after a thing the tool does not do, is the problem being fixed.
- *
- * Read as: retired name → the canonical tool it forwards to.
+ * There are no hidden aliases for the pre-#1177 tool names (`list_documents`,
+ * `read_document`, `validate_package_document`, `import_package_document`) or
+ * the `document_uri` argument. They were kept callable-but-unlisted because
+ * the server advertises `tools: { listChanged: false }`, so a client that
+ * listed before an upgrade and calls an old name after it is behaving
+ * correctly. The cost of removing them is bounded and transient: such a client
+ * gets `-32602 Unknown tool` and re-lists, rather than being forwarded
+ * silently. The cost of keeping them was a permanent second dispatch path
+ * whose only proof of life was its own test.
  */
-export const RETIRED_MCP_TOOL_NAMES: Readonly<Record<string, McpToolName>> = {
-  list_documents: "list_files",
-  read_document: "read_file",
-  validate_package_document: "validate_package_file",
-  import_package_document: "import_package_file",
-};
-
-/** Pre-#1177 argument names, normalized before the canonical handler runs. */
-const RETIRED_MCP_TOOL_ARGS: Readonly<Record<string, string>> = {
-  document_uri: "file_uri",
-};
-
-/**
- * One hidden alias definition per retired name whose canonical tool is present.
- * The alias shares the canonical HANDLER (so telemetry, audit and permissions
- * are identical) and only renames retired arguments on the way in.
- */
-function retiredToolAliases(tools: AppstrateToolDefinition[]): AppstrateToolDefinition[] {
-  const byName = new Map(tools.map((t) => [t.descriptor.name, t]));
-  const aliases: AppstrateToolDefinition[] = [];
-  for (const [retired, canonical] of Object.entries(RETIRED_MCP_TOOL_NAMES)) {
-    const target = byName.get(canonical);
-    if (!target) continue; // canonical tool not offered to this caller
-    aliases.push({
-      descriptor: { ...target.descriptor, name: retired },
-      hidden: true,
-      handler: (args, extra) => {
-        const normalized: Record<string, unknown> = { ...args };
-        for (const [from, to] of Object.entries(RETIRED_MCP_TOOL_ARGS)) {
-          if (from in normalized && !(to in normalized)) {
-            normalized[to] = normalized[from];
-            delete normalized[from];
-          }
-        }
-        return target.handler(normalized, extra);
-      },
-    });
-  }
-  return aliases;
-}
-
 export function buildMcpTools(ctx: McpToolContext): AppstrateToolDefinition[] {
   const tools = [
     buildSearchTool(ctx),
@@ -1446,5 +1405,5 @@ export function buildMcpTools(ctx: McpToolContext): AppstrateToolDefinition[] {
   // kept either way: the operation index is injected too, but its `best_match`
   // schema still saves a describe_operation round-trip, so it is not redundant.
   if (!ctx.contextInjected) tools.push(buildGetMeTool(ctx));
-  return [...tools, ...retiredToolAliases(tools)];
+  return tools;
 }
