@@ -30,7 +30,6 @@ export type RunDetailTab = (typeof RUN_DETAIL_TABS)[number];
  *     `output` tool's value; both are sections of `outcome` now.
  *   - `memory` is a section of `outcome` too — memory is something the run
  *     produced, not something it was configured with.
- *   - `documents` is the file list under its pre-#1177 name.
  *   - `logs` and `info` both described how the run ran; `execution` is the pane
  *     that answers that question, and it owns the logs, the usage figures, the
  *     timings and the identifiers the Info tab used to hold. The handful of
@@ -39,7 +38,6 @@ export type RunDetailTab = (typeof RUN_DETAIL_TABS)[number];
  */
 const RETIRED_TAB_ALIASES = {
   deliverable: "outcome",
-  documents: "files",
   result: "outcome",
   memory: "outcome",
   logs: "execution",
@@ -162,7 +160,7 @@ export function effectiveRunDetailTab(requested: RunDetailTabHash): RunDetailTab
  * already carries the canonical one.
  *
  * Rendering the right pane for a retired hash is not enough: the user copies
- * the URL they see, and a dead `#documents` keeps propagating. The rewrite runs
+ * the URL they see, and a dead `#logs` keeps propagating. The rewrite runs
  * from an effect, which is exactly the construct that loops in production, so
  * the decision is pulled out here where its TERMINATION can be tested instead
  * of assumed. It holds because {@link effectiveRunDetailTab} is idempotent —

@@ -122,17 +122,16 @@ describe("the default pane is captured from settled inputs", () => {
 
 describe("retired tab hashes", () => {
   it("renders the pane that absorbed the retired hash", () => {
-    expect(activeTab(NOTHING, { memorySettled: true, hash: "#documents" })).toBe("files");
     expect(activeTab(NOTHING, { memorySettled: true, hash: "#deliverable" })).toBe("outcome");
     expect(activeTab(NOTHING, { memorySettled: true, hash: "#logs" })).toBe("execution");
   });
 
   it("rewrites the address bar to the canonical tab, and terminates", () => {
     // Rendering the right pane is not enough: the user copies the URL they see,
-    // and a dead `#documents` keeps propagating. `setActiveTab` navigates with
+    // and a dead `#logs` keeps propagating. `setActiveTab` navigates with
     // `replace: true` (see `use-tab-with-hash.ts`), so back still leaves the page.
-    expect(runDetailTabHashRewrite("documents")).toBe("files");
     expect(runDetailTabHashRewrite("logs")).toBe("execution");
+    expect(runDetailTabHashRewrite("deliverable")).toBe("outcome");
     // Termination is the property that matters: the rewrite runs from an
     // effect, and an effect that rewrites the URL is exactly the construct
     // that loops in production. It stops because the mapping is idempotent —

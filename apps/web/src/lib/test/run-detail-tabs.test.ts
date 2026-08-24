@@ -46,8 +46,6 @@ describe("retired tab hashes", () => {
     result: "outcome",
     // Memory is something the run produced, so it moved with the rest.
     memory: "outcome",
-    // The file list under its pre-#1177 name.
-    documents: "files",
     // Both described how the run ran.
     logs: "execution",
     info: "execution",
