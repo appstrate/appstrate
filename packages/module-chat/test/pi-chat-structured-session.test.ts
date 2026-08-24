@@ -255,6 +255,45 @@ describe("structured Pi session reconstruction", () => {
     expect(result?.content).toEqual([{ type: "text", text: "[image image/png]" }]);
   });
 
+  it("never inlines a tool-result image as base64, whatever was persisted", () => {
+    // The case above pins the shape the CURRENT forwarder writes. This one
+    // pins the guarantee, which is older and wider than that shape: base64
+    // image bytes must never reach the model's context on replay.
+    //
+    // `toolResultContent` drops every non-`text` block, so an image-only
+    // `content` array leaves it with nothing and it used to fall through to a
+    // whole-value JSON stringify — which put the base64 straight back in. A row
+    // written by a build predating the forwarder's textification replays
+    // exactly like that, so "the live path cannot emit this" does not retire
+    // the guarantee.
+    const base64 = "iVBORw0KGgoAAAANSUhEUg-BASE64-MUST-NOT-APPEAR";
+    const thread: UIMessage[] = [
+      { id: "u1", role: "user", parts: [{ type: "text", text: "Capture" }] },
+      {
+        id: "a1",
+        role: "assistant",
+        parts: [
+          {
+            type: "dynamic-tool",
+            toolName: "screenshot",
+            toolCallId: "call_img",
+            state: "output-available",
+            output: { content: [{ type: "image", data: base64, mimeType: "image/png" }] },
+            input: {},
+          },
+        ],
+      } as unknown as UIMessage,
+      { id: "u2", role: "user", parts: [{ type: "text", text: "Et ?" }] },
+    ];
+
+    const turn = buildStructuredPiTurn(thread, MODEL, OPTIONS);
+    const result = turn.history.find((message) => message.role === "toolResult");
+    // Rendered as the same pointer the live forwarder would have produced…
+    expect(result?.content).toEqual([{ type: "text", text: "[image image/png]" }]);
+    // …and the bytes are nowhere in the projected history, by any route.
+    expect(JSON.stringify(turn.history)).not.toContain(base64);
+  });
+
   it("reports a context estimate so a long history cannot look empty to compaction", () => {
     const turn = buildStructuredPiTurn(toolThread, MODEL, OPTIONS);
     const assistants = turn.history.filter((message) => message.role === "assistant");

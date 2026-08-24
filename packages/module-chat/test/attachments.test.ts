@@ -174,8 +174,10 @@ describe("chat attachments", () => {
     ).url;
     const fileId = canonical.slice("appfile://".length);
 
-    expect(resolve(`document://${fileId}`)).rejects.toThrow(/upload:\/\/' or 'appfile:\/\//);
-    expect(resolve("document://doc_aaaaaaaa")).rejects.toThrow(/upload:\/\/' or 'appfile:\/\//);
+    await expect(resolve(`document://${fileId}`)).rejects.toThrow(/upload:\/\/' or 'appfile:\/\//);
+    await expect(resolve("document://doc_aaaaaaaa")).rejects.toThrow(
+      /upload:\/\/' or 'appfile:\/\//,
+    );
   });
 
   it("rejects an appfile:// belonging to another user (container ACL)", async () => {

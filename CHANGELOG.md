@@ -17,15 +17,55 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
   The rename first shipped a READ alias on every wire-visible spelling, each
   one justified by a single sentence: "the runtime image and the platform
-  deploy independently". Both halves of that argument are spent. The skew it
-  named can no longer occur — the environment schema now refuses to boot unless
-  the platform's own version and both runtime image tags agree (see the entry
-  below) — and nobody was ever on the other side of it: `v1.0.0-beta.51`
-  predates the commit that introduced both the rename and its aliases, so no
-  released artifact has ever spoken the old shapes. The released CLI never
-  called them, `cloud` and `connect-helper` contain zero occurrences, and the
-  SPA is baked into the platform image, so a served build cannot be older than
-  the platform serving it. The layer is deleted, not deprecated.
+  deploy independently". `v1.0.0-beta.51` is precisely the artifact on the
+  other side of that sentence, and it speaks every retired shape: it registers
+  `/api/runs/{runId}/documents` and `/api/runs/{runId}/documents/{name}` and
+  not one `/files` route; `runtime-pi/publish.ts` posts each deliverable to
+  `…/documents` under `X-Document-Name`; `runtime-pi/provision.ts` fetches its
+  input manifest from `…/documents`; `packages/afps-runtime/src/events/cloudevents.ts`
+  stamps `dataschema` on every canonical event; and its row ids are `doc_`. So
+  the argument for deleting the layer is NOT that nobody ever spoke the old
+  shapes — the last release did. It is that the PAIRING of such an artifact
+  with this platform is now refused at boot: the environment schema will not
+  start unless the platform's own `APP_VERSION` and both runtime image tags
+  agree (see the entry below), so an old image cannot be _configured_ against
+  a new platform.
+
+  **That rule has blind spots, and they are the whole residual risk.** They
+  come in two kinds. The comparison carves itself out wherever a tag cannot
+  answer the question — a runtime ref pinned by digest alone silences it
+  outright (`findRuntimeImageTagMismatch` returns `null` the moment either ref
+  parses to no tag), and a platform with no release identity drops out of the
+  trio, degrading the rule to the image-pair rule it grew from; the
+  authoritative list of those carve-outs lives with the comparison in
+  `@appstrate/core/image-ref`. And then there is the one that is not a carve-out
+  at all: this is an env-schema check evaluated at BOOT, so it says nothing
+  whatsoever about containers **already running** when the platform restarts.
+  (Same-tag-two-builds drift — `:latest` rebuilt on one side — is invisible to
+  tag comparison by construction; `runtime-image-pair.ts` catches it from the
+  OCI revision labels after the pre-pull, and only WARNS.)
+
+  That second kind is the operational one, and it needs a step in the upgrade
+  rather than a paragraph. A run container started by the PREVIOUS
+  platform process survives a `compose up -d`: the boot sweep finalizes only
+  runs whose heartbeat has already gone stale (`listOrphanRunIds`, cutoff
+  `RUN_STALL_THRESHOLD_SECONDS`), and the container sweep preserves anything in
+  state `running` (`isReclaimableContainer`); a container still executing a run
+  satisfies neither reap condition. It keeps posting to the new API, and its
+  `POST …/documents` now
+  404s. In the uploader a 404 is a non-retryable 4xx, so the deliverable is
+  abandoned and the outputs sweep reports `artifacts.status: "partial"`. That
+  field is not an input to the run's status — `mapTerminalStatus` reads only
+  `result.status` / `result.error` — so **a run whose work succeeded still
+  settles `success`, with its deliverable simply missing**, which is the exact
+  silent failure the aliases existed to prevent. **Drain in-flight runs before
+  restarting the platform**; see OPERATOR ACTIONS below.
+
+  What is verified about released consumers is narrower, and holds: the
+  released CLI never called the retired paths, neither `cloud` nor
+  `connect-helper` contains any retired wire shape, and the SPA is baked into
+  the platform image, so a served build cannot be older than the platform
+  serving it. The layer is deleted, not deprecated.
 
   | Surface             | Before                                                                                    | After                                                                     |
   | ------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
@@ -84,13 +124,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
      as an ARGUMENT of the `run_and_wait` tool: the shared launch client
      canonicalizes it to `context_files` before the launch body is built. On
      the wire it is a `400`.
-  4. **`document.published` is no longer accepted as a runtime-tool event.**
-     Its removal is safe for a structural reason rather than a version one: the
-     only producer of that name is core's own `filePublishedEvent`, bundled
-     into the SAME artifact as the trust-boundary acceptor
-     `reEmitRuntimeToolEvents`. There is no version boundary between them, so
-     the retired name can now only arrive from a forged upstream event — which
-     is what the acceptor's drop is for.
+  4. **`document.published` is no longer accepted as a runtime-tool event**, at
+     either acceptor — and the two are safe for different reasons. Inside the
+     container the reason is structural: the only producer of that name is
+     core's own `filePublishedEvent`, bundled into the SAME artifact as the
+     trust-boundary acceptor `reEmitRuntimeToolEvents`, so there is no version
+     boundary between them and the retired name can only arrive forged, which
+     is what the acceptor's drop is for. The platform-side sink
+     (`persistRunEvent`) is a DIFFERENT artifact reached over HTTP, so that
+     argument does not reach it; what does is the image-tag rule above — plus
+     the fact that the event's own precondition went with it, since a
+     pre-`#1177` container emits `document.published` only after a SUCCESSFUL
+     `POST …/documents`, and that route now 404s.
   5. **`workspace/documents/` and the `documents` twin key in the run-input
      manifest are gone from both sides.** `runtime-pi/provision.ts` no longer
      probes `/documents` after a `404` on `/files` (that `404` is the ordinary
@@ -128,6 +173,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
      What the caller SENDS is refused; what is already STORED is migrated —
      `0046` rewrites every persisted spelling, so no existing credential is
      silently narrowed. See "Migrations" below.
+
+     The API-key write path now refuses on the same principle. `POST
+/api/api-keys` with a scope that is not grantable at all — an unknown
+     string, a retired spelling like `documents:read`, or a session-only
+     permission — is a `400` naming the offender, where it previously filtered
+     the value out and answered `201` with a key that then 403'd on
+     everything. A scope that is valid but above the creator's own role is
+     still narrowed silently: that is a real rule ("you cannot delegate more
+     than you hold"), not a swallowed typo, and the scopes-omitted default
+     branch relies on it.
 
      Three tests were passing only because of the alias, which justifies the
      removal on its own: `enduser-token-auth` minted tokens carrying
@@ -233,6 +288,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   reasons. **It moves no bytes.** Until the objects follow, a download `404`s on
   a file that physically exists. In the same window:
 
+  - **drain in-flight runs BEFORE the platform restarts**, and do not launch
+    new ones until the window closes. A container the previous platform process
+    started is not stopped by the upgrade and is not reaped at boot while it is
+    still heartbeating, so it survives into the new platform and its
+    `POST …/documents` 404s — losing the deliverable while the run finalizes
+    green. This is the same drain the run-workspace rename below needs, so one
+    drain covers both;
   - copy the `documents` bucket onto `files` and drop the old one
     (`aws s3 sync s3://documents s3://files`, or `mc mirror`); on filesystem
     storage (tier ≤ 2) it is a directory rename under
@@ -316,14 +378,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   data are dropped, and only the snapshot brings them back. Neither is the
   physical `0044`: the object move it requires is yours to undo too.
 
-  **Deploy order is now enforced rather than documented.** Rolling the platform
-  and the runtime images out of step used to be a live hazard — a new image
-  against an old platform posted every `publish_file` to a `/files` route that
-  did not exist, so the run finished with no deliverable and nothing in the
-  platform log said why. The version contract below refuses to boot on that
-  pairing, so the failure moved from "silent, at run time" to "loud, at start".
-  Ship the platform and both images from one version, which is what all four
-  shipped compose paths already do.
+  **Deploy order is now enforced rather than documented — for the pairings the
+  check can see.** Rolling the platform and the runtime images out of step used
+  to be a live hazard — a new image against an old platform posted every
+  `publish_file` to a `/files` route that did not exist, so the run finished
+  with no deliverable and nothing in the platform log said why. The version
+  contract below refuses to boot on that pairing, so for a configured mismatch
+  the failure moved from "silent, at run time" to "loud, at start". It stays
+  silent wherever that check is blind — its own carve-outs (`image-ref.ts`),
+  and above all a container already running when the platform restarts, which
+  no boot-time check can see — which is why the drain step above is part of
+  this upgrade. Ship the platform and both images from one version, which is what
+  all four shipped compose paths already do.
 
 - **BREAKING: the runtime images must now agree with the PLATFORM's version,
   not just with each other — and a disagreement fails boot.** #1201 turned
@@ -336,30 +402,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
   The comparison now includes `APP_VERSION`, which already existed — baked by
   the Dockerfile, fed by `release.yml` as the git ref, surfaced on `/health`
-  and in the SPA footer. No new variable, no file read at boot. `APP_VERSION`
-  is a git ref (`v1.0.0-beta.51`) while image tags come from metadata-action's
-  `{{version}}` (`1.0.0-beta.51`), so a leading `v` followed by a digit is
-  stripped before comparing; a tag named `vnext` is left alone. The message
-  names which of the three moved and what to set, because "one of your three
-  images is wrong" is the error being replaced.
+  and in the SPA footer. No new variable, no file read at boot.
 
-  Two exemptions, both carried over unchanged from the pair rule: **a
-  digest-pinned ref on either image** silences the whole comparison (a digest
-  identifies an image by content — there is no version to compare, and an
-  operator pinning digests has taken explicit control of image identity), and
-  **a platform with no release identity** (unset, empty, or the Dockerfile's
-  `dev` default — which preview images also report) drops out of the trio, so
-  the rule degrades to exactly the pair rule and the zero-config dev box keeps
-  booting.
+  The two halves are deliberately not symmetric. `PI_IMAGE` and `SIDECAR_IMAGE`
+  are always compared to each other literally, as they were under the pair
+  rule: every compose file sets both from one `${APPSTRATE_VERSION}`, so any
+  difference between them is a half-done edit whatever tag family it is in. The
+  platform joins the comparison only when **all three values are release
+  versions**. `APP_VERSION` is a git ref name, so it can equal an image tag only
+  in the one family (`{{version}}`) the two namespaces share; `release.yml`
+  publishes three others for the very same image (`latest` — documented as the
+  compat fallback for consumers that skip the CLI —, `{{major}}.{{minor}}`, and
+  `sha-<sha>`). Comparing against those, or against a non-release build stamp
+  (`dev`, the Dockerfile default and source-run fallback; `health-container-e2e`,
+  what the container health job builds with against `:local` images), does not
+  detect skew — it makes the rule unsatisfiable, since no legitimately-built
+  image tag can ever equal such a value and the only escape would be pinning
+  digests. Any of those drops the platform out and the rule degrades to the pair
+  rule, which is what keeps dev boxes, preview deployments, that CI job and
+  `:latest` consumers booting. A digest-pinned ref on either image is exempt
+  outright: a digest identifies an image by content, so there is no version to
+  compare, and an operator pinning digests has taken explicit control of image
+  identity.
 
-  **The behaviour change: a deployment pinning a floating tag
-  (`APPSTRATE_VERSION=latest`) now fails at boot instead of failing runs
-  later.** No shipped compose path does this — all four derive every image from
-  one `${APPSTRATE_VERSION}` — but an operator who pinned one by hand will see
-  the refusal on the next restart. `runtime-image-pair.ts` is untouched and
-  stays complementary: it compares OCI revision labels on the images actually
-  present after the pre-pull, which is the same-tag-two-builds case tag
-  comparison structurally cannot see, and it only warns.
+  **What this deliberately does not catch.** Both runtime refs floating on
+  `:latest` under a released platform is accepted. That is not a gap left open
+  by choice of predicate — tag comparison cannot see it at all: `APP_VERSION` is
+  baked at build time and reads identically whether the platform image was
+  pulled by its version tag or by `:latest`, so `{platform 1.0.0-beta.52, pi
+latest, sidecar latest}` is byte-for-byte the same input as the supported
+  all-`:latest` deployment. Only something reading the images actually present
+  on the host can separate them. `runtime-image-pair.ts` is untouched and stays
+  complementary for exactly that reason: it compares OCI revision labels after
+  the pre-pull — the same-tag-two-builds case — and it warns rather than
+  refusing. Promoting that guard to a refusal, not re-tightening the tag rule,
+  is the way to close this.
 
 - **Long Anthropic cache retention is refused on the model record, not by
   convention — and `cacheRetention` is no longer forwarded from the
@@ -403,6 +480,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `execution` — so a bookmark, a back-history entry or a link pasted into an old
   chat message lands on the pane that absorbed it instead of silently falling
   back to the default.
+
+- **BREAKING: the schedule launch bodies are validated too — it was the fourth
+  launch surface, and the one where a bad value is permanent.** #1189 made every
+  agent-launch body `.strict()` and value-checked, and covered three surfaces.
+  `POST /api/agents/{scope}/{name}/schedules` and `PUT /api/schedules/{id}`
+  freeze exactly these fields onto `package_schedules` and replay them at every
+  fire, so a defect there is not one mis-executed run, it is a wrong run forever
+  with a `201` as the only receipt. Three gaps, all closed against the run
+  route's existing rules: `connection_overrides` values lacked `.min(1)`, and
+  the pin is applied with a truthy check, so an empty id was skipped without a
+  trace and every fire fell through to actor-fallback or died with
+  `412 must_choose_connection`; neither schema was `.strict()`, so an unknown
+  field was silently stripped; and `dependency_overrides` values were never
+  checked, because a schedule resolves through `resolveEffectiveInput` +
+  `validateInput` and never calls the parser the agent route gets that gate from
+  — so an unresolvable value froze onto the row and failed at every fire instead
+  of at the write. `minLength: 1` on `connection_overrides` is now documented at
+  the three run surfaces as well: the Zod has always enforced it, and the spec
+  said plain `{ "type": "string" }`.
+
+  **Why this is BREAKING and not a fix: `.strict()` makes read-modify-write a
+  `400`.** The spec's `Schedule` response component has 26 properties;
+  `updateScheduleSchema` accepts 11 of them (`name`, `cron_expression`,
+  `timezone`, `input`, `enabled`, the four `*_override` fields,
+  `connection_overrides`, `dependency_overrides` — plus `actor`, which is not a
+  response field). The other 15 are now refused BY NAME: `id`, `packageId`,
+  `userId`, `endUserId`, `orgId`, `applicationId`, `last_run_at`, `next_run_at`,
+  `createdAt`, `updatedAt`, `actor_name`, `actor_type`, `running_runs`,
+  `unread_count`, `last_run_number`. A third-party client that does the obvious
+  thing — `GET /api/schedules/{id}`, flip `enabled`, `PUT` the object back —
+  previously had those keys stripped and got a `200`; it now gets a `400` on
+  `id`. In-repo callers are unaffected: `useUpdateSchedule`
+  (`apps/web/src/hooks/use-schedules.ts`) destructures `id` into the path and
+  sends only the remaining fields as the body. Send only the fields you mean to
+  change.
 
 ### Removed
 
@@ -453,25 +565,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   never answers `400` to.
 
 ### Fixed
-
-- **The schedule launch body is validated too — it was the fourth launch
-  surface, and the one where a bad value is permanent.** #1189 made every
-  agent-launch body `.strict()` and value-checked, and covered three surfaces.
-  `POST`/`PATCH .../schedules` freezes exactly these fields onto
-  `package_schedules` and replays them at every fire, so a defect there is not
-  one mis-executed run, it is a wrong run forever with a `201` as the only
-  receipt. Three gaps, all closed against the run route's existing rules:
-  `connection_overrides` values lacked `.min(1)`, and the pin is applied with a
-  truthy check, so an empty id was skipped without a trace and every fire fell
-  through to actor-fallback or died with `412 must_choose_connection`; neither
-  schema was `.strict()`, so an unknown field was silently stripped; and
-  `dependency_overrides` values were never checked, because a schedule resolves
-  through `resolveEffectiveInput` + `validateInput` and never calls the parser
-  the agent route gets that gate from — so an unresolvable value froze onto the
-  row and failed at every fire instead of at the write. `minLength: 1` on
-  `connection_overrides` is now documented at the three run surfaces as well:
-  the Zod has always enforced it, and the spec said plain
-  `{ "type": "string" }`.
 
 - **`appstrate run` validates the resolved input against the agent's schema
   again.** The `config` → `input` collapse (#1179) deleted the CLI's validation

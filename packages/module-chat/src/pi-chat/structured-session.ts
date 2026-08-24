@@ -125,6 +125,16 @@ function json(value: unknown): string {
  * as the pointer `[image <mime>]` and whose `run_and_wait` result is JSON text.
  * Replay must reproduce what the live turn showed the model, so a block type
  * the live path cannot emit has no branch here either.
+ *
+ * The one exception is an MCP-shaped result whose blocks are ALL non-text. The
+ * generic JSON fallback below would stringify it whole — and for an image block
+ * that means the raw base64 lands in the model's context, the exact thing the
+ * live forwarder exists to prevent. Such a result should not reach here (the
+ * forwarder textifies images before anything is persisted), but "should not"
+ * is not "cannot": a row written by an older build, or a foreign persisted
+ * shape, still replays through this function. So a content array with no
+ * surviving text block is rendered as pointers, the same way the forwarder
+ * would have rendered it live.
  */
 function toolResultContent(value: unknown): ToolResultContent {
   if (value && typeof value === "object") {
@@ -141,6 +151,13 @@ function toolResultContent(value: unknown): ToolResultContent {
         ];
       });
       if (blocks.length > 0) return blocks;
+      const pointers = content.flatMap((part): ToolResultContent => {
+        if (!part || typeof part !== "object") return [];
+        const type = String((part as { type?: unknown }).type ?? "unknown");
+        const mime = (part as { mimeType?: unknown }).mimeType;
+        return [{ type: "text", text: `[${type}${mime ? ` ${String(mime)}` : ""}]` }];
+      });
+      if (pointers.length > 0) return pointers;
     }
   }
   return [{ type: "text", text: json(redactConnectPayload(value)) }];

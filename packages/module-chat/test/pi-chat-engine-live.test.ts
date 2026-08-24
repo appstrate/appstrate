@@ -124,7 +124,7 @@ function userTurn(text: string): UIMessage[] {
 }
 
 /** Drive one real turn and collect its UI-message-stream chunks. */
-async function runTurn(mintBearer: () => string) {
+async function runTurn(mintBearer: () => string, abortSignal?: AbortSignal) {
   const binding = createPiProxyModelBinding({ model: orgModel(), origin: ORIGIN, mintBearer })!;
   const slot = acquirePiChatSlot();
   expect(slot).not.toBeNull();
@@ -146,7 +146,7 @@ async function runTurn(mintBearer: () => string) {
       system: "You are a helpful assistant.",
       generation: {},
       platformMcp: { url: `${ORIGIN}/api/mcp/o/org_live?context=injected`, headers: {} },
-      abortSignal: new AbortController().signal,
+      abortSignal: abortSignal ?? new AbortController().signal,
       onError: (error) => String(error),
       recordUsage: (record) => usage.push(record),
     });
@@ -218,5 +218,38 @@ describe("runPiChat against a stub provider", () => {
     expect(capture.authHeaders.length).toBe(minted);
     expect(new Set(capture.authHeaders).size).toBe(capture.authHeaders.length);
     expect(capture.authHeaders.every((h) => h.startsWith("Bearer fresh-"))).toBe(true);
+  }, 30_000);
+
+  it("closes a stopped turn as a plain stop, with no error chunk", async () => {
+    // The engine's OUTER catch is the only place the abort suppression lives:
+    //
+    //     ...(aborted ? {} : { error: err }),
+    //     finishReason: aborted ? "stop" : "error",
+    //
+    // `closePiTurn` itself does not suppress anything — hand it an error and it
+    // emits an `error` chunk whatever `aborted` says (asserted in
+    // `pi-chat-turn-closure.test.ts`). So this decision is only reachable
+    // through the engine, and only on the exit where an exception escapes with
+    // the turn already aborted: a stop that lands during setup, before the
+    // prompt's own try/catch exists to swallow it. Aborting the signal up front
+    // is exactly that shape — `buildPlatformMcpTools` is the first await and it
+    // throws on an already-aborted signal.
+    //
+    // Delete the suppression and this fails twice over: an `error` chunk
+    // appears in the stream, and the persisted metadata gains an
+    // `errorCategory` — a user pressing stop would be shown a failed turn.
+    const stopped = new AbortController();
+    stopped.abort(new Error("stopped by user"));
+    const { chunks } = await runTurn(() => "unused", stopped.signal);
+
+    expect(chunks.map((c) => c.type)).toEqual(["start", "finish"]);
+    const finish = chunks.find((c) => c.type === "finish") as {
+      messageMetadata?: { appstrate?: { turn?: Record<string, unknown> } };
+    };
+    expect(finish.messageMetadata?.appstrate?.turn?.finishReason).toBe("stop");
+    // Nothing about the abort is persisted as a failure: no category, no
+    // retryable flag, no request id.
+    expect(finish.messageMetadata?.appstrate?.turn).not.toHaveProperty("errorCategory");
+    expect(JSON.stringify(chunks)).not.toContain("errorCategory");
   }, 30_000);
 });

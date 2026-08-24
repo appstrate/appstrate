@@ -41,6 +41,52 @@ describe("isTextLikeMimeType", () => {
     expect(isTextLikeMimeType(contentType)).toBe(true);
   });
 
+  // Regression: gating the charset rule on an ambiguous base type (see the
+  // note on `isTextLikeMimeType`) silently demoted every text media type that
+  // was NOT in `TEXT_SHAPED_MEDIA_TYPES` — it used to ride in on its charset
+  // parameter alone. The fix is in `@appstrate/afps-shared/mime`, not here: a
+  // text format must be classified as text with OR without a charset. Each of
+  // these is asserted both ways, because passing only with the parameter would
+  // mean the charset fallback is doing the work again.
+  it.each([
+    "application/toml",
+    "application/sql",
+    "application/graphql",
+    "application/json5",
+    "application/hjson",
+    "application/sgml",
+    "application/markdown",
+    "application/x-markdown",
+    "application/n-triples",
+    "application/n-quads",
+    "application/trig",
+    "application/node",
+    "application/typescript",
+    "application/x-typescript",
+    "application/dart",
+    "application/x-shellscript",
+    "application/pem-certificate-chain",
+    "application/pgp-keys",
+    "application/pgp-signature",
+  ])("decodes %s as text with or without a charset parameter", (mime) => {
+    expect(isTextLikeMimeType(mime)).toBe(true);
+    expect(isTextLikeMimeType(`${mime}; charset=utf-8`)).toBe(true);
+  });
+
+  // The other half of the same sweep: formats whose common form is ASCII but
+  // whose spec lets them embed raw bytes stay on the byte path, charset or
+  // not. Listing them pins the boundary — a later "it's text really" addition
+  // to the shared set has to argue with this test.
+  it.each([
+    "application/rtf", // \bin blocks carry raw bytes
+    "application/postscript", // binary-token PostScript is a valid encoding
+    "application/http", // a wrapped message whose body may be anything
+    "application/wasm", // registry marks it compressible; it is still bytecode
+  ])("keeps %s as bytes even with a charset parameter", (mime) => {
+    expect(isTextLikeMimeType(mime)).toBe(false);
+    expect(isTextLikeMimeType(`${mime}; charset=utf-8`)).toBe(false);
+  });
+
   it.each([
     "application/octet-stream",
     "application/pdf",

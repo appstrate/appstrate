@@ -1505,10 +1505,12 @@ export interface SerializeFetchResponseContext {
  * preserved end-to-end — the regression fixed by issues #149 / #151 in
  * the sidecar resurfaced when the runtime moved from `curl` to typed
  * `{ns}__api_call` tools, because the client-side serializer still
- * stringified bytes as UTF-8. Decoding now follows a strict whitelist
- * (text/*, application/json, application/xml, +json/+xml suffixes,
- * `; charset=...`); everything else round-trips as base64 (`inline`)
- * or spills to a file (`file`).
+ * stringified bytes as UTF-8. Decoding now follows a strict media-type
+ * whitelist (text/*, application/json, application/xml, +json/+xml/+yaml
+ * suffixes — see {@link isTextLikeMimeType}); a `; charset=...` parameter is
+ * NOT a whitelist entry, only a fallback consulted when the base type is
+ * ambiguous (absent, or `application/octet-stream`). Everything else
+ * round-trips as base64 (`inline`) or spills to a file (`file`).
  */
 export async function serializeFetchResponse(
   res: Response,

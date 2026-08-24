@@ -199,6 +199,37 @@ describe("closePiTurn", () => {
     expect(turnMetadataFromMessage(await assemble(closing.chunks))?.finishReason).toBe("stop");
   });
 
+  it("does NOT suppress an error just because the turn was aborted", async () => {
+    // The negative half of the case above, and the reason it is not a
+    // tautology: passing no `error` is a CALLER decision, not something this
+    // emitter infers from `aborted`. Hand it an error on an aborted turn and it
+    // still surfaces one — documented on `closePiTurn` as "Suppression is the
+    // caller's call".
+    //
+    // Which is what makes `engine.ts`'s `...(aborted ? {} : { error: err })`
+    // load-bearing rather than decorative: it is the only thing standing
+    // between a user pressing stop and a turn rendered as a failure. That
+    // decision is exercised end to end in `pi-chat-engine-live.test.ts`
+    // ("closes a stopped turn as a plain stop, with no error chunk"); if this
+    // assertion ever flips, the suppression has moved back in here and that
+    // test is the one to re-point.
+    const closing = closePiTurn({
+      error: new DOMException("aborted", "AbortError"),
+      finishReason: "stop",
+      streamStarted: false,
+      aborted: true,
+      abortReason: new Error("stopped by user"),
+      stepCount: 0,
+      stepCapReached: false,
+      newId: () => "assistant-aborted-with-error",
+    });
+
+    expect(closing.chunks.map((chunk) => chunk.type)).toEqual(["start", "error", "finish"]);
+    const metadata = turnMetadataFromMessage(await assemble(closing.chunks));
+    expect(metadata?.finishReason).toBe("stop");
+    expect(metadata?.errorCategory).toBeDefined();
+  });
+
   it("closes the success path with the loop's own finish reason and no start", async () => {
     // What `engine.ts` does when the Pi loop returns normally: the `start` was
     // already written, so no second one is owed, and the model's finish reason
