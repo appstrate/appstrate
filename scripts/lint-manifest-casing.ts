@@ -33,7 +33,7 @@
  * `lint:manifest-casing` script in root package.json.
  */
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
 const REPO_ROOT = join(import.meta.dir, "..");
@@ -65,7 +65,6 @@ const SCAN_FILES = [
   "packages/connect/src/afps-delivery.ts",
   "packages/connect/src/connect",
   "runtime-pi/sidecar/integrations-boot.ts",
-  "runtime-pi/sidecar/integration-spawn-resolver.ts",
 ];
 
 const FILE_EXTS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]);
@@ -194,6 +193,21 @@ function buildWriterShapeRegex(key: string): RegExp {
 
 function scan(): Hit[] {
   const files: string[] = [];
+  // `walk()` swallows ENOENT and returns, so a SCAN_FILES entry that resolves
+  // to nothing removed itself from the gate in silence — and one did, for its
+  // whole life: `runtime-pi/sidecar/integration-spawn-resolver.ts` was never
+  // tracked in git. Rename any of the others and the same thing happens, so the
+  // list is checked against the disk before it is walked.
+  const missing = SCAN_FILES.filter((target) => !existsSync(join(REPO_ROOT, target)));
+  if (missing.length > 0) {
+    console.error(
+      `[lint-manifest-casing] FAIL — ${missing.length} SCAN_FILES entr(y|ies) resolve to nothing:\n` +
+        missing.map((m) => `  - ${m}`).join("\n") +
+        "\n\nA path that does not exist is not scanned, and this gate would otherwise " +
+        "report OK while covering less than it claims. Fix the path or drop the entry.\n",
+    );
+    process.exit(1);
+  }
   for (const target of SCAN_FILES) walk(join(REPO_ROOT, target), files);
 
   const hits: Hit[] = [];
@@ -229,7 +243,8 @@ function main(): void {
   const hits = scan();
   if (hits.length === 0) {
     console.log(
-      "[lint-manifest-casing] OK — no legacy camelCase manifest-key writer contexts found.",
+      `[lint-manifest-casing] OK — no legacy camelCase manifest-key writer contexts found ` +
+        `(${SCAN_FILES.length} scan targets).`,
     );
     process.exit(0);
   }

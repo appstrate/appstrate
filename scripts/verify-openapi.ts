@@ -207,6 +207,12 @@ try {
     }
   }
 } catch (err: unknown) {
+  // A section that throws IS a failed section. Without this the word "FAIL" is
+  // printed and the run still ends "ALL CHECKS PASSED" — any throw out of
+  // `createConfig` / `lintFromString` (a Redocly bump, a bad rule id, OOM on a
+  // 287-path spec) silently disabled the whole best-practice gate. Every other
+  // catch in this file sets it; this one was the outlier.
+  exitCode = 1;
   const msg = err instanceof Error ? err.message : String(err);
   console.log(`  FAIL — could not lint: ${msg}`);
 }
