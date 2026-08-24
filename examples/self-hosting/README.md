@@ -491,8 +491,9 @@ Appstrate:
 The settings above cover the REQUEST direction. The RESPONSE direction matters
 too: Appstrate streams chat tokens and run logs over Server-Sent Events, and a
 proxy that buffers responses turns a live feed into one batch delivered when the
-turn ends. Appstrate sets `X-Accel-Buffering: no` on every SSE response, which
-nginx honours — but two things are worth checking on your own deployment:
+turn ends. Appstrate sets `X-Accel-Buffering: no` on every SSE response — the three
+producers are `/api/realtime/*`, the chat stream (via the AI SDK's own
+`UI_MESSAGE_STREAM_HEADERS`) and `/api/llm-proxy/*` — which nginx honours — but two things are worth checking on your own deployment:
 
 - **nginx**: the header is enough. Add `proxy_buffering off;` on the Appstrate
   location if you have overridden buffering behaviour elsewhere.

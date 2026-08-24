@@ -455,6 +455,12 @@ describe("POST /api/llm-proxy/anthropic-messages/v1/messages", () => {
 
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("text/event-stream");
+    // No upstream vendor sends this, and both header paths here derive from the
+    // upstream reply — so without an explicit set it never appeared, and an
+    // nginx in front delivered the whole completion in one batch at the end.
+    // `/api/realtime/*` sets it directly and the chat stream inherits it from
+    // the AI SDK's `UI_MESSAGE_STREAM_HEADERS`; this was the third producer.
+    expect(res.headers.get("x-accel-buffering")).toBe("no");
     const echoedBody = await res.text();
     expect(echoedBody).toBe(sseBody);
 
