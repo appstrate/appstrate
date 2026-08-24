@@ -218,9 +218,10 @@ export async function resolveIntegrationSpawns(
         // missing referenced package) stays a per-integration skip — now a
         // MARKED one: the reason travels back to the caller in `dropped`.
         if (err instanceof BundleError && err.code === "DEPENDENCY_UNRESOLVED") throw err;
-        // The server-side log stays: it carries `applicationId` and fires even
-        // for callers that ignore `dropped` (the credential proxy, tests). The
-        // run-visible marker is additive, not a replacement.
+        // The server-side log stays: it carries `applicationId`, which the
+        // run-visible marker does not, and it fires even for a caller that
+        // ignores `dropped` — today only tests, `run-context-builder.ts` being
+        // the sole production caller. The marker is additive, not a replacement.
         logger.warn("integration resolve failed; skipping", {
           integrationId: entry.id,
           applicationId,

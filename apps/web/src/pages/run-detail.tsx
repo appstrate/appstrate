@@ -125,7 +125,6 @@ export function RunDetailPage() {
   // pane's «Ce run n'a rien produit» state and this tab-selection input have to
   // agree, and a second spelling one prop away is how they stop agreeing.
   const hasOutput = runHasOutputValue(finalOutput);
-  const allLogs = historicalLogs;
 
   // Run-level memory rows (only those touched during this run).
   const runMemoriesQuery = useRunMemories(packageId, runId);
@@ -395,7 +394,7 @@ export function RunDetailPage() {
             </TabsContent>
 
             <TabsContent value="execution" className="mt-0">
-              <RunExecutionTab run={enrichedRun} logs={allLogs} turns={turnRows} />
+              <RunExecutionTab run={enrichedRun} logs={historicalLogs} turns={turnRows} />
             </TabsContent>
 
             <TabsContent value="configuration" className="mt-0">

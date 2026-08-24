@@ -33,13 +33,14 @@ inside a sandboxed container, and credentials are mediated by the sidecar (see
 `SIDECAR.md`). The SDK never sees platform credentials and never executes inside
 the API process.
 
-The entire import surface, after this hardening, is **three barrel files**:
+The entire import surface, after this hardening, is **four barrel files**:
 
-| Package                | Barrel                             | Symbols consumed                                                                                                                                                                            |
-| ---------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@appstrate/runner-pi` | `packages/runner-pi/src/pi-sdk.ts` | `createAgentSession`, `DefaultResourceLoader`, `ModelRuntime`, `SessionManager`, `SettingsManager`, `Type` (values); `ExtensionAPI`, `ExtensionFactory`, `Api`, `KnownApi`, `Model` (types) |
-| `runtime-pi` (image)   | `runtime-pi/pi-sdk.ts`             | `Type` (value); `ExtensionAPI`, `ExtensionFactory`, `Api`, `Model` (types)                                                                                                                  |
-| `@appstrate/cli`       | `apps/cli/src/lib/pi-sdk.ts`       | `Api`, `Model` (types)                                                                                                                                                                      |
+| Package                | Barrel                             | Symbols consumed                                                                                                                                                                                                                                                                                                                                                           |
+| ---------------------- | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@appstrate/runner-pi` | `packages/runner-pi/src/pi-sdk.ts` | `Type`, `streamSimple`, `getBuiltinProviders` (values), plus `createAgentSession`, `DefaultResourceLoader`, `SessionManager`, `SettingsManager` through the `loadPiCodingAgentSdk()` dynamic loader; `ExtensionAPI`, `ExtensionFactory`, `ModelRuntime`, `Api`, `KnownApi`, `Model`, `Transport`, `Message`, `AgentSessionEvent`, `AssistantMessageEvent`, `Usage` (types) |
+| `runtime-pi` (image)   | `runtime-pi/pi-sdk.ts`             | `Type`, `streamSimple` (values); `ExtensionAPI`, `ExtensionFactory`, `Api`, `Model` (types)                                                                                                                                                                                                                                                                                |
+| `runtime-pi` (sidecar) | `runtime-pi/sidecar/pi-sdk.ts`     | `streamSimple` from the five `pi-ai/api/*` protocol entrypoints (values, wrapped as `streamBacking`); `Api`, `AssistantMessage`, `AssistantMessageEvent`, `AssistantMessageEventStream`, `Context`, `Model`, `SimpleStreamOptions`, `ThinkingLevel`, `ToolCall`, `Usage`, `PiMessagesEvent` (types)                                                                        |
+| `@appstrate/cli`       | `apps/cli/src/lib/pi-sdk.ts`       | `Api`, `Model` (types)                                                                                                                                                                                                                                                                                                                                                     |
 
 Every other module imports these symbols from its package-local barrel, never
 from the SDK directly.
@@ -75,7 +76,7 @@ one-line override for them too.
 
 ### Single swap point (barrel) + ESLint guard
 
-Because the SDK is imported only through the three `pi-sdk.ts` barrels, swapping
+Because the SDK is imported only through the four `pi-sdk.ts` barrels, swapping
 the implementation is a change to those files alone — no agent logic moves.
 
 A `no-restricted-imports` rule in `eslint.config.mjs` forbids any direct
@@ -95,9 +96,12 @@ It lives in core's block rather than the shared guard block because flat-config
 last-match-wins would otherwise clobber core's workspace-independence rule.
 
 A barrel-completeness test (`test/supply-chain-barrels.test.ts`) asserts each
-barrel actually re-exports the value symbols its consumers import — a missing
-re-export is a runtime crash the lint guard cannot catch. Type-only re-exports are
-covered by `tsc` on the barrels' real consumers.
+barrel's value surface is actually reachable at runtime — a missing re-export is a
+runtime crash the lint guard cannot catch. The sidecar barrel does not re-export
+its vendor symbols verbatim (it folds them into `streamBacking`), so the test
+drives that dispatcher once per alias backing shape instead. The `apps/cli` barrel
+is pure type-only and has no case there. Type-only re-exports are covered by `tsc`
+on the barrels' real consumers.
 
 ### Renovate / Dependabot
 
@@ -112,8 +116,8 @@ deliberate human decision, not an automated background bump.
 | ------------------------------------------ | --------------------------------------------------------------------------------------- |
 | Pin a new upstream version                 | 1 line per declaring `package.json` + `bun install` (lockfile diff reviewed)            |
 | Substitute a drop-in fork (same API)       | 1 `package.json` `overrides` entry (see below) — **0 source edits**                     |
-| Substitute a fork with API drift           | edit the 3 barrel files to adapt re-exports; agent logic untouched                      |
-| Replace the SDK entirely with a new runner | re-implement behind the 3 barrels + the `Runner` interface in `@appstrate/afps-runtime` |
+| Substitute a fork with API drift           | edit the 4 barrel files to adapt re-exports; agent logic untouched                      |
+| Replace the SDK entirely with a new runner | re-implement behind the 4 barrels + the `Runner` interface in `@appstrate/afps-runtime` |
 
 The realistic emergency case (compromised/yanked package, maintainer
 abandonment) is the **drop-in fork**: one `overrides` line, no code change.
@@ -158,7 +162,7 @@ bun test               # runner-pi / runtime-pi / cli suites
 ```
 
 The fork must keep the symbols listed in the barrel table above. If the fork's
-API drifts, adapt the three `pi-sdk.ts` barrels (re-map names, wrap shapes) —
+API drifts, adapt the four `pi-sdk.ts` barrels (re-map names, wrap shapes) —
 that is the only place the rest of the codebase touches the SDK.
 
 For a fully air-gapped posture (vendored tarball or registry mirror), pair option

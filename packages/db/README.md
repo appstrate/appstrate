@@ -4,13 +4,19 @@ Database and authentication layer for the Appstrate platform.
 
 ## Exports
 
-| Import                  | Description                                                                                |
-| ----------------------- | ------------------------------------------------------------------------------------------ |
-| `@appstrate/db/schema`  | Drizzle ORM schema (34 tables, 5 enums)                                                    |
-| `@appstrate/db/client`  | `db` instance + `listenClient` for PostgreSQL LISTEN/NOTIFY                                |
-| `@appstrate/db/auth`    | Better Auth config (email/password, Google/GitHub social, email verification, magic links) |
-| `@appstrate/db/storage` | S3 storage integration                                                                     |
-| `@appstrate/db/notify`  | PostgreSQL notification helpers                                                            |
+Every `exports` subpath of the package, in manifest order:
+
+| Import                         | Description                                                                                |
+| ------------------------------ | ------------------------------------------------------------------------------------------ |
+| `@appstrate/db/schema`         | Drizzle ORM schema (50 tables, 9 enums)                                                    |
+| `@appstrate/db/run-status`     | Import-free run-status literals + the terminal/active sets derived from them               |
+| `@appstrate/db/pricing-status` | Import-free `pricing_status` literals (`priced` / `partial` / `unpriced`)                  |
+| `@appstrate/db/client`         | `db` instance + `listenClient` for PostgreSQL LISTEN/NOTIFY                                |
+| `@appstrate/db/auth`           | Better Auth config (email/password, Google/GitHub social, email verification, magic links) |
+| `@appstrate/db/auth-policy`    | Pure `AUTH_*`-driven signup/platform-admin policy helpers (no DB access)                   |
+| `@appstrate/db/bootstrap-org`  | Idempotent root-organization creation for `AUTH_BOOTSTRAP_OWNER_EMAIL`                     |
+| `@appstrate/db/storage`        | S3 storage integration                                                                     |
+| `@appstrate/db/notify`         | PostgreSQL notification helpers                                                            |
 
 ## Usage
 

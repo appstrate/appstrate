@@ -13,7 +13,7 @@ import {
   deriveProviderFromApi,
   derivePiProvider,
   PI_PROVIDER_BY_MODEL_PROVIDER,
-} from "../src/index.ts";
+} from "../src/provider-map.ts";
 import { getBuiltinProviders, streamSimple } from "../src/pi-sdk.ts";
 import type { Api, Model } from "../src/pi-sdk.ts";
 

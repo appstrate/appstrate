@@ -53,11 +53,16 @@ export function _resetSdkDriftWarningForTesting(): void {
 }
 
 /**
- * Name a container/sidecar pi-ai mismatch once — the images deploy
- * independently (`PI_IMAGE`/`SIDECAR_IMAGE`) and `PiMessagesEvent` is
- * pi-ai-internal. Warns rather than rejects (a mismatch usually still works;
- * absent = older image). The header is container-controlled, so the latch is a
- * SINGLE flag and the value is TRUNCATED: keying a cache on it would let the
+ * Name a container/sidecar pi-ai mismatch once. `PI_IMAGE`/`SIDECAR_IMAGE` are
+ * a version contract, not two knobs — the env schema fails platform boot when
+ * their tags disagree — so what is left for this to catch is the drift a tag
+ * cannot express: the SAME tag built twice (`:latest` rebuilt on one side only,
+ * which `services/orchestrator/runtime-image-pair.ts` only warns about), or a
+ * digest-pinned pair, which the tag rule exempts. `PiMessagesEvent` is
+ * pi-ai-internal, so that drift matters here. Warns rather than rejects — a
+ * mismatch usually still works, and an absent header means a container built
+ * before the header existed. The header is container-controlled, so the latch is
+ * a SINGLE flag and the value is TRUNCATED: keying a cache on it would let the
  * container grow the sidecar's memory one distinct value at a time.
  */
 function warnOnSdkDrift(request: Request): void {
@@ -120,7 +125,12 @@ export interface PiMessagesBackendDeps {
   llm: LlmProxyApiKeyConfig;
   /** The alias descriptor. Its `backing` is what this module rebuilds the Model from. */
   swap: ModelSwap;
-  /** REAL (unmasked) token limits — the sidecar is trusted with them, the container is not. */
+  /**
+   * The backing's real token limits. Not a sidecar-only secret: the container
+   * gets the identical pair, because it needs them to size compaction and the
+   * `usage.input` count a run reports out-tells them anyway (`container-env.ts`,
+   * `MODEL_ALIASES.md`). They are here so the rebuilt `Model` clamps the same way.
+   */
   limits: Pick<SidecarConfig, "modelContextWindow" | "modelMaxTokens">;
   /** Defaults to {@link streamBacking}. */
   streamBackingFn?: BackingStreamFn;

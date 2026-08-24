@@ -15,13 +15,16 @@
  * this key goes through.
  */
 
-import { describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, describe, expect, it } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { setPiRuntimeCredential } from "../src/pi-runner.ts";
 import {
   ALIAS_PI_PROVIDER_KEY,
   PI_SDK_VERSION,
   PI_SDK_VERSION_HEADER,
-  setPiRuntimeCredential,
-} from "../src/index.ts";
+} from "../src/provider-map.ts";
 import { loadPiCodingAgentSdk } from "../src/pi-sdk.ts";
 import type { Api, Model } from "../src/pi-sdk.ts";
 
@@ -40,11 +43,23 @@ const ALIASED_MODEL = {
   maxTokens: 8_192,
 } as unknown as Model<Api>;
 
+/** One scratch dir for the file; every runtime gets its own auth file inside it. */
+let authRoot: string;
+let authSeq = 0;
+
+beforeAll(async () => {
+  authRoot = await mkdtemp(join(tmpdir(), "pi-auth-alias-"));
+});
+
+afterAll(async () => {
+  await rm(authRoot, { recursive: true, force: true });
+});
+
 async function newRuntime() {
   const { ModelRuntime } = await loadPiCodingAgentSdk();
   return ModelRuntime.create({
-    // Per-test path so a stray write cannot leak between runs.
-    authPath: `/tmp/pi-auth-alias-${Math.random().toString(36).slice(2)}.json`,
+    // Per-test path so a stray write cannot leak between cases.
+    authPath: join(authRoot, `auth-${authSeq++}.json`),
     modelsPath: null,
     allowModelNetwork: false,
   });

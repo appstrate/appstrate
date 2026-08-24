@@ -116,7 +116,7 @@ describe("POST /api/runs/:runId/files — agent-output ingestion", () => {
       size: number;
       sha256: string;
     };
-    expect(body.id).toMatch(/^doc_/);
+    expect(body.id).toMatch(/^file_/);
     expect(body.uri).toBe(`appfile://${body.id}`);
     expect(body.name).toBe("report.html");
     expect(body.mime).toBe("text/html");
@@ -189,9 +189,16 @@ describe("POST /api/runs/:runId/files — agent-output ingestion", () => {
   });
 
   it("IGNORES a legacy X-Document-Presentation header instead of rejecting it", async () => {
-    // Version skew (issue #1177): the runtime-pi image deploys independently of
-    // the platform, so an older image still sends this retired header. It must
-    // never turn a deliverable into a 400 — the value is simply not read.
+    // What is pinned is the route's TOLERANCE, not a deploy story: ingestion
+    // reads the headers it knows and ignores the rest, so a header the client
+    // sends and the platform retired can never cost a run its deliverable. A
+    // future strict header allowlist would remove that silently, and this case
+    // is what fails first.
+    //
+    // Deliberately no longer justified by version skew. `findRuntimeImageTagMismatch`
+    // (`@appstrate/core/image-ref`) fails boot when a tag-pinned `PI_IMAGE` /
+    // `SIDECAR_IMAGE` disagrees with the platform's own release, so the pair
+    // that would have sent this header no longer runs against this route.
     //
     // The header is spelled `X-Document-Presentation` and nothing else: it was
     // retired before the `document` → `file` rename, so the only images that
@@ -216,7 +223,7 @@ describe("POST /api/runs/:runId/files — agent-output ingestion", () => {
 
   it("cuts an over-per-file-cap upload mid-stream: 413, no row, no counter, no partial", async () => {
     const runId = await seedRun(ctx);
-    await withEnv("DOCUMENT_MAX_FILE_BYTES", "8", async () => {
+    await withEnv("FILE_MAX_BYTES", "8", async () => {
       const bytes = new TextEncoder().encode("way too many bytes for the cap");
       const res = await postDoc(runId, docHeaders(RUN_SECRET, "big.txt"), bytes);
       expect(res.status).toBe(413);
@@ -253,7 +260,7 @@ describe("POST /api/runs/:runId/files — agent-output ingestion", () => {
 
   it("rejects over the per-run file COUNT cap with a distinct 413", async () => {
     const runId = await seedRun(ctx);
-    await withEnv("RUN_MAX_DOCUMENTS", "2", async () => {
+    await withEnv("RUN_MAX_FILES", "2", async () => {
       // Two distinct publishes fill the run's file budget.
       expect((await postDoc(runId, docHeaders(RUN_SECRET, "a.txt"), "aaa")).status).toBe(201);
       expect((await postDoc(runId, docHeaders(RUN_SECRET, "b.txt"), "bbb")).status).toBe(201);

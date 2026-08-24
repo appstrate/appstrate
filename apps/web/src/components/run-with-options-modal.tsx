@@ -108,7 +108,7 @@ function RunWithOptionsForm({
   const inputFormRef = useRef<AgentInputFormHandle>(null);
   // Deps follow the selected version (#770): the input / integrations / skills
   // the modal renders match what the run will execute, not the draft.
-  const deps = useScheduleFormDeps(agent.id, version);
+  const { deps } = useScheduleFormDeps(agent.id, version);
 
   // Version-pinned input wrapper / skills (fall back to the draft the parent
   // passed while the version-aware detail is still loading).

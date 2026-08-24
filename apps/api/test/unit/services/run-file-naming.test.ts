@@ -9,7 +9,6 @@ import { describe, it, expect } from "bun:test";
 import {
   assignWorkspaceNames,
   assertUniqueWorkspaceNames,
-  toWorkspaceSegment,
 } from "../../../src/services/run-file-naming.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
 
@@ -63,17 +62,15 @@ describe("assignWorkspaceNames", () => {
     // then disambiguated so the container path-traversal guard never triggers.
     expect(assignWorkspaceNames(["..", ".", ""])).toEqual(["file", "file-2", "file-3"]);
   });
-});
 
-describe("toWorkspaceSegment", () => {
-  it("reduces a name to a single safe ASCII segment", () => {
-    expect(toWorkspaceSegment("naïve résumé.pdf")).toBe("naive_resume.pdf");
-    expect(toWorkspaceSegment("a/b/c.txt")).toBe("a_b_c.txt");
-  });
-
-  it("folds traversal / empty names to a safe fallback", () => {
-    expect(toWorkspaceSegment("..")).toBe("file");
-    expect(toWorkspaceSegment("")).toBe("file");
+  it("reduces each name to a single safe ASCII segment", () => {
+    // The per-name sanitization step (accents folded, directory separators
+    // collapsed) is covered here rather than through its own export: it has
+    // exactly one caller, this function.
+    expect(assignWorkspaceNames(["naïve résumé.pdf", "a/b/c.txt"])).toEqual([
+      "naive_resume.pdf",
+      "a_b_c.txt",
+    ]);
   });
 });
 

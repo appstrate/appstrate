@@ -3,7 +3,7 @@
 /**
  * Per-profile OpenAPI schema cache with ETag/304 revalidation.
  *
- * Why cache at all: `GET /api/openapi.json` returns ~191 endpoints
+ * Why cache at all: `GET /api/openapi.json` returns ~290 endpoints
  * (~several MB of JSON with all component schemas). Users typically
  * invoke `appstrate openapi list` / `show` many times in quick
  * succession while exploring. Re-downloading the full schema on every

@@ -13,15 +13,15 @@ export {
   type InternalSink,
 } from "./pi-runner.ts";
 
-export {
-  deriveProviderFromApi,
-  derivePiProvider,
-  ALIAS_PI_PROVIDER_KEY,
-  PI_SDK_VERSION,
-  PI_SDK_VERSION_HEADER,
-  PROVIDER_BY_API,
-  PI_PROVIDER_BY_MODEL_PROVIDER,
-} from "./provider-map.ts";
+// Same rule as the `pi-sdk.ts` block below: only what something OUTSIDE the
+// package imports FROM THE BARREL. Four more sat here and none had such a
+// reader — `PI_SDK_VERSION` / `PI_SDK_VERSION_HEADER` reach the sidecar through
+// the `./provider-map` subpath (`runtime-pi/sidecar/pi-messages-backend.ts`),
+// and `ALIAS_PI_PROVIDER_KEY` / `PI_PROVIDER_BY_MODEL_PROVIDER` are read only
+// inside this package. knip cannot see the difference — `index.ts` is an entry,
+// so an export here always has "a reader". Re-add a line only when something
+// outside the package actually imports it from `@appstrate/runner-pi`.
+export { deriveProviderFromApi, derivePiProvider, PROVIDER_BY_API } from "./provider-map.ts";
 
 // Warms `@earendil-works/pi-coding-agent` (dynamic import) so the container
 // entrypoint can overlap its ~200ms eval with network-bound provisioning

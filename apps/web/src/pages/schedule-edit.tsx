@@ -8,7 +8,6 @@ import {
   useUpdateSchedule,
   useDeleteSchedule,
   useScheduleFormDeps,
-  useScheduleFormDepsError,
 } from "../hooks/use-schedules";
 import { ScheduleForm } from "../components/schedule-form";
 import { PageHeader } from "../components/page-header";
@@ -21,8 +20,7 @@ export function ScheduleEditPage() {
   const { id } = useParams<{ id: string }>();
 
   const { data: schedule, isLoading, error } = useScheduleById(id);
-  const deps = useScheduleFormDeps(schedule?.packageId);
-  const depsError = useScheduleFormDepsError(schedule?.packageId);
+  const { deps, error: depsError } = useScheduleFormDeps(schedule?.packageId);
   const updateSchedule = useUpdateSchedule();
   const deleteSchedule = useDeleteSchedule();
 

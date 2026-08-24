@@ -56,7 +56,7 @@ const STORED_SCHEDULE_INPUT = { folder: "inbox", query: "invoices" };
 const EMPTY_SETTINGS: AgentInputSettings = { values: {}, locked_fields: [] };
 
 function Probe() {
-  const deps = useScheduleFormDeps(PACKAGE_ID);
+  const { deps } = useScheduleFormDeps(PACKAGE_ID);
   // The page renders its loading state until the deps resolve.
   if (!deps) return <>loading</>;
   // What `ScheduleForm`'s `useState` initialiser computes on mount — and what

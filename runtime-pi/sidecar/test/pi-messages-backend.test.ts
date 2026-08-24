@@ -266,7 +266,7 @@ describe("re-originated request shape", () => {
 });
 
 describe("buildBackingModel", () => {
-  it("keeps the REAL token limits, not the container's masked pair", () => {
+  it("keeps the backing's real token limits — the same pair the container gets", () => {
     const model = buildBackingModel(depsFor(BACKINGS[0]!));
     expect(model.contextWindow).toBe(CONTEXT_WINDOW);
     expect(model.maxTokens).toBe(MAX_TOKENS);

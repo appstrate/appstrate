@@ -5,11 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { usePermissions } from "../hooks/use-permissions";
 import { useAgents } from "../hooks/use-packages";
-import {
-  useCreateSchedule,
-  useScheduleFormDeps,
-  useScheduleFormDepsError,
-} from "../hooks/use-schedules";
+import { useCreateSchedule, useScheduleFormDeps } from "../hooks/use-schedules";
 import { ScheduleForm } from "../components/schedule-form";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState } from "../components/page-states";
@@ -23,8 +19,7 @@ export function ScheduleCreatePage() {
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
 
   const effectiveAgentId = selectedAgentId || agents?.[0]?.id || "";
-  const deps = useScheduleFormDeps(effectiveAgentId || undefined);
-  const depsError = useScheduleFormDepsError(effectiveAgentId || undefined);
+  const { deps, error: depsError } = useScheduleFormDeps(effectiveAgentId || undefined);
   const createSchedule = useCreateSchedule(effectiveAgentId);
 
   if (!isAdmin) return null;

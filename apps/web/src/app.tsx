@@ -645,11 +645,12 @@ export function App() {
             />
             {/*
              * The gallery was `/documents` until #1177. Kept as a redirect for
-             * the same reason `run-detail-tabs.ts` keeps its retired tab hashes
-             * and the API keeps its `/api/documents/*` aliases: the old path is
-             * in bookmarks, in back-history and in links already pasted
-             * elsewhere, and without this it falls through to the catch-all and
-             * lands the user on the dashboard with no explanation.
+             * the same reason `run-detail-tabs.ts` keeps its retired tab
+             * hashes: the old path is in bookmarks, in back-history and in
+             * links already pasted elsewhere, and without this it falls
+             * through to the catch-all and lands the user on the dashboard
+             * with no explanation. Human-held URLs only — the HTTP surface
+             * kept no `/api/documents/*` alias to match (`rate-limit.ts`).
              */}
             <Route path="/documents" element={<LegacyDocumentsRedirect />} />
             <Route
