@@ -44,8 +44,7 @@ import { applications } from "@appstrate/db/schema";
 import { oauthClient } from "@appstrate/db/schema";
 import { prefixedId } from "../../../lib/ids.ts";
 import { logger } from "../../../lib/logger.ts";
-import { canonicalizeScopes, getAppstrateScopeSet, OIDC_IDENTITY_SCOPES } from "../auth/scopes.ts";
-import { canonicalPermission } from "@appstrate/core/permissions";
+import { getAppstrateScopeSet, OIDC_IDENTITY_SCOPES } from "../auth/scopes.ts";
 import { getModuleEndUserAllowedScopes } from "@appstrate/core/permissions";
 import { isValidRedirectUri } from "./redirect-uri.ts";
 
@@ -90,26 +89,17 @@ export class OAuthAdminValidationError extends Error {
 }
 
 /**
- * Validate a requested scope list and return it in its CANONICAL spelling.
+ * Reject any requested scope outside the OIDC vocabulary (identity scopes +
+ * `OIDC_ALLOWED_SCOPES` + module `endUserGrantable` contributions).
  *
- * The return value is the point: validating canonically while persisting the
- * caller's raw string is how a re-registering pre-#1177 client puts a
- * `documents:` row back into `oauth_clients.scopes`, undoing migration 0044 —
- * which runs once and will never see that row. From then on the client is
- * refused at `/oauth2/authorize` for every scope in that column, because the
- * oauth-provider plugin compares the request against exactly these strings.
- *
- * `undefined` in, `undefined` out — the caller's own default applies.
+ * `undefined` / empty in — nothing to validate, the caller's own default
+ * applies.
  */
-function canonicalizeValidScopes(scopes: readonly string[] | undefined): string[] | undefined {
-  if (!scopes || scopes.length === 0) return scopes ? [...scopes] : undefined;
+function assertValidScopes(scopes: readonly string[] | undefined): void {
+  if (!scopes || scopes.length === 0) return;
   // OIDC owns its scope vocabulary directly (identity scopes + OIDC_ALLOWED_SCOPES).
-  // Retired spellings are canonicalized first: a client registered before #1177
-  // re-registering with `documents:read` must not be rejected for asking for a
-  // scope it already holds. Migration 0044 rewrites the stored strings; this
-  // covers the request side.
   const allowed = getAppstrateScopeSet();
-  const invalid = scopes.filter((s) => !allowed.has(canonicalPermission(s)));
+  const invalid = scopes.filter((s) => !allowed.has(s));
   if (invalid.length > 0) {
     throw new OAuthAdminValidationError(
       "scopes",
@@ -118,7 +108,6 @@ function canonicalizeValidScopes(scopes: readonly string[] | undefined): string[
         `may be registered.`,
     );
   }
-  return canonicalizeScopes(scopes);
 }
 
 function assertValidRedirectUris(uris: readonly string[]): void {
@@ -363,9 +352,7 @@ type CreateClientInput =
 
 export async function createClient(input: CreateClientInput): Promise<OAuthClientWithSecret> {
   assertValidRedirectUris(input.redirectUris);
-  // Canonical on the way IN, so the column migration 0044 normalised stays
-  // normalised — see `canonicalizeValidScopes`.
-  const scopes = canonicalizeValidScopes(input.scopes);
+  assertValidScopes(input.scopes);
 
   const id = prefixedId("oac");
   const clientId = `oauth_${randomSecret().slice(0, 24)}`;
@@ -412,7 +399,7 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
       name: input.name,
       redirectUris: input.redirectUris,
       postLogoutRedirectUris: input.postLogoutRedirectUris ?? [],
-      scopes: scopes ?? ["openid", "profile", "email"],
+      scopes: input.scopes ?? ["openid", "profile", "email"],
       level: input.level,
       referencedOrgId: input.level === "org" ? input.referencedOrgId : null,
       referencedApplicationId: input.level === "application" ? input.referencedApplicationId : null,
@@ -547,8 +534,9 @@ export async function updateClient(
   if (input.redirectUris !== undefined) {
     assertValidRedirectUris(input.redirectUris);
   }
-  const canonicalScopes =
-    input.scopes === undefined ? undefined : canonicalizeValidScopes(input.scopes);
+  if (input.scopes !== undefined) {
+    assertValidScopes(input.scopes);
+  }
 
   // `signupRole` is only meaningful on org-level clients — reject updates
   // targeting instance/application levels loudly so configuration mistakes
@@ -568,7 +556,7 @@ export async function updateClient(
   if (input.redirectUris !== undefined) set.redirectUris = input.redirectUris;
   if (input.postLogoutRedirectUris !== undefined)
     set.postLogoutRedirectUris = input.postLogoutRedirectUris;
-  if (canonicalScopes !== undefined) set.scopes = canonicalScopes;
+  if (input.scopes !== undefined) set.scopes = input.scopes;
   if (input.disabled !== undefined) set.disabled = input.disabled;
   if (input.isFirstParty !== undefined) set.skipConsent = input.isFirstParty;
   if (input.allowSignup !== undefined) set.allowSignup = input.allowSignup;
@@ -893,7 +881,7 @@ export async function createInstanceClientFromEnv(
   input: CreateInstanceClientFromEnvInput,
 ): Promise<OAuthClientRecord> {
   assertValidRedirectUris(input.redirectUris);
-  const scopes = canonicalizeValidScopes(input.scopes) ?? [];
+  assertValidScopes(input.scopes);
 
   const id = prefixedId("oac");
   const hashedSecret = await hashSecret(input.clientSecretPlaintext);
@@ -917,7 +905,7 @@ export async function createInstanceClientFromEnv(
       name: input.name,
       redirectUris: input.redirectUris,
       postLogoutRedirectUris: input.postLogoutRedirectUris,
-      scopes,
+      scopes: input.scopes,
       level: "instance",
       referencedOrgId: null,
       referencedApplicationId: null,
@@ -1005,26 +993,11 @@ export async function compareDeclaredClientWithStored(
       declared: declared.postLogoutRedirectUris,
     });
   }
-  // Compare on the CANONICAL spelling — on BOTH sides. The env declaration is
-  // whatever the operator wrote; the row is *usually* normalized (on insert by
-  // `canonicalizeValidScopes`, retroactively by migration 0044), but "usually"
-  // is not an invariant this comparison may assume: `narrowScopeToClient`
-  // (`cli-tokens.ts`) documents the same exposure and canonicalizes both sides
-  // for it — a row minted between the code deploy and the migration, an
-  // operator-set `OIDC_INSTANCE_CLIENTS` still listing the old resource, or a
-  // replayed request all put a pre-#1177 `documents:read` in front of this
-  // check. Canonicalizing only the declaration turns such a row into a
-  // permanent `drift`, which `syncInstanceClientsFromEnv` escalates to an
-  // `InstanceClientSyncError` — i.e. the platform REFUSES TO BOOT over two
-  // scope sets that are in fact equal. Both sides are also REPORTED canonical:
-  // a mismatch list that mixes spellings is unreadable as a diff.
-  const declaredScopes = canonicalizeScopes(declared.scopes);
-  const storedScopes = canonicalizeScopes(row.scopes ?? []);
-  if (!setEquals(storedScopes, declaredScopes)) {
+  if (!setEquals(row.scopes ?? [], declared.scopes)) {
     mismatches.push({
       field: "scopes",
-      stored: storedScopes,
-      declared: declaredScopes,
+      stored: row.scopes ?? [],
+      declared: declared.scopes,
     });
   }
   if ((row.skipConsent ?? false) !== declared.skipConsent) {

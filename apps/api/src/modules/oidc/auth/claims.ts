@@ -15,11 +15,7 @@
  * translation layer.
  */
 
-import {
-  canonicalPermission,
-  getModuleEndUserAllowedScopes,
-  type OrgRole,
-} from "@appstrate/core/permissions";
+import { getModuleEndUserAllowedScopes, type OrgRole } from "@appstrate/core/permissions";
 import { resolvePermissions } from "../../../lib/permissions.ts";
 import { logger } from "../../../lib/logger.ts";
 import { OIDC_ALLOWED_SCOPES, OIDC_IDENTITY_SCOPE_SET } from "./scopes.ts";
@@ -83,12 +79,7 @@ export function scopesToPermissions(
     );
   }
 
-  for (const raw of scope.split(/\s+/)) {
-    // A token minted before #1177 carries `documents:read`. The vocabulary now
-    // spells it `files:read`, and every branch below ends in a `logger.debug`
-    // DROP — so without this normalization the scope disappears from a live
-    // token with nothing above debug level to say the caller lost access.
-    const s = canonicalPermission(raw);
+  for (const s of scope.split(/\s+/)) {
     if (s === "" || OIDC_IDENTITY_SCOPE_SET.has(s)) continue;
     if (actorType === "end_user") {
       // End-users are constrained to the safe OIDC allowlist. Anything

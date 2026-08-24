@@ -6,9 +6,6 @@ import {
   requireCorePermission,
   setPermissionDenialHandler,
   CORE_RESOURCE_NAMES,
-  LEGACY_PERMISSION_RESOURCE_ALIASES,
-  canonicalPermission,
-  canonicalPermissions,
   type CoreResources,
 } from "../src/permissions.ts";
 
@@ -239,75 +236,5 @@ describe("CoreResources ↔ CORE_RESOURCE_NAMES drift", () => {
       expect(interfaceNames.has(name)).toBe(true);
     }
     expect(CORE_RESOURCE_NAMES.size).toBe(interfaceNames.size);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Retired permission spellings (#1177: `documents` → `files`)
-//
-// A `resource:action` string is PERSISTED — on API keys, OIDC grants, role
-// snapshots. A rename with no alias silently demotes every principal granted
-// under the old spelling: the guard just stops matching and the only symptom is
-// an unexplained 403.
-// ---------------------------------------------------------------------------
-
-describe("legacy permission spellings", () => {
-  it("maps the retired `documents` resource onto `files`", () => {
-    expect(LEGACY_PERMISSION_RESOURCE_ALIASES.documents).toBe("files");
-  });
-
-  it("canonicalPermission rewrites a stored legacy scope", () => {
-    expect(canonicalPermission("documents:read")).toBe("files:read");
-    expect(canonicalPermission("documents:delete")).toBe("files:delete");
-  });
-
-  it("canonicalPermission leaves canonical and non-scope strings alone", () => {
-    expect(canonicalPermission("files:read")).toBe("files:read");
-    expect(canonicalPermission("runs:read")).toBe("runs:read");
-    expect(canonicalPermission("nonsense")).toBe("nonsense");
-    expect(canonicalPermission(":read")).toBe(":read");
-  });
-
-  it("canonicalPermissions collapses a scope stored under both spellings", () => {
-    expect(canonicalPermissions(["documents:read", "files:read", "runs:read"]).sort()).toEqual([
-      "files:read",
-      "runs:read",
-    ]);
-  });
-
-  it("a permission Set built from a stored legacy scope still grants files:read", async () => {
-    // The exact production shape: an API key minted before the rename carries
-    // `documents:read` and nothing else. It must still open the guarded route.
-    const middleware = requireCorePermission("files", "read");
-    const c = makeContext(new Set(["documents:read"]));
-    let called = false;
-    await middleware(c, async () => {
-      called = true;
-    });
-    expect(called).toBe(true);
-  });
-
-  it("a stored legacy scope grants only its own action", async () => {
-    const middleware = requireCorePermission("files", "delete");
-    const c = makeContext(new Set(["documents:read"]));
-    await expect(middleware(c, async () => {})).rejects.toThrow(
-      /Insufficient permissions: files:delete required/,
-    );
-  });
-
-  it("normalising the stored scope on read grants the same way", async () => {
-    const middleware = requireCorePermission("files", "delete");
-    const c = makeContext(new Set(canonicalPermissions(["documents:delete"])));
-    let called = false;
-    await middleware(c, async () => {
-      called = true;
-    });
-    expect(called).toBe(true);
-  });
-
-  it("the alias does not invent a grant for an unrelated resource", async () => {
-    const middleware = requireCorePermission("runs", "read");
-    const c = makeContext(new Set(["documents:read"]));
-    await expect(middleware(c, async () => {})).rejects.toThrow(/runs:read required/);
   });
 });

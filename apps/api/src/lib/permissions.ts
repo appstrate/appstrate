@@ -45,7 +45,6 @@ import {
   type OrgRole,
   getModuleRoleScopes,
   getModuleApiKeyScopes,
-  canonicalPermissions,
 } from "@appstrate/core/permissions";
 
 // ---------------------------------------------------------------------------
@@ -348,13 +347,7 @@ export function roleScopes(role: OrgRole): ReadonlySet<string> {
 export function validateScopes(scopes: string[], creatorRole: OrgRole): Permission[] {
   const creatorPerms = roleScopes(creatorRole);
   const allowed = getApiKeyAllowedScopes();
-  // Retired spellings are canonicalized first (`documents:read` → `files:read`,
-  // #1177). The filter DROPS what it does not recognise, so an un-normalized
-  // legacy scope would not error — it would silently mint a key narrower than
-  // the caller asked for.
-  return canonicalPermissions(scopes).filter(
-    (s): s is Permission => allowed.has(s) && creatorPerms.has(s),
-  );
+  return scopes.filter((s): s is Permission => allowed.has(s) && creatorPerms.has(s));
 }
 
 /**
@@ -365,10 +358,7 @@ export function validateScopes(scopes: string[], creatorRole: OrgRole): Permissi
 export function resolveApiKeyPermissions(scopes: string[], creatorRole: OrgRole): Set<Permission> {
   const rolePerms = roleScopes(creatorRole);
   const effective = new Set<Permission>();
-  // Same reason as `validateScopes`: a key row minted before #1177 stores
-  // `documents:read`, which is no longer in any role's set — the loop would
-  // drop it and the key would 403 on a family it was granted.
-  for (const scope of canonicalPermissions(scopes)) {
+  for (const scope of scopes) {
     if (rolePerms.has(scope)) {
       effective.add(scope as Permission);
     }
