@@ -1,4 +1,26 @@
 {
+  "chat-latest": {
+    "label": "Chat Latest",
+    "contextWindow": 400000,
+    "maxTokens": 128000,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unknown",
+        "adaptive": null,
+        "levels": {}
+      }
+    },
+    "cost": {
+      "input": 5,
+      "output": 30,
+      "cacheRead": 0.5
+    }
+  },
   "chatgpt-4o-latest": {
     "label": "Chatgpt 4o Latest",
     "contextWindow": 128000,
@@ -18,6 +40,68 @@
     "cost": {
       "input": 5,
       "output": 15
+    }
+  },
+  "daybreak-blue-latest": {
+    "label": "Daybreak Blue Latest",
+    "contextWindow": 1050000,
+    "maxTokens": 128000,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unsupported",
+        "adaptive": null,
+        "levels": {
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
+        }
+      }
+    },
+    "cost": {
+      "input": 4,
+      "output": 20,
+      "cacheRead": 0.4,
+      "cacheWrite": 5
+    }
+  },
+  "daybreak-red-latest": {
+    "label": "Daybreak Red Latest",
+    "contextWindow": 400000,
+    "maxTokens": 128000,
+    "capabilities": [
+      "text",
+      "image"
+    ],
+    "generation": {
+      "temperature": "supported",
+      "reasoning": {
+        "supported": "unsupported",
+        "adaptive": null,
+        "levels": {
+          "off": "unsupported",
+          "minimal": "unsupported",
+          "low": "unsupported",
+          "medium": "unsupported",
+          "high": "unsupported",
+          "xhigh": "unsupported",
+          "max": "unsupported"
+        }
+      }
+    },
+    "cost": {
+      "input": 12.5,
+      "output": 75,
+      "cacheRead": 1.25,
+      "cacheWrite": 15.625
     }
   },
   "ft:gpt-3.5-turbo": {
@@ -1531,9 +1615,10 @@
       "reasoning"
     ],
     "generation": {
-      "temperature": "unsupported",
+      "temperature": "supported",
       "reasoning": {
         "supported": "supported",
+        "temperatureCompatible": "unsupported",
         "adaptive": null,
         "levels": {
           "off": "supported",
@@ -1541,7 +1626,7 @@
           "low": "supported",
           "medium": "supported",
           "high": "supported",
-          "xhigh": "unsupported",
+          "xhigh": "supported",
           "max": "supported"
         }
       }
@@ -1746,7 +1831,7 @@
   },
   "gpt-5.6": {
     "label": "Gpt 5.6",
-    "contextWindow": 1050000,
+    "contextWindow": 922000,
     "maxTokens": 128000,
     "capabilities": [
       "text",
@@ -1771,15 +1856,47 @@
       }
     },
     "cost": {
-      "input": 5,
-      "output": 30,
-      "cacheRead": 0.5,
-      "cacheWrite": 6.25
+      "input": 4,
+      "output": 20,
+      "cacheRead": 0.4,
+      "cacheWrite": 5
+    }
+  },
+  "gpt-5.6-cyber": {
+    "label": "Gpt 5.6 Cyber",
+    "contextWindow": 400000,
+    "maxTokens": 128000,
+    "capabilities": [
+      "text",
+      "image",
+      "reasoning"
+    ],
+    "generation": {
+      "temperature": "unsupported",
+      "reasoning": {
+        "supported": "supported",
+        "adaptive": null,
+        "levels": {
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "unsupported",
+          "max": "supported"
+        }
+      }
+    },
+    "cost": {
+      "input": 12.5,
+      "output": 75,
+      "cacheRead": 1.25,
+      "cacheWrite": 15.625
     }
   },
   "gpt-5.6-luna": {
     "label": "Gpt 5.6 Luna",
-    "contextWindow": 1050000,
+    "contextWindow": 922000,
     "maxTokens": 128000,
     "capabilities": [
       "text",
@@ -1812,7 +1929,7 @@
   },
   "gpt-5.6-sol": {
     "label": "Gpt 5.6 Sol",
-    "contextWindow": 1050000,
+    "contextWindow": 922000,
     "maxTokens": 128000,
     "capabilities": [
       "text",
@@ -1837,15 +1954,15 @@
       }
     },
     "cost": {
-      "input": 5,
-      "output": 30,
-      "cacheRead": 0.5,
-      "cacheWrite": 6.25
+      "input": 4,
+      "output": 20,
+      "cacheRead": 0.4,
+      "cacheWrite": 5
     }
   },
   "gpt-5.6-terra": {
     "label": "Gpt 5.6 Terra",
-    "contextWindow": 1050000,
+    "contextWindow": 922000,
     "maxTokens": 128000,
     "capabilities": [
       "text",
