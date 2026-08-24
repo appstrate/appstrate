@@ -46,14 +46,27 @@ export async function ensureSession(id: string, orgId: string, userId: string): 
   // then persist a message into it. `DO UPDATE … SET id = id` is a no-op write
   // that still makes the conflicting row visible to `RETURNING`, so the insert
   // and the ownership check are ONE round trip instead of two — this sits on the
-  // pre-inference path of every turn. Refuse with 404, not 403, so we don't
-  // reveal that the id exists for someone else.
+  // pre-inference path of every turn.
+  //
+  // `setWhere` is what keeps that round trip from writing into a row the caller
+  // does not own. Without it the UPDATE ran FIRST and the ownership check
+  // followed in application code, so a REFUSED cross-tenant request still
+  // produced a new heap tuple, WAL, both index entries and a row-exclusive lock
+  // on the victim's row. Harmless only for as long as no column value changes:
+  // the day `updatedAt` gains an `$onUpdateFn` — the obvious thing to do on this
+  // table — drizzle folds it into the SET clause automatically and a 404 starts
+  // silently re-sorting a stranger's sidebar. With the predicate, a foreign
+  // conflict updates zero rows, `RETURNING` yields nothing, and the `!row` arm
+  // below already says 404. One round trip AND no write.
+  //
+  // 404, not 403, so we don't reveal that the id exists for someone else.
   const [row] = await db
     .insert(chatSessions)
     .values({ id, orgId, userId, title: null })
     .onConflictDoUpdate({
       target: chatSessions.id,
       set: { id: sql`${chatSessions.id}` },
+      setWhere: and(eq(chatSessions.orgId, orgId), eq(chatSessions.userId, userId)),
     })
     .returning({ orgId: chatSessions.orgId, userId: chatSessions.userId });
   if (!row || row.orgId !== orgId || row.userId !== userId) {

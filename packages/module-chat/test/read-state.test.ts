@@ -20,7 +20,9 @@ import {
   authHeaders,
   type TestContext,
 } from "../../../apps/api/test/helpers/auth.ts";
-import { persistUserMessage, persistAssistantMessage } from "../src/persistence.ts";
+import { persistUserMessage, persistAssistantMessage, ensureSession } from "../src/persistence.ts";
+import { db } from "@appstrate/db/client";
+import { sql } from "drizzle-orm";
 import type { UIMessage } from "ai";
 
 const app = getTestApp();
@@ -181,5 +183,64 @@ describe("chat session read-state", () => {
     expect((await res.json()) as { title: string | null }).toMatchObject({
       title: "Résume ce fichier",
     });
+  });
+});
+
+describe("ensureSession refuses a foreign session without writing to it", () => {
+  let owner: TestContext;
+  let stranger: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    owner = await createTestContext({ orgSlug: "victimorg" });
+    stranger = await createTestContext({ orgSlug: "strangerorg" });
+  });
+
+  /**
+   * `xmin` is the transaction that produced the row's current version. Postgres
+   * bumps it on ANY update, including one that writes a column its own value —
+   * which is exactly the write we are asserting does not happen. Nothing
+   * user-visible would move today (`chat_sessions.updatedAt` is `.defaultNow()`
+   * with no `$onUpdateFn`), so a test written against observable columns would
+   * pass either way and go on passing right up until someone adds one.
+   */
+  async function xminOf(id: string): Promise<string> {
+    // `db.execute` returns a bare row array on postgres.js and a `{ rows }`
+    // envelope on PGlite; the suite runs on both depending on TEST_TIER.
+    const res = await db.execute(sql`select xmin::text as x from chat_sessions where id = ${id}`);
+    const rows = (Array.isArray(res) ? res : (res as { rows: unknown[] }).rows) as {
+      x: string;
+    }[];
+    const row = rows[0];
+    if (!row) throw new Error(`session ${id} not found`);
+    return row.x;
+  }
+
+  async function createSessionAs(ctx: TestContext): Promise<string> {
+    const res = await app.request("/api/chat/sessions", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(201);
+    return ((await res.json()) as { id: string }).id;
+  }
+
+  it("control: the owner's own ensureSession DOES rewrite the row", async () => {
+    // Without this the assertion below would hold just as well against a table
+    // whose xmin never moves, and would be proving nothing.
+    const id = await createSessionAs(owner);
+    const before = await xminOf(id);
+    await ensureSession(id, owner.orgId, owner.user.id);
+    expect(await xminOf(id)).not.toBe(before);
+  });
+
+  it("a stranger naming the id gets 404 and leaves the row byte-identical", async () => {
+    const id = await createSessionAs(owner);
+    const before = await xminOf(id);
+
+    await expect(ensureSession(id, stranger.orgId, stranger.user.id)).rejects.toThrow(/not found/i);
+
+    expect(await xminOf(id)).toBe(before);
   });
 });
