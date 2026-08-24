@@ -149,8 +149,12 @@ describe("inline run launched from the chat with an attached file", () => {
     await expectFileIsRunInput(launched.launch.runId, uri, fileId);
   });
 
-  it("makes the attached file an input of the run under the legacy tool-argument spelling", async () => {
-    const { uri, fileId } = await attachToChat();
+  it("refuses the retired tool-argument spelling instead of ignoring it", async () => {
+    // `context_documents` is no longer canonicalized. It must still be named
+    // in a refusal rather than left unrecognised: the launch body is built
+    // from an allowlist, so an argument nobody reads is invisible — the run
+    // would start with nothing mounted and every layer would report success.
+    const { uri } = await attachToChat();
 
     const launched = await launchFromChat({
       kind: "inline",
@@ -159,9 +163,7 @@ describe("inline run launched from the chat with an attached file", () => {
       context_documents: [uri],
     });
 
-    expect(launched.ok).toBe(true);
-    if (!launched.ok) return;
-    await expectFileIsRunInput(launched.launch.runId, uri, fileId);
+    expect(launched.ok).toBe(false);
   });
 
   it("still launches a run with no file at all", async () => {

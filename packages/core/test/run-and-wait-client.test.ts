@@ -588,17 +588,16 @@ describe("launchRunAndWait launch body", () => {
     });
   });
 
-  // The pre-#1177 spelling. `POST /runs/inline` accepts it forever, so the
-  // client that builds the launch body must too: reading only the canonical
-  // name dropped the argument BEFORE the HTTP call, and the route never got the
-  // chance to answer with its field-precise 400 — the run launched with nothing
-  // mounted and every layer reported success. A model reaches for the old name
-  // from its own transcript, or from a tool listing taken before the upgrade
-  // (`tools.listChanged: false`).
-  it("kind:inline canonicalizes the legacy context_documents spelling", async () => {
+  // The pre-#1177 spelling is no longer canonicalized — but it must not become
+  // INVISIBLE either. The launch body is built from an allowlist, so an
+  // argument nobody names is dropped before the HTTP call, the route never
+  // sees it, and the run launches with nothing mounted while every layer
+  // reports success. These two assert the refusal, which is the only place
+  // that signal can exist.
+  it("kind:inline refuses the retired context_documents spelling by name", async () => {
     const { fetchImpl, captured } = captureLaunch();
 
-    await launchRunAndWait(
+    const result = await launchRunAndWait(
       {
         kind: "inline",
         manifest: { name: "tmp" },
@@ -608,16 +607,21 @@ describe("launchRunAndWait launch body", () => {
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
 
-    const body = captured()?.body as Record<string, unknown>;
-    expect(body).toMatchObject({ context_files: ["appfile://file_abc12345"] });
-    // One spelling on the wire, whatever the model spelled.
-    expect(body).not.toHaveProperty("context_documents");
+    expect(result.ok).toBe(false);
+    expect(
+      String((result as { step: { payload: { error?: string } } }).step.payload.error),
+    ).toMatch(/`context_documents` is not an argument of this tool/);
+    // Nothing launched — the model is told to resend, not handed a fileless run.
+    expect(captured()).toBeUndefined();
   });
 
-  it("kind:inline prefers context_files when both spellings are present", async () => {
+  it("refuses it even when the canonical spelling is also present", async () => {
+    // Ambiguity resolves to a refusal, not to a silent preference: two file
+    // lists in one call means the caller believes something untrue about the
+    // tool, and picking one would launch a run it did not ask for.
     const { fetchImpl, captured } = captureLaunch();
 
-    await launchRunAndWait(
+    const result = await launchRunAndWait(
       {
         kind: "inline",
         manifest: { name: "tmp" },
@@ -628,7 +632,8 @@ describe("launchRunAndWait launch body", () => {
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
 
-    expect(captured()?.body).toMatchObject({ context_files: ["appfile://file_abc12345"] });
+    expect(result.ok).toBe(false);
+    expect(captured()).toBeUndefined();
   });
 
   // A wrong-typed argument used to be indistinguishable from an absent one:
@@ -651,7 +656,9 @@ describe("launchRunAndWait launch body", () => {
     }
   });
 
-  it("names the legacy spelling in its own shape refusal", async () => {
+  it("refuses the retired spelling whatever its type", async () => {
+    // A wrong-typed retired argument is refused for BEING retired, before any
+    // shape check — the caller's first problem is the name, not the value.
     const { fetchImpl } = captureLaunch();
 
     const result = await launchRunAndWait(
@@ -667,10 +674,10 @@ describe("launchRunAndWait launch body", () => {
     expect(result.ok).toBe(false);
     expect(
       String((result as { step: { payload: { error?: string } } }).step.payload.error),
-    ).toMatch(/`context_documents` must be a JSON array/);
+    ).toMatch(/`context_documents` is not an argument of this tool/);
   });
 
-  it("kind:agent rejects the legacy spelling too (never silently drops it)", async () => {
+  it("kind:agent rejects the retired spelling too (never silently drops it)", async () => {
     const { fetchImpl, captured } = captureLaunch();
 
     const result = await launchRunAndWait(
@@ -684,9 +691,6 @@ describe("launchRunAndWait launch body", () => {
     );
 
     expect(result.ok).toBe(false);
-    expect(
-      String((result as { step: { payload: { error?: string } } }).step.payload.error),
-    ).toMatch(/only supported for kind:'inline'/);
     expect(captured()).toBeUndefined();
   });
 

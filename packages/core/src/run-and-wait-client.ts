@@ -173,17 +173,14 @@ function materializeInlineManifest(manifest: Record<string, unknown>): {
  * layer says a file was discarded. The model reads a normal success and reports
  * the work done on a file the run never had.
  *
- *  1. **The legacy spelling.** `context_documents` is the pre-#1177 name. The
- *     HTTP route no longer takes it — `POST /runs/inline` is `.strict()` and
- *     answers a field-precise 400 — so this is the ONLY place the old spelling
- *     is still understood, and it is understood by canonicalizing it (see the
- *     launch-body construction below), never by relaying it. The reason is the
- *     same one that keeps `RETIRED_MCP_TOOL_NAMES` alive: a model reaches for
- *     the old argument from its own transcript — an earlier turn of the same
- *     conversation, made before the upgrade — or from a tool listing taken
- *     before it, and the MCP server advertises `tools.listChanged: false`, so a
- *     client that calls the old shape afterwards is behaving correctly. Reading
- *     only the canonical name here would turn that into a silent drop.
+ *  1. **The retired spelling.** `context_documents` is the pre-#1177 name. It
+ *     is no longer canonicalized — that alias is gone with the rest of the
+ *     rename — but it is REFUSED here rather than left unrecognised, and the
+ *     distinction is the whole point of this function. An argument this
+ *     function does not return is not "rejected", it is invisible: the
+ *     allowlist drops it, the route never sees it, and the run starts with
+ *     nothing mounted. Naming it explicitly is what turns the retirement into
+ *     an error the model can act on instead of a success it will misreport.
  *  2. **A wrong-typed value.** The MCP transport does not validate tool
  *     arguments, so a single URI passed bare, or a JSON-encoded array, used to
  *     be dropped on the floor exactly like an unknown field. It is refused
@@ -198,14 +195,20 @@ function contextFilesArgument(args: Record<string, unknown>): {
   uris?: unknown[];
   error?: string;
 } {
-  const canonical = args.context_files !== undefined && args.context_files !== null;
-  const value = canonical ? args.context_files : args.context_documents;
+  if (args.context_documents !== undefined && args.context_documents !== null) {
+    return {
+      error:
+        "`context_documents` is not an argument of this tool — it was renamed to " +
+        "`context_files`. Resend with `context_files` (a JSON array of appfile:// URIs, " +
+        'e.g. `["appfile://file_abc123"]`).',
+    };
+  }
+  const value = args.context_files;
   if (value === undefined || value === null) return {};
-  const name = canonical ? "context_files" : "context_documents";
   if (!Array.isArray(value)) {
     return {
       error:
-        `\`${name}\` must be a JSON array of appfile:// URIs (e.g. ` +
+        "`context_files` must be a JSON array of appfile:// URIs (e.g. " +
         '`["appfile://file_abc123"]`)' +
         (typeof value === "string"
           ? " — pass the array itself, not a single URI and not a JSON-encoded string."

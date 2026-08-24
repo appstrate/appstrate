@@ -605,21 +605,22 @@ describe("useRunLogStream source guards", () => {
 });
 
 /**
- * Pre-#1177 wire compatibility. A chat session opened today replays run logs
- * and tool results written BEFORE the rename: they tag the frame
- * `event: "document"` and carry `document_id`. Those must still surface a chip
- * — a reader that only knows the new spelling would show an old conversation
- * with no files at all, and nothing anywhere would report an error.
+ * Pre-#1177 wire shapes are NOT read any more.
  *
- * The `document://` URI SCHEME is the one shape that no longer resolves: it
- * only ever addressed `doc_` ids, which the finished rename stopped accepting.
- * A frame carrying one keeps its URI verbatim (nothing here re-mints it), and
- * an attachment part carrying one degrades to inert.
+ * They used to be: a chat session replaying logs written before the rename
+ * would find `event: "document"` frames carrying `document_id`, and
+ * `run_and_wait` results carrying their list under `documents`. No such row or
+ * payload exists, so the readers were narrowed to the canonical spellings.
+ *
+ * Asserted rather than deleted, because the failure mode is silent in both
+ * directions: a reader that quietly re-accepted the old tag would resurrect a
+ * second wire vocabulary, and the tests that used to prove the old one worked
+ * would have simply disappeared with nothing recording the decision.
  */
-describe("legacy `document` wire shapes", () => {
+describe("retired `document` wire shapes", () => {
   const settled = { status: "success" as const, sweepDone: true };
 
-  it('still produces a chip from a pre-rename `event: "document"` log frame', () => {
+  it('ignores a pre-rename `event: "document"` log frame', () => {
     const logs: RunLogLine[] = [
       {
         id: 1,
@@ -628,12 +629,24 @@ describe("legacy `document` wire shapes", () => {
         data: { document_id: "file_legacy1", name: "rapport.md", mime: "text/markdown", size: 12 },
       },
     ];
+    expect(publishedFilesFromLogs(logs)).toEqual([]);
+  });
+
+  it('reads the canonical `event: "file"` frame — the positive control', () => {
+    // Without this, the assertion above would pass just as well if
+    // `publishedFilesFromLogs` were broken outright.
+    const logs: RunLogLine[] = [
+      {
+        id: 1,
+        type: "result",
+        event: "file",
+        data: { file_id: "file_new1", name: "rapport.md", mime: "text/markdown", size: 12 },
+      },
+    ];
     expect(publishedFilesFromLogs(logs)).toEqual([
       {
-        id: "file_legacy1",
-        // No `uri` on the frame — derived through core's `fileUri()`, which
-        // emits the canonical scheme even for a legacy id.
-        uri: "appfile://file_legacy1",
+        id: "file_new1",
+        uri: "appfile://file_new1",
         name: "rapport.md",
         mime: "text/markdown",
         size: 12,
@@ -641,31 +654,22 @@ describe("legacy `document` wire shapes", () => {
     ]);
   });
 
-  it("keeps a legacy frame's own `document://` URI verbatim", () => {
-    const logs: RunLogLine[] = [
-      {
-        id: 1,
-        event: "document",
-        data: { document_id: "file_legacy2", uri: "document://file_legacy2", name: "a.pdf" },
-      },
-    ];
-    expect(publishedFilesFromLogs(logs)[0]?.uri).toBe("document://file_legacy2");
-  });
-
-  it("feeds the derived presentation rule from legacy frames alone", () => {
-    // One legacy publication = a single-file run, exactly as a new-tag frame.
-    const one = publishedFilesFromLogs([
+  it("counts only canonical frames when deriving the presentation rule", () => {
+    // A run whose only publication used the retired tag presents nothing —
+    // there is no file, not a file that fails to present.
+    const legacyOnly = publishedFilesFromLogs([
       { id: 1, event: "document", data: { document_id: "file_only", name: "only.md" } },
     ]);
-    expect(autoPresentFile({ files: one, ...settled })?.id).toBe("file_only");
+    expect(legacyOnly).toEqual([]);
+    expect(autoPresentFile({ files: legacyOnly, ...settled })).toBeUndefined();
 
-    // Mixed old/new tags in the same run still count as two — nothing presented.
+    // Mixed tags therefore count as ONE, and that one presents.
     const mixed = publishedFilesFromLogs([
       { id: 1, event: "document", data: { document_id: "file_old", name: "old.md" } },
       { id: 2, event: "file", data: { file_id: "file_new", name: "new.md" } },
     ]);
-    expect(mixed.map((f) => f.id)).toEqual(["file_old", "file_new"]);
-    expect(autoPresentFile({ files: mixed, ...settled })).toBeUndefined();
+    expect(mixed.map((f) => f.id)).toEqual(["file_new"]);
+    expect(autoPresentFile({ files: mixed, ...settled })?.id).toBe("file_new");
   });
 
   it("treats a retired `document://` attachment URI as inert, not as a file", () => {
@@ -683,46 +687,33 @@ describe("legacy `document` wire shapes", () => {
     });
   });
 
-  it("still reads a persisted tool result whose items carry `document_id`", () => {
+  it("ignores a tool-result item keyed by `document_id`", () => {
     expect(
       extractRunFiles({
         body: { id: "run_1", files: [{ document_id: "file_x", name: "x.md" }] },
       }),
+    ).toEqual([]);
+    // Positive control: the same item under the canonical key is read.
+    expect(
+      extractRunFiles({ body: { id: "run_1", files: [{ id: "file_x", name: "x.md" }] } }),
     ).toEqual([{ id: "file_x", uri: "appfile://file_x", name: "x.md" }]);
   });
 
-  it("still reads a persisted tool result whose list sits under `documents`", () => {
-    // The run_and_wait payload key was `documents` until #1177. This payload is
-    // the RELOAD-SAFE source of a run card's chips — it exists precisely
-    // because run logs get pruned — so a conversation reopened from before the
-    // rename must still find its files here, top level or under the envelope.
+  it("ignores a tool-result list sitting under `documents`", () => {
     expect(
       extractRunFiles({
         id: "run_1",
         status: "success",
         done: true,
-        documents: [
-          {
-            id: "file_1",
-            uri: "document://file_1",
-            name: "report.html",
-            mime: "text/html",
-            size: 12,
-          },
-        ],
+        documents: [{ id: "file_1", name: "report.html" }],
       }),
-    ).toEqual([
-      { id: "file_1", uri: "document://file_1", name: "report.html", mime: "text/html", size: 12 },
-    ]);
-
+    ).toEqual([]);
     expect(
-      extractRunFiles({
-        body: { id: "run_1", documents: [{ document_id: "file_2", name: "a.pdf" }] },
-      }),
-    ).toEqual([{ id: "file_2", uri: "appfile://file_2", name: "a.pdf" }]);
+      extractRunFiles({ body: { id: "run_1", documents: [{ id: "file_2", name: "a.pdf" }] } }),
+    ).toEqual([]);
   });
 
-  it("prefers the canonical `files` key when a payload carries both", () => {
+  it("reads the canonical `files` key and ignores a `documents` sibling", () => {
     expect(
       extractRunFiles({
         files: [{ id: "file_new", name: "new.md" }],

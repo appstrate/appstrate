@@ -294,8 +294,10 @@ describe("isPublishedFileLogEvent", () => {
     expect(isPublishedFileLogEvent("file")).toBe(true);
   });
 
-  it("still accepts the pre-#1177 `document` tag", () => {
-    expect(isPublishedFileLogEvent("document")).toBe(true);
+  it("rejects the retired pre-#1177 `document` tag", () => {
+    // Accepted until the rename finished. A row carrying it renders without
+    // its attachment — an absence, not an error — and no such row exists.
+    expect(isPublishedFileLogEvent("document")).toBe(false);
   });
 
   it("rejects every other run-log event, and the empty cases", () => {

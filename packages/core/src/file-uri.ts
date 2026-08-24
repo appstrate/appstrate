@@ -44,20 +44,21 @@
 export const FILE_URI_PREFIX = "appfile://";
 
 /**
- * Every `run_logs.event` tag that announces a published file, canonical first.
- * The sink writes `"file"` today (`type='result' event='file'`); `"document"`
- * is the pre-#1177 spelling and stays readable FOREVER. Unlike the retired
- * `document://` URI scheme, this one has live values behind it: `"document"` is
- * what every release up to and including `v1.0.0-beta.51` wrote, a `run_logs`
- * row is immutable once written, and the run page renders rows the current
- * build never emitted.
+ * Every `run_logs.event` tag that announces a published file. The sink writes
+ * `"file"` (`type='result' event='file'`), and that is the whole set.
  *
- * Lives here, beside {@link FILE_URI_PREFIX}, because it is the same kind of
- * thing: pure data about a wire spelling that two independent readers (the web
- * shell's run page and the chat module's run card) must agree on. Two copies of
- * a compatibility list is how one of them silently stops matching.
+ * It used to carry the pre-#1177 `"document"` spelling as well, because a
+ * `run_logs` row is immutable once written and every release up to
+ * `v1.0.0-beta.51` wrote that tag. It is gone with the rest of the rename: no
+ * row carrying it exists any more. A deployment that somehow held one would
+ * render that row without its file attachment — not an error, just an absence.
+ *
+ * Stays a list rather than a bare string, and stays HERE, because it is the
+ * agreement point three independent readers share (the web shell's run page,
+ * the chat module's run card, and the event sink that writes the tag). Two
+ * copies of it is how one of them silently stops matching.
  */
-export const PUBLISHED_FILE_LOG_EVENTS: readonly string[] = ["file", "document"];
+export const PUBLISHED_FILE_LOG_EVENTS: readonly string[] = ["file"];
 
 /**
  * `files.purpose` of a file an agent published from a run. The other purposes

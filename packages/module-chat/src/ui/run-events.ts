@@ -344,10 +344,10 @@ export const UNNAMED_FILE = "file";
 function asChatRunFile(raw: unknown): ChatRunFile | undefined {
   const r = asRecord(raw);
   if (!r) return undefined;
-  // `id` in the tool result; `file_id` in the `file.published` log frame; the
-  // pre-#1177 frames used `document_id` — read it too (same reason the legacy
-  // `event` tag stays accepted: persisted frames are immutable once written).
-  const id = nonEmptyString(r.id) ?? nonEmptyString(r.file_id) ?? nonEmptyString(r.document_id);
+  // `id` in the tool result; `file_id` in the `file.published` log frame. The
+  // pre-#1177 `document_id` spelling is no longer read: no persisted frame
+  // carries it.
+  const id = nonEmptyString(r.id) ?? nonEmptyString(r.file_id);
   const uri = nonEmptyString(r.uri) ?? (id ? fileUri(id) : undefined);
   const name = nonEmptyString(r.name) ?? UNNAMED_FILE;
   if (!id || !uri) return undefined;
@@ -359,23 +359,17 @@ function asChatRunFile(raw: unknown): ChatRunFile | undefined {
 }
 
 /**
- * The keys a persisted `run_and_wait` result can carry its published file list
- * under, canonical first. `files` is what the tool writes today; `documents` is
- * the pre-#1177 spelling and stays readable FOREVER — this payload IS the
- * reload-safe source (it exists precisely because run logs get pruned), so a
- * conversation reopened from before the rename would otherwise come back with
- * no chips at all, permanently, once its logs are gone.
+ * The published file list of a persisted `run_and_wait` result. The tool
+ * writes it under `files`, and that is the only key read.
+ *
+ * The pre-#1177 `documents` spelling used to be accepted here as well, on the
+ * grounds that this payload IS the reload-safe source (it exists precisely
+ * because run logs get pruned). It is gone with the rest of the rename: no
+ * persisted result carries it.
  */
-const PUBLISHED_FILE_RESULT_KEYS = ["files", "documents"] as const;
-
-/** First `PUBLISHED_FILE_RESULT_KEYS` entry present on `record` as an array. */
 function rawFileList(record: Record<string, unknown> | null | undefined): unknown[] | undefined {
-  if (!record) return undefined;
-  for (const key of PUBLISHED_FILE_RESULT_KEYS) {
-    const value = record[key];
-    if (Array.isArray(value)) return value;
-  }
-  return undefined;
+  const value = record?.files;
+  return Array.isArray(value) ? value : undefined;
 }
 
 /**
