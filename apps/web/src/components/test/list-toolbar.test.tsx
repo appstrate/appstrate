@@ -191,10 +191,7 @@ describe("the view toggle", () => {
     expect(html).toContain('aria-label="Vue cartes" aria-pressed="false"');
   });
 
-  it("opens the row, before what narrows it and before what acts on it", () => {
-    // "What am I looking at" comes before "which rows" and before "what do I
-    // do". It also gets it out of the action cluster, where it read as one more
-    // button rather than as a choice of representation.
+  it("keeps search and utilities left, and the representation at the far right", () => {
     const html = render(
       <ListToolbar
         filters={filters()}
@@ -204,8 +201,8 @@ describe("the view toggle", () => {
         actions={<button>Nouvel agent</button>}
       />,
     );
-    expect(html.indexOf("aria-pressed")).toBeLessThan(html.indexOf("Rechercher…"));
     expect(html.indexOf("Rechercher…")).toBeLessThan(html.indexOf("Nouvel agent"));
+    expect(html.indexOf("Nouvel agent")).toBeLessThan(html.indexOf("aria-pressed"));
   });
 });
 

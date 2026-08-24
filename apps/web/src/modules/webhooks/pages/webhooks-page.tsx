@@ -9,6 +9,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { useWebhooks } from "../hooks/use-webhooks";
 import { ErrorState, EmptyState } from "@/components/page-states";
 import { DataTable } from "@/components/data-table";
+import { SettingsPageActions } from "@/components/settings/settings-page-actions";
 import { useWebhookColumns } from "../components/webhook-columns";
 import { TOOLBAR_ACTION } from "@/lib/toolbar-button";
 import { WebhookCreateModal } from "../components/webhook-create-modal";
@@ -27,12 +28,12 @@ export function WebhooksPage() {
 
   return (
     <div>
-      <div className="mb-4 flex items-center justify-end">
+      <SettingsPageActions>
         <Button variant="outline" className={TOOLBAR_ACTION} onClick={() => setCreateOpen(true)}>
           <Plus />
           {t("settings:webhooks.createTitle")}
         </Button>
-      </div>
+      </SettingsPageActions>
 
       <DataTable
         label={t("settings:webhooks.pageTitle")}

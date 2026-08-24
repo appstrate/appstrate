@@ -16,7 +16,7 @@ import { useColumnVisibility } from "../stores/column-visibility-store";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { usePackageViewStore } from "../stores/list-view-store";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
-import { TOOLBAR_ACTION, TOOLBAR_UTILITY } from "../lib/toolbar-button";
+import { TOOLBAR_ACTION } from "../lib/toolbar-button";
 import { PageHeader, type BreadcrumbEntry } from "../components/page-header";
 import { ImportModal } from "../components/import-modal";
 import { ErrorState, EmptyState } from "../components/page-states";
@@ -92,7 +92,7 @@ export function PackageTab({
   const visibility = useColumnVisibility("packages");
 
   const header = title ? (
-    <PageHeader title={title} emoji={emoji} breadcrumbs={breadcrumbs}>
+    <PageHeader title={title} emoji={emoji} breadcrumbs={breadcrumbs} actions={extraActions}>
       {headerContent}
     </PageHeader>
   ) : null;
@@ -132,7 +132,7 @@ export function PackageTab({
         columns={view === "table" ? columnMenu(allColumns, visibility) : undefined}
         view={view}
         onViewChange={setView}
-        actions={extraActions}
+        actions={title ? undefined : extraActions}
       />
       {view === "table" ? (
         <PackagesTable
@@ -198,17 +198,15 @@ export function PackageList() {
         extraActions={
           isAdmin ? (
             <>
-              {/* Importing is a second way in, not the way in: it takes the
-                  utility treatment, like Filters and Columns. */}
               <Button
                 variant="outline"
                 size="sm"
-                className={TOOLBAR_UTILITY}
+                className={TOOLBAR_ACTION}
                 title={t("nav.import", { ns: "common" })}
                 onClick={() => setImportOpen(true)}
               >
                 <Upload />
-                <span className="hidden @lg/bar:inline">{t("nav.import", { ns: "common" })}</span>
+                <span className="hidden sm:inline">{t("nav.import", { ns: "common" })}</span>
               </Button>
               <Link to="/agents/new">
                 <Button
@@ -218,7 +216,7 @@ export function PackageList() {
                   title={t("list.create")}
                 >
                   <Plus />
-                  <span className="hidden @lg/bar:inline">{t("list.create")}</span>
+                  <span className="hidden sm:inline">{t("list.create")}</span>
                 </Button>
               </Link>
             </>

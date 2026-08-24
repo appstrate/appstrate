@@ -1,13 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { Boxes, LibraryBig, Plus, Search, SearchX } from "lucide-react";
+import {
+  Bot,
+  Boxes,
+  ChevronDown,
+  LibraryBig,
+  MessageSquareText,
+  PencilLine,
+  Plus,
+  Search,
+  SearchX,
+} from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@appstrate/ui/components/dropdown-menu";
 import { PageHeader } from "../components/page-header";
+import { Modal } from "../components/modal";
 import { CardGrid } from "../components/card-grid";
 import { DataTable, columnMenu, visibleColumns } from "../components/data-table";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
@@ -81,6 +98,84 @@ function IntegrationCard({ integration }: { integration: IntegrationSummaryWire 
         <p className="text-muted-foreground mt-3 line-clamp-2 text-sm">{manifest.description}</p>
       )}
     </Link>
+  );
+}
+
+/**
+ * PROTOTYPE: creation-method chooser. Its row grammar is intentionally local,
+ * but can later take a resource noun and option set for MCP servers, skills or
+ * agents once those flows have real destinations.
+ */
+function IntegrationCreationMethodModal({
+  open,
+  onClose,
+  onManual,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onManual: () => void;
+}) {
+  const { t } = useTranslation("settings");
+  const methods = [
+    {
+      id: "manual",
+      icon: PencilLine,
+      title: t("integrations.creation.manual.title"),
+      description: t("integrations.creation.manual.description"),
+      onClick: onManual,
+      disabled: false,
+    },
+    {
+      id: "chat",
+      icon: MessageSquareText,
+      title: t("integrations.creation.chat.title"),
+      description: t("integrations.creation.chat.description"),
+      onClick: undefined,
+      disabled: true,
+    },
+    {
+      id: "coding-agent",
+      icon: Bot,
+      title: t("integrations.creation.codingAgent.title"),
+      description: t("integrations.creation.codingAgent.description"),
+      onClick: undefined,
+      disabled: true,
+    },
+  ];
+
+  return (
+    <Modal open={open} onClose={onClose} title={t("integrations.creation.title")}>
+      <div className="space-y-2">
+        {methods.map(({ id, icon: Icon, title, description, onClick, disabled }) => (
+          <Button
+            key={id}
+            type="button"
+            variant="outline"
+            className="h-auto min-h-16 w-full justify-start gap-3 p-3 text-left whitespace-normal"
+            onClick={onClick}
+            disabled={disabled}
+            data-creation-method={id}
+          >
+            <span className="bg-muted grid size-9 shrink-0 place-items-center rounded-md">
+              <Icon />
+            </span>
+            <span className="min-w-0">
+              <span className="flex items-center gap-2 text-sm font-semibold">
+                {title}
+                {disabled && (
+                  <Badge variant="secondary" className="font-normal">
+                    {t("integrations.creation.unavailable")}
+                  </Badge>
+                )}
+              </span>
+              <span className="text-muted-foreground mt-0.5 block text-xs leading-relaxed font-normal">
+                {description}
+              </span>
+            </span>
+          </Button>
+        ))}
+      </div>
+    </Modal>
   );
 }
 
@@ -190,6 +285,7 @@ function CataloguePanel({
             },
           ]}
           onReset={onReset}
+          placement="panel"
         />
       </div>
 
@@ -232,6 +328,7 @@ export function IntegrationsPage() {
   const setView = useIntegrationViewStore((state) => state.setView);
   const visibility = useColumnVisibility("integrations");
   const searchPlaceholder = useSearchPlaceholder(t("integrations.title"));
+  const [creationMethodOpen, setCreationMethodOpen] = useState(false);
 
   const statuses = list.values("status", INTEGRATION_STATUSES);
   const origins = list.values("origin", INTEGRATION_ORIGINS);
@@ -288,6 +385,16 @@ export function IntegrationsPage() {
     );
   };
 
+  const openCatalogue = () =>
+    navigate(
+      {
+        pathname: location.pathname,
+        search: catalogueSearch(location.search, true),
+        hash: location.hash,
+      },
+      { state: withCatalogueDepth(location.state, 1) },
+    );
+
   const empty = (
     <EmptyState
       icon={filtering ? SearchX : Boxes}
@@ -302,6 +409,29 @@ export function IntegrationsPage() {
         emoji="🧩"
         title={t("integrations.title")}
         breadcrumbs={[{ label: t("integrations.title") }]}
+        wrapActions
+        actions={
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className={TOOLBAR_ACTION}>
+                {t("integrations.actions")}
+                <ChevronDown />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={openCatalogue}>
+                <LibraryBig />
+                {t("integrations.catalogue.browse")}
+              </DropdownMenuItem>
+              {isAdmin && (
+                <DropdownMenuItem onSelect={() => setCreationMethodOpen(true)}>
+                  <Plus />
+                  {t("integrations.create")}
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        }
       >
         <p className="text-muted-foreground mt-1 text-sm">{t("integrations.subtitle")}</p>
       </PageHeader>
@@ -334,42 +464,11 @@ export function IntegrationsPage() {
         columns={view === "table" ? columnMenu(allColumns, visibility) : undefined}
         view={view}
         onViewChange={setView}
-        actions={
-          <>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className={TOOLBAR_ACTION}
-              title={t("integrations.catalogue.browse")}
-              onClick={() =>
-                navigate(
-                  {
-                    pathname: location.pathname,
-                    search: catalogueSearch(location.search, true),
-                    hash: location.hash,
-                  },
-                  { state: withCatalogueDepth(location.state, 1) },
-                )
-              }
-            >
-              <LibraryBig />
-              <span className="hidden @xl/bar:inline">{t("integrations.catalogue.browse")}</span>
-            </Button>
-            {isAdmin && (
-              <Button asChild variant="outline" size="sm" className={TOOLBAR_ACTION}>
-                <Link to="/integrations/new" title={t("integrations.createCustom")}>
-                  <Plus />
-                  <span className="hidden @lg/bar:inline">{t("integrations.createCustom")}</span>
-                </Link>
-              </Button>
-            )}
-          </>
-        }
       />
 
       {view === "table" ? (
         <DataTable
+          appearance="card"
           label={t("integrations.tableLabel")}
           columns={columns}
           rows={shown}
@@ -398,6 +497,15 @@ export function IntegrationsPage() {
       )}
       <ListFooter
         count={isLoading || error ? undefined : t("integrations.count", { count: shown.length })}
+      />
+
+      <IntegrationCreationMethodModal
+        open={creationMethodOpen}
+        onClose={() => setCreationMethodOpen(false)}
+        onManual={() => {
+          setCreationMethodOpen(false);
+          navigate("/integrations/new");
+        }}
       />
 
       {catalogueOpen && (

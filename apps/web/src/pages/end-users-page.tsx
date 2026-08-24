@@ -4,11 +4,10 @@ import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Plus, Search, SearchX, Users } from "lucide-react";
+import { Plus, SearchX, Users } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
-import { Input } from "@appstrate/ui/components/input";
 import {
   useDeleteEndUser,
   useEndUser,
@@ -21,8 +20,11 @@ import { EndUserCreateModal } from "../components/end-user-create-modal";
 import { EndUserDetailModal } from "../components/end-user-detail-modal";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Modal } from "../components/modal";
-import { DataTable } from "../components/data-table";
+import { DataTable, columnMenu, visibleColumns } from "../components/data-table";
+import { ListToolbar } from "../components/list-toolbar";
+import { SettingsPageActions } from "../components/settings/settings-page-actions";
 import { TOOLBAR_ACTION } from "../lib/toolbar-button";
+import { useColumnVisibility } from "../stores/column-visibility-store";
 import { endUserDisplayName, useEndUserColumns } from "./end-user-columns";
 import { endUserHref, endUsersHref } from "./end-user-route";
 
@@ -116,42 +118,37 @@ function EndUsersPageContent() {
     setLoadedPages((previous) => previous.filter((user) => user.id !== id));
   };
 
-  const columns = useEndUserColumns({
+  const allColumns = useEndUserColumns({
     deletingUserId: deleteMutation.isPending
       ? (deleteMutation.variables?.params.path.id ?? null)
       : null,
     onEdit: (user) => navigate(endUserHref(location, user.id, true), { state: location.state }),
     onDelete: setPendingDelete,
   });
+  const visibility = useColumnVisibility("end-users");
+  const columns = visibleColumns(allColumns, visibility.hidden);
 
   if (!isAdmin) return null;
   if (!applicationId) return <EmptyState message={t("applications.noAppSelected")} icon={Users} />;
 
   return (
     <div>
-      <div className="mb-4 flex items-center gap-2">
-        <div className="relative min-w-0 flex-1 sm:max-w-[250px]">
-          <Search
-            size={16}
-            className="text-muted-foreground absolute top-1/2 left-3 -translate-y-1/2"
-          />
-          <Input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t("applications.searchEndUsers")}
-            className="pl-9"
-          />
-        </div>
-        <Button
-          variant="outline"
-          className={`${TOOLBAR_ACTION} ml-auto`}
-          onClick={() => setCreateOpen(true)}
-        >
+      <SettingsPageActions>
+        <Button variant="outline" className={TOOLBAR_ACTION} onClick={() => setCreateOpen(true)}>
           <Plus />
           {t("applications.newEndUser")}
         </Button>
-      </div>
+      </SettingsPageActions>
+
+      <ListToolbar
+        search={{
+          value: search,
+          onChange: setSearch,
+          placeholder: t("applications.searchEndUsers"),
+        }}
+        filters={[]}
+        columns={columnMenu(allColumns, visibility)}
+      />
 
       <DataTable
         label={t("endUsers.pageTitle")}

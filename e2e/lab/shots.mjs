@@ -94,10 +94,23 @@ for (const scenario of SCENARIOS) {
       await page.waitForTimeout(1200);
       if (screen.expectedText) {
         const actualPath = new URL(page.url()).pathname;
+        // Responsive headers may render a desktop and a mobile copy, with one
+        // hidden by CSS. The route is healthy when ANY exact copy is visible;
+        // `.first().isVisible()` incorrectly failed on the hidden sibling.
         const visible = await page
           .getByText(screen.expectedText, { exact: true })
-          .first()
-          .isVisible()
+          .evaluateAll((elements) =>
+            elements.some((element) => {
+              const style = getComputedStyle(element);
+              const rect = element.getBoundingClientRect();
+              return (
+                style.visibility !== "hidden" &&
+                style.display !== "none" &&
+                rect.width > 0 &&
+                rect.height > 0
+              );
+            }),
+          )
           .catch(() => false);
         if (actualPath !== screen.path || !visible) {
           navigationFailures.push({

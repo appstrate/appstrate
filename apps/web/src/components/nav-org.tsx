@@ -31,7 +31,13 @@ type NavItem = { path: string; label: string; icon: LucideIcon; badge?: number }
 
 export function NavOrg() {
   const { t } = useTranslation();
-  const location = useLocation();
+  // Subscribe to route changes even though the visible URL, not the
+  // background route exposed by this tree, owns the active state below.
+  useLocation();
+  // Routed settings keep the underlying page mounted, so React Router exposes
+  // that background location to this tree. Use the visible path to avoid
+  // painting Dashboard active behind an open settings surface.
+  const visiblePathname = window.location.pathname;
   const { data: unreadCount } = useUnreadCount();
   const { data: agents } = useAgents();
 
@@ -77,7 +83,7 @@ export function NavOrg() {
         icon={item.icon}
         label={item.label}
         isActive={
-          item.path === "/" ? location.pathname === "/" : location.pathname.startsWith(item.path)
+          item.path === "/" ? visiblePathname === "/" : visiblePathname.startsWith(item.path)
         }
       >
         {item.badge && item.badge > 0 ? (
@@ -100,7 +106,7 @@ export function NavOrg() {
           <SidebarMenuItem className="relative">
             <SidebarMenuButton
               asChild
-              isActive={location.pathname.startsWith("/runs")}
+              isActive={visiblePathname.startsWith("/runs")}
               tooltip={t("nav.runs")}
             >
               <Link to="/runs">

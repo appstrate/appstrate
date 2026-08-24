@@ -10,6 +10,7 @@ import { useApplications } from "../../hooks/use-applications";
 import { useAppSwitcher } from "../../hooks/use-current-application";
 import { ErrorState, EmptyState } from "../../components/page-states";
 import { DataTable } from "../../components/data-table";
+import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import { useApplicationColumns } from "./application-columns";
 import { TOOLBAR_ACTION } from "../../lib/toolbar-button";
 import { ApplicationCreateModal } from "../../components/application-create-modal";
@@ -40,7 +41,7 @@ export function OrgSettingsApplicationsPage() {
 
   return (
     <>
-      <div className="mb-4 flex justify-end">
+      <SettingsPageActions>
         <Button
           variant="outline"
           className={TOOLBAR_ACTION}
@@ -50,7 +51,7 @@ export function OrgSettingsApplicationsPage() {
           <Plus />
           {t("applications.create")}
         </Button>
-      </div>
+      </SettingsPageActions>
 
       <DataTable
         label={t("applications.pageTitle")}

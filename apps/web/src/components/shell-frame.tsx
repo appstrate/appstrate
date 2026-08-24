@@ -12,20 +12,27 @@
  */
 
 import type { ReactNode } from "react";
-import { PanelLeft, Search } from "lucide-react";
+import { Link, useLocation } from "react-router-dom";
+import { Menu, PanelLeft, Search, Settings } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { NavUser } from "@/components/nav-user";
 import { OrgSwitcher } from "@/components/org-switcher";
 import { NotificationBell } from "@/components/notification-bell";
 import { ProductTabs } from "@/components/product-tabs";
 import { ShellBreadcrumb } from "@/components/shell-breadcrumb";
+import { openAsModal } from "@/lib/modal-route";
 import { cn } from "@appstrate/ui/cn";
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
   SidebarTrigger,
 } from "@appstrate/ui/components/sidebar";
+import { useSidebar } from "@appstrate/ui/components/sidebar-context";
 
 export function ShellSidebar({
   children,
@@ -35,6 +42,16 @@ export function ShellSidebar({
   children: ReactNode;
   contentClassName?: string;
 }) {
+  const { t } = useTranslation();
+  const location = useLocation();
+  // The page route tree deliberately renders the modal's background location.
+  // The address bar is therefore the source of truth for this one global
+  // destination while settings are open.
+  const settingsActive =
+    window.location.pathname.startsWith("/org-settings") ||
+    window.location.pathname.startsWith("/workspace-settings") ||
+    window.location.pathname.startsWith("/preferences");
+
   return (
     <Sidebar collapsible="icon">
       {/* Head: the brand cell alone, at the header's height and closed by the
@@ -53,12 +70,28 @@ export function ShellSidebar({
         <ProductTabs />
       </div>
       <SidebarContent className={cn("gap-0", contentClassName)}>{children}</SidebarContent>
-      {/* Foot: who you are, and nothing else. Usage and Settings left it — both
-          configure the org, and the org's own switcher already carries them
-          (the gear on the row you are in, the settings link under the panel).
-          A row that repeats what the control above it offers is a row that
-          teaches the control is not enough. */}
+      {/* Settings is a destination in the global mobile drawer, not only an
+          action hidden inside the context switcher. It sits above the user
+          boundary so the drawer can represent the settings overlay as the
+          active global destination. */}
       <SidebarFooter className="gap-0 p-0">
+        <SidebarMenu className="px-2 pb-2 md:hidden">
+          <SidebarMenuItem>
+            <SidebarMenuButton asChild isActive={settingsActive} tooltip={t("nav.settings")}>
+              {settingsActive ? (
+                <button type="button">
+                  <Settings />
+                  <span>{t("nav.settings")}</span>
+                </button>
+              ) : (
+                <Link to="/org-settings" state={openAsModal(location)}>
+                  <Settings />
+                  <span>{t("nav.settings")}</span>
+                </Link>
+              )}
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
         {/* Who you are, and the collapse beside it — the control that changes
             the column's width sits at the end of the column, not in the head
             where it competed with the product name. */}
@@ -88,17 +121,31 @@ export function ShellHeader({
    */
   fullBleed?: boolean;
 }) {
+  const { isMobile, openMobile } = useSidebar();
+
   return (
-    <header className="bg-canvas h-header sticky top-0 z-20 flex shrink-0 items-center border-b">
+    <header
+      className={cn(
+        "bg-canvas md:h-header sticky top-0 z-20 flex shrink-0 flex-col border-b md:flex-row md:items-center",
+        isMobile && openMobile && "invisible",
+      )}
+    >
       <div
         className={cn(
-          "px-gutter flex w-full items-center gap-2",
+          "px-gutter h-header flex w-full shrink-0 items-center gap-2 border-b border-b-black/5 md:border-b-0",
           !fullBleed && "max-w-page mx-auto",
         )}
       >
         {/* Mobile-only trigger — desktop collapse lives in the sidebar */}
-        <SidebarTrigger className="md:hidden" />
-        <ShellBreadcrumb />
+        <SidebarTrigger className="-ml-5 size-11 shrink-0 rounded-l-none md:hidden">
+          <Menu className="size-4" />
+        </SidebarTrigger>
+        <div className="flex min-w-0 flex-1 md:hidden">
+          <OrgSwitcher variant="mobile" />
+        </div>
+        <div className="hidden min-w-0 flex-1 md:flex">
+          <ShellBreadcrumb />
+        </div>
         {/* The page's own actions, then the two utilities that are global but
             not personal: search and notifications. They sit here rather than in
             the sidebar because the sidebar answers "where am I" and these two
@@ -123,6 +170,9 @@ export function ShellHeader({
           </button>
           <NotificationBell />
         </div>
+      </div>
+      <div className="px-gutter flex h-10 w-full shrink-0 items-center md:hidden">
+        <ShellBreadcrumb />
       </div>
     </header>
   );

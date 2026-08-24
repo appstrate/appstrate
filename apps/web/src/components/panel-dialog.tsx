@@ -14,7 +14,10 @@
  * scrolling as such.
  */
 import type { ReactNode } from "react";
+import { cn } from "@appstrate/ui/cn";
 import { Dialog, DialogContent, DialogTitle } from "@appstrate/ui/components/dialog";
+import { ScrollArea } from "@appstrate/ui/components/scroll-area";
+import { useIsMobile } from "@appstrate/ui/use-mobile";
 
 interface PanelDialogProps {
   /** Announced to screen readers; the visible heading lives in `rail`. */
@@ -27,20 +30,70 @@ interface PanelDialogProps {
    * collapses to one line.
    */
   mobileNav?: ReactNode;
+  /** Use the design-system overlay scrollbar for this panel's content pane. */
+  contentScrollArea?: boolean;
+  /** Localized accessible name for the standard dialog close control. */
+  closeLabel?: string;
+  /** Keep page headings and toolbars below the dialog's close affordance. */
+  reserveCloseArea?: boolean;
+  /** Prototype the panel as a shell surface below the two-line mobile header. */
+  mobileAsSurface?: boolean;
   children: ReactNode;
   onClose: () => void;
 }
 
-export function PanelDialog({ title, rail, mobileNav, children, onClose }: PanelDialogProps) {
+export function PanelDialog({
+  title,
+  rail,
+  mobileNav,
+  contentScrollArea = false,
+  closeLabel,
+  reserveCloseArea = false,
+  mobileAsSurface = false,
+  children,
+  onClose,
+}: PanelDialogProps) {
+  const isMobile = useIsMobile();
+  const content = (
+    <div className={cn("p-6", reserveCloseArea && "md:pt-14")}>
+      {/* `pr-10` clears the dialog's own close button, which is absolutely
+          positioned top-right and would otherwise sit on the selector. */}
+      {mobileNav && <div className="mb-4 pr-10 md:hidden">{mobileNav}</div>}
+      {children}
+    </div>
+  );
+
+  if (mobileAsSurface && isMobile) {
+    return (
+      <section
+        data-settings-mobile-surface
+        aria-label={title}
+        className="bg-background fixed inset-x-0 top-24 bottom-0 z-10 flex min-w-0 flex-col overflow-hidden"
+      >
+        {contentScrollArea ? (
+          <ScrollArea className="min-h-0 min-w-0 flex-1">{content}</ScrollArea>
+        ) : (
+          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">{content}</div>
+        )}
+      </section>
+    );
+  }
+
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent
+        closeLabel={closeLabel}
         className={[
           "flex h-[min(720px,calc(100dvh-6rem))] w-[min(1080px,calc(100vw-4rem))] max-w-none gap-0 overflow-hidden p-0",
           // Full screen on a phone: two panes side by side do not survive
           // 390px. The negative margin cancels the padding the shared dialog
           // wrapper puts around every content box.
           "max-sm:-m-4 max-sm:h-[100dvh] max-sm:w-[100vw] max-sm:rounded-none max-sm:border-0",
+          // The reserved header band owns the close control at every modal
+          // width. Other panels keep the existing phone-sized target only.
+          reserveCloseArea
+            ? "[&>button]:top-1.5 [&>button]:right-1.5 [&>button]:z-30 [&>button]:flex [&>button]:size-11 [&>button]:items-center [&>button]:justify-center [&>button]:rounded-md"
+            : "max-md:[&>button]:top-2.5 max-md:[&>button]:right-2.5 max-md:[&>button]:z-30 max-md:[&>button]:flex max-md:[&>button]:size-11 max-md:[&>button]:items-center max-md:[&>button]:justify-center",
         ].join(" ")}
       >
         <DialogTitle className="sr-only">{title}</DialogTitle>
@@ -56,12 +109,13 @@ export function PanelDialog({ title, rail, mobileNav, children, onClose }: Panel
         <aside className="bg-sidebar border-sidebar-border w-56 shrink-0 overflow-y-auto border-r max-md:hidden">
           {rail}
         </aside>
-        <div className="min-w-0 flex-1 overflow-y-auto p-6">
-          {/* `pr-10` clears the dialog's own close button, which is absolutely
-              positioned top-right and would otherwise sit on the selector. */}
-          {mobileNav && <div className="mb-4 pr-10 md:hidden">{mobileNav}</div>}
-          {children}
-        </div>
+        {contentScrollArea ? (
+          <div className="flex min-w-0 flex-1 flex-col">
+            <ScrollArea className="min-h-0 min-w-0 flex-1">{content}</ScrollArea>
+          </div>
+        ) : (
+          <div className="min-w-0 flex-1 overflow-y-auto">{content}</div>
+        )}
       </DialogContent>
     </Dialog>
   );

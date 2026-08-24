@@ -2168,6 +2168,107 @@ mobile contracts intact.
 `TEST_TIER=0 bun test apps/web` is green at 628 tests. `bun run check` is green
 at 33/33 tasks with the same nine pre-existing warnings.
 
+**Mobile navigation follow-up under visual review, 24 August.** The two stacked
+mobile groups with a context dropdown and a second page dropdown are replaced
+by one internal left drawer that mirrors the desktop rail: Organisation owns
+its context selector and visible destinations, then Workspace owns its selector
+and visible destinations. The global two-line mobile header remains sticky
+above the settings surface. Inside that surface, a 44px `Menu` trigger and the
+active page title precede the content. The full-width menu covers only the
+surface below the global header, traps keyboard focus, identifies itself as a
+modal navigation surface, and makes the covered page content inert. A route
+link or Escape closes it; either context selector leaves it open. There is no
+scrim because no part of the covered settings surface remains exposed. Desktop
+and tablet settings remain the closable two-pane dialog.
+
+The sticky phone header keeps the active destination visible while the content
+scrolls. Its 44px Menu trigger uses the existing outlined secondary-action
+grammar, with a transparent fill so the surface behind it remains visible. The
+settings content pane alone opts into the existing Radix `ScrollArea`: its
+overlay thumb replaces the permanently allocated native scrollbar without
+changing the catalogue or any other panel in this pass. A later scrollbar
+harmonisation should start from this shared component, not add local CSS to
+individual pages.
+
+The first implementation left that header inside the Radix viewport with CSS
+`sticky`. Real geometry contradicted the class: on Workspace Authentication,
+the header moved from `top: 0` to `top: -506px` at the end of the page. It is
+now a sibling above the viewport, so the content scrolls independently and the
+header measures `top: 0` before and after the same 506px scroll. That page is
+1442px tall inside a 936px viewport at 390. The neutral Menu control measures
+44px with a one-pixel outline and transparent fill. The native scrollbar is
+suppressed by the stock Radix viewport, while its discreet thumb is present on
+hover. No scrollbar treatment was applied outside this settings content pane.
+
+The current route state distinguishes a cold precise URL from an in-app entry.
+The drawer opens initially for an in-app entry to either General route,
+including the index-to-General redirect, and stays closed for a cold URL or
+another precise settings destination. The canonical `lab:settings` guard now
+owns this contract together with the active global Settings row, drawer closing,
+organisation-switcher viewport fit, the dependent context selectors, keyed
+remount, Back, desktop Close and legacy redirect. A temporary second shell guard
+was removed rather than letting two partial descriptions drift.
+
+**Table surfaces and collection apparatus generalised, 24 August.** A table in
+settings is integrated into the white settings surface: it keeps its column
+alignment and horizontal separators, but has no outer border, radius, fill or
+shadow of its own. The same `DataTable` remains a white bordered card everywhere
+else, including every level-one collection. The distinction belongs to the DOM
+surface, not to each settings page: the settings content owns a
+`data-settings-table-surface="integrated"` marker and `DataTable` responds to
+that ancestor. A React appearance context was considered and removed because
+context crosses portals; a future table inside a nested modal would otherwise
+inherit the settings treatment despite sitting on a new dialog surface.
+
+The accepted collection apparatus is now the default `ListToolbar`, rather
+than a query-string prototype. Search and the table utilities sit together at
+the left, Filter and Columns are icon controls, and the view switch stays at
+the far right. On a phone Search becomes an icon that reveals a full-width
+field on the next line. The catalogue's toolbar deliberately opts into the
+semantic `panel` placement, preserving its already-reviewed always-visible
+mobile search instead of accidentally inheriting page chrome. Agents, Skills
+and MCP Servers now default to Table like Documents, Runs, Schedules and
+Integrations; an explicitly saved user preference still wins.
+
+Real page actions moved from the apparatus to title height. Level-one package,
+run and schedule actions are owned by `PageHeader`; Integrations keeps one
+Actions menu containing Catalogue and creation. Settings already owns its page
+title in the shared shell, so `SettingsPageActions` portals each page's CTA into
+the shell's desktop and mobile title slots. End-Users' one-off search row moved
+onto `ListToolbar` at the same time. The only remaining toolbar actions are for
+embedded collections that have no page header of their own.
+
+The integration creation chooser keeps the three approved paths visible, but
+only Manual is a live destination today. Chat and Coding agent are disabled and
+labelled Coming soon until their flows exist; an enabled no-op button would
+teach a false capability.
+
+The mobile organisation switcher exposed a separate surface bug during this
+pass. Opened from the sidebar, it retained the desktop right-opening, two-column
+geometry and measured from 286px to 628px inside a 390px viewport. The sidebar
+now forces the mobile presentation: the popover opens below, stacks Organisation
+and Workspace, and measures 8px to 280px. The focused shell guard pins that
+viewport fit.
+
+At 1440, Integrations retains a 1px frame, 9px radius, white fill and shadow;
+Membres in settings resolves to 0px frame and radius, transparent fill and no
+shadow. At 390 both have zero viewport overflow, the settings CTA appears once
+beside its mobile title, and Agents opens in Table with its two title actions.
+The first full screenshot pass falsely rejected two healthy detail routes:
+responsive headers render one desktop and one mobile title, and
+`first().isVisible()` selected the hidden copy. The guard now accepts any exact
+copy with visible display, visibility and non-zero geometry. Both width and
+height are required so a collapsed node cannot weaken the route assertion.
+
+The targeted table, toolbar, column-tier and row-action suite is green at 100
+tests; `bun test apps/web` is green at 630. `bun run check` is green at 33/33
+tasks with the same nine pre-existing warnings. `lab:settings` is green on the
+desktop and mobile contracts above, and the complete 1440/390 nominal pass is
+green at 68 captures with no missing fixture. Root `bun test` still has the
+documented local-infrastructure baseline: 10,708 pass and 49 skip, then 36
+failures plus 19 Playwright-loader errors in the MITM/CA, CLI and e2e suites;
+none is in the touched web surface.
+
 **12. Accessibility, which nothing here has ever checked.** The branch
 re-declares ARIA roles on the table because this file demands it, and that is
 the whole of it: not one contrast ratio, keyboard path or touch target has ever

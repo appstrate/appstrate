@@ -87,7 +87,24 @@ export function RunsPage() {
 
   return (
     <div>
-      <PageHeader title={t("runs.title")} emoji="▶️" breadcrumbs={[{ label: t("runs.title") }]} />
+      <PageHeader
+        title={t("runs.title")}
+        emoji="▶️"
+        breadcrumbs={[{ label: t("runs.title") }]}
+        actions={
+          <Button
+            variant="outline"
+            size="sm"
+            className={TOOLBAR_ACTION}
+            title={t("runs.markAllRead")}
+            onClick={() => markAllRead.mutate({})}
+            disabled={markAllRead.isPending || !unreadCount}
+          >
+            <CheckCheck />
+            <span className="hidden sm:inline">{t("runs.markAllRead")}</span>
+          </Button>
+        }
+      />
 
       <RunList
         pageSize={15}
@@ -109,24 +126,6 @@ export function RunsPage() {
             columns={view === "table" ? columns : undefined}
             view={view}
             onViewChange={setView}
-            // On a list screen the action belongs beside the view controls,
-            // not at title height: every table screen then keeps its controls
-            // and its actions in the same corner.
-            // The icon is what survives when the bar runs out of room; the
-            // words step aside on `@lg/bar`, the container the toolbar names.
-            actions={
-              <Button
-                variant="outline"
-                size="sm"
-                className={TOOLBAR_ACTION}
-                title={t("runs.markAllRead")}
-                onClick={() => markAllRead.mutate({})}
-                disabled={markAllRead.isPending || !unreadCount}
-              >
-                <CheckCheck />
-                <span className="hidden @lg/bar:inline">{t("runs.markAllRead")}</span>
-              </Button>
-            }
           />
         )}
         // A filtered list that finds nothing has NOT run out of runs — it has

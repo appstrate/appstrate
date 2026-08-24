@@ -71,6 +71,21 @@ describe("roles", () => {
   });
 });
 
+describe("surface", () => {
+  it("keeps the card frame by default and lets the settings surface remove it", () => {
+    const html = table();
+    expect(html).toContain("bg-card rounded-lg border shadow-sm");
+    expect(html).toContain("data-settings-table-surface=integrated");
+    expect(html).toContain(":border-0");
+    expect(html).toContain(":shadow-none");
+  });
+
+  it("can be explicitly integrated outside settings", () => {
+    const html = table({ appearance: "integrated" });
+    expect(html).not.toContain("bg-card rounded-lg border shadow-sm");
+  });
+});
+
 describe("column templates", () => {
   const html = table();
 

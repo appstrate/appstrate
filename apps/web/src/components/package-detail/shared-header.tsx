@@ -58,6 +58,7 @@ export function SharedHeader({
         title={detail.displayName}
         emoji={emojiMap[detail.type]}
         icon={iconNode}
+        wrapActions={detail.type === "integration"}
         breadcrumbs={[
           { label: breadcrumbLabel, href: breadcrumbPath },
           { label: detail.displayName },

@@ -29,6 +29,7 @@ import { useCurrentApplicationId, useAppSwitcher } from "../hooks/use-current-ap
 import { usePermissions } from "../hooks/use-permissions";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { useSidebar } from "@appstrate/ui/components/sidebar-context";
 import { cn } from "@appstrate/ui/cn";
 
 function OrgAvatar({ name, className }: { name: string; className?: string }) {
@@ -68,7 +69,11 @@ function ColumnHeader({
   );
 }
 
-export function OrgSwitcher({ variant = "chip" }: { variant?: "chip" | "row" | "brand" }) {
+export function OrgSwitcher({
+  variant = "chip",
+}: {
+  variant?: "chip" | "row" | "brand" | "mobile";
+}) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const location = useLocation();
@@ -77,6 +82,7 @@ export function OrgSwitcher({ variant = "chip" }: { variant?: "chip" | "row" | "
   const currentAppId = useCurrentApplicationId();
   const { switchApp } = useAppSwitcher();
   const { isAdmin } = usePermissions();
+  const { isMobile, setOpenMobile } = useSidebar();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   // The organisation whose workspaces column two is showing. Null means "the
@@ -87,6 +93,11 @@ export function OrgSwitcher({ variant = "chip" }: { variant?: "chip" | "row" | "
   const currentApp = applications?.find((a) => a.id === currentAppId) ?? null;
   const exploredId = exploredOrgId ?? currentOrg?.id ?? null;
   const isExploringElsewhere = exploredId !== null && exploredId !== currentOrg?.id;
+  const mobilePresentation = variant === "mobile" || isMobile;
+  const closeSwitcherAndSidebar = () => {
+    setOpen(false);
+    setOpenMobile(false);
+  };
 
   // Workspaces of the EXPLORED organisation. The header is passed explicitly,
   // so it is part of the query key and the client middleware leaves it alone
@@ -114,15 +125,23 @@ export function OrgSwitcher({ variant = "chip" }: { variant?: "chip" | "row" | "
    * anywhere for a frame; both stores are set in the same tick instead.
    *
    * A new organisation also means the current URL may not exist there (an agent
-   * id, a run number), so the landing is the root of the product you are in —
-   * changing org from the chat keeps you in the chat.
+   * id, a run number), so the landing is the root of the product you are in.
+   * Settings are the exception: their routes describe a page type, not a
+   * resource id, so they remain valid when the context changes.
    */
   const applyContext = (orgId: string, applicationId: string) => {
     const orgChanged = orgId !== currentOrg.id;
     if (orgChanged) switchOrg(orgId, applicationId);
     else switchApp(applicationId);
     setOpen(false);
-    if (orgChanged) {
+    // The global shell stays on the background router location while settings
+    // are mounted as an overlay route. Read the visible URL for this exception
+    // so a context switch does not mistake settings for the page underneath.
+    const visiblePathname = window.location.pathname;
+    const settingsRoute =
+      visiblePathname.startsWith("/org-settings") ||
+      visiblePathname.startsWith("/workspace-settings");
+    if (orgChanged && !settingsRoute) {
       navigate(location.pathname.startsWith("/chat") ? "/chat" : "/", { replace: true });
     }
   };
@@ -145,7 +164,31 @@ export function OrgSwitcher({ variant = "chip" }: { variant?: "chip" | "row" | "
             breadcrumb segment means "go up a level" — cheap and reversible.
             This one replaces the whole context. The coloured avatar and the
             up/down chevron (never a right chevron) are what say so. */}
-        {variant === "brand" ? (
+        {variant === "mobile" ? (
+          <button
+            type="button"
+            data-testid="org-switcher-button"
+            aria-label={t("switcher.orgAriaLabel")}
+            className="hover:bg-accent data-[state=open]:bg-accent flex h-11 min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-sm transition-colors"
+          >
+            <OrgAvatar
+              name={currentOrg.name}
+              className="size-6 shrink-0 rounded-md text-[0.7rem]"
+            />
+            <span className="flex min-w-0 flex-1 items-center text-left">
+              <span className="max-w-[48%] shrink-0 truncate font-semibold">{currentOrg.name}</span>
+              {currentApp && (
+                <>
+                  <span className="text-border mx-1.5 shrink-0" aria-hidden>
+                    |
+                  </span>
+                  <span className="text-muted-foreground min-w-0 truncate">{currentApp.name}</span>
+                </>
+              )}
+            </span>
+            <ChevronsUpDown className="text-muted-foreground size-3.5 shrink-0" />
+          </button>
+        ) : variant === "brand" ? (
           /* The head of the column: whose data you are in, wearing its own
              avatar — the workspace you are looking at names itself, the way
              Notion puts the workspace logo where a product logo would go. Flat:
@@ -231,9 +274,14 @@ export function OrgSwitcher({ variant = "chip" }: { variant?: "chip" | "row" | "
       </PopoverTrigger>
       <PopoverContent
         align="start"
-        side={variant === "chip" ? "bottom" : "right"}
-        sideOffset={6}
-        className="w-[540px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl p-0"
+        side={variant === "chip" || mobilePresentation ? "bottom" : "right"}
+        sideOffset={variant === "mobile" ? 47 : 6}
+        className={cn(
+          "w-[540px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl p-0",
+          mobilePresentation && "max-h-[calc(100svh-4.5rem)] overflow-y-auto",
+          variant === "mobile" && "w-[calc(100vw-1rem)] max-w-none",
+          isMobile && variant !== "mobile" && "w-[calc(100vw-1rem)] max-w-[17rem]",
+        )}
       >
         <div className="flex items-center gap-2 border-b px-4 py-3">
           <Search className="text-muted-foreground size-4 shrink-0" />
@@ -246,7 +294,7 @@ export function OrgSwitcher({ variant = "chip" }: { variant?: "chip" | "row" | "
           />
         </div>
 
-        <div className="grid grid-cols-2">
+        <div className={cn("grid grid-cols-2", mobilePresentation && "grid-cols-1")}>
           <div className="p-2.5">
             <ColumnHeader
               label={t("switcher.orgsColumn")}
@@ -299,7 +347,7 @@ export function OrgSwitcher({ variant = "chip" }: { variant?: "chip" | "row" | "
                     <Link
                       to="/org-settings"
                       state={openAsModal(location)}
-                      onClick={() => setOpen(false)}
+                      onClick={closeSwitcherAndSidebar}
                       aria-label={t("switcher.orgSettings", { org: org.name })}
                       className="text-muted-foreground hover:text-foreground shrink-0 p-2"
                     >
@@ -311,7 +359,7 @@ export function OrgSwitcher({ variant = "chip" }: { variant?: "chip" | "row" | "
             })}
           </div>
 
-          <div className="border-l p-2.5">
+          <div className={cn("border-l p-2.5", mobilePresentation && "border-t border-l-0")}>
             {/* Adding a workspace lands in the CURRENT org's settings, so the
                 shortcut is offered only while you are looking at your own —
                 elsewhere it would create it in the wrong place. */}
@@ -354,7 +402,7 @@ export function OrgSwitcher({ variant = "chip" }: { variant?: "chip" | "row" | "
                       <Link
                         to="/workspace-settings"
                         state={openAsModal(location)}
-                        onClick={() => setOpen(false)}
+                        onClick={closeSwitcherAndSidebar}
                         aria-label={t("workspaceSettings.pageTitle", { ns: "settings" })}
                         className="text-muted-foreground hover:text-foreground shrink-0 p-2"
                       >
@@ -372,7 +420,7 @@ export function OrgSwitcher({ variant = "chip" }: { variant?: "chip" | "row" | "
           <Link
             to="/org-settings"
             state={openAsModal(location)}
-            onClick={() => setOpen(false)}
+            onClick={closeSwitcherAndSidebar}
             className="hover:bg-accent flex items-center gap-2 px-3 py-2.5 text-[0.84rem] font-medium"
           >
             <Settings size={15} className="text-muted-foreground shrink-0" />

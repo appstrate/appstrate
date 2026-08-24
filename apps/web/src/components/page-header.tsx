@@ -12,6 +12,8 @@ interface PageHeaderProps {
   icon?: ReactNode;
   breadcrumbs?: BreadcrumbEntry[];
   actions?: ReactNode;
+  /** Lets an action group move below the title when the container is genuinely too narrow. */
+  wrapActions?: boolean;
   children?: ReactNode;
 }
 
@@ -21,6 +23,7 @@ export function PageHeader({
   icon,
   breadcrumbs,
   actions,
+  wrapActions = false,
   children,
 }: PageHeaderProps) {
   // Pages keep declaring their trail here, next to the code that knows the
@@ -37,7 +40,13 @@ export function PageHeader({
 
   return (
     <div className="mb-4">
-      <div className="flex min-h-9 items-center justify-between gap-4">
+      <div
+        className={
+          wrapActions
+            ? "flex min-h-9 flex-wrap items-center justify-between gap-3"
+            : "flex min-h-9 items-center justify-between gap-4"
+        }
+      >
         <h2 className="flex items-center gap-2 text-lg font-semibold">
           {icon ?? (emoji && <span>{emoji}</span>)}
           {title}

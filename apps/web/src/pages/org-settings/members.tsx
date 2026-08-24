@@ -26,6 +26,7 @@ import { Modal } from "../../components/modal";
 import { CopyLinkButton } from "../../components/copy-link-button";
 import { ErrorState, EmptyState } from "../../components/page-states";
 import { DataTable } from "../../components/data-table";
+import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import { useMemberColumns } from "./member-columns";
 import { TOOLBAR_ACTION } from "../../lib/toolbar-button";
 import { Spinner } from "../../components/spinner";
@@ -168,12 +169,12 @@ export function OrgSettingsMembersPage() {
   return (
     <>
       {isAdmin && (
-        <div className="mb-4 flex justify-end">
+        <SettingsPageActions>
           <Button variant="outline" className={TOOLBAR_ACTION} onClick={() => setInviteOpen(true)}>
             <Plus />
             {t("orgSettings.inviteMember")}
           </Button>
-        </div>
+        </SettingsPageActions>
       )}
 
       {isAdmin && (

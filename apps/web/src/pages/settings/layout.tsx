@@ -12,21 +12,22 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Settings } from "lucide-react";
+import { ChevronDown, Settings, X } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@appstrate/ui/cn";
+import { Button } from "@appstrate/ui/components/button";
+import { ScrollArea } from "@appstrate/ui/components/scroll-area";
 import {
   Select,
   SelectContent,
-  SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@appstrate/ui/components/select";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { client } from "../../api/client";
 import { AppVersion } from "../../components/app-version";
+import { SettingsPageActionTargetsProvider } from "../../components/settings/settings-page-actions";
 import { NavigateKeepingState } from "../../components/navigate-keeping-state";
 import { PanelDialog } from "../../components/panel-dialog";
 import { useAppConfig } from "../../hooks/use-app-config";
@@ -43,6 +44,7 @@ import {
   settingsScopeFromPath,
   type SettingsScope,
 } from "../../lib/settings-context";
+import { useBreadcrumbStore } from "../../stores/breadcrumb-store";
 import {
   buildSettingsNavigation,
   type UnifiedSettingsNavItem,
@@ -91,19 +93,25 @@ function RailLink({
   label,
   active,
   state,
+  mobile = false,
+  onNavigate,
 }: {
   item: UnifiedSettingsNavItem;
   label: string;
   active: boolean;
   state?: unknown;
+  mobile?: boolean;
+  onNavigate?: () => void;
 }) {
   return (
     <Link
       to={item.to}
       state={state}
+      onClick={onNavigate}
       aria-current={active ? "page" : undefined}
       className={cn(
         "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
+        mobile && "min-h-11",
         active
           ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
           : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
@@ -119,8 +127,10 @@ interface ScopeNavigationProps {
   section: UnifiedSettingsSection;
   activeItem?: UnifiedSettingsNavItem;
   keepOverlay?: unknown;
-  contextSelector: ReactNode;
+  contextSelector?: ReactNode;
   label: (key: string) => string;
+  mobile?: boolean;
+  onNavigate?: () => void;
 }
 
 function ScopeNavigation({
@@ -129,6 +139,8 @@ function ScopeNavigation({
   keepOverlay,
   contextSelector,
   label,
+  mobile = false,
+  onNavigate,
 }: ScopeNavigationProps) {
   return (
     <section
@@ -153,73 +165,11 @@ function ScopeNavigation({
             label={label(item.labelKey)}
             active={activeItem?.to === item.to}
             state={keepOverlay}
+            mobile={mobile}
+            onNavigate={onNavigate}
           />
         ))}
       </nav>
-    </section>
-  );
-}
-
-interface MobileScopeNavigationProps {
-  section: UnifiedSettingsSection;
-  activeScope: SettingsScope;
-  activeItem?: UnifiedSettingsNavItem;
-  contextSelector: ReactNode;
-  label: (key: string) => string;
-  onNavigate: (to: string) => void;
-}
-
-function MobileScopeNavigation({
-  section,
-  activeScope,
-  activeItem,
-  contextSelector,
-  label,
-  onNavigate,
-}: MobileScopeNavigationProps) {
-  const active = activeScope === section.scope;
-  const headingId = `settings-${section.scope}-mobile-heading`;
-  const pageSelectorId = `settings-${section.scope}-mobile-page-selector`;
-  return (
-    <section
-      data-settings-mobile-scope={section.scope}
-      className="border-border rounded-lg border p-2.5"
-    >
-      <div
-        id={headingId}
-        data-settings-scope-title
-        className="text-muted-foreground mb-1.5 text-xs font-semibold tracking-wide uppercase"
-      >
-        {label(section.labelKey)}
-      </div>
-      <div className="space-y-1.5">
-        {contextSelector}
-        <span id={pageSelectorId} className="sr-only">
-          {label("unifiedSettings.pageSelector")}
-        </span>
-        <Select value={active ? activeItem?.to : ""} onValueChange={onNavigate}>
-          <SelectTrigger
-            className="bg-background h-10"
-            aria-labelledby={`${headingId} ${pageSelectorId}`}
-            data-settings-page-selector
-          >
-            <SelectValue placeholder={label("unifiedSettings.choosePage")} />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              <SelectLabel>{label(section.labelKey)}</SelectLabel>
-              {section.items.map((item) => (
-                <SelectItem key={item.to} value={item.to}>
-                  <span className="inline-flex items-center gap-2">
-                    <item.icon className="size-4" />
-                    {label(item.labelKey)}
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
-      </div>
     </section>
   );
 }
@@ -229,14 +179,33 @@ export function UnifiedSettingsLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const background = useBackgroundLocation();
+  const setBreadcrumbEntries = useBreadcrumbStore((state) => state.setEntries);
   const { currentOrg, orgs, switchOrg } = useOrg();
   const { data: applications = [] } = useApplications();
   const applicationId = useCurrentApplicationId();
   const { switchApp } = useAppSwitcher();
   const { isAdmin } = usePermissions();
   const { features } = useAppConfig();
+  const shouldOpenMobileNavigationOnEntry =
+    background !== null &&
+    (location.pathname === "/org-settings" ||
+      location.pathname === "/org-settings/general" ||
+      location.pathname === "/workspace-settings" ||
+      location.pathname === "/workspace-settings/general");
+  const openMobileNavigationOnEntry = useRef(shouldOpenMobileNavigationOnEntry);
   const [switchingOrganization, setSwitchingOrganization] = useState(false);
+  const [mobileNavigationOpen, setMobileNavigationOpen] = useState(
+    () =>
+      shouldOpenMobileNavigationOnEntry &&
+      (location.pathname === "/org-settings/general" ||
+        location.pathname === "/workspace-settings/general"),
+  );
+  const [desktopActionTarget, setDesktopActionTarget] = useState<HTMLDivElement | null>(null);
+  const [mobileActionTarget, setMobileActionTarget] = useState<HTMLDivElement | null>(null);
   const organizationSwitchRequest = useRef(0);
+  const mobileNavigationButton = useRef<HTMLButtonElement>(null);
+  const mobileNavigationPanel = useRef<HTMLDivElement>(null);
+  const breadcrumbsBeforeSettings = useRef(useBreadcrumbStore.getState().entries);
 
   useEffect(
     () => () => {
@@ -264,9 +233,92 @@ export function UnifiedSettingsLayout() {
     allItems.find((item) => location.pathname === item.to) ??
     allItems.find((item) => location.pathname.startsWith(item.to + "/"));
   const activeScope = settingsScopeFromPath(location.pathname);
+  const activeSection = sections.find((section) => section.scope === activeScope);
   const contentKey = settingsContentKey(location.pathname, currentOrg?.id ?? null, applicationId);
   const keepOverlay = background ? openAsModal(background) : undefined;
   const label = (key: string) => t(key, { ns: "settings" });
+  const settingsBreadcrumbLabel = label("unifiedSettings.title");
+  const activeSectionLabel = activeSection ? label(activeSection.labelKey) : null;
+  const activeItemLabel = activeItem ? label(activeItem.labelKey) : null;
+  const activeSectionHref = activeSection?.items[0]?.to ?? activeItem?.to;
+
+  useEffect(() => {
+    if (
+      !openMobileNavigationOnEntry.current ||
+      (location.pathname !== "/org-settings/general" &&
+        location.pathname !== "/workspace-settings/general")
+    ) {
+      return;
+    }
+    openMobileNavigationOnEntry.current = false;
+    setMobileNavigationOpen(true);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    const previousBreadcrumbs = breadcrumbsBeforeSettings.current;
+    return () => setBreadcrumbEntries(previousBreadcrumbs);
+  }, [setBreadcrumbEntries]);
+
+  useEffect(() => {
+    if (!activeSectionLabel || !activeItemLabel || !activeSectionHref) return;
+    setBreadcrumbEntries([
+      { label: settingsBreadcrumbLabel, href: "/org-settings/general" },
+      { label: activeSectionLabel, href: activeSectionHref },
+      { label: activeItemLabel },
+    ]);
+  }, [
+    activeItemLabel,
+    activeSectionHref,
+    activeSectionLabel,
+    setBreadcrumbEntries,
+    settingsBreadcrumbLabel,
+  ]);
+
+  useEffect(() => {
+    if (!mobileNavigationOpen) return;
+
+    mobileNavigationPanel.current?.focus();
+    const keepFocusInNavigation = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setMobileNavigationOpen(false);
+        requestAnimationFrame(() => mobileNavigationButton.current?.focus());
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const panel = mobileNavigationPanel.current;
+      if (!panel) return;
+      const focusable = [
+        ...panel.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), [role="combobox"]:not([aria-disabled="true"]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ].filter((element) => !element.hidden && element.getClientRects().length > 0);
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (!first || !last) {
+        event.preventDefault();
+        panel.focus();
+      } else if (
+        event.shiftKey &&
+        (document.activeElement === first || document.activeElement === panel)
+      ) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", keepFocusInNavigation, true);
+    return () => window.removeEventListener("keydown", keepFocusInNavigation, true);
+  }, [mobileNavigationOpen]);
+
+  const closeMobileNavigation = () => {
+    setMobileNavigationOpen(false);
+    requestAnimationFrame(() => mobileNavigationButton.current?.focus());
+  };
 
   const changeOrganization = async (organizationId: string) => {
     if (!currentOrg || organizationId === currentOrg.id || switchingOrganization) return;
@@ -331,9 +383,12 @@ export function UnifiedSettingsLayout() {
   const selectorFor = (scope: SettingsScope) =>
     scope === "organization" ? organizationSelector : workspaceSelector;
 
+  const closeTarget = modalReturnTarget(background);
+  const closeSettings = () => navigate(closeTarget.to, { replace: true, state: closeTarget.state });
+
   const rail = (
     <div className="flex h-full flex-col">
-      <div className="border-sidebar-border flex items-center gap-2 border-b px-4 py-3 text-sm font-semibold">
+      <div className="border-sidebar-border flex min-h-14 items-center gap-2 border-b pr-1.5 pl-4 text-sm font-semibold">
         <Settings className="text-muted-foreground size-4" />
         {label("unifiedSettings.title")}
       </div>
@@ -355,38 +410,102 @@ export function UnifiedSettingsLayout() {
     </div>
   );
 
-  const mobileNav = (
-    <div className="space-y-3">
-      {sections.map((section) => (
-        <MobileScopeNavigation
-          key={section.scope}
-          section={section}
-          activeScope={activeScope}
-          activeItem={activeItem}
-          contextSelector={selectorFor(section.scope)}
-          label={label}
-          onNavigate={(to) => navigate(to, { state: keepOverlay })}
-        />
-      ))}
+  const mobileNavigation = mobileNavigationOpen ? (
+    <div
+      ref={mobileNavigationPanel}
+      id="settings-mobile-navigation"
+      tabIndex={-1}
+      role="dialog"
+      aria-modal="true"
+      aria-label={label("unifiedSettings.title")}
+      className="bg-background fixed inset-x-0 top-24 bottom-0 z-30 flex flex-col outline-none md:hidden"
+    >
+      <div className="border-border flex h-14 shrink-0 items-center border-b pr-1.5 pl-4 text-sm font-semibold">
+        {label("unifiedSettings.title")}
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="ml-auto size-11"
+          aria-label={label("unifiedSettings.closeMenu")}
+          onClick={closeMobileNavigation}
+        >
+          <X className="size-4" />
+        </Button>
+      </div>
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="pb-3">
+          {sections.map((section) => (
+            <ScopeNavigation
+              key={section.scope}
+              section={section}
+              activeItem={activeItem}
+              keepOverlay={keepOverlay}
+              contextSelector={selectorFor(section.scope)}
+              label={label}
+              mobile
+              onNavigate={closeMobileNavigation}
+            />
+          ))}
+        </div>
+      </ScrollArea>
+      <div className="shrink-0 px-4 py-3">
+        <AppVersion />
+      </div>
     </div>
-  );
-
-  const closeTarget = modalReturnTarget(background);
+  ) : null;
 
   return (
     <PanelDialog
       title={label("unifiedSettings.title")}
       rail={rail}
-      mobileNav={mobileNav}
-      onClose={() => navigate(closeTarget.to, { replace: true, state: closeTarget.state })}
+      contentScrollArea
+      closeLabel={t("btn.close", { ns: "common" })}
+      reserveCloseArea
+      mobileAsSurface
+      onClose={closeSettings}
     >
-      {activeItem && <h3 className="mb-6 text-lg font-semibold">{label(activeItem.labelKey)}</h3>}
+      {activeSection && activeItem && (
+        <div className="mb-6 md:hidden">
+          <Button
+            ref={mobileNavigationButton}
+            type="button"
+            variant="outline"
+            className="h-11 w-full justify-between bg-transparent px-3"
+            aria-label={label("unifiedSettings.openNavigation")}
+            aria-expanded={mobileNavigationOpen}
+            aria-controls="settings-mobile-navigation"
+            onClick={() => setMobileNavigationOpen(true)}
+          >
+            <span className="truncate">{label("unifiedSettings.menu")}</span>
+            <ChevronDown className="size-4 shrink-0" />
+          </Button>
+          <div className="mt-6 flex min-h-9 items-center justify-between gap-3">
+            <h1 className="text-xl font-semibold">{label(activeItem.labelKey)}</h1>
+            <div ref={setMobileActionTarget} className="flex shrink-0 items-center gap-2" />
+          </div>
+        </div>
+      )}
+      {mobileNavigation}
+      {activeItem && (
+        <div className="mb-6 hidden min-h-9 items-center justify-between gap-4 md:flex">
+          <h3 className="text-lg font-semibold">{label(activeItem.labelKey)}</h3>
+          <div ref={setDesktopActionTarget} className="flex shrink-0 items-center gap-2" />
+        </div>
+      )}
       <div
         key={contentKey}
+        inert={mobileNavigationOpen}
+        aria-hidden={mobileNavigationOpen || undefined}
+        data-settings-table-surface="integrated"
         data-settings-content-scope={activeScope}
         data-settings-content-key={contentKey}
       >
-        <Outlet />
+        <SettingsPageActionTargetsProvider
+          targets={{ desktop: desktopActionTarget, mobile: mobileActionTarget }}
+        >
+          <Outlet />
+        </SettingsPageActionTargetsProvider>
       </div>
     </PanelDialog>
   );

@@ -66,7 +66,16 @@
 
 import { Fragment, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, Filter, LayoutGrid, PlusCircle, Rows3, SlidersHorizontal, X } from "lucide-react";
+import {
+  Check,
+  Filter,
+  LayoutGrid,
+  PlusCircle,
+  Rows3,
+  Search,
+  SlidersHorizontal,
+  X,
+} from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import type { ListView } from "@/stores/list-view-store";
 import { toggleValue } from "../lib/toggle-value";
@@ -237,7 +246,13 @@ function FacetedFilter({ filter }: { filter: FilterSpec }) {
  * The last visible column cannot be hidden — a table with no columns is not a
  * state worth being able to reach.
  */
-function ColumnsMenu({ columns }: { columns: ColumnMenuSpec }) {
+function ColumnsMenu({
+  columns,
+  iconOnly = false,
+}: {
+  columns: ColumnMenuSpec;
+  iconOnly?: boolean;
+}) {
   const { t } = useTranslation("common");
   const label = t("toolbar.columns");
   const hidden = new Set(columns.hidden);
@@ -246,9 +261,15 @@ function ColumnsMenu({ columns }: { columns: ColumnMenuSpec }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className={TOOLBAR_UTILITY} title={label}>
+        <Button
+          variant="outline"
+          size="sm"
+          className={cn(TOOLBAR_UTILITY, iconOnly && "size-8 px-0")}
+          title={label}
+          aria-label={label}
+        >
           <SlidersHorizontal />
-          <span className="hidden @xl/bar:inline">{label}</span>
+          {!iconOnly && <span className="hidden @xl/bar:inline">{label}</span>}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">
@@ -330,6 +351,7 @@ export function ListToolbar({
   view,
   onViewChange,
   actions,
+  placement = "page",
 }: {
   /**
    * The text filter that opens shadcn's own toolbar — present only where the
@@ -350,15 +372,10 @@ export function ListToolbar({
   /** Present on every level-one collection, whose two representations are real. */
   view?: ListView;
   onViewChange?: (view: ListView) => void;
-  /**
-   * What the screen does, at the right end of the row.
-   *
-   * On a LIST screen this is where an action belongs, not in `PageHeader` —
-   * shadcn puts "Add task" exactly here, and it means every table screen keeps
-   * its controls and its actions in the same corner. Screens without a list
-   * keep theirs at title height.
-   */
+  /** Actions for an embedded collection that has no page header of its own. */
   actions?: ReactNode;
+  /** A panel keeps its compact, always-visible search instead of page-level responsive chrome. */
+  placement?: "page" | "panel";
 }) {
   const { t } = useTranslation("common");
   const activeCount = filters.reduce((total, filter) => total + filter.values.length, 0);
@@ -368,52 +385,154 @@ export function ListToolbar({
   // the FIRST render decides — closing the row afterwards is the reader's call
   // and is not undone by the next keystroke.
   const [open, setOpen] = useState(() => activeCount > 0);
+  const [searchOpen, setSearchOpen] = useState(false);
 
-  return (
-    <div className="@container/bar mb-4 space-y-2">
-      <div className="flex items-center gap-2">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          {view && onViewChange && <ViewToggle view={view} onChange={onViewChange} />}
-          {search && (
-            <Input
-              value={search.value}
-              onChange={(event) => search.onChange(event.target.value)}
-              placeholder={search.placeholder}
-              className="h-8 w-full max-w-[250px]"
-            />
-          )}
+  if (placement === "panel") {
+    return (
+      <div className="@container/bar mb-4 space-y-2">
+        <div className="flex items-center gap-2">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            {search && (
+              <Input
+                value={search.value}
+                onChange={(event) => search.onChange(event.target.value)}
+                placeholder={search.placeholder}
+                className="h-8 w-full max-w-[250px]"
+              />
+            )}
+          </div>
+
+          <div className="flex shrink-0 items-center gap-2">
+            {filters.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                aria-expanded={open}
+                title={t("toolbar.filters")}
+                className={cn(TOOLBAR_UTILITY, "aria-expanded:bg-accent")}
+                onClick={() => setOpen((wasOpen) => !wasOpen)}
+              >
+                <Filter />
+                <span className="hidden @xl/bar:inline">{t("toolbar.filters")}</span>
+                {activeCount > 0 && (
+                  <Badge variant="secondary" className="rounded-sm px-1 font-normal">
+                    {activeCount}
+                  </Badge>
+                )}
+              </Button>
+            )}
+            {columns && <ColumnsMenu columns={columns} />}
+            {actions}
+            {view && onViewChange && <ViewToggle view={view} onChange={onViewChange} />}
+          </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2">
+        {open && filters.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            {filters.map((filter) => (
+              <Fragment key={filter.id}>
+                <FacetedFilter filter={filter} />
+              </Fragment>
+            ))}
+            {activeCount > 0 && onReset && (
+              <Button variant="ghost" size="sm" className="h-8 gap-1.5 px-2.5" onClick={onReset}>
+                <X />
+                {t("toolbar.reset")}
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="@container/bar mb-3 space-y-2">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:flex sm:items-center">
+        {search && (
+          <Input
+            value={search.value}
+            onChange={(event) => search.onChange(event.target.value)}
+            placeholder={search.placeholder}
+            className="hidden h-8 w-full sm:block sm:max-w-[280px]"
+          />
+        )}
+
+        <div className="flex items-center gap-2 sm:flex-1">
+          {search && (
+            <Button
+              variant="outline"
+              size="sm"
+              aria-expanded={searchOpen}
+              aria-label={search.placeholder}
+              title={search.placeholder}
+              className={cn(
+                TOOLBAR_UTILITY,
+                "size-8 px-0 sm:hidden",
+                (searchOpen || search.value.trim() !== "") && "bg-accent",
+              )}
+              onClick={() => setSearchOpen((wasOpen) => !wasOpen)}
+            >
+              <Search />
+            </Button>
+          )}
+
           {filters.length > 0 && (
             <Button
               variant="outline"
               size="sm"
               aria-expanded={open}
+              aria-label={t("toolbar.filters")}
               title={t("toolbar.filters")}
-              // `aria-expanded` is the state AND the style hook: an open row
-              // has to be readable from the button that opened it.
-              className={cn(TOOLBAR_UTILITY, "aria-expanded:bg-accent")}
+              className={cn(TOOLBAR_UTILITY, "aria-expanded:bg-accent relative size-8 px-0")}
               onClick={() => setOpen((wasOpen) => !wasOpen)}
             >
               <Filter />
-              <span className="hidden @xl/bar:inline">{t("toolbar.filters")}</span>
               {activeCount > 0 && (
-                <Badge variant="secondary" className="rounded-sm px-1 font-normal">
+                <span className="bg-foreground text-background absolute -top-1 -right-1 grid size-4 place-items-center rounded-full text-[0.6rem] font-semibold">
                   {activeCount}
-                </Badge>
+                </span>
               )}
             </Button>
           )}
 
-          {columns && <ColumnsMenu columns={columns} />}
-          {actions}
+          {columns && <ColumnsMenu columns={columns} iconOnly />}
         </div>
+
+        {(actions || (view && onViewChange)) && (
+          <div className="flex items-center gap-2 justify-self-end sm:ml-auto">
+            {actions}
+            {view && onViewChange && <ViewToggle view={view} onChange={onViewChange} />}
+          </div>
+        )}
       </div>
 
-      {/* The filters' own line. It may take two — that is what a dedicated row
-          is for, and it is the difference between a line you opened and a line
-          that appeared because the window moved. */}
+      {search && searchOpen && (
+        <div className="relative sm:hidden">
+          <Input
+            autoFocus
+            value={search.value}
+            onChange={(event) => search.onChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") setSearchOpen(false);
+            }}
+            placeholder={search.placeholder}
+            className="h-8 w-full pr-9"
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label={t("btn.close")}
+            title={t("btn.close")}
+            className="absolute top-0 right-0 size-8"
+            onClick={() => setSearchOpen(false)}
+          >
+            <X />
+          </Button>
+        </div>
+      )}
+
       {open && filters.length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
           {filters.map((filter) => (

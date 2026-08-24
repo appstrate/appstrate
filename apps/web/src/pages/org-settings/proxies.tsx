@@ -8,6 +8,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import { DataTable, type DataColumn } from "../../components/data-table";
+import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import { TOOLBAR_ACTION } from "../../lib/toolbar-button";
 import { usePermissions } from "../../hooks/use-permissions";
 import {
@@ -224,12 +225,12 @@ export function OrgSettingsProxiesPage() {
       {/* The page's own action, in the treatment every list bar uses: a white
           surface, not a filled blue. A screen whose table now looks like every
           other table cannot keep the one button that does not. */}
-      <div className="mb-4 flex items-center justify-end gap-2">
+      <SettingsPageActions>
         <Button variant="outline" size="sm" className={TOOLBAR_ACTION} onClick={onCreate}>
           <Plus />
           {t("proxies.add")}
         </Button>
-      </div>
+      </SettingsPageActions>
 
       <DataTable
         label={t("proxies.tabTitle")}

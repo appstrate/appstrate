@@ -173,7 +173,7 @@ await withPage(async (page) => {
 
   await page.locator("button").filter({ hasText: "Tractr" }).first().click();
   await page.getByRole("link", { name: "Paramètres de Tractr" }).first().click();
-  await page.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Fermer" }).click();
   assert.equal(page.url(), `${BASE}${background}`);
 });
 console.log("  Back and complete Close background restoration: ok");
@@ -184,56 +184,82 @@ await withPage(async (page) => {
   assert.equal(new URL(page.url()).pathname, "/workspace-settings/general");
 
   await page.setViewportSize({ width: 390, height: 1000 });
-  await page.goto(`${BASE}/org-settings/general`);
+  await page.goto(`${BASE}/org-settings/members`);
   await settle(page);
-  await waitForDialogToSettle(page);
 
-  const mobileSections = page.locator("[data-settings-mobile-scope]");
-  await mobileSections.first().waitFor({ state: "visible" });
-  assert.equal(await mobileSections.count(), 2);
-  const mobileSectionStyles = await mobileSections.evaluateAll((nodes) =>
-    nodes.map((node) => {
-      const style = getComputedStyle(node);
-      return {
-        backgroundColor: style.backgroundColor,
-        borderColor: style.borderColor,
-      };
-    }),
+  const settingsMenu = page.getByRole("button", {
+    name: "Ouvrir la navigation des paramètres",
+  });
+  await settingsMenu.waitFor({ state: "visible" });
+  assert.equal(await settingsMenu.locator(".lucide-menu").count(), 0);
+  assert.equal(await page.locator("#settings-mobile-navigation").count(), 0);
+
+  const globalMenu = page.getByRole("button", { name: "Toggle Sidebar" }).first();
+  assert.equal(await globalMenu.locator(".lucide-menu").count(), 1);
+  await globalMenu.click();
+  const sidebar = page.getByRole("dialog", { name: "Sidebar" });
+  await sidebar.waitFor({ state: "visible" });
+  assert.equal(
+    await sidebar.getByRole("link", { name: "Dashboard" }).getAttribute("data-active"),
+    "false",
   );
-  assert.deepEqual(mobileSectionStyles[0], mobileSectionStyles[1]);
-  for (const scope of ["organization", "workspace"]) {
-    const section = page.locator(`[data-settings-mobile-scope="${scope}"]`);
-    assert.equal(await section.isVisible(), true);
-    assert.equal(await section.locator('button[role="combobox"]').count(), 2);
-    assert.equal(await section.locator("[data-settings-scope-title] svg").count(), 0);
+  const activeSettings = sidebar.getByRole("button", { name: "Paramètres" });
+  assert.equal(await activeSettings.getAttribute("data-active"), "true");
+  await activeSettings.click();
+  await sidebar.waitFor({ state: "hidden" });
 
-    const contextSelector = section.locator("[data-settings-context-selector]");
-    assertClose(await contextSelector.evaluate((node) => node.getBoundingClientRect().height), 44);
-    assertClose(
-      await contextSelector.evaluate((node) => {
-        const style = getComputedStyle(node, "::before");
-        return (
-          Number.parseFloat(style.height) +
-          Number.parseFloat(style.borderTopWidth) +
-          Number.parseFloat(style.borderBottomWidth)
-        );
-      }),
-      40,
-    );
+  await globalMenu.click();
+  await sidebar.waitFor({ state: "visible" });
+  await sidebar.getByRole("button", { name: "Changer d'organisation" }).click();
+  const switcher = page.getByRole("dialog").last();
+  const switcherRect = await switcher.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return { left: rect.left, right: rect.right, viewport: window.innerWidth };
+  });
+  assert.ok(switcherRect.left >= 0 && switcherRect.right <= switcherRect.viewport);
+  await page.getByRole("link", { name: "Paramètres de Tractr" }).last().click();
+  await sidebar.waitFor({ state: "hidden" });
+
+  await page.goto(BASE);
+  await globalMenu.click();
+  const landingSidebar = page.getByRole("dialog", { name: "Sidebar" });
+  await landingSidebar.getByRole("link", { name: "Paramètres" }).click();
+  await page.waitForURL("**/org-settings/general");
+
+  const mobileNavigation = page.locator("#settings-mobile-navigation");
+  await mobileNavigation.waitFor({ state: "visible" });
+  assert.equal(await mobileNavigation.getAttribute("aria-modal"), "true");
+  assert.equal(await page.locator("[data-settings-content-key]").getAttribute("inert"), "");
+  await page.keyboard.press("Shift+Tab");
+  assert.equal(
+    await mobileNavigation.evaluate((node) => node.contains(document.activeElement)),
+    true,
+  );
+  const mobileSections = mobileNavigation.locator("[data-settings-scope]");
+  assert.equal(await mobileSections.count(), 2);
+  for (const scope of ["organization", "workspace"]) {
+    const section = mobileNavigation.locator(`[data-settings-scope="${scope}"]`);
+    assert.equal(await section.isVisible(), true);
+    assert.equal(await section.locator("[data-settings-scope-title] svg").count(), 0);
     assertClose(
       await section
-        .locator("[data-settings-page-selector]")
+        .locator("[data-settings-context-selector]")
         .evaluate((node) => node.getBoundingClientRect().height),
-      40,
+      44,
     );
   }
+
+  await mobileNavigation
+    .locator('[data-settings-scope="organization"] a[href="/org-settings/members"]')
+    .click();
+  await mobileNavigation.waitFor({ state: "hidden" });
 
   assert.equal(
     await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     true,
   );
 });
-console.log("  legacy route and two neutral mobile scope groups: ok");
+console.log("  legacy route, mobile shell, switcher fit and full settings menu: ok");
 
 await browser.close();
 console.log("\nSettings behaviour guard passed.");

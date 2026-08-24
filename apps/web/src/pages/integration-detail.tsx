@@ -1210,6 +1210,7 @@ export function IntegrationDetailPage() {
               </Button>
             )}
             <PackageActionsDropdown
+              labelledTrigger
               packageId={packageId}
               type="integration"
               isOwned={isOwned}

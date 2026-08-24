@@ -43,7 +43,7 @@ export function SchedulesListPage() {
       onClick={() => navigate("/schedules/new")}
     >
       <Plus />
-      <span className="hidden @lg/bar:inline">{t("schedules.create")}</span>
+      <span className="hidden sm:inline">{t("schedules.create")}</span>
     </Button>
   );
 
@@ -99,6 +99,7 @@ export function SchedulesListPage() {
         title={t("schedules.title")}
         emoji="📅"
         breadcrumbs={[{ label: t("schedules.title") }]}
+        actions={isAdmin ? create : undefined}
       />
 
       <ListToolbar
@@ -119,7 +120,6 @@ export function SchedulesListPage() {
         columns={view === "table" ? columnMenu(allColumns, visibility) : undefined}
         view={view}
         onViewChange={setView}
-        actions={isAdmin ? create : undefined}
       />
 
       {view === "table" ? (

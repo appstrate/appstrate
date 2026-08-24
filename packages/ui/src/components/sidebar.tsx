@@ -238,6 +238,7 @@ const SidebarTrigger = React.forwardRef<
   React.ComponentProps<typeof Button>
 >(({ className, onClick, ...props }, ref) => {
   const { toggleSidebar } = useSidebar();
+  const { children, ...buttonProps } = props;
 
   return (
     <Button
@@ -250,9 +251,9 @@ const SidebarTrigger = React.forwardRef<
         onClick?.(event);
         toggleSidebar();
       }}
-      {...props}
+      {...buttonProps}
     >
-      <PanelLeft />
+      {children ?? <PanelLeft />}
       <span className="sr-only">Toggle Sidebar</span>
     </Button>
   );

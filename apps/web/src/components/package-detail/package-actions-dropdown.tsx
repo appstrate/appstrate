@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   MoreHorizontal,
+  ChevronDown,
   Download,
   Package,
   GitBranchPlus,
@@ -66,6 +67,8 @@ interface PackageActionsDropdownProps {
   canDeactivate?: boolean;
   onDeactivate?: () => void;
   deactivatePending?: boolean;
+  /** Integration-detail prototype: use the same labelled page-action trigger as collections. */
+  labelledTrigger?: boolean;
 }
 
 export function PackageActionsDropdown({
@@ -96,6 +99,7 @@ export function PackageActionsDropdown({
   canDeactivate,
   onDeactivate,
   deactivatePending,
+  labelledTrigger = false,
 }: PackageActionsDropdownProps) {
   const { t } = useTranslation(["agents", "common", "settings"]);
   const navigate = useNavigate();
@@ -114,8 +118,19 @@ export function PackageActionsDropdown({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="icon">
-          <MoreHorizontal size={16} />
+        <Button
+          variant="outline"
+          size={labelledTrigger ? "sm" : "icon"}
+          className={labelledTrigger ? "h-8 gap-1.5 px-2.5" : undefined}
+        >
+          {labelledTrigger ? (
+            <>
+              {t("integrations.actions", { ns: "settings" })}
+              <ChevronDown size={16} />
+            </>
+          ) : (
+            <MoreHorizontal size={16} />
+          )}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">

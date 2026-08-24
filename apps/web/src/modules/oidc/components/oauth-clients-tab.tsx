@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import { Plus, KeyRound } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { DataTable } from "@/components/data-table";
+import { SettingsPageActions } from "@/components/settings/settings-page-actions";
 import { ErrorState, EmptyState } from "@/components/page-states";
 import { TOOLBAR_ACTION } from "@/lib/toolbar-button";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -60,15 +61,17 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
               : "settings:oauthClients.introOrg",
           )}
         </p>
-        <Button
-          size="sm"
-          variant="outline"
-          className={`${TOOLBAR_ACTION} self-end`}
-          onClick={() => setSelectedClient("new")}
-        >
-          <Plus />
-          {t("settings:oauthClients.createBtn")}
-        </Button>
+        <SettingsPageActions>
+          <Button
+            size="sm"
+            variant="outline"
+            className={TOOLBAR_ACTION}
+            onClick={() => setSelectedClient("new")}
+          >
+            <Plus />
+            {t("settings:oauthClients.createBtn")}
+          </Button>
+        </SettingsPageActions>
       </div>
 
       <DataTable

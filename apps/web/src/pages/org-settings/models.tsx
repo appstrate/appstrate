@@ -34,6 +34,7 @@ import { ConfirmModal } from "../../components/confirm-modal";
 import { ErrorState, EmptyState } from "../../components/page-states";
 import { useCredentialColumns, useModelColumns } from "./model-columns";
 import { DataTable } from "../../components/data-table";
+import { SettingsPageActions } from "../../components/settings/settings-page-actions";
 import { TOOLBAR_ACTION } from "../../lib/toolbar-button";
 
 function ModelsList({
@@ -73,12 +74,12 @@ function ModelsList({
 
   return (
     <>
-      <div className="mb-4 flex items-center justify-end gap-2">
+      <SettingsPageActions>
         <Button variant="outline" size="sm" className={TOOLBAR_ACTION} onClick={onCreate}>
           <Plus />
           {t("models.add")}
         </Button>
-      </div>
+      </SettingsPageActions>
 
       <DataTable
         label={t("models.tabTitle")}
@@ -135,12 +136,12 @@ function CredentialsSection({
       {/* Single entry point — the unified modal handles both API-key and OAuth
           flows. Removing a module from `MODULES` hides its OAuth tile from the
           in-modal provider picker with zero UI footprint here. */}
-      <div className="mb-4 flex items-center justify-end gap-2">
+      <SettingsPageActions>
         <Button variant="outline" size="sm" className={TOOLBAR_ACTION} onClick={onCreate}>
           <Plus />
           {t("credentials.add")}
         </Button>
-      </div>
+      </SettingsPageActions>
 
       <DataTable
         label={t("credentials.title")}

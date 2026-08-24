@@ -31,7 +31,7 @@ function createListViewStore(storageKey: string, defaultView: ListView = "cards"
   }));
 }
 
-export const usePackageViewStore = createListViewStore("appstrate-package-view");
+export const usePackageViewStore = createListViewStore("appstrate-package-view", "table");
 export const useIntegrationViewStore = createListViewStore("appstrate-integration-view", "table");
 // Operational collections are separate reading tasks. They persist in the
 // same way, but changing Documents must not unexpectedly redraw Runs.
