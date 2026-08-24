@@ -952,7 +952,18 @@ export async function assertExplicitModelExists(
 
 // --- Connection test ---
 
-/** Build the discovery URL + headers used to probe a model provider. Pure for unit testing. */
+/**
+ * Build the discovery URL + headers used to probe a model provider. Pure for
+ * unit testing.
+ *
+ * Note what this does NOT take: a model id. Every branch below builds a plain
+ * `GET <baseUrl>/models` listing request, so the result identifies the
+ * CREDENTIAL, never a particular model. Callers that pass a `modelId` through
+ * `testModelConfig` (the model-test routes, and `discoverAvailableModels`'
+ * per-candidate loop) are handing over a value nothing reads — see the warning
+ * at the top of `services/model-providers/model-discovery.ts` for what that
+ * costs and why it is not quietly patched here.
+ */
 export function buildModelTestRequest(config: {
   apiShape: string;
   baseUrl: string;
