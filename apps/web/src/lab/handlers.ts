@@ -54,6 +54,21 @@ function endUserId(url: URL): string {
   return decodeURIComponent(parts[parts.length - 1] ?? "");
 }
 
+function typedPackageId(url: URL): string {
+  const parts = url.pathname.split("/").filter(Boolean);
+  return `${decodeURIComponent(parts[3] ?? "")}/${decodeURIComponent(parts[4] ?? "")}`;
+}
+
+function genericPackageId(url: URL): string {
+  const parts = url.pathname.split("/").filter(Boolean);
+  return `${decodeURIComponent(parts[2] ?? "")}/${decodeURIComponent(parts[3] ?? "")}`;
+}
+
+function isPermanentPackageDetail(headers: Headers): boolean {
+  const location = headers.get("X-Appstrate-Lab-Location") ?? "";
+  return /^\/(skills|mcp-servers)\/[^/]+\/[^/]+(?:\/|$)/.test(location);
+}
+
 function isEndUserPatch(body: unknown): body is EndUserPatch {
   return typeof body === "object" && body !== null && !Array.isArray(body);
 }
@@ -76,9 +91,12 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   {
     method: "GET",
     pattern: /^\/api\/orgs$/,
-    handler: (_u, s) => ({
+    handler: (_u, s, headers) => ({
       status: 200,
-      body: { ...f.orgs, data: list(f.orgs.data, s) },
+      body: {
+        ...f.orgs,
+        data: isPermanentPackageDetail(headers) ? f.orgs.data : list(f.orgs.data, s),
+      },
     }),
   },
   {
@@ -258,7 +276,13 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     handler: (_u, s, headers) => {
       const orgId = headers.get("X-Org-Id") ?? "";
       const rows = f.applicationsByOrg[orgId] ?? f.applications.data;
-      return { status: 200, body: { ...f.applications, data: list(rows, s) } };
+      return {
+        status: 200,
+        body: {
+          ...f.applications,
+          data: isPermanentPackageDetail(headers) ? rows : list(rows, s),
+        },
+      };
     },
   },
 
@@ -323,11 +347,67 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   },
   {
     method: "GET",
+    pattern: /^\/api\/packages\/skills\/[^/]+\/[^/]+$/,
+    handler: (url) => {
+      const detail = f.skillDetails.find((candidate) => candidate.id === typedPackageId(url));
+      return detail ? { status: 200, body: detail } : { status: 404, body: {} };
+    },
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/packages\/skills\/[^/]+\/[^/]+\/versions\/info$/,
+    handler: (url) => {
+      const info = f.skillVersionInfoById[typedPackageId(url)];
+      return info ? { status: 200, body: info } : { status: 404, body: {} };
+    },
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/packages\/skills\/[^/]+\/[^/]+\/versions\/[^/]+$/,
+    handler: (url) =>
+      typedPackageId(url) === f.wikiBrainSkillDetail.id
+        ? { status: 200, body: f.wikiBrainLatestVersion }
+        : { status: 404, body: {} },
+  },
+  {
+    method: "GET",
     pattern: /^\/api\/packages\/mcp-servers$/,
     handler: (_u, s) => ({
       status: 200,
       body: { ...f.mcpServers, data: list(f.mcpServers.data, s) },
     }),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/packages\/mcp-servers\/[^/]+\/[^/]+$/,
+    handler: (url) => {
+      const detail = f.mcpServerDetails.find((candidate) => candidate.id === typedPackageId(url));
+      return detail ? { status: 200, body: detail } : { status: 404, body: {} };
+    },
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/packages\/mcp-servers\/[^/]+\/[^/]+\/versions\/info$/,
+    handler: (url) => {
+      const info = f.mcpServerVersionInfoById[typedPackageId(url)];
+      return info ? { status: 200, body: info } : { status: 404, body: {} };
+    },
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/packages\/mcp-servers\/[^/]+\/[^/]+\/versions\/[^/]+$/,
+    handler: (url) =>
+      typedPackageId(url) === f.qboMcpServerDetail.id
+        ? { status: 200, body: f.qboMcpServerLatestVersion }
+        : { status: 404, body: {} },
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/packages\/[^/]+\/[^/]+\/files$/,
+    handler: (url) => {
+      const files = f.packageFileIndexes[genericPackageId(url)];
+      return files ? { status: 200, body: files } : { status: 404, body: {} };
+    },
   },
   {
     // The gallery pages with `limit` + an accumulator on the caller's side, so

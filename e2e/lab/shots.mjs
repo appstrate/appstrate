@@ -32,6 +32,9 @@
  *   LAB_WIDTHS     comma-separated pixel widths (default: 1440)
  *   LAB_OUT        directory for the PNGs (default: ./lab-shots)
  *   LAB_ALLOW_HOLES=1  report missing fixtures without failing
+ *
+ * CONSOLE CARVE-OUT: this developer CLI's human-readable stdout and stderr are
+ * its interface. Application logging rules do not apply to this harness.
  */
 
 import { mkdir } from "node:fs/promises";
@@ -53,6 +56,7 @@ await mkdir(OUT, { recursive: true });
 // with it, so both can run at once.
 const browser = await chromium.launch({ channel: "chrome" });
 const holes = new Map();
+const navigationFailures = [];
 let shots = 0;
 
 for (const scenario of SCENARIOS) {
@@ -71,12 +75,42 @@ for (const scenario of SCENARIOS) {
   });
 
   for (const screen of SCREENS) {
-    await page.goto(`${BASE}${screen.path}`, { waitUntil: "domcontentloaded" });
+    // Nominal and heavy can prove the real row-link path. Empty and error have
+    // no reliable source row by design, so those scenarios exercise the
+    // permanent detail URL directly and prove the detail resource survives.
+    if (screen.via && (scenario === "nominal" || scenario === "heavy")) {
+      await page.goto(`${BASE}${screen.via.path}`, { waitUntil: "domcontentloaded" });
+      const link = page.getByText(screen.via.text, { exact: true }).first();
+      await link.waitFor({ state: "visible" });
+      await link.click();
+    } else {
+      await page.goto(`${BASE}${screen.path}`, { waitUntil: "domcontentloaded" });
+    }
+    if (screen.settleMs) await page.waitForTimeout(screen.settleMs);
     for (const width of WIDTHS) {
       await page.setViewportSize({ width, height: 1000 });
       // Long enough for the queries the screen fires on mount to answer, which
       // is also what the fixture guard is waiting for.
       await page.waitForTimeout(1200);
+      if (screen.expectedText) {
+        const actualPath = new URL(page.url()).pathname;
+        const visible = await page
+          .getByText(screen.expectedText, { exact: true })
+          .first()
+          .isVisible()
+          .catch(() => false);
+        if (actualPath !== screen.path || !visible) {
+          navigationFailures.push({
+            screen: screen.name,
+            scenario,
+            width,
+            expectedPath: screen.path,
+            actualPath,
+            expectedText: screen.expectedText,
+            visible,
+          });
+        }
+      }
       const file = `${OUT}/${screen.name}-${scenario}-${width}.png`;
       await page.screenshot({ path: file, fullPage: true });
       shots += 1;
@@ -89,20 +123,33 @@ await browser.close();
 
 console.log(`\n${shots} shots, ${SCREENS.length} screens × ${SCENARIOS.length} scenarios`);
 
-if (holes.size === 0) {
+if (holes.size === 0 && navigationFailures.length === 0) {
   console.log("No missing fixture.");
   process.exit(0);
 }
 
-console.error(`\n${holes.size} endpoint(s) the lab cannot serve:\n`);
-for (const [line, where] of holes) {
-  console.error(`  ${line}`);
-  console.error(`    seen on: ${[...where].join(", ")}`);
+if (navigationFailures.length > 0) {
+  console.error("\nDetail navigation regression(s):\n");
+  for (const failure of navigationFailures) {
+    console.error(
+      `  ${failure.screen} ${failure.scenario} ${failure.width}px: expected ${failure.expectedPath}` +
+        ` with visible ${JSON.stringify(failure.expectedText)}, got ${failure.actualPath}` +
+        ` (visible: ${failure.visible})`,
+    );
+  }
 }
-console.error(
-  "\nA screen with no fixture is a screen nobody looks at: it can only ever be" +
-    "\nseen failing. Add a row to `apps/web/src/lab/handlers.ts` and the body it" +
-    "\nserves to `apps/web/src/lab/fixtures.ts`, typed as the OpenAPI response" +
-    "\nfor that endpoint so a backend shape change fails typecheck on the fixture.",
-);
-process.exit(ALLOW_HOLES ? 0 : 1);
+
+if (holes.size > 0) {
+  console.error(`\n${holes.size} endpoint(s) the lab cannot serve:\n`);
+  for (const [line, where] of holes) {
+    console.error(`  ${line}`);
+    console.error(`    seen on: ${[...where].join(", ")}`);
+  }
+  console.error(
+    "\nA screen with no fixture is a screen nobody looks at: it can only ever be" +
+      "\nseen failing. Add a row to `apps/web/src/lab/handlers.ts` and the body it" +
+      "\nserves to `apps/web/src/lab/fixtures.ts`, typed as the OpenAPI response" +
+      "\nfor that endpoint so a backend shape change fails typecheck on the fixture.",
+  );
+}
+process.exit(navigationFailures.length === 0 && ALLOW_HOLES ? 0 : 1);

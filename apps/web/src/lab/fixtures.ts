@@ -709,6 +709,226 @@ export const mcpServers: Json200<"/api/packages/mcp-servers", "get"> = {
   ],
 };
 
+/**
+ * Detail resources mirror their list rows instead of using one catch-all body.
+ * That keeps a row click honest and lets the handler return a real 404 for an
+ * identifier the authored lab data does not contain.
+ */
+export const comptaReferencesSkillDetail: Json200<"/api/packages/skills/{scope}/{name}", "get"> = {
+  id: "@tractr/compta-references",
+  orgId: ORG_ID,
+  name: "compta-references",
+  description:
+    "Références et scripts de la comptabilité Tractr : année fiscale, règles d'extraction BNC, mapping des marchands.",
+  content:
+    "# Références comptables\n\nUtiliser l'année fiscale Tractr et les règles BNC avant toute extraction.\n\n## Contrôles\n\n- Vérifier la période fiscale.\n- Conserver la pièce source.\n- Signaler tout marchand inconnu.",
+  source: "local",
+  created_by: USER_ID,
+  auto_installed: false,
+  lock_version: 4,
+  version: "1.4.0",
+  manifest: {},
+  manifest_name: "@tractr/compta-references",
+  version_count: 4,
+  has_unarchived_changes: false,
+  forked_from: null,
+  agents: [{ id: "@tractr/compta-trimestrielle", display_name: "Compta trimestrielle" }],
+  createdAt: skills.data[0]!.createdAt,
+  updatedAt: skills.data[0]!.updatedAt,
+};
+
+export const triageSentimentSkillDetail: Json200<"/api/packages/skills/{scope}/{name}", "get"> = {
+  id: "@default/triage-sentiment",
+  orgId: null,
+  name: "triage-sentiment",
+  description: "Classe un message entrant par intention et par urgence, puis le route.",
+  content:
+    "# Triage sentiment\n\nClasser chaque message par intention, sentiment et urgence sans inventer de contexte.",
+  source: "system",
+  created_by: null,
+  auto_installed: true,
+  version: "0.3.1",
+  manifest: {},
+  manifest_name: "@default/triage-sentiment",
+  version_count: 1,
+  has_unarchived_changes: false,
+  forked_from: null,
+  agents: [],
+  createdAt: skills.data[1]!.createdAt,
+  updatedAt: skills.data[1]!.updatedAt,
+};
+
+export const wikiBrainSkillDetail: Json200<"/api/packages/skills/{scope}/{name}", "get"> = {
+  id: "@tractr/wiki-brain-method",
+  orgId: ORG_ID,
+  name: "wiki-brain-method",
+  description: "Mémoire proactive par personne : quoi retenir, quand le rappeler.",
+  content:
+    "# Wiki brain\n\nRetenir uniquement les faits durables, attribués et utiles à une interaction future.",
+  source: "local",
+  created_by: USER_ID,
+  auto_installed: false,
+  lock_version: 2,
+  version: "0.9.0",
+  manifest: {},
+  manifest_name: "@tractr/wiki-brain-method",
+  version_count: 2,
+  has_unarchived_changes: true,
+  forked_from: "@default/triage-sentiment",
+  agents: [],
+  createdAt: skills.data[2]!.createdAt,
+  updatedAt: skills.data[2]!.updatedAt,
+};
+
+export const gdriveMcpServerDetail: Json200<"/api/packages/mcp-servers/{scope}/{name}", "get"> = {
+  id: "@appstrate/gdrive-mcp",
+  orgId: null,
+  name: "gdrive-mcp",
+  description: "Serveur MCP Google Drive : recherche, lecture, dépôt de fichiers.",
+  content: null,
+  source: "system",
+  created_by: null,
+  auto_installed: true,
+  version: "2.1.0",
+  manifest: {},
+  manifest_name: "@appstrate/gdrive-mcp",
+  version_count: 3,
+  has_unarchived_changes: false,
+  forked_from: null,
+  agents: [{ id: "@tractr/compta-trimestrielle", display_name: "Compta trimestrielle" }],
+  createdAt: mcpServers.data[0]!.createdAt,
+  updatedAt: mcpServers.data[0]!.updatedAt,
+};
+
+export const qboMcpServerDetail: Json200<"/api/packages/mcp-servers/{scope}/{name}", "get"> = {
+  id: "@tractr/qbo-mcp",
+  orgId: ORG_ID,
+  name: "qbo-mcp",
+  description: "QuickBooks Online, lecture seule : 69 outils comptables.",
+  content: null,
+  source: "local",
+  created_by: USER_ID,
+  auto_installed: false,
+  lock_version: 7,
+  version: "1.0.0",
+  manifest: {},
+  manifest_name: "@tractr/qbo-mcp",
+  version_count: 1,
+  has_unarchived_changes: true,
+  forked_from: null,
+  agents: [{ id: "@tractr/compta-trimestrielle", display_name: "Compta trimestrielle" }],
+  createdAt: mcpServers.data[1]!.createdAt,
+  updatedAt: mcpServers.data[1]!.updatedAt,
+};
+
+export const skillDetails = [
+  comptaReferencesSkillDetail,
+  triageSentimentSkillDetail,
+  wikiBrainSkillDetail,
+];
+
+export const mcpServerDetails = [gdriveMcpServerDetail, qboMcpServerDetail];
+
+type PackageFileIndex = Json200<"/api/packages/{scope}/{name}/files", "get">;
+
+function skillFileIndex(content: string): PackageFileIndex {
+  return {
+    entries: [
+      { path: "SKILL.md", size: content.length, media_kind: "text", inline: content },
+      { path: "manifest.json", size: 3, media_kind: "text", inline: "{}\n" },
+    ],
+  };
+}
+
+function mcpServerFileIndex(): PackageFileIndex {
+  return {
+    entries: [{ path: "manifest.json", size: 3, media_kind: "text", inline: "{}\n" }],
+  };
+}
+
+export const comptaReferencesSkillFiles: Json200<"/api/packages/{scope}/{name}/files", "get"> =
+  skillFileIndex(comptaReferencesSkillDetail.content ?? "");
+export const triageSentimentSkillFiles: Json200<"/api/packages/{scope}/{name}/files", "get"> =
+  skillFileIndex(triageSentimentSkillDetail.content ?? "");
+export const wikiBrainSkillFiles: Json200<"/api/packages/{scope}/{name}/files", "get"> =
+  skillFileIndex(wikiBrainSkillDetail.content ?? "");
+export const gdriveMcpServerFiles: Json200<"/api/packages/{scope}/{name}/files", "get"> =
+  mcpServerFileIndex();
+export const qboMcpServerFiles: Json200<"/api/packages/{scope}/{name}/files", "get"> =
+  mcpServerFileIndex();
+
+export const packageFileIndexes: Record<string, PackageFileIndex> = {
+  [comptaReferencesSkillDetail.id]: comptaReferencesSkillFiles,
+  [triageSentimentSkillDetail.id]: triageSentimentSkillFiles,
+  [wikiBrainSkillDetail.id]: wikiBrainSkillFiles,
+  [gdriveMcpServerDetail.id]: gdriveMcpServerFiles,
+  [qboMcpServerDetail.id]: qboMcpServerFiles,
+};
+
+export const skillVersionInfoById: Record<
+  string,
+  Json200<"/api/packages/skills/{scope}/{name}/versions/info", "get">
+> = {
+  [comptaReferencesSkillDetail.id]: {
+    latest_published_version: "1.4.0",
+    active_version: "1.4.0",
+  },
+  [triageSentimentSkillDetail.id]: {
+    latest_published_version: "0.3.1",
+    active_version: "0.3.1",
+  },
+  [wikiBrainSkillDetail.id]: {
+    latest_published_version: "0.8.0",
+    active_version: "0.9.0",
+  },
+};
+
+export const mcpServerVersionInfoById: Record<
+  string,
+  Json200<"/api/packages/mcp-servers/{scope}/{name}/versions/info", "get">
+> = {
+  [gdriveMcpServerDetail.id]: {
+    latest_published_version: "2.1.0",
+    active_version: "2.1.0",
+  },
+  [qboMcpServerDetail.id]: {
+    latest_published_version: "0.9.0",
+    active_version: "1.0.0",
+  },
+};
+
+export const wikiBrainLatestVersion: Json200<
+  "/api/packages/skills/{scope}/{name}/versions/{version}",
+  "get"
+> = {
+  id: 1,
+  version: "0.8.0",
+  manifest: {},
+  content: "# Wiki brain\n\nRetenir les faits durables et attribués.",
+  yanked: false,
+  yanked_reason: null,
+  integrity: "sha256-08c9d3b7f51d73bc0f93cf40a2fdb82deef4c59f47c6c7e15bf5ce495239537d",
+  artifact_size: 1_240,
+  createdAt: ago(2_000),
+  dist_tags: ["latest"],
+};
+
+export const qboMcpServerLatestVersion: Json200<
+  "/api/packages/mcp-servers/{scope}/{name}/versions/{version}",
+  "get"
+> = {
+  id: 1,
+  version: "0.9.0",
+  manifest: {},
+  content: null,
+  yanked: false,
+  yanked_reason: null,
+  integrity: "sha256-cfd1844da42673fc92ed98c9f1d178832f03a5f08e851f9ec31716f009440dc2",
+  artifact_size: 4_820,
+  createdAt: ago(1_200),
+  dist_tags: ["latest"],
+};
+
 /* -------------------------------------------------------------------------- */
 /* Documents                                                                   */
 /* -------------------------------------------------------------------------- */

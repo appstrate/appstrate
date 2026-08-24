@@ -166,6 +166,22 @@ The integration catalogue is a permanent lab screen now
 not only the collection behind it, so the catalogue's cards, filters, empty and
 error states stay visible at desktop and phone widths.
 
+Skill and MCP-server details are permanent lab screens too (23 August). Their
+list fixtures had existed without the corresponding detail handlers, so a row
+click fetched an unserved endpoint twice and `UnifiedPackageDetailPage` replaced
+the failed route with `/`. The screen entries now exercise the actual row click
+in nominal and heavy, then exercise the permanent URL directly in empty and
+error. The guard asserts both the final pathname and the resource name, in
+addition to listening for missing fixtures. It therefore catches the user's
+exact symptom, not only the 404 that happened to cause it this time.
+
+An empty list normally removes the org shell and reaches onboarding. That is
+still the rule for list screens. `mock-fetch` now passes the current lab path as
+internal handler context so a permanent Skill or MCP-server detail URL keeps
+its org and application shell under `empty`; only those two detail families get
+the exception. The authored detail resource then survives `empty` and `error`,
+while endpoints beneath it still express the selected scenario.
+
 The guard watches the browser rather than scanning the source, and that is the
 whole design. The obvious version greps the hooks for their endpoint strings;
 it does not hold, because the SPA reaches the API in FOUR shapes and only two
@@ -1892,6 +1908,36 @@ one derived pagination signature, so either resets pages without remounting the
 toolbar. Card-level web tests cover the new run and schedule representations,
 the preserved compact schedule variant and the empty document-card footer. The
 review's duplicated schedule activity badges were also reduced to one atom.
+
+A package-detail fixture follow-up closed a hole that this collection pass had
+left behind. Every Skill and MCP-server row authored in the lab now has its own
+OpenAPI-typed detail resource; the handler resolves the requested `@scope/name`
+and returns 404 for an unknown identifier rather than serving one catch-all
+body. The two permanent screens are `skill-detail` at
+`/skills/@tractr/compta-references` and `mcp-server-detail` at
+`/mcp-servers/@tractr/qbo-mcp`.
+
+The first browser pass discovered the secondary reads rather than guessing
+them: the Skill file index, both families' version-info routes, and the MCP
+server's `latest` version used by the diff calculation. Those responses are
+typed fixtures too, and every authored Skill or MCP-server list row has a
+matching file/detail identity. The harness also exposed a second, independent
+problem: `empty` removed the org before a permanent detail URL could render.
+The lab now preserves the shell only when its current location is one of these
+details, leaving the list-screen onboarding behaviour unchanged.
+
+The two screens produce 16 captures across nominal, empty, heavy and error at
+1440 and 390 with no missing fixture. Nominal pixels were inspected at both
+widths. DOM measurements report zero horizontal overflow: the root remains
+1440/390px, the content surface 1184/390px and the tab track 239/343px. The
+browser guard proves that clicking each list row lands on the matching detail
+instead of `/`; handler tests prove both identity resolution and unknown-id
+404s. `TEST_TIER=0 bun test apps/web` is green (616 tests), and `bun run check`
+is green (33/33 tasks, with the same nine pre-existing warnings). Root
+`bun test` cannot complete in this environment: its preload immediately fails
+to reach the OrbStack Docker socket and cannot pull Redis. It was stopped after
+that proof rather than reporting an invented success; the touched Tier 0 web
+suite remains green.
 
 **10. Prototype Table / Calendar for Runs and Schedules, replacing their Card
 view.** This is a product decision, not a request to make one generic calendar

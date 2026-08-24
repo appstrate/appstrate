@@ -69,6 +69,10 @@ export function installLabFetch(): void {
     const headers = new Headers(
       init?.headers ?? (input instanceof Request ? input.headers : undefined),
     );
+    // Internal lab context only. The empty scenario normally removes the orgs
+    // and lands on onboarding, but a permanent detail URL must keep its shell
+    // so the authored detail survivor can be inspected in that scenario.
+    headers.set("X-Appstrate-Lab-Location", window.location.pathname);
     const handled = resolveHandler(
       method,
       url,
