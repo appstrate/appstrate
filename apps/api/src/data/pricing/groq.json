@@ -311,21 +311,23 @@
     "maxTokens": 16384,
     "capabilities": [
       "text",
-      "image"
+      "image",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
-          "xhigh": "unsupported",
-          "max": "unsupported"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },

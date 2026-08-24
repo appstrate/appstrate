@@ -280,21 +280,22 @@
     "maxTokens": 128000,
     "capabilities": [
       "text",
-      "image"
+      "image",
+      "reasoning"
     ],
     "generation": {
       "temperature": "unsupported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
         "adaptive": true,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
-          "xhigh": "unsupported",
-          "max": "unsupported"
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
+          "xhigh": "supported",
+          "max": "supported"
         }
       }
     },
@@ -766,7 +767,7 @@
   "claude-sonnet-4-6": {
     "label": "Claude Sonnet 4 6",
     "contextWindow": 1000000,
-    "maxTokens": 64000,
+    "maxTokens": 128000,
     "capabilities": [
       "text",
       "image",

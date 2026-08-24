@@ -686,9 +686,9 @@
       }
     },
     "cost": {
-      "input": 1.5,
-      "output": 7.5,
-      "cacheRead": 0.15
+      "input": 0.75,
+      "output": 3.75,
+      "cacheRead": 0.075
     }
   },
   "gemini-3.7-flash": {
@@ -697,19 +697,21 @@
     "maxTokens": 65536,
     "capabilities": [
       "text",
-      "image"
+      "image",
+      "reasoning"
     ],
     "generation": {
       "temperature": "supported",
       "reasoning": {
-        "supported": "unsupported",
+        "supported": "supported",
+        "temperatureCompatible": "supported",
         "adaptive": null,
         "levels": {
-          "off": "unsupported",
-          "minimal": "unsupported",
-          "low": "unsupported",
-          "medium": "unsupported",
-          "high": "unsupported",
+          "off": "supported",
+          "minimal": "supported",
+          "low": "supported",
+          "medium": "supported",
+          "high": "supported",
           "xhigh": "unsupported",
           "max": "unsupported"
         }

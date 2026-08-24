@@ -209,9 +209,9 @@
       }
     },
     "cost": {
-      "input": 0.14,
-      "output": 0.28,
-      "cacheRead": 0.0028,
+      "input": 0.44,
+      "output": 1.32,
+      "cacheRead": 0.014,
       "cacheWrite": 0
     }
   },
@@ -241,9 +241,9 @@
       }
     },
     "cost": {
-      "input": 0.435,
-      "output": 0.87,
-      "cacheRead": 0.003625,
+      "input": 1.32,
+      "output": 3.96,
+      "cacheRead": 0.044,
       "cacheWrite": 0
     }
   }
