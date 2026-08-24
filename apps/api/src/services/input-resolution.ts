@@ -24,7 +24,8 @@
  */
 
 import { ApiError } from "../lib/errors.ts";
-import { authorDefaults, type JSONSchemaObject } from "@appstrate/core/form";
+import { asJSONSchemaObject, authorDefaults, type JSONSchemaObject } from "@appstrate/core/form";
+import { validateInput } from "./schema.ts";
 import {
   assertFieldsUnlocked as assertFieldsUnlockedCore,
   resolveEffectiveInput as resolveEffectiveInputCore,
@@ -104,4 +105,45 @@ export function assertLockedFieldsSatisfiable(
       param: `locked_fields.${field}`,
     });
   }
+}
+
+/**
+ * Resolve a schedule's stored input through the layers and validate the result
+ * against the agent's schema, WITHOUT choosing a failure channel.
+ *
+ * Three call sites need exactly this pair, and they answer differently: the
+ * create route throws `validationFailed`, the update route does too, and the
+ * fire path calls `failSchedule` and logs. Writing the pair out per site is
+ * what let them drift — `PUT /api/schedules/:id` had adopted only the
+ * lock half (`assertFieldsUnlocked`) and skipped the validation entirely, so a
+ * PUT that replaced `input` with a wrong-typed or incomplete value answered
+ * 200 and then failed at EVERY subsequent tick. The create route's own comment
+ * says the point is to refuse "at this write rather than silently each tick";
+ * its sibling did the opposite.
+ *
+ * A `null` schema means the agent declares none, in which case there is
+ * nothing to validate and the resolved input is returned as-is. Resolution
+ * itself can still throw `ApiError(400, "locked_input_field")` — that refusal
+ * has one shape everywhere and is deliberately left to propagate.
+ */
+export function resolveAndValidateScheduleInput(args: {
+  inputSchema: unknown;
+  editorDefaults: Record<string, unknown> | undefined;
+  lockedFields: readonly string[] | undefined;
+  input: Record<string, unknown> | undefined;
+}):
+  | { resolved: Record<string, unknown>; errors?: undefined }
+  | { errors: { field: string; message: string }[] } {
+  const schema = args.inputSchema ? asJSONSchemaObject(args.inputSchema) : undefined;
+  const resolved = resolveEffectiveInput({
+    ...(schema ? { schema } : {}),
+    editorDefaults: args.editorDefaults,
+    lockedFields: args.lockedFields,
+    overlay: { origin: "schedule input", values: args.input },
+  });
+  if (!schema) return { resolved };
+
+  const validation = validateInput(resolved, schema);
+  if (!validation.valid) return { errors: validation.errors };
+  return { resolved };
 }

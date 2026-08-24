@@ -2,6 +2,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { connectionOverridesSchema, dependencyOverridesSchema } from "../lib/launch-schemas.ts";
 import {
   ModelGenerationError,
   modelGenerationSettingsSchema,
@@ -20,8 +21,6 @@ import {
   deleteSchedule,
 } from "../services/scheduler.ts";
 import { isValidCron } from "../lib/cron.ts";
-import { validateInput } from "../services/schema.ts";
-import { isValidDependencyOverride } from "../services/input-parser.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { ApiError, invalidRequest, notFound, validationFailed } from "../lib/errors.ts";
@@ -34,7 +33,8 @@ import { getOrgMember } from "../services/organizations.ts";
 import { getEndUser } from "../services/end-users.ts";
 import { assertExplicitModelExists, resolveModel } from "../services/org-models.ts";
 import { getInstalledPackageSettings } from "../services/application-packages.ts";
-import { assertFieldsUnlocked, resolveEffectiveInput } from "../services/input-resolution.ts";
+import { resolveAndValidateScheduleInput } from "../services/input-resolution.ts";
+import { getPackage } from "../services/package-catalog.ts";
 import { asJSONSchemaObject, schemaHasFileFields } from "@appstrate/core/form";
 import { listScheduleRuns } from "../services/state/runs.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
@@ -43,36 +43,26 @@ import { listResponse } from "../lib/list-response.ts";
 import { scheduleInputSchema } from "../lib/jsonb-schemas.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 
-// Per-integration connection picks frozen on the schedule row (cascade
-// mechanism #3). Same wire shape as the run-route's connection_overrides;
-// loses to admin pins at fire time. Shape: { "@scope/integration": "<connection_id>" }.
-//
-// `.min(1)` on the value for the same reason the run route sets it
-// (`runs.ts`) — and it costs more here. An empty-string id is FALSY at the
-// resolver's `resolveOne` (`integration-connection-resolver.ts`, layer 4), so
-// the pin is skipped without a trace and the fire falls through to the
-// actor-fallback, or dies with a 412 `must_choose_connection`. A schedule
-// replays its frozen map on every tick, so without this the write answers 200
-// once and every subsequent fire is silently wrong.
-const connectionOverridesSchema = z.record(z.string(), z.string().min(1));
+// Both maps are the shared launch rules (`lib/launch-schemas.ts`). A schedule
+// freezes them onto the row and replays them on every tick, which is what makes
+// a second, drifting copy expensive here: the write answers 200 once and every
+// subsequent fire is silently wrong.
 
-// Per-dependency version overrides frozen on the schedule row (#666/#686).
-// Same wire shape as the run-route's dependency_overrides; keys may name a
-// declared skill OR integration. Shape: { "@scope/dep": "draft" | "<spec>" }.
-//
-// The VALUE gate lives here because nothing downstream applies it on this
-// path: the agent route gets it from `parseRequestInput` (`input-parser.ts`)
-// and the remote route declares it in Zod, but a schedule resolves its input
-// through `resolveEffectiveInput` + `validateInput` (`services/scheduler.ts`)
-// and never calls the parser — so an unresolvable value froze onto the row and
-// failed at EVERY fire instead of at the write. Same predicate and same message
-// as `POST /api/runs/remote`; a second predicate would be a second opinion.
-const dependencyOverridesSchema = z
-  .record(z.string(), z.string())
-  .refine(
-    (m) => Object.values(m).every(isValidDependencyOverride),
-    '`dependency_overrides` values must be "draft" or a valid version spec (semver range or dist-tag)',
+/**
+ * The 400 a schedule's stored input earns when it no longer satisfies the
+ * agent's schema. One shape for the create route and the update route, so the
+ * two cannot answer the same bad body differently.
+ */
+function scheduleInputInvalid(errors: { field: string; message: string }[]): ApiError {
+  return validationFailed(
+    errors.map((e) => ({
+      field: e.field ? `input.${e.field}` : "input",
+      code: "invalid_input",
+      title: "Invalid Input",
+      message: e.message,
+    })),
   );
+}
 
 // #738: schedule execution identity, chosen by an admin from the form.
 // XOR — exactly one of user_id / end_user_id. Omitted at create → defaults to
@@ -236,25 +226,13 @@ export function createSchedulesRouter() {
       // refused (400 `locked_input_field`) at this write rather than silently
       // each tick.
       const packageSettings = await getInstalledPackageSettings(scope.applicationId, agent.id);
-      const resolvedInput = resolveEffectiveInput({
-        ...(inputSchema ? { schema: asJSONSchemaObject(inputSchema) } : {}),
+      const resolution = resolveAndValidateScheduleInput({
+        inputSchema,
         editorDefaults: packageSettings.values,
         lockedFields: packageSettings.locked,
-        overlay: { origin: "schedule input", values: data.input },
+        input: data.input,
       });
-      if (inputSchema) {
-        const inputValidation = validateInput(resolvedInput, asJSONSchemaObject(inputSchema));
-        if (!inputValidation.valid) {
-          throw validationFailed(
-            inputValidation.errors.map((e) => ({
-              field: e.field ? `input.${e.field}` : "input",
-              code: "invalid_input",
-              title: "Invalid Input",
-              message: e.message,
-            })),
-          );
-        }
-      }
+      if (resolution.errors) throw scheduleInputInvalid(resolution.errors);
 
       // #738: actor defaults to the caller; an admin may override it from the
       // form (validated against this org/app scope).
@@ -345,10 +323,24 @@ export function createSchedulesRouter() {
       existing.packageId,
     );
 
-    // A schedule may not answer a locked field — same refusal the create route
-    // and the fire path apply, so the three cannot disagree.
-    if (data.input !== undefined) {
-      assertFieldsUnlocked(data.input, packageSettings.locked, "schedule input");
+    // Same resolve-and-validate the create route runs, for the same stated
+    // reason: refuse at THIS write rather than silently at every tick. This
+    // path used to run only the lock half, so a PUT replacing `input` with a
+    // wrong-typed or incomplete value answered 200 and then died on every
+    // subsequent fire, visible only in the schedule's failure record.
+    //
+    // `data.input ?? existing.input` because a PATCH that omits `input` must
+    // still be checked against the CURRENT schema and locks — both can have
+    // tightened since the schedule was written.
+    if (data.input !== undefined || existing.input !== undefined) {
+      const agentForInput = await getPackage(existing.packageId, scope.orgId);
+      const resolution = resolveAndValidateScheduleInput({
+        inputSchema: agentForInput?.manifest.input?.schema,
+        editorDefaults: packageSettings.values,
+        lockedFields: packageSettings.locked,
+        input: data.input ?? (existing.input as Record<string, unknown> | undefined),
+      });
+      if (resolution.errors) throw scheduleInputInvalid(resolution.errors);
     }
 
     // Reject a `model_id_override` that references no real model (no-op when

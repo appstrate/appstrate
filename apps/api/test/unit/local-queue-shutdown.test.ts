@@ -224,3 +224,75 @@ describe("LocalQueue.shutdown — failures during shutdown", () => {
     expect(attempts).toEqual([0, 1]);
   });
 });
+
+describe("LocalQueue.shutdown — jobs that never started", () => {
+  /**
+   * The sleeper rule above says a retry inside the budget is work that would
+   * have completed. A job still sitting in `pending` is the same work, one step
+   * earlier — and it was dropped without so much as a log line, because
+   * `drain()` returns early once `shuttingDown` is set.
+   */
+  it("runs queued-but-unstarted jobs that fit in the budget", async () => {
+    const { lines, logger } = recordingLogger();
+    const queue = new LocalQueue<{ n: number }>("test-pending", logger);
+    const ran: number[] = [];
+    const started = signal();
+
+    queue.process(
+      async (job: QueueJob<{ n: number }>) => {
+        ran.push(job.data.n);
+        if (ran.length === 1) started.fire();
+        await tick(20);
+      },
+      { concurrency: 1 },
+    );
+
+    // Four jobs, concurrency 1: the first runs, three queue behind it.
+    for (const n of [1, 2, 3, 4]) await queue.add("job", { n });
+    await started.fired;
+    expect(await queue.count()).toBeGreaterThan(1);
+
+    await queue.shutdown(2_000);
+
+    expect(ran.sort()).toEqual([1, 2, 3, 4]);
+    expect(abandonLines(lines)).toHaveLength(0);
+  });
+
+  /**
+   * With no budget there is no time to run them, so they go — but loudly. A
+   * silent drop is the failure this whole file exists to prevent, and it does
+   * not stop mattering because the job had not started yet.
+   */
+  it("abandons queued jobs under a zero grace, and names each one", async () => {
+    const { lines, logger } = recordingLogger();
+    const queue = new LocalQueue<{ n: number }>("test-pending-zero", logger);
+    const ran: number[] = [];
+    const started = signal();
+
+    queue.process(
+      async (job: QueueJob<{ n: number }>) => {
+        ran.push(job.data.n);
+        if (ran.length === 1) started.fire();
+        await tick(20);
+      },
+      { concurrency: 1 },
+    );
+
+    for (const n of [1, 2, 3]) await queue.add("job", { n });
+    await started.fired;
+
+    await queue.shutdown(0);
+
+    // Only the in-flight job ran; the other two were abandoned, each logged.
+    expect(ran).toEqual([1]);
+    const abandoned = abandonLines(lines).filter((l) => l.msg.includes("never started"));
+    expect(abandoned).toHaveLength(2);
+    expect(abandoned[0]?.data).toMatchObject({ queue: "test-pending-zero", jobName: "job" });
+
+    // And they stay abandoned: nothing re-drains them after shutdown returns.
+    // (`count()` still reports the in-flight job — shutdown(0) does not wait
+    // for it — so assert on what actually ran, not on the queue depth.)
+    await tick(80);
+    expect(ran).toEqual([1]);
+  });
+});

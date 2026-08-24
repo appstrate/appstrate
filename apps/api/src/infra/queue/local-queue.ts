@@ -198,10 +198,47 @@ export class LocalQueue<T> implements JobQueue<T> {
       this.abandonRetry(sleeper);
     }
 
+    // The same rule, applied to jobs that never STARTED. `drain()` returns
+    // early once `shuttingDown` is set, so everything still queued was dropped
+    // here — with no log line, which is exactly the silent loss the sleeper
+    // pass above exists to prevent. It is the same billable rows: consumers
+    // like `llm-usage-retry` run at `concurrency: 4`, so more than four
+    // simultaneous failures leave the excess sitting in `pending`.
+    //
+    // Run them within the same budget, then abandon the remainder loudly.
+    // `graceMs: 0` (test teardown) skips the loop entirely and logs whatever
+    // was queued, which is the honest report of an immediate tear-down.
+    const maxConcurrency = this.workerOpts?.concurrency ?? 5;
+    while (this.pending.length > 0 && Date.now() < deadline) {
+      if (!this.handler) break;
+      if (this.activeJobs >= maxConcurrency) {
+        await new Promise((r) => setTimeout(r, 50));
+        continue;
+      }
+      const item = this.pending.shift()!;
+      this.executeJob(item.job, item.opts);
+    }
+    for (const item of this.pending.splice(0)) {
+      this.logAbandonedPending(item.job);
+    }
+
     // Wait for in-flight handlers — and for the retries kept above — to finish.
     while (this.activeJobs > 0 && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 200));
     }
+  }
+
+  /**
+   * Record a job the process is dropping before it ever ran. Same obligation as
+   * {@link logAbandonedRetry}: work thrown away never leaves without a line
+   * naming the queue and the job.
+   */
+  private logAbandonedPending(job: QueueJob<T>): void {
+    this.log.warn(`${this.name} job abandoned at shutdown, never started`, {
+      queue: this.name,
+      jobId: job.id,
+      jobName: job.name,
+    });
   }
 
   /**

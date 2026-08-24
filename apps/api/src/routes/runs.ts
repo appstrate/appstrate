@@ -28,6 +28,7 @@ import { invalidRequest, notFound, conflict, internalError } from "../lib/errors
 import { listResponse } from "../lib/list-response.ts";
 import { setOffsetLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
 import { parseListPagination } from "../lib/list-query.ts";
+import { connectionOverridesSchema } from "../lib/launch-schemas.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { stopWorkloadAndWait } from "../services/stop-workload.ts";
@@ -84,8 +85,7 @@ export const runAgentBodySchema = z
     modelId: z.string().optional(),
     generation: modelGenerationSettingsSchema.optional(),
     proxyId: z.string().optional(),
-    /** `.min(1)` for the same reason it is set on the inline schema below. */
-    connection_overrides: z.record(z.string(), z.string().min(1)).optional(),
+    connection_overrides: connectionOverridesSchema.optional(),
     dependency_overrides: z.record(z.string(), z.string()).optional(),
   })
   .strict();
@@ -125,14 +125,10 @@ const inlineRunBodySchema = z
      * gate, which runs BEFORE `parseRequestInput` and would otherwise never see
      * it.
      *
-     * `.min(1)` is owned here rather than delegated to `parseRequestInput`: an
-     * empty-string id is falsy at the resolver's `resolveOne`, so readiness would
-     * answer 412 before the parser's field-precise 400 could fire — and
-     * `POST /runs/inline/validate` never calls the parser at all, so the guard
-     * would have no owner there and the validator would disagree with the launch
-     * on the same body.
+     * `.min(1)` and the reason it is owned at the schema rather than in
+     * `parseRequestInput` live with the rule itself, in `lib/launch-schemas.ts`.
      */
-    connection_overrides: z.record(z.string(), z.string().min(1)).optional(),
+    connection_overrides: connectionOverridesSchema.optional(),
     /**
      * Not a field — a rejection. `rerun_from` is an agent-route concept (replay a
      * cataloged agent's prior input) and means nothing here, so its presence must

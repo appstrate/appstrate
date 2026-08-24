@@ -34,7 +34,8 @@ import { getActor } from "../lib/actor.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { getPlatformRunLimits } from "../services/run-limits.ts";
 import { runInlinePreflight } from "../services/inline-run-preflight.ts";
-import { isValidDependencyOverride, collectFileRefs } from "../services/input-parser.ts";
+import { collectFileRefs } from "../services/input-parser.ts";
+import { dependencyOverridesSchema } from "../lib/launch-schemas.ts";
 import { insertShadowPackage, buildShadowLoadedPackage } from "../services/inline-run.ts";
 import { createRun } from "../services/run-creation.ts";
 import { resolveRunnerContext } from "../lib/runner-context.ts";
@@ -115,13 +116,7 @@ export const CreateRemoteRunBodySchema = z
     // working copy; any other value replaces the manifest pin. Mirrors the
     // platform run route's value gate (`isValidDependencyOverride`); the KEY
     // gate + pin resolution happen in `freezeRunSpawnDependencies`.
-    dependency_overrides: z
-      .record(z.string(), z.string())
-      .optional()
-      .refine(
-        (m) => !m || Object.values(m).every(isValidDependencyOverride),
-        '`dependency_overrides` values must be "draft" or a valid version spec (semver range or dist-tag)',
-      ),
+    dependency_overrides: dependencyOverridesSchema.optional(),
     contextSnapshot: z
       .record(z.string(), z.unknown())
       .optional()
