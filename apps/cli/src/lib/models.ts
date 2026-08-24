@@ -76,21 +76,20 @@ export async function listModelPresets(profileName: string): Promise<ModelPreset
  * `/v1/chat/completions` endpoint — NOT the Beta `/v1/conversations`
  * agentic API. Auth is `Authorization: Bearer` for OpenAI and Mistral.
  *
- * NOT a shared constant, and deliberately so. This set is
- * `platform-routed ∩ pi-ai-supported` — the CLI's client SDK is pi-ai. Two
- * sibling lists answer neighbouring but different questions, against different
- * owners, and merging them would couple capability sets that can legitimately
- * diverge:
- *   - `apps/api/src/routes/llm-proxy.ts` `routes[]` — the AUTHORITATIVE route
- *     table. Deliberately concrete per the spec ("resists premature
- *     abstraction"), and it carries per-family upstream paths a membership set
- *     can't. Anything here must exist there; widen that table first.
- *   - `packages/module-chat/src/pi-chat/model-binding.ts` `proxyBaseUrl()` —
- *     `platform-routed ∩ AI-SDK-supported`, plus each family's AI SDK provider
- *     kind and baseURL suffix. Same three families today by coincidence of
- *     support, not by shared definition: pi-ai already knows shapes the AI SDK
- *     binding doesn't (`openai-responses`, `google-generative-ai`, …), so
- *     adding one here need not add one there.
+ * Derived from `LLM_PROXY_ROUTES` rather than restated. This paragraph used to
+ * argue the opposite — "NOT a shared constant, and deliberately so", the set
+ * being `platform-routed ∩ pi-ai-supported` — and named two sibling lists it
+ * must not be merged with. Both of those are gone: `routes[]` in
+ * `apps/api/src/routes/llm-proxy.ts` and `proxyBaseUrl()` in
+ * `model-binding.ts` were deleted by the same change that made this a
+ * derivation, so all three cross-references pointed at nothing.
+ *
+ * The weaker contract that replaced it, stated plainly: CLI preset support IS
+ * platform routing. A shape the platform stops routing stops looking supported
+ * here, which is the property worth having. The intersection with pi-ai's own
+ * client support is not re-checked, because pi-ai carries a superset of the
+ * shapes the proxy has adapters for — if that ever stops being true, the fix is
+ * to intersect HERE and say so, not to spell the membership out by hand again.
  *
  * The Anthropic case takes a side-channel: pi-ai's Anthropic SDK sends
  * `x-api-key` natively, but the platform's auth pipeline reads

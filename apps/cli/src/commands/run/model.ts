@@ -166,7 +166,13 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
     );
   }
 
-  const baseUrl = buildProxyBaseUrl(inputs.instance, preset.apiShape);
+  // Non-null by construction: `PROXY_SUPPORTED_APIS` IS `Object.keys(
+  // LLM_PROXY_ROUTES)`, the exact predicate `llmProxyBaseUrl` tests, and the
+  // guard above already refused anything outside it. This used to run through a
+  // wrapper that re-tested the same predicate and threw a second, differently
+  // worded "does not yet route" error — a branch nothing could reach, kept in
+  // sync forever and coverable by no test.
+  const baseUrl = llmProxyBaseUrl(inputs.instance, preset.apiShape)!;
   // pi-ai's Anthropic SDK path sends auth as `x-api-key`, but the
   // platform's auth pipeline reads `Authorization: Bearer`. We inject
   // the bearer via model.headers and pass a placeholder `apiKey` to
@@ -289,19 +295,4 @@ function pickPreset(presets: ModelPreset[], requestedId?: string): ModelPreset {
     );
   }
   return defaultPreset;
-}
-
-function buildProxyBaseUrl(instance: string, api: string): string {
-  const trimmed = instance.replace(/\/+$/, "");
-  // The per-SDK path convention lives once, in `LLM_PROXY_ROUTES`
-  // (`@appstrate/runner-pi`) — the same table the platform mounts its proxy
-  // routes from. This used to spell the three base URLs out again, with its own
-  // copy of the comment explaining why `/v1` sits in the base for OpenAI and in
-  // the suffix for the other two.
-  const baseUrl = llmProxyBaseUrl(trimmed, api);
-  if (baseUrl) return baseUrl;
-  throw new ModelResolutionError(
-    `CLI preset mode does not yet route protocol "${api}"`,
-    `Supported today: ${Array.from(PROXY_SUPPORTED_APIS).join(", ")}. Pick a compatible preset or use --model-source env.`,
-  );
 }

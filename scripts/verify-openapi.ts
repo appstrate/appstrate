@@ -1259,12 +1259,12 @@ for (const m of indexSrc.matchAll(
 // 4b. Route files referenced by mounts — parse each factory body or default body
 //     and combine with the mount prefix.
 const SKIP_FILES = new Set<string>([
-  // Routes registered via runtime config with a VARIABLE path
-  // (`router.post(entry.urlPath, …)` — a bare identifier, not a string/template
-  // literal). The path can't be captured at all, so the emitted endpoints are
-  // covered by SPEC_ONLY_ALLOWLIST in §5b, which pins the three shapes the spec
-  // documents. (This used to read "covered by check #1" — the hand-typed
-  // endpoint list §5b replaced.) (packages.ts is NOT skipped: its template-literal
+  // Routes registered with a COMPUTED path (`router.post(llmProxyUrlPath(shape),
+  // …)` — a call, not a string/template literal). The path can't be captured
+  // statically, so the emitted endpoints are covered by SPEC_ONLY_ALLOWLIST in
+  // §5b. (This used to describe `router.post(entry.urlPath, …)`, a bare
+  // identifier read off a local config array; that array is gone. Before that
+  // it read "covered by check #1", the hand-typed endpoint list §5b replaced.) (packages.ts is NOT skipped: its template-literal
   // `${path}` routes are now expanded by resolveTemplatedPath against the
   // in-file ROUTE_CONFIGS `path:` literals and verified against the spec like
   // any literal route; an unresolvable `${…}` fails the run.)
@@ -1545,11 +1545,18 @@ const SPEC_ONLY_ALLOWLIST = new Set<string>([
   "GET /health",
   "GET /api/openapi.json",
 
-  // LLM proxy shapes. `routes/llm-proxy.ts` registers them from a config array
-  // (`router.post(entry.urlPath, …)` — a bare identifier), which is why the
-  // whole file sits in SKIP_FILES. The spec is the only place these three paths
-  // appear as literals, so this allowlist is what keeps that skip honest:
-  // documenting a fourth shape without listing it here fails the run.
+  // LLM proxy shapes. `routes/llm-proxy.ts` mounts them from `LLM_PROXY_ROUTES`
+  // (`@appstrate/runner-pi`) via `llmProxyUrlPath(shape)`, a call this parser
+  // cannot evaluate, which is why the whole file sits in SKIP_FILES.
+  //
+  // Neither side spells these paths as literals any more: the spec derives its
+  // keys from the SAME table (`openapi/paths/llm-proxy.ts`). That is what keeps
+  // the skip honest now — not this list. A `baseSuffix` edit moves the mounted
+  // route and the document together, so they cannot disagree; the symmetry
+  // between a client's base URL and the server's mount is asserted directly in
+  // `packages/runner-pi/test/llm-proxy-routes.test.ts`. This allowlist remains
+  // only because §5b compares against code endpoints the skip removed, and
+  // documenting a fourth shape without listing it here still fails the run.
   "POST /api/llm-proxy/anthropic-messages/v1/messages",
   "POST /api/llm-proxy/openai-completions/v1/chat/completions",
   "POST /api/llm-proxy/mistral-conversations/v1/chat/completions",

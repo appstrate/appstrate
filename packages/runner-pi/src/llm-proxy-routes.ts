@@ -33,7 +33,10 @@
  */
 
 /** One proxied api shape's path convention. */
-export interface LlmProxyRoute {
+// Not exported: `as const satisfies Record<string, LlmProxyRoute>` below keeps
+// the literal type, so no consumer ever names this — and knip flags an exported
+// type with no reader, which is how the barrel export of it was caught.
+interface LlmProxyRoute {
   /**
    * Path segment that belongs in the BASE URL handed to the vendor client,
    * after `/api/llm-proxy/<apiShape>`. Empty when the client puts the whole
@@ -75,11 +78,18 @@ export function isProxiedApiShape(apiShape: string): apiShape is ProxiedApiShape
  * Base URL a vendor client is pointed at to reach the proxy, or null when the
  * shape is not proxyable.
  *
- * `origin` is the platform origin (no trailing slash).
+ * A trailing slash on `origin` is trimmed here rather than required of the
+ * caller. The precondition used to be documented and unenforced, and only one
+ * of the two callers honoured it: the CLI trimmed its `--instance` value, while
+ * chat passed `CHAT_SELF_ORIGIN` — an operator-set env var — verbatim, so
+ * `http://127.0.0.1:3000/` produced a double slash. Consolidating three copies
+ * of a path convention into one function is the moment to enforce its
+ * precondition once too, instead of restating it.
  */
 export function llmProxyBaseUrl(origin: string, apiShape: string): string | null {
   if (!isProxiedApiShape(apiShape)) return null;
-  return `${origin}/api/llm-proxy/${apiShape}${LLM_PROXY_ROUTES[apiShape].baseSuffix}`;
+  const base = origin.replace(/\/+$/, "");
+  return `${base}/api/llm-proxy/${apiShape}${LLM_PROXY_ROUTES[apiShape].baseSuffix}`;
 }
 
 /**
