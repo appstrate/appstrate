@@ -293,6 +293,10 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       actor_type: "end_user",
       end_user_id: endUserId,
       application_id: applicationId,
+      // `/api/runs` is used here as a convenient authenticated route — the
+      // subject under test is app-context pinning. It enforces `runs:read`
+      // like every other read route, so the token has to carry it.
+      scope: "openid runs:read",
     });
     const res = await app.request(`/api/runs`, {
       headers: {
@@ -382,6 +386,9 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       actor_type: "end_user",
       end_user_id: endUserId,
       application_id: applicationId,
+      // The subject under test is the azp/disabled-client check; `/api/runs`
+      // is the probe route and enforces `runs:read`.
+      scope: "openid runs:read",
     });
 
     // Token should work while client is active.

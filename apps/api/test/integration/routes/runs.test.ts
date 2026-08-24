@@ -721,6 +721,7 @@ describe("Runs API", () => {
         applicationId: ctx.defaultAppId,
         createdBy: ctx.user.id,
         name: "user-filter-key",
+        scopes: ["runs:read"],
       });
       const ownRun = await seedRun({
         packageId: "@runorg/eu-filter-agent",
@@ -772,6 +773,7 @@ describe("Runs API", () => {
         applicationId: ctx.defaultAppId,
         createdBy: ctx.user.id,
         name: "user-filter-key-bad",
+        scopes: ["runs:read"],
       });
 
       const res = await app.request("/api/runs?user=garbage", {
