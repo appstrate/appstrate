@@ -166,18 +166,18 @@ export async function buildAgentPackage(
    */
   dependencyOverrides?: Record<string, string> | null,
 ): Promise<AgentPackageResult> {
-  // #1177 — canonicalize the persisted `runtime_tools` ids BEFORE they are
-  // serialized into the bundle the container loads. `runtime-pi/entrypoint.ts`
-  // gates the publish tool on an exact string match against THIS manifest's
+  // Canonicalize the persisted `runtime_tools` ids BEFORE they are serialized
+  // into the bundle the container loads. `runtime-pi/entrypoint.ts` gates the
+  // publish tool on an exact string match against THIS manifest's
   // `runtime_tools` (`declaredRuntimeTools.includes("publish_file")`), so an
-  // agent published under the retired `publish_document` spelling would launch
-  // normally and register no publish tool at all: the model cannot publish
-  // mid-run, everything it writes outside `./outputs/` is lost, and nothing
-  // errors anywhere. Only `POST /api/runs/remote` used to canonicalize (in
-  // `registry-run-resolver.ts`); the two paths a real agent actually launches
-  // on — the run routes via `package-catalog` and the version resolver via
-  // `package-versions` — both hand the stored manifest through verbatim, so
-  // the choke point has to be here, where the manifest BECOMES the run bundle.
+  // unknown id left in place reaches a gate that can only answer "not
+  // selected" — silently, with nothing in any log. Stripping here turns that
+  // into a reported drop. Only `POST /api/runs/remote` used to canonicalize
+  // (in `registry-run-resolver.ts`); the two paths a real agent actually
+  // launches on — the run routes via `package-catalog` and the version
+  // resolver via `package-versions` — both hand the stored manifest through
+  // verbatim, so the choke point has to be here, where the manifest BECOMES
+  // the run bundle.
   //
   // `dropRetiredRuntimeTools` returns the SAME reference when nothing needs
   // rewriting, so an already-canonical manifest keeps its exact bytes (the

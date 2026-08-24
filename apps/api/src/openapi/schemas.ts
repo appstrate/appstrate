@@ -6,15 +6,15 @@ import { ACCEPTED_RUNTIME_TOOL_IDS } from "@appstrate/core/runtime-tools-catalog
 const ORG_ROLES = [...orgRoleEnum.enumValues];
 
 /**
- * Runtime-tool ids a manifest may DECLARE — derived from the catalog's
- * ACCEPTED set, not its SELECTABLE one.
+ * Runtime-tool ids a manifest may DECLARE — the catalog's ACCEPTED set.
  *
- * The two differ by the retired spellings (`publish_document` → `publish_file`,
- * issue #1177). SELECTABLE answers "may the editor offer this?"; ACCEPTED
- * answers "is this valid input?", which is what a request-body schema
- * describes. Publishing the narrower set would make the spec reject a manifest
- * the server accepts and normalizes — and a generated client would refuse to
- * round-trip an agent published before the rename.
+ * It is currently identical to the SELECTABLE set: the two diverged only while
+ * a retired spelling was still resolved on read (`publish_document`, #1177),
+ * and that alias is gone. The import stays pointed at ACCEPTED on purpose —
+ * it is the set that answers "is this valid input?", which is what a
+ * request-body schema describes, and pointing it at SELECTABLE ("may the
+ * editor offer this?") would silently publish the wrong one the next time the
+ * two differ.
  */
 const RUNTIME_TOOL_IDS = [...ACCEPTED_RUNTIME_TOOL_IDS];
 
@@ -761,18 +761,6 @@ export const schemas = {
           output: {
             description:
               "Structured JSON emitted via the agent's `output` runtime tool. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped.",
-          },
-          text: {
-            type: "string",
-            deprecated: true,
-            description:
-              "HISTORICAL ONLY. Markdown left by the removed `report` runtime tool. The platform no longer writes this field — it is served verbatim on runs finalized before the removal. Agent reports are descriptively named markdown files now (`outputs/<task-specific-name>.md`).",
-          },
-          text_truncated: {
-            type: "boolean",
-            deprecated: true,
-            description:
-              "HISTORICAL ONLY. Present and true when a pre-removal `text` exceeded the 256 KiB storage cap.",
           },
         },
       },
@@ -1716,9 +1704,8 @@ export const schemas = {
             },
             description:
               "Appstrate top-level extension: runtime tools the agent may use. Optional. " +
-              "`publish_document` is the retired pre-#1177 spelling of `publish_file`: still " +
-              "accepted on input (a manifest published before the rename carries it) and " +
-              "normalized to the canonical id on save.",
+              "An id outside this enum is rejected on author input and dropped (with the " +
+              "drop reported) when read back from a stored manifest.",
           },
         },
       },

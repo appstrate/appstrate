@@ -6,8 +6,6 @@ import {
   EVENT_EMITTER_RUNTIME_TOOLS,
   RUNTIME_TOOL_CATALOG,
   ACCEPTED_RUNTIME_TOOL_IDS,
-  LEGACY_RUNTIME_TOOL_ALIASES,
-  canonicalRuntimeToolId,
   canonicalizeRuntimeToolIds,
   isSelectableRuntimeTool,
 } from "../src/runtime-tools-catalog.ts";
@@ -50,62 +48,43 @@ describe("runtime-tools-catalog", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Legacy id aliasing (#1177: `publish_document` → `publish_file`)
+// Reading stored ids — no alias table any more (#1177's was removed)
 // ---------------------------------------------------------------------------
 
-describe("runtime-tool legacy aliases", () => {
-  it("publish_document maps forward to publish_file", () => {
-    expect(LEGACY_RUNTIME_TOOL_ALIASES.publish_document).toBe("publish_file");
-    expect(canonicalRuntimeToolId("publish_document")).toBe("publish_file");
-  });
-
-  it("a legacy id is NOT selectable — the editor never offers it as a new choice", () => {
-    expect(isSelectableRuntimeTool("publish_document")).toBe(false);
-    expect(RUNTIME_TOOL_CATALOG.map((e) => e.id)).not.toContain("publish_document" as never);
-    expect([...SELECTABLE_RUNTIME_TOOLS]).not.toContain("publish_document" as never);
-  });
-
-  it("the accepted-id list is canonical ids plus every legacy spelling", () => {
+describe("runtime-tool id reading", () => {
+  it("the accepted-id list is exactly the selectable one — no retired spelling", () => {
     // Spelled out literally on purpose: recomposing the expectation from the
-    // same two expressions the source composes it from passes even when the
-    // alias table is empty or wrong. This is the list the Zod `runtime_tools`
-    // enum and the generated AFPS JSON Schema are built from — a persisted
-    // manifest carrying an id missing here stops validating.
+    // same expression the source composes it from would pass whatever the
+    // source said. This is the list the Zod `runtime_tools` enum and the
+    // generated AFPS JSON Schema are built from — an id missing here stops a
+    // persisted manifest validating.
     expect([...ACCEPTED_RUNTIME_TOOL_IDS] as string[]).toEqual([
       "output",
       "log",
       "note",
       "pin",
       "publish_file",
-      "publish_document",
     ]);
   });
 
-  it("canonicalRuntimeToolId returns null only for genuinely unknown ids", () => {
-    expect(canonicalRuntimeToolId("report")).toBeNull();
-    expect(canonicalRuntimeToolId(42)).toBeNull();
-    expect(canonicalRuntimeToolId(undefined)).toBeNull();
-    expect(canonicalRuntimeToolId("output")).toBe("output");
+  it("the retired publish_document spelling is known nowhere", () => {
+    expect(isSelectableRuntimeTool("publish_document")).toBe(false);
+    expect(RUNTIME_TOOL_CATALOG.map((e) => e.id)).not.toContain("publish_document" as never);
+    expect([...SELECTABLE_RUNTIME_TOOLS]).not.toContain("publish_document" as never);
+    expect([...ACCEPTED_RUNTIME_TOOL_IDS] as string[]).not.toContain("publish_document");
   });
 
-  it("canonicalizeRuntimeToolIds resolves a legacy id and reports the rewrite", () => {
+  it("drops the retired spelling and REPORTS it rather than resolving it", () => {
+    // The removed alias would have rewritten this to `publish_file`. The
+    // contract now is a reported drop — never a silent one, and never a guess.
     expect(canonicalizeRuntimeToolIds(["log", "publish_document"])).toEqual({
-      ids: ["log", "publish_file"],
-      dropped: [],
+      ids: ["log"],
+      dropped: ["publish_document"],
       changed: true,
     });
   });
 
-  it("canonicalizeRuntimeToolIds collapses both spellings into one entry", () => {
-    expect(canonicalizeRuntimeToolIds(["publish_document", "publish_file"]).ids).toEqual([
-      "publish_file",
-    ]);
-    expect(canonicalizeRuntimeToolIds(["publish_file", "publish_document"]).ids).toEqual([
-      "publish_file",
-    ]);
-  });
-
-  it("canonicalizeRuntimeToolIds leaves an already-canonical list untouched", () => {
+  it("leaves an already-canonical list untouched", () => {
     expect(canonicalizeRuntimeToolIds(["output", "publish_file"])).toEqual({
       ids: ["output", "publish_file"],
       dropped: [],
@@ -113,10 +92,18 @@ describe("runtime-tool legacy aliases", () => {
     });
   });
 
-  it("canonicalizeRuntimeToolIds still drops an id that resolves to nothing", () => {
-    expect(canonicalizeRuntimeToolIds(["output", "report"])).toEqual({
+  it("collapses a duplicate, preserving the author's order", () => {
+    expect(canonicalizeRuntimeToolIds(["publish_file", "output", "publish_file"])).toEqual({
+      ids: ["publish_file", "output"],
+      dropped: [],
+      changed: true,
+    });
+  });
+
+  it("drops an id that resolves to nothing, including non-strings", () => {
+    expect(canonicalizeRuntimeToolIds(["output", "report", 42, undefined])).toEqual({
       ids: ["output"],
-      dropped: ["report"],
+      dropped: ["report", "42", "undefined"],
       changed: true,
     });
   });

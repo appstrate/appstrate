@@ -43,9 +43,9 @@ export type EventEmitterRuntimeTool = (typeof EVENT_EMITTER_RUNTIME_TOOLS)[numbe
  * {@link buildRuntimeToolDefs}) — it is selectable (validation + editor) but
  * never appears in the standalone def builder.
  *
- * **Canonical ids only.** A retired spelling never comes back here — it goes
- * in {@link LEGACY_RUNTIME_TOOL_ALIASES}, which is what keeps the editor from
- * offering it as a new choice while persisted manifests still resolve.
+ * **Canonical ids only, and there is no second list.** A retired spelling does
+ * not come back here under any circumstance: it is dropped on read, and the
+ * drop is reported by {@link canonicalizeRuntimeToolIds} rather than swallowed.
  */
 export const SELECTABLE_RUNTIME_TOOLS = [...EVENT_EMITTER_RUNTIME_TOOLS, "publish_file"] as const;
 
@@ -92,80 +92,32 @@ export const RUNTIME_TOOL_CATALOG: readonly RuntimeToolCatalogEntry[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Legacy id aliasing — the one place a retired spelling is mapped forward
+// Reading stored ids
 // ---------------------------------------------------------------------------
 
 /**
- * Retired `runtime_tools` spellings and the canonical id each resolves to.
- * **The single alias table in the codebase** — validation, the publish path
- * and the editor all read it from here.
+ * Every `runtime_tools` id a PERSISTED manifest may legitimately carry. It is
+ * the list the Zod `runtime_tools` enum and the generated AFPS JSON Schema are
+ * built from, and it is exactly {@link SELECTABLE_RUNTIME_TOOLS}: there are no
+ * retired spellings to accept any more.
  *
- * Why this exists rather than a plain rename: `runtime_tools` is persisted
- * INSIDE agent manifests, including published ZIPs that are immutable by
- * construction. The read path drops ids it does not recognise (that is what
- * keeps a manifest naming a genuinely retired tool runnable), so a bare rename
- * would not fail loudly — it would silently strip the tool from every agent
- * that already selected it, with nothing in any log. An alias turns "unknown,
- * drop it" into "known under an old name, resolve it".
- *
- * A key here is deliberately NOT in {@link SELECTABLE_RUNTIME_TOOLS} nor in
- * {@link RUNTIME_TOOL_CATALOG}: it must resolve on read and never be offered
- * as a new choice in the editor.
- *
- * `publish_document` → `publish_file`: issue #1177. "Document" promised a
- * Word/PDF; the tool takes any file the agent produced.
+ * There used to be an alias table here mapping `publish_document` forward to
+ * `publish_file` (#1177), kept because `runtime_tools` is persisted inside
+ * agent manifests — including published ZIPs, which are immutable. It is gone:
+ * no system package ships that spelling, and no stored manifest carries it.
+ * A manifest that somehow did would have the id DROPPED, not silently
+ * mistaken for another tool — see {@link canonicalizeRuntimeToolIds}, which
+ * reports every drop to its caller.
  */
-export const LEGACY_RUNTIME_TOOL_ALIASES = Object.freeze({
-  publish_document: "publish_file",
-} satisfies Readonly<Record<string, SelectableRuntimeTool>>);
-
-/** A retired `runtime_tools` spelling — a key of {@link LEGACY_RUNTIME_TOOL_ALIASES}. */
-export type LegacyRuntimeToolId = keyof typeof LEGACY_RUNTIME_TOOL_ALIASES;
-
-/** Runtime mirror of {@link LegacyRuntimeToolId}, derived from the alias table. */
-export const LEGACY_RUNTIME_TOOL_IDS = Object.keys(
-  LEGACY_RUNTIME_TOOL_ALIASES,
-) as readonly LegacyRuntimeToolId[];
-
-/**
- * Every `runtime_tools` id a PERSISTED manifest may legitimately carry —
- * canonical ids first, then the legacy spellings. This is the list the Zod
- * `runtime_tools` enum and the generated AFPS JSON Schema are built from, so a
- * stored manifest holding either spelling validates instead of erroring.
- *
- * Not the editor's list: that is {@link RUNTIME_TOOL_CATALOG}.
- */
-export const ACCEPTED_RUNTIME_TOOL_IDS = [
-  ...SELECTABLE_RUNTIME_TOOLS,
-  ...LEGACY_RUNTIME_TOOL_IDS,
-] as [AcceptedRuntimeToolId, ...AcceptedRuntimeToolId[]];
-
-/** Any `runtime_tools` id a persisted manifest may carry — canonical or legacy. */
-export type AcceptedRuntimeToolId = SelectableRuntimeTool | LegacyRuntimeToolId;
+export const ACCEPTED_RUNTIME_TOOL_IDS = [...SELECTABLE_RUNTIME_TOOLS] as [
+  SelectableRuntimeTool,
+  ...SelectableRuntimeTool[],
+];
 
 /** Type guard: is `value` a selectable (canonical) runtime tool id? */
 export function isSelectableRuntimeTool(value: unknown): value is SelectableRuntimeTool {
   return (
     typeof value === "string" && (SELECTABLE_RUNTIME_TOOLS as readonly string[]).includes(value)
-  );
-}
-
-/**
- * Resolve any accepted `runtime_tools` id — canonical or legacy — to its
- * canonical form. Returns `null` for an id the platform genuinely does not
- * know (a typo, or a tool that was removed outright rather than renamed).
- *
- * **Use this, not {@link isSelectableRuntimeTool}, whenever you are reading
- * ids that came out of storage.** `isSelectableRuntimeTool` answers "may the
- * editor offer this?"; this answers "what tool did the author mean?". Filtering
- * stored ids through the type guard is precisely the silent-drop bug this table
- * exists to prevent.
- */
-export function canonicalRuntimeToolId(value: unknown): SelectableRuntimeTool | null {
-  if (typeof value !== "string") return null;
-  if (isSelectableRuntimeTool(value)) return value;
-  return (
-    (LEGACY_RUNTIME_TOOL_ALIASES as Readonly<Record<string, SelectableRuntimeTool>>)[value] ?? null
   );
 }
 
@@ -176,17 +128,21 @@ export interface CanonicalizedRuntimeToolIds {
   /** Ids the platform could not resolve at all (retired outright, or a typo). */
   dropped: string[];
   /**
-   * True when {@link ids} differs from the input — a legacy id was resolved, a
-   * duplicate collapsed, or an unknown id dropped. Callers that rewrite stored
-   * bytes use this to leave an untouched manifest byte-identical.
+   * True when {@link ids} differs from the input — a duplicate collapsed, or
+   * an unknown id dropped. Callers that rewrite stored bytes use this to leave
+   * an untouched manifest byte-identical.
    */
   changed: boolean;
 }
 
 /**
- * Canonicalize a raw `runtime_tools` array read from a manifest: resolve legacy
- * spellings, collapse the duplicate that appears when BOTH spellings are
- * present, drop ids that resolve to nothing, and preserve the author's order.
+ * Canonicalize a raw `runtime_tools` array read from a manifest: drop ids the
+ * platform does not know, collapse duplicates, and preserve the author's
+ * order.
+ *
+ * Every drop is REPORTED in {@link CanonicalizedRuntimeToolIds.dropped} rather
+ * than swallowed — that is what keeps a manifest naming a retired tool
+ * runnable while still telling its caller what was removed.
  *
  * Pure and allocation-light; no Zod, no schema. The one helper every read path
  * should funnel stored ids through.
@@ -197,19 +153,17 @@ export function canonicalizeRuntimeToolIds(raw: readonly unknown[]): Canonicaliz
   const seen = new Set<SelectableRuntimeTool>();
   let changed = false;
   for (const entry of raw) {
-    const canonical = canonicalRuntimeToolId(entry);
-    if (canonical === null) {
+    if (!isSelectableRuntimeTool(entry)) {
       dropped.push(String(entry));
       changed = true;
       continue;
     }
-    if (canonical !== entry) changed = true;
-    if (seen.has(canonical)) {
+    if (seen.has(entry)) {
       changed = true;
       continue;
     }
-    seen.add(canonical);
-    ids.push(canonical);
+    seen.add(entry);
+    ids.push(entry);
   }
   return { ids, dropped, changed };
 }

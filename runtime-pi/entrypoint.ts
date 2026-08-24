@@ -475,16 +475,16 @@ await progress("bundle loaded", { bundlePrepareMs: phaseTimings.bundlePrepareMs 
 // the root package manifest. Reused by the no-sidecar extension registration,
 // the `publish_file` gate, and the PiRunner's terminal-tool decision.
 //
-// Canonicalized here too (#1177). The platform already rewrites the retired
-// `publish_document` spelling into the bundle it builds (`buildAgentPackage`),
-// so this is a second line of defence at the trust boundary rather than the
-// only one — and the gates below are exact string matches, so getting a raw
-// stored id here silently unregisters the publish tool. The version skew that
-// would deliver one (a NEW image against an OLDER platform) is refused at boot
-// by the image-trio tag rule, except where that rule is blind: a floating tag
-// rebuilt on one side, a digest-pinned ref, and a platform with no build
-// identity. Resolving the alias once, at the single read, costs a function
-// call and does not depend on which of those is true.
+// Canonicalized here too. The platform already strips ids it cannot build
+// from the bundle (`buildAgentPackage`), so this is a second line of defence
+// at the trust boundary rather than the only one — and the gates below are
+// exact string matches, so an unrecognised id reaching them silently
+// unregisters the publish tool. The version skew that would deliver one (a NEW
+// image against an OLDER platform) is refused at boot by the image-trio tag
+// rule, except where that rule is blind: a floating tag rebuilt on one side, a
+// digest-pinned ref, and a platform with no build identity. Filtering once, at
+// the single read, costs a function call and does not depend on which of those
+// is true.
 const declaredRuntimeTools: string[] = canonicalizeRuntimeToolIds(
   (bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: unknown[] } | undefined)
     ?.runtime_tools ?? [],

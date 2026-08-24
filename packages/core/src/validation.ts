@@ -447,17 +447,13 @@ function parseWithSchema(
 }
 
 /**
- * Canonicalize an ALREADY-STORED agent manifest's `runtime_tools`: resolve the
- * retired spellings the platform still understands, and strip the entries it
- * no longer knows how to build at all.
+ * Canonicalize an ALREADY-STORED agent manifest's `runtime_tools`: strip the
+ * entries the platform no longer knows how to build, and collapse duplicates.
  *
- * **Aliasing comes first, and it is what makes a rename safe.** A tool that was
- * RENAMED (`publish_document` → `publish_file`, #1177) is not retired: dropping
- * it would silently strip a working tool from every agent that selected it
- * under the old name, with nothing in any log. {@link LEGACY_RUNTIME_TOOL_ALIASES}
- * maps it forward instead, and a manifest holding BOTH spellings collapses to
- * one entry rather than registering the tool twice. Only an id that resolves to
- * nothing — a tool removed outright, or an author's typo — is dropped.
+ * **Every drop is reported, never swallowed.** The `dropped` array reaches the
+ * caller, which is what makes a removal auditable instead of an agent quietly
+ * losing a tool. There is deliberately no alias table any more: an id the
+ * platform does not know is not guessed at, it is removed and named.
  *
  * The runtime-tool set evolves, and a removal is not retroactive: manifests
  * persisted before it (DB drafts, and published ZIPs which are immutable by
