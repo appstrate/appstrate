@@ -33,6 +33,7 @@
         "scripts/**/*.ts",
         "test/**/*.ts",
         "eslint.config.mjs",
+        "knip.config.ts",
         "package.json"
       ]
     },

@@ -70,7 +70,7 @@
     "build:system-packages:check": "bun scripts/build-system-packages.ts --check",
     "lint:manifest-casing": "bun scripts/lint-manifest-casing.ts",
     "conformance:check": "bun scripts/conformance/run.ts --tier gate",
-    "verify:dead-code": "knip-bun --no-config-hints",
+    "verify:dead-code": "knip-bun",
     "test:system-packages": "bun scripts/conformance/run.ts",
     "check": "turbo typecheck lint format:check verify:openapi verify:api-types verify:type-coverage verify:compose-defaults detect:breaking build:system-packages:check lint:manifest-casing conformance:check verify:module-isolation typecheck:scripts verify:module-contract verify:dead-code",
     "verify:module-isolation": "bun scripts/verify-module-isolation.ts",

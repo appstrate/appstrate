@@ -48,16 +48,22 @@ import type { KnipConfig } from "knip";
  */
 
 /**
- * The suite runs on `bun test`, for which knip has no plugin, so no test file
- * is ever pulled into the import graph. Without this every test file — and
- * every helper only tests import — reads as dead.
+ * Test files are **not** declared here. knip ships a Bun plugin that reads
+ * each workspace's `test` script and turns it into entry patterns: a bare
+ * `bun test` yields a recursive `.test.` / `.spec.` glob over the workspace,
+ * and `bun test <dir>` yields the same glob rooted at `<dir>`. Every
+ * workspace that runs tests declares such a script, so its suites — and the
+ * helpers only they import — are already in the graph.
+ *
+ * A blanket list of test globs applied to every workspace is worse than
+ * nothing: most of the patterns match no file in most workspaces, and knip
+ * reports each one as a configuration hint. 65 of those hints is where a
+ * *stale* entry hides, and a stale entry is what cost this config 6 dead
+ * files and ~450 phantom unused exports. `verify:dead-code` therefore runs
+ * with hints ON: every pattern below must match at least one file.
+ *
+ * The one gap the plugin leaves is called out at `apps/api` below.
  */
-const TEST_ENTRY = [
-  "test/**/*.test.ts",
-  "test/**/*.test.tsx",
-  "src/**/test/**/*.test.ts",
-  "src/**/*.test.ts",
-];
 
 const config: KnipConfig = {
   /**
@@ -80,7 +86,6 @@ const config: KnipConfig = {
     // `main`, so there are no manifest entries to re-declare here.
     ".": {
       entry: [
-        ...TEST_ENTRY,
         // Operator backstops, documented in docs/architecture/FILES.md and
         // CHANGELOG.md respectively. Run by hand, never imported.
         "scripts/storage-orphans.ts",
@@ -88,10 +93,6 @@ const config: KnipConfig = {
         // Dev utility that mints a CONFORMANCE_TOKENS bearer, documented in
         // its own header.
         "scripts/conformance/grab-token.ts",
-        // One-shot data migration for the manifest `config` -> `input` collapse,
-        // run by hand per deployment (CHANGELOG.md and the header of
-        // packages/db/drizzle/0040_config_into_input.sql both point at it).
-        "scripts/migrate-config-to-input.ts",
         // System-package sources: `build:system-packages` reads them off disk
         // and bundles them, so nothing imports them.
         "scripts/system-packages/**/server/index.ts",
@@ -109,24 +110,42 @@ const config: KnipConfig = {
         // apps/api/src/index.ts` (the workspace `dev` script) and by the
         // Docker image CMD.
         "src/index.ts!",
-        ...TEST_ENTRY,
         // Built-in modules are loaded by name out of the `MODULES` env var,
         // never statically imported.
         "src/modules/*/index.ts",
         // Per-module truncate lists, auto-discovered by the root test preload.
         "src/modules/*/test/tables.ts",
+        // The workspace `test` script names only `test/unit/` and
+        // `test/integration/`, so knip's Bun plugin derives its entry
+        // patterns from those two directories alone and never reaches the
+        // suites the built-in modules keep next to their own source. The
+        // root `bun test` does run them.
+        "src/modules/*/test/**/*.test.ts",
         // Run inside the guest VM / on the Firecracker host, not by the API.
         "src/modules/firecracker/guest/supervisor.ts",
         "src/modules/firecracker/runner/daemon.ts",
         "src/modules/firecracker/scripts/dev/smoke.ts",
       ],
-      // Same dynamic `MODULES` load: declared so the workspace resolves, but
-      // no import statement names them.
-      ignoreDependencies: [
-        "@appstrate/module-chat",
-        "@appstrate/module-codex",
-        "@appstrate/module-observability",
-      ],
+      /**
+       * Same dynamic `MODULES` load: declared so the workspace resolves, but
+       * no import statement names them, so knip reports each as an unused
+       * dependency. Deleting one on that report is not hypothetical — it has
+       * happened, and only the health-container e2e caught it.
+       *
+       * Written as one alternation rather than four literals because knip
+       * compiles any ignore entry containing `(`, `|`, `*`, `+`, `{`, `^` or
+       * `$` to a RegExp, and reports an entry that never suppressed anything
+       * as a configuration hint. `@appstrate/module-claude-code` is in that
+       * position today: it is loaded exactly like its three siblings, but one
+       * unit test (`test/unit/services/model-selection.test.ts`) imports it
+       * statically to assert the claude-code model lists, so knip already
+       * sees a reader and would call a literal entry redundant. It is not —
+       * the day that assertion moves, the dependency reads as dead. The
+       * alternation covers it without asserting anything untrue, and stays
+       * exact: a new module dependency is not silently covered, it has to be
+       * named here.
+       */
+      ignoreDependencies: ["@appstrate/module-(chat|claude-code|codex|observability)"],
     },
 
     "apps/cli": {
@@ -134,7 +153,6 @@ const config: KnipConfig = {
         // Bundled to dist/cli.js by scripts/build.ts; `bin` points at the
         // build output, which knip cannot walk back to a source file.
         "src/cli.ts!",
-        ...TEST_ENTRY,
         // Compiled and executed by the "Smoke-test keyring native binding"
         // step of .github/workflows/release.yml.
         "scripts/ci-keyring-probe.ts",
@@ -145,7 +163,6 @@ const config: KnipConfig = {
     // reached from index.html by the Vite plugin, not from this list.
     "apps/web": {
       entry: [
-        ...TEST_ENTRY,
         // Type-level guard over the generated OpenAPI types: it exists to be
         // type-checked, so it has no importer by design.
         "src/api/schema.assert.ts",
@@ -165,7 +182,6 @@ const config: KnipConfig = {
         "src/bootstrap-org.ts!",
         "src/storage.ts!",
         "src/notify.ts!",
-        ...TEST_ENTRY,
         // Migration CLI, invoked as `bun packages/db/src/migrate.ts`.
         "src/migrate.ts",
       ],
@@ -175,7 +191,6 @@ const config: KnipConfig = {
       entry: [
         // Sole `exports` target, imported as `@appstrate/mcp-transport`.
         "src/index.ts!",
-        ...TEST_ENTRY,
         // Spawned as a subprocess by the transport tests.
         "test/fixtures/echo-server.ts",
       ],
@@ -200,32 +215,26 @@ const config: KnipConfig = {
         "src/conformance/index.ts!",
         // Manifest `bin`: the `afps` executable itself.
         "bin/afps.ts!",
-        ...TEST_ENTRY,
         "examples/**/build.ts",
       ],
     },
 
     // Modules: the `exports` map is what the module loader resolves when a
     // `MODULES` specifier names the package, and what apps/web imports for
-    // the UI surface. Plus the per-module truncate list, auto-discovered by
-    // the root test preload.
+    // the UI surface. Plus the per-module truncate list where the module owns
+    // tables — the root test preload skips the file when it is absent, which
+    // is why module-chat (no tables of its own) declares none.
     "packages/module-chat": {
-      entry: [
-        "src/index.ts!",
-        "src/ui/index.tsx!",
-        "src/ui/use-sessions.ts!",
-        ...TEST_ENTRY,
-        "test/tables.ts",
-      ],
+      entry: ["src/index.ts!", "src/ui/index.tsx!", "src/ui/use-sessions.ts!"],
     },
     "packages/module-claude-code": {
-      entry: ["src/index.ts!", ...TEST_ENTRY, "test/tables.ts"],
+      entry: ["src/index.ts!", "test/tables.ts"],
     },
     "packages/module-codex": {
-      entry: ["src/index.ts!", ...TEST_ENTRY, "test/tables.ts"],
+      entry: ["src/index.ts!", "test/tables.ts"],
     },
     "packages/module-observability": {
-      entry: ["src/index.ts!", ...TEST_ENTRY, "test/tables.ts"],
+      entry: ["src/index.ts!", "test/tables.ts"],
     },
 
     "packages/core": {
@@ -287,7 +296,6 @@ const config: KnipConfig = {
         "src/oauth-bearer-swap.ts!",
         "src/url.ts!",
         "src/run-and-wait-client.ts!",
-        ...TEST_ENTRY,
       ],
       /**
        * Optional peer dependencies: the S3 storage adapter and the Hono
@@ -305,9 +313,9 @@ const config: KnipConfig = {
 
     // Docker entrypoints: the image CMD runs them directly. Neither manifest
     // declares `exports`, `bin` or `main`.
-    "runtime-pi": { entry: ["entrypoint.ts!", ...TEST_ENTRY] },
+    "runtime-pi": { entry: ["entrypoint.ts!"] },
     "runtime-pi/sidecar": {
-      entry: ["server.ts!", ...TEST_ENTRY, "test/fixtures/**/server.ts"],
+      entry: ["server.ts!", "test/fixtures/**/server.ts"],
     },
 
     // Every target of the `exports` map. afps-shared is published on npm
@@ -331,7 +339,6 @@ const config: KnipConfig = {
         "src/unzip-bounded.ts!",
         "src/backoff.ts!",
         "src/mime.ts!",
-        ...TEST_ENTRY,
       ],
     },
     "packages/connect": {
@@ -343,20 +350,14 @@ const config: KnipConfig = {
         "src/integration-mitm-planner.ts!",
         "src/integration-credentials.ts!",
         "src/afps-delivery.ts!",
-        ...TEST_ENTRY,
       ],
     },
-    "packages/emails": { entry: ["src/index.ts!", ...TEST_ENTRY] },
-    "packages/env": { entry: ["src/index.ts!", ...TEST_ENTRY] },
+    "packages/emails": { entry: ["src/index.ts!"] },
+    "packages/env": { entry: ["src/index.ts!"] },
     "packages/runner-pi": {
-      entry: [
-        "src/index.ts!",
-        "src/runtime-tools/index.ts!",
-        "src/provider-map.ts!",
-        ...TEST_ENTRY,
-      ],
+      entry: ["src/index.ts!", "src/runtime-tools/index.ts!", "src/provider-map.ts!"],
     },
-    "packages/shared-types": { entry: ["src/index.ts!", ...TEST_ENTRY] },
+    "packages/shared-types": { entry: ["src/index.ts!"] },
     "packages/ui": {
       entry: [
         "src/schema-form/index.tsx!",
@@ -367,11 +368,10 @@ const config: KnipConfig = {
         "src/components/*.tsx!",
         "src/cn.ts!",
         "src/use-mobile.ts!",
-        ...TEST_ENTRY,
       ],
     },
     // Playwright specs, discovered by the runner, not imported.
-    e2e: { entry: ["**/*.spec.ts", ...TEST_ENTRY] },
+    e2e: { entry: ["**/*.spec.ts"] },
   },
 };
 

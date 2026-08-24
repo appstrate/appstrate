@@ -331,7 +331,7 @@ describe("applyAuth", () => {
 
 describe("checkAuthLiveness", () => {
   const okFetch = (status: number): typeof fetch =>
-    (async () => new Response(null, { status })) as typeof fetch;
+    (async () => new Response(null, { status })) as unknown as typeof fetch;
   // @appstrate/github is a seeded probe.
   const ghEntry = entry({
     packageId: "@appstrate/github",
@@ -380,7 +380,7 @@ describe("checkAuthLiveness", () => {
     _resetCredsCache();
     const boom = (async () => {
       throw new Error("ENOTFOUND");
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
     const f = await checkAuthLiveness(ghEntry, { fetchImpl: boom });
     expect(f[0]!.severity).toBe("warn");
   });

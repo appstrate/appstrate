@@ -259,11 +259,11 @@ services:
     environment:
       # ── Core ──
       - PORT=3000
-      - APP_URL=${APP_URL:-http://localhost:3000}
+      - APP_URL
       - TRUSTED_ORIGINS=${TRUSTED_ORIGINS:-}
       - COOKIE_DOMAIN=${COOKIE_DOMAIN:-}
-      - TRUST_PROXY=${TRUST_PROXY:-false}
-      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - TRUST_PROXY
+      - LOG_LEVEL
       - MODULES
       # ── Auth / Crypto ──
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:?Set BETTER_AUTH_SECRET in .env}
@@ -299,8 +299,8 @@ services:
       - RUNNER_IMAGE_UV=ghcr.io/appstrate/appstrate-mcp-runner-uv:${APPSTRATE_VERSION:-1.0.0-beta.41}
       - RUNNER_IMAGE_BINARY=ghcr.io/appstrate/appstrate-mcp-runner-binary:${APPSTRATE_VERSION:-1.0.0-beta.41}
       # ── System config (JSON arrays) ──
-      - SYSTEM_PROVIDER_KEYS=${SYSTEM_PROVIDER_KEYS:-[]}
-      - SYSTEM_PROXIES=${SYSTEM_PROXIES:-[]}
+      - SYSTEM_PROVIDER_KEYS
+      - SYSTEM_PROXIES
       # System integrations offered out of the box (shared OAuth clients, or an
       # entry with no client for DCR-based remote MCP integrations). Passthrough,
       # not `${VAR:-[]}` — the Zod schema owns the `[]` default. Missing this line
@@ -308,7 +308,7 @@ services:
       # every deployment silently saw an empty list.
       - SYSTEM_INTEGRATIONS
       - PROXY_URL=${PROXY_URL:-}
-      - OIDC_INSTANCE_CLIENTS=${OIDC_INSTANCE_CLIENTS:-[]}
+      - OIDC_INSTANCE_CLIENTS
       # ── Social login (optional) ──
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
@@ -316,7 +316,7 @@ services:
       - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
       # ── SMTP (optional) ──
       - SMTP_HOST=${SMTP_HOST:-}
-      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_PORT
       - SMTP_USER=${SMTP_USER:-}
       - SMTP_PASS=${SMTP_PASS:-}
       - SMTP_FROM=${SMTP_FROM:-}
@@ -324,14 +324,14 @@ services:
       - LEGAL_TERMS_URL=${LEGAL_TERMS_URL:-}
       - LEGAL_PRIVACY_URL=${LEGAL_PRIVACY_URL:-}
       # ── Auth lockdown (optional, see examples/self-hosting/AUTH_MODES.md) ──
-      - AUTH_DISABLE_SIGNUP=${AUTH_DISABLE_SIGNUP:-false}
-      - AUTH_DISABLE_ORG_CREATION=${AUTH_DISABLE_ORG_CREATION:-false}
-      - AUTH_PLATFORM_ADMIN_EMAILS=${AUTH_PLATFORM_ADMIN_EMAILS:-}
-      - AUTH_ALLOWED_SIGNUP_DOMAINS=${AUTH_ALLOWED_SIGNUP_DOMAINS:-}
-      - AUTH_BOOTSTRAP_OWNER_EMAIL=${AUTH_BOOTSTRAP_OWNER_EMAIL:-}
-      - AUTH_BOOTSTRAP_ORG_NAME=${AUTH_BOOTSTRAP_ORG_NAME:-Default}
+      - AUTH_DISABLE_SIGNUP
+      - AUTH_DISABLE_ORG_CREATION
+      - AUTH_PLATFORM_ADMIN_EMAILS
+      - AUTH_ALLOWED_SIGNUP_DOMAINS
+      - AUTH_BOOTSTRAP_OWNER_EMAIL
+      - AUTH_BOOTSTRAP_ORG_NAME
       # ── Auth secret rotation (optional) ──
-      - BETTER_AUTH_ACTIVE_KID=${BETTER_AUTH_ACTIVE_KID:-k1}
+      - BETTER_AUTH_ACTIVE_KID
       # NOTE: empty default (NOT `{}`) — better-auth 1.6+ has its own
       # `BETTER_AUTH_SECRETS` env var with CSV `v1:secret` format and crashes
       # boot on a non-CSV value. Empty string is falsy for better-auth and
@@ -339,14 +339,14 @@ services:
       # rotating the kid map; see env docstring in `packages/env/src/index.ts`.
       - BETTER_AUTH_SECRETS=${BETTER_AUTH_SECRETS:-}
       # ── Credential encryption rotation (optional) ──
-      - CONNECTION_ENCRYPTION_KEY_ID=${CONNECTION_ENCRYPTION_KEY_ID:-k1}
+      - CONNECTION_ENCRYPTION_KEY_ID
       - CONNECTION_ENCRYPTION_KEYS=${CONNECTION_ENCRYPTION_KEYS:-{}}
       # ── AFPS bundle signing (optional) ──
-      - AFPS_TRUST_ROOT=${AFPS_TRUST_ROOT:-[]}
-      - AFPS_SIGNATURE_POLICY=${AFPS_SIGNATURE_POLICY:-off}
+      - AFPS_TRUST_ROOT
+      - AFPS_SIGNATURE_POLICY
       # ── Sidecar capacity caps (optional, hard ceiling 100 MB) ──
-      - SIDECAR_MAX_REQUEST_BODY_BYTES=${SIDECAR_MAX_REQUEST_BODY_BYTES:-10485760}
-      - SIDECAR_MAX_MCP_ENVELOPE_BYTES=${SIDECAR_MAX_MCP_ENVELOPE_BYTES:-16777216}
+      - SIDECAR_MAX_REQUEST_BODY_BYTES
+      - SIDECAR_MAX_MCP_ENVELOPE_BYTES
       # Sidecar token/concurrency knobs. Bare passthrough, no default: the
       # sidecar owns the compiled defaults and re-stating them here is the
       # drift class `verify:compose-defaults` exists to catch. Forwarded only
@@ -355,10 +355,10 @@ services:
       - SIDECAR_RUN_TOOL_OUTPUT_BUDGET_TOKENS
       - SIDECAR_API_CALL_CONCURRENCY
       # ── Remote runner protocol (optional) ──
-      - REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS=${REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS:-7200}
-      - REMOTE_RUN_SINK_MAX_TTL_SECONDS=${REMOTE_RUN_SINK_MAX_TTL_SECONDS:-86400}
-      - REMOTE_RUN_REPLAY_WINDOW_SECONDS=${REMOTE_RUN_REPLAY_WINDOW_SECONDS:-600}
-      - REMOTE_RUN_BUFFER_FLUSH_MS=${REMOTE_RUN_BUFFER_FLUSH_MS:-5000}
+      - REMOTE_RUN_SINK_DEFAULT_TTL_SECONDS
+      - REMOTE_RUN_SINK_MAX_TTL_SECONDS
+      - REMOTE_RUN_REPLAY_WINDOW_SECONDS
+      - REMOTE_RUN_BUFFER_FLUSH_MS
       - REMOTE_RUN_EVENT_LIMITS=${REMOTE_RUN_EVENT_LIMITS:-{}}
       # ── Run liveness watchdog (optional, ratio: stall ≥ 3 × heartbeat) ──
       # Defaults live in `packages/env` — passthrough means an unset host
@@ -372,7 +372,7 @@ services:
       - PLATFORM_RUN_LIMITS=${PLATFORM_RUN_LIMITS:-{}}
       - INLINE_RUN_LIMITS=${INLINE_RUN_LIMITS:-{}}
       # ── Misc ──
-      - API_BODY_LIMIT_BYTES=${API_BODY_LIMIT_BYTES:-10485760}
+      - API_BODY_LIMIT_BYTES
       - S3_PUBLIC_ENDPOINT=${S3_PUBLIC_ENDPOINT:-}
       # Separate origin for agent-generated HTML previews. SECURITY-RELEVANT:
       # unset => previews fall back to same-origin on APP_URL (hardened, but a

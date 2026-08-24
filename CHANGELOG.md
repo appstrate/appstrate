@@ -418,12 +418,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `runs.config` merge into the respective `input`. On a key collision `input`
   wins, the same rule the manifest merge applies.
 
-  **Ordering matters and is not enforced.** The DDL runs automatically at boot,
-  while `scripts/migrate-config-to-input.ts --apply` — which rewrites manifests
-  and `{{config.x}}` prompt references — can only run afterwards, since it reads
-  the renamed column. In between, published agents still carry `{{config.x}}`,
-  which the renderer resolves to the empty string with no error. Run the script
-  immediately after deploying.
+  **The manifest half was a separate, manual pass.** The DDL runs automatically
+  at boot; rewriting manifests and `{{config.x}}` prompt references was done by
+  `scripts/migrate-config-to-input.ts --apply`, which could only run afterwards
+  because it read the renamed column. Until it had run, published agents still
+  carried `{{config.x}}`, which the renderer resolves to the empty string with
+  no error. That script was single-use and has since been deleted; nothing in
+  the tree declares a manifest `config` section any more.
 
 - **Three endpoints now report malformed JSON as `validation_failed` instead of
   `invalid_request`.** Two on `runs-events.ts` and one on `runs.ts`, as a side

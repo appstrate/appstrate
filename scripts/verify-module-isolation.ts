@@ -36,7 +36,7 @@ for (const builtin of ["oidc", "webhooks", "core-providers"]) {
 {
   const glob = new Glob("module-*/src");
   for await (const rel of glob.scan({ cwd: resolve(ROOT, "packages"), onlyFiles: false })) {
-    const id = rel.split("/")[0].replace(/^module-/, "");
+    const id = rel.split("/")[0]!.replace(/^module-/, "");
     MODULE_ROOTS[id] = resolve(ROOT, "packages", rel);
   }
 }
@@ -84,7 +84,7 @@ for (const [moduleId, root] of Object.entries(MODULE_ROOTS)) {
       // Bare specifier naming another module's npm package.
       const pkgMatch = /^@appstrate\/module-([a-z0-9-]+)/.exec(spec);
       if (pkgMatch) {
-        const owner = pkgMatch[1];
+        const owner = pkgMatch[1]!;
         if (MODULE_ROOTS[owner] && owner !== moduleId) {
           problems.push(
             `${moduleId}/${rel} imports \`${spec}\` (module \`${owner}\`'s package). ` +

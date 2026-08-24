@@ -85,7 +85,7 @@ export interface TypeShape {
 }
 
 /** Strip `null` / `undefined` from a union; return the single remaining type, or null if 0 or >1 remain. */
-function stripNullish(checker: ts.TypeChecker, type: ts.Type): ts.Type | null {
+function stripNullish(type: ts.Type): ts.Type | null {
   if (!type.isUnion()) return type;
   const rest = type.types.filter((t) => !(t.flags & (ts.TypeFlags.Null | ts.TypeFlags.Undefined)));
   return rest.length === 1 ? rest[0]! : null;
@@ -93,7 +93,7 @@ function stripNullish(checker: ts.TypeChecker, type: ts.Type): ts.Type | null {
 
 /** A type we can descend into for structural required-field comparison (a closed object, not a Record/Date/array). */
 function closedObjectType(checker: ts.TypeChecker, type: ts.Type): ts.Type | null {
-  const core = stripNullish(checker, type);
+  const core = stripNullish(type);
   if (!core) return null;
   // Object OR intersection-of-objects (e.g. `SchemaWrapper & { current }`).
   // getPropertiesOfType flattens intersections, so both are descendable.
@@ -108,7 +108,7 @@ function closedObjectType(checker: ts.TypeChecker, type: ts.Type): ts.Type | nul
 
 /** If `type` is an array/readonly-array, return its element type; else null. */
 function arrayElementType(checker: ts.TypeChecker, type: ts.Type): ts.Type | null {
-  const core = stripNullish(checker, type);
+  const core = stripNullish(type);
   if (!core) return null;
   const name = core.getSymbol()?.getName();
   if (name !== "Array" && name !== "ReadonlyArray") return null;
