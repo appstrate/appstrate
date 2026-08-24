@@ -1327,22 +1327,15 @@ of scope until the grammar is in place.
 ours to design, which our own rule allows when the reference is silent, but it
 means nobody has drawn it for us.
 
-**shadcn's `Calendar` is a date PICKER, not an agenda.** Verified against their
-docs: thirty-odd variants (single, range, presets, with time, booked dates) and
-not one of them renders content inside a day cell. That splits the calendar
-question cleanly:
-
-- **Runs want a date RANGE, not a month.** Forty runs a day would make a cell
-  an illegible pile; the real question is "which week did this break", which is
-  `start_date` / `end_date` — parameters `GET /api/runs` already accepts, and
-  shadcn's range picker plugs straight in. Half a day, and it belongs in the
-  filter bar.
-- **Schedules want a real agenda**, and that is a build: cells holding items, a
-  month/week switch, a "+3" when a day overflows. Either on top of the
-  `Calendar` day grid or with a dependency (FullCalendar and its kind), which
-  would be the app's first heavy UI dependency. Note that `packages/ui` has no
-  `calendar` component and `react-day-picker` is not a dependency yet, so even
-  the picker adds one.
+**shadcn's `Calendar` is a date PICKER, not an event calendar.** Verified
+against its documentation: its useful primitive is React DayPicker and it does
+not own event layout, density, overflow or agenda behaviour. The initial
+conclusion below was deliberately conservative: give Runs a date-range filter
+and build a real agenda only for Schedules. The product decision in open block
+10 supersedes it. Runs and Schedules now both need Table / Calendar as their
+two-view grammar, but their calendars answer different questions. The range
+parameters already accepted by `GET /api/runs` remain the correct data boundary
+for the Runs calendar.
 
 **The agent icon is NOT a data-model gap**, unlike the org logo. The AFPS
 manifest already carries `icon` (a string) and `icons[]` (`src`/`size`/`theme`)
@@ -1900,7 +1893,60 @@ toolbar. Card-level web tests cover the new run and schedule representations,
 the preserved compact schedule variant and the empty document-card footer. The
 review's duplicated schedule activity badges were also reduced to one atom.
 
-**10. Accessibility, which nothing here has ever checked.** The branch
+**10. Prototype Table / Calendar for Runs and Schedules, replacing their Card
+view.** This is a product decision, not a request to make one generic calendar
+mean the same thing on both pages. Documents, Agents, Skills, MCP servers and
+Integrations keep Table / Cards. Runs and Schedules become Table / Calendar,
+with the switch in the same toolbar position and a separate persisted view
+preference for each collection. Embedded lists remain tables unless their
+caller explicitly asks for another representation.
+
+Use **FullCalendar v7 Standard**, through its official shadcn registry and MIT
+packages, rather than stretching shadcn's date picker into an event calendar.
+Do not add Premium plugins. Keep the dependency behind an Appstrate-owned
+adapter: shared calendar chrome, range and selection state belong in a small
+collection-calendar seam, while Runs and Schedules own their event mapping and
+rendering. The seam must keep a future library replacement local; product pages
+must not grow FullCalendar-specific objects as their domain model.
+
+This block starts as a throwaway UI prototype on the existing Runs and
+Schedules routes, gated by `?variant=` and unavailable in production. Produce
+three structurally different variants with the shared prototype switcher, not
+three cosmetic themes. Do not promote the prototype directly. Its question is:
+which combination of month density, selected-day detail and navigation lets an
+operator understand both execution history and future automation without
+turning a day cell into a miniature table?
+
+The two adapters have distinct semantics:
+
+- **Runs is observed history.** Query the visible range through the existing
+  `start_date` / `end_date` contract. A day cell summarizes volume and status;
+  the selected day exposes a legible agenda of actual runs. Clicking a run uses
+  the existing detail destination. Dense days must collapse into counts or a
+  `+N` affordance rather than stack unbounded event text.
+- **Schedules is projected future activity.** First audit the current schedule
+  and API contracts. The calendar needs occurrences in a bounded visible range,
+  computed with exactly the scheduler's recurrence, timezone and DST semantics.
+  Do not approximate cron independently in the browser. If the server cannot
+  supply those occurrences, the prototype must document the smallest typed
+  range endpoint required before production work starts.
+
+Desktop may use a real month grid with a selected-day agenda or drill-in.
+At 390, do not squeeze desktop's seven text-heavy columns into the viewport:
+use a compact month/date chooser plus a vertical agenda for the selected day.
+Search and filters apply to both representations without changing meaning;
+range navigation, selection, Back behaviour and the existing detail URLs must
+remain addressable enough to reproduce what the operator was looking at.
+
+Prototype with nominal, empty, heavy and error data, including many same-day
+runs, mixed statuses, overlapping schedule occurrences and timezone/DST edges.
+Measure the DOM and inspect pixels at 1440 and 390. Hand back the three URLs,
+screenshots, the recommended variant, the dependency/bundle observation and
+the schedule-occurrence contract finding. Record the verdict here before a
+separate production implementation begins. The prototype branch is the primary
+source for rejected variants and must not be merged wholesale.
+
+**11. Accessibility, which nothing here has ever checked.** The branch
 re-declares ARIA roles on the table because this file demands it, and that is
 the whole of it: not one contrast ratio, keyboard path or touch target has ever
 been measured. Meanwhile the last days added dozens of controls — icon buttons
