@@ -27,7 +27,6 @@
 
 import { Hono } from "hono";
 import type { Handler } from "hono";
-import { z } from "zod";
 import { getEnv } from "@appstrate/env";
 import type { AppEnv } from "../types/index.ts";
 import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
@@ -53,6 +52,7 @@ import {
   parseStorageKey,
   type ListFilesFilters,
 } from "../services/files.ts";
+import { parseListPagination } from "../lib/list-query.ts";
 import {
   verifyPreviewToken,
   previewKind,
@@ -89,8 +89,7 @@ export function createFilesRouter() {
     if (contextChatSessionId) filters.contextChatSessionId = contextChatSessionId;
     const startingAfter = c.req.query("startingAfter");
     if (startingAfter) filters.startingAfter = startingAfter;
-    // Documented query-int idiom (routes/models.ts): coerce + clamp + default.
-    filters.limit = z.coerce.number().int().min(1).max(100).catch(20).parse(c.req.query("limit"));
+    filters.limit = parseListPagination(c, { defaultLimit: 20 }).limit;
 
     const page = await listFilesForActor(scope, actor, filters, c.get("permissions"));
     return c.json(page);

@@ -119,6 +119,15 @@ export function cancel(message: string, io: CommandIO = DEFAULT_IO): void {
  * readable error — issue #184. Callers that do have a flag (resolveTier,
  * resolveDir) should guard earlier with a specific message naming it.
  */
+/**
+ * The three prompt wrappers below each take a trailing `io`, like every other
+ * wrapper in this file. They did not, and the ESLint funnel message named them
+ * anyway ("Only `ui.ts` hands clack an `output`") — so a command with an
+ * injected sink still had its prompt bytes and its "Cancelled." go to the real
+ * stdout. `requireTTY` gates on stdin, not stdout, so this was reachable in
+ * production too: `appstrate login > login.log` from a terminal wrote clack's
+ * cursor escapes into the file.
+ */
 function requireTTY(message: string): void {
   if (!process.stdin.isTTY) {
     throw new Error(
@@ -129,20 +138,28 @@ function requireTTY(message: string): void {
   }
 }
 
-export async function askText(message: string, initialValue?: string): Promise<string> {
+export async function askText(
+  message: string,
+  initialValue?: string,
+  io: CommandIO = DEFAULT_IO,
+): Promise<string> {
   requireTTY(message);
-  const value = await clack.text({ message, initialValue });
+  const value = await clack.text({ message, initialValue, output: clackOutput(io) });
   if (clack.isCancel(value)) {
-    exitWithError(CANCELLED, DEFAULT_IO, EXIT_CANCELLED);
+    exitWithError(CANCELLED, io, EXIT_CANCELLED);
   }
   return value;
 }
 
-export async function confirm(message: string, initialValue = true): Promise<boolean> {
+export async function confirm(
+  message: string,
+  initialValue = true,
+  io: CommandIO = DEFAULT_IO,
+): Promise<boolean> {
   requireTTY(message);
-  const value = await clack.confirm({ message, initialValue });
+  const value = await clack.confirm({ message, initialValue, output: clackOutput(io) });
   if (clack.isCancel(value)) {
-    exitWithError(CANCELLED, DEFAULT_IO, EXIT_CANCELLED);
+    exitWithError(CANCELLED, io, EXIT_CANCELLED);
   }
   return value;
 }
@@ -171,15 +188,17 @@ export async function select<T>(
   message: string,
   options: SelectOption<T>[],
   initialValue?: T,
+  io: CommandIO = DEFAULT_IO,
 ): Promise<T> {
   requireTTY(message);
   const value = await clack.select<T>({
     message,
     options: options as unknown as Parameters<typeof clack.select<T>>[0]["options"],
     initialValue,
+    output: clackOutput(io),
   });
   if (clack.isCancel(value)) {
-    exitWithError(CANCELLED, DEFAULT_IO, EXIT_CANCELLED);
+    exitWithError(CANCELLED, io, EXIT_CANCELLED);
   }
   return value as T;
 }

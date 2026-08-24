@@ -179,23 +179,55 @@ describe("withSpinner", () => {
    * Observing "nothing paints after the throw" means observing a real stdout,
    * so a child process owns it: this suite must not touch the globals it is
    * proving clean. The window after MARKER is what a live interval would paint
-   * into. Control: the same snippet with a raw `clack.spinner()` fills that
-   * window with frames.
+   * into.
+   *
+   * BOTH children force `process.stdout.isTTY = true`. `runIsolated` gives the
+   * child a PIPE, so without this `spinner()` takes its `!isTTY` branch
+   * (`src/lib/ui.ts`) and returns `plainSpinner`, which has no `setInterval` at
+   * all — there is then no interval to leak, the assertion cannot fail, and
+   * deleting `withSpinner`'s whole cleanup path leaves it green. That is what
+   * this test had become: the `isTTY` branch was added by the same commit that
+   * hardened the spinner, and emptied it. Setting a global INSIDE the child is
+   * not the banned pattern from #1180 — that ban is on swapping
+   * `process.stdout.write` in the shared test process; the child owns its own.
+   *
+   * The control is the second child: the same window, a raw `clack.spinner()`
+   * left running, which must FILL it with frames. Without it a green assertion
+   * could come from the frames never having been possible.
    */
   it("clears the paint interval when the body throws (issue #1180)", async () => {
-    const { stdout } = await runIsolated(`
-      const { withSpinner } = await import(${UI_MODULE});
-      await withSpinner("Working", async () => { throw new Error("boom"); }, "Done")
-        .catch(() => {});
-      process.stdout.write("MARKER");
-      await Bun.sleep(400);
-      process.stdout.write("END");
-    `);
-    const tail = stdout.split("MARKER")[1] ?? "";
-    expect(stdout).toContain("MARKER");
+    const asTty = 'Object.defineProperty(process.stdout, "isTTY", { value: true });';
+    const [guarded, control] = await Promise.all([
+      runIsolated(`
+        ${asTty}
+        const { withSpinner } = await import(${UI_MODULE});
+        await withSpinner("Working", async () => { throw new Error("boom"); }, "Done")
+          .catch(() => {});
+        process.stdout.write("MARKER");
+        await Bun.sleep(400);
+        process.stdout.write("END");
+      `),
+      runIsolated(`
+        ${asTty}
+        const clack = await import("@clack/prompts");
+        const s = clack.spinner();
+        s.start("Working");
+        process.stdout.write("MARKER");
+        await Bun.sleep(400);
+        process.stdout.write("END");
+        s.stop("Done");
+      `),
+    ]);
+
+    const tail = guarded.stdout.split("MARKER")[1] ?? "";
+    expect(guarded.stdout).toContain("MARKER");
     expect(tail).toContain("END");
     // A live interval paints a frame every ~80ms, so 400ms of silence is the
     // falsifiable claim.
     expect(tail).not.toMatch(/[◒◐◓◑]/);
+
+    // Control: the same 400ms window, with a spinner deliberately left running.
+    const controlTail = control.stdout.split("MARKER")[1] ?? "";
+    expect(controlTail).toMatch(/[◒◐◓◑]/);
   });
 });

@@ -71,6 +71,14 @@ const globalIoBan = (target, selector) => ({
 // Message for both halves of the clack funnel below (direct `clack.x()` and
 // `clack.log.x()`). Declared once so the two selectors can never disagree
 // about what the rule is for.
+const PROCESS_STREAM_MESSAGE =
+  "Write through the command's `CommandIO` (`io.stdout.write` / `io.stderr.write`), never " +
+  "`process.stdout.write` / `process.stderr.write`. The process-global streams are invisible " +
+  "to an injected sink, so the output cannot be asserted on without capturing globals — the " +
+  "coupling issue #1180 is about. If this command genuinely owns a different output contract " +
+  "(a run's passthrough, a pre-sink host command), add it to this block's `ignores` with the " +
+  "reason, next to the ones already there.";
+
 const CLACK_FUNNEL_MESSAGE =
   "Render through a `lib/ui.ts` wrapper (intro / outro / note / logInfo / logWarn / spinner / withSpinner / select / confirm / askText / cancel / exitWithError), never `clack.*` directly. Only `ui.ts` hands clack an `output`, so a direct call writes to the process-global stdout and is invisible to an injected CommandIO — the coupling issue #1180 is about. `clack.spinner()` additionally leaks its paint interval when the body throws; use `withSpinner`, or `spinner()` + a `finally` for a conditional start.";
 
@@ -230,7 +238,30 @@ export default tseslint.config(
     // Re-declares `no-restricted-syntax` for a subset of the Zod block above,
     // which fully REPLACES its options here — hence the explicit spread.
     files: ["apps/cli/src/**/*.ts"],
-    ignores: ["apps/cli/src/lib/ui.ts", "apps/cli/src/lib/io.ts"],
+    ignores: [
+      "apps/cli/src/lib/ui.ts",
+      "apps/cli/src/lib/io.ts",
+      // The `process.*.write` ban below has a longer exemption list than the
+      // clack ban, and it lives HERE rather than only in `lib/io.ts`'s
+      // docstring — a list a linter cannot read is documentation, not a rule.
+      // Each of these owns a different output contract, spelled out in that
+      // docstring: `run.ts` + `run/**` stream a run's own stdout/stderr
+      // through, `runner.ts` and `lifecycle.ts` are host-level commands that
+      // run before any command sink exists, `install.ts` predates the sink and
+      // keeps its own prompt-DI seams, and `cli.ts` is the top-level error
+      // handler that must still print when everything else has failed.
+      "apps/cli/src/cli.ts",
+      "apps/cli/src/commands/run.ts",
+      "apps/cli/src/commands/run/**/*.ts",
+      "apps/cli/src/commands/runner.ts",
+      "apps/cli/src/commands/lifecycle.ts",
+      "apps/cli/src/commands/install.ts",
+      // `lib/keyring.ts` emits ONE lifetime warning when the OS keyring is
+      // unavailable, from a module with no command context and therefore no
+      // sink to inject. The one exemption the io.ts docstring did not account
+      // for; named here so it is a decision rather than an oversight.
+      "apps/cli/src/lib/keyring.ts",
+    ],
     rules: {
       "no-restricted-syntax": [
         "error",
@@ -243,6 +274,22 @@ export default tseslint.config(
         {
           selector: "CallExpression[callee.object.object.name='clack']",
           message: CLACK_FUNNEL_MESSAGE,
+        },
+        // The third door, and the most direct one. `2d71e0297` was titled "put
+        // every command's output behind the sink, AND ENFORCE IT" and enforced
+        // `console.*` (via no-console) and `clack.*` (above) — leaving the
+        // literal `process.stdout.write("…")` a new command could reach for,
+        // which passes `bun run check` untouched and is invisible to an
+        // injected CommandIO exactly like the other two.
+        {
+          selector:
+            "CallExpression[callee.property.name='write'][callee.object.object.name='process'][callee.object.property.name='stdout']",
+          message: PROCESS_STREAM_MESSAGE,
+        },
+        {
+          selector:
+            "CallExpression[callee.property.name='write'][callee.object.object.name='process'][callee.object.property.name='stderr']",
+          message: PROCESS_STREAM_MESSAGE,
         },
       ],
     },
