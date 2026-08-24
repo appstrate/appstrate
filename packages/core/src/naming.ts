@@ -322,3 +322,41 @@ export function isValidToolName(name: string): boolean {
   if (name.length === 0 || name.length > TOOL_NAME_MAX_LEN) return false;
   return TOOL_NAME_PATTERN.test(name);
 }
+
+/**
+ * Deliverable filenames a model reaches for by reflex and that mean nothing
+ * once the file leaves the run that produced it.
+ *
+ * Lives in core, not beside the prompt that first needed it, because THREE
+ * prompts issue this instruction and they do not share a package: the platform
+ * run prompt (`@appstrate/afps-runtime/bundle`), the MCP `run_and_wait` tool
+ * descriptions (`apps/api/src/modules/mcp/tools.ts`), and the chat system
+ * prompt (`@appstrate/module-chat`). `module-chat` does not depend on
+ * afps-runtime, which is how the third one came to hold a hand-copied literal
+ * of exactly these six names, in exactly this order — the drift the constant
+ * was created to end, reintroduced in the same range that ended it.
+ *
+ * The copies had already drifted once before: the MCP sites banned three of
+ * these six, omitting exactly the three (`result`, `document`, `file`) that
+ * #1177's vocabulary makes most attractive to a model.
+ */
+const CONTEXT_FREE_DELIVERABLE_FILENAMES: readonly string[] = [
+  "report.md",
+  "summary.md",
+  "output.md",
+  "result.md",
+  "document.md",
+  "file.md",
+];
+
+/**
+ * {@link CONTEXT_FREE_DELIVERABLE_FILENAMES} rendered for a prompt sentence:
+ * `` `report.md`, `summary.md`, …, or `file.md` ``. Interpolate it after
+ * "never use context-free names such as " — it supplies no trailing
+ * punctuation.
+ */
+export const CONTEXT_FREE_FILENAMES_PHRASE: string = (() => {
+  const quoted = CONTEXT_FREE_DELIVERABLE_FILENAMES.map((name) => `\`${name}\``);
+  const last = quoted[quoted.length - 1]!;
+  return quoted.length > 1 ? `${quoted.slice(0, -1).join(", ")}, or ${last}` : last;
+})();
