@@ -37,16 +37,11 @@ const SECRET = "test-run-secret-0123456789";
 interface ServerConfig {
   requireSig: boolean;
   lastSigOk: boolean | null;
+  /** Every pathname the runtime requested, in order. */
+  requestedPaths: string[];
   /** Path-suffix → handler. Suffix matched against the URL pathname tail. */
   workspace: (req: Request) => Response | Promise<Response>;
   files: (req: Request) => Response | Promise<Response>;
-  /**
-   * The pre-#1177 `/documents` manifest path. A platform older than this image
-   * serves ONLY that one, and a 404 on `/files` is ambiguous there — it is also
-   * the legitimate "no input files" answer — so the runtime probes this before
-   * concluding the run carries none.
-   */
-  legacyFiles: (req: Request) => Response | Promise<Response>;
   doc: (name: string, req: Request) => Response | Promise<Response>;
 }
 
@@ -72,6 +67,7 @@ beforeAll(() => {
     port: 0,
     fetch(req) {
       const u = new URL(req.url);
+      config.requestedPaths.push(u.pathname);
       // Verify the HMAC the runtime signed (empty GET body).
       const sig = verify({
         msgId: req.headers.get("webhook-id") ?? "",
@@ -86,8 +82,7 @@ beforeAll(() => {
       }
       if (u.pathname.endsWith("/workspace")) return config.workspace(req);
       if (u.pathname.endsWith("/files")) return config.files(req);
-      if (u.pathname.endsWith("/documents")) return config.legacyFiles(req);
-      const m = u.pathname.match(/\/(?:files|documents)\/([^/]+)$/);
+      const m = u.pathname.match(/\/files\/([^/]+)$/);
       if (m) return config.doc(decodeURIComponent(m[1]!), req);
       return new Response("not found", { status: 404 });
     },
@@ -101,9 +96,9 @@ beforeEach(() => {
   config = {
     requireSig: false,
     lastSigOk: null,
+    requestedPaths: [],
     workspace: () => new Response("bundle-bytes", { status: 200 }),
     files: () => new Response("no files", { status: 404 }),
-    legacyFiles: () => new Response("no files", { status: 404 }),
     doc: () => new Response("missing", { status: 404 }),
   };
 });
@@ -264,12 +259,11 @@ describe("provisionFiles", () => {
     }
   });
 
-  it("symlinks documents/ onto files/ for a platform older than this image", async () => {
-    // The prompt names the directory, and the platform builds the prompt. A
-    // pre-#1177 platform still says `./documents/`, so without the symlink the
-    // agent is pointed at a directory that does not exist — a prompt-level
-    // miss with the bytes sitting right next to it and nothing reporting a
-    // fault.
+  it("provisions into files/ only — no retired documents/ directory", async () => {
+    // `files/` is the directory the platform prompt announces (`./files/<name>`,
+    // unconditionally). The retired `documents/` symlink is gone: nothing
+    // announces that path any more, and a second name for the same bytes is
+    // one more thing that can drift out of step with the prompt.
     const bytes = new TextEncoder().encode("mounted");
     config.files = () =>
       Response.json({
@@ -282,48 +276,43 @@ describe("provisionFiles", () => {
     await provisionFiles(deps(ws, die));
 
     expect(messages).toHaveLength(0);
-    const viaLegacy = await readFile(path.join(ws, "documents", "m.txt"));
-    expect(Buffer.compare(viaLegacy, Buffer.from(bytes))).toBe(0);
+    expect(
+      Buffer.compare(await readFile(path.join(ws, "files", "m.txt")), Buffer.from(bytes)),
+    ).toBe(0);
+    expect(await exists(path.join(ws, "documents"))).toBe(false);
   });
 
-  it("reads the retired `documents` manifest key", async () => {
-    // A platform older than this image emits only that key. Reading `files`
-    // alone yields zero names, which this function treats as "no input files"
-    // and returns from silently.
-    const bytes = new TextEncoder().encode("legacy key");
+  it("ignores a manifest carrying only the retired `documents` key", async () => {
+    // `files` is the only key read. No platform this image can talk to emits
+    // the retired spelling — the platform validates its runtime image tags
+    // against its own version at boot — so a `files`-less manifest is a
+    // malformed one, and "no input files" is the honest reading of it.
     config.files = () =>
       Response.json({
-        documents: [{ name: "k.txt", workspace_name: "k.txt", size: bytes.byteLength }],
+        documents: [{ name: "k.txt", workspace_name: "k.txt", size: 3 }],
       });
-    config.doc = () => chunkedResponse(bytes);
+    config.doc = () => chunkedResponse(new TextEncoder().encode("nope"));
     const ws = await tempWorkspace();
     const { die, messages } = makeDie();
 
     await provisionFiles(deps(ws, die));
 
     expect(messages).toHaveLength(0);
-    expect(
-      Buffer.compare(await readFile(path.join(ws, "files", "k.txt")), Buffer.from(bytes)),
-    ).toBe(0);
+    expect(await exists(path.join(ws, "files", "k.txt"))).toBe(false);
   });
 
-  it("falls back to the retired /documents manifest path on a 404", async () => {
-    const bytes = new TextEncoder().encode("legacy path");
-    config.files = () => new Response("not here", { status: 404 });
-    config.legacyFiles = () =>
-      Response.json({
-        documents: [{ name: "p.txt", workspace_name: "p.txt", size: bytes.byteLength }],
-      });
-    config.doc = () => chunkedResponse(bytes);
+  it("does not probe the retired /documents manifest path on a 404", async () => {
+    // A 404 on `/files` now carries exactly one meaning — this run has no
+    // input files — so there is no second round-trip on the common boot path.
+    config.files = () => new Response("no files", { status: 404 });
     const ws = await tempWorkspace();
     const { die, messages } = makeDie();
 
     await provisionFiles(deps(ws, die));
 
     expect(messages).toHaveLength(0);
-    expect(
-      Buffer.compare(await readFile(path.join(ws, "files", "p.txt")), Buffer.from(bytes)),
-    ).toBe(0);
+    expect(config.requestedPaths.filter((p) => p.endsWith("/documents"))).toEqual([]);
+    expect(config.requestedPaths.filter((p) => p.endsWith("/files"))).toHaveLength(1);
   });
 
   it("keys writes on workspace_name, not the (possibly colliding) display name", async () => {

@@ -78,26 +78,13 @@ export const CANONICAL_RUNTIME_TOOL_EVENT_TYPES = [
   "file.published",
 ] as const;
 
-/**
- * Retired event-type spellings still ACCEPTED by {@link reEmitRuntimeToolEvents}
- * but never emitted. `document.published` was the canonical name until issue
- * #1177; the runtime image and the platform deploy independently, so an image
- * built before the rename can still hand this host a `document.published`
- * event. Forwarding it costs nothing (ingestion accepts both names) whereas
- * dropping it would silently lose a published file.
- */
-export const LEGACY_RUNTIME_TOOL_EVENT_TYPES = ["document.published"] as const;
-
-const ACCEPTED_RUNTIME_TOOL_EVENT_TYPE_SET: ReadonlySet<string> = new Set<string>([
-  ...CANONICAL_RUNTIME_TOOL_EVENT_TYPES,
-  ...LEGACY_RUNTIME_TOOL_EVENT_TYPES,
-]);
+const ACCEPTED_RUNTIME_TOOL_EVENT_TYPE_SET: ReadonlySet<string> = new Set<string>(
+  CANONICAL_RUNTIME_TOOL_EVENT_TYPES,
+);
 
 /** A canonical run event carried back from a runtime tool call. */
 export interface RuntimeToolEvent {
-  type:
-    | (typeof CANONICAL_RUNTIME_TOOL_EVENT_TYPES)[number]
-    | (typeof LEGACY_RUNTIME_TOOL_EVENT_TYPES)[number];
+  type: (typeof CANONICAL_RUNTIME_TOOL_EVENT_TYPES)[number];
   [k: string]: unknown;
 }
 
@@ -373,11 +360,7 @@ export interface PublishedFile extends RunAndWaitFile {
   sha256: string;
 }
 
-/**
- * The canonical `file.published` run event for a stored file. Ingestion also
- * accepts the pre-#1177 shape (`type: "document.published"` with a
- * `document_id` field) from a runtime image built before the rename.
- */
+/** The canonical `file.published` run event for a stored file. */
 export interface FilePublishedEvent extends RuntimeToolEvent {
   type: "file.published";
   file_id: string;

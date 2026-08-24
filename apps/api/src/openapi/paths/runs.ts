@@ -1575,17 +1575,10 @@ const canonicalRunsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["files", "documents"],
+                required: ["files"],
                 properties: {
                   files: {
                     type: "array",
-                    items: runFileManifestEntry,
-                  },
-                  documents: {
-                    type: "array",
-                    deprecated: true,
-                    description:
-                      "DEPRECATED — the pre-#1177 spelling of `files`, carrying the SAME entries. Still emitted because the runtime image and the platform deploy independently: a container built before the rename reads this key, and a `files`-only manifest would give it zero input files with no error anywhere. Read `files`.",
                     items: runFileManifestEntry,
                   },
                 },

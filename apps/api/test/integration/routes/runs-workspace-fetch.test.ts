@@ -326,10 +326,10 @@ describe("GET /api/runs/:runId/files[/:name]", () => {
       headers: signedGetHeaders(RUN_SECRET),
     });
     expect(manifestRes.status).toBe(200);
-    // Both keys carry the SAME array — `documents` is the pre-#1177 spelling a
-    // runtime image older than the platform reads. See `RunFilesManifest`.
+    // ONE key. The pre-#1177 `documents` twin is gone from the written object
+    // and from the reader — see `RunFilesManifest`.
     const entries = [{ name: "a.txt", workspace_name: "a.txt", size: 5 }];
-    expect(await manifestRes.json()).toEqual({ files: entries, documents: entries });
+    expect(await manifestRes.json()).toEqual({ files: entries });
 
     const docRes = await app.request(`/api/runs/${runId}/files/a.txt`, {
       method: "GET",

@@ -18976,17 +18976,6 @@ export interface operations {
                             workspace_name: string;
                             size: number;
                         }[];
-                        /**
-                         * @deprecated
-                         * @description DEPRECATED — the pre-#1177 spelling of `files`, carrying the SAME entries. Still emitted because the runtime image and the platform deploy independently: a container built before the rename reads this key, and a `files`-only manifest would give it zero input files with no error anywhere. Read `files`.
-                         */
-                        documents: {
-                            /** @description The file's human display name (may repeat across entries). */
-                            name: string;
-                            /** @description Unique single path segment the agent writes the file to under `workspace/files/` and fetches its bytes by. */
-                            workspace_name: string;
-                            size: number;
-                        }[];
                     };
                 };
             };

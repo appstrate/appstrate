@@ -5,7 +5,6 @@ import {
   buildPublishFileDef,
   buildRuntimeToolDefs,
   CANONICAL_RUNTIME_TOOL_EVENT_TYPES,
-  LEGACY_RUNTIME_TOOL_EVENT_TYPES,
   filePublishedEvent,
   reEmitRuntimeToolEvents,
   RUNTIME_TOOL_EVENTS_META_KEY,
@@ -228,16 +227,14 @@ describe("buildPublishFileDef", () => {
 });
 
 describe("run-event type compatibility (#1177)", () => {
-  it("file.published is canonical; document.published is accepted, not emitted", () => {
+  it("file.published is canonical and document.published is no longer accepted", () => {
     expect([...CANONICAL_RUNTIME_TOOL_EVENT_TYPES]).toContain("file.published");
     expect([...CANONICAL_RUNTIME_TOOL_EVENT_TYPES]).not.toContain("document.published" as never);
-    expect([...LEGACY_RUNTIME_TOOL_EVENT_TYPES]).toEqual(["document.published"]);
-  });
 
-  it("reEmitRuntimeToolEvents forwards a legacy document.published from an older image", () => {
-    // Runtime image and platform deploy independently: an image built before
-    // the rename still hands this host `document.published`. Dropping it at the
-    // trust boundary would silently lose a published file.
+    // The only producer of the retired name is this module's own
+    // `filePublishedEvent`, bundled into the SAME artifact as the acceptor
+    // below — there is no version boundary between them, so the name can now
+    // only arrive forged, and the acceptor drops it like any other.
     const emitted: unknown[] = [];
     reEmitRuntimeToolEvents(
       {
@@ -249,9 +246,6 @@ describe("run-event type compatibility (#1177)", () => {
       },
       (e) => emitted.push(e),
     );
-    expect(emitted).toEqual([
-      { type: "document.published", document_id: "doc_legacy" },
-      { type: "file.published", file_id: "doc_new" },
-    ]);
+    expect(emitted).toEqual([{ type: "file.published", file_id: "doc_new" }]);
   });
 });

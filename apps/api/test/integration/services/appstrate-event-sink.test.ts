@@ -24,7 +24,6 @@ import {
 import { logger } from "../../../src/lib/logger.ts";
 import { _resetRunMetricBroadcasterForTests } from "../../../src/services/run-metric-broadcaster.ts";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
-import { LEGACY_RUNTIME_TOOL_EVENT_TYPES } from "@appstrate/core/runtime-tool-defs";
 import type { ModelCost } from "@appstrate/core/module";
 import { db } from "@appstrate/db/client";
 import { runLogs, llmUsage, runs } from "@appstrate/db/schema";
@@ -99,32 +98,36 @@ describe("persistRunEvent", () => {
     expect(await loadLogs()).toHaveLength(0);
   });
 
-  // The published-file event has more than one accepted spelling: the runtime
-  // image and the platform deploy independently, so a container built before
-  // #1177 still emits `document.published` / `document_id`. The set of accepted
-  // spellings is core's `LEGACY_RUNTIME_TOOL_EVENT_TYPES`, so this test is
-  // driven BY that table — a spelling core forwards but the sink does not
-  // ingest is a file stored with no run_log to show for it, and nothing
-  // anywhere saying why. Adding an entry to the table without touching the
-  // sink must keep working; if it ever does not, this fails.
-  it("ingests every published-file spelling core still forwards", async () => {
-    const spellings = ["file.published", ...LEGACY_RUNTIME_TOOL_EVENT_TYPES];
-    // Pins today's table so the loop cannot silently degrade to one case.
-    expect(spellings).toContain("document.published");
-
-    for (const type of spellings) {
-      const id = `doc_${type.replace(/\W/g, "_")}`;
-      // A pre-rename image emits the retired TYPE with the retired payload KEY.
-      const payload = type.startsWith("document.") ? { document_id: id } : { file_id: id };
-      await persist(event(type, { ...payload, name: "a.md", mime: "text/markdown", size: 3 }));
-    }
+  // `file.published` / `file_id` is the ONE published-file spelling. The
+  // pre-#1177 `document.published` / `document_id` twin is gone from the sink.
+  // Dropping it costs nothing: the only producer of this event is core's
+  // `filePublishedEvent`, bundled into the very artifact that also decides what
+  // to forward (`reEmitRuntimeToolEvents`) — producer and acceptor are the same
+  // build, so there is no version boundary between them for a retired spelling
+  // to cross. The retired name can now only come from a forged upstream event,
+  // which is exactly what the dispatcher's `default:` drop is for.
+  it("ingests file.published and drops the retired document.published", async () => {
+    await persist(
+      event("file.published", {
+        file_id: "doc_canonical",
+        name: "a.md",
+        mime: "text/markdown",
+        size: 3,
+      }),
+    );
+    await persist(
+      event("document.published", {
+        document_id: "doc_retired",
+        name: "b.md",
+        mime: "text/markdown",
+        size: 3,
+      }),
+    );
 
     const fileLogs = (await loadLogs()).filter((l) => l.event === "file");
-    expect(fileLogs).toHaveLength(spellings.length);
-    expect(fileLogs.map((l) => l.type)).toEqual(spellings.map(() => "result"));
-    expect(fileLogs.map((l) => (l.data as { file_id: string }).file_id)).toEqual(
-      spellings.map((type) => `doc_${type.replace(/\W/g, "_")}`),
-    );
+    expect(fileLogs).toHaveLength(1);
+    expect(fileLogs[0]!.type).toBe("result");
+    expect((fileLogs[0]!.data as { file_id: string }).file_id).toBe("doc_canonical");
   });
 
   it("maps log.written into run_logs with the original level + message", async () => {

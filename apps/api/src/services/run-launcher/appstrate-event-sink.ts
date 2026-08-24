@@ -16,7 +16,6 @@
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import { isPlainObject } from "@appstrate/core/safe-json";
 import { fileUri } from "@appstrate/core/file-uri";
-import { LEGACY_RUNTIME_TOOL_EVENT_TYPES } from "@appstrate/core/runtime-tool-defs";
 import type { Db } from "@appstrate/db/client";
 import { modelCostSchema, type ModelCost } from "@appstrate/core/module";
 import { computeTokenCost, type TokenPricingStatus } from "@appstrate/afps-runtime/runner";
@@ -31,23 +30,6 @@ import type { TokenUsage } from "./types.ts";
 import { scheduleRunMetricBroadcast } from "../run-metric-broadcaster.ts";
 
 const FILE_PUBLISHED_EVENT_TYPE = "file.published";
-
-/** Forward-map a retired event type: the `document.` subject became `file.`. */
-function canonicalRuntimeToolEventType(type: string): string {
-  return type.startsWith("document.") ? `file.${type.slice("document.".length)}` : type;
-}
-
-/**
- * Every spelling this sink ingests as a published run file. Derived from
- * `LEGACY_RUNTIME_TOOL_EVENT_TYPES` rather than hand-listed, so an alias added
- * there cannot fall through to `default` here.
- */
-const FILE_PUBLISHED_EVENT_TYPES: ReadonlySet<string> = new Set<string>([
-  FILE_PUBLISHED_EVENT_TYPE,
-  ...LEGACY_RUNTIME_TOOL_EVENT_TYPES.filter(
-    (type) => canonicalRuntimeToolEventType(type) === FILE_PUBLISHED_EVENT_TYPE,
-  ),
-]);
 
 /**
  * Dispatch one {@link RunEvent} through the platform write-through table.
@@ -66,13 +48,7 @@ export async function persistRunEvent(
     modelCost?: ModelCost | null;
   } = {},
 ): Promise<string | null> {
-  // Normalise every accepted alias onto its canonical type before dispatch, so
-  // the switch below carries one `case` per event.
-  const eventType = FILE_PUBLISHED_EVENT_TYPES.has(event.type)
-    ? FILE_PUBLISHED_EVENT_TYPE
-    : event.type;
-
-  switch (eventType) {
+  switch (event.type) {
     case "output.emitted": {
       await appendRunLog(
         scope,
@@ -107,9 +83,8 @@ export async function persistRunEvent(
       // `"file"` tag written below must stay the first member of
       // `PUBLISHED_FILE_LOG_EVENTS` (`@appstrate/core/file-uri`) — every reader
       // filters run_log lines on that list, and retired values must stay in it
-      // for historical rows. `document_id` is the pre-rename payload key.
-      const rawFileId = event.file_id ?? event.document_id;
-      const fileId = typeof rawFileId === "string" ? rawFileId : null;
+      // for historical rows.
+      const fileId = typeof event.file_id === "string" ? event.file_id : null;
       if (fileId) {
         await appendRunLog(
           scope,

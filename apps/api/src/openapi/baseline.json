@@ -3747,32 +3747,10 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["files", "documents"],
+                  "required": ["files"],
                   "properties": {
                     "files": {
                       "type": "array",
-                      "items": {
-                        "type": "object",
-                        "required": ["name", "workspace_name", "size"],
-                        "properties": {
-                          "name": {
-                            "type": "string",
-                            "description": "The file's human display name (may repeat across entries)."
-                          },
-                          "workspace_name": {
-                            "type": "string",
-                            "description": "Unique single path segment the agent writes the file to under `workspace/files/` and fetches its bytes by."
-                          },
-                          "size": {
-                            "type": "integer"
-                          }
-                        }
-                      }
-                    },
-                    "documents": {
-                      "type": "array",
-                      "deprecated": true,
-                      "description": "DEPRECATED — the pre-#1177 spelling of `files`, carrying the SAME entries. Still emitted because the runtime image and the platform deploy independently: a container built before the rename reads this key, and a `files`-only manifest would give it zero input files with no error anywhere. Read `files`.",
                       "items": {
                         "type": "object",
                         "required": ["name", "workspace_name", "size"],

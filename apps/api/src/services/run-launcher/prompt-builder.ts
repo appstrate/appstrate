@@ -60,13 +60,14 @@ export async function buildPlatformSystemPrompt(
   plan: AppstrateRunPlan,
 ): Promise<string> {
   const executionMode = getExecutionMode();
-  // `./files/` since issue #1177 — the directory `runtime-pi/provision.ts`
-  // streams the run's input files into. DEPLOY ORDER: the runtime image must be
-  // at or ahead of the platform. A pre-#1177 image provisions `./documents/`
-  // only, so a platform announcing `./files/` to it points the agent at a
-  // directory that is not there; the reverse skew is covered image-side by a
-  // `documents` → `files` symlink. Both directions are a prompt-level miss, not
-  // an error — the bytes are provisioned either way.
+  // `./files/` — the ONE directory `runtime-pi/provision.ts` streams the run's
+  // input files into, since #1177. This announcement and that layout must stay
+  // spelled the same: a divergence is a prompt-level miss, not an error — the
+  // bytes are provisioned either way, the agent is simply pointed at a
+  // directory that is not there and nothing reports a fault. It is kept true by
+  // the env schema, which fails boot unless `PI_IMAGE` carries the platform's
+  // own version, so the image reading this prompt is never a different #1177
+  // side than the platform writing it.
   const uploads = plan.files?.map((f) => ({
     name: f.name,
     path: `./files/${f.workspaceName}`,
