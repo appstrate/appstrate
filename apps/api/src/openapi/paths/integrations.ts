@@ -1399,7 +1399,9 @@ export const integrationsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["connection_id", "enforce"],
+              // `enforce` carries a server-side default (`false`), so it is
+              // optional on the wire — the `default` beside it said as much.
+              required: ["connection_id"],
               properties: {
                 connection_id: { type: "string", format: "uuid" },
                 enforce: { type: "boolean", default: false },

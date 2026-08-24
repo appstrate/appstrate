@@ -472,33 +472,37 @@ export const schemas = {
         description: "Optimistic lock version (user agents only)",
       },
       input: {
+        // Stated explicitly alongside `allOf`: the branches below are a
+        // conjunction on an object, and a reader that stops at the top level
+        // (openapi-typescript, the breaking-change detector) must still see it.
         type: "object",
-        // The detail serializer always emits `schema` (falls back to an empty
-        // object schema when the manifest declares no input wrapper), plus the
-        // two per-application layers the launch form needs.
-        required: ["schema", "values", "locked_fields"],
+        // `values` + `locked_fields` are NOT re-spelled here: they are the
+        // AgentInputSettings component, which is also the request and response
+        // body of PUT /agents/{scope}/{name}/input-settings. Spelling them
+        // twice is how `locked_fields` ended up documented as the full rule in
+        // one place and a single clause in the other.
+        allOf: [
+          { $ref: "#/components/schemas/AgentInputSettings" },
+          {
+            type: "object",
+            // The detail serializer always emits `schema` (falls back to an
+            // empty object schema when the manifest declares no input wrapper),
+            // on top of the two per-application layers the launch form needs.
+            required: ["schema"],
+            properties: {
+              schema: { type: "object", description: "Pure JSON Schema 2020-12 object" },
+              file_constraints: { $ref: "#/components/schemas/FileConstraintsMap" },
+              ui_hints: { $ref: "#/components/schemas/UIHintsMap" },
+              property_order: {
+                type: "array",
+                items: { type: "string" },
+                description: "Presentation order for schema properties",
+              },
+            },
+          },
+        ],
         description:
           "AFPS schema wrapper for the agent's parameters, plus the per-application stored values and field locks. Resolution order at launch: author default (JSON Schema `default`) < stored value (`values`) < schedule value < caller input. A field named in `locked_fields` is not asked at launch and a caller that sets it is refused with 400 `locked_input_field`.",
-        properties: {
-          schema: { type: "object", description: "Pure JSON Schema 2020-12 object" },
-          values: {
-            type: "object",
-            description: "Values stored once for this application (editor defaults).",
-            additionalProperties: true,
-          },
-          locked_fields: {
-            type: "array",
-            items: { type: "string" },
-            description: "Input fields no caller may set at launch.",
-          },
-          file_constraints: { $ref: "#/components/schemas/FileConstraintsMap" },
-          ui_hints: { $ref: "#/components/schemas/UIHintsMap" },
-          property_order: {
-            type: "array",
-            items: { type: "string" },
-            description: "Presentation order for schema properties",
-          },
-        },
       },
       output: {
         type: "object",

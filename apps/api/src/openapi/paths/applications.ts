@@ -462,13 +462,9 @@ export const applicationsPaths = {
                   version_pin: { type: ["string", "null"] },
                   input: {
                     type: "object",
+                    allOf: [{ $ref: "#/components/schemas/AgentInputSettings" }],
                     description:
                       "Stored input layer for this application — the editor's values and the fields it locked. A locally executed run applies `values` under the caller's input and refuses a caller value naming a locked field.",
-                    required: ["values", "locked_fields"],
-                    properties: {
-                      values: { type: "object", additionalProperties: true },
-                      locked_fields: { type: "array", items: { type: "string" } },
-                    },
                   },
                 },
               },

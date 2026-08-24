@@ -85,6 +85,11 @@ export const updateWebhookSchema = z.object({
   enabled: z.boolean().optional(),
 });
 
+/** Optional body of `POST /api/webhooks/{id}/rotate`. */
+export const rotateSecretSchema = z.object({
+  windowSeconds: z.number().int().positive().optional(),
+});
+
 export function createWebhooksRouter() {
   const router = new Hono<AppEnv>();
 
@@ -258,9 +263,6 @@ export function createWebhooksRouter() {
   // 7-day window (capped at 30 days). The response carries both the new
   // secret (for consumer migration) and the previous one (still valid
   // until the window closes), plus the deadline.
-  const rotateSecretSchema = z.object({
-    windowSeconds: z.number().int().positive().optional(),
-  });
   router.post(
     "/api/webhooks/:id/rotate",
     rateLimit(5),

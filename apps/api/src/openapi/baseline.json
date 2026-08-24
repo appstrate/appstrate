@@ -442,7 +442,8 @@
                   },
                   "password": {
                     "type": "string",
-                    "minLength": 8
+                    "minLength": 8,
+                    "maxLength": 256
                   },
                   "name": {
                     "type": "string",
@@ -7901,7 +7902,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["connection_id", "enforce"],
+                "required": ["connection_id"],
                 "properties": {
                   "connection_id": {
                     "type": "string",
@@ -9737,6 +9738,7 @@
                 "properties": {
                   "providerId": {
                     "type": "string",
+                    "minLength": 1,
                     "pattern": "^[a-z0-9-]+$",
                     "description": "Must match the pairing's pinned providerId. Mismatched → 400; provider deregistered after mint → 404."
                   },
@@ -10869,7 +10871,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["email", "role"],
+                "required": ["email"],
                 "properties": {
                   "email": {
                     "type": "string",
@@ -11912,10 +11914,12 @@
                 "required": ["agent_package_id", "integration_package_id", "connection_id"],
                 "properties": {
                   "agent_package_id": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1
                   },
                   "integration_package_id": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1
                   },
                   "connection_id": {
                     "type": "string",
@@ -14667,6 +14671,7 @@
                 "properties": {
                   "version": {
                     "type": "string",
+                    "minLength": 1,
                     "description": "Optional semver version override (e.g. from bump selector)"
                   }
                 }
@@ -14969,7 +14974,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["manifest", "content", "lock_version"],
+                "required": ["lock_version"],
                 "properties": {
                   "manifest": {
                     "type": "object",
@@ -15151,7 +15156,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["manifest", "content"],
+                "required": ["manifest"],
                 "properties": {
                   "manifest": {
                     "$ref": "#/components/schemas/AgentManifest"
@@ -15281,7 +15286,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["manifest", "content", "lock_version"],
+                "required": ["lock_version"],
                 "properties": {
                   "manifest": {
                     "$ref": "#/components/schemas/AgentManifest"
@@ -15538,6 +15543,7 @@
                 "properties": {
                   "version": {
                     "type": "string",
+                    "minLength": 1,
                     "description": "Optional semver version override (e.g. from bump selector)"
                   }
                 }
@@ -16150,6 +16156,7 @@
                 "properties": {
                   "version": {
                     "type": "string",
+                    "minLength": 1,
                     "description": "Optional semver version override (e.g. from bump selector)"
                   }
                 }
@@ -16452,7 +16459,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["manifest", "lock_version"],
+                "required": ["lock_version"],
                 "properties": {
                   "manifest": {
                     "type": "object",
@@ -16831,6 +16838,7 @@
                 "properties": {
                   "version": {
                     "type": "string",
+                    "minLength": 1,
                     "description": "Optional semver version override (e.g. from bump selector)"
                   }
                 }
@@ -17133,7 +17141,7 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["manifest", "content", "lock_version"],
+                "required": ["lock_version"],
                 "properties": {
                   "manifest": {
                     "type": "object",
@@ -17966,20 +17974,12 @@
                     },
                     "input": {
                       "type": "object",
-                      "description": "Stored input layer for this application — the editor's values and the fields it locked. A locally executed run applies `values` under the caller's input and refuses a caller value naming a locked field.",
-                      "required": ["values", "locked_fields"],
-                      "properties": {
-                        "values": {
-                          "type": "object",
-                          "additionalProperties": true
-                        },
-                        "locked_fields": {
-                          "type": "array",
-                          "items": {
-                            "type": "string"
-                          }
+                      "allOf": [
+                        {
+                          "$ref": "#/components/schemas/AgentInputSettings"
                         }
-                      }
+                      ],
+                      "description": "Stored input layer for this application — the editor's values and the fields it locked. A locally executed run applies `values` under the caller's input and refuses a caller value naming a locked field."
                     }
                   }
                 },
@@ -21993,39 +21993,35 @@
           },
           "input": {
             "type": "object",
-            "required": ["schema", "values", "locked_fields"],
-            "description": "AFPS schema wrapper for the agent's parameters, plus the per-application stored values and field locks. Resolution order at launch: author default (JSON Schema `default`) < stored value (`values`) < schedule value < caller input. A field named in `locked_fields` is not asked at launch and a caller that sets it is refused with 400 `locked_input_field`.",
-            "properties": {
-              "schema": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AgentInputSettings"
+              },
+              {
                 "type": "object",
-                "description": "Pure JSON Schema 2020-12 object"
-              },
-              "values": {
-                "type": "object",
-                "description": "Values stored once for this application (editor defaults).",
-                "additionalProperties": true
-              },
-              "locked_fields": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                },
-                "description": "Input fields no caller may set at launch."
-              },
-              "file_constraints": {
-                "$ref": "#/components/schemas/FileConstraintsMap"
-              },
-              "ui_hints": {
-                "$ref": "#/components/schemas/UIHintsMap"
-              },
-              "property_order": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                },
-                "description": "Presentation order for schema properties"
+                "required": ["schema"],
+                "properties": {
+                  "schema": {
+                    "type": "object",
+                    "description": "Pure JSON Schema 2020-12 object"
+                  },
+                  "file_constraints": {
+                    "$ref": "#/components/schemas/FileConstraintsMap"
+                  },
+                  "ui_hints": {
+                    "$ref": "#/components/schemas/UIHintsMap"
+                  },
+                  "property_order": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "Presentation order for schema properties"
+                  }
+                }
               }
-            }
+            ],
+            "description": "AFPS schema wrapper for the agent's parameters, plus the per-application stored values and field locks. Resolution order at launch: author default (JSON Schema `default`) < stored value (`values`) < schedule value < caller input. A field named in `locked_fields` is not asked at launch and a caller that sets it is refused with 400 `locked_input_field`."
           },
           "output": {
             "type": "object",

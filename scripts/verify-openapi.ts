@@ -9,6 +9,9 @@
  * 3. Best practices lint — @redocly/openapi-core (recommended ruleset)
  * 4. Zod ↔ OpenAPI schema comparison — compares Zod-derived JSON Schemas (pre-converted
  *    in the registry via z.toJSONSchema()) against hand-written OpenAPI requestBody schemas
+ * 4b. Step 4 coverage — every endpoint whose spec declares an application/json request body
+ *    must be registered (core registry or a module's openApiSchemas()) or listed in
+ *    EXEMPT_REQUEST_BODIES with a stated reason; a stale exemption fails too
  * 5. Code subset Spec — statically enumerates router.METHOD() and app.METHOD() calls across
  *    apps/api/src/routes (per-domain route files) plus apps/api/src/modules (built-in modules)
  *    plus apps/api/src/index.ts, composes the mount prefix from app.route(prefix, factory) calls,
@@ -33,7 +36,10 @@ import { validate as validateOpenAPI } from "@readme/openapi-parser";
 import { lintFromString, createConfig } from "@redocly/openapi-core";
 import type { OpenApiSchemaEntry } from "@appstrate/core/module";
 import { buildOpenApiSpec } from "../apps/api/src/openapi/index.ts";
-import { buildZodSchemaRegistry } from "../apps/api/src/openapi/zod-schema-registry.ts";
+import {
+  buildZodSchemaRegistry,
+  EXEMPT_REQUEST_BODIES,
+} from "../apps/api/src/openapi/zod-schema-registry.ts";
 import {
   responseTypeRegistry,
   KNOWN_DRIFT,
@@ -361,6 +367,23 @@ function normalizeType(schema: Record<string, unknown>): {
     return resolved ? normalizeType(resolved) : { baseTypes: [], nullable: false };
   }
 
+  // `allOf` is a conjunction, not a union: merge the branches' base types with
+  // any sibling `type`. Without this a component built as
+  // `{ allOf: [ {$ref: <external>}, {type:"object", …} ] }` — the AFPS manifest
+  // schemas — normalizes to no type at all and reads as drift against a Zod
+  // `z.record(...)`.
+  if (Array.isArray(schema.allOf)) {
+    const normalized = (schema.allOf as Record<string, unknown>[]).map(normalizeType);
+    const merged = new Set(normalized.flatMap((branch) => branch.baseTypes));
+    if (typeof schema.type === "string") merged.add(schema.type);
+    if (merged.size > 0) {
+      return {
+        baseTypes: [...merged].sort(),
+        nullable: normalized.some((branch) => branch.nullable),
+      };
+    }
+  }
+
   const variants = Array.isArray(schema.anyOf)
     ? schema.anyOf
     : Array.isArray(schema.oneOf)
@@ -369,10 +392,17 @@ function normalizeType(schema: Record<string, unknown>): {
   if (variants) {
     // Zod and hand-authored OpenAPI use unions for nullable refs and scalars.
     const normalized = (variants as Record<string, unknown>[]).map(normalizeType);
-    return {
-      baseTypes: [...new Set(normalized.flatMap((variant) => variant.baseTypes))].sort(),
-      nullable: normalized.some((variant) => variant.nullable),
-    };
+    const baseTypes = [...new Set(normalized.flatMap((variant) => variant.baseTypes))].sort();
+    // A `oneOf` whose branches carry no `type` is not a type union — it is a
+    // constraint list on a node that declares its own type alongside it (the
+    // "exactly one of these keys is required" idiom). Fall through to the
+    // sibling `type` rather than reporting "no type".
+    if (baseTypes.length > 0 || schema.type === undefined) {
+      return {
+        baseTypes,
+        nullable: normalized.some((variant) => variant.nullable),
+      };
+    }
   }
 
   if (Array.isArray(schema.type)) {
@@ -577,6 +607,68 @@ if (discrepancies.length === 0) {
       console.log(`          - ${issue}`);
     }
     console.log();
+  }
+}
+
+// Coverage enforcement — every endpoint whose spec declares an
+// `application/json` request body must be either registered (compared above)
+// or explicitly exempt with a stated reason. Without this the registry is
+// opt-in: a launch surface can accept fields its documented body never
+// mentions, and nothing notices. Same shape as §7b for response schemas.
+//
+// The universe is the SPEC, not the `readJsonBody()` call sites: the spec is
+// the published contract, and §5/§5b already assert that code and spec carry
+// the same endpoint set. Non-JSON bodies (multipart uploads, form-encoded
+// OAuth2, cloudevents, octet-stream) are out of scope — there is no JSON
+// schema to compare a Zod object against.
+{
+  const registeredEndpoints = new Set(
+    zodSchemaRegistry.map((e) => `${e.method.toUpperCase()} ${e.path}`),
+  );
+  const jsonBodyEndpoints: string[] = [];
+  for (const [path, methods] of Object.entries(paths)) {
+    for (const [method, op] of Object.entries(methods)) {
+      const body = (op as { requestBody?: { content?: Record<string, unknown> } })?.requestBody;
+      if (!body?.content?.["application/json"]) continue;
+      jsonBodyEndpoints.push(`${method.toUpperCase()} ${path}`);
+    }
+  }
+  const uncoveredBodies = jsonBodyEndpoints
+    .filter((k) => !registeredEndpoints.has(k) && !(k in EXEMPT_REQUEST_BODIES))
+    .sort();
+  // A stale exemption (endpoint removed, or its body registered after all) is
+  // also a failure — keep the list honest.
+  const jsonBodySet = new Set(jsonBodyEndpoints);
+  const staleExemptBodies = Object.keys(EXEMPT_REQUEST_BODIES)
+    .filter((k) => !jsonBodySet.has(k) || registeredEndpoints.has(k))
+    .sort();
+
+  console.log(`\n  4b. Step 4 coverage (every JSON request body registered or exempt)`);
+  console.log(`  ------------------------------------------------------------------`);
+  if (uncoveredBodies.length === 0 && staleExemptBodies.length === 0) {
+    console.log(
+      `  OK — all ${jsonBodyEndpoints.length} JSON request bodies are registered ` +
+        `(${jsonBodyEndpoints.length - Object.keys(EXEMPT_REQUEST_BODIES).length}) or exempt ` +
+        `(${Object.keys(EXEMPT_REQUEST_BODIES).length}).`,
+    );
+  } else {
+    exitCode = 1;
+    if (uncoveredBodies.length > 0) {
+      console.log(
+        `  Endpoint(s) with a JSON request body that is neither registered nor exempt ` +
+          `(${uncoveredBodies.length}):`,
+      );
+      for (const k of uncoveredBodies) console.log(`    - ${k}`);
+      console.log(
+        `\n  Register the route's Zod schema in apps/api/src/openapi/zod-schema-registry.ts ` +
+          `(or the owning module's openApiSchemas()), or add the endpoint to ` +
+          `EXEMPT_REQUEST_BODIES with the reason it has no comparable schema.`,
+      );
+    }
+    if (staleExemptBodies.length > 0) {
+      console.log(`\n  Stale EXEMPT_REQUEST_BODIES entries (endpoint gone, or now registered):`);
+      for (const k of staleExemptBodies) console.log(`    - ${k}`);
+    }
   }
 }
 

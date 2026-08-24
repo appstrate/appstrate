@@ -173,6 +173,7 @@ export const modelProvidersOAuthPaths = {
               properties: {
                 providerId: {
                   type: "string",
+                  minLength: 1,
                   pattern: "^[a-z0-9-]+$",
                   description:
                     "Must match the pairing's pinned providerId. Mismatched → 400; provider deregistered after mint → 404.",

@@ -135,7 +135,7 @@ async function resolveScheduleActor(
  * fields onto `package_schedules` and replays them on every fire, so a stripped
  * field is a wrong run forever with a 201 as the only receipt.
  */
-const createScheduleSchema = z
+export const createScheduleSchema = z
   .object({
     name: z.string().optional(),
     cron_expression: z.string().min(1, "cron_expression is required"),
@@ -152,7 +152,7 @@ const createScheduleSchema = z
   .strict();
 
 /** `.strict()` for the same reason as {@link createScheduleSchema}. */
-const updateScheduleSchema = z
+export const updateScheduleSchema = z
   .object({
     name: z.string().optional(),
     cron_expression: z.string().optional(),

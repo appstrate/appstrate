@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { REQUEST_ID_ONLY_HEADERS } from "./headers.ts";
+
 /**
  * Reusable OpenAPI response definitions — RFC 9457 Problem Details format.
  */
@@ -116,7 +118,7 @@ export const responses = {
   RateLimited: {
     description: "Too many requests",
     headers: {
-      "Request-Id": { $ref: "#/components/headers/RequestId" },
+      ...REQUEST_ID_ONLY_HEADERS,
       "Retry-After": { $ref: "#/components/headers/RetryAfter" },
       RateLimit: { $ref: "#/components/headers/RateLimit" },
       "RateLimit-Policy": { $ref: "#/components/headers/RateLimitPolicy" },
@@ -138,9 +140,7 @@ export const responses = {
   },
   IdempotencyInProgress: {
     description: "A request with the same Idempotency-Key is already being processed",
-    headers: {
-      "Request-Id": { $ref: "#/components/headers/RequestId" },
-    },
+    headers: REQUEST_ID_ONLY_HEADERS,
     content: {
       "application/problem+json": {
         schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -187,9 +187,7 @@ export const responses = {
       "(`package_archive_unreadable`). This is the SAME ceiling the import gate applies, so " +
       "reaching it means the archive is a bomb or was stored before the gate covered this path " +
       "— republish the package. RFC 9457 problem+json.",
-    headers: {
-      "Request-Id": { $ref: "#/components/headers/RequestId" },
-    },
+    headers: REQUEST_ID_ONLY_HEADERS,
     content: {
       "application/problem+json": {
         schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -207,9 +205,7 @@ export const responses = {
   },
   IdempotencyConflict: {
     description: "Same Idempotency-Key used with a different request body",
-    headers: {
-      "Request-Id": { $ref: "#/components/headers/RequestId" },
-    },
+    headers: REQUEST_ID_ONLY_HEADERS,
     content: {
       "application/problem+json": {
         schema: { $ref: "#/components/schemas/ProblemDetail" },

@@ -81,10 +81,7 @@ export const adminStorageDeletionPaths = {
       responses: {
         "200": {
           description: "A page of storage-deletion jobs.",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            Link: { $ref: "#/components/headers/Link" },
-          },
+          headers: { ...REQUEST_ID_ONLY_HEADERS, Link: { $ref: "#/components/headers/Link" } },
           content: {
             "application/json": {
               schema: {

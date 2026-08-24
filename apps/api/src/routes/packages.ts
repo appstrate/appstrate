@@ -211,16 +211,30 @@ export const forkSchema = z.object({
  * Both objects are non-strict, so an unknown key (a client still sending the
  * retired `source_code`, say) is silently stripped rather than rejected.
  */
-const packageJsonCreateSchema = z.object({
+export const packageJsonCreateSchema = z.object({
   manifest: z.record(z.string(), z.unknown()),
   content: z.string().optional(),
 });
 
-const packageJsonUpdateSchema = z.object({
+export const packageJsonUpdateSchema = z.object({
   manifest: z.record(z.string(), z.unknown()).optional(),
   content: z.string().optional(),
-  lock_version: z.number().optional(),
+  /**
+   * Optimistic-lock token. Mandatory and integral — the value is a row version,
+   * never a fraction. This used to be `z.number().optional()` with a hand-rolled
+   * `null / typeof !== "number"` check in the handler restating both rules; the
+   * schema now carries them, so the spec's `required: ["lock_version"]` and
+   * `type: "integer"` have exactly one runtime counterpart.
+   */
+  lock_version: z.number().int(),
 });
+
+/**
+ * Body of `POST /api/packages/{type}/{scope}/{name}/versions`. The body itself
+ * is optional (`requestBody.required: false`) — the SPA omits it entirely when
+ * no override is chosen — so `version` is the only member and it is optional.
+ */
+export const createVersionBodySchema = z.object({ version: z.string().min(1).optional() });
 
 /** Enrich items with creator display names (batch lookup). */
 async function enrichWithCreatorNames<T extends { created_by?: string | null }>(
@@ -914,10 +928,6 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
 
     const body = await readJsonBody(c, packageJsonUpdateSchema);
 
-    if (body.lock_version == null || typeof body.lock_version !== "number") {
-      throw invalidRequest("lock_version (integer) is required for updates", "lock_version");
-    }
-
     // A PUT that omits `manifest` is a content-only edit: the stored draft is
     // carried forward untouched. That makes this handler directional per
     // request — `manifest` SUPPLIED is author input, `manifest` OMITTED is the
@@ -1233,7 +1243,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     // a present-but-malformed body is a 400, not a silent no-override.
     let versionOverride: string | undefined;
     if (c.req.raw.body !== null) {
-      const body = await readJsonBody(c, z.object({ version: z.string().min(1).optional() }));
+      const body = await readJsonBody(c, createVersionBodySchema);
       versionOverride = body.version;
     }
 

@@ -59,7 +59,7 @@ import type { AppEnv } from "../types/index.ts";
  */
 const CONTEXT_SNAPSHOT_MAX_BYTES = 16 * 1024;
 
-const CreateRemoteRunBodySchema = z
+export const CreateRemoteRunBodySchema = z
   .object({
     // Two source shapes:
     //   - `inline`   — ad-hoc manifest + prompt shipped in the request
@@ -137,7 +137,7 @@ const CreateRemoteRunBodySchema = z
   })
   .strict();
 
-const ExtendSinkBodySchema = z
+export const ExtendSinkBodySchema = z
   .object({
     ttl_seconds: z.number().int().positive().max(86400),
   })

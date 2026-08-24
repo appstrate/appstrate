@@ -27,7 +27,7 @@ export const batchLookupSchema = z.object({
 // Bounds mirror the Better Auth password config (`minPasswordLength: 8` in
 // packages/db/src/auth.ts) so validation fails here with a proper RFC 9457
 // response instead of surfacing a BA APIError.
-const setPasswordSchema = z.object({
+export const setPasswordSchema = z.object({
   newPassword: z.string().min(8).max(128),
 });
 

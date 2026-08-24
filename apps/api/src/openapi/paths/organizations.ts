@@ -213,7 +213,9 @@ export const organizationsPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["email", "role"],
+              // `role` carries a server-side default, so it is optional on the
+              // wire — listing it required contradicted the `default` beside it.
+              required: ["email"],
               properties: {
                 email: { type: "string", format: "email" },
                 role: { type: "string", enum: [...ASSIGNABLE_ORG_ROLES], default: "member" },

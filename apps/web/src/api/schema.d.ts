@@ -4535,15 +4535,9 @@ export interface components {
             /** @description Optimistic lock version (user agents only) */
             lock_version?: number;
             /** @description AFPS schema wrapper for the agent's parameters, plus the per-application stored values and field locks. Resolution order at launch: author default (JSON Schema `default`) < stored value (`values`) < schedule value < caller input. A field named in `locked_fields` is not asked at launch and a caller that sets it is refused with 400 `locked_input_field`. */
-            input: {
+            input: components["schemas"]["AgentInputSettings"] & {
                 /** @description Pure JSON Schema 2020-12 object */
                 schema: Record<string, never>;
-                /** @description Values stored once for this application (editor defaults). */
-                values: {
-                    [key: string]: unknown;
-                };
-                /** @description Input fields no caller may set at launch. */
-                locked_fields: string[];
                 file_constraints?: components["schemas"]["FileConstraintsMap"];
                 ui_hints?: components["schemas"]["UIHintsMap"];
                 /** @description Presentation order for schema properties */
@@ -7932,12 +7926,7 @@ export interface operations {
                         proxyId: string | null;
                         version_pin: string | null;
                         /** @description Stored input layer for this application — the editor's values and the fields it locked. A locally executed run applies `values` under the caller's input and refuses a caller value naming a locked field. */
-                        input: {
-                            values: {
-                                [key: string]: unknown;
-                            };
-                            locked_fields: string[];
-                        };
+                        input: components["schemas"]["AgentInputSettings"];
                     };
                 };
             };
@@ -11708,7 +11697,7 @@ export interface operations {
                     /** Format: uuid */
                     connection_id: string;
                     /** @default false */
-                    enforce: boolean;
+                    enforce?: boolean;
                 };
             };
         };
@@ -14961,7 +14950,7 @@ export interface operations {
                      * @default member
                      * @enum {string}
                      */
-                    role: "viewer" | "member" | "admin";
+                    role?: "viewer" | "member" | "admin";
                 };
             };
         };
@@ -15180,7 +15169,7 @@ export interface operations {
                 "application/json": {
                     manifest: components["schemas"]["AgentManifest"];
                     /** @description Agent prompt (markdown) */
-                    content: string;
+                    content?: string;
                 };
             };
         };
@@ -15259,8 +15248,8 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    manifest: components["schemas"]["AgentManifest"];
-                    content: string;
+                    manifest?: components["schemas"]["AgentManifest"];
+                    content?: string;
                     /** @description Optimistic lock version */
                     lock_version: number;
                 };
@@ -15936,7 +15925,7 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @description Package manifest */
-                    manifest: {
+                    manifest?: {
                         [key: string]: unknown;
                     };
                     content?: string;
@@ -16382,10 +16371,10 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @description Package manifest */
-                    manifest: {
+                    manifest?: {
                         [key: string]: unknown;
                     };
-                    content: string;
+                    content?: string;
                     /** @description Optimistic lock version */
                     lock_version: number;
                 };
@@ -16848,10 +16837,10 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @description Package manifest */
-                    manifest: {
+                    manifest?: {
                         [key: string]: unknown;
                     };
-                    content: string;
+                    content?: string;
                     /** @description Optimistic lock version */
                     lock_version: number;
                 };
