@@ -39,7 +39,7 @@ import type { ModelGenerationCapabilitiesOverride } from "./model-generation.ts"
  * attributes, bundler support). `packages/core/test/core-version.test.ts`
  * asserts it equals the published `version` field, so it cannot drift.
  */
-export const CORE_VERSION = "7.0.0";
+export const CORE_VERSION = "8.0.0";
 
 /** Metadata describing a module. */
 export interface ModuleManifest {

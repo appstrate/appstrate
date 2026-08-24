@@ -8,8 +8,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 Breaking, batched per the release policy in `.github/workflows/publish-core.yml`:
-these changes accumulate here until a deliberate major. `7.0.0` is already
-published without them, so the version in `package.json` does not move.
+these changes accumulate here until a deliberate major. **This is that major —
+`8.0.0`** — and the version moves in `package.json` even though nothing is
+published yet, which is the opposite of what this section said for most of the
+cycle. The reason it had to move is worth stating, because the argument for
+holding it at `7.0.0` was sound about the thing it was reasoning about and
+silent about the thing that actually breaks.
+
+`CORE_VERSION` (`src/module.ts`) is not documentation. It is the **only** input
+to the platform's module-compatibility gate: `enforceCoreVersionContract` reads
+the `@appstrate/core` range a module declares and calls
+`matchVersion([CORE_VERSION], declared)`, and a `null` result throws at boot
+under the default `MODULE_CONTRACT_ENFORCE=fail`. That check runs against the
+declared range regardless of how the module resolves core — so "cloud never
+resolves core from npm" (true, and stated below) does not exempt it. With
+`cloud` declaring `>=8.0.0` and the constant reading `7.0.0`,
+`maxSatisfying(["7.0.0"], ">=8.0.0")` is `null` and **Cloud mode does not
+boot**. `@appstrate/cloud` is not a built-in, and `>=8.0.0` matches none of
+`IN_TREE_RANGE_PREFIXES`, so no carve-out applies.
+
+The symmetric half is worse, because it is silent: a module declaring the
+`^7.0.0` this file recommended is **admitted** by the same comparison and then
+calls `services.setDocumentStorageLimit`, which the removals below deleted.
+That is verbatim the risk the gate's own message names — "a stale module can
+call a platform service whose signature moved under it — silently, without an
+error." Holding the constant at a version whose surface no longer exists is
+what produced both halves.
+
+Publishing `8.0.0` to npm stays gated on the `core@8.0.0` tag and is still
+independent of this branch; what moves here is the constant the platform
+compares against, plus the `version` field the drift guard
+(`test/core-version.test.ts`) pins it to.
 
 **Out-of-tree consumers.** The config removals below touch nothing `cloud` or
 `connect-helper` import. The `document` → `file` rename (#1177) does: both
@@ -18,9 +47,10 @@ lands on all four — the symbols a consumer imports today are
 `PlatformServices.cleanupSessionDocuments` / `setDocumentStorageLimit`,
 `documentCountExceeded`, `recordDocument*` and `CoreResources.documents`.
 
-Staying pinned to the published `7.0.0` protects them at the TYPE level only.
-`cloud` also binds one of these off the LIVE services object the platform
-injects at runtime — `services.setDocumentStorageLimit.bind(services)`
+Holding the version at the published `7.0.0` would have protected them at the
+TYPE level only, which is the second reason it was the wrong lever. `cloud`
+also binds one of these off the LIVE services object the platform injects at
+runtime — `services.setDocumentStorageLimit.bind(services)`
 (`cloud/src/billing/storage-entitlement.ts`) — and a compile-time pin does
 nothing for a property read at boot.
 
