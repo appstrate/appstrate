@@ -247,10 +247,18 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
     // end-users) from hitting platform routes. The realm is denormalized
     // onto the session row at create time (`databaseHooks.session.create
     // .before` + `session.additionalFields.realm` in packages/db/src/
-    // auth.ts), and `cookieCache` is disabled, so `getSession` always
-    // returns the fresh DB row with the declared additionalField — read
-    // it from there instead of re-querying the user table on every
-    // session-backed request. Fall back to the user-table lookup only
+    // auth.ts), so `getSession` returns it with the declared additionalField
+    // — read it from there instead of re-querying the user table on every
+    // session-backed request.
+    //
+    // This used to say "and `cookieCache` is disabled", which is no longer
+    // true in the absolute: it is an operator knob
+    // (`AUTH_SESSION_COOKIE_CACHE_SECONDS`, `packages/db/src/auth.ts`),
+    // defaulting to off. Nothing here depends on which way it is set — the
+    // cached cookie carries the same declared fields — but the fallback
+    // below is what keeps the read correct either way.
+    //
+    // Fall back to the user-table lookup only
     // when the field is absent (sessions created before the
     // denormalization shipped, or a BA version stripping undeclared
     // output fields) so audience enforcement never silently degrades.
