@@ -353,6 +353,12 @@ export default tseslint.config(
       "packages/runner-pi/src/pi-sdk.ts",
       "apps/cli/src/lib/pi-sdk.ts",
       "runtime-pi/pi-sdk.ts",
+      // Tests may reach the vendor directly. The guard protects the PRODUCTION
+      // import graph — routing a test probe through a barrel instead put the
+      // vendor's 2.1 MB provider catalog on the container's boot path (see the
+      // note in `packages/runner-pi/src/pi-sdk.ts`). `packages/*/test/**` was
+      // never in `files`; only runtime-pi's own tests needed exempting.
+      "runtime-pi/**/test/**/*.ts",
       // The sidecar image is built from `runtime-pi/sidecar/*.ts` alone, so it
       // cannot reach the agent's barrel one directory up — it needs its own.
       // It carries pi-ai to RE-ORIGINATE an aliased run's inference call

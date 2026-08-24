@@ -26,7 +26,7 @@ import { describe, it, expect } from "bun:test";
 import { buildRuntimePiEnv } from "@appstrate/runner-pi";
 import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 import { buildPiModelFromEnv, parseRuntimeEnv } from "../env.ts";
-import { streamSimple } from "../pi-sdk.ts";
+import { streamSimple } from "@earendil-works/pi-ai/compat";
 import type { Api, Model } from "../pi-sdk.ts";
 
 /** A platform backing an alias could be bound to. */

@@ -20,24 +20,23 @@
 // Used synchronously at tool-registration time to build parameter schemas,
 // so it stays a static export.
 export { Type } from "@earendil-works/pi-ai";
-// Test-only payload probe. Pi 0.84 moved this legacy API-dispatch helper behind
-// its compatibility entrypoint. Nothing in production dispatches through it any
-// more: #1173 unified every chat turn on `createAgentSession`, and proxy-bound
-// chat models are now bound as native Pi providers driven off `model.baseUrl`
-// (`module-chat/src/pi-chat/model-binding.ts`) — the "one generic dispatch seam"
-// this export used to justify no longer exists. It survives because
-// `test/pi-runner-generation.test.ts` captures the request payload Pi would
-// serialize, and the `no-restricted-imports` guard forbids that test from
-// reaching `@earendil-works/pi-ai/compat` directly. It is NOT re-exported from
-// `index.ts`; keep it that way.
-export { streamSimple } from "@earendil-works/pi-ai/compat";
-// Test-only: Pi's own list of built-in provider ids. `test/provider-map.test.ts`
-// pins `PI_PROVIDER_BY_MODEL_PROVIDER` against it, so an upstream rename fails
-// there instead of silently dropping a provider back to the generic request
-// shape. Same reason as `streamSimple` above: the `no-restricted-imports`
-// guard forbids a test from reaching the vendor package directly. NOT
-// re-exported from `index.ts`; keep it that way.
-export { getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
+// NOTHING TEST-ONLY BELONGS IN THIS FILE.
+//
+// Two re-exports lived here — `streamSimple` (from `pi-ai/compat`) and
+// `getBuiltinProviders` (from `pi-ai/providers/all`) — on the stated grounds
+// that the `no-restricted-imports` guard forbade a test from reaching the
+// vendor directly. It did not: that guard's `files` list is
+// `packages/runner-pi/src/**`, and has never covered `test/**`.
+//
+// The cost was real. `pi-ai/dist/providers` is 2.1 MB across ~45 statically
+// imported provider modules, and `compat.js` pulls it too. The package ROOT
+// does not — so before those two lines this graph was never evaluated. They are
+// static exports, so every consumer of this barrel paid for them at import
+// time: `runtime-pi/entrypoint.ts` at container boot, and `apps/api` through
+// `module-chat`. That is the exact cost this file's header exists to avoid and
+// `runtime-pi/Dockerfile` spends a bundling stage shaving.
+//
+// The tests import the vendor entrypoints directly.
 
 // --- types (erased at runtime) ---
 export type { ModelRuntime, ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";

@@ -18,14 +18,12 @@
 
 // --- values ---
 export { Type } from "@earendil-works/pi-ai";
-// Test-only payload probe, same role (and same reason for existing) as the
-// re-export of the same name in `packages/runner-pi/src/pi-sdk.ts`: the
-// `no-restricted-imports` guard forbids a test from reaching the vendor package
-// directly, and `test/alias-dialect-opacity.test.ts` needs to capture the
-// request body Pi would serialize for a model built by `buildPiModelFromEnv`.
-// Costs nothing in the image — `@earendil-works/pi-ai/compat` is already in the
-// entrypoint's bundle graph through the runner's own barrel.
-export { streamSimple } from "@earendil-works/pi-ai/compat";
+// No test-only re-export here either. The one that stood here claimed it
+// "costs nothing in the image" because `pi-ai/compat` was already in the
+// entrypoint's bundle graph through the runner's barrel — which was only true
+// BECAUSE that barrel carried the same test-only re-export. Both are gone; the
+// test imports `@earendil-works/pi-ai/compat` directly, which the supply-chain
+// guard now exempts for `runtime-pi/**/test/**`.
 
 // --- types ---
 export type { ExtensionAPI, ExtensionFactory } from "@earendil-works/pi-coding-agent";
