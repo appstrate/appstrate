@@ -59,28 +59,40 @@ import type { KnipConfig } from "knip";
  * nothing: most of the patterns match no file in most workspaces, and knip
  * reports each one as a configuration hint. 65 of those hints is where a
  * *stale* entry hides, and a stale entry is what cost this config 6 dead
- * files and ~450 phantom unused exports. Hence `treatConfigHintsAsErrors`
- * below: every pattern in this file must match at least one file, and
- * `verify:dead-code` fails when one stops doing so.
+ * files and ~450 phantom unused exports. knip reports such a pattern as a
+ * configuration hint, which is advisory — see the note on
+ * `treatConfigHintsAsErrors` below for why it is NOT escalated to an error.
  *
  * The one gap the plugin leaves is called out at `apps/api` below.
  */
 
 const config: KnipConfig = {
   /**
-   * Makes the rule the header states actually a rule. Without it knip prints
-   * configuration hints and still exits 0, so a pattern that has stopped
-   * matching anything — the exact failure mode this config is built to avoid —
-   * scrolls past in a green CI log. Set here rather than as a
-   * `--treat-config-hints-as-errors` flag on the script so it travels with the
-   * patterns it governs.
+   * `treatConfigHintsAsErrors` is deliberately NOT set, and this note is the
+   * evidence for that rather than a preference.
    *
-   * It costs nothing to keep green: every entry and ignore below is justified
-   * by what reaches it, and a justification that has expired is precisely what
-   * should fail. When it does fire, the fix is to delete the stale pattern —
-   * never to unset this.
+   * It *was* set here, and it made `verify:dead-code` fail on Linux while
+   * passing on macOS — same lockfile, same knip 5.88.1: zero configuration
+   * hints locally, 120 in CI. Every one of the 120 was `entry-redundant`
+   * ("this entry is already reachable another way"), not the `entry-empty`
+   * staleness this config actually cares about, and knip's option is a single
+   * boolean covering all fifteen hint types (`ConfigurationHintType`,
+   * knip/dist/types/issues.d.ts) — there is no way to escalate one without
+   * the other.
+   *
+   * Redundancy is a judgement about knip's own module resolution, and that
+   * judgement moved with the host. Deleting the patterns it flags is not the
+   * fix either: they read as redundant only where knip reaches them some
+   * other way, so on a host where it does not, dropping them reintroduces
+   * exactly the drift described above. A gate that reports 120 problems on
+   * one OS and none on another is not measuring this repo, and does not get
+   * to block a merge.
+   *
+   * What issue #1181 asked for is unaffected. Unused files, unused exports
+   * and unused dependencies are knip *issues*, not hints: they fail the run
+   * on their own, and they agreed across both hosts (CI reported none). Hints
+   * still print on every run — they are read, not obeyed.
    */
-  treatConfigHintsAsErrors: true,
 
   /**
    * Invoked through `npx`/`bunx` or a shell builtin, so no manifest lists
