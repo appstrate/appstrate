@@ -20,7 +20,12 @@
 
 import { z } from "zod";
 import { runStatusValues, TERMINAL_RUN_STATUSES } from "@appstrate/db/run-status";
-import { fileUri, parseFileUri, PUBLISHED_FILE_LOG_EVENTS } from "@appstrate/core/file-uri";
+import {
+  fileUri,
+  isFileProducedByRun,
+  parseFileUri,
+  PUBLISHED_FILE_LOG_EVENTS,
+} from "@appstrate/core/file-uri";
 import { asRecord, unwrapResult } from "./tool-result.ts";
 
 /** Operation ids whose result launches a run we can follow. */
@@ -75,7 +80,7 @@ export function isRunLaunchOp(opId: string | undefined): opId is RunLaunchOp {
  * than enum'd so a future level can't drop a line; `data` may be a record,
  * the literal `"[payload too large]"`, or absent (non-verbose subscribers).
  */
-export const runLogLineSchema = z.object({
+const runLogLineSchema = z.object({
   id: z.number(),
   level: z.string().nullable().optional(),
   type: z.string().nullable().optional(),
@@ -453,19 +458,10 @@ interface ProducedFileList {
  * nothing, which is a complete answer; a body that is not an envelope is no
  * answer at all. See {@link shouldRaiseSweepDone}.
  *
- * Both halves of the filter are load-bearing and `purpose` alone is NOT
- * enough: the endpoint answers the run's whole CONTAINER, so a file chained in
- * as INPUT from an earlier run is listed here while still carrying
- * `purpose: "agent_output"` — it was produced by that earlier run. Ownership is
- * decided by the row's own `run_id`.
- *
- * The produced-by-this-run predicate exists in THREE places and they must not
- * drift: `producedRunFiles()` in `apps/web/src/lib/files.ts` (the run page),
- * this function (the chat card), and `fetchRunFiles()` in
- * `@appstrate/core/run-and-wait-client` (the server-side `run_and_wait`
- * payload). All three agree with the server's own predicate. The duplication is
- * deliberate: `@appstrate/module-chat` is an optional package the web shell
- * consumes, and a package may not import from `apps/web`.
+ * Which rows count is `isFileProducedByRun` (`@appstrate/core/file-uri`), the
+ * one predicate the run page's Outcome pane and the server-side
+ * `run_and_wait` payload also read — a package may not import from
+ * `apps/web`, but all three can import core.
  */
 export function producedFilesFromFileList(
   payload: unknown,
@@ -478,7 +474,7 @@ export function producedFilesFromFileList(
   for (const row of rows) {
     const r = asRecord(row);
     if (!r) continue;
-    if (r.purpose !== "agent_output" || r.run_id !== runId) continue;
+    if (!isFileProducedByRun(r, runId)) continue;
     const file = asChatRunFile(r);
     if (file) out.push(file);
   }

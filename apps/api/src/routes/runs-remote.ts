@@ -251,10 +251,15 @@ export function createRunsRemoteRouter() {
           ...(inputSchema ? { schema: asJSONSchemaObject(inputSchema) } : {}),
           editorDefaults: storedValues,
           lockedFields,
-          callerInput:
-            body.input && typeof body.input === "object" && !Array.isArray(body.input)
-              ? (body.input as Record<string, unknown>)
-              : undefined,
+          overlays: [
+            {
+              origin: "input",
+              values:
+                body.input && typeof body.input === "object" && !Array.isArray(body.input)
+                  ? (body.input as Record<string, unknown>)
+                  : undefined,
+            },
+          ],
         });
 
         // Validate the resolved input against the manifest schema. The

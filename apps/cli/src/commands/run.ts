@@ -92,7 +92,8 @@ import {
 } from "./run/mode.ts";
 import { runRemote } from "./run/remote-runner.ts";
 import { resolveSignalPolicy, readStdinIsTty } from "./run/signal-policy.ts";
-import { authorDefaults, type JSONSchemaObject } from "@appstrate/core/form";
+import type { JSONSchemaObject } from "@appstrate/core/form";
+import { resolveEffectiveInput } from "@appstrate/core/input-resolution";
 import { validateAgainstSchema } from "@appstrate/core/schema-validation";
 import type { CommandIO } from "../lib/io.ts";
 import { onShutdown, shutdownSignal, shutdownExitCode } from "../lib/shutdown.ts";
@@ -1214,7 +1215,9 @@ interface StoredInputLayer {
 
 /**
  * Raised when the caller's `--input` / `--input-file` names a field the
- * editor locked. Mirrors the server's `400 locked_input_field`.
+ * editor locked — the CLI's own shape of the refusal the shared resolver
+ * asks its host for, where the server builds its `400 locked_input_field`
+ * problem document instead. The wording is the server's, verbatim.
  */
 export class LockedInputFieldError extends Error {
   constructor(public readonly field: string) {
@@ -1228,25 +1231,20 @@ export class LockedInputFieldError extends Error {
 /**
  * Layer the agent's stored input underneath a local run's caller input.
  *
- * Precedence, lowest first — the same order and the same shallow
- * per-property overlay the server applies in `resolveEffectiveInput`
- * (`apps/api/src/services/input-resolution.ts`):
- *
- *   1. author defaults — `manifest.input.schema` `default` keywords, read
- *      through the platform's own `authorDefaults` (`@appstrate/core/form`)
- *   2. editor values — `stored.values`, present only for a package fetched
- *      from a platform
- *   3-4. schedule values / caller input — the server owns layer 3 entirely;
- *      the CLI caller IS layer 4, and their value wins even when it is
- *      `null` or `""`. Only an ABSENT key falls through.
+ * Reads the bundle's `input.schema` off disk and hands it, the stored editor
+ * layer and the caller's values to the platform's own resolver
+ * (`@appstrate/core/input-resolution`) — the same code, in the same order,
+ * that `apps/api` runs on a hosted launch. A local run has exactly ONE
+ * overlay above the editor layer: the caller. The platform has two, because
+ * it also resolves a scheduled trigger's frozen values, and a local run has
+ * no schedules to resolve.
  *
  * A property with no value at any layer stays absent rather than being
- * materialised as `null`, which is what the server's resolver does too.
- * Nothing downstream enforces `required` on its own — the runtime reads
- * `input.schema.required` only to print the word "required" next to the
- * field in the platform prompt (`renderPlatformPrompt`) — so resolution
- * alone would let a missing required field reach the model as an empty
- * render. `validateLocalInput` below is the gate; call it on the result.
+ * materialised as `null`. Nothing downstream enforces `required` on its own —
+ * the runtime reads `input.schema.required` only to print the word "required"
+ * next to the field in the platform prompt (`renderPlatformPrompt`) — so
+ * resolution alone would let a missing required field reach the model as an
+ * empty render. `validateLocalInput` below is the gate; call it on the result.
  *
  * A caller value naming a locked field is REFUSED, not dropped: silently
  * ignoring it would run the agent with parameters other than the ones
@@ -1263,16 +1261,14 @@ export function resolveLocalInput(
   callerInput: Record<string, unknown>,
   stored?: StoredInputLayer | undefined,
 ): Record<string, unknown> {
-  const locked = new Set(stored?.lockedFields ?? []);
-  for (const key of Object.keys(callerInput)) {
-    if (locked.has(key)) throw new LockedInputFieldError(key);
-  }
   const schema = readBundleInputSchema(bundle);
-  return {
-    ...(schema ? authorDefaults(schema) : {}),
-    ...(stored?.values ?? {}),
-    ...callerInput,
-  };
+  return resolveEffectiveInput({
+    ...(schema ? { schema } : {}),
+    editorDefaults: stored?.values,
+    lockedFields: stored?.lockedFields,
+    overlays: [{ origin: "input", values: callerInput }],
+    lockedFieldError: (field) => new LockedInputFieldError(field),
+  });
 }
 
 /**

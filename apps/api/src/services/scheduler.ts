@@ -24,7 +24,8 @@ import {
   extractRunAgentDenorm,
 } from "./run-pipeline.ts";
 import { getInstalledPackageSettings } from "./application-packages.ts";
-import { resolveEffectiveInput, withoutLockedFields } from "./input-resolution.ts";
+import { resolveEffectiveInput } from "./input-resolution.ts";
+import { withoutLockedFields } from "@appstrate/core/input-resolution";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { getPackage, packageExists } from "./package-catalog.ts";
@@ -601,7 +602,7 @@ export async function triggerScheduledRun(
         ...(inputSchema ? { schema: asJSONSchemaObject(inputSchema) } : {}),
         editorDefaults: packageSettings.values,
         lockedFields: packageSettings.locked,
-        scheduleValues: input,
+        overlays: [{ origin: "schedule input", values: input }],
       });
     } catch (err) {
       if (err instanceof ApiError) {

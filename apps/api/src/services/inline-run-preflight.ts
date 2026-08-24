@@ -144,7 +144,7 @@ export async function runInlinePreflight(params: {
       // absent.
       effectiveInput = resolveEffectiveInput({
         schema,
-        callerInput: callerInput ?? undefined,
+        overlays: [{ origin: "input", values: callerInput ?? undefined }],
       });
       const iv = validateInput(effectiveInput, schema);
       if (!iv.valid) {

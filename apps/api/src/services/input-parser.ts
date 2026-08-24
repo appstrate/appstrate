@@ -31,7 +31,8 @@ import { fileTypeStream, fileTypeFromBuffer } from "file-type";
 import type { FileReference } from "./run-launcher/types.ts";
 import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
 import { validateInput } from "./schema.ts";
-import { resolveEffectiveInput, withoutLockedFields } from "./input-resolution.ts";
+import { resolveEffectiveInput } from "./input-resolution.ts";
+import { withoutLockedFields } from "@appstrate/core/input-resolution";
 import {
   invalidRequest,
   notFound,
@@ -617,7 +618,7 @@ export async function parseRequestInput(
     schema: inputSchema,
     editorDefaults: opts?.editorDefaults,
     lockedFields: opts?.lockedFields,
-    callerInput: input,
+    overlays: [{ origin: "input", values: input }],
   });
   let uploadedFiles: FileReference[] = [];
   let pendingFiles: PendingUploadMaterialization[] = [];

@@ -93,6 +93,37 @@ deployment for zero user-visible gain.
   list never refreshes, with no error anywhere. The old tag stays readable
   forever: a persisted log line is immutable once written, and the emitter
   behind it — a runtime image — deploys on its own clock.
+- **`isFileProducedByRun`, `AGENT_OUTPUT_FILE_PURPOSE`** (`./file-uri`) — the
+  one predicate answering "was this file row produced by this run, as opposed
+  to merely consumed by it". Both halves of the pair are load-bearing:
+  `GET /api/files?run_id=X` answers the run's whole CONTAINER, so a file
+  chained in from an earlier run still carries `purpose: "agent_output"`, while
+  an upload made FOR this run carries this run's id under
+  `purpose: "user_upload"`. It had three independent implementations (the run
+  page, the chat module's run card, the server-side `run_and_wait` payload) kept
+  in step by a comment naming the other two; they now share this one. Lives in
+  `./file-uri` for the same reason `PUBLISHED_FILE_LOG_EVENTS` does — a package
+  may not import from `apps/web`, but all three can import core.
+- **`./input-resolution`** — the platform's input resolution, previously
+  private to `apps/api` and re-implemented by the CLI down to a byte-identical
+  error message. `resolveEffectiveInput` collapses author defaults
+  (`authorDefaults`), the editor's stored values and an ordered list of
+  `overlays` into what a run executes with; `assertFieldsUnlocked` and
+  `withoutLockedFields` are the two rules around locked fields. The overlays are
+  a LIST rather than named fields because the hosts do not have the same layers:
+  the platform resolves a scheduled trigger's frozen values under the caller's
+  input, a local `appstrate run` has no schedules at all, and a named
+  `scheduleValues` would leave the CLI carrying a field it can never fill. The
+  refusal is injected (`lockedFieldError`) so each host keeps its own error
+  surface — `ApiError(400, "locked_input_field")` on the platform, a CLI error
+  type locally — without re-deriving the rule.
+- **`compileCached`, `MAX_CACHED_VALIDATORS`** (`./schema-validation`) — the
+  module's compiled-validator cache, exported so `apps/api`'s three server-only
+  validators compile through it instead of standing up a second Ajv instance.
+  The second instance had diverged: no `removeSchema`, so its registry grew
+  unbounded in a long-lived process and a schema carrying `$id` threw the second
+  time it was compiled; and it evicted by clearing the whole map rather than
+  FIFO.
 - **`LEGACY_RUNTIME_TOOL_ALIASES`, `LegacyRuntimeToolId`,
   `LEGACY_RUNTIME_TOOL_IDS`, `ACCEPTED_RUNTIME_TOOL_IDS`,
   `AcceptedRuntimeToolId`, `canonicalRuntimeToolId`,
@@ -105,10 +136,6 @@ deployment for zero user-visible gain.
   `canonicalRuntimeToolId` / `canonicalizeRuntimeToolIds`, never through
   `isSelectableRuntimeTool`, which answers "may the editor offer this?" and is
   canonical-only by design.
-- **`LEGACY_RUNTIME_TOOL_EVENT_TYPES`** (`./runtime-tool-defs`) — retired
-  run-event spellings `reEmitRuntimeToolEvents` still forwards but never emits.
-  The runtime image and the platform deploy independently, so an image built
-  before the rename still hands the host a `document.published` event.
 - **`LEGACY_PERMISSION_RESOURCE_ALIASES`, `canonicalPermission`,
   `canonicalPermissions`** (`./permissions`) — retired permission-resource
   spellings and the normalizer for stored scope strings. A `resource:action`
@@ -168,6 +195,12 @@ deployment for zero user-visible gain.
   `JSON.parse`d object cannot write through `__proto__`.
 - **`validateConfig` / `ConfigValidationResult`** (`./schema-validation`) —
   renamed, see Added.
+- **`swapRequestModel`** (`./model-swap`) — the alias→real request-body rewrite.
+  Its last caller was deleted with the alias-opacity change (#1202); the
+  adaptive-Anthropic branch it still carried had become a second implementation
+  of the live `compat: { forceAdaptiveThinking: true }` path. Verified to have
+  no reader in this repo, in `cloud`, or in `connect-helper`. Every other
+  `./model-swap` export is untouched.
 - **`InlineRunBody.config`** (`./platform-types`) — the inline-run routes no
   longer accept the field.
 - **`publish_document.presentation`** (`./runtime-tool-defs`) — the

@@ -22,7 +22,6 @@ import {
   resolvedInputDefaults,
   storedInputValues,
   subsetWrapper,
-  withoutLockedFields,
   type AgentInputSettings,
 } from "../agent-input";
 
@@ -170,17 +169,6 @@ describe("storedInputValues", () => {
     expect(
       storedInputValues(settings({ values: { folder: "archive" }, locked_fields: ["folder"] })),
     ).toEqual({});
-  });
-});
-
-describe("withoutLockedFields", () => {
-  it("returns the same object when nothing is locked", () => {
-    const values = { a: 1 };
-    expect(withoutLockedFields(values, [])).toBe(values);
-  });
-
-  it("removes only the locked keys", () => {
-    expect(withoutLockedFields({ a: 1, b: 2 }, ["b"])).toEqual({ a: 1 });
   });
 });
 

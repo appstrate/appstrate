@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { createAjv } from "@appstrate/core/ajv";
 import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
 import {
+  compileCached,
   stripEmptyRequired,
   validateAgainstSchema as validateAgainstSchemaCore,
   type SchemaValidationResult,
@@ -10,33 +10,14 @@ import {
 
 // --- AJV runtime validation ---
 //
-// Shared Ajv2020 + ajv-formats factory — mirrors the frontend RJSF validator so
-// client- and server-side validation agree. See packages/core/src/ajv.ts.
-//
-// `validateAgainstSchema` itself lives in `@appstrate/core/schema-validation`,
-// a published core export so out-of-tree consumers can apply the same gate.
-// `validateInput` and `validateOutput` stay here — they rely on server-only
-// concerns (file-field stripping, output overload).
-const ajv = createAjv({ coerceTypes: true });
-
-// Compiled-validator cache. `validateInput`/`validateOutput`/
-// `validateConnectionCredentials` run on hot paths (per run, per connect)
-// and rebuild a fresh `effectiveSchema` object each call, so AJV's own
-// by-reference cache never hits — compilation (the expensive step) ran every
-// time. Key by the schema's canonical JSON so structurally-equal schemas
-// share one compiled validator. Bounded to cap memory in a long-lived process.
-const validatorCache = new Map<string, ReturnType<typeof ajv.compile>>();
-const MAX_CACHED_VALIDATORS = 500;
-function compileCached(schema: object): ReturnType<typeof ajv.compile> {
-  const key = JSON.stringify(schema);
-  let validate = validatorCache.get(key);
-  if (!validate) {
-    validate = ajv.compile(schema);
-    if (validatorCache.size >= MAX_CACHED_VALIDATORS) validatorCache.clear();
-    validatorCache.set(key, validate);
-  }
-  return validate;
-}
+// The Ajv2020 instance, its dialect and the compiled-validator cache in front
+// of it all live in `@appstrate/core/schema-validation` — one instance for the
+// process, so nothing here can grow a second unbounded schema registry or
+// collide with the shared one over a `$id`. `validateAgainstSchema` is
+// re-exported below from the same module, a published core export so
+// out-of-tree consumers apply the same gate. What stays HERE is the three
+// server-only shapes: input with file fields stripped, output with
+// `additionalProperties` relaxed, and connection credentials.
 
 // --- Section C: Validation functions ---
 

@@ -1,8 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the unified input resolution — the four-layer merge, the
- * locked-field refusal, and the two write-time guards.
+ * Unit tests for the API's binding of the shared input resolution — that the
+ * layers reach `@appstrate/core/input-resolution` in the right order, that a
+ * locked field is refused as an `ApiError(400, "locked_input_field")`, and the
+ * write-time guard on the lock configuration itself.
+ *
+ * The merge itself (overlay ordering, absent-vs-null, the injected refusal) is
+ * covered in `packages/core/test/input-resolution.test.ts`.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -12,7 +17,6 @@ import {
   assertFieldsUnlocked,
   assertLockedFieldsSatisfiable,
   resolveEffectiveInput,
-  withoutLockedFields,
 } from "../../src/services/input-resolution.ts";
 
 const SCHEMA: JSONSchemaObject = {
@@ -46,8 +50,10 @@ describe("resolveEffectiveInput — four-layer precedence", () => {
     const resolved = resolveEffectiveInput({
       schema: SCHEMA,
       editorDefaults: { folder: "archive", limit: 50 },
-      scheduleValues: { limit: 100, subject: "weekly" },
-      callerInput: { subject: "ad-hoc" },
+      overlays: [
+        { origin: "schedule input", values: { limit: 100, subject: "weekly" } },
+        { origin: "input", values: { subject: "ad-hoc" } },
+      ],
     });
 
     expect(resolved).toEqual({
@@ -63,7 +69,7 @@ describe("resolveEffectiveInput — four-layer precedence", () => {
   });
 
   it("passes an author default through when it is the only layer", () => {
-    expect(resolveEffectiveInput({ schema: SCHEMA })).toEqual({
+    expect(resolveEffectiveInput({ schema: SCHEMA, overlays: [] })).toEqual({
       tone: "neutral",
       folder: "inbox",
       limit: 10,
@@ -74,7 +80,7 @@ describe("resolveEffectiveInput — four-layer precedence", () => {
     const resolved = resolveEffectiveInput({
       schema: SCHEMA,
       editorDefaults: { folder: "archive" },
-      callerInput: { folder: "sent" },
+      overlays: [{ origin: "input", values: { folder: "sent" } }],
     });
     expect(resolved.folder).toBe("sent");
   });
@@ -86,7 +92,7 @@ describe("resolveEffectiveInput — four-layer precedence", () => {
           schema: SCHEMA,
           editorDefaults: { folder: "archive" },
           lockedFields: ["folder"],
-          callerInput: { folder: "sent" },
+          overlays: [{ origin: "input", values: { folder: "sent" } }],
         }),
       400,
       "locked_input_field",
@@ -100,7 +106,7 @@ describe("resolveEffectiveInput — four-layer precedence", () => {
         resolveEffectiveInput({
           schema: SCHEMA,
           lockedFields: ["folder"],
-          scheduleValues: { folder: "sent" },
+          overlays: [{ origin: "schedule input", values: { folder: "sent" } }],
         }),
       400,
       "locked_input_field",
@@ -113,7 +119,7 @@ describe("resolveEffectiveInput — four-layer precedence", () => {
       schema: SCHEMA,
       editorDefaults: { folder: "archive" },
       lockedFields: ["folder", "tone"],
-      callerInput: { subject: "hello" },
+      overlays: [{ origin: "input", values: { subject: "hello" } }],
     });
     expect(resolved.folder).toBe("archive");
     expect(resolved.tone).toBe("neutral");
@@ -124,17 +130,6 @@ describe("assertFieldsUnlocked", () => {
   it("is a no-op when nothing is locked", () => {
     expect(() => assertFieldsUnlocked({ folder: "sent" }, [])).not.toThrow();
     expect(() => assertFieldsUnlocked({ folder: "sent" }, undefined)).not.toThrow();
-  });
-});
-
-describe("withoutLockedFields", () => {
-  it("drops the locked keys and keeps the rest", () => {
-    expect(withoutLockedFields({ a: 1, b: 2, c: 3 }, ["b"])).toEqual({ a: 1, c: 3 });
-  });
-
-  it("returns the values untouched when nothing is locked", () => {
-    const values = { a: 1 };
-    expect(withoutLockedFields(values, [])).toBe(values);
   });
 });
 

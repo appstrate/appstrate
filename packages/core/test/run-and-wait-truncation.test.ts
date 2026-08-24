@@ -122,9 +122,14 @@ describe("run_and_wait terminal step", () => {
         });
       if (url.endsWith("/run")) return json({ id: "run_1", status: "pending" });
       if (url.includes("/api/files")) {
-        // The list route reports each row's own container; `fetchRunFiles`
-        // keeps only the ones this run produced.
-        const data = files.map((doc) => ({ ...doc, run_id: "run_1" }));
+        // The list route reports each row's own container, with the two fields
+        // `isFileProducedByRun` reads; `fetchRunFiles` keeps only the rows this
+        // run produced.
+        const data = files.map((doc) => ({
+          ...doc,
+          run_id: "run_1",
+          purpose: "agent_output",
+        }));
         return json({ object: "list", data, hasMore: false });
       }
       return json({ id: "run_1", packageId: "@acme/writer", status: "success", result: bigResult });

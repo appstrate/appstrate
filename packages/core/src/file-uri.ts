@@ -66,6 +66,43 @@ export const ACCEPTED_FILE_URI_PREFIXES = [FILE_URI_PREFIX, LEGACY_DOCUMENT_URI_
  */
 export const PUBLISHED_FILE_LOG_EVENTS: readonly string[] = ["file", "document"];
 
+/**
+ * `files.purpose` of a file an agent published from a run. The other purposes
+ * (`user_upload`, …) mark a file that came from somewhere else.
+ */
+export const AGENT_OUTPUT_FILE_PURPOSE = "agent_output";
+
+/**
+ * Was this file row PRODUCED by the given run, as opposed to merely consumed
+ * by it?
+ *
+ * Both halves are load-bearing and NEITHER alone is enough. A file row carries
+ * two independent facts: `purpose` says who created it, `run_id` says which
+ * run it is anchored to.
+ *
+ * - `purpose` alone is wrong because `GET /api/files?run_id=X` deliberately
+ *   answers the run's whole CONTAINER: it ORs `files.run_id = X` with the ids
+ *   extracted from `runs.input`, so a file chained in from an earlier run via
+ *   `appfile://` is listed there while still carrying `purpose: "agent_output"`
+ *   — it was produced by that earlier run, and is an INPUT to this one.
+ * - `run_id` alone is wrong because an upload made FOR this run is committed
+ *   with `purpose: "user_upload"` AND that run's id
+ *   (`apps/api/src/services/files.ts`), so matching the id alone would call the
+ *   run's own input an output.
+ *
+ * Lives here, beside {@link PUBLISHED_FILE_LOG_EVENTS}, for the same reason:
+ * three independent readers — the web shell's run page, the chat module's run
+ * card, and the server-side `run_and_wait` payload — must answer this question
+ * identically, and a package may not import from `apps/web`. Values are read
+ * as `unknown` so a raw JSON row can be tested without being narrowed first.
+ */
+export function isFileProducedByRun(
+  file: { purpose?: unknown; run_id?: unknown },
+  runId: string,
+): boolean {
+  return file.purpose === AGENT_OUTPUT_FILE_PURPOSE && file.run_id === runId;
+}
+
 /** `upload://upl_xxx` — the ephemeral URI form of a staged (not-yet-materialized) upload. */
 export const UPLOAD_URI_PREFIX = "upload://";
 

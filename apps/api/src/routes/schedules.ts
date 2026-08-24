@@ -240,7 +240,7 @@ export function createSchedulesRouter() {
         ...(inputSchema ? { schema: asJSONSchemaObject(inputSchema) } : {}),
         editorDefaults: packageSettings.values,
         lockedFields: packageSettings.locked,
-        scheduleValues: data.input,
+        overlays: [{ origin: "schedule input", values: data.input }],
       });
       if (inputSchema) {
         const inputValidation = validateInput(resolvedInput, asJSONSchemaObject(inputSchema));

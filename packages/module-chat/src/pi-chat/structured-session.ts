@@ -26,7 +26,7 @@ export interface PiHistoryModel {
 }
 
 /** Estimate the tokens one Pi message occupies — Pi's own exported heuristic. */
-export type EstimateTokens = (message: Message) => number;
+type EstimateTokens = (message: Message) => number;
 
 export interface BuildStructuredPiTurnOptions {
   estimateTokens: EstimateTokens;

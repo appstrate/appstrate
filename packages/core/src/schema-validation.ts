@@ -12,8 +12,14 @@
  * `validateLocalInput` (`apps/cli/src/commands/run.ts`), which gates a
  * local `appstrate run` on the verdict the server would have reached.
  *
- * Reuses the shared Ajv2020 factory in `./ajv.ts` so the dialect
- * (formats, strict-mode, coercion) matches between callers.
+ * Owns the process's ONE Ajv2020 instance and the ONE compiled-validator
+ * cache in front of it ({@link compileCached}) — built from the shared factory
+ * in `./ajv.ts` so the dialect (formats, strict-mode, coercion) matches every
+ * caller. `apps/api`'s `validateInput` / `validateOutput` /
+ * `validateConnectionCredentials` compile through the same cache rather than
+ * standing up a second instance: a second one grows its own unbounded
+ * registry, and a schema carrying `$id` compiled once in each throws
+ * "schema with key or id … already exists".
  */
 
 import { createAjv } from "./ajv.ts";
@@ -21,18 +27,31 @@ import type { JSONSchemaObject } from "./form.ts";
 
 const ajv = createAjv({ coerceTypes: true });
 
-// Compiled-validator cache. `validateAgainstSchema` runs on hot paths (per
-// run, per input-settings save) and receives schemas freshly parsed from JSONB, so
-// AJV's own by-reference cache never hits — compilation (the expensive
-// step) ran on every call AND each compile was retained forever in the
-// Ajv instance's internal registry (unbounded growth in a long-lived
-// process). Key by the schema's canonical JSON so structurally-equal
-// schemas share one compiled validator; bound the map to cap memory.
-// Mirrors `compileCached` in `apps/api/src/services/schema.ts`.
+// Compiled-validator cache. The validators in front of it run on hot paths
+// (per run, per connect, per input-settings save) and receive schemas freshly
+// parsed from JSONB — or rebuilt into a fresh object on every call, as
+// `apps/api`'s file-field-stripped `effectiveSchema` is — so AJV's own
+// by-reference cache never hits: compilation (the expensive step) ran on every
+// call AND each compile was retained forever in the Ajv instance's internal
+// registry (unbounded growth in a long-lived process). Key by the schema's
+// canonical JSON so structurally-equal schemas share one compiled validator;
+// bound the map to cap memory. Shared by every caller, in-tree and out.
 const validatorCache = new Map<string, ReturnType<typeof ajv.compile>>();
-const MAX_CACHED_VALIDATORS = 500;
 
-function compileCached(schema: JSONSchemaObject): ReturnType<typeof ajv.compile> {
+/** Hard bound on the number of retained compiled validators. */
+export const MAX_CACHED_VALIDATORS = 500;
+
+/**
+ * Compile `schema` (or reuse the compiled validator for a structurally
+ * identical one), never leaving it registered inside the Ajv instance.
+ *
+ * Exported because `apps/api` validates three more shapes than
+ * {@link validateAgainstSchema} covers (input with file fields stripped,
+ * output with `additionalProperties` relaxed, connection credentials) and must
+ * compile them through THIS cache — see the module doc for what a second Ajv
+ * instance costs.
+ */
+export function compileCached(schema: JSONSchemaObject): ReturnType<typeof ajv.compile> {
   const key = JSON.stringify(schema);
   let validate = validatorCache.get(key);
   if (!validate) {

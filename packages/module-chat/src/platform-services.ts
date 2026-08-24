@@ -28,7 +28,7 @@ import type { db } from "@appstrate/db/client";
 import type { ModuleInitContext, UsageRejection } from "@appstrate/core/module";
 
 /** The chat module's open DB transaction handle (Drizzle tx). */
-export type ChatDbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+type ChatDbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 import type {
   ChatAttachmentRequest,
   ChatUsageRecord,

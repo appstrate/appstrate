@@ -73,6 +73,7 @@
     "./schemas": "./src/schemas.ts",
     "./schema-validation": "./src/schema-validation.ts",
     "./form": "./src/form.ts",
+    "./input-resolution": "./src/input-resolution.ts",
     "./format": "./src/format.ts",
     "./module": "./src/module.ts",
     "./telemetry": "./src/telemetry.ts",

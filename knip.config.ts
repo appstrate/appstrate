@@ -276,6 +276,7 @@ const config: KnipConfig = {
         "src/schemas.ts!",
         "src/schema-validation.ts!",
         "src/form.ts!",
+        "src/input-resolution.ts!",
         "src/format.ts!",
         "src/module.ts!",
         "src/telemetry.ts!",

@@ -33,7 +33,7 @@ import type { CatalogModelEntry } from "@appstrate/shared-types";
 import {
   getOrgModelProviderCredential,
   loadInferenceCredentials,
-  loadCredentialMetadata,
+  loadCredentialRow,
 } from "../services/model-providers/credentials.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
@@ -674,8 +674,7 @@ export function createModelsRouter() {
       // is dead. A gone credential/provider yields no catalog defaults and
       // the check runs on the stored overrides alone.
       const providerId =
-        newCreds?.providerId ??
-        (await loadCredentialMetadata(current.credentialId, orgId))?.providerId;
+        newCreds?.providerId ?? (await loadCredentialRow(current.credentialId, orgId))?.providerId;
       const catalogDefaults: CatalogDefaults = providerId
         ? resolveCatalogDefaults(providerId, effectiveModelId)
         : {};

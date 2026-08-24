@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { isFileProducedByRun } from "./file-uri.ts";
 import { encodePackageIdPath, toSlug } from "./naming.ts";
 
 /**
@@ -717,11 +718,10 @@ export function runProducedFilesPath(runId: string): string {
  * (network, non-2xx, malformed body) yields an empty list — a missing file
  * list must never turn a successful run into a tool error.
  *
- * `GET /api/files?run_id=…` answers the run's whole file CONTAINER —
- * the files it produced PLUS the ones mounted as its input (a chained
- * `appfile://` from an earlier run keeps `purpose: 'agent_output'`, so the
- * purpose filter alone does not exclude it). This list is the run's OUTPUT, so
- * rows are kept only when their own `run_id` is this run.
+ * `GET /api/files?run_id=…` answers the run's whole file CONTAINER — the files
+ * it produced PLUS the ones mounted as its input. Which rows are this run's
+ * OUTPUT is {@link isFileProducedByRun}, the same predicate the run page and
+ * the chat's run card read.
  */
 export async function fetchRunFiles(
   runId: string,
@@ -736,7 +736,7 @@ export async function fetchRunFiles(
     const out: RunAndWaitFile[] = [];
     for (const raw of data) {
       const r = asRecord(raw);
-      if (asString(r?.run_id) !== runId) continue;
+      if (!r || !isFileProducedByRun(r, runId)) continue;
       const id = asString(r?.id);
       const uri = asString(r?.uri);
       const name = asString(r?.name);
