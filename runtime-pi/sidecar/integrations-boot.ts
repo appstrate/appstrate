@@ -1073,12 +1073,8 @@ export function hiddenToolsForNativeUpstream(
   const hidden = new Set(spec.hiddenTools ?? []);
   for (const apiCall of spec.apiCalls ?? []) {
     hidden.add(apiCall.toolName);
-    const legacyCallName =
-      apiCall.toolName === "api_call" ? "api_call" : `api_call__${apiCall.authKey}`;
-    hidden.add(legacyCallName);
     if ((apiCall.uploadProtocols?.length ?? 0) > 0) {
       hidden.add(apiCall.toolName.replace(/^api_call/, "api_upload"));
-      hidden.add(legacyCallName.replace(/^api_call/, "api_upload"));
     }
   }
   return hidden.size > 0 ? [...hidden] : undefined;

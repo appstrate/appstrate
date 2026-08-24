@@ -32,7 +32,6 @@ import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import {
   apiUploadToolNameFor,
-  canonicalizeApiToolName,
   expandScopesGranted,
   getApiCallConfigs,
   readDefaultTools,
@@ -170,9 +169,7 @@ export function IntegrationToolPicker({ packageId, entry, onChange }: Integratio
   // array. The wildcard form `"*"` short-circuits the picker (see
   // `wildcardSelected` above) — fall back to an empty set so the checkbox
   // lookups below stay safe.
-  const arrayTools = Array.isArray(effectiveTools)
-    ? [...new Set(effectiveTools.map((name) => canonicalizeApiToolName(detail.manifest, name)))]
-    : [];
+  const arrayTools = Array.isArray(effectiveTools) ? [...new Set(effectiveTools)] : [];
   const selectedTools = new Set(arrayTools);
   const selectedScopes = new Set(entry.scopes ?? []);
   const allSelected =

@@ -181,12 +181,14 @@ describe("bootIntegrations — synthetic api_call surface", () => {
       undefined,
       namespace,
     );
+    // Only the canonical bounded names are reserved. The raw
+    // `api_call__{authKey}` / `api_upload__{authKey}` spellings used to be
+    // hidden alongside them; that alias is gone, so a native upstream tool
+    // carrying one is left alone.
     expect(hiddenToolsForNativeUpstream(spec)).toEqual([
       "api_call__short",
       `api_call__${token}`,
-      `api_call__${authKey}`,
       `api_upload__${token}`,
-      `api_upload__${authKey}`,
     ]);
     const result = await boot(spec);
     try {

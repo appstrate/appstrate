@@ -15,7 +15,6 @@ import {
   integrationManifestSchema,
   type IntegrationManifest,
   API_CALL_TOOL_NAME,
-  canonicalizeApiToolName,
   getConnectToolNames,
   getDeclaredToolNames,
   getApiCallConfigs,
@@ -1019,7 +1018,10 @@ describe("getApiCallConfigs", () => {
 
   it("keeps valid long auth keys while deriving bounded stable multi-auth names", () => {
     const longAuthKey = "authentication_key_that_is_valid_but_long";
-    const legacyCall = `api_call__${longAuthKey}`;
+    // The bounded canonical name. The raw `api_call__{longAuthKey}` spelling
+    // used to be accepted alongside it; that alias is gone, so the canonical
+    // token is the only name a manifest may use.
+    const canonicalCall = "api_call__h0a0593260c3968fd8";
     const auth = (envName: string) => ({
       type: "api_key",
       credentials: { schema: { type: "object", properties: {} } },
@@ -1029,7 +1031,7 @@ describe("getApiCallConfigs", () => {
     const manifest = parse(
       baseManifest({
         source: { kind: "none" },
-        default_tools: [legacyCall],
+        default_tools: [canonicalCall],
         auths: { short: auth("SHORT"), [longAuthKey]: auth("LONG") },
         _meta: {
           "dev.appstrate/api": {
@@ -1044,19 +1046,46 @@ describe("getApiCallConfigs", () => {
 
     const config = getApiCallConfigs(manifest).find((entry) => entry.authKey === longAuthKey)!;
     expect(config.authKey).toBe(longAuthKey);
-    expect(config.toolName).toBe("api_call__h0a0593260c3968fd8");
+    expect(config.toolName).toBe(canonicalCall);
     expect(config.uploadToolName).toBe(config.toolName.replace(/^api_call/, "api_upload"));
     expect(`${"n".repeat(24)}__${config.uploadToolName}`).toHaveLength(TOOL_NAME_MAX_LEN);
-    expect(canonicalizeApiToolName(manifest, legacyCall)).toBe(config.toolName);
-    expect(readDefaultTools(manifest)).toEqual([legacyCall]);
+    expect(readDefaultTools(manifest)).toEqual([canonicalCall]);
 
-    const hiddenLegacy = {
+    const hiddenCanonical = {
       ...manifest,
-      hidden_tools: [legacyCall],
+      hidden_tools: [canonicalCall],
     } as IntegrationManifest;
-    expect(resolveIntegrationToolCatalog({ integration: hiddenLegacy })).toEqual([
+    expect(resolveIntegrationToolCatalog({ integration: hiddenCanonical })).toEqual([
       { name: "api_call__short" },
     ]);
+  });
+
+  it("refuses a manifest naming the pre-bounding raw auth-key spelling", () => {
+    // `api_call__{longAuthKey}` is not a tool this integration exposes any
+    // more. It must fail validation rather than be silently canonicalized —
+    // an accepted-but-rewritten name is how two spellings for one capability
+    // came to exist in the first place.
+    const longAuthKey = "authentication_key_that_is_valid_but_long";
+    const auth = (envName: string) => ({
+      type: "api_key",
+      credentials: { schema: { type: "object", properties: {} } },
+      authorized_uris: ["https://api/**"],
+      delivery: { env: { [envName]: { value: "{$credential.k}" } } },
+    });
+    expect(() =>
+      parse(
+        baseManifest({
+          source: { kind: "none" },
+          default_tools: [`api_call__${longAuthKey}`],
+          auths: { short: auth("SHORT"), [longAuthKey]: auth("LONG") },
+          _meta: {
+            "dev.appstrate/api": {
+              auths: { short: {}, [longAuthKey]: { upload_protocols: ["google-resumable"] } },
+            },
+          },
+        }),
+      ),
+    ).toThrow(/not a tool this integration exposes/);
   });
 
   it("returns [] when the integration declares no api_call extension", () => {
