@@ -93,6 +93,8 @@ import {
 import { runRemote } from "./run/remote-runner.ts";
 import { resolveSignalPolicy, readStdinIsTty } from "./run/signal-policy.ts";
 import { authorDefaults, type JSONSchemaObject } from "@appstrate/core/form";
+import { validateAgainstSchema } from "@appstrate/core/schema-validation";
+import type { CommandIO } from "../lib/io.ts";
 import { onShutdown, shutdownSignal, shutdownExitCode } from "../lib/shutdown.ts";
 
 export interface RunCommandOptions {
@@ -294,6 +296,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     ? { values: inheritedConfig.inputValues, lockedFields: inheritedConfig.lockedInputFields }
     : undefined;
   const input = resolveLocalInput(bundle, await resolveInput(opts), storedInput);
+  validateLocalInput(bundle, input);
 
   // ─── 6. ExecutionContext + prompt inputs ──────────────────────────
   // Derive the full platform prompt (tools / skills / schemas / output)
@@ -1237,8 +1240,13 @@ export class LockedInputFieldError extends Error {
  *      the CLI caller IS layer 4, and their value wins even when it is
  *      `null` or `""`. Only an ABSENT key falls through.
  *
- * A property with no value at any layer stays absent, so the bundle's own
- * `required` check sees the truth.
+ * A property with no value at any layer stays absent rather than being
+ * materialised as `null`, which is what the server's resolver does too.
+ * Nothing downstream enforces `required` on its own — the runtime reads
+ * `input.schema.required` only to print the word "required" next to the
+ * field in the platform prompt (`renderPlatformPrompt`) — so resolution
+ * alone would let a missing required field reach the model as an empty
+ * render. `validateLocalInput` below is the gate; call it on the result.
  *
  * A caller value naming a locked field is REFUSED, not dropped: silently
  * ignoring it would run the agent with parameters other than the ones
@@ -1265,6 +1273,49 @@ export function resolveLocalInput(
     ...(stored?.values ?? {}),
     ...callerInput,
   };
+}
+
+/**
+ * Gate a resolved input against the bundle's declared `input.schema`,
+ * BEFORE launching PiRunner.
+ *
+ * The platform runs this same gate on every launch path — `parseRunInput`
+ * (`apps/api/src/services/input-parser.ts`), the scheduler and the inline-run
+ * preflight all follow `resolveEffectiveInput` with `validateInput`. A local
+ * run reaches none of them, so without this call `appstrate run --local`
+ * succeeds on an input the dashboard would have rejected: a required field
+ * answered nowhere, a string where the schema declares a number, a value
+ * outside a declared `enum`. The model then receives the field rendered as
+ * an empty string with no error anywhere.
+ *
+ * Both sides go through `validateAgainstSchema` (`@appstrate/core/schema-validation`,
+ * which the server's `validateInput` wraps), so the same `(input, schema)`
+ * pair reaches the same verdict locally and on the platform.
+ *
+ * An agent that declares no `input.schema` accepts anything — nothing to
+ * validate against, so the gate is a no-op rather than a rejection.
+ *
+ * `io` exists for the tests: on failure this exits the process, and a test
+ * asserting that needs its own sink rather than the real streams.
+ */
+export function validateLocalInput(
+  bundle: import("@appstrate/afps-runtime/bundle").Bundle,
+  input: Record<string, unknown>,
+  io?: CommandIO,
+): void {
+  const schema = readBundleInputSchema(bundle);
+  if (!schema) return;
+  const result = validateAgainstSchema(input, schema);
+  if (result.valid) return;
+  const summary = result.errors.map((e) => `  - ${e.field}: ${e.message}`).join("\n");
+  exitWithError(
+    `Resolved input does not match the agent's manifest input schema:\n${summary}\n\n` +
+      `The value checked is the resolved one — author defaults, then the\n` +
+      `stored per-application values, then your --input / --input-file.\n` +
+      `Fix the stored input in the dashboard, or pass a corrected\n` +
+      `--input <json> / --input-file <path> override.`,
+    io,
+  );
 }
 
 /**

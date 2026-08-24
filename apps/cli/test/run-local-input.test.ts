@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for `resolveLocalInput` — layers 1-2 a LOCAL `appstrate run`
- * applies underneath the caller's `--input` / `--input-file`.
+ * Unit tests for the local input pipeline: `resolveLocalInput` — layers 1-2 a
+ * LOCAL `appstrate run` applies underneath the caller's `--input` /
+ * `--input-file` — and `validateLocalInput`, the schema gate that runs on its
+ * result.
  *
  * The platform resolves `manifest.input.schema` defaults and the
  * per-application stored values on every run, so a local run of the same
@@ -13,7 +15,13 @@
 
 import { describe, it, expect } from "bun:test";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
-import { resolveLocalInput, LockedInputFieldError } from "../src/commands/run.ts";
+import {
+  resolveLocalInput,
+  validateLocalInput,
+  LockedInputFieldError,
+} from "../src/commands/run.ts";
+import { createMemoryIO } from "./helpers/memory-io.ts";
+import { ExitError } from "./helpers/process-exit.ts";
 
 /**
  * Minimal Bundle fixture — `resolveLocalInput` only reads the root
@@ -158,5 +166,104 @@ describe("resolveLocalInput — stored input layer (remote package)", () => {
       tone: "neutral",
       extra: 1,
     });
+  });
+});
+
+/**
+ * The gate that pairs with the resolver.
+ *
+ * The platform validates on every launch path (`parseRunInput`, the
+ * scheduler, the inline-run preflight all follow `resolveEffectiveInput`
+ * with `validateInput`). A local run reaches none of them, so the CLI has to
+ * run the same check itself or `appstrate run --local` succeeds on an input
+ * the dashboard would reject — nothing downstream enforces `required`, the
+ * runtime only prints the word next to the field in the platform prompt.
+ *
+ * `validateLocalInput` exits the process on failure, so every test here
+ * injects its own `createMemoryIO()` sink: no global stream or
+ * `process.exit` is touched (the pattern issue #1180 retired), and the exit
+ * arrives as the shared `ExitError` carrying the code.
+ */
+describe("validateLocalInput", () => {
+  const REQUIRED_BUNDLE = makeBundle({
+    schema: {
+      type: "object",
+      properties: { topic: { type: "string" }, tone: { type: "string", default: "neutral" } },
+      required: ["topic"],
+    },
+  });
+
+  it("accepts a resolved input that satisfies the schema", () => {
+    const { io, stdout, stderr } = createMemoryIO();
+    expect(() =>
+      validateLocalInput(REQUIRED_BUNDLE, { topic: "weekly", tone: "neutral" }, io),
+    ).not.toThrow();
+    expect(stdout()).toBe("");
+    expect(stderr()).toBe("");
+  });
+
+  it("exits non-zero naming the required field no layer answered", () => {
+    const { io, stdout } = createMemoryIO();
+    // What `resolveLocalInput` produces for this bundle when the caller
+    // passes nothing: the author default for `tone`, and `topic` absent.
+    const resolved = resolveLocalInput(REQUIRED_BUNDLE, {});
+    expect(resolved).toEqual({ tone: "neutral" });
+    try {
+      validateLocalInput(REQUIRED_BUNDLE, resolved, io);
+      throw new Error("expected validateLocalInput to exit");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ExitError);
+      expect((err as ExitError).code).toBe(1);
+    }
+    expect(stdout()).toContain("topic");
+  });
+
+  it("exits non-zero naming a field whose value violates the schema", () => {
+    const bundle = makeBundle({
+      schema: {
+        type: "object",
+        properties: { tone: { type: "string", enum: ["neutral", "formal"] } },
+      },
+    });
+    const { io, stdout } = createMemoryIO();
+    try {
+      validateLocalInput(bundle, { tone: "shouty" }, io);
+      throw new Error("expected validateLocalInput to exit");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ExitError);
+      expect((err as ExitError).code).toBe(1);
+    }
+    expect(stdout()).toContain("tone");
+  });
+
+  it("validates the RESOLVED value, not the caller's raw input", () => {
+    // `topic` is required and the caller supplies nothing — but the author
+    // default answers it, exactly as it would on the platform. Validating
+    // the raw caller input here would reject a run the dashboard accepts.
+    const bundle = makeBundle({
+      schema: {
+        type: "object",
+        properties: { topic: { type: "string", default: "weekly" } },
+        required: ["topic"],
+      },
+    });
+    const { io } = createMemoryIO();
+    expect(() => validateLocalInput(bundle, resolveLocalInput(bundle, {}), io)).not.toThrow();
+  });
+
+  it("accepts anything when the agent declares no input schema", () => {
+    const { io, stdout } = createMemoryIO();
+    expect(() => validateLocalInput(makeBundle(undefined), { anything: 1 }, io)).not.toThrow();
+    expect(() =>
+      validateLocalInput(makeBundle({ ui_hints: {} }), { anything: 1 }, io),
+    ).not.toThrow();
+    expect(stdout()).toBe("");
+  });
+
+  it("accepts a caller key the schema does not declare", () => {
+    // `resolveLocalInput` deliberately keeps undeclared caller keys, so the
+    // gate must not reject them under a schema that stays open.
+    const { io } = createMemoryIO();
+    expect(() => validateLocalInput(TONE_BUNDLE, { tone: "formal", extra: 1 }, io)).not.toThrow();
   });
 });

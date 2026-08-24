@@ -6,9 +6,11 @@
  *
  * A published export of `@appstrate/core`, so out-of-tree consumers (modules,
  * external tooling) reach the same verdict as the platform on the same
- * `(values, schema)` pair. In this workspace its sole importer is
+ * `(values, schema)` pair. In this workspace it has two importers:
  * `apps/api/src/services/schema.ts`, which re-exports it alongside the
- * server-only `validateInput` / `validateOutput`.
+ * server-only `validateInput` / `validateOutput`, and the CLI's
+ * `validateLocalInput` (`apps/cli/src/commands/run.ts`), which gates a
+ * local `appstrate run` on the verdict the server would have reached.
  *
  * Reuses the shared Ajv2020 factory in `./ajv.ts` so the dialect
  * (formats, strict-mode, coercion) matches between callers.

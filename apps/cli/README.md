@@ -549,7 +549,15 @@ appstrate run ./out/triage-1.2.0.afps-bundle --integrations local --creds-file .
 
 Run-config inheritance (model, proxy, version pin) is fetched from `/api/applications/{applicationId}/packages/{scope}/{name}/run-config` and merged with flag/env overrides. Use `--no-inherit` to opt out (deterministic CI).
 
-Agent parameters are supplied with `--input <json>` / `--input-file <path>`. On a **local** run the agent's own `input` schema `default`s are resolved underneath whatever you pass, so a local run gets the same parameters the platform would; a value you supply always wins, including an explicit `null`. Remote runs send your input verbatim — the instance resolves defaults and per-application settings server-side.
+Agent parameters are supplied with `--input <json>` / `--input-file <path>`. Remote runs send your input verbatim — the instance resolves and validates it server-side. A **local** run reaches none of the server's code, so the CLI reproduces the same chain in-process:
+
+1. **Author defaults** — the `default` keywords in the agent's own `input` schema, always.
+2. **Stored per-application values** — `application_packages.input_settings.values`, i.e. what the dashboard's agent settings hold. Applied only when the target is a package id (`appstrate run @scope/agent`) and inheritance is on; a bundle read off disk has no application row behind it and stays on author defaults alone. `--no-inherit` skips this layer.
+3. **Your `--input` / `--input-file`** — wins over both, including an explicit `null` or `""`. Only an _absent_ key falls through to a lower layer.
+
+A field the editor **locked** cannot be set at launch: naming it in `--input` / `--input-file` is a hard error (`Field '<name>' is locked on this agent and cannot be set at launch`), not a silently dropped value — the same rule the server's `locked_input_field` enforces. Leave it out and the stored value applies.
+
+The resolved result is then validated against the agent's `input` schema before anything executes, through the same validator the platform uses. A required field answered by no layer, or a value of the wrong type, exits non-zero with the offending field named rather than reaching the agent as an empty render.
 
 **Remote runs and process lifetime**
 
