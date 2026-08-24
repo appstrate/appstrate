@@ -31,6 +31,7 @@ import { drainTurns } from "./inflight.ts";
 import { reconcileChatRun } from "./run-reconcile.ts";
 import { logger } from "./logger.ts";
 import { warnIfDefaultChatConcurrency } from "./pi-chat/concurrency.ts";
+import { loadPiCodingAgentSdk } from "@appstrate/runner-pi";
 import { z } from "zod";
 
 // Platform deps captured at init from `ctx.services` (immutable; no module-level
@@ -62,6 +63,20 @@ const chatModule: AppstrateModule = {
     // Chat now runs entirely in-process, so its concurrency cap is a capacity
     // decision an operator must make deliberately. Say so at boot.
     warnIfDefaultChatConcurrency();
+    // Warm the Pi SDK's value graph. `loadPiCodingAgentSdk()` is a dynamic
+    // import of the single most expensive module in the runtime graph (~200 ms
+    // to evaluate, see `packages/runner-pi/src/pi-sdk.ts`), memoized by the ESM
+    // registry after the first call. The container entrypoint already warms it
+    // during its network-bound provisioning phase; nothing did on the API side,
+    // so the first chat turn after every deploy paid it inline, on the
+    // time-to-first-token path. Fire-and-forget: a failure here is not fatal
+    // (the turn re-awaits the same import and surfaces the real error there),
+    // so it is logged and swallowed rather than allowed to fail boot.
+    void loadPiCodingAgentSdk().catch((err: unknown) => {
+      logger.warn("pi sdk warm-up failed — the first chat turn will pay the import", {
+        err: String(err),
+      });
+    });
   },
 
   createRouter() {

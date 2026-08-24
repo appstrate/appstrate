@@ -69,8 +69,15 @@ export interface PiChatInput {
   /** Base system persona (+ caller context) — MCP instructions are appended here. */
   system: string;
   generation: ModelGenerationSettings;
-  /** Platform HTTP MCP server (meta-tools) — the engine opens its own client. */
-  platformMcp: { url: string; headers: Record<string, string> };
+  /**
+   * Platform HTTP MCP server (meta-tools) — the engine opens its own client.
+   *
+   * `fetch` is the transport for that handshake: production hands in the
+   * platform's in-process dispatch so the three JSON-RPC hops re-enter the Hono
+   * app directly rather than opening real loopback sockets to this same process.
+   * Omitted → global `fetch`.
+   */
+  platformMcp: { url: string; headers: Record<string, string>; fetch?: typeof fetch };
   /** Aborts when the turn is explicitly stopped (decoupled from client disconnect). */
   abortSignal: AbortSignal;
   /** Maps a thrown error to a client-safe message. */
@@ -140,23 +147,43 @@ export function runPiChat(input: PiChatInput): Response {
       let mcpTools: Awaited<ReturnType<typeof buildPlatformMcpTools>> | undefined;
       let stepCap: ReturnType<typeof createStepCapController> | undefined;
       try {
-        // Platform meta-tools (search/describe/invoke_operation + run_and_wait).
-        // A failure here is a genuine misconfiguration (the chat's value IS the
+        // Platform meta-tools (search/describe/invoke_operation + run_and_wait),
+        // and the Pi SDK's value graph. They are independent — the SDK import
+        // reads no MCP result — so they run together rather than back to back.
+        // The SDK module evaluation is the expensive half on a cold process
+        // (~200 ms, see `pi-sdk.ts`); the handshake is three JSON-RPC hops.
+        //
+        // A MCP failure is a genuine misconfiguration (the chat's value IS the
         // tools) — let it propagate to `onError`.
-        mcpTools = await buildPlatformMcpTools({
-          url: platformMcp.url,
-          headers: platformMcp.headers,
-          writeChunk: write,
-          signal: turnAbort.signal,
-          // Budget seam: the turn deadline bounds every run_and_wait, and the
-          // live step count feeds the per-step budget note the model reads.
-          turnBudget: {
-            deadlineAt: turnDeadlineAt,
-            stepCount: () => mapper.stepCount(),
-            chatSessionId: input.chatSessionId,
-            orgId: input.orgId,
-          },
-        });
+        // `allSettled`, not `all`: `all` rejects on the first failure, so an SDK
+        // import error would abandon a handshake still in flight and strand the
+        // MCP client it goes on to open — `finally` cannot close what was never
+        // assigned. Waiting for both outcomes keeps teardown total.
+        const [toolsResult, sdkResult] = await Promise.allSettled([
+          buildPlatformMcpTools({
+            url: platformMcp.url,
+            headers: platformMcp.headers,
+            writeChunk: write,
+            signal: turnAbort.signal,
+            ...(platformMcp.fetch ? { fetch: platformMcp.fetch } : {}),
+            // Budget seam: the turn deadline bounds every run_and_wait, and the
+            // live step count feeds the per-step budget note the model reads.
+            turnBudget: {
+              deadlineAt: turnDeadlineAt,
+              stepCount: () => mapper.stepCount(),
+              chatSessionId: input.chatSessionId,
+              orgId: input.orgId,
+            },
+          }),
+          loadPiCodingAgentSdk(),
+        ]);
+        // Adopt the client BEFORE rethrowing, so the outer `finally` owns it on
+        // every path — exactly as it did when these ran back to back.
+        if (toolsResult.status === "fulfilled") mcpTools = toolsResult.value;
+        if (toolsResult.status === "rejected") throw toolsResult.reason;
+        if (sdkResult.status === "rejected") throw sdkResult.reason;
+        const sdk = sdkResult.value;
+        const tools = toolsResult.value;
 
         const {
           createAgentSession,
@@ -165,7 +192,7 @@ export function runPiChat(input: PiChatInput): Response {
           ModelRuntime,
           SessionManager,
           SettingsManager,
-        } = await loadPiCodingAgentSdk();
+        } = sdk;
 
         const piModel = model;
         const requestedThinkingLevel = input.generation.reasoningLevel ?? "medium";
@@ -189,8 +216,8 @@ export function runPiChat(input: PiChatInput): Response {
         // heading only ever legitimately appears in the server's instructions,
         // so cutting there and concatenating afterwards removes the hazard by
         // construction. See the note in `chat-stream.ts` that documents it.
-        const mcpInstructions = mcpTools.instructions
-          ? applyOperationIndexPolicy(mcpTools.instructions, model.api)
+        const mcpInstructions = tools.instructions
+          ? applyOperationIndexPolicy(tools.instructions, model.api)
           : undefined;
         const system = mcpInstructions ? `${input.system}\n\n${mcpInstructions}` : input.system;
 
@@ -269,7 +296,7 @@ export function runPiChat(input: PiChatInput): Response {
           DefaultResourceLoader,
           SettingsManager,
           extensionFactories: [
-            ...mcpTools.extensionFactories,
+            ...tools.extensionFactories,
             ...authExtensions,
             ...generationExtensions,
           ],

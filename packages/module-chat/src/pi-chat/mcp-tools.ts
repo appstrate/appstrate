@@ -141,6 +141,17 @@ interface BuildPlatformMcpToolsOptions {
   signal: AbortSignal;
   /** Turn deadline + step counter — bounds run_and_wait and feeds the budget note. */
   turnBudget: PiTurnBudget;
+  /**
+   * Transport for the MCP handshake. Production passes the platform's in-process
+   * dispatch, so `initialize` / `notifications/initialized` / `tools/list` re-enter
+   * the Hono app directly instead of opening three real loopback TCP connections
+   * to this same process. Auth and RBAC still run on every hop — `dispatch` goes
+   * through the full pipeline — so this trades sockets for latency, not safety.
+   *
+   * Omitted (tests, and any caller without a dispatcher) → global `fetch`, i.e.
+   * the previous behaviour.
+   */
+  fetch?: typeof fetch;
 }
 
 /**
@@ -181,6 +192,7 @@ export async function buildPlatformMcpTools(
   const client = await createMcpHttpClient(opts.url, {
     clientInfo: { name: "appstrate-chat-pi", version: "1.0" },
     extraHeaders: opts.headers,
+    ...(opts.fetch ? { fetch: opts.fetch } : {}),
   });
 
   let listed: Awaited<ReturnType<AppstrateMcpClient["listTools"]>>;
