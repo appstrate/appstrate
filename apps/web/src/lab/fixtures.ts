@@ -126,6 +126,49 @@ export const availableApiKeyScopes: Json200<"/api/api-keys/available-scopes", "g
   data: ["agents:read", "agents:run", "runs:read", "end-users:read", "end-users:write"],
 };
 
+export const apiKeys: Json200<"/api/api-keys", "get"> = {
+  object: "list",
+  hasMore: false,
+  data: [
+    {
+      id: "key_lab_automation",
+      name: "Production automations",
+      keyPrefix: "apk_prod",
+      scopes: availableApiKeyScopes.data,
+      created_by: USER_ID,
+      created_by_name: "Olivier Tarbès",
+      expiresAt: ago(-43_200),
+      lastUsedAt: ago(14),
+      revokedAt: null,
+      createdAt: ago(21_600),
+    },
+    {
+      id: "key_lab_reporting",
+      name: "Reporting read-only",
+      keyPrefix: "apk_repo",
+      scopes: ["runs:read", "agents:read"],
+      created_by: "user_lab_pierre",
+      created_by_name: "Pierre",
+      expiresAt: null,
+      lastUsedAt: ago(1_440),
+      revokedAt: null,
+      createdAt: ago(86_400),
+    },
+    {
+      id: "key_lab_expired",
+      name: "Legacy CI",
+      keyPrefix: "apk_old_",
+      scopes: ["agents:run"],
+      created_by: USER_ID,
+      created_by_name: "Olivier Tarbès",
+      expiresAt: ago(1_440),
+      lastUsedAt: ago(2_880),
+      revokedAt: null,
+      createdAt: ago(129_600),
+    },
+  ],
+};
+
 /* -------------------------------------------------------------------------- */
 /* Runs                                                                        */
 /* -------------------------------------------------------------------------- */

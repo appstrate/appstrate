@@ -138,6 +138,7 @@ run it at all:
 bun run lab:shots     # screens × scenarios × widths → PNGs, and the guard below
 bun run lab:measure   # one table's real geometry across a sweep of widths
 bun run lab:settings  # settings context, remount, routing, Back/Close and mobile guard
+bun run lab:tables    # collection versus settings table surfaces at 1440 / 390
 ```
 
 `e2e/lab/`, not `apps/web/scripts/`, for one boring reason: `@playwright/test`
@@ -2268,6 +2269,45 @@ green at 68 captures with no missing fixture. Root `bun test` still has the
 documented local-infrastructure baseline: 10,708 pass and 49 skip, then 36
 failures plus 19 Playwright-loader errors in the MITM/CA, CLI and e2e suites;
 none is in the touched web surface.
+
+**Table-grammar sweep, 24 August.** The exhaustive source audit found seven
+level-one collection routes on the shared PageHeader / ListToolbar / DataTable
+grammar and nine settings table families under the integrated settings
+surface. Detail tables correctly keep their own card frame. The Library remains
+the one raw shadcn table on purpose: it is a package-by-workspace matrix, not a
+collection, so hiding a column would hide an entity and its control.
+
+Two real stragglers were corrected. API keys was still a stack of cards, with
+its New key deed in the body beside the documentation link. It is now the ninth
+settings DataTable: Name, Key, Status, Expiration, Permissions, Last used and
+Created by are comparable columns, while Revoke is the destructive deed in the
+row menu. Identity plus Actions survive on a phone. The creation deed now uses
+SettingsPageActions at title height while API documentation remains contextual
+content. DataTable also still exposed an `appearance="integrated"` escape hatch
+even though the surface decision belongs to the containing DOM. That prop is
+gone: every table is a white framed card unless the settings content marker
+integrates it, so a caller cannot silently invent a third treatment.
+
+`bun run lab:tables` now walks all seven main collection routes and all nine
+settings table routes at 1440 and 390. It reads the rendered border, radius,
+fill and shadow, checks table and viewport overflow, confirms the level-one
+toolbar's two-view control and pins real page deeds beside the title. The guard
+also changes Models to the provider-credentials tab, opens both Integration
+detail tables, checks the catalogue's mobile toolbar and desktop filter rail,
+checks the End-Users toolbar and protects Library as the native, horizontally
+scrollable matrix exception. Search, filters and column controls remain
+capability-driven: the sweep did not invent a search box over an incomplete
+page or add an empty toolbar to a settings table with no honest manipulation to
+offer.
+
+The new guard is green across the sixteen collection and settings routes plus
+the special detail, catalogue and matrix surfaces at both widths. API Keys,
+Models, Integration catalogue, both Integration detail tabs, Library and
+End-Users produced fourteen nominal captures at 1440 and 390 with no fixture
+hole; their rendered pixels were inspected as well as their DOM.
+`bun test apps/web` is green at 634 tests, `lab:settings` remains green and
+`bun run check` is green at 33/33 tasks with the same nine pre-existing
+warnings.
 
 **The switcher no longer owns destinations, 24 August.** Its bottom Settings
 and Library footer was removed. Settings already has a selected destination in

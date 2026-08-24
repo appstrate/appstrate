@@ -85,8 +85,6 @@ interface DataTableProps<T> extends CollectionState {
   banner?: ReactNode;
   /** Names the table for screen readers; never drawn. */
   label: string;
-  /** Overrides the default card surface for a standalone table. */
-  appearance?: "card" | "integrated";
 }
 
 /**
@@ -138,7 +136,6 @@ export function DataTable<T>({
   rowState,
   banner,
   label,
-  appearance = "card",
   ...state
 }: DataTableProps<T>) {
   // The order lives in `collection.ts`, shared with the card grid: a caller
@@ -169,8 +166,7 @@ export function DataTable<T>({
       <div
         className={cn(
           "@container/table overflow-hidden",
-          appearance === "card" &&
-            "bg-card rounded-lg border shadow-sm [[data-settings-table-surface=integrated]_&]:rounded-none [[data-settings-table-surface=integrated]_&]:border-0 [[data-settings-table-surface=integrated]_&]:bg-transparent [[data-settings-table-surface=integrated]_&]:shadow-none",
+          "bg-card rounded-lg border shadow-sm [[data-settings-table-surface=integrated]_&]:rounded-none [[data-settings-table-surface=integrated]_&]:border-0 [[data-settings-table-surface=integrated]_&]:bg-transparent [[data-settings-table-surface=integrated]_&]:shadow-none",
         )}
       >
         {verdict === "error" ? (state.error ?? <ErrorState compact />) : state.empty}
@@ -182,8 +178,7 @@ export function DataTable<T>({
     <div
       className={cn(
         "@container/table overflow-hidden",
-        appearance === "card" &&
-          "bg-card rounded-lg border shadow-sm [[data-settings-table-surface=integrated]_&]:rounded-none [[data-settings-table-surface=integrated]_&]:border-0 [[data-settings-table-surface=integrated]_&]:bg-transparent [[data-settings-table-surface=integrated]_&]:shadow-none",
+        "bg-card rounded-lg border shadow-sm [[data-settings-table-surface=integrated]_&]:rounded-none [[data-settings-table-surface=integrated]_&]:border-0 [[data-settings-table-surface=integrated]_&]:bg-transparent [[data-settings-table-surface=integrated]_&]:shadow-none",
       )}
     >
       <table role="table" aria-label={label} className="block w-full text-sm" style={tracks}>

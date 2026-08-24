@@ -33,6 +33,7 @@ import { useEndUserColumns } from "../../pages/end-user-columns.tsx";
 import { useWebhookColumns } from "../../modules/webhooks/components/webhook-columns.tsx";
 import { useDocumentColumns } from "../document-columns.tsx";
 import { useIntegrationListColumns } from "../../pages/integration-list-columns.tsx";
+import { useApiKeyColumns } from "../../pages/api-key-columns.tsx";
 import { render } from "./run-fixture.tsx";
 
 /**
@@ -188,6 +189,14 @@ const SETS = {
     columnsFrom(() =>
       useIntegrationListColumns({
         onOpen: () => {},
+      }),
+    ),
+  apiKeys: () =>
+    columnsFrom(() =>
+      useApiKeyColumns({
+        availableScopes: ["agents:read", "agents:run", "runs:read"],
+        revokingKeyId: null,
+        onRevoke: () => {},
       }),
     ),
 };

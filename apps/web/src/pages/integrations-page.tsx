@@ -222,7 +222,7 @@ function CataloguePanel({
   ];
 
   const rail = (
-    <div className="flex min-h-full flex-col p-5">
+    <div data-catalogue-controls="rail" className="flex min-h-full flex-col p-5">
       <div className="flex items-center gap-2">
         <LibraryBig className="text-muted-foreground size-5 shrink-0" />
         <h2 className="font-semibold">{t("integrations.catalogue.title")}</h2>
@@ -261,7 +261,7 @@ function CataloguePanel({
 
   return (
     <PanelDialog title={t("integrations.catalogue.title")} rail={rail} onClose={onClose}>
-      <div className="md:hidden">
+      <div data-catalogue-controls="mobile" className="md:hidden">
         <div className="mb-5 pr-10">
           <h2 className="text-lg font-semibold">{t("integrations.catalogue.title")}</h2>
           <p className="text-muted-foreground mt-1 text-sm">
@@ -468,7 +468,6 @@ export function IntegrationsPage() {
 
       {view === "table" ? (
         <DataTable
-          appearance="card"
           label={t("integrations.tableLabel")}
           columns={columns}
           rows={shown}

@@ -198,8 +198,12 @@ export function OrgSettingsModelsPage() {
     <>
       <Tabs value={subTab} onValueChange={(v) => setSubTab(v as "models-list" | "credentials")}>
         <TabsList className="mb-4">
-          <TabsTrigger value="models-list">{t("models.tabTitle")}</TabsTrigger>
-          <TabsTrigger value="credentials">{t("credentials.title")}</TabsTrigger>
+          <TabsTrigger value="models-list" data-testid="models-list-tab">
+            {t("models.tabTitle")}
+          </TabsTrigger>
+          <TabsTrigger value="credentials" data-testid="models-credentials-tab">
+            {t("credentials.title")}
+          </TabsTrigger>
         </TabsList>
       </Tabs>
 

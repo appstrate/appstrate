@@ -159,7 +159,7 @@ function LibraryMatrix({
   }
 
   return (
-    <Table>
+    <Table data-library-matrix>
       <TableHeader>
         <TableRow>
           <TableHead className={HEAD}>{t("library.column.package")}</TableHead>

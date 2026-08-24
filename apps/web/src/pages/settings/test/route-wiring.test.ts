@@ -58,4 +58,10 @@ describe("unified settings route wiring", () => {
       expect(source).toContain("<NavigateKeepingState ");
     }
   });
+
+  it("puts the API-key creation deed in the settings title slot", () => {
+    const apiKeys = read("../../api-keys-page.tsx");
+    expect(apiKeys).toContain("<SettingsPageActions>");
+    expect(apiKeys.indexOf("<SettingsPageActions>")).toBeLessThan(apiKeys.indexOf("<DataTable"));
+  });
 });

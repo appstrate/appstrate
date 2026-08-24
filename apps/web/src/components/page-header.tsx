@@ -39,7 +39,7 @@ export function PageHeader({
   }, [signature, setEntries]);
 
   return (
-    <div className="mb-4">
+    <div data-page-header className="mb-4">
       <div
         className={
           wrapActions
@@ -51,7 +51,11 @@ export function PageHeader({
           {icon ?? (emoji && <span>{emoji}</span>)}
           {title}
         </h2>
-        {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+        {actions && (
+          <div data-page-actions className="flex shrink-0 items-center gap-2">
+            {actions}
+          </div>
+        )}
       </div>
       {children}
     </div>
