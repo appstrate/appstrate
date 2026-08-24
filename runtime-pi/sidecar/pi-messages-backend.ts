@@ -28,6 +28,7 @@ import type { LlmProxyApiKeyConfig, ModelSwap, SidecarConfig } from "./helpers.t
 import { LLM_PROXY_TIMEOUT_MS } from "./helpers.ts";
 import { anthropicThinkingBudgets } from "@appstrate/core/model-generation";
 import { PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "@appstrate/runner-pi/provider-map";
+import { PLATFORM_MODEL_COMPAT } from "@appstrate/runner-pi/model-compat";
 import { logger } from "./logger.ts";
 import { syntheticAliasErrorBody, syntheticAliasErrorMessage } from "./model-swap.ts";
 import { streamBacking } from "./pi-sdk.ts";
@@ -165,15 +166,9 @@ export function buildBackingModel(deps: PiMessagesBackendDeps): Model<Api> {
     ...(backing.reasoningLevelMap ? { thinkingLevelMap: backing.reasoningLevelMap } : {}),
     compat: {
       // The STRUCTURAL half of the cache-retention refusal — see
-      // {@link FORWARDED_OPTION_KEYS} for the billing reason. Dropping the
-      // option from the whitelist closes the request-body route; this closes
-      // the class. pi-ai gates every long-retention emission on this one flag
-      // (`cache_control.ttl:"1h"` for anthropic-messages, `"24h"` for both
-      // OpenAI shapes), and reads it as `model.compat?.… ?? true`, so the
-      // record must say `false` OUT LOUD rather than stay silent. With it set,
-      // no option value and no `PI_CACHE_RETENTION` in any environment can
-      // produce a token bucket the platform cannot price.
-      supportsLongCacheRetention: false,
+      // {@link FORWARDED_OPTION_KEYS} for the request-body half, and
+      // `PLATFORM_MODEL_COMPAT` for the billing reason both close.
+      ...PLATFORM_MODEL_COMPAT,
       // pi-ai gates its adaptive branch on `compat.forceAdaptiveThinking`, which
       // it sources from metadata it has none of for a record rebuilt from the
       // platform's catalog. Without the flag an adaptive backing gets the classic

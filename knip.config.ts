@@ -387,7 +387,12 @@ const config: KnipConfig = {
     "packages/emails": { entry: ["src/index.ts!"] },
     "packages/env": { entry: ["src/index.ts!"] },
     "packages/runner-pi": {
-      entry: ["src/index.ts!", "src/runtime-tools/index.ts!", "src/provider-map.ts!"],
+      entry: [
+        "src/index.ts!",
+        "src/runtime-tools/index.ts!",
+        "src/provider-map.ts!",
+        "src/model-compat.ts!",
+      ],
     },
     "packages/shared-types": { entry: ["src/index.ts!"] },
     "packages/ui": {

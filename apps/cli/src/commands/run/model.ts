@@ -28,6 +28,7 @@ import {
   llmProxyBaseUrl,
   PROVIDER_BY_API,
 } from "@appstrate/runner-pi";
+import { PLATFORM_MODEL_COMPAT } from "@appstrate/runner-pi/model-compat";
 import { ANTHROPIC_OAUTH_PLACEHOLDER_API_KEY } from "@appstrate/core/oauth-bearer-swap";
 import { listModelPresets, PROXY_SUPPORTED_APIS, type ModelPreset } from "../../lib/models.ts";
 
@@ -118,6 +119,13 @@ export function resolveModel(flags: ModelFlags): ResolvedModel {
     );
   }
 
+  // No `compat` here, deliberately: env mode bills nobody but the caller. The
+  // key is theirs, the request goes straight to the vendor, and no `llm_usage`
+  // row is written — so the under-billing `PLATFORM_MODEL_COMPAT` exists to
+  // prevent cannot occur, and refusing long retention would only make the
+  // user's own run more expensive. `resolvePresetModel` below is the opposite
+  // case and does carry it. (Pinned by the coverage test that enumerates the
+  // model builders, which lists this exemption with this reason.)
   const model: Model<Api> = {
     id: modelId,
     name: modelId,
@@ -208,6 +216,14 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
     },
     contextWindow: preset.contextWindow ?? 200_000,
     maxTokens: preset.maxTokens ?? 8192,
+    // Preset mode is platform-billed: `baseUrl` points at `/api/llm-proxy/*`,
+    // which resolves the upstream credential server-side and writes an
+    // `llm_usage` row. Without this the record stayed silent, pi-ai defaulted
+    // the flag to TRUE, and `PI_CACHE_RETENTION=long` in the USER'S OWN shell —
+    // the CLI runs on their machine — emitted a 1h cache write that the
+    // anthropic adapter forwards unaltered and the meter prices at the
+    // short-retention rate. See `PLATFORM_MODEL_COMPAT`.
+    compat: { ...PLATFORM_MODEL_COMPAT },
     headers,
   };
   // Placeholder for anthropic — never reaches upstream (see comment above).
