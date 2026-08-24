@@ -2046,9 +2046,10 @@ their existing `/org-settings/*` and `/workspace-settings/*` URLs. Account
 Preferences remains its own modal. The desktop rail is two large sections:
 Organisation dropdown then all organisation pages, followed lower down by a
 separate Workspace dropdown and its pages. A two-pixel scope rail plus the
-active item's surface makes the active scope explicit. Below `md`, those same
-sections become two framed groups, each with its context and page selects; they
-are not flattened into one ambiguous menu.
+active item's surface initially made the active scope explicit; the product
+follow-up below supersedes that styling. Below `md`, those same sections become
+two framed groups, each with its context and page selects; they are not flattened
+into one ambiguous menu.
 
 Changing organisation fetches the destination's workspaces with the explicit
 org header before changing either store. It chooses the remembered workspace
@@ -2113,6 +2114,24 @@ warnings. Root `bun test` reproduced the known infrastructure failure before a
 useful suite summary: preload could not connect to the OrbStack Docker socket,
 then tests that depend on preload state failed. It was interrupted after the
 failure was established; no touched web test remains failing.
+
+**Settings-navigation product follow-up, 24 August.** The blue rail or framed
+scope border and the grey active-page surface encode two simultaneous kinds of
+selection. In practice that makes the whole Organisation group look selected
+and Workspace look secondary or disabled. Remove the persistent scope signal:
+both groups use the same neutral surface, both context dropdowns stay white,
+and the one grey active-page surface moves across the complete navigation when
+the route changes. Blue remains a transient keyboard-focus treatment, not a
+third navigation state. The `ORGANISATION` and `WORKSPACE` section titles are
+plain text with no logo or decorative icon; resource icons may remain on the
+actual page destinations where they aid recognition.
+
+The context selectors also read as primary form fields at their current height.
+Target a 36px visible control on desktop and 40px on mobile, while preserving a
+44px mobile hit target without making the painted field taller. Reduce the
+vertical gaps around them proportionally. The two sections remain structurally
+separate and retain all dependent organisation/workspace switching behaviour;
+this is a density and state-grammar correction, not another IA change.
 
 **12. Accessibility, which nothing here has ever checked.** The branch
 re-declares ARIA roles on the table because this file demands it, and that is
