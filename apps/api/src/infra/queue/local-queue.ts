@@ -62,6 +62,12 @@ export class LocalQueue<T> implements JobQueue<T> {
   private drainInterval: ReturnType<typeof setInterval> | null = null;
   private shuttingDown = false;
   /**
+   * Abandon callbacks for jobs currently sleeping between retry attempts. Such
+   * a job still counts towards `activeJobs`, so `shutdown()` has to be able to
+   * release it — see the comment there.
+   */
+  private sleepingRetries = new Set<() => void>();
+  /**
    * Wall-clock time (epoch ms) of the previous cron poll. The next poll's
    * window floor advances from here rather than a fixed `now - interval`, so a
    * late/drifted poll (GC, blocked drain) still inspects the whole elapsed gap
@@ -133,7 +139,18 @@ export class LocalQueue<T> implements JobQueue<T> {
     this.cronInterval = null;
     this.drainInterval = null;
 
-    // Wait for active jobs to finish (max 10s)
+    // Abandon every job that is merely SLEEPING between attempts. A backing-off
+    // job counts as active (its `run()` awaits the retry timer), so without this
+    // a single job that fails permanently — an org deleted before its ledger
+    // replay landed, say — holds `activeJobs` above zero for its whole retry
+    // schedule and pins the loop below to its full 10s cap on every shutdown.
+    // Abandoning is the documented semantics of this queue: in-memory jobs do
+    // not survive the process, and a retry that has not started yet has nothing
+    // in flight to lose.
+    for (const abandon of [...this.sleepingRetries]) abandon();
+    this.sleepingRetries.clear();
+
+    // Wait for genuinely in-flight handlers to finish (max 10s)
     const deadline = Date.now() + 10_000;
     while (this.activeJobs > 0 && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 200));
@@ -182,12 +199,31 @@ export class LocalQueue<T> implements JobQueue<T> {
             attempt: nextAttempt,
             error: getErrorMessage(err),
           });
-          // Schedule retry — await a timer so the outer .finally() waits
+          // Schedule retry — await a timer so the outer .finally() waits.
+          // Registered in `sleepingRetries` so `shutdown()` can abandon it:
+          // otherwise the wait below blocks on a job that is doing nothing but
+          // counting down.
           await new Promise<void>((resolve) => {
-            setTimeout(() => {
+            if (this.shuttingDown) {
+              resolve();
+              return;
+            }
+            const abandon = () => {
+              clearTimeout(timer);
+              this.sleepingRetries.delete(abandon);
+              resolve();
+            };
+            const timer = setTimeout(() => {
+              this.sleepingRetries.delete(abandon);
+              if (this.shuttingDown) {
+                resolve();
+                return;
+              }
               const retryJob: QueueJob<T> = { ...currentJob, attemptsMade: nextAttempt };
               run(retryJob).then(resolve, resolve);
             }, delay);
+            timer.unref?.();
+            this.sleepingRetries.add(abandon);
           });
           return;
         }
