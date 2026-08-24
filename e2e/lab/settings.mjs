@@ -105,6 +105,12 @@ await withPage(async (page) => {
   await assertDesktopNavigationState(page, "/org-settings/members");
 
   await page
+    .locator('[data-settings-scope="organization"] a[href="/org-settings/library"]')
+    .click();
+  await page.waitForURL("**/org-settings/library");
+  await assertDesktopNavigationState(page, "/org-settings/library");
+
+  await page
     .locator('[data-settings-scope="workspace"] a[href="/workspace-settings/api-keys"]')
     .click();
   await page.waitForURL("**/workspace-settings/api-keys");
@@ -183,6 +189,15 @@ await withPage(async (page) => {
   await settle(page);
   assert.equal(new URL(page.url()).pathname, "/workspace-settings/general");
 
+  await page.goto(`${BASE}/library#skills`);
+  await settle(page);
+  assert.equal(new URL(page.url()).pathname, "/org-settings/library");
+  assert.equal(new URL(page.url()).hash, "#skills");
+  assert.equal(
+    await page.getByRole("tab", { name: /Skills/ }).getAttribute("data-state"),
+    "active",
+  );
+
   await page.setViewportSize({ width: 390, height: 1000 });
   await page.goto(`${BASE}/org-settings/members`);
   await settle(page);
@@ -217,7 +232,10 @@ await withPage(async (page) => {
     return { left: rect.left, right: rect.right, viewport: window.innerWidth };
   });
   assert.ok(switcherRect.left >= 0 && switcherRect.right <= switcherRect.viewport);
-  await page.getByRole("link", { name: "Paramètres de Tractr" }).last().click();
+  assert.equal(await switcher.getByRole("link", { name: "Bibliothèque" }).count(), 0);
+  const contextualSettings = switcher.getByRole("link", { name: "Paramètres de Tractr" });
+  assert.equal(await contextualSettings.count(), 1);
+  await contextualSettings.click();
   await sidebar.waitFor({ state: "hidden" });
 
   await page.goto(BASE);

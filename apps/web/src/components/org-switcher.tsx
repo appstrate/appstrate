@@ -21,12 +21,11 @@ import { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { openAsModal } from "../lib/modal-route";
 import { useTranslation } from "react-i18next";
-import { Check, ChevronRight, ChevronsUpDown, Plus, Search, Settings, Library } from "lucide-react";
+import { Check, ChevronRight, ChevronsUpDown, Plus, Search, Settings } from "lucide-react";
 import { useOrg } from "../hooks/use-org";
 import { $api } from "../api/client";
 import { useApplications } from "../hooks/use-applications";
 import { useCurrentApplicationId, useAppSwitcher } from "../hooks/use-current-application";
-import { usePermissions } from "../hooks/use-permissions";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { useSidebar } from "@appstrate/ui/components/sidebar-context";
@@ -81,7 +80,6 @@ export function OrgSwitcher({
   const { data: applications } = useApplications();
   const currentAppId = useCurrentApplicationId();
   const { switchApp } = useAppSwitcher();
-  const { isAdmin } = usePermissions();
   const { isMobile, setOpenMobile } = useSidebar();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -414,28 +412,6 @@ export function OrgSwitcher({
               })
             )}
           </div>
-        </div>
-
-        <div className="grid grid-cols-2 border-t">
-          <Link
-            to="/org-settings"
-            state={openAsModal(location)}
-            onClick={closeSwitcherAndSidebar}
-            className="hover:bg-accent flex items-center gap-2 px-3 py-2.5 text-[0.84rem] font-medium"
-          >
-            <Settings size={15} className="text-muted-foreground shrink-0" />
-            <span className="truncate">{t("switcher.orgSettings", { org: currentOrg.name })}</span>
-          </Link>
-          {isAdmin && (
-            <Link
-              to="/library"
-              onClick={() => setOpen(false)}
-              className="hover:bg-accent flex items-center gap-2 border-l px-3 py-2.5 text-[0.84rem] font-medium"
-            >
-              <Library size={15} className="text-muted-foreground shrink-0" />
-              <span className="truncate">{t("nav.library")}</span>
-            </Link>
-          )}
         </div>
       </PopoverContent>
     </Popover>

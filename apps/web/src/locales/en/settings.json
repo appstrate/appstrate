@@ -79,6 +79,7 @@
   "orgSettings.sectionOrganization": "Organization",
   "orgSettings.tabGeneral": "General",
   "orgSettings.tabMembers": "Members",
+  "orgSettings.tabLibrary": "Library",
   "orgSettings.inviteMember": "Invite member",
   "orgSettings.invite": "Invite",
   "orgSettings.memberColumn": "Member",

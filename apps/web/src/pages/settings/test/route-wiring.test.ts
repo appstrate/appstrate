@@ -47,6 +47,7 @@ describe("unified settings route wiring", () => {
       "../../org-settings/proxies.tsx",
       "../../org-settings/billing.tsx",
       "../../org-settings/oauth.tsx",
+      "../../library-page.tsx",
       "../../org-settings/app/auth.tsx",
       "../../org-settings/app/oauth.tsx",
     ];

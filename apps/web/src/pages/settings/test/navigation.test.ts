@@ -28,6 +28,7 @@ describe("unified settings navigation", () => {
     expect(memberPaths).toContain("/org-settings/mcp-access");
     expect(memberPaths).toContain("/org-settings/billing");
     expect(memberPaths).not.toContain("/org-settings/models");
+    expect(memberPaths).not.toContain("/org-settings/library");
     expect(memberPaths).not.toContain("/org-settings/oauth");
     expect(memberPaths.some((path) => path.startsWith("/workspace-settings/"))).toBe(false);
 
@@ -40,5 +41,6 @@ describe("unified settings navigation", () => {
     expect(adminWithoutModules).not.toContain("/workspace-settings/oauth");
     expect(adminWithoutModules).not.toContain("/workspace-settings/webhooks");
     expect(adminWithoutModules).toContain("/workspace-settings/general");
+    expect(adminWithoutModules).toContain("/org-settings/library");
   });
 });

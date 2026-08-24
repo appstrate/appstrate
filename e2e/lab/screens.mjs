@@ -44,7 +44,6 @@ export const SCREENS = [
     name: "integration-detail-config",
   },
   { path: "/documents", name: "documents" },
-  { path: "/library", name: "library" },
   // The two detail pages that host the compact lists: an agent's Connexions
   // and Mémoire tabs, and a run's Documents and Mémoire tabs. They are here
   // because the third body of a collection lives on them and nowhere else.
@@ -59,6 +58,7 @@ export const SCREENS = [
   { path: "/org-settings/general", name: "settings-general" },
   { path: "/org-settings/members", name: "settings-members" },
   { path: "/org-settings/applications", name: "settings-applications" },
+  { path: "/org-settings/library", name: "settings-library" },
   { path: "/org-settings/models", name: "settings-models" },
   { path: "/org-settings/proxies", name: "settings-proxies" },
   { path: "/org-settings/oauth", name: "settings-oauth" },

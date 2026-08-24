@@ -2269,6 +2269,24 @@ documented local-infrastructure baseline: 10,708 pass and 49 skip, then 36
 failures plus 19 Playwright-loader errors in the MITM/CA, CLI and e2e suites;
 none is in the touched web surface.
 
+**The switcher no longer owns destinations, 24 August.** Its bottom Settings
+and Library footer was removed. Settings already has a selected destination in
+the global mobile drawer, and the gears on the current organisation and
+workspace rows remain the contextual shortcuts. Repeating those destinations
+in the switcher made its context-changing job less legible.
+
+The package Library is now an admin-only Organisation settings destination at
+`/org-settings/library`; `/library` redirects there for old bookmarks. The
+existing package-by-workspace matrix is reused rather than converted to a
+collection table. It loses its duplicate page title and card frame inside the
+settings surface, while keeping horizontal scrolling because a workspace
+column is an entity and cannot be hidden. The lab coverage moved to the
+canonical settings URL and `lab:settings` walks the new navigation item.
+That guard also exposed a latent hidden-DOM duplicate: an in-app General entry
+could initialise the mobile settings menu even at desktop width. Initial menu
+opening is now gated by the real mobile breakpoint; the desktop rail remains
+the only settings navigation in its viewport.
+
 **12. Accessibility, which nothing here has ever checked.** The branch
 re-declares ARIA roles on the table because this file demands it, and that is
 the whole of it: not one contrast ratio, keyboard path or touch target has ever
@@ -2311,7 +2329,7 @@ block is. The skill itself is left alone; it is simply not the tool for this.
 After those, what is left in this section is: the Usage page (a feature to
 build, not a defect), storage and MCP connect to the form pattern, the
 page-action rule on screens without a list, per-org colour and logo (deferred by
-decision, twice — do not start it), and library browsing through `PanelDialog`.
+decision, twice — do not start it).
 
 - ~~**The tier-one budget is the window, and it should be the container.**~~
   Closed 22 August, and it was worth the detour. The test asserted 390 (the

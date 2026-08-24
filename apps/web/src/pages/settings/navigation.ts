@@ -8,6 +8,7 @@ import {
   Globe,
   KeyRound,
   Laptop,
+  Library,
   LayoutGrid,
   Plug,
   Settings,
@@ -54,6 +55,12 @@ export function buildSettingsNavigation({
           to: "/org-settings/applications",
           icon: LayoutGrid,
           labelKey: "applications.pageTitle",
+        },
+        {
+          to: "/org-settings/library",
+          icon: Library,
+          labelKey: "orgSettings.tabLibrary",
+          show: isAdmin,
         },
         {
           to: "/org-settings/models",

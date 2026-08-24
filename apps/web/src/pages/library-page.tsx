@@ -5,10 +5,11 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Package } from "lucide-react";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { useLibrary, useTogglePackageInstall } from "../hooks/use-library";
+import { usePermissions } from "../hooks/use-permissions";
 import { collectionVerdict } from "../components/collection";
+import { NavigateKeepingState } from "../components/navigate-keeping-state";
 import type { LibraryPackageItem, LibraryApp } from "../hooks/use-library";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@appstrate/ui/components/tabs";
@@ -47,14 +48,20 @@ const DETAIL_PATH_MAP: Record<string, string> = {
   integration: "/integrations",
 };
 
-export function LibraryPage() {
+export function OrgSettingsLibraryPage() {
+  const { isAdmin } = usePermissions();
+
+  if (!isAdmin) return <NavigateKeepingState to="/org-settings/general" />;
+  return <LibraryContent />;
+}
+
+function LibraryContent() {
   const { t } = useTranslation();
   const { data, isLoading, error } = useLibrary();
   const [activeTab, setActiveTab] = useTabWithHash(TABS, "agents");
 
   return (
     <div>
-      <PageHeader title={t("library.title")} />
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as Tab)}>
         <TabsList>
           {TABS.map((tab) => (
@@ -95,10 +102,8 @@ export function LibraryPage() {
  * against a phone's 390, with nothing that may be given up.
  *
  * A matrix scrolls where a list degrades, which is exactly what shadcn's own
- * `Table` does (`overflow-auto` on its wrapper) and what `DataTable` cannot
- * (`overflow-hidden`, for the frame's radius). So it keeps the raw table and
- * takes the rest of the family: the same frame, the same states, drawn in
- * place rather than above the tabs.
+ * `Table` does (`overflow-auto` on its wrapper). So it keeps the raw table,
+ * while loading, error and empty states stay in the same tab panel.
  */
 function LibraryMatrix({
   packages: pkgs,
@@ -141,7 +146,7 @@ function LibraryMatrix({
   const verdict = collectionVerdict({ isLoading, isError, empty: true }, pkgs.length);
   if (verdict !== "items") {
     return (
-      <Frame>
+      <>
         {verdict === "error" ? (
           <ErrorState message={errorMessage} compact />
         ) : verdict === "loading" ? (
@@ -149,71 +154,64 @@ function LibraryMatrix({
         ) : (
           <EmptyState message={t("library.empty")} icon={Package} compact />
         )}
-      </Frame>
+      </>
     );
   }
 
   return (
-    <Frame>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead className={HEAD}>{t("library.column.package")}</TableHead>
-            {applications.map((app) => (
-              <TableHead key={app.id} className={`${HEAD} text-center`}>
-                <span>{app.name}</span>
-                {app.isDefault && (
-                  <Badge variant="outline" className="ml-1 px-1 py-0 text-[0.6rem] normal-case">
-                    {t("library.defaultApp")}
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead className={HEAD}>{t("library.column.package")}</TableHead>
+          {applications.map((app) => (
+            <TableHead key={app.id} className={`${HEAD} text-center`}>
+              <span>{app.name}</span>
+              {app.isDefault && (
+                <Badge variant="outline" className="ml-1 px-1 py-0 text-[0.6rem] normal-case">
+                  {t("library.defaultApp")}
+                </Badge>
+              )}
+            </TableHead>
+          ))}
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {pkgs.map((pkg) => (
+          <TableRow key={pkg.id}>
+            <TableCell>
+              <div className="flex items-center gap-2">
+                <Link to={`${basePath}/${pkg.id}`} className="font-medium hover:underline">
+                  {pkg.name}
+                </Link>
+                {pkg.source === "system" && (
+                  <Badge variant="secondary" className="px-1.5 py-0 text-[0.6rem]">
+                    {t("library.system")}
                   </Badge>
                 )}
-              </TableHead>
-            ))}
+              </div>
+              {pkg.description && (
+                <p className="text-muted-foreground mt-0.5 line-clamp-1 text-xs">
+                  {pkg.description}
+                </p>
+              )}
+            </TableCell>
+            {applications.map((app) => {
+              const installed = pkg.installed_in.includes(app.id);
+              const locked = lockSystem && pkg.source === "system";
+              return (
+                <TableCell key={app.id} className="text-center">
+                  <Checkbox
+                    checked={locked || installed}
+                    disabled={locked}
+                    title={locked ? t("library.systemAlwaysActive") : undefined}
+                    onCheckedChange={() => handleToggle(pkg, app.id, installed)}
+                  />
+                </TableCell>
+              );
+            })}
           </TableRow>
-        </TableHeader>
-        <TableBody>
-          {pkgs.map((pkg) => (
-            <TableRow key={pkg.id}>
-              <TableCell>
-                <div className="flex items-center gap-2">
-                  <Link to={`${basePath}/${pkg.id}`} className="font-medium hover:underline">
-                    {pkg.name}
-                  </Link>
-                  {pkg.source === "system" && (
-                    <Badge variant="secondary" className="px-1.5 py-0 text-[0.6rem]">
-                      {t("library.system")}
-                    </Badge>
-                  )}
-                </div>
-                {pkg.description && (
-                  <p className="text-muted-foreground mt-0.5 line-clamp-1 text-xs">
-                    {pkg.description}
-                  </p>
-                )}
-              </TableCell>
-              {applications.map((app) => {
-                const installed = pkg.installed_in.includes(app.id);
-                const locked = lockSystem && pkg.source === "system";
-                return (
-                  <TableCell key={app.id} className="text-center">
-                    <Checkbox
-                      checked={locked || installed}
-                      disabled={locked}
-                      title={locked ? t("library.systemAlwaysActive") : undefined}
-                      onCheckedChange={() => handleToggle(pkg, app.id, installed)}
-                    />
-                  </TableCell>
-                );
-              })}
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </Frame>
+        ))}
+      </TableBody>
+    </Table>
   );
-}
-
-/** The frame every collection body wears, matrix included. */
-function Frame({ children }: { children: React.ReactNode }) {
-  return <div className="bg-card overflow-hidden rounded-lg border shadow-sm">{children}</div>;
 }

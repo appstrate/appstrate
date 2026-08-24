@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
 import { ScrollArea } from "@appstrate/ui/components/scroll-area";
+import { useIsMobile } from "@appstrate/ui/use-mobile";
 import {
   Select,
   SelectContent,
@@ -176,6 +177,7 @@ function ScopeNavigation({
 
 export function UnifiedSettingsLayout() {
   const { t } = useTranslation(["settings", "common"]);
+  const isMobile = useIsMobile();
   const location = useLocation();
   const navigate = useNavigate();
   const background = useBackgroundLocation();
@@ -187,6 +189,7 @@ export function UnifiedSettingsLayout() {
   const { isAdmin } = usePermissions();
   const { features } = useAppConfig();
   const shouldOpenMobileNavigationOnEntry =
+    isMobile &&
     background !== null &&
     (location.pathname === "/org-settings" ||
       location.pathname === "/org-settings/general" ||

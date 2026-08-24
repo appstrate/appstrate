@@ -91,8 +91,8 @@ const IntegrationsPage = lazy(() =>
 const IntegrationDetailPage = lazy(() =>
   import("./pages/integration-detail").then((m) => ({ default: m.IntegrationDetailPage })),
 );
-const LibraryPage = lazy(() =>
-  import("./pages/library-page").then((m) => ({ default: m.LibraryPage })),
+const OrgSettingsLibraryPage = lazy(() =>
+  import("./pages/library-page").then((m) => ({ default: m.OrgSettingsLibraryPage })),
 );
 const EndUsersPage = lazy(() =>
   import("./pages/end-users-page").then((m) => ({ default: m.EndUsersPage })),
@@ -360,6 +360,7 @@ export function App() {
       <Route path="general" element={<OrgSettingsGeneralPage />} />
       <Route path="members" element={<OrgSettingsMembersPage />} />
       <Route path="applications" element={<OrgSettingsApplicationsPage />} />
+      <Route path="library" element={<OrgSettingsLibraryPage />} />
       <Route path="models" element={<OrgSettingsModelsPage />} />
       <Route path="proxies" element={<OrgSettingsProxiesPage />} />
       <Route path="oauth" element={<OrgSettingsOAuthPage />} />
@@ -851,9 +852,15 @@ export function App() {
             <Route
               path="/library"
               element={
-                <LazyRoute>
-                  <LibraryPage />
-                </LazyRoute>
+                <Navigate
+                  to={{
+                    pathname: "/org-settings/library",
+                    search: location.search,
+                    hash: location.hash,
+                  }}
+                  replace
+                  state={location.state}
+                />
               }
             />
             <Route
