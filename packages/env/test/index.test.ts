@@ -590,3 +590,48 @@ describe("retired file-limit env names are refused, not ignored", () => {
     expect(() => getEnv()).toThrow(/no longer read/);
   });
 });
+
+describe("an explicitly blanked retired name is not 'still set'", () => {
+  let s: Snap;
+
+  beforeEach(() => {
+    s = snap();
+    setBaseEnv();
+    _resetCacheForTesting();
+  });
+
+  afterEach(() => {
+    restore(s);
+    _resetCacheForTesting();
+  });
+
+  // `sanitizeEnv` (`@appstrate/core/env`) coalesces `""` to `undefined` for
+  // every field before Zod sees it, on the stated ground that "the host never
+  // sets a variable to a meaningful empty string". The retired-name check has
+  // to read raw `process.env` — the parsed object is where these no longer
+  // exist — which opts it out of that coalesce, so it redoes it by hand.
+  for (const retired of [
+    "DOCUMENT_MAX_FILE_BYTES",
+    "DOCUMENT_RETENTION_DAYS",
+    "RUN_MAX_DOCUMENTS",
+    "WORKSPACE_MAX_DOCS_BYTES",
+  ]) {
+    it(`boots with ${retired}= (blank), which reverts nothing`, () => {
+      // Compose's `${VAR:-}` forwarding produces exactly this when the host var
+      // is unset — sixteen times in this repo's own docker-compose.yml — and
+      // blanking a line is the normal dotenv way to disable a setting. Refusing
+      // it would abort boot over a variable carrying no value, with an error
+      // ("Leaving it set would silently revert the limit to its default")
+      // describing a hazard an empty value cannot cause.
+      process.env[retired] = "";
+      expect(() => getEnv()).not.toThrow();
+    });
+  }
+
+  it("control: the same name with a value is still refused", () => {
+    // Without this, the four above would pass just as well against a guard that
+    // had been deleted outright.
+    process.env.DOCUMENT_RETENTION_DAYS = "30";
+    expect(() => getEnv()).toThrow(/no longer read/);
+  });
+});

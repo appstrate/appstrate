@@ -1009,7 +1009,18 @@ const envSchema = z
   // replaced it, not evaporate.
   .superRefine((_env, ctx) => {
     for (const [retired, replacement] of Object.entries(RETIRED_ENV_RENAMES)) {
-      if (process.env[retired] === undefined) continue;
+      const raw = process.env[retired];
+      // An explicitly blanked name carries no value, so it cannot revert
+      // anything — refusing it would be refusing a no-op. This mirrors
+      // `sanitizeEnv` (`@appstrate/core/env`), which coalesces `""` to
+      // `undefined` for EVERY field before Zod sees it precisely because "the
+      // host never sets a variable to a meaningful empty string". Compose's
+      // `${VAR:-}` forwarding produces exactly that, sixteen times in this
+      // repo's own `docker-compose.yml`, and blanking a line is the normal
+      // dotenv way to disable a setting — reading raw `process.env` here (which
+      // this check must, since the parsed object is where these no longer
+      // exist) opts out of that coalesce, so it has to redo it by hand.
+      if (raw === undefined || raw === "") continue;
       ctx.addIssue({
         code: "custom",
         message:
