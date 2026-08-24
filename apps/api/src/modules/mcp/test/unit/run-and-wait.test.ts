@@ -75,7 +75,12 @@ function makeRunAndWait(opts: {
   const tools = buildMcpTools({
     origin: "http://test.local",
     authHeaders: new Headers({ "X-Org-Id": "org_1", "X-Application-Id": "app_1" }),
-    permissions: new Set(opts.permissions ?? ["mcp:invoke"]),
+    // `runs:read` is in the default because the tool cannot function without
+    // it: its second half polls `GET /api/runs/{id}` through the same dispatch,
+    // under the caller's own scopes. A caller holding only `mcp:invoke` is
+    // covered by its own case below, which asserts the refusal happens BEFORE
+    // the launch.
+    permissions: new Set(opts.permissions ?? ["mcp:invoke", "runs:read"]),
     dispatch,
     actor: { type: "user", id: "user_1" },
     scope: { orgId: "org_1", applicationId: "app_1" },
@@ -463,5 +468,20 @@ describe("run_and_wait", () => {
     const res = await denied.tool.handler({ kind: "agent", scope: "@a", name: "b" }, noExtra);
     expect(res.isError).toBe(true);
     expect(denied.calls.length).toBe(0);
+  });
+
+  it("refuses a caller that can launch but not read, BEFORE launching", async () => {
+    // `agents:run` without `runs:read` is a reachable credential — both are
+    // separately requestable OIDC scopes, and it is the canonical shape of a
+    // headless CI key. The launch dispatches in-process with the caller's own
+    // auth, and `internal-dispatch` neither elevates nor alters identity, so
+    // the poll would take a 403 on a run that is already provisioned and
+    // already spending. `calls.length === 0` is the whole assertion: the
+    // refusal has to precede the side effect, not follow it.
+    const { tool, calls } = makeRunAndWait({ permissions: ["mcp:invoke"] });
+    const res = await tool.handler({ kind: "agent", scope: "@a", name: "b" }, noExtra);
+    expect(res.isError).toBe(true);
+    expect(parseResult(res).error).toContain("runs:read");
+    expect(calls.length).toBe(0);
   });
 });

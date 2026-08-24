@@ -8,6 +8,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **BREAKING: run and schedule `GET` routes now enforce a read permission.**
+  Eight reads were gated on org membership alone and enforced nothing about
+  what the caller may do, so any credential that could reach the org could
+  list runs, read a run, stream its logs, and read every schedule. Each now
+  requires the scope it was always documented to require:
+
+  | Route                                      | Scope            |
+  | ------------------------------------------ | ---------------- |
+  | `GET /api/runs`                            | `runs:read`      |
+  | `GET /api/runs/{id}`                       | `runs:read`      |
+  | `GET /api/runs/{id}/logs`                  | `runs:read`      |
+  | `GET /api/agents/{scope}/{name}/runs`      | `runs:read`      |
+  | `GET /api/schedules`                       | `schedules:read` |
+  | `GET /api/schedules/{id}`                  | `schedules:read` |
+  | `GET /api/schedules/{id}/runs`             | `schedules:read` |
+  | `GET /api/agents/{scope}/{name}/schedules` | `schedules:read` |
+
+  **No org role loses access.** Every role down to `viewer` holds both scopes,
+  and session auth derives permissions from the role, so the dashboard and any
+  cookie-authenticated client are unaffected.
+
+  **The change is breaking for API keys and OIDC clients**, which carry exactly
+  the scopes they were minted with, intersected with the creator's role — there
+  is no "narrow scope implies the rest" fallback. **Audit issued key scopes
+  before upgrading.**
+
+  Two callers are affected in a way worth naming, because both LAUNCH before
+  they read and so leave a billed run behind rather than failing cleanly:
+
+  - `appstrate run --remote` and `appstrate/github-action` trigger with
+    `agents:run`, then poll `GET /api/runs/{id}` and `…/logs`. A key narrowed
+    to `agents:run` now starts the run and 403s on every poll. The CLI's own
+    failure hint used to name `agents:run` alone and now names both scopes.
+  - `run_and_wait` over MCP dispatches the launch in-process with the caller's
+    own auth and then polls the same route; its tool description tells the
+    model not to fall back to `getRun`, so there was no recovery path. It now
+    pre-checks `runs:read` alongside `mcp:invoke` and refuses BEFORE launching.
+
+  `detect:breaking` reports these as non-breaking additions, and that is
+  correct about the OpenAPI _document_ — adding a `403` response is schema-
+  additive. It says nothing about runtime behaviour, which is why this entry
+  exists.
+
 - **BREAKING: `document` is now `file`, everywhere the concept is named
   (#1177) — and the compatibility layer the rename shipped with is gone.**
   `publish_document` accepted Markdown, HTML, source code, a PDF, an image —

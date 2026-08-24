@@ -945,6 +945,26 @@ function buildRunAndWaitTool(ctx: McpToolContext): AppstrateToolDefinition {
       emit(ctx, { tool: "run_and_wait", durationMs: performance.now() - start, outcome: "denied" });
       return textResult({ error: "Permission 'mcp:invoke' is required to launch runs." }, true);
     }
+    // Checked HERE, before the launch, because this tool's second half polls
+    // `GET /api/runs/{id}` through the same in-process dispatch — and
+    // `internal-dispatch.ts` is explicit that the marker "does not
+    // authenticate, elevate, or alter identity", so the caller's own scopes
+    // gate the poll. Without this, a credential holding `agents:run` but not
+    // `runs:read` provisions the container, incurs the LLM spend, and only THEN
+    // takes a 403 on the first poll: a billed orphan instead of a refusal. The
+    // description above also tells the model not to fall back to `getRun`, so
+    // there is no recovery path once the run is away.
+    if (!ctx.permissions.has("runs:read")) {
+      emit(ctx, { tool: "run_and_wait", durationMs: performance.now() - start, outcome: "denied" });
+      return textResult(
+        {
+          error:
+            "Permission 'runs:read' is required to wait for a run. Launching without it would " +
+            "start the run and then fail to read its status.",
+        },
+        true,
+      );
+    }
 
     const kind = asString(args.kind);
     if (kind !== "agent" && kind !== "inline") {
