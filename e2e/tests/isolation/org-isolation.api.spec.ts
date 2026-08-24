@@ -15,7 +15,6 @@ import {
   createApiKey,
   createApplication,
   createSchedule,
-  installPackageInApp,
 } from "../../helpers/seed.ts";
 
 // ═══════════════════════════════════════════════
@@ -162,12 +161,7 @@ test.describe("Cross-org application isolation", () => {
     expect(names).not.toContain("OrgA Custom App");
   });
 
-  test("OrgB cannot access OrgA application by ID", async ({
-    request,
-    ctxA,
-    orgClientA,
-    orgClientB,
-  }) => {
+  test("OrgB cannot access OrgA application by ID", async ({ orgClientA, orgClientB }) => {
     const app = await createApplication(orgClientA, "OrgA Private App");
     const res = await orgClientB.get(`/applications/${app.id}`);
     expect(res.status()).toBe(404);

@@ -65,7 +65,7 @@ test.describe("Cross-org run isolation", () => {
 appTest.describe("Cross-app run isolation", () => {
   appTest(
     "Run listing is app-scoped (custom app has no runs)",
-    async ({ request, apiClient, orgContext, orgOnlyClient }) => {
+    async ({ request, orgContext, orgOnlyClient }) => {
       const customApp = await createApplication(orgOnlyClient, `RunIso-${Date.now()}`);
       const customClient = createApiClient(request, {
         cookie: orgContext.auth.cookie,

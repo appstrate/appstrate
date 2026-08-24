@@ -545,7 +545,7 @@ export async function collectUntilSniParses(rawSocket: Socket, seed: Buffer): Pr
  *     ServerName{ uint8 name_type (0x00=host_name), uint16 host_len, opaque host_name }
  */
 export function extractSni(buf: Buffer): string | null {
-  let p = 0;
+  let p: number;
   // TLS record header
   if (buf.length < 5) return null;
   if (buf[0] !== 0x16) return null;

@@ -12,7 +12,6 @@ import {
   createAgent,
   createApplication,
   createWebhook,
-  createEndUser,
   createSchedule,
   installPackageInApp,
 } from "../../helpers/seed.ts";
@@ -65,7 +64,7 @@ test.describe("Application cascade deletion", () => {
     // Verify installed
     let res = await orgOnlyClient.get(`/applications/${customApp.id}/packages`);
     expect(res.status()).toBe(200);
-    let body = await res.json();
+    const body = await res.json();
     expect((body.data ?? []).length).toBeGreaterThan(0);
 
     // Delete the app
@@ -119,9 +118,7 @@ test.describe("Application cascade deletion", () => {
   });
 
   test("Deleting a custom app does not affect the default app's resources", async ({
-    request,
     apiClient,
-    orgContext,
     orgOnlyClient,
   }) => {
     // Create org-level webhook (not tied to any specific app)

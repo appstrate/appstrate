@@ -111,7 +111,14 @@ export default tseslint.config(
     // `scripts/**` or `**/test/**`, which this block does cover. See that block
     // for why.
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
-    files: ["**/src/**/*.{ts,tsx}", "**/test/**/*.ts", "scripts/**/*.ts", "*.ts"],
+    files: [
+      "**/src/**/*.{ts,tsx}",
+      "**/test/**/*.ts",
+      "**/scripts/**/*.ts",
+      "e2e/**/*.ts",
+      "runtime-pi/**/*.ts",
+      "*.ts",
+    ],
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.node,
@@ -156,15 +163,15 @@ export default tseslint.config(
     //     (`apps/api/src/modules/*/test/**`), and they are tests like any
     //     other.
     //
-    // NOT in scope, and it should be: `runtime-pi/**` (the agent image
-    // entrypoint + sidecar) has no `src/` segment, so it matches none of the
-    // general blocks either — eslint lints it for the Pi-SDK import guard and
-    // nothing else. Adding it here needs its own `languageOptions.parser`
-    // (espree cannot parse the TypeScript) and would newly surface every other
-    // rule over that directory, which is a change of its own, not a rider on
-    // this one.
-    files: ["apps/*/src/**/*.{ts,tsx}", "packages/*/src/**/*.{ts,tsx}"],
-    ignores: ["**/src/**/scripts/**", "**/src/**/test/**"],
+    // `runtime-pi/**` (the agent image entrypoint + sidecar) has no `src/`
+    // segment, so it used to match none of the general blocks and was linted
+    // for the Pi-SDK import guard and nothing else — over the credential-proxy
+    // and MITM surface. It is in scope now: the general block above lists it
+    // explicitly, which also gives it the TypeScript parser espree lacks, and
+    // this block covers it for `no-console`. The migration cost was 10
+    // findings, all style, none a defect.
+    files: ["apps/*/src/**/*.{ts,tsx}", "packages/*/src/**/*.{ts,tsx}", "runtime-pi/**/*.ts"],
+    ignores: ["**/src/**/scripts/**", "**/src/**/test/**", "runtime-pi/**/test/**"],
     rules: {
       "no-console": "error",
     },
@@ -178,7 +185,14 @@ export default tseslint.config(
     // `**/test/**` and `apps/cli/src/**` blocks that re-declare
     // `no-restricted-syntax`, so those still win (with the bans re-spread) for
     // the files they cover — including `scripts/test/**`.
-    files: ["**/src/**/*.{ts,tsx}", "**/test/**/*.ts", "scripts/**/*.ts", "*.ts"],
+    files: [
+      "**/src/**/*.{ts,tsx}",
+      "**/test/**/*.ts",
+      "**/scripts/**/*.ts",
+      "e2e/**/*.ts",
+      "runtime-pi/**/*.ts",
+      "*.ts",
+    ],
     rules: {
       "no-restricted-syntax": ["error", ...ZOD4_STRING_FORMAT_BANS],
     },

@@ -423,11 +423,15 @@ function openFileStream(absPath: string): ReadableStream<Uint8Array> {
   if (bunGlobal && typeof bunGlobal.file === "function") {
     return bunGlobal.file(absPath).stream();
   }
-  // Lazy load to avoid pulling node:fs into pure-Bun runtimes.
+  // Lazy load to avoid pulling node:fs into pure-Bun runtimes. `require` and
+  // not `await import`: this function is synchronous and its callers depend
+  // on that, so the async form is a signature change, not a style change.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const mod = require("node:fs") as typeof import("node:fs");
   const stream = mod.createReadStream(absPath);
   // node:stream Readable.toWeb gives a ReadableStream<Buffer | string>;
   // we know the source is binary so the cast is safe.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { Readable } = require("node:stream") as typeof import("node:stream");
   return Readable.toWeb(stream) as unknown as ReadableStream<Uint8Array>;
 }
