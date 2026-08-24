@@ -41,20 +41,21 @@ function toContent(message: UIMessage): Record<string, unknown> {
  * writer of record.
  */
 export async function ensureSession(id: string, orgId: string, userId: string): Promise<void> {
-  await db
+  // The id is client-minted, so a caller could send an id that already belongs
+  // to another tenant; a plain `DO NOTHING` would leave that row intact and we'd
+  // then persist a message into it. `DO UPDATE … SET id = id` is a no-op write
+  // that still makes the conflicting row visible to `RETURNING`, so the insert
+  // and the ownership check are ONE round trip instead of two — this sits on the
+  // pre-inference path of every turn. Refuse with 404, not 403, so we don't
+  // reveal that the id exists for someone else.
+  const [row] = await db
     .insert(chatSessions)
     .values({ id, orgId, userId, title: null })
-    .onConflictDoNothing({ target: chatSessions.id });
-  // The id is client-minted, so a caller could send an id that already belongs
-  // to another tenant; onConflictDoNothing would leave that row intact and we'd
-  // then persist a message into it. Confirm ownership after the upsert (the row
-  // exists by now) and refuse otherwise — 404, not 403, so we don't reveal that
-  // the id exists for someone else.
-  const [row] = await db
-    .select({ orgId: chatSessions.orgId, userId: chatSessions.userId })
-    .from(chatSessions)
-    .where(eq(chatSessions.id, id))
-    .limit(1);
+    .onConflictDoUpdate({
+      target: chatSessions.id,
+      set: { id: sql`${chatSessions.id}` },
+    })
+    .returning({ orgId: chatSessions.orgId, userId: chatSessions.userId });
   if (!row || row.orgId !== orgId || row.userId !== userId) {
     throw notFound("Chat session not found");
   }
@@ -223,16 +224,43 @@ async function touchSession(
       ...(title !== session.title ? { title } : {}),
     })
     .where(eq(chatSessions.id, sessionId));
-  await notifySessionUpdate(sessionId, session.orgId, session.userId);
+  // Detached on purpose. `notifySessionUpdate` is a `pg_notify` round trip whose
+  // only job is telling connected clients to refetch the sidebar — `realtime.ts`
+  // documents it as best-effort and already swallows its own failures. Awaiting
+  // it put a round trip on the pre-inference path of every turn to buy nothing:
+  // a lost signal delays a refetch, it does not lose data. The `void` + `catch`
+  // keeps a rejection from surfacing as an unhandled rejection.
+  void notifySessionUpdate(sessionId, session.orgId, session.userId).catch(() => {});
 }
+
+/**
+ * How many of a session's earliest USER messages to inspect for a title.
+ *
+ * The loop below skips a user message with no text (one carrying only an
+ * attachment, say), so this cannot be 1. It used to be unbounded — the query
+ * read every message of the session, with no role filter — and it re-ran on
+ * every turn for as long as `title` stayed null, i.e. on the FIRST turn of every
+ * conversation, the one whose latency the user judges. Ten is far past the point
+ * where a conversation that has not yielded a title is going to.
+ */
+const TITLE_SCAN_LIMIT = 10;
 
 /** First user message's text, trimmed to 60 chars (57 + ellipsis). */
 async function deriveTitle(sessionId: string): Promise<string | null> {
   const rows = await db
     .select({ content: chatMessages.content })
     .from(chatMessages)
-    .where(eq(chatMessages.sessionId, sessionId))
-    .orderBy(chatMessages.seq);
+    .where(
+      and(
+        eq(chatMessages.sessionId, sessionId),
+        // Role lives inside the jsonb payload; filtering here rather than in the
+        // loop is what keeps the scan off the assistant turns, which are both
+        // the majority of rows and the largest (tool calls and results).
+        sql`${chatMessages.content}->>'role' = 'user'`,
+      ),
+    )
+    .orderBy(chatMessages.seq)
+    .limit(TITLE_SCAN_LIMIT);
   for (const row of rows) {
     const content = row.content as { role?: string; parts?: unknown[] };
     if (content?.role !== "user" || !Array.isArray(content.parts)) continue;

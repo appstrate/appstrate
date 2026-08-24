@@ -147,4 +147,39 @@ describe("chat session read-state", () => {
     const other = await createTestContext({ orgSlug: "otherorg" });
     expect(await markRead(id, authHeaders(other))).toBe(404);
   });
+
+  /**
+   * The title is derived by a query that filters on the role INSIDE the jsonb
+   * payload (`content->>'role'`) and bounds the scan. A wrong operator there
+   * returns no rows and the title silently stays null forever, so it needs an
+   * assertion rather than a green suite that never looked.
+   */
+  it("derives the title from the first user message, skipping assistant turns", async () => {
+    const id = await createSession();
+    await persistUserMessage(id, uiMessage("u1", "user", "Combien de runs ce mois-ci ?"));
+    await persistAssistantMessage(id, uiMessage("a1", "assistant", "Quarante-deux."), "u1");
+    await persistUserMessage(id, uiMessage("u2", "user", "Et le mois dernier ?"), "a1");
+
+    const res = await app.request(`/api/chat/sessions/${id}`, { headers: authHeaders(ctx) });
+    expect(res.status).toBe(200);
+    expect((await res.json()) as { title: string | null }).toMatchObject({
+      title: "Combien de runs ce mois-ci ?",
+    });
+  });
+
+  it("skips a user message with no text and titles from the next one", async () => {
+    const id = await createSession();
+    // Only an attachment part: `uiMessageText` yields "" and the loop must go on.
+    await persistUserMessage(id, {
+      id: "u1",
+      role: "user",
+      parts: [{ type: "file", url: "appfile://file_1", mediaType: "text/plain" }],
+    } as unknown as UIMessage);
+    await persistUserMessage(id, uiMessage("u2", "user", "Résume ce fichier"), "u1");
+
+    const res = await app.request(`/api/chat/sessions/${id}`, { headers: authHeaders(ctx) });
+    expect((await res.json()) as { title: string | null }).toMatchObject({
+      title: "Résume ce fichier",
+    });
+  });
 });
