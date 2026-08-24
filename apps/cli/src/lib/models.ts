@@ -10,6 +10,7 @@
  * the real upstream credentials.
  */
 
+import { LLM_PROXY_ROUTES } from "@appstrate/runner-pi";
 import type { ModelCost } from "@appstrate/core/module";
 import { apiList } from "./api.ts";
 
@@ -100,8 +101,8 @@ export async function listModelPresets(profileName: string): Promise<ModelPreset
  * the real upstream key from server-side storage, so the placeholder
  * never reaches Anthropic.
  */
-export const PROXY_SUPPORTED_APIS = new Set<string>([
-  "openai-completions",
-  "anthropic-messages",
-  "mistral-conversations",
-]);
+export const PROXY_SUPPORTED_APIS: ReadonlySet<string> = new Set<string>(
+  // Derived from the proxy's own route table rather than restated: a shape the
+  // platform stops routing must not keep looking supported here.
+  Object.keys(LLM_PROXY_ROUTES),
+);

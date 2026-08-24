@@ -23,6 +23,18 @@ export {
 // outside the package actually imports it from `@appstrate/runner-pi`.
 export { deriveProviderFromApi, derivePiProvider, PROVIDER_BY_API } from "./provider-map.ts";
 
+// The llm-proxy's path convention, declared once. Read by `apps/api` to mount
+// the proxy routes, and by the chat engine + the CLI to build the base URL a
+// vendor client is pointed at — the three used to spell it out separately.
+export {
+  LLM_PROXY_ROUTES,
+  isProxiedApiShape,
+  llmProxyBaseUrl,
+  llmProxyUrlPath,
+  type LlmProxyRoute,
+  type ProxiedApiShape,
+} from "./llm-proxy-routes.ts";
+
 // Warms `@earendil-works/pi-coding-agent` (dynamic import) so the container
 // entrypoint can overlap its ~200ms eval with network-bound provisioning
 // instead of paying it on the pre-session boot path. `Type` (pi-ai, cheap) is a

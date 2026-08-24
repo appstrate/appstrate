@@ -22,7 +22,12 @@
  */
 
 import type { Api, Model } from "../../lib/pi-sdk.ts";
-import { deriveProviderFromApi, derivePiProvider, PROVIDER_BY_API } from "@appstrate/runner-pi";
+import {
+  deriveProviderFromApi,
+  derivePiProvider,
+  llmProxyBaseUrl,
+  PROVIDER_BY_API,
+} from "@appstrate/runner-pi";
 import { ANTHROPIC_OAUTH_PLACEHOLDER_API_KEY } from "@appstrate/core/oauth-bearer-swap";
 import { listModelPresets, PROXY_SUPPORTED_APIS, type ModelPreset } from "../../lib/models.ts";
 
@@ -272,26 +277,13 @@ function pickPreset(presets: ModelPreset[], requestedId?: string): ModelPreset {
 
 function buildProxyBaseUrl(instance: string, api: string): string {
   const trimmed = instance.replace(/\/+$/, "");
-  // Each SDK appends its own canonical suffix to `baseURL`; we stop one
-  // segment short so the suffix lands on the platform's
-  // `/api/llm-proxy/<api>/v1/…` route.
-  //   - OpenAI SDK appends `/chat/completions` → baseUrl carries `/v1`.
-  //   - Anthropic SDK appends `/v1/messages`   → baseUrl is the bare
-  //     route prefix (no `/v1`).
-  //   - Mistral SDK appends `/v1/chat/completions` → baseUrl is the bare
-  //     route prefix (no `/v1`). Despite the protocol family name
-  //     `mistral-conversations`, pi-ai uses Mistral's `chat.stream` which
-  //     hits `/v1/chat/completions`, not the Beta `/v1/conversations`
-  //     agentic API.
-  if (api === "openai-completions") {
-    return `${trimmed}/api/llm-proxy/openai-completions/v1`;
-  }
-  if (api === "anthropic-messages") {
-    return `${trimmed}/api/llm-proxy/anthropic-messages`;
-  }
-  if (api === "mistral-conversations") {
-    return `${trimmed}/api/llm-proxy/mistral-conversations`;
-  }
+  // The per-SDK path convention lives once, in `LLM_PROXY_ROUTES`
+  // (`@appstrate/runner-pi`) — the same table the platform mounts its proxy
+  // routes from. This used to spell the three base URLs out again, with its own
+  // copy of the comment explaining why `/v1` sits in the base for OpenAI and in
+  // the suffix for the other two.
+  const baseUrl = llmProxyBaseUrl(trimmed, api);
+  if (baseUrl) return baseUrl;
   throw new ModelResolutionError(
     `CLI preset mode does not yet route protocol "${api}"`,
     `Supported today: ${Array.from(PROXY_SUPPORTED_APIS).join(", ")}. Pick a compatible preset or use --model-source env.`,
