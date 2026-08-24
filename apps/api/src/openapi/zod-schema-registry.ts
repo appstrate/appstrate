@@ -72,6 +72,7 @@ import {
   githubImportSchema,
   forkSchema,
   packageJsonCreateSchema,
+  packageJsonCreateWithContentSchema,
   packageJsonUpdateSchema,
   createVersionBodySchema,
 } from "../routes/packages.ts";
@@ -414,10 +415,15 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   // schema backs several paths. Registering each path individually is what
   // makes the loop's fan-out visible to the gate: a package type whose spec
   // body drifts from the shared schema fails on its own line.
+  //
+  // Create is NOT one schema for all types: `agent` and `skill` carry
+  // `requireContent`, so their body is `packageJsonCreateWithContentSchema`
+  // and the spec must publish `content` as required. `integration` has an
+  // optional content file and keeps the looser body.
   {
     method: "POST",
     path: "/api/packages/agents",
-    jsonSchema: toJsonSchema(packageJsonCreateSchema),
+    jsonSchema: toJsonSchema(packageJsonCreateWithContentSchema),
     description: "Create a draft agent package",
   },
   {
@@ -429,7 +435,7 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   {
     method: "POST",
     path: "/api/packages/skills",
-    jsonSchema: toJsonSchema(packageJsonCreateSchema),
+    jsonSchema: toJsonSchema(packageJsonCreateWithContentSchema),
     description: "Create a draft skill package",
   },
   {

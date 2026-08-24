@@ -58,10 +58,10 @@ export class LockedInputFieldError extends Error {
  * Reads the bundle's `input.schema` off disk and hands it, the stored editor
  * layer and the caller's values to the platform's own resolver
  * (`@appstrate/core/input-resolution`) — the same code, in the same order,
- * that `apps/api` runs on a hosted launch. A local run has exactly ONE
- * overlay above the editor layer: the caller. The platform has two, because
- * it also resolves a scheduled trigger's frozen values, and a local run has
- * no schedules to resolve.
+ * that `apps/api` runs on a hosted launch. The overlay above the editor layer
+ * is always the caller here: a local run has no schedules, so the platform's
+ * other overlay origin (a scheduled trigger's frozen values) has no local
+ * counterpart.
  *
  * A property with no value at any layer stays absent rather than being
  * materialised as `null`. Nothing downstream enforces `required` on its own —
@@ -90,7 +90,7 @@ export function resolveLocalInput(
     ...(schema ? { schema } : {}),
     editorDefaults: stored?.values,
     lockedFields: stored?.lockedFields,
-    overlays: [{ origin: "input", values: callerInput }],
+    overlay: { origin: "input", values: callerInput },
     lockedFieldError: (field) => new LockedInputFieldError(field),
   });
 }

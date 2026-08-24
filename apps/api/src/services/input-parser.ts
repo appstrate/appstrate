@@ -618,7 +618,7 @@ export async function parseRequestInput(
     schema: inputSchema,
     editorDefaults: opts?.editorDefaults,
     lockedFields: opts?.lockedFields,
-    overlays: [{ origin: "input", values: input }],
+    overlay: { origin: "input", values: input },
   });
   let uploadedFiles: FileReference[] = [];
   let pendingFiles: PendingUploadMaterialization[] = [];

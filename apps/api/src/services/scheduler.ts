@@ -602,7 +602,7 @@ export async function triggerScheduledRun(
         ...(inputSchema ? { schema: asJSONSchemaObject(inputSchema) } : {}),
         editorDefaults: packageSettings.values,
         lockedFields: packageSettings.locked,
-        overlays: [{ origin: "schedule input", values: input }],
+        overlay: { origin: "schedule input", values: input },
       });
     } catch (err) {
       if (err instanceof ApiError) {

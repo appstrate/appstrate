@@ -14,13 +14,13 @@
  *
  *   author default   (manifest `input.schema` JSON Schema `default` keyword)
  *     -> editor default   (`application_packages.input_settings.values`)
- *       -> schedule values   (`package_schedules.input`)
- *         -> run-time caller input   <- REFUSED on a locked field
+ *       -> the overlay   <- REFUSED on a locked field
  *
- * The last two are `overlays`, listed by each call site: the schedule paths
- * pass both, a manual launch passes only the caller's input, and the inline
- * preflight — which has neither an application row nor a schedule — passes the
- * caller alone with no locks at all.
+ * The top layer is the single `overlay`, and which source fills it is what
+ * each call site declares: a manual launch and the inline preflight pass the
+ * run-time caller's input (`origin: "input"`), the schedule paths pass the
+ * schedule's frozen values (`origin: "schedule input"`) because a cron fire
+ * has no caller. No path has both.
  */
 
 import { ApiError } from "../lib/errors.ts";
@@ -65,7 +65,7 @@ export function assertFieldsUnlocked(
 /**
  * Collapse the layers into the input a run executes with.
  *
- * Throws `ApiError(400, "locked_input_field")` when an overlay — the caller's
+ * Throws `ApiError(400, "locked_input_field")` when the overlay — the caller's
  * input, or a schedule's frozen values — names a locked field.
  */
 export function resolveEffectiveInput(

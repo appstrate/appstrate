@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the shared input resolution: the layer merge, the ordered
- * overlays that let a host declare exactly the sources it has, and the
+ * Unit tests for the shared input resolution: the layer merge, the single
+ * overlay whose origin lets a host declare which source it has, and the
  * host-injected refusal.
  */
 
@@ -40,14 +40,11 @@ const lockedFieldError = (field: string, origin: InputOverlayOrigin) =>
   new TestLockedFieldError(field, origin);
 
 describe("resolveEffectiveInput — layer precedence", () => {
-  it("applies author < editor < overlays in listed order, last one wins", () => {
+  it("applies author < editor < overlay, last one wins", () => {
     const resolved = resolveEffectiveInput({
       schema: SCHEMA,
       editorDefaults: { folder: "archive", limit: 50 },
-      overlays: [
-        { origin: "schedule input", values: { limit: 100, subject: "weekly" } },
-        { origin: "input", values: { subject: "ad-hoc" } },
-      ],
+      overlay: { origin: "input", values: { limit: 100, subject: "ad-hoc" } },
       lockedFieldError,
     });
 
@@ -56,40 +53,50 @@ describe("resolveEffectiveInput — layer precedence", () => {
       tone: "neutral",
       // editor beats author
       folder: "archive",
-      // the first overlay beats the editor
+      // the overlay beats the editor
       limit: 100,
-      // the second overlay beats the first
+      // the overlay is the only layer that supplies it
       subject: "ad-hoc",
     });
   });
 
-  it("resolves with no overlays at all — author + editor only", () => {
-    expect(resolveEffectiveInput({ schema: SCHEMA, overlays: [], lockedFieldError })).toEqual({
+  it("resolves an overlay that supplied nothing — author + editor only", () => {
+    expect(
+      resolveEffectiveInput({
+        schema: SCHEMA,
+        overlay: { origin: "input", values: undefined },
+        lockedFieldError,
+      }),
+    ).toEqual({
       tone: "neutral",
       folder: "inbox",
       limit: 10,
     });
   });
 
-  it("resolves a host that has ONE overlay (a local run: no schedules)", () => {
+  it("resolves a scheduled fire the same way — only the origin differs", () => {
     const resolved = resolveEffectiveInput({
       schema: SCHEMA,
       editorDefaults: { folder: "archive" },
-      overlays: [{ origin: "input", values: { folder: "sent" } }],
+      overlay: { origin: "schedule input", values: { folder: "sent" } },
       lockedFieldError,
     });
     expect(resolved.folder).toBe("sent");
   });
 
   it("leaves a property with no value at any layer ABSENT, not null", () => {
-    const resolved = resolveEffectiveInput({ schema: SCHEMA, overlays: [], lockedFieldError });
+    const resolved = resolveEffectiveInput({
+      schema: SCHEMA,
+      overlay: { origin: "input", values: undefined },
+      lockedFieldError,
+    });
     expect("subject" in resolved).toBe(false);
   });
 
   it("keeps a caller value that is null or empty — only an absent key falls through", () => {
     const resolved = resolveEffectiveInput({
       schema: SCHEMA,
-      overlays: [{ origin: "input", values: { tone: "" } }],
+      overlay: { origin: "input", values: { tone: "" } },
       lockedFieldError,
     });
     expect(resolved.tone).toBe("");
@@ -104,7 +111,7 @@ describe("resolveEffectiveInput — locked fields", () => {
         schema: SCHEMA,
         editorDefaults: { folder: "archive" },
         lockedFields: ["folder"],
-        overlays: [{ origin: "input", values: { folder: "sent" } }],
+        overlay: { origin: "input", values: { folder: "sent" } },
         lockedFieldError,
       });
     } catch (err) {
@@ -115,15 +122,12 @@ describe("resolveEffectiveInput — locked fields", () => {
     expect((caught as TestLockedFieldError).origin).toBe("input");
   });
 
-  it("names the offending overlay's own origin, not the topmost one", () => {
+  it("names the overlay's own origin, so the refusal points at the schedule", () => {
     let caught: unknown;
     try {
       resolveEffectiveInput({
         lockedFields: ["folder"],
-        overlays: [
-          { origin: "schedule input", values: { folder: "sent" } },
-          { origin: "input", values: { subject: "hello" } },
-        ],
+        overlay: { origin: "schedule input", values: { folder: "sent" } },
         lockedFieldError,
       });
     } catch (err) {
@@ -137,7 +141,7 @@ describe("resolveEffectiveInput — locked fields", () => {
       schema: SCHEMA,
       editorDefaults: { folder: "archive" },
       lockedFields: ["folder", "tone"],
-      overlays: [{ origin: "input", values: { subject: "hello" } }],
+      overlay: { origin: "input", values: { subject: "hello" } },
       lockedFieldError,
     });
     expect(resolved.folder).toBe("archive");

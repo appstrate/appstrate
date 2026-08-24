@@ -721,7 +721,9 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["manifest"],
+              // `content` is mandatory on create for every type whose content
+              // file is (`agent`, `skill`) — the handler refuses a blank one.
+              required: ["manifest", "content"],
               properties: {
                 manifest: {
                   type: "object",
@@ -731,7 +733,8 @@ export const packagesPaths = {
                 },
                 content: {
                   type: "string",
-                  description: "SKILL.md content (markdown with YAML frontmatter).",
+                  description:
+                    "SKILL.md content (markdown with YAML frontmatter). Must not be blank.",
                 },
               },
             },
@@ -1144,10 +1147,15 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["manifest"],
+              // `content` is mandatory on create for every type whose content
+              // file is (`agent`, `skill`) — the handler refuses a blank one.
+              required: ["manifest", "content"],
               properties: {
                 manifest: { $ref: "#/components/schemas/AgentManifest" },
-                content: { type: "string", description: "Agent prompt (markdown)" },
+                content: {
+                  type: "string",
+                  description: "Agent prompt (markdown). Must not be blank.",
+                },
               },
             },
           },

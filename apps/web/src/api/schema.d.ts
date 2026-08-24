@@ -7440,7 +7440,7 @@ export interface operations {
                      * @description ISO 8601 datetime. Must be in the future if provided.
                      */
                     expiresAt?: string | null;
-                    /** @description Permission scopes for the key (e.g. `agents:read`, `agents:run`). Omit or pass empty array for full role access. Invalid or unauthorized scopes are silently filtered. */
+                    /** @description Permission scopes for the key (e.g. `agents:read`, `agents:run`). Omit or pass an empty array for full role access. A scope no API key can carry — unknown, or session-only such as `org:delete` — is rejected with a 400 naming it; a scope the creator's own role does not hold is dropped, since a key cannot be granted more than its creator has. `GET /api/api-keys/available-scopes` lists what the caller can grant. */
                     scopes?: string[];
                 };
             };
@@ -15168,8 +15168,8 @@ export interface operations {
             content: {
                 "application/json": {
                     manifest: components["schemas"]["AgentManifest"];
-                    /** @description Agent prompt (markdown) */
-                    content?: string;
+                    /** @description Agent prompt (markdown). Must not be blank. */
+                    content: string;
                 };
             };
         };
@@ -16759,8 +16759,8 @@ export interface operations {
                     manifest: {
                         [key: string]: unknown;
                     };
-                    /** @description SKILL.md content (markdown with YAML frontmatter). */
-                    content?: string;
+                    /** @description SKILL.md content (markdown with YAML frontmatter). Must not be blank. */
+                    content: string;
                 };
             };
         };

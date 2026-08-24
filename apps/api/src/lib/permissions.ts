@@ -36,6 +36,7 @@
  * @see packages/core/src/permissions.ts (the extension surface)
  */
 
+import { invalidRequest } from "./errors.ts";
 import {
   type ModuleResources,
   type CoreResource,
@@ -332,22 +333,43 @@ export function roleScopes(role: OrgRole): ReadonlySet<string> {
 }
 
 /**
- * Validate and filter API key scopes.
+ * Validate API key scopes against the API-key allowlist, then narrow them to
+ * the creator's own authority.
  *
- * Returns only the scopes that are:
- * 1. Valid permission strings (core or module-contributed)
- * 2. Allowed for API keys (not session-only)
- * 3. Within the creator's own permissions (based on their role)
+ * The two rules are deliberately different in kind:
+ *
+ *  - A scope that is not API-key-grantable — a typo, a retired spelling, or a
+ *    session-only permission such as `org:delete` — is a REFUSAL (400 naming
+ *    the offending value). It is not a request the server can honour in any
+ *    narrower form, and dropping it mints a key that silently lacks the
+ *    access the caller asked for. `POST /api/api-keys {"scopes":["oops"]}`
+ *    answering 201 with `scopes: []` is a key that 403s on everything.
+ *  - A scope the creator's own role does not hold is FILTERED. "You cannot
+ *    delegate more than you have" is a rule, not a mistake, and the
+ *    scopes-omitted default (`validateScopes([...getApiKeyAllowedScopes()])`)
+ *    depends on it: it hands in the full allowlist precisely so the role
+ *    narrows it.
  *
  * The type predicate re-narrows the filtered strings to `Permission` — the
  * runtime invariant is that survival in the filter proves membership in
- * both `allowed` and the creator's role set, both of which are (logically)
- * subsets of the `Permission` union.
+ * both `allowed` (asserted above) and the creator's role set, both of which
+ * are (logically) subsets of the `Permission` union.
+ *
+ * @throws ApiError 400 `invalid_request` when a scope is not grantable to an
+ *   API key.
  */
 export function validateScopes(scopes: string[], creatorRole: OrgRole): Permission[] {
   const creatorPerms = roleScopes(creatorRole);
   const allowed = getApiKeyAllowedScopes();
-  return scopes.filter((s): s is Permission => allowed.has(s) && creatorPerms.has(s));
+  const ungrantable = scopes.filter((s) => !allowed.has(s));
+  if (ungrantable.length > 0) {
+    throw invalidRequest(
+      `Unknown or non-grantable API key scope(s): ${ungrantable.join(", ")}. ` +
+        `See GET /api/api-keys/available-scopes for the scopes this role can grant.`,
+      "scopes",
+    );
+  }
+  return scopes.filter((s): s is Permission => creatorPerms.has(s));
 }
 
 /**

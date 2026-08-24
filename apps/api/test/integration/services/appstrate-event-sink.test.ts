@@ -100,12 +100,27 @@ describe("persistRunEvent", () => {
 
   // `file.published` / `file_id` is the ONE published-file spelling. The
   // pre-#1177 `document.published` / `document_id` twin is gone from the sink.
-  // Dropping it costs nothing: the only producer of this event is core's
-  // `filePublishedEvent`, bundled into the very artifact that also decides what
-  // to forward (`reEmitRuntimeToolEvents`) — producer and acceptor are the same
-  // build, so there is no version boundary between them for a retired spelling
-  // to cross. The retired name can now only come from a forged upstream event,
-  // which is exactly what the dispatcher's `default:` drop is for.
+  //
+  // The "producer and acceptor are the same build, so there is no version
+  // boundary" argument does NOT cover this drop, and it is worth writing down
+  // because it reads as if it does. That argument belongs to the CONTAINER-side
+  // acceptor `reEmitRuntimeToolEvents`, which core bundles into the runtime
+  // image alongside the producer `filePublishedEvent`. `persistRunEvent` is the
+  // PLATFORM-side sink — a separate artifact, reached over HTTP by whatever
+  // image the operator happens to have launched — so a version boundary very
+  // much exists across it.
+  //
+  // What makes the drop safe across that boundary is the image-tag rule plus
+  // the event's own precondition. `findRuntimeImageTagMismatch`, enforced by
+  // the env schema at boot, refuses to start a platform whose `APP_VERSION`
+  // disagrees with either runtime image tag. Where that rule is blind — its own
+  // carve-outs (see `@appstrate/core/image-ref`), and containers already
+  // running when the platform restarted, which a boot check cannot see at all —
+  // a pre-#1177 container still cannot reach here with the retired name: it
+  // emits `document.published` only after a SUCCESSFUL
+  // `POST /api/runs/:id/documents`, and that route 404s now. The dispatcher's
+  // `default:` drop is the backstop for a forged event, not the argument for
+  // removing the case.
   it("ingests file.published and drops the retired document.published", async () => {
     await persist(
       event("file.published", {

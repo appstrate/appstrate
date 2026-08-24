@@ -216,6 +216,24 @@ export const packageJsonCreateSchema = z.object({
   content: z.string().optional(),
 });
 
+/**
+ * The create body of a type whose content file is MANDATORY — `agent` and
+ * `skill`, i.e. every {@link PackageRouteConfig} carrying `requireContent`.
+ *
+ * The requirement is spelled here rather than as a handler check so the
+ * published body can state it: the create schemas back the spec's request
+ * bodies through `zod-schema-registry.ts`, and a handler-only rule left
+ * `POST /api/packages/agents {"manifest": …}` documented as valid and
+ * answered with a 400. Blank-but-present content is refused by the same rule
+ * — an all-whitespace prompt is the empty prompt with extra characters — and
+ * it is a `refine` rather than `.min(1)` because "not blank" has no JSON
+ * Schema spelling, so the published body says `required` and nothing more.
+ */
+export const packageJsonCreateWithContentSchema = z.object({
+  manifest: z.record(z.string(), z.unknown()),
+  content: z.string().refine((v) => v.trim().length > 0, "Content cannot be empty"),
+});
+
 export const packageJsonUpdateSchema = z.object({
   manifest: z.record(z.string(), z.unknown()).optional(),
   content: z.string().optional(),
@@ -480,7 +498,12 @@ interface PackageRouteConfig {
   requireMutableForVersionOps?: boolean;
   /** If true, this type uses JSON body for create (not ZIP upload parsing). */
   jsonBodyCreate?: boolean;
-  /** If true, content is required when creating via JSON body. */
+  /**
+   * If true, this type's content file is mandatory: create refuses a body
+   * without a non-blank `content` (through
+   * {@link packageJsonCreateWithContentSchema}, so the published body says so
+   * too), and update refuses a save that would leave the stored content blank.
+   */
   requireContent?: boolean;
   /** Custom GET detail handler, replaces makeGetHandler when provided. */
   getHandler?: (c: Context<AppEnv>) => Promise<Response>;
@@ -593,7 +616,15 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
     // JSON body create path: { manifest, content?, source? }
     if (rcfg.jsonBodyCreate) {
-      const body = await readJsonBody(c, packageJsonCreateSchema);
+      // The two create bodies differ only in whether `content` is mandatory,
+      // which is what `requireContent` means. Selecting the schema here — as
+      // opposed to re-checking the parsed body afterwards — is what lets the
+      // spec publish the difference: `zod-schema-registry.ts` registers
+      // whichever of the two schemas this package type's route uses.
+      const body = await readJsonBody(
+        c,
+        rcfg.requireContent ? packageJsonCreateWithContentSchema : packageJsonCreateSchema,
+      );
 
       const manifest = body.manifest;
       const content = body.content ?? "";
@@ -604,10 +635,6 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         orgId,
         "author",
       );
-
-      if (rcfg.requireContent && !content.trim()) {
-        throw invalidRequest("Content cannot be empty", "content");
-      }
 
       if (rcfg.validateContent) {
         const validation = rcfg.validateContent(content);

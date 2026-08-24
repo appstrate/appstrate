@@ -14,23 +14,25 @@
  *
  *   author default   (manifest `input.schema` JSON Schema `default` keyword)
  *     -> editor default   (`application_packages.input_settings.values`)
- *       -> one overlay per further source, in the order the caller lists them
+ *       -> the overlay   (the one source of values this launch carries)
  *
  * The merge is a shallow per-property overlay: a layer either supplies a
  * top-level property or it does not. There is no deep merge — a property's
  * value is owned by exactly one layer, which is what makes "which layer did
  * this come from" answerable at every call site.
  *
- * ## Why the overlays are a list and not two named fields
+ * ## Why the overlay names its origin instead of being a named field
  *
- * The two hosts do NOT have the same number of layers. The platform resolves
- * a scheduled trigger's frozen values (`package_schedules.input`) UNDER the
- * caller's launch input; the CLI (`appstrate run --local`) has no schedules at
- * all, so its topmost layer is the caller and nothing else. A named
- * `scheduleValues` field would leave the CLI passing a field it can never fill
- * — a shape that lies about what a local run is made of. Each host instead
- * lists exactly the overlays it has, and each one names its own origin so the
- * refusal below can quote it.
+ * Every launch carries exactly ONE source of values above the editor layer,
+ * but not the same one: a manual launch (and every local `appstrate run`)
+ * carries the caller's input, while a scheduled fire carries the schedule's
+ * frozen values (`package_schedules.input`) and no caller input at all —
+ * nobody is at the keyboard when the cron ticks. A pair of named
+ * `callerInput` / `scheduleValues` fields would leave every call site passing
+ * one and omitting the other, and the CLI passing a field it can never fill.
+ * One `overlay` carrying its own {@link InputOverlayOrigin} says the same
+ * thing once, and lets the refusal below quote the source the caller must
+ * actually edit.
  *
  * ## Why the error is injected
  *
@@ -51,8 +53,8 @@ import { authorDefaults, type JSONSchemaObject } from "./form.ts";
 export type InputOverlayOrigin = "schedule input" | "input";
 
 /**
- * One source of values layered ABOVE the editor's stored values, and therefore
- * subject to the editor's locks.
+ * The one source of values layered ABOVE the editor's stored values, and
+ * therefore subject to the editor's locks.
  */
 export interface InputOverlay {
   /** Named in the refusal when this overlay sets a locked field. */
@@ -78,9 +80,9 @@ export interface InputLayers {
   editorDefaults?: Record<string, unknown> | undefined;
   /** `application_packages.input_settings.locked` — fields no overlay may set. */
   lockedFields?: readonly string[] | undefined;
-  /** Sources above the editor layer, lowest precedence first. */
-  overlays: readonly InputOverlay[];
-  /** Host-supplied error for a locked field an overlay tried to set. */
+  /** The source above the editor layer — see {@link InputOverlay}. */
+  overlay: InputOverlay;
+  /** Host-supplied error for a locked field the overlay tried to set. */
   lockedFieldError: LockedFieldErrorFactory;
 }
 
@@ -107,22 +109,17 @@ export function assertFieldsUnlocked(
 /**
  * Collapse the layers into the input a run executes with.
  *
- * Throws whatever `lockedFieldError` builds when an overlay names a locked
+ * Throws whatever `lockedFieldError` builds when the overlay names a locked
  * field.
  */
 export function resolveEffectiveInput(layers: InputLayers): Record<string, unknown> {
-  for (const overlay of layers.overlays) {
-    assertFieldsUnlocked(overlay, layers.lockedFields, layers.lockedFieldError);
-  }
+  assertFieldsUnlocked(layers.overlay, layers.lockedFields, layers.lockedFieldError);
 
-  const resolved: Record<string, unknown> = {
+  return {
     ...authorDefaults(layers.schema),
     ...(layers.editorDefaults ?? {}),
+    ...(layers.overlay.values ?? {}),
   };
-  for (const overlay of layers.overlays) {
-    Object.assign(resolved, overlay.values ?? {});
-  }
-  return resolved;
 }
 
 /**

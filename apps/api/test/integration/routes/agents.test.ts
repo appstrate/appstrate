@@ -647,7 +647,7 @@ describe("Agents API", () => {
         }),
         editorDefaults: stored.values,
         lockedFields: stored.locked,
-        overlays: [{ origin: "schedule input", values: row.input as Record<string, unknown> }],
+        overlay: { origin: "schedule input", values: row.input as Record<string, unknown> },
       });
       // The locked field resolves from the CURRENT editor value.
       expect(effective).toEqual({ folder: "archive" });

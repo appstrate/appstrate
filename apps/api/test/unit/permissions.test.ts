@@ -108,17 +108,31 @@ describe("validateScopes", () => {
     expect(memberResult).not.toContain("agents:write");
   });
 
-  it("rejects session-only permissions", () => {
+  it("throws on session-only permissions instead of dropping them", () => {
+    // org/members are real permissions but session-only: no API key can ever
+    // carry them, so asking for one is a caller error, not a narrowing.
     const scopes = ["org:read", "org:delete", "members:invite"];
-    const ownerResult = validateScopes(scopes, "owner");
-    // org/members are session-only, excluded from API keys
-    expect(ownerResult).toHaveLength(0);
+    expect(() => validateScopes(scopes, "owner")).toThrow(/org:read, org:delete, members:invite/);
   });
 
-  it("rejects invalid/unknown scope strings", () => {
+  it("throws on invalid/unknown scope strings, naming every offender", () => {
     const scopes = ["invalid:scope", "not-a-permission", ""];
-    const result = validateScopes(scopes, "owner");
-    expect(result).toHaveLength(0);
+    let thrown: unknown;
+    try {
+      validateScopes(scopes, "owner");
+    } catch (err) {
+      thrown = err;
+    }
+    const status = (thrown as { status?: number } | undefined)?.status;
+    expect(status).toBe(400);
+    expect((thrown as Error).message).toContain("invalid:scope");
+    expect((thrown as Error).message).toContain("not-a-permission");
+  });
+
+  it("still narrows silently when the scope is real but above the creator role", () => {
+    // A member cannot delegate what they do not hold — that is a rule, not a
+    // typo, and the scopes-omitted default depends on it.
+    expect(validateScopes(["agents:read", "agents:write"], "member")).toEqual(["agents:read"]);
   });
 
   it("returns empty array for empty input", () => {

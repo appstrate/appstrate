@@ -188,7 +188,7 @@ describe("API Keys API", () => {
       expect(body.scopes).toContain("agents:run");
     });
 
-    it("filters out session-only scopes (org:*, billing:*)", async () => {
+    it("rejects session-only scopes (org:*, billing:*) instead of minting a narrower key", async () => {
       const res = await app.request("/api/api-keys", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -199,12 +199,14 @@ describe("API Keys API", () => {
         }),
       });
 
-      expect(res.status).toBe(201);
+      expect(res.status).toBe(400);
       const body = (await res.json()) as any;
-      expect(body.scopes).toEqual(["agents:read"]);
+      expect(body.code).toBe("invalid_request");
+      expect(body.detail).toContain("org:delete");
+      expect(body.detail).toContain("members:invite");
     });
 
-    it("filters out invalid scope strings", async () => {
+    it("rejects invalid scope strings, naming them", async () => {
       const res = await app.request("/api/api-keys", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -215,9 +217,37 @@ describe("API Keys API", () => {
         }),
       });
 
-      expect(res.status).toBe(201);
+      expect(res.status).toBe(400);
       const body = (await res.json()) as any;
-      expect(body.scopes).toEqual(["agents:read"]);
+      expect(body.code).toBe("invalid_request");
+      expect(body.detail).toContain("not-a-scope");
+      expect(body.detail).toContain("invalid:permission");
+    });
+
+    it("does not persist a key when a scope is refused", async () => {
+      const before = (await (
+        await app.request("/api/api-keys", {
+          headers: authHeaders(ctx),
+        })
+      ).json()) as any;
+
+      await app.request("/api/api-keys", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Never Minted",
+          applicationId: ctx.defaultAppId,
+          scopes: ["documents:read"],
+        }),
+      });
+
+      const after = (await (
+        await app.request("/api/api-keys", {
+          headers: authHeaders(ctx),
+        })
+      ).json()) as any;
+      expect(after.data.length).toBe(before.data.length);
+      expect(after.data.some((k: any) => k.name === "Never Minted")).toBe(false);
     });
 
     it("scoped key appears in list with scopes", async () => {

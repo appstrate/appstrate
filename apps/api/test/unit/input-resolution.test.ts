@@ -45,15 +45,12 @@ function expectApiError(fn: () => unknown, status: number, code: string): ApiErr
   return err;
 }
 
-describe("resolveEffectiveInput — four-layer precedence", () => {
-  it("applies author < editor < schedule < caller, last one wins", () => {
+describe("resolveEffectiveInput — three-layer precedence", () => {
+  it("applies author < editor < overlay, last one wins", () => {
     const resolved = resolveEffectiveInput({
       schema: SCHEMA,
       editorDefaults: { folder: "archive", limit: 50 },
-      overlays: [
-        { origin: "schedule input", values: { limit: 100, subject: "weekly" } },
-        { origin: "input", values: { subject: "ad-hoc" } },
-      ],
+      overlay: { origin: "input", values: { limit: 100, subject: "ad-hoc" } },
     });
 
     expect(resolved).toEqual({
@@ -61,15 +58,17 @@ describe("resolveEffectiveInput — four-layer precedence", () => {
       tone: "neutral",
       // editor beats author
       folder: "archive",
-      // schedule beats editor
+      // the overlay beats the editor
       limit: 100,
-      // caller beats schedule
+      // the overlay is the only layer that supplies it
       subject: "ad-hoc",
     });
   });
 
   it("passes an author default through when it is the only layer", () => {
-    expect(resolveEffectiveInput({ schema: SCHEMA, overlays: [] })).toEqual({
+    expect(
+      resolveEffectiveInput({ schema: SCHEMA, overlay: { origin: "input", values: undefined } }),
+    ).toEqual({
       tone: "neutral",
       folder: "inbox",
       limit: 10,
@@ -80,9 +79,19 @@ describe("resolveEffectiveInput — four-layer precedence", () => {
     const resolved = resolveEffectiveInput({
       schema: SCHEMA,
       editorDefaults: { folder: "archive" },
-      overlays: [{ origin: "input", values: { folder: "sent" } }],
+      overlay: { origin: "input", values: { folder: "sent" } },
     });
     expect(resolved.folder).toBe("sent");
+  });
+
+  it("lets a schedule's frozen values override an unlocked editor default", () => {
+    const resolved = resolveEffectiveInput({
+      schema: SCHEMA,
+      editorDefaults: { folder: "archive", limit: 50 },
+      overlay: { origin: "schedule input", values: { limit: 100 } },
+    });
+    expect(resolved.limit).toBe(100);
+    expect(resolved.folder).toBe("archive");
   });
 
   it("refuses caller input on a locked field, naming the field", () => {
@@ -92,7 +101,7 @@ describe("resolveEffectiveInput — four-layer precedence", () => {
           schema: SCHEMA,
           editorDefaults: { folder: "archive" },
           lockedFields: ["folder"],
-          overlays: [{ origin: "input", values: { folder: "sent" } }],
+          overlay: { origin: "input", values: { folder: "sent" } },
         }),
       400,
       "locked_input_field",
@@ -106,12 +115,13 @@ describe("resolveEffectiveInput — four-layer precedence", () => {
         resolveEffectiveInput({
           schema: SCHEMA,
           lockedFields: ["folder"],
-          overlays: [{ origin: "schedule input", values: { folder: "sent" } }],
+          overlay: { origin: "schedule input", values: { folder: "sent" } },
         }),
       400,
       "locked_input_field",
     );
     expect(err.message).toContain("folder");
+    expect(err.message).toContain("schedule input");
   });
 
   it("keeps a locked field resolving from author + editor", () => {
@@ -119,7 +129,7 @@ describe("resolveEffectiveInput — four-layer precedence", () => {
       schema: SCHEMA,
       editorDefaults: { folder: "archive" },
       lockedFields: ["folder", "tone"],
-      overlays: [{ origin: "input", values: { subject: "hello" } }],
+      overlay: { origin: "input", values: { subject: "hello" } },
     });
     expect(resolved.folder).toBe("archive");
     expect(resolved.tone).toBe("neutral");
