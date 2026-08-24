@@ -30,7 +30,13 @@ import { describe, it, expect, beforeEach, beforeAll } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedInstalledPackage, seedRun, seedSchedule, seedApiKey } from "../../helpers/seed.ts";
+import {
+  seedPackage,
+  seedInstalledPackage,
+  seedRun,
+  seedSchedule,
+  seedApiKey,
+} from "../../helpers/seed.ts";
 
 const app = getTestApp();
 
