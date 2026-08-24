@@ -240,6 +240,71 @@ describe("syncInstanceClientsFromEnv — drift", () => {
     await expect(syncInstanceClientsFromEnv()).rejects.toThrow(/scopes/);
   });
 
+  // ── The beta.51 upgrade trap ────────────────────────────────────────────────
+  //
+  // Migration 0046 rewrote `oauth_clients.scopes` from `documents:*` to
+  // `files:*`. An operator whose `OIDC_INSTANCE_CLIENTS` still names the retired
+  // spelling therefore boots into a `scopes` drift they never caused. The
+  // generic drift remedy — DELETE the row and restart — is destructive AND
+  // useless here: the re-create is rejected by `assertValidScopes` on the same
+  // env value, so the platform still refuses to boot and the row backing every
+  // satellite session is gone.
+  it("names the retired scope rename instead of telling the operator to delete the row", async () => {
+    // Stored row as migration 0046 leaves it.
+    setDeclaration([validEntry({ scopes: ["openid", "profile", "files:read"] })]);
+    await syncInstanceClientsFromEnv();
+
+    // Env the operator never edited — still the pre-rename spelling.
+    setDeclaration([validEntry({ scopes: ["openid", "profile", "documents:read"] })]);
+    let caught: unknown;
+    try {
+      await syncInstanceClientsFromEnv();
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(InstanceClientSyncError);
+    const message = (caught as Error).message;
+    expect(message).toContain("documents:read -> files:read");
+    expect(message).toContain("OIDC_INSTANCE_CLIENTS");
+    // The remedy that does not work must not be offered.
+    expect(message).not.toContain("DELETE FROM oauth_clients");
+  });
+
+  // Control for the case above: an ordinary scope drift keeps the generic
+  // remedy. Without the retired-spelling branch the two cases are
+  // indistinguishable and this assertion is the one that stays true.
+  it("still offers the delete remedy for an ordinary scope drift", async () => {
+    setDeclaration([validEntry({ scopes: ["openid", "profile", "files:read"] })]);
+    await syncInstanceClientsFromEnv();
+
+    setDeclaration([validEntry({ scopes: ["openid", "profile"] })]);
+    let caught: unknown;
+    try {
+      await syncInstanceClientsFromEnv();
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(InstanceClientSyncError);
+    expect((caught as Error).message).toContain("DELETE FROM oauth_clients");
+  });
+
+  // The second half of the trap: after the DELETE the entry is `not-found`, the
+  // create path validates the SAME env value, and it must also say what the
+  // scope was renamed to rather than "unknown scope".
+  it("names the retired scope rename on the create path too", async () => {
+    setDeclaration([validEntry({ scopes: ["openid", "profile", "documents:read"] })]);
+    let caught: unknown;
+    try {
+      await syncInstanceClientsFromEnv();
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(InstanceClientSyncError);
+    const message = (caught as Error).message;
+    expect(message).toContain("documents:read -> files:read");
+    expect(message).not.toContain("DELETE FROM oauth_clients");
+  });
+
   it("treats redirectUris as order-insensitive (no drift on reorder)", async () => {
     setDeclaration([
       validEntry({

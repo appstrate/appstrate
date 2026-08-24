@@ -10,6 +10,7 @@
  */
 
 import { logger } from "../../lib/logger.ts";
+import type { Logger } from "@appstrate/core/logger";
 import { computeNextRun } from "../../lib/cron.ts";
 import type {
   JobQueue,
@@ -52,6 +53,28 @@ const CRON_POLL_INTERVAL_MS = 30_000;
  */
 const MAX_CRON_CATCHUP_PER_POLL = 5;
 
+/**
+ * Default budget `shutdown()` gives in-flight work to finish, and the window a
+ * sleeping retry has to be due within to be kept — see `shutdown()`. This is
+ * the PRODUCTION value, applied whenever a caller does not ask for another.
+ */
+const SHUTDOWN_GRACE_MS = 10_000;
+
+/** A job parked on its retry timer, waiting for the next attempt to start. */
+interface SleepingRetry {
+  /** Epoch ms at which the next attempt is due to start. */
+  resumeAt: number;
+  /** Job identity, for the abandon log line. */
+  jobId: string;
+  /**
+   * The `attemptsMade` the pending attempt would carry — 1 for the first
+   * retry, i.e. the count of attempts that have already failed.
+   */
+  attempt: number;
+  /** Cancels the timer and releases the `run()` awaiting it. */
+  abandon: () => void;
+}
+
 export class LocalQueue<T> implements JobQueue<T> {
   private pending: PendingJob<T>[] = [];
   private schedulers = new Map<string, CronScheduler<T>>();
@@ -62,11 +85,16 @@ export class LocalQueue<T> implements JobQueue<T> {
   private drainInterval: ReturnType<typeof setInterval> | null = null;
   private shuttingDown = false;
   /**
-   * Abandon callbacks for jobs currently sleeping between retry attempts. Such
-   * a job still counts towards `activeJobs`, so `shutdown()` has to be able to
-   * release it — see the comment there.
+   * Jobs currently sleeping between retry attempts. Such a job still counts
+   * towards `activeJobs`, so `shutdown()` has to be able to release the ones
+   * that cannot finish inside its budget — see the comment there.
    */
-  private sleepingRetries = new Set<() => void>();
+  private sleepingRetries = new Set<SleepingRetry>();
+  /**
+   * Epoch ms by which `shutdown()` stops waiting, or `null` while running
+   * normally. A retry is only armed when its attempt is due before this.
+   */
+  private shutdownDeadline: number | null = null;
   /**
    * Wall-clock time (epoch ms) of the previous cron poll. The next poll's
    * window floor advances from here rather than a fixed `now - interval`, so a
@@ -75,7 +103,11 @@ export class LocalQueue<T> implements JobQueue<T> {
    */
   private lastCronPollAt = 0;
 
-  constructor(private readonly name: string) {}
+  constructor(
+    private readonly name: string,
+    /** Injectable for tests; production always uses the app logger. */
+    private readonly log: Logger = logger,
+  ) {}
 
   async add(name: string, data: T, opts?: JobAddOptions): Promise<string> {
     const id = `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -132,29 +164,65 @@ export class LocalQueue<T> implements JobQueue<T> {
     return this.pending.length + this.activeJobs;
   }
 
-  async shutdown(): Promise<void> {
+  /**
+   * @param graceMs - How long draining may take, and the window a sleeping
+   *   retry must be due within to be kept. Defaults to the production
+   *   {@link SHUTDOWN_GRACE_MS}. Pass `0` to tear down immediately: every
+   *   sleeper is released and nothing is waited on. A test that resets a
+   *   process-global worker wants that — with a production budget it would
+   *   sit and drain jobs enqueued by other test files.
+   */
+  async shutdown(graceMs: number = SHUTDOWN_GRACE_MS): Promise<void> {
     this.shuttingDown = true;
     if (this.cronInterval) clearInterval(this.cronInterval);
     if (this.drainInterval) clearInterval(this.drainInterval);
     this.cronInterval = null;
     this.drainInterval = null;
 
-    // Abandon every job that is merely SLEEPING between attempts. A backing-off
-    // job counts as active (its `run()` awaits the retry timer), so without this
-    // a single job that fails permanently — an org deleted before its ledger
-    // replay landed, say — holds `activeJobs` above zero for its whole retry
-    // schedule and pins the loop below to its full 10s cap on every shutdown.
-    // Abandoning is the documented semantics of this queue: in-memory jobs do
-    // not survive the process, and a retry that has not started yet has nothing
-    // in flight to lose.
-    for (const abandon of [...this.sleepingRetries]) abandon();
-    this.sleepingRetries.clear();
+    // Draining is budgeted, and the budget covers backoff too. A job merely
+    // SLEEPING between attempts counts as active (its `run()` awaits the retry
+    // timer), so a job on a long — or effectively endless — retry schedule
+    // would otherwise hold `activeJobs` above zero and pin the loop below to
+    // the full grace period on every shutdown. But a retry due *inside* the
+    // budget is work that would have completed, and consumers like
+    // `llm-usage-retry` queue billable rows precisely because losing them is
+    // silent: dropping those would recreate the loss window they exist to
+    // close. So we release only the sleepers that cannot possibly run in time,
+    // and each release is logged. With `graceMs` of 0 there is no time at all
+    // and every sleeper goes, which is the teardown a test wants.
+    const deadline = Date.now() + graceMs;
+    this.shutdownDeadline = deadline;
 
-    // Wait for genuinely in-flight handlers to finish (max 10s)
-    const deadline = Date.now() + 10_000;
+    for (const sleeper of [...this.sleepingRetries]) {
+      if (sleeper.resumeAt <= deadline) continue;
+      this.abandonRetry(sleeper);
+    }
+
+    // Wait for in-flight handlers — and for the retries kept above — to finish.
     while (this.activeJobs > 0 && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 200));
     }
+  }
+
+  /**
+   * Record a retry the process is dropping. An abandoned job is work silently
+   * thrown away, so it never leaves without a log line naming the queue, the
+   * job and the attempt that will not run.
+   */
+  private logAbandonedRetry(info: { jobId: string; attempt: number; resumeAt: number }): void {
+    this.log.warn(`${this.name} job abandoned at shutdown, retry not attempted`, {
+      queue: this.name,
+      jobId: info.jobId,
+      attempt: info.attempt,
+      dueInMs: info.resumeAt - Date.now(),
+    });
+  }
+
+  /** Log + release a retry already parked on its timer. */
+  private abandonRetry(sleeper: SleepingRetry): void {
+    this.sleepingRetries.delete(sleeper);
+    this.logAbandonedRetry(sleeper);
+    sleeper.abandon();
   }
 
   // ---------------------------------------------------------------------------
@@ -184,7 +252,7 @@ export class LocalQueue<T> implements JobQueue<T> {
         await handler(currentJob);
       } catch (err) {
         if (err instanceof PermanentJobError) {
-          logger.warn(`${this.name} job permanently failed`, {
+          this.log.warn(`${this.name} job permanently failed`, {
             jobId: currentJob.id,
             error: err.message,
           });
@@ -194,41 +262,48 @@ export class LocalQueue<T> implements JobQueue<T> {
         const nextAttempt = currentJob.attemptsMade + 1;
         if (nextAttempt < maxAttempts) {
           const delay = backoffStrategy ? backoffStrategy(nextAttempt) : 1000 * nextAttempt;
-          logger.warn(`${this.name} job failed, retrying in ${delay}ms`, {
+          this.log.warn(`${this.name} job failed, retrying in ${delay}ms`, {
             jobId: currentJob.id,
             attempt: nextAttempt,
             error: getErrorMessage(err),
           });
           // Schedule retry — await a timer so the outer .finally() waits.
-          // Registered in `sleepingRetries` so `shutdown()` can abandon it:
-          // otherwise the wait below blocks on a job that is doing nothing but
-          // counting down.
+          // Registered in `sleepingRetries` so `shutdown()` can release it if
+          // the attempt falls outside the shutdown budget; otherwise the wait
+          // there blocks on a job that is doing nothing but counting down.
           await new Promise<void>((resolve) => {
-            if (this.shuttingDown) {
+            const resumeAt = Date.now() + delay;
+            // Already shutting down and the attempt lands past the deadline:
+            // arming the timer would only leak past the process. Drop it here,
+            // with the same log line an already-parked sleeper gets.
+            if (this.shutdownDeadline !== null && resumeAt > this.shutdownDeadline) {
+              this.logAbandonedRetry({ jobId: currentJob.id, attempt: nextAttempt, resumeAt });
               resolve();
               return;
             }
-            const abandon = () => {
-              clearTimeout(timer);
-              this.sleepingRetries.delete(abandon);
-              resolve();
-            };
             const timer = setTimeout(() => {
-              this.sleepingRetries.delete(abandon);
-              if (this.shuttingDown) {
-                resolve();
-                return;
-              }
+              this.sleepingRetries.delete(sleeper);
               const retryJob: QueueJob<T> = { ...currentJob, attemptsMade: nextAttempt };
               run(retryJob).then(resolve, resolve);
             }, delay);
             timer.unref?.();
-            this.sleepingRetries.add(abandon);
+            // Declared after the timer so `abandon` can close over it; the
+            // callback above only dereferences `sleeper` once it fires.
+            const sleeper: SleepingRetry = {
+              resumeAt,
+              jobId: currentJob.id,
+              attempt: nextAttempt,
+              abandon: () => {
+                clearTimeout(timer);
+                resolve();
+              },
+            };
+            this.sleepingRetries.add(sleeper);
           });
           return;
         }
 
-        logger.error(`${this.name} job failed after ${maxAttempts} attempts`, {
+        this.log.error(`${this.name} job failed after ${maxAttempts} attempts`, {
           jobId: currentJob.id,
           error: getErrorMessage(err),
         });
@@ -283,7 +358,7 @@ export class LocalQueue<T> implements JobQueue<T> {
           attemptsMade: 0,
         };
         this.pending.push({ job });
-        logger.debug(`${this.name} cron fired`, { schedulerId: scheduler.id, fireAt });
+        this.log.debug(`${this.name} cron fired`, { schedulerId: scheduler.id, fireAt });
       }
       // Hit the cap with occurrences still pending → coalesce the backlog:
       // skip to `now` so we don't replay it next poll, and surface the drop.
@@ -291,7 +366,7 @@ export class LocalQueue<T> implements JobQueue<T> {
         const more = computeNextRun(scheduler.pattern, scheduler.tz, new Date(cursor));
         if (more && more.getTime() <= now) {
           scheduler.lastFiredAt = now;
-          logger.warn(`${this.name} cron catch-up capped, coalescing backlog`, {
+          this.log.warn(`${this.name} cron catch-up capped, coalescing backlog`, {
             schedulerId: scheduler.id,
             cap: MAX_CRON_CATCHUP_PER_POLL,
           });
