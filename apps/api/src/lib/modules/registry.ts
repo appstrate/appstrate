@@ -147,12 +147,6 @@ function buildPlatformServices(): PlatformServices {
     // org's technical byte ceiling here; the platform enforces it on every write.
     // Billing-neutral: the core stores a byte limit, never a plan/price.
     setFileStorageLimit: setOrgFileStorageLimit,
-    // Deprecated pre-#1177 spelling of the SAME implementation. Out-of-tree
-    // modules (cloud) bind this off the live services object rather than off
-    // their pinned types, so the rename alone does not reach them and their
-    // next boot would `TypeError` on a deploy clock we do not control. Drop
-    // this line once every out-of-tree consumer binds `setFileStorageLimit`.
-    setDocumentStorageLimit: setOrgFileStorageLimit,
   };
 }
 
