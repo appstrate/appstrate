@@ -129,6 +129,28 @@ function toPiModel(input: {
       cacheRead: 0,
       cacheWrite: 0,
     }) as Model<Api>["cost"],
+    compat: {
+      // Long prompt-cache retention is REFUSED structurally, on the record
+      // itself, for the same reason the run path refuses it
+      // (`runtime-pi/env.ts`, `sidecar/pi-messages-backend.ts`): the platform
+      // cannot price what it would produce. Anthropic bills a 1h cache write at
+      // 2x the input rate, and the cost record carries ONE `cacheWrite` rate,
+      // not two — so a long-retention write is metered at the short-retention
+      // price and the org is under-billed.
+      //
+      // pi-ai defaults this flag to TRUE when the record stays silent, and then
+      // resolves each request's retention from `options.cacheRetention` and
+      // `process.env.PI_CACHE_RETENTION`. Chat runs in the API process, so that
+      // env var is reachable by whoever configures the deployment: leaving the
+      // flag unset made a silent under-billing one environment variable away.
+      // Two of the five model builders already set it; this was one of the
+      // three that did not.
+      //
+      // Turning it back on is a pricing change, not a performance tweak — it
+      // needs a second cache-write rate in the catalog and in `computeTokenCost`
+      // first.
+      supportsLongCacheRetention: false,
+    },
     contextWindow: input.contextWindow ?? undefined,
     maxTokens: input.maxTokens ?? undefined,
   } as Model<Api>;

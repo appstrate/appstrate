@@ -188,4 +188,37 @@ describe("Pi chat model binding", () => {
       }),
     ).toEqual({ status: "unsupported" });
   });
+
+  /**
+   * Billing-safety invariant, not a preference. pi-ai defaults
+   * `supportsLongCacheRetention` to TRUE on a silent record and then resolves
+   * retention from `options.cacheRetention` and `process.env.PI_CACHE_RETENTION`
+   * — reachable by whoever configures the API deployment. Anthropic bills a 1h
+   * cache write at 2x input while the cost record carries a single `cacheWrite`
+   * rate, so an unset flag puts silent under-billing one env var away. Both
+   * credential modes must refuse it.
+   */
+  it("refuses long cache retention on both credential modes", () => {
+    const proxy = resolvePiChatModelBinding({
+      model: orgModel(),
+      subscription: { subscription: false },
+      origin: ORIGIN,
+      mintBearer: () => "loopback",
+    });
+    const oauth = resolvePiChatModelBinding({
+      model: orgModel({ apiShape: "anthropic-messages" }),
+      subscription: { subscription: true, model: oauthModel() },
+      origin: ORIGIN,
+      mintBearer: () => "unused",
+    });
+
+    expect(proxy.status).toBe("ready");
+    expect(oauth.status).toBe("ready");
+    expect(proxy.status === "ready" && proxy.binding.model.compat).toMatchObject({
+      supportsLongCacheRetention: false,
+    });
+    expect(oauth.status === "ready" && oauth.binding.model.compat).toMatchObject({
+      supportsLongCacheRetention: false,
+    });
+  });
 });
