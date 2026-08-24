@@ -217,7 +217,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
   Two more went with them: the `setDocumentStorageLimit` platform-services
   alias (`@appstrate/cloud` now binds `setFileStorageLimit`; see the ship order
-  below) and the `#documents` run-detail tab hash. The `result.text` /
+  below) and every retired run-detail tab hash. The `result.text` /
   `result.text_truncated` fields of the removed `report` tool left the run
   resource at the same time.
 
@@ -499,11 +499,13 @@ latest, sidecar latest}` is byte-for-byte the same input as the supported
   tool emitted, not a verdict on the run. The top bar states whether a run is an
   inline run or an agent run.
 
-  Every retired tab hash still resolves — `#deliverable`, `#result` and
-  `#memory` → `outcome`, `#documents` → `files`, `#logs` and `#info` →
-  `execution` — so a bookmark, a back-history entry or a link pasted into an old
-  chat message lands on the pane that absorbed it instead of silently falling
-  back to the default.
+  **The retired tab hashes no longer resolve.** `#deliverable`, `#result`,
+  `#memory`, `#documents`, `#logs` and `#info` were each mapped onto the pane
+  that absorbed them and rewritten in the address bar; the whole table, its
+  mapping function and the rewrite effect are gone. A bookmark, a back-history
+  entry or a link pasted into an old chat message now opens the default pane,
+  silently — the page cannot tell that anchor apart from any other it does not
+  know. Accepted so these anchors have one vocabulary rather than two.
 
 - **BREAKING: the schedule launch bodies are validated too — it was the fourth
   launch surface, and the one where a bad value is permanent.** #1189 made every

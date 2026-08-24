@@ -156,7 +156,7 @@ The run-detail page is four FIXED tabs (`apps/web/src/lib/run-detail-tabs.ts`). 
 Tab keys above are the URL hashes; in the French UI the panes read « Fichiers », « Exécution » and « Configuration », and Outcome's first section is « Output ».
 The previous set (result / deliverable / logs / memory / files / info) grew by accretion, mixed those questions across five panes, and made two of them appear and disappear per run. « Résultat » is now « Output »: the section is literally what the `output` tool emitted, not a verdict on the run. The top bar states whether a run is an inline run or an agent run.
 
-A run opened with no hash lands on `outcome` when it produced anything at all (a file, an output value, a memory write) and on `execution` otherwise, where the logs say why. Every retired hash still resolves — `#deliverable`, `#result` and `#memory` → `outcome`, `#documents` → `files`, `#logs` and `#info` → `execution`. Nothing is ever dropped from that table: a hash removed from it stops resolving and silently falls back to the default pane, which is exactly the "my link stopped working" nobody reports.
+A run opened with no hash lands on `outcome` when it produced anything at all (a file, an output value, a memory write) and on `execution` otherwise, where the logs say why. No hash outside those four resolves. `#deliverable`, `#result`, `#memory`, `#documents`, `#logs` and `#info` used to be mapped onto the pane that absorbed each of them, and rewritten in the address bar; that table is gone. A link still carrying one opens the default pane and nothing says why — the accepted cost of these anchors having one vocabulary instead of two.
 
 The `outcome` and `files` panes read the SAME query (the run's files in one page, filtered client-side), so the two panes cost one request between them and cannot disagree about what the run produced.
 
@@ -266,7 +266,7 @@ The platform MCP server (`apps/api/src/modules/mcp/`) surfaces files to external
 | MCP `list_documents`, `read_document`, `import_package_document`, `validate_package_document`, and the `document_uri` argument | `list_files`, `read_file`, `import_package_file`, `validate_package_file`, `file_uri` | Not registered. A client holding a cached tool list gets `-32602 Unknown tool` and re-lists (`tools.listChanged: false` made this the one alias with a live protocol argument behind it).                              |
 | `context_documents` as a `run_and_wait` **tool argument**                                                                      | `context_files`                                                                       | Refused **by name**, which is the point: the launch body is built from an allowlist, so merely not reading it would make it invisible — the run would start with nothing mounted and every layer would report success. |
 
-Two more went with them, outside this table: the `setDocumentStorageLimit` platform-services alias (see "Module contract" — it moves in lockstep with `@appstrate/cloud`, which now binds `setFileStorageLimit`), and the `#documents` run-detail tab hash.
+Two more went with them, outside this table: the `setDocumentStorageLimit` platform-services alias (see "Module contract" — it moves in lockstep with `@appstrate/cloud`, which now binds `setFileStorageLimit`), and every retired run-detail tab hash.
 
 **Retired, and refused on purpose.** Each of these was an alias with no caller behind it, so keeping it bought nothing and cost a second path to keep honest:
 

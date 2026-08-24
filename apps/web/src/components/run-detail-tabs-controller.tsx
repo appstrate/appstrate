@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import {
-  RUN_DETAIL_TAB_HASHES,
+  RUN_DETAIL_TABS,
   capturedRunDetailTab,
-  effectiveRunDetailTab,
   initialRunDetailTab,
-  runDetailTabHashRewrite,
   type RunDetailTab,
   type RunTabAvailability,
 } from "../lib/run-detail-tabs";
@@ -37,11 +35,11 @@ import {
  * anything is painted, so the provisional value never reaches the screen when
  * the queries were already warm.
  *
- * The hash is validated against `RUN_DETAIL_TAB_HASHES` (live tabs + retired
- * ones), and `effectiveRunDetailTab` maps a retired hash onto the pane that
- * absorbed it — dropping it from the list instead would silently send every old
- * `#deliverable`, `#result` or `#logs` link back to the default tab. A retired
- * hash is also rewritten in the address bar (see below).
+ * The hash is validated against `RUN_DETAIL_TABS`, and that is the whole of it:
+ * a recognised hash selects its pane, anything else falls through to the
+ * default. There is no retired-hash mapping and no address-bar rewrite any
+ * more — see `run-detail-tabs.ts` for the six anchors that used to resolve and
+ * what dropping them costs.
  */
 export function RunDetailTabsController({
   availability,
@@ -75,19 +73,7 @@ export function RunDetailTabsController({
   }
 
   const defaultTab = captured ?? initialRunDetailTab({ ...availability, hasMemory: false });
-  const [requestedTab, setActiveTab] = useTabWithHash(RUN_DETAIL_TAB_HASHES, defaultTab);
-  const activeTab = effectiveRunDetailTab(requestedTab);
-
-  // A retired hash renders the right pane but must not stay in the address bar:
-  // the user copies what they see, and an old `#documents` would keep
-  // propagating a dead anchor. `setActiveTab` navigates with `replace: true`,
-  // so this adds no history entry and the back button still leaves the page.
-  // The decision — and its TERMINATION, the thing that makes this effect safe —
-  // lives in `runDetailTabHashRewrite`.
-  const rewriteTo = runDetailTabHashRewrite(requestedTab);
-  useEffect(() => {
-    if (rewriteTo) setActiveTab(rewriteTo);
-  }, [rewriteTo, setActiveTab]);
+  const [activeTab, setActiveTab] = useTabWithHash(RUN_DETAIL_TABS, defaultTab);
 
   return children({ activeTab, setActiveTab });
 }
