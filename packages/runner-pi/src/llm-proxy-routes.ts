@@ -88,7 +88,17 @@ export function isProxiedApiShape(apiShape: string): apiShape is ProxiedApiShape
  */
 export function llmProxyBaseUrl(origin: string, apiShape: string): string | null {
   if (!isProxiedApiShape(apiShape)) return null;
-  const base = origin.replace(/\/+$/, "");
+  // Index scan, not `origin.replace(/\/+$/, "")`. That regex is the textbook
+  // polynomial-ReDoS shape (`js/polynomial-redos`, and the same `\s+$` case
+  // CodeQL's own docs use): `/+` is ambiguous about where it starts matching,
+  // so on a string of many slashes that does NOT end in one the engine retries
+  // from each slash and the cost goes quadratic. `origin` here reaches an
+  // EXPORTED function from a package — chat passes `CHAT_SELF_ORIGIN`, the CLI
+  // passes `--instance` — which is exactly the "uncontrolled data" the rule is
+  // about. This loop is linear and needs no argument.
+  let end = origin.length;
+  while (end > 0 && origin.charCodeAt(end - 1) === 47 /* "/" */) end--;
+  const base = origin.slice(0, end);
   return `${base}/api/llm-proxy/${apiShape}${LLM_PROXY_ROUTES[apiShape].baseSuffix}`;
 }
 
