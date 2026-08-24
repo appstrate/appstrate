@@ -332,6 +332,109 @@ function compareShapeToSchema(
  * Returns undefined if the endpoint has no requestBody or no application/json content.
  * Resolves top-level `$ref` pointers so the comparison gets the actual schema.
  */
+/**
+ * A schema position that may hold a nested schema — `items`, or
+ * `additionalProperties` when it is a schema rather than the boolean form.
+ */
+/**
+ * The JSON media types a request body can be declared under.
+ *
+ * `application/json` plus the RFC 6839 `+json` structured suffix. The gate used
+ * to match the first exactly and dismiss the rest as having "no JSON schema to
+ * compare a Zod object against" — true for the multipart, form-encoded and
+ * octet-stream bodies, and false for exactly one endpoint:
+ * `POST /api/runs/{runId}/events` declares `application/cloudevents+json` with
+ * a hand-written 8-key schema, validated by a `.strict()` Zod object with the
+ * same 8 keys. It is the most skew-exposed body on the surface — the envelope
+ * is strict, so a spec/Zod divergence 400s the whole event, and it is the
+ * runtime→platform boundary the image-tag lockstep admits it cannot cover in
+ * three cases.
+ */
+function jsonBodySchemaOf(
+  content: Record<string, { schema?: unknown }> | undefined,
+): unknown | undefined {
+  if (!content) return undefined;
+  for (const [mediaType, entry] of Object.entries(content)) {
+    if (/^application\/([\w.+-]+\+)?json$/.test(mediaType)) return entry?.schema;
+  }
+  return undefined;
+}
+
+function asSchemaObject(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+/**
+ * Compare the scalar JSON-Schema keywords of one value position.
+ *
+ * UNIDIRECTIONAL by design: a constraint present in Zod but missing or
+ * differing in OpenAPI is flagged; an OpenAPI-only constraint is not. Zod is
+ * the runtime source of truth, so a Zod constraint absent from the spec is the
+ * drift that misleads consumers, while the spec legitimately carries
+ * descriptive constraints Zod does not enforce. KNOWN LIMITATION: tightening to
+ * bidirectional would require reconciling that pre-existing hand-authored drift
+ * first.
+ *
+ * `label` is the reported position — `field`, `field[]` for array items, or
+ * `field[*]` for a record's values.
+ */
+function compareValueConstraints(
+  label: string,
+  zodProp: Record<string, unknown>,
+  oaProp: Record<string, unknown>,
+  issues: string[],
+): void {
+  // maxLength (check anyOf variants for Zod nullable types)
+  const zodMaxLen =
+    zodProp.maxLength ??
+    (zodProp.anyOf as Record<string, unknown>[] | undefined)?.find((v) => v.maxLength)?.maxLength;
+  const oaMaxLen = oaProp.maxLength;
+  if (zodMaxLen !== undefined && oaMaxLen !== undefined && zodMaxLen !== oaMaxLen) {
+    issues.push(`Property "${label}" maxLength: Zod=${zodMaxLen}, OpenAPI=${oaMaxLen}`);
+  }
+  if (zodMaxLen !== undefined && oaMaxLen === undefined) {
+    issues.push(`Property "${label}" maxLength: Zod=${zodMaxLen}, OpenAPI=unset`);
+  }
+
+  // minLength
+  const zodMinLen =
+    zodProp.minLength ??
+    (zodProp.anyOf as Record<string, unknown>[] | undefined)?.find((v) => v.minLength)?.minLength;
+  const oaMinLen = oaProp.minLength;
+  if (zodMinLen !== undefined && oaMinLen !== undefined && zodMinLen !== oaMinLen) {
+    issues.push(`Property "${label}" minLength: Zod=${zodMinLen}, OpenAPI=${oaMinLen}`);
+  }
+  if (zodMinLen !== undefined && oaMinLen === undefined) {
+    issues.push(`Property "${label}" minLength: Zod=${zodMinLen}, OpenAPI=unset`);
+  }
+
+  // Pattern
+  if (zodProp.pattern && oaProp.pattern && zodProp.pattern !== oaProp.pattern) {
+    issues.push(
+      `Property "${label}" pattern: Zod="${zodProp.pattern}", OpenAPI="${oaProp.pattern}"`,
+    );
+  }
+
+  // Format (check anyOf variants for Zod nullable types)
+  const zodFormat =
+    zodProp.format ??
+    (zodProp.anyOf as Record<string, unknown>[] | undefined)?.find((v) => v.format)?.format;
+  if (zodFormat && oaProp.format && zodFormat !== oaProp.format) {
+    issues.push(`Property "${label}" format: Zod="${zodFormat}", OpenAPI="${oaProp.format}"`);
+  }
+
+  // Enum values
+  if (zodProp.enum && oaProp.enum) {
+    const zodEnumStr = JSON.stringify([...(zodProp.enum as unknown[])].sort());
+    const oaEnumStr = JSON.stringify([...(oaProp.enum as unknown[])].sort());
+    if (zodEnumStr !== oaEnumStr) {
+      issues.push(`Property "${label}" enum: Zod=${zodEnumStr}, OpenAPI=${oaEnumStr}`);
+    }
+  }
+}
+
 function getOpenApiRequestBodySchema(
   specPath: string,
   method: string,
@@ -343,7 +446,7 @@ function getOpenApiRequestBodySchema(
   const operation = pathObj[method.toLowerCase()] as any;
   if (!operation?.requestBody) return undefined;
 
-  let schema = operation.requestBody?.content?.["application/json"]?.schema as
+  let schema = jsonBodySchemaOf(operation.requestBody?.content) as
     Record<string, unknown> | undefined;
 
   // Resolve top-level $ref
@@ -509,73 +612,35 @@ for (const entry of zodSchemaRegistry) {
       );
     }
 
-    // String/length/format/enum constraint checks below are UNIDIRECTIONAL by
-    // design: they flag a constraint present in Zod but missing (or differing)
-    // in OpenAPI, not the reverse (OpenAPI-only constraint). Zod is the runtime
-    // source of truth, so a Zod constraint absent from the spec is the drift
-    // that misleads consumers; the spec legitimately carries descriptive
-    // constraints Zod does not enforce. KNOWN LIMITATION: OpenAPI-only
-    // constraints therefore go unreported here — tightening to bidirectional
-    // would require reconciling that pre-existing hand-authored drift first.
-    // String constraints — maxLength (check anyOf variants for Zod nullable types)
-    const zodMaxLen =
-      zodProp.maxLength ??
-      (zodProp.anyOf as Record<string, unknown>[] | undefined)?.find((v) => v.maxLength)?.maxLength;
-    const oaMaxLen = oaProp.maxLength;
-    if (zodMaxLen !== undefined && oaMaxLen !== undefined && zodMaxLen !== oaMaxLen) {
-      issues.push(`Property "${field}" maxLength: Zod=${zodMaxLen}, OpenAPI=${oaMaxLen}`);
-    }
-    if (zodMaxLen !== undefined && oaMaxLen === undefined) {
-      issues.push(`Property "${field}" maxLength: Zod=${zodMaxLen}, OpenAPI=unset`);
-    }
+    // The scalar keyword comparison, applied to the property AND to the two
+    // places a constraint can hide one level down.
+    //
+    // This used to be inline, and only the property's own keywords were read.
+    // `connection_overrides` is `z.record(z.string(), z.string().min(1))`: the
+    // `minLength` lives on the record's VALUES, i.e. on `additionalProperties`,
+    // so `zodProp.minLength` was `undefined` on both sides and every branch was
+    // skipped — the gate reported nothing. That is not hypothetical: 875df353f
+    // documents finding and fixing exactly that drift BY HAND, on three run
+    // surfaces, in the same range this gate was written.
+    compareValueConstraints(field, zodProp, oaProp, issues);
 
-    // String constraints — minLength
-    const zodMinLen =
-      zodProp.minLength ??
-      (zodProp.anyOf as Record<string, unknown>[] | undefined)?.find((v) => v.minLength)?.minLength;
-    const oaMinLen = oaProp.minLength;
-    if (zodMinLen !== undefined && oaMinLen !== undefined && zodMinLen !== oaMinLen) {
-      issues.push(`Property "${field}" minLength: Zod=${zodMinLen}, OpenAPI=${oaMinLen}`);
-    }
-    if (zodMinLen !== undefined && oaMinLen === undefined) {
-      issues.push(`Property "${field}" minLength: Zod=${zodMinLen}, OpenAPI=unset`);
-    }
-
-    // Pattern
-    const zodPattern = zodProp.pattern;
-    const oaPattern = oaProp.pattern;
-    if (zodPattern && oaPattern && zodPattern !== oaPattern) {
-      issues.push(`Property "${field}" pattern: Zod="${zodPattern}", OpenAPI="${oaPattern}"`);
-    }
-
-    // Format (check anyOf variants for Zod nullable types)
-    const zodFormat =
-      zodProp.format ??
-      (zodProp.anyOf as Record<string, unknown>[] | undefined)?.find((v) => v.format)?.format;
-    const oaFormat = oaProp.format;
-    if (zodFormat && oaFormat && zodFormat !== oaFormat) {
-      issues.push(`Property "${field}" format: Zod="${zodFormat}", OpenAPI="${oaFormat}"`);
-    }
-
-    // Enum values (also check inside array items)
-    const zodEnum = zodProp.enum ?? (zodProp.items as Record<string, unknown> | undefined)?.enum;
-    const oaEnum = oaProp.enum ?? (oaProp.items as Record<string, unknown> | undefined)?.enum;
-    if (zodEnum && oaEnum) {
-      const zodEnumStr = JSON.stringify([...(zodEnum as unknown[])].sort());
-      const oaEnumStr = JSON.stringify([...(oaEnum as unknown[])].sort());
-      if (zodEnumStr !== oaEnumStr) {
-        issues.push(`Property "${field}" enum: Zod=${zodEnumStr}, OpenAPI=${oaEnumStr}`);
-      }
+    const zodAdditional = asSchemaObject(zodProp.additionalProperties);
+    const oaAdditional = asSchemaObject(oaProp.additionalProperties);
+    if (zodAdditional && oaAdditional) {
+      compareValueConstraints(`${field}[*]`, zodAdditional, oaAdditional, issues);
     }
 
     // Array item type
     if (zodProp.type === "array" && oaProp.type === "array") {
-      const zodItems = zodProp.items as Record<string, unknown> | undefined;
-      const oaItems = oaProp.items as Record<string, unknown> | undefined;
+      const zodItems = asSchemaObject(zodProp.items);
+      const oaItems = asSchemaObject(oaProp.items);
       if (zodItems?.type && oaItems?.type && zodItems.type !== oaItems.type) {
         issues.push(
           `Property "${field}" array items type: Zod=${zodItems.type}, OpenAPI=${oaItems.type}`,
         );
+      }
+      if (zodItems && oaItems) {
+        compareValueConstraints(`${field}[]`, zodItems, oaItems, issues);
       }
     }
 
@@ -619,8 +684,10 @@ if (discrepancies.length === 0) {
 // The universe is the SPEC, not the `readJsonBody()` call sites: the spec is
 // the published contract, and §5/§5b already assert that code and spec carry
 // the same endpoint set. Non-JSON bodies (multipart uploads, form-encoded
-// OAuth2, cloudevents, octet-stream) are out of scope — there is no JSON
-// schema to compare a Zod object against.
+// OAuth2, octet-stream) are out of scope — there is genuinely no JSON schema to
+// compare a Zod object against. `application/cloudevents+json` IS in scope: it
+// carries a hand-written JSON schema and a `.strict()` Zod object, and listing
+// it as exempt was the gate's one blind spot. See `jsonBodySchemaOf`.
 {
   const registeredEndpoints = new Set(
     zodSchemaRegistry.map((e) => `${e.method.toUpperCase()} ${e.path}`),
@@ -628,8 +695,9 @@ if (discrepancies.length === 0) {
   const jsonBodyEndpoints: string[] = [];
   for (const [path, methods] of Object.entries(paths)) {
     for (const [method, op] of Object.entries(methods)) {
-      const body = (op as { requestBody?: { content?: Record<string, unknown> } })?.requestBody;
-      if (!body?.content?.["application/json"]) continue;
+      const body = (op as { requestBody?: { content?: Record<string, { schema?: unknown }> } })
+        ?.requestBody;
+      if (jsonBodySchemaOf(body?.content) === undefined) continue;
       jsonBodyEndpoints.push(`${method.toUpperCase()} ${path}`);
     }
   }

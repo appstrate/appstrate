@@ -56,7 +56,7 @@ import type { AppEnv } from "../types/index.ts";
  * `data` carries the RunEvent-specific payload; we validate lightly here
  * and let the handler narrow further before dispatch.
  */
-const CloudEventEnvelopeSchema = z
+export const CloudEventEnvelopeSchema = z
   .object({
     specversion: z.literal("1.0"),
     type: z.string().min(1),

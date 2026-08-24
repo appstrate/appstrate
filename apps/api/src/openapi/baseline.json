@@ -3298,22 +3298,27 @@
                 ],
                 "properties": {
                   "specversion": {
+                    "type": "string",
                     "const": "1.0"
                   },
                   "type": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1
                   },
                   "source": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1
                   },
                   "id": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1
                   },
                   "time": {
                     "type": "string",
                     "format": "date-time"
                   },
                   "datacontenttype": {
+                    "type": "string",
                     "const": "application/json"
                   },
                   "data": {
@@ -3323,7 +3328,8 @@
                     "type": "integer",
                     "minimum": 0
                   }
-                }
+                },
+                "additionalProperties": false
               }
             }
           }
@@ -18055,7 +18061,8 @@
                   "metadata": {
                     "type": "object",
                     "additionalProperties": {
-                      "type": ["string", "number", "boolean", "null"]
+                      "type": ["string", "number", "boolean", "null"],
+                      "maxLength": 500
                     },
                     "description": "Key-value metadata. Max 50 keys, key length 1–40 chars, values: string (max 500), number, boolean, or null."
                   }
@@ -18430,7 +18437,8 @@
                   "metadata": {
                     "type": "object",
                     "additionalProperties": {
-                      "type": ["string", "number", "boolean", "null"]
+                      "type": ["string", "number", "boolean", "null"],
+                      "maxLength": 500
                     },
                     "description": "Key-value metadata. Max 50 keys, key length 1–40 chars, values: string (max 500), number, boolean, or null."
                   }
@@ -21928,7 +21936,8 @@
           "locked_fields": {
             "type": "array",
             "items": {
-              "type": "string"
+              "type": "string",
+              "minLength": 1
             },
             "description": "Input fields no caller may set at launch. A run or schedule that sets one is refused with 400 `locked_input_field`. A required field may not be locked unless it has a value (author `default` or an entry in `values`) — otherwise the write is refused with 400 `locked_required_field_empty`."
           }

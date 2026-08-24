@@ -1335,16 +1335,21 @@ const canonicalRunsPaths = {
                 "data",
                 "sequence",
               ],
+              // Kept in step with `CloudEventEnvelopeSchema` (routes/runs-events.ts)
+              // by verify-openapi §4 — the envelope is `.strict()`, so a
+              // divergence here 400s the whole event on the runtime→platform
+              // boundary the image-tag lockstep cannot always cover.
               properties: {
-                specversion: { const: "1.0" },
-                type: { type: "string" },
-                source: { type: "string" },
-                id: { type: "string" },
+                specversion: { type: "string", const: "1.0" },
+                type: { type: "string", minLength: 1 },
+                source: { type: "string", minLength: 1 },
+                id: { type: "string", minLength: 1 },
                 time: { type: "string", format: "date-time" },
-                datacontenttype: { const: "application/json" },
+                datacontenttype: { type: "string", const: "application/json" },
                 data: { type: "object" },
                 sequence: { type: "integer", minimum: 0 },
               },
+              additionalProperties: false,
             },
           },
         },

@@ -90,6 +90,7 @@ import { runAgentBodySchema } from "../routes/runs.ts";
 
 // --- Remote-run schemas (routes/runs-remote.ts) ---
 import { CreateRemoteRunBodySchema, ExtendSinkBodySchema } from "../routes/runs-remote.ts";
+import { CloudEventEnvelopeSchema } from "../routes/runs-events.ts";
 
 // --- Schedule schemas (routes/schedules.ts) ---
 import { createScheduleSchema, updateScheduleSchema } from "../routes/schedules.ts";
@@ -215,6 +216,13 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     path: "/api/runs/{runId}/sink/extend",
     jsonSchema: toJsonSchema(ExtendSinkBodySchema),
     description: "Extend a remote run's event-sink lease",
+  },
+
+  {
+    method: "POST",
+    path: "/api/runs/{runId}/events",
+    jsonSchema: toJsonSchema(CloudEventEnvelopeSchema),
+    description: "Ingest a run CloudEvent",
   },
 
   // ─── Schedules ──────────────────────────────────────────────────────────

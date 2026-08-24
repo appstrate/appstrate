@@ -101,7 +101,7 @@ const updateClientRequest = {
     },
     scopes: {
       type: "array",
-      items: { type: "string" },
+      items: { type: "string", minLength: 1 },
       description:
         "OAuth scopes granted to this client. Must be a subset of `/api/oauth/scopes`. Existing access tokens retain the scopes they were minted with; updating this field only affects subsequent authorizations.",
     },

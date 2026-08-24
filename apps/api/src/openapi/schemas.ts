@@ -422,7 +422,7 @@ export const schemas = {
       },
       locked_fields: {
         type: "array",
-        items: { type: "string" },
+        items: { type: "string", minLength: 1 },
         description:
           "Input fields no caller may set at launch. A run or schedule that sets one is refused with 400 `locked_input_field`. A required field may not be locked unless it has a value (author `default` or an entry in `values`) — otherwise the write is refused with 400 `locked_required_field_empty`.",
       },
