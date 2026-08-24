@@ -27,7 +27,6 @@ export interface UnifiedSettingsNavItem {
 export interface UnifiedSettingsSection {
   scope: SettingsScope;
   labelKey: string;
-  icon: LucideIcon;
   items: UnifiedSettingsNavItem[];
 }
 
@@ -48,7 +47,6 @@ export function buildSettingsNavigation({
     {
       scope: "organization",
       labelKey: "orgSettings.sectionOrganization",
-      icon: Building,
       items: [
         { to: "/org-settings/general", icon: Building, labelKey: "orgSettings.tabGeneral" },
         { to: "/org-settings/members", icon: Users, labelKey: "orgSettings.tabMembers" },
@@ -97,7 +95,6 @@ export function buildSettingsNavigation({
     {
       scope: "workspace",
       labelKey: "workspaceSettings.sectionGeneral",
-      icon: LayoutGrid,
       items: [
         {
           to: "/workspace-settings/general",

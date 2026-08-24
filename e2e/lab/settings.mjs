@@ -29,6 +29,88 @@ async function withPage(run, viewport = { width: 1440, height: 1000 }) {
 }
 
 const settle = (page) => page.waitForTimeout(500);
+const assertClose = (actual, expected) =>
+  assert.ok(Math.abs(actual - expected) < 0.1, `Expected ${actual} to be close to ${expected}`);
+
+const waitForDialogToSettle = (page) =>
+  page.waitForFunction(() => {
+    const dialog = document.querySelector('[role="dialog"]');
+    return dialog && getComputedStyle(dialog).transform === "none";
+  });
+
+async function assertDesktopNavigationState(page, expectedHref) {
+  await waitForDialogToSettle(page);
+  const current = page.locator('[data-settings-scope] a[aria-current="page"]');
+  await page
+    .locator(`[data-settings-scope] a[aria-current="page"][href="${expectedHref}"]`)
+    .waitFor({ state: "visible" });
+  // Leave the rail before counting persistent surfaces. An inactive link under
+  // the pointer legitimately paints its transient hover surface.
+  await page.mouse.move(800, 50);
+  await page.waitForFunction(
+    () =>
+      [...document.querySelectorAll("[data-settings-scope] a")].filter(
+        (node) => getComputedStyle(node).backgroundColor !== "rgba(0, 0, 0, 0)",
+      ).length === 1,
+  );
+  assert.equal(await current.count(), 1);
+  assert.equal(await current.getAttribute("href"), expectedHref);
+
+  const linkBackgrounds = await page
+    .locator("[data-settings-scope] a")
+    .evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).backgroundColor));
+  const activeBackground = await current.evaluate((node) => getComputedStyle(node).backgroundColor);
+  assert.notEqual(activeBackground, "rgba(0, 0, 0, 0)");
+  assert.equal(linkBackgrounds.filter((background) => background !== "rgba(0, 0, 0, 0)").length, 1);
+
+  const sections = page.locator("[data-settings-scope]");
+  assert.equal(await sections.count(), 2);
+  const sectionStyles = await sections.evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const style = getComputedStyle(node);
+      return {
+        backgroundColor: style.backgroundColor,
+        borderLeftColor: style.borderLeftColor,
+        borderLeftWidth: style.borderLeftWidth,
+      };
+    }),
+  );
+  assert.equal(sectionStyles[0].backgroundColor, sectionStyles[1].backgroundColor);
+  assert.equal(sectionStyles[0].borderLeftWidth, "0px");
+  assert.equal(sectionStyles[1].borderLeftWidth, "0px");
+
+  for (const scope of ["organization", "workspace"]) {
+    const section = page.locator(`[data-settings-scope="${scope}"]`);
+    assert.equal(await section.locator("[data-settings-scope-title] svg").count(), 0);
+    const selector = section.locator("[data-settings-context-selector]");
+    assertClose(await selector.evaluate((node) => node.getBoundingClientRect().height), 36);
+    assert.equal(
+      await selector.evaluate((node) => getComputedStyle(node).backgroundColor),
+      await page.evaluate(() =>
+        getComputedStyle(document.documentElement).getPropertyValue("--background").trim(),
+      ),
+    );
+  }
+}
+
+await withPage(async (page) => {
+  await page.goto(`${BASE}/org-settings/general`);
+  await settle(page);
+  await assertDesktopNavigationState(page, "/org-settings/general");
+
+  await page
+    .locator('[data-settings-scope="organization"] a[href="/org-settings/members"]')
+    .click();
+  await page.waitForURL("**/org-settings/members");
+  await assertDesktopNavigationState(page, "/org-settings/members");
+
+  await page
+    .locator('[data-settings-scope="workspace"] a[href="/workspace-settings/api-keys"]')
+    .click();
+  await page.waitForURL("**/workspace-settings/api-keys");
+  await assertDesktopNavigationState(page, "/workspace-settings/api-keys");
+});
+console.log("  one neutral desktop navigation state across both scopes: ok");
 
 await withPage(async (page) => {
   await page.goto(`${BASE}/workspace-settings/general`);
@@ -104,17 +186,54 @@ await withPage(async (page) => {
   await page.setViewportSize({ width: 390, height: 1000 });
   await page.goto(`${BASE}/org-settings/general`);
   await settle(page);
+  await waitForDialogToSettle(page);
 
   const mobileSections = page.locator("[data-settings-mobile-scope]");
   await mobileSections.first().waitFor({ state: "visible" });
   assert.equal(await mobileSections.count(), 2);
+  const mobileSectionStyles = await mobileSections.evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const style = getComputedStyle(node);
+      return {
+        backgroundColor: style.backgroundColor,
+        borderColor: style.borderColor,
+      };
+    }),
+  );
+  assert.deepEqual(mobileSectionStyles[0], mobileSectionStyles[1]);
   for (const scope of ["organization", "workspace"]) {
     const section = page.locator(`[data-settings-mobile-scope="${scope}"]`);
     assert.equal(await section.isVisible(), true);
     assert.equal(await section.locator('button[role="combobox"]').count(), 2);
+    assert.equal(await section.locator("[data-settings-scope-title] svg").count(), 0);
+
+    const contextSelector = section.locator("[data-settings-context-selector]");
+    assertClose(await contextSelector.evaluate((node) => node.getBoundingClientRect().height), 44);
+    assertClose(
+      await contextSelector.evaluate((node) => {
+        const style = getComputedStyle(node, "::before");
+        return (
+          Number.parseFloat(style.height) +
+          Number.parseFloat(style.borderTopWidth) +
+          Number.parseFloat(style.borderBottomWidth)
+        );
+      }),
+      40,
+    );
+    assertClose(
+      await section
+        .locator("[data-settings-page-selector]")
+        .evaluate((node) => node.getBoundingClientRect().height),
+      40,
+    );
   }
+
+  assert.equal(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    true,
+  );
 });
-console.log("  legacy route and two-scope mobile navigation: ok");
+console.log("  legacy route and two neutral mobile scope groups: ok");
 
 await browser.close();
 console.log("\nSettings behaviour guard passed.");

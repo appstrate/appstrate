@@ -57,10 +57,22 @@ interface ContextSelectorProps {
   onValueChange: (value: string) => void;
 }
 
+const contextSelectorTriggerClass = [
+  "relative h-11 border-transparent bg-transparent py-0 shadow-none",
+  "before:pointer-events-none before:absolute before:inset-x-0 before:inset-y-0.5",
+  "before:rounded-md before:border before:border-input before:bg-background before:shadow-sm",
+  "[&>span]:relative [&>span]:z-10 [&>svg]:relative [&>svg]:z-10",
+  "md:h-9 md:border-input md:bg-background md:py-2 md:shadow-sm md:before:hidden",
+].join(" ");
+
 function ContextSelector({ value, label, disabled, options, onValueChange }: ContextSelectorProps) {
   return (
     <Select value={value} disabled={disabled} onValueChange={onValueChange}>
-      <SelectTrigger className="bg-background h-10" aria-label={label}>
+      <SelectTrigger
+        className={contextSelectorTriggerClass}
+        aria-label={label}
+        data-settings-context-selector
+      >
         <SelectValue placeholder={label} />
       </SelectTrigger>
       <SelectContent>
@@ -105,7 +117,6 @@ function RailLink({
 
 interface ScopeNavigationProps {
   section: UnifiedSettingsSection;
-  activeScope: SettingsScope;
   activeItem?: UnifiedSettingsNavItem;
   keepOverlay?: unknown;
   contextSelector: ReactNode;
@@ -114,34 +125,27 @@ interface ScopeNavigationProps {
 
 function ScopeNavigation({
   section,
-  activeScope,
   activeItem,
   keepOverlay,
   contextSelector,
   label,
 }: ScopeNavigationProps) {
-  const active = activeScope === section.scope;
   return (
     <section
       data-settings-scope={section.scope}
-      data-active={active || undefined}
       className={cn(
-        "border-l-2 px-3 py-4",
+        "px-3 py-3",
         section.scope === "workspace" && "border-t-sidebar-border border-t",
-        active ? "border-l-primary bg-sidebar-accent/20" : "border-l-transparent",
       )}
     >
       <div
-        className={cn(
-          "mb-2 flex items-center gap-2 text-[0.7rem] font-semibold tracking-[0.06em] uppercase",
-          active ? "text-foreground" : "text-muted-foreground",
-        )}
+        data-settings-scope-title
+        className="text-muted-foreground mb-1.5 text-[0.7rem] font-semibold tracking-[0.06em] uppercase"
       >
-        <section.icon className="size-3.5" />
         {label(section.labelKey)}
       </div>
       {contextSelector}
-      <nav className="mt-2 flex flex-col gap-0.5" aria-label={label(section.labelKey)}>
+      <nav className="mt-1.5 flex flex-col gap-0.5" aria-label={label(section.labelKey)}>
         {section.items.map((item) => (
           <RailLink
             key={item.to}
@@ -179,22 +183,26 @@ function MobileScopeNavigation({
   return (
     <section
       data-settings-mobile-scope={section.scope}
-      data-active={active || undefined}
-      className={cn("rounded-lg border p-3", active && "border-primary/50 bg-primary/5")}
+      className="border-border rounded-lg border p-2.5"
     >
       <div
         id={headingId}
-        className="text-muted-foreground mb-2 text-xs font-semibold tracking-wide uppercase"
+        data-settings-scope-title
+        className="text-muted-foreground mb-1.5 text-xs font-semibold tracking-wide uppercase"
       >
         {label(section.labelKey)}
       </div>
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         {contextSelector}
         <span id={pageSelectorId} className="sr-only">
           {label("unifiedSettings.pageSelector")}
         </span>
         <Select value={active ? activeItem?.to : ""} onValueChange={onNavigate}>
-          <SelectTrigger aria-labelledby={`${headingId} ${pageSelectorId}`}>
+          <SelectTrigger
+            className="bg-background h-10"
+            aria-labelledby={`${headingId} ${pageSelectorId}`}
+            data-settings-page-selector
+          >
             <SelectValue placeholder={label("unifiedSettings.choosePage")} />
           </SelectTrigger>
           <SelectContent>
@@ -334,7 +342,6 @@ export function UnifiedSettingsLayout() {
           <ScopeNavigation
             key={section.scope}
             section={section}
-            activeScope={activeScope}
             activeItem={activeItem}
             keepOverlay={keepOverlay}
             contextSelector={selectorFor(section.scope)}

@@ -2115,10 +2115,11 @@ useful suite summary: preload could not connect to the OrbStack Docker socket,
 then tests that depend on preload state failed. It was interrupted after the
 failure was established; no touched web test remains failing.
 
-**Settings-navigation product follow-up, 24 August.** The blue rail or framed
-scope border and the grey active-page surface encode two simultaneous kinds of
-selection. In practice that makes the whole Organisation group look selected
-and Workspace look secondary or disabled. Remove the persistent scope signal:
+**~~Settings-navigation product follow-up, 24 August.~~ Done 24 August.** The
+blue rail or framed scope border and the grey active-page surface encode two
+simultaneous kinds of selection. In practice that makes the whole Organisation
+group look selected and Workspace look secondary or disabled. Remove the
+persistent scope signal:
 both groups use the same neutral surface, both context dropdowns stay white,
 and the one grey active-page surface moves across the complete navigation when
 the route changes. Blue remains a transient keyboard-focus treatment, not a
@@ -2132,6 +2133,40 @@ Target a 36px visible control on desktop and 40px on mobile, while preserving a
 vertical gaps around them proportionally. The two sections remain structurally
 separate and retain all dependent organisation/workspace switching behaviour;
 this is a density and state-grammar correction, not another IA change.
+
+The desktop shell now gives both sections the same transparent neutral surface,
+with only the existing divider between them. Scope headings use plain text and
+no decorative icon. Exactly one destination link carries `aria-current` and
+the grey active surface; the browser guard follows it from Organisation General
+to Members and then to Workspace API keys. Both context selectors remain white
+and measure 36px on desktop. The destination icons remain because they identify
+real pages rather than decorating a scope.
+
+The mobile groups now share the same neutral border and surface regardless of
+the active route. Their headings are plain text, context selectors paint a 40px
+field inside a 44px interactive trigger, and page selectors paint at 40px. The
+slightly smaller group padding and six-pixel internal gaps recover the space
+used by the enlarged hit target. The five affected destinations, Organisation
+General, Members, MCP access, Workspace General and API keys, were inspected at
+1440 and 390 with zero viewport overflow. Their nominal, heavy and error passes
+produced 30 captures with no missing fixture; the full four-scenario pass also
+completed 40 captures.
+
+The first geometry assertion read the trigger while the dialog's opening zoom
+was still active and reported 42.68px for a 44px target. The guard now waits for
+the dialog transform to settle before measuring the real rectangle, and adds
+the pseudo-element's content plus borders when measuring the 40px painted
+surface. It also waits for the expected `aria-current` destination rather than
+assuming a cold route has mounted after a fixed delay. The link colour
+transition briefly paints the old and new destination at once, so the same
+guard waits for that transition before asserting exactly one non-transparent
+active surface. The fixed-point review caught that an inactive link under the
+pointer can legitimately keep its hover surface too; the guard moves outside
+the rail before counting persistent backgrounds. `bun run lab:settings` is
+green with the dependent context, keyed remount, Back, Close, legacy route and
+mobile contracts intact.
+`TEST_TIER=0 bun test apps/web` is green at 628 tests. `bun run check` is green
+at 33/33 tasks with the same nine pre-existing warnings.
 
 **12. Accessibility, which nothing here has ever checked.** The branch
 re-declares ARIA roles on the table because this file demands it, and that is
