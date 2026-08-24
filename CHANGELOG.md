@@ -120,10 +120,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   3. **`context_documents` on both inline-run bodies, and the `dataschema`
      CloudEvents attribute on the run-events ingestion route, are `400`s.**
      Each of those bodies is `.strict()`, so the retired field is refused by
-     name rather than stripped. `context_documents` survives in exactly one place,
-     as an ARGUMENT of the `run_and_wait` tool: the shared launch client
-     canonicalizes it to `context_files` before the launch body is built. On
-     the wire it is a `400`.
+     name rather than stripped. The `run_and_wait` TOOL ARGUMENT of the same
+     name used to be canonicalized to `context_files` by the shared launch
+     client; it is now refused by name there too. Refused rather than merely
+     unread, because that client builds the launch body from an allowlist —
+     an argument nobody names is invisible, and the run would start with
+     nothing mounted while every layer reported success.
   4. **`document.published` is no longer accepted as a runtime-tool event**, at
      either acceptor — and the two are safe for different reasons. Inside the
      container the reason is structural: the only producer of that name is
@@ -189,23 +191,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
      `documents:read` and asserted `/api/files/*` answered `200`. #1193 renamed
      the routes and left the scopes on the old spelling; the alias hid the gap.
 
-  **What still reads an old spelling, and why each one earned it** — every
-  entry below is a value a RELEASED build wrote into a place the current build
-  still reads, or one a client is entitled to keep sending because the protocol
-  told it the list was stable:
+  **Nothing reads an old spelling any more.** The rename shipped with a read
+  alias on every wire-visible spelling. The last five were kept on the
+  strongest ground available — a value a RELEASED build wrote into a place the
+  current build still reads, or a vocabulary a protocol had told a client was
+  stable — and they are gone too, because no such value and no such client
+  exists:
 
-  - `run_logs` rows with `event: "document"` still render
-    (`PUBLISHED_FILE_LOG_EVENTS`). A log row is immutable once written, and
-    `"document"` is what every release through `v1.0.0-beta.51` wrote.
-  - The `documents` key of a persisted `run_and_wait` result is still read
-    (`PUBLISHED_FILE_RESULT_KEYS`), as are frames carrying `document_id`. This
-    payload is the reload-safe source of a run card's chips, so a pre-rename
-    conversation would lose them permanently once its logs are pruned.
-  - `publish_document` in a persisted `manifest.runtime_tools` is canonicalized
-    on read; a published package version is immutable, so its manifest cannot
-    be rewritten in place.
-  - The four retired MCP tool names stay callable but hidden — see below.
-  - `context_documents` as a `run_and_wait` tool argument — see above.
+  - `run_logs` rows tagged `event: "document"` are no longer rendered
+    (`PUBLISHED_FILE_LOG_EVENTS` is now just `["file"]`). Such a row would show
+    without its attachment — an absence, not an error.
+  - The `documents` key of a persisted `run_and_wait` result, and items keyed
+    `document_id`, are no longer read. Only `files` / `id` / `file_id` are.
+  - `publish_document` in `manifest.runtime_tools` is no longer canonicalized.
+    Author input naming it is REFUSED; a stored manifest has it DROPPED and the
+    drop REPORTED to the caller — never silently reinterpreted as `publish_file`.
+  - The four retired MCP tool names are no longer registered. A client holding
+    a cached tool list gets `-32602 Unknown tool` and re-lists; that was the one
+    alias with a live protocol argument behind it (`tools.listChanged: false`),
+    and the cost is transient where the second dispatch path was permanent.
+  - `context_documents` as a `run_and_wait` tool argument is REFUSED BY NAME.
+    That distinction is the whole point: the launch body is built from an
+    allowlist, so merely not reading it would make it invisible — the run would
+    start with nothing mounted and every layer would report success.
+
+  Two more went with them: the `setDocumentStorageLimit` platform-services
+  alias (`@appstrate/cloud` now binds `setFileStorageLimit`; see the ship order
+  below) and the `#documents` run-detail tab hash. The `result.text` /
+  `result.text_truncated` fields of the removed `report` tool left the run
+  resource at the same time.
+
+  **Ship order, and it is not optional.** `@appstrate/cloud` binds the storage
+  capability off the LIVE services object the platform injects, not off its
+  pinned types, so a rename does not reach its read — it `TypeError`s its next
+  boot. Publish `@appstrate/core` 8.0.0 → release `cloud` (already moved to
+  `setFileStorageLimit` and `>=8.0.0`) → deploy this platform build. The
+  published `7.0.0` exposes only the old name, so cloud's range had to move
+  with it.
 
   **What a consumer has to do:**
 
@@ -231,22 +253,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
      The limits and the statuses are unchanged; only the strings moved.
 
   3. **`publish_document` is now `publish_file` and no longer accepts
-     `presentation`.** A persisted manifest declaring
-     `runtime_tools: ["publish_document"]` keeps working — the id is
-     canonicalized on read, never dropped, and a manifest saved afterwards
-     writes only `publish_file`. This was the sharpest edge in the change:
-     `dropRetiredRuntimeTools()` silently DELETES runtime-tool ids it does not
-     recognise, so a bare rename would not have errored, it would have stripped
-     the tool from every agent that had selected it, with nothing in any log.
-     A caller that still sends `presentation` has it ignored, not rejected.
-  4. **The four MCP tools are renamed; the old names stay callable but hidden.**
+     `presentation`.** The retired id is not aliased: author input naming it is
+     refused, and a stored manifest has it DROPPED with the drop REPORTED to
+     the caller. That report is the part that matters —
+     `dropRetiredRuntimeTools()` removes ids it does not recognise, so a silent
+     drop would strip the tool from an agent that had selected it with nothing
+     in any log. A caller that still sends `presentation` has it ignored, not
+     rejected.
+  4. **The four MCP tools are renamed, and the old names are gone.**
      `list_documents`, `read_document`, `import_package_document` and
-     `validate_package_document` forward to the canonical handler and rename a
-     `document_uri` argument to `file_uri` on the way in. They are withheld from
-     `tools/list` because the point of the rename is what the model sees. The
+     `validate_package_document` are no longer registered, hidden or otherwise,
+     and the `document_uri` argument is no longer renamed on the way in. The
      server advertises `tools: { listChanged: false }`, so a client that listed
-     before the upgrade and calls an old name after it is behaving correctly and
-     must not get `-32602 Unknown tool` mid-conversation.
+     before the upgrade and calls an old name after it gets `-32602 Unknown
+tool` and re-lists. That is the one alias here with a live protocol
+     argument behind it; the cost of dropping it is transient, where a second
+     dispatch path for four capabilities was permanent.
 
      One MCP break is NOT covered by any alias, and it is client-facing: a
      dynamically-registering client whose published Client ID Metadata Document
@@ -271,15 +293,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
      `isFileUri`, `parseDocumentUri` → `parseFileUri`, `documentUri()` →
      `fileUri()`, `extractDocumentIds[FromText]` → `extractFileIds[FromText]`,
      plus renames on `./permissions`, `./telemetry`, `./api-errors`, `./module`
-     and `./run-and-wait-client`. **Core is NOT published from this branch.**
-     `cloud` and `connect-helper` stay on the currently published version, but
-     the pin only protects them at the TYPE level: `cloud` binds
-     `services.setDocumentStorageLimit` off the LIVE services object this
-     platform injects at boot, so what keeps it working here is the deprecated
-     `setDocumentStorageLimit` alias kept beside the canonical
-     `setFileStorageLimit` — temporary, and the only thing holding that seam
-     together. The eventual major needs a matching code change in `cloud`, not
-     just a version bump. See `packages/core/CHANGELOG.md`.
+     and `./run-and-wait-client`. **Core is NOT published from this branch** —
+     but this build cannot ship before it is. `cloud` binds
+     `services.setFileStorageLimit` off the LIVE services object this platform
+     injects at boot, and the deprecated `setDocumentStorageLimit` alias that
+     used to cover that seam is gone. A type-level pin never protected it: a
+     property read at boot does not typecheck. Ship order is core `8.0.0` on
+     npm → `cloud` (already moved, and its range raised to `>=8.0.0` because
+     the published `7.0.0` exposes only the old name) → this platform build.
+     Deploying the platform first `TypeError`s cloud at boot.
+     `connect-helper` reads none of this surface. See
+     `packages/core/CHANGELOG.md`.
 
   **OPERATOR ACTIONS, and SQL cannot perform them.** Migration
   `0044_finish_file_rename` carries the data half — it rewrites every

@@ -22,26 +22,28 @@ Staying pinned to the published `7.0.0` protects them at the TYPE level only.
 `cloud` also binds one of these off the LIVE services object the platform
 injects at runtime — `services.setDocumentStorageLimit.bind(services)`
 (`cloud/src/billing/storage-entitlement.ts`) — and a compile-time pin does
-nothing for a property read at boot. What keeps `cloud` working against this
-branch is the **deprecated `setDocumentStorageLimit` alias**: `PlatformServices`
-declares it beside the canonical `setFileStorageLimit`, and the platform
-registry assigns both names the same function. It is declared REQUIRED, not
-optional, and that detail is load-bearing in both directions. `cloud` reads it
-unconditionally, and it typechecks against the platform image's core rather
-than against npm, so an optional member is a `TS18048 possibly 'undefined'`
-build failure in the repo the alias exists to protect. Required also keeps the
-compiler's grip on the platform side: with `?`, deleting the binding in
-`buildPlatformServices()` would still typecheck. The alias is temporary and is
-the only thing holding the seam together — `cloud` must move to
-`setFileStorageLimit` before it is removed.
+nothing for a property read at boot.
 
-`cleanupSessionDocuments` → `cleanupSessionFiles` deliberately gets NO such
-alias. Its only consumer is the in-tree `@appstrate/module-chat`, which ships
-in the same image and was renamed in the same commit, so an alias would need a
+That seam was held open for a while by a deprecated `setDocumentStorageLimit`
+alias declared beside the canonical `setFileStorageLimit`. **The alias is now
+gone**, and the two repos move in lockstep instead: `cloud` binds
+`setFileStorageLimit` and declares `@appstrate/core` `>=8.0.0`. That range is
+not cosmetic — the published `7.0.0` exposes ONLY the old name, so a cloud
+build resolving `7.0.0` would typecheck against a services object without the
+member it now reads. Local dev resolves core through a workspace symlink and
+would not have caught it.
+
+**Ship order is therefore fixed**: core `8.0.0` on npm → `cloud` → the platform
+build. Deploying the platform first `TypeError`s cloud at boot.
+
+`cleanupSessionDocuments` → `cleanupSessionFiles` never had such an alias. Its
+only consumer is the in-tree `@appstrate/module-chat`, which ships in the same
+image and was renamed in the same commit, so an alias would have needed a
 ledger owner in `scripts/verify-module-contract.ts` that does not exist — a
 fiction rather than a contract. An out-of-tree module binding the old name off
 the live services object WILL break; that is the accepted cost, recorded here
-rather than left as an oversight.
+rather than left as an oversight. The same now goes for the storage-limit
+capability.
 
 `connect-helper` reads none of this surface and is unaffected either way.
 
@@ -63,12 +65,17 @@ persisted spelling. **Those aliases are gone**, and they never reached npm: they
 were added and removed inside this same unreleased window, so relative to the
 published `7.0.0` they are not a deprecation, they simply never existed. What
 went with them is listed under Removed — the legacy permission-resource table,
-the retired runtime-tool event type, and the `document://` URI prefix. The
-compatibility that survives is the compatibility that a RELEASED build wrote
-into a place the current build still reads: `PUBLISHED_FILE_LOG_EVENTS` (a
-`run_logs` row is immutable once written) and the retired `publish_document`
-runtime-tool id on a persisted manifest (a published package version is
-immutable). The platform-side environment variables moved too, with no alias
+the retired runtime-tool event type, and the `document://` URI prefix.
+
+**No read alias survives this release.** The two that were argued for on the
+grounds that a RELEASED build had written values a current build still reads —
+the `"document"` tag in `PUBLISHED_FILE_LOG_EVENTS` (a `run_logs` row is
+immutable once written) and the `publish_document` runtime-tool id on a
+persisted manifest (a published package version is immutable) — are gone too:
+no such row and no such manifest exists. A deployment that held one would see
+that single log row render without its attachment, and that one tool id
+dropped from the manifest with the drop reported — never a silent
+reinterpretation. The platform-side environment variables moved too, with no alias
 (`FILE_MAX_BYTES`, `RUN_MAX_FILES`, `FILE_RETENTION_DAYS`,
 `WORKSPACE_MAX_FILES_BYTES`) — see the platform CHANGELOG; core reads none of
 them, it only names them in docblocks.
@@ -137,18 +144,20 @@ them, it only names them in docblocks.
   unbounded in a long-lived process and a schema carrying `$id` threw the second
   time it was compiled; and it evicted by clearing the whole map rather than
   FIFO.
-- **`LEGACY_RUNTIME_TOOL_ALIASES`, `LegacyRuntimeToolId`,
-  `LEGACY_RUNTIME_TOOL_IDS`, `ACCEPTED_RUNTIME_TOOL_IDS`,
-  `AcceptedRuntimeToolId`, `canonicalRuntimeToolId`,
-  `canonicalizeRuntimeToolIds`** (`./runtime-tools-catalog`) — the single alias
-  table for retired `runtime_tools` spellings, and the helpers that resolve
-  them. `runtime_tools` is persisted inside agent manifests (published ZIPs
-  included, which are immutable by construction), and the read path drops ids it
-  does not recognise — so a bare rename would not error, it would silently strip
-  the tool from every agent that already selected it. Read stored ids through
-  `canonicalRuntimeToolId` / `canonicalizeRuntimeToolIds`, never through
-  `isSelectableRuntimeTool`, which answers "may the editor offer this?" and is
-  canonical-only by design.
+- **`ACCEPTED_RUNTIME_TOOL_IDS`, `canonicalizeRuntimeToolIds`**
+  (`./runtime-tools-catalog`) — the set of `runtime_tools` ids a PERSISTED
+  manifest may carry, and the one helper every read path funnels stored ids
+  through. It drops ids the platform does not know, collapses duplicates,
+  preserves the author's order, and — the part that matters — REPORTS every
+  drop to its caller rather than swallowing it.
+
+  An alias table (`LEGACY_RUNTIME_TOOL_ALIASES` and friends, mapping the
+  retired `publish_document` forward to `publish_file`) was drafted for this
+  release and removed again before it shipped, so it never reached npm and
+  needs no deprecation. Nothing carries the retired spelling: no system
+  package, no stored manifest. An unknown id is now refused on author input
+  and dropped-with-a-report on read — never guessed at.
+
 - **`./image-ref`** — the image-reference parser and the runtime-image version
   contract, added after `7.0.0` was published and undocumented here until now.
   `parseImageRef` splits a ref into repository / tag / digest;
@@ -202,9 +211,9 @@ them, it only names them in docblocks.
   `context_documents` becomes `context_files`, the terminal payload key
   `documents` becomes `files`, the inline default `runtime_tools` selects
   `publish_file`, and the client calls `GET /api/files`.
-- **`schema/agent.schema.json`** — the `runtime_tools` enum accepts BOTH
-  `publish_file` and `publish_document`, so a persisted manifest carrying
-  either validates.
+- **`schema/agent.schema.json`** — the `runtime_tools` enum lists the canonical
+  ids only. `publish_document` is not among them: an author manifest naming it
+  fails validation, and a stored one has it dropped and reported.
 
 ### Removed
 

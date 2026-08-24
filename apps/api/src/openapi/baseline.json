@@ -22362,16 +22362,6 @@
             "properties": {
               "output": {
                 "description": "Structured JSON emitted via the agent's `output` runtime tool. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped."
-              },
-              "text": {
-                "type": "string",
-                "deprecated": true,
-                "description": "HISTORICAL ONLY. Markdown left by the removed `report` runtime tool. The platform no longer writes this field — it is served verbatim on runs finalized before the removal. Agent reports are descriptively named markdown files now (`outputs/<task-specific-name>.md`)."
-              },
-              "text_truncated": {
-                "type": "boolean",
-                "deprecated": true,
-                "description": "HISTORICAL ONLY. Present and true when a pre-removal `text` exceeded the 256 KiB storage cap."
               }
             }
           },
@@ -23722,9 +23712,9 @@
                 "type": "array",
                 "items": {
                   "type": "string",
-                  "enum": ["output", "log", "note", "pin", "publish_file", "publish_document"]
+                  "enum": ["output", "log", "note", "pin", "publish_file"]
                 },
-                "description": "Appstrate top-level extension: runtime tools the agent may use. Optional. `publish_document` is the retired pre-#1177 spelling of `publish_file`: still accepted on input (a manifest published before the rename carries it) and normalized to the canonical id on save."
+                "description": "Appstrate top-level extension: runtime tools the agent may use. Optional. An id outside this enum is rejected on author input and dropped (with the drop reported) when read back from a stored manifest."
               }
             }
           }

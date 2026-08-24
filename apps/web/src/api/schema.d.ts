@@ -4794,8 +4794,8 @@ export interface components {
         } & {
             [key: string]: unknown;
         }) & {
-            /** @description Appstrate top-level extension: runtime tools the agent may use. Optional. `publish_document` is the retired pre-#1177 spelling of `publish_file`: still accepted on input (a manifest published before the rename carries it) and normalized to the canonical id on save. */
-            runtime_tools?: ("output" | "log" | "note" | "pin" | "publish_file" | "publish_document")[];
+            /** @description Appstrate top-level extension: runtime tools the agent may use. Optional. An id outside this enum is rejected on author input and dropped (with the drop reported) when read back from a stored manifest. */
+            runtime_tools?: ("output" | "log" | "note" | "pin" | "publish_file")[];
         };
         AgentSkillRef: {
             id: string;
@@ -5406,16 +5406,6 @@ export interface components {
             result: {
                 /** @description Structured JSON emitted via the agent's `output` runtime tool. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped. */
                 output?: unknown;
-                /**
-                 * @deprecated
-                 * @description HISTORICAL ONLY. Markdown left by the removed `report` runtime tool. The platform no longer writes this field — it is served verbatim on runs finalized before the removal. Agent reports are descriptively named markdown files now (`outputs/<task-specific-name>.md`).
-                 */
-                text?: string;
-                /**
-                 * @deprecated
-                 * @description HISTORICAL ONLY. Present and true when a pre-removal `text` exceeded the 256 KiB storage cap.
-                 */
-                text_truncated?: boolean;
             } | null;
             /** @description Terminal summary of the run's end-of-run `outputs/` sweep. `status: "partial"` means at least one deliverable was LOST (upload abandoned after retries, or a file over the per-file cap); `failed` lists each lost file's name + a stable code (`file_too_large`, `quota_exceeded`, `conflict`, `upload_failed`). Independent of the run `status` — a successful run can still be `partial`. Null on older runs / containers that never reported it. */
             artifacts: {
