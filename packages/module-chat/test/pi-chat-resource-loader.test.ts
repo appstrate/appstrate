@@ -93,6 +93,12 @@ describe("Pi chat resource policy", () => {
     const resolved = await packageManager.resolve();
     expect(resolved.skills).toEqual([]);
     expect(resolved.extensions).toEqual([]);
-    expect((await packageManager.resolveExtensionSources([])).extensions).toEqual([]);
+    // Dropped: `expect((await resolveExtensionSources([])).extensions).toEqual([])`
+    // asserted nothing. `DefaultPackageManager.resolveExtensionSources` maps
+    // over its argument, so an empty list returns empty with or without the
+    // shim — it passed identically against the unshimmed loader. The two
+    // assertions above carry the real claim, and they are non-vacuous because
+    // the fixture seeds `<agentDir>/skills/would-be-discovered/SKILL.md` in the
+    // directory `addAutoDiscoveredResources` scans unconditionally.
   });
 });

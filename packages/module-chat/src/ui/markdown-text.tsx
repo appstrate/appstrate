@@ -51,8 +51,18 @@ export function MarkdownText() {
       //
       // Kept as smoothing rather than switched off outright: a raw chunk feed
       // reads as jittery. Retuned so the animation tracks the stream instead of
-      // buffering it — one character per frame at most, and a quarter of the
-      // former backlog window.
+      // buffering it: at most one character per MILLISECOND, and a quarter of
+      // the former backlog window.
+      //
+      // `maxCharIntervalMs` is the ceiling on the gap BETWEEN characters, not a
+      // per-frame cap — the per-frame cap is `maxCharsPerFrame`, deliberately
+      // left at its default. `useSmooth`'s animator computes
+      // `baseTimePerChar = min(maxCharIntervalMs, drainMs / remaining)` and then
+      // reveals `deltaTime / baseTimePerChar` characters per frame, so this
+      // yields ~16 at 60 fps with a short backlog and proportionally more with
+      // a long one — which is the point: the reveal rate follows the stream
+      // rather than a fixed budget. Reading this as a frame cap and raising
+      // `drainMs` to slow the reveal does the opposite of what it looks like.
       smooth={{ drainMs: 60, maxCharIntervalMs: 1 }}
       className="prose prose-sm dark:prose-invert max-w-none break-words [&_code]:text-[0.85em] [&_pre]:rounded-md [&_pre]:p-3 [&_pre]:text-xs"
       components={MARKDOWN_COMPONENTS}

@@ -23,7 +23,7 @@
  * pi-ai's own request shape — that is the SDK's contract, not ours.
  */
 
-import { describe, it, expect, afterAll } from "bun:test";
+import { describe, it, expect, afterAll, afterEach } from "bun:test";
 import type { UIMessage } from "ai";
 import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
 import { createPiProxyModelBinding } from "../src/pi-chat/model-binding.ts";
@@ -52,6 +52,13 @@ interface Capture {
  * still written after it, reading the first chunk would deadlock rather than
  * return, and the test times out instead of passing for the wrong reason.
  */
+// Module-level, and therefore process-level: `mcpResponse` awaits it on EVERY
+// subsequent handshake. Cleared in `afterEach` rather than in the one test's
+// `finally`, because the failure that test guards against is a TIMEOUT — and a
+// timed-out body never reaches its `finally`. A gate left pending would then
+// hang every later turn in this file at 30 s apiece, burying the one real
+// failure under a cascade. Harmless today only because that test happens to be
+// last in the describe.
 let mcpInitGate: Promise<void> | null = null;
 
 async function mcpResponse(req: Request): Promise<Response> {
@@ -112,6 +119,9 @@ const server = Bun.serve({
 const ORIGIN = `http://127.0.0.1:${server.port}`;
 
 afterAll(() => server.stop(true));
+afterEach(() => {
+  mcpInitGate = null;
+});
 
 function orgModel(): OrgModel {
   return {
@@ -133,7 +143,11 @@ function userTurn(text: string): UIMessage[] {
 }
 
 /** Drive one real turn and collect its UI-message-stream chunks. */
-async function runTurn(mintBearer: () => string, abortSignal?: AbortSignal) {
+async function runTurn(
+  mintBearer: () => string,
+  abortSignal?: AbortSignal,
+  platformFetch?: typeof fetch,
+) {
   const binding = createPiProxyModelBinding({ model: orgModel(), origin: ORIGIN, mintBearer })!;
   const slot = acquirePiChatSlot();
   expect(slot).not.toBeNull();
@@ -154,7 +168,11 @@ async function runTurn(mintBearer: () => string, abortSignal?: AbortSignal) {
       messages: userTurn("dis bonjour"),
       system: "You are a helpful assistant.",
       generation: {},
-      platformMcp: { url: `${ORIGIN}/api/mcp/o/org_live?context=injected`, headers: {} },
+      platformMcp: {
+        url: `${ORIGIN}/api/mcp/o/org_live?context=injected`,
+        headers: {},
+        ...(platformFetch ? { fetch: platformFetch } : {}),
+      },
       abortSignal: abortSignal ?? new AbortController().signal,
       onError: (error) => String(error),
       recordUsage: (record) => usage.push(record),
@@ -328,5 +346,32 @@ describe("runPiChat against a stub provider", () => {
       releaseHandshake();
       slot!.release();
     }
+  }, 30_000);
+
+  it("carries the caller's fetch all the way into the MCP transport", async () => {
+    // The route→engine hop is asserted in `chat-stream-handler.test.ts`, which
+    // probes `input.platformMcp.fetch`. The two hops AFTER it — engine →
+    // `buildPlatformMcpTools`, and that → `createMcpHttpClient` — were only
+    // ever evaluated on their falsy branch, because every fixture in this file
+    // built `platformMcp` without a `fetch`. Deleting either conditional spread
+    // left the whole suite green while production silently went back to opening
+    // real loopback TCP connections per turn — and kept using them for every
+    // `tools/call` after the handshake, since the override lives for the
+    // client's whole lifetime.
+    const seen: string[] = [];
+    const recording: typeof fetch = (input, init) => {
+      seen.push(new Request(input as RequestInfo, init).url);
+      return fetch(input as RequestInfo, init);
+    };
+
+    const { chunks } = await runTurn(() => "bearer-mcp-fetch", undefined, recording);
+
+    // It reached the transport: the handshake and the tool listing both went
+    // through the injected fetch rather than the global one.
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every((u) => u.includes("/api/mcp/"))).toBe(true);
+    // And the turn still completed, so the injection is not merely observed —
+    // it is what actually served the handshake.
+    expect(chunks.at(-1)?.type).toBe("finish");
   }, 30_000);
 });

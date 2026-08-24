@@ -148,7 +148,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
           title: data.title ?? null,
         })
         .returning();
-      await notifySessionUpdate(row!.id, row!.orgId, row!.userId);
+      notifySessionUpdate(row!.id, row!.orgId, row!.userId);
       return c.json(toSessionDto(row!), 201);
     },
   );
@@ -168,7 +168,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
       .update(chatSessions)
       .set({ title, updatedAt: new Date() })
       .where(eq(chatSessions.id, session.id));
-    await notifySessionUpdate(session.id, session.orgId, session.userId);
+    notifySessionUpdate(session.id, session.orgId, session.userId);
     return c.body(null, 204);
   });
 
@@ -190,7 +190,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
           lastReadSeq: sql`GREATEST(coalesce(${chatSessions.lastReadSeq}, 0), coalesce(${chatSessions.lastAssistantSeq}, 0))`,
         })
         .where(eq(chatSessions.id, session.id));
-      await notifySessionUpdate(session.id, session.orgId, session.userId);
+      notifySessionUpdate(session.id, session.orgId, session.userId);
       return c.body(null, 204);
     },
   );
@@ -212,7 +212,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
       await deps.cleanupSessionFiles(session.id, tx);
       await tx.delete(chatSessions).where(eq(chatSessions.id, session.id));
     });
-    await notifySessionUpdate(session.id, session.orgId, session.userId);
+    notifySessionUpdate(session.id, session.orgId, session.userId);
     return c.body(null, 204);
   });
 

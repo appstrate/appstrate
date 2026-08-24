@@ -237,13 +237,11 @@ async function touchSession(
       ...(title !== session.title ? { title } : {}),
     })
     .where(eq(chatSessions.id, sessionId));
-  // Detached on purpose. `notifySessionUpdate` is a `pg_notify` round trip whose
-  // only job is telling connected clients to refetch the sidebar — `realtime.ts`
-  // documents it as best-effort and already swallows its own failures. Awaiting
-  // it put a round trip on the pre-inference path of every turn to buy nothing:
-  // a lost signal delays a refetch, it does not lose data. The `void` + `catch`
-  // keeps a rejection from surfacing as an unhandled rejection.
-  void notifySessionUpdate(sessionId, session.orgId, session.userId).catch(() => {});
+  // Detached inside `notifySessionUpdate` itself now, so this call site — on the
+  // pre-inference path of every turn — pays nothing, and neither do the six that
+  // used to await it for no reason. The `.catch(() => {})` that stood here was
+  // dead code either way: the function could not reject.
+  notifySessionUpdate(sessionId, session.orgId, session.userId);
 }
 
 /**

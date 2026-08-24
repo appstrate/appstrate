@@ -101,7 +101,7 @@ export async function setActiveStream(sessionId: string, streamId: string): Prom
     .set({ activeStreamId: streamId })
     .where(eq(chatSessions.id, sessionId))
     .returning({ orgId: chatSessions.orgId, userId: chatSessions.userId });
-  if (row) await notifySessionUpdate(sessionId, row.orgId, row.userId);
+  if (row) notifySessionUpdate(sessionId, row.orgId, row.userId);
 }
 
 /**
@@ -120,5 +120,5 @@ export async function clearActiveStream(sessionId: string, streamId: string): Pr
     .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.activeStreamId, streamId)))
     .returning({ orgId: chatSessions.orgId, userId: chatSessions.userId });
   // No-op race (a newer turn already owns the marker) → no row, no signal.
-  if (row) await notifySessionUpdate(sessionId, row.orgId, row.userId);
+  if (row) notifySessionUpdate(sessionId, row.orgId, row.userId);
 }
