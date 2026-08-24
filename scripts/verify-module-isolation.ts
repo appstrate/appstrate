@@ -35,31 +35,28 @@ const ROOT = resolve(dirname(Bun.fileURLToPath(import.meta.url)), "..");
 /**
  * Cross-module imports that exist today and are accepted for now, each with the
  * reason and the exit. An entry is `<importing module>/<path>` → `<owning
- * module>`.
+ * module>`, narrowed to ONE import specifier by `spec`.
+ *
+ * `spec` is not decoration. Without it an acceptance keyed only on file and
+ * owner grants that file blanket permission to import ANYTHING from that
+ * module: the three entries this list used to hold each named a specific symbol
+ * in their prose while matching every future import beside it. An acceptance
+ * that widens itself as the code grows is the blind spot this gate exists to
+ * close, one level down.
  *
  * Checked in BOTH directions: an entry that no longer matches a real import
  * fails the gate, so this cannot quietly become a list of things that were
- * fixed years ago.
+ * fixed years ago. The list is currently EMPTY — the three `oidc → mcp` imports
+ * it carried are gone, the audience allowlist having moved to
+ * `apps/api/src/lib/audiences.ts` where two built-ins can share it without
+ * either reaching into the other.
  */
-const ACCEPTED_CROSS_MODULE_IMPORTS: { from: string; to: string; reason: string }[] = [
-  {
-    from: "oidc/auth/strategy.ts",
-    to: "mcp",
-    reason:
-      "`extractOrgIdFromAudiences` — audience parsing is platform vocabulary that " +
-      "landed in the mcp module. Move it to core; tracked, not fixed here.",
-  },
-  {
-    from: "oidc/auth/plugins.ts",
-    to: "mcp",
-    reason: "`mcpValidAudiences` / `initMcpValidAudiences` — same move as above.",
-  },
-  {
-    from: "oidc/services/enduser-token.ts",
-    to: "mcp",
-    reason: "`getEndUserVerifyAudiences` — same move as above.",
-  },
-];
+const ACCEPTED_CROSS_MODULE_IMPORTS: {
+  from: string;
+  to: string;
+  spec: string;
+  reason: string;
+}[] = [];
 
 /**
  * Absolute module roots, keyed by module id.
@@ -92,6 +89,20 @@ const MODULE_ROOTS: Record<string, string> = {};
   const glob = new Glob("module-*/src");
   for await (const rel of glob.scan({ cwd: resolve(ROOT, "packages"), onlyFiles: false })) {
     const id = rel.split("/")[0]!.replace(/^module-/, "");
+    // Refuse a collision rather than overwrite. This loop runs SECOND and wrote
+    // into the same map as the built-in discovery above, so extracting a
+    // built-in to `packages/module-<same-id>` would silently drop the built-in's
+    // root from the scan — `ownerOf()` returns null for it and every import into
+    // it becomes invisible. That is precisely the blind spot the hardcoded
+    // inventory used to have, reproduced without even the module count dropping.
+    if (MODULE_ROOTS[id]) {
+      console.error(
+        `❌ module id \`${id}\` is claimed twice: ${MODULE_ROOTS[id]} and ` +
+          `${resolve(ROOT, "packages", rel)}. One would shadow the other and ` +
+          `un-scan it in silence — rename one.`,
+      );
+      process.exit(1);
+    }
     MODULE_ROOTS[id] = resolve(ROOT, "packages", rel);
   }
 }
@@ -130,10 +141,10 @@ for (const [moduleId, root] of Object.entries(MODULE_ROOTS)) {
         const owner = ownerOf(target);
         if (owner && owner !== moduleId) {
           const accepted = ACCEPTED_CROSS_MODULE_IMPORTS.find(
-            (e) => e.from === `${moduleId}/${rel}` && e.to === owner,
+            (e) => e.from === `${moduleId}/${rel}` && e.to === owner && e.spec === spec,
           );
           if (accepted) {
-            matchedAcceptances.add(`${accepted.from}→${accepted.to}`);
+            matchedAcceptances.add(`${accepted.from}→${accepted.to}→${accepted.spec}`);
           } else {
             problems.push(
               `${moduleId}/${rel} imports \`${spec}\` → reaches into module \`${owner}\`. ` +

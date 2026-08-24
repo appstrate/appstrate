@@ -62,7 +62,7 @@ import { getAppstrateScopes, OIDC_IDENTITY_SCOPES } from "./scopes.ts";
 import { getModuleEndUserAllowedScopes } from "@appstrate/core/permissions";
 import { isBlockedUrlWithDns } from "../../../lib/ssrf-dns.ts";
 import { markClientSelfService } from "../services/oauth-admin.ts";
-import { mcpValidAudiences, initMcpValidAudiences } from "../../mcp/audiences.ts";
+import { mcpValidAudiences, initMcpValidAudiences } from "../../../lib/audiences.ts";
 
 interface ClientMetadata {
   level?: "org" | "application" | "instance";
@@ -147,7 +147,7 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
   // is one canonical URI per org, layered onto this allowlist at runtime.
   //
   // Org-aware, mutable allowlist: the static platform + AS audiences plus one
-  // per-org MCP resource URI each, kept in sync via `mcp/audiences.ts` (seeded
+  // per-org MCP resource URI each, kept in sync via `lib/audiences.ts` (seeded
   // from the `organizations` table at boot, updated on `onOrgCreate` /
   // `onOrgDelete`). Passed BY REFERENCE to both plugins below; both read it live
   // per request (the library's `checkResource` reads `opts.validAudiences` on

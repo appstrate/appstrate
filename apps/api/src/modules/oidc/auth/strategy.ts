@@ -41,7 +41,7 @@ import { getClientCached } from "../services/oauth-admin.ts";
 import { checkFamilyAndTouch } from "../services/cli-tokens.ts";
 import { scopesToPermissions } from "./claims.ts";
 import { getClientIpFromRequest } from "../../../lib/client-ip.ts";
-import { extractOrgIdFromAudiences } from "../../mcp/audiences.ts";
+import { extractOrgIdFromAudiences } from "../../../lib/audiences.ts";
 
 export const oidcAuthStrategy: AuthStrategy = {
   id: "oidc-jwt",

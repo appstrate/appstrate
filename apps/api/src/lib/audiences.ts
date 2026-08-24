@@ -3,6 +3,20 @@
 /**
  * RFC 8707 audience set for the inbound MCP server, org-aware.
  *
+ * Platform-level, not module-level, because BOTH built-ins need it and neither
+ * owns it: the OIDC authorization server mints against this allowlist
+ * (`auth/plugins.ts`, `services/enduser-token.ts`, `auth/strategy.ts`) and the
+ * MCP module keeps it in sync with the org set. It lived under `modules/mcp/`
+ * and was reached into from three `oidc` files — the cross-module import the
+ * isolation gate exists to refuse, recorded as accepted rather than fixed
+ * because "audience parsing is platform vocabulary that landed in the mcp
+ * module". This is that fix.
+ *
+ * `@appstrate/core` was the destination the acceptance named, and it is the
+ * wrong one: the array below is MUTABLE PROCESS STATE shared by reference, and
+ * a published package is no place for it. `apps/api/src/lib/` is where two
+ * in-process built-ins can share without either importing the other.
+ *
  * Each organization exposes its own MCP endpoint (`/api/mcp/o/:org`) whose
  * canonical resource URI a client requests as the RFC 8707 `resource`. The
  * authorization server only mints a token bound to a resource that is in its

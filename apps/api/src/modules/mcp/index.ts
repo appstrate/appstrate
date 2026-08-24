@@ -30,7 +30,11 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../../lib/logger.ts";
 import { createMcpRouter } from "./router.ts";
 import { mcpPaths } from "./openapi/paths.ts";
-import { seedMcpOrgAudiences, addMcpOrgAudience, removeMcpOrgAudience } from "./audiences.ts";
+import {
+  seedMcpOrgAudiences,
+  addMcpOrgAudience,
+  removeMcpOrgAudience,
+} from "../../lib/audiences.ts";
 
 // Cross-replica convergence interval for the org-aware audience allowlist. The
 // `onOrgCreate` / `onOrgDelete` events are in-process broadcasts, so a replica

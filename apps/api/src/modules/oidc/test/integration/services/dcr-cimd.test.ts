@@ -35,7 +35,7 @@ import {
   orgIdFromMcpAudience,
   addMcpOrgAudience,
   _resetMcpOrgAudiencesForTesting,
-} from "../../../../mcp/audiences.ts";
+} from "../../../../../lib/audiences.ts";
 import { getEnv } from "@appstrate/env";
 import oidcModule from "../../../index.ts";
 

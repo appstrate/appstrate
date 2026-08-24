@@ -48,7 +48,7 @@ import { registerProtectedResourceFamily } from "../../lib/protected-resources.t
 import { recordAuditFromContext } from "../../services/audit.ts";
 import type { AppEnv } from "../../types/index.ts";
 import { dispatchInProcess } from "../../lib/platform-app.ts";
-import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "./audiences.ts";
+import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "../../lib/audiences.ts";
 import {
   buildMcpTools,
   buildFileResourceProvider,

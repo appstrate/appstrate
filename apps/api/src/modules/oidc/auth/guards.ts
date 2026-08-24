@@ -709,7 +709,7 @@ async function isSelfServiceClient(clientId: string): Promise<boolean> {
 
 export function oidcGuardsPlugin(opts: OidcGuardsOptions) {
   // Read `opts.validAudiences` LIVE on every request — it is the org-aware
-  // mutable allowlist (see `mcp/audiences.ts`), so a snapshot taken here would
+  // mutable allowlist (see `lib/audiences.ts`), so a snapshot taken here would
   // miss orgs created after boot and reject their per-org MCP resource.
 
   return {

@@ -35,7 +35,7 @@ import type { OrgRole } from "@appstrate/core/permissions";
 import { logger } from "../../../lib/logger.ts";
 import { getOidcAuthApi } from "../auth/api.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { getEndUserVerifyAudiences } from "../../mcp/audiences.ts";
+import { getEndUserVerifyAudiences } from "../../../lib/audiences.ts";
 
 /** Normalize a JWT `aud` (string | string[] | undefined) to a string array. */
 function normalizeAudiences(aud: unknown): string[] {
