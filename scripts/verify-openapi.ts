@@ -1857,11 +1857,49 @@ if (responseDrifts.length === 0) {
   );
 }
 
-// Coverage enforcement — every named component schema must be either registered
+/**
+ * How many 2xx JSON responses name their schema, and how many inline it.
+ *
+ * Printed by §7b so the size of its blind spot is a measurement on every run,
+ * not a sentence someone has to keep true by hand.
+ */
+function countJsonResponseSchemaShapes(): { inline: number; named: number } {
+  let inline = 0;
+  let named = 0;
+  const paths = (openApiSpec.paths ?? {}) as Record<string, Record<string, unknown>>;
+  for (const methods of Object.values(paths)) {
+    for (const op of Object.values(methods)) {
+      const responses = (op as { responses?: Record<string, unknown> })?.responses;
+      if (!responses) continue;
+      for (const [status, resp] of Object.entries(responses)) {
+        if (!status.startsWith("2")) continue;
+        const schema = (resp as { content?: Record<string, { schema?: Record<string, unknown> }> })
+          ?.content?.["application/json"]?.schema;
+        if (!schema || typeof schema !== "object") continue;
+        if (typeof schema.$ref === "string") named++;
+        else inline++;
+      }
+    }
+  }
+  return { inline, named };
+}
+
+// Coverage enforcement — every NAMED component schema must be either registered
 // (a shared-type pair, checked above) or explicitly EXEMPT (no shared-type
-// consumer). This makes step 7 fail-closed: a new response schema can't slip
-// in unchecked. The opt-in gap (a schema nobody registers is never compared)
-// is closed by requiring an explicit, justified decision for every schema.
+// consumer). Requiring an explicit, justified decision for every named schema
+// closes the opt-in gap: one nobody registers is no longer silently uncompared.
+//
+// WHAT THIS DOES NOT COVER, and it is the majority. The universe is
+// `components.schemas` — schemas with a NAME. A 2xx response whose schema is
+// written INLINE at the operation has no name, so it is not in that universe
+// and no amount of registry discipline reaches it. The count is printed below
+// on every run rather than asserted here in prose, because prose is what went
+// stale: this block used to claim "step 7 is fail-closed: a new response schema
+// can't slip in unchecked", which is true only of the named third.
+//
+// Closing it needs a different shape — a registry keyed on
+// `(verb, path, status)` like §4b's request-body one, not on schema name. That
+// is a project, not a tightening, and it is deliberately not attempted here.
 {
   const registeredSpecNames = new Set(
     responseTypeRegistry.map((e) => e.specSchemaName).filter((n): n is string => !!n),
@@ -1884,6 +1922,11 @@ if (responseDrifts.length === 0) {
     console.log(
       `  OK — all ${allSchemaNames.length} component schemas are registered ` +
         `(${registeredSpecNames.size}) or exempt (${Object.keys(EXEMPT_SCHEMAS).length}).`,
+    );
+    const { inline, named } = countJsonResponseSchemaShapes();
+    console.log(
+      `  Out of scope: ${inline} of ${inline + named} 2xx JSON responses declare their ` +
+        `schema INLINE (no name), so this step cannot see them. See the note above.`,
     );
   } else {
     exitCode = 1;
