@@ -13,6 +13,24 @@ import type {
   ModelReasoningLevel,
 } from "@appstrate/core/model-generation";
 
+/**
+ * `MODEL_API_KEY` inside an ALIASED container.
+ *
+ * Constant rather than derived, because the platform's own placeholder is not
+ * vendor-neutral: `deriveKeyPlaceholder` deliberately preserves the key's
+ * dash-separated prefix so the SDK's prefix-based behaviour keeps working, and
+ * for a real key that prefix IS the vendor — `sk-ant-…`, `sk-proj-…`,
+ * `sk-or-v1-…`. Emitting it would disclose the exact fact `MODEL_PROVIDER` is
+ * withheld to hide, to code that can read its own environment.
+ *
+ * Safe to make constant: an aliased run always speaks {@link
+ * ALIAS_CLIENT_API_SHAPE} to the sidecar, which authenticates with
+ * `Authorization: Bearer <key>` and never inspects the value's shape. The
+ * sidecar swaps in the real credential upstream, so nothing downstream of the
+ * container reads this string either.
+ */
+export const ALIAS_API_KEY_PLACEHOLDER = "appstrate-placeholder";
+
 export interface RuntimePiModelConfig {
   /** Pi SDK `api` slug — e.g. `"anthropic-messages"`, `"openai-completions"`. */
   api: string;
@@ -149,7 +167,11 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
     // The raw-key fallback is reachable only on the direct path, where the agent
     // talks to the provider itself and needs the real credential.
     const placeholder = model.apiKeyPlaceholder ?? model.apiKey;
-    env.MODEL_API_KEY = placeholder;
+    // An aliased run gets a vendor-neutral constant instead — see
+    // ALIAS_API_KEY_PLACEHOLDER for why the derived placeholder cannot be used.
+    // This is the same withholding the `MODEL_PROVIDER` line below performs,
+    // applied to the other env var that carries the vendor.
+    env.MODEL_API_KEY = model.aliased ? ALIAS_API_KEY_PLACEHOLDER : placeholder;
   }
 
   // Which provider Pi is really talking to: a sidecar-proxied run replaces
