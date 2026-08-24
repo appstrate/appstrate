@@ -114,8 +114,8 @@ const canonicalRunsPaths = {
                 connection_overrides: {
                   type: "object",
                   description:
-                    'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.',
-                  additionalProperties: { type: "string" },
+                    'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.',
+                  additionalProperties: { type: "string", minLength: 1 },
                 },
                 dependency_overrides: {
                   type: "object",
@@ -466,8 +466,8 @@ const canonicalRunsPaths = {
                 connection_overrides: {
                   type: "object",
                   description:
-                    'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.',
-                  additionalProperties: { type: "string" },
+                    'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.',
+                  additionalProperties: { type: "string", minLength: 1 },
                 },
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },
@@ -693,11 +693,12 @@ const canonicalRunsPaths = {
                 },
                 connection_overrides: {
                   type: "object",
-                  additionalProperties: { type: "string" },
+                  additionalProperties: { type: "string", minLength: 1 },
                   description:
                     "Same field as `POST /api/runs/inline` — applied to the integration readiness " +
                     "check so a pick that clears `must_choose_connection` here clears it on the " +
-                    "real launch too. Never persisted; no run is created.",
+                    "real launch too. Never persisted; no run is created. Values must be " +
+                    "non-empty, same rule and same reason as on the launch surfaces.",
                 },
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },

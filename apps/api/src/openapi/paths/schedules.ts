@@ -124,13 +124,13 @@ export const schedulesPaths = {
                 connection_overrides: {
                   type: "object",
                   description:
-                    'Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Shape: `{ "@scope/integration": "<connection_id>" }`. Loses to admin pins (#1), beats actor-fallback (#4). Stored on `package_schedules.connection_overrides` and replayed on every fire.',
-                  additionalProperties: { type: "string" },
+                    'Per-integration connection picks frozen on the schedule row (flat-connections mechanism #3). Shape: `{ "@scope/integration": "<connection_id>" }`. Loses to admin pins (#1), beats actor-fallback (#4). Stored on `package_schedules.connection_overrides` and replayed on every fire. Values must be non-empty: an empty id is falsy at the connection resolver, so it would skip the pin in silence on every fire instead of failing here.',
+                  additionalProperties: { type: "string", minLength: 1 },
                 },
                 dependency_overrides: {
                   type: "object",
                   description:
-                    'Per-dependency version overrides frozen on the schedule row (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. Forwarded to each fired run so it resolves dependencies exactly as the schedule froze them.',
+                    'Per-dependency version overrides frozen on the schedule row (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. Forwarded to each fired run so it resolves dependencies exactly as the schedule froze them. Each value must be `draft` or a resolvable version spec (semver range, exact version, or dist-tag); the protected tags `latest` and `published` are refused at this write rather than failing at every fire.',
                   additionalProperties: { type: "string" },
                 },
                 actor: {
@@ -144,6 +144,11 @@ export const schedulesPaths = {
                   oneOf: [{ required: ["user_id"] }, { required: ["end_user_id"] }],
                 },
               },
+              // An unknown field is a 400, never a silent drop — the same rule
+              // the other launch bodies publish (`paths/runs.ts`). It matters
+              // most here: a schedule FREEZES this body and replays it on every
+              // fire, so a stripped field is a wrong run forever.
+              additionalProperties: false,
             },
           },
         },
@@ -288,13 +293,13 @@ export const schedulesPaths = {
                 connection_overrides: {
                   type: ["object", "null"],
                   description:
-                    "Per-integration connection picks frozen on the schedule. Pass `null` to clear.",
-                  additionalProperties: { type: "string" },
+                    "Per-integration connection picks frozen on the schedule. Pass `null` to clear. Values must be non-empty — same rule as on create.",
+                  additionalProperties: { type: "string", minLength: 1 },
                 },
                 dependency_overrides: {
                   type: ["object", "null"],
                   description:
-                    'Per-dependency version overrides frozen on the schedule (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; skill or integration ids. Pass `null` to clear.',
+                    'Per-dependency version overrides frozen on the schedule (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; skill or integration ids. Pass `null` to clear. Each value must be `draft` or a resolvable version spec — same rule as on create.',
                   additionalProperties: { type: "string" },
                 },
                 actor: {
@@ -308,6 +313,11 @@ export const schedulesPaths = {
                   oneOf: [{ required: ["user_id"] }, { required: ["end_user_id"] }],
                 },
               },
+              // An unknown field is a 400, never a silent drop — the same rule
+              // the other launch bodies publish (`paths/runs.ts`). It matters
+              // most here: a schedule FREEZES this body and replays it on every
+              // fire, so a stripped field is a wrong run forever.
+              additionalProperties: false,
             },
           },
         },

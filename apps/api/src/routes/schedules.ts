@@ -21,6 +21,7 @@ import {
 } from "../services/scheduler.ts";
 import { isValidCron } from "../lib/cron.ts";
 import { validateInput } from "../services/schema.ts";
+import { isValidDependencyOverride } from "../services/input-parser.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { ApiError, invalidRequest, notFound, validationFailed } from "../lib/errors.ts";
@@ -45,12 +46,33 @@ import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 // Per-integration connection picks frozen on the schedule row (cascade
 // mechanism #3). Same wire shape as the run-route's connection_overrides;
 // loses to admin pins at fire time. Shape: { "@scope/integration": "<connection_id>" }.
-const connectionOverridesSchema = z.record(z.string(), z.string());
+//
+// `.min(1)` on the value for the same reason the run route sets it
+// (`runs.ts`) — and it costs more here. An empty-string id is FALSY at the
+// resolver's `resolveOne` (`integration-connection-resolver.ts`, layer 4), so
+// the pin is skipped without a trace and the fire falls through to the
+// actor-fallback, or dies with a 412 `must_choose_connection`. A schedule
+// replays its frozen map on every tick, so without this the write answers 200
+// once and every subsequent fire is silently wrong.
+const connectionOverridesSchema = z.record(z.string(), z.string().min(1));
 
 // Per-dependency version overrides frozen on the schedule row (#666/#686).
 // Same wire shape as the run-route's dependency_overrides; keys may name a
 // declared skill OR integration. Shape: { "@scope/dep": "draft" | "<spec>" }.
-const dependencyOverridesSchema = z.record(z.string(), z.string());
+//
+// The VALUE gate lives here because nothing downstream applies it on this
+// path: the agent route gets it from `parseRequestInput` (`input-parser.ts`)
+// and the remote route declares it in Zod, but a schedule resolves its input
+// through `resolveEffectiveInput` + `validateInput` (`services/scheduler.ts`)
+// and never calls the parser — so an unresolvable value froze onto the row and
+// failed at EVERY fire instead of at the write. Same predicate and same message
+// as `POST /api/runs/remote`; a second predicate would be a second opinion.
+const dependencyOverridesSchema = z
+  .record(z.string(), z.string())
+  .refine(
+    (m) => Object.values(m).every(isValidDependencyOverride),
+    '`dependency_overrides` values must be "draft" or a valid version spec (semver range or dist-tag)',
+  );
 
 // #738: schedule execution identity, chosen by an admin from the form.
 // XOR — exactly one of user_id / end_user_id. Omitted at create → defaults to
@@ -106,36 +128,48 @@ async function resolveScheduleActor(
   return { type: "end_user", id: selected.end_user_id! };
 }
 
-const createScheduleSchema = z.object({
-  name: z.string().optional(),
-  cron_expression: z.string().min(1, "cron_expression is required"),
-  timezone: z.string().default("UTC"),
-  input: scheduleInputSchema.default({}),
-  model_id_override: z.string().optional(),
-  generation_config_override: modelGenerationSettingsSchema.optional(),
-  proxy_id_override: z.string().optional(),
-  version_override: z.string().optional(),
-  connection_overrides: connectionOverridesSchema.optional(),
-  dependency_overrides: dependencyOverridesSchema.optional(),
-  actor: actorSchema.optional(),
-});
+/**
+ * `.strict()` (#1187's rule, extended to this surface): an unknown field is a
+ * 400, never a silent drop. A schedule is the strongest case for it — the other
+ * launch surfaces mis-execute ONE run, whereas a schedule freezes exactly these
+ * fields onto `package_schedules` and replays them on every fire, so a stripped
+ * field is a wrong run forever with a 201 as the only receipt.
+ */
+const createScheduleSchema = z
+  .object({
+    name: z.string().optional(),
+    cron_expression: z.string().min(1, "cron_expression is required"),
+    timezone: z.string().default("UTC"),
+    input: scheduleInputSchema.default({}),
+    model_id_override: z.string().optional(),
+    generation_config_override: modelGenerationSettingsSchema.optional(),
+    proxy_id_override: z.string().optional(),
+    version_override: z.string().optional(),
+    connection_overrides: connectionOverridesSchema.optional(),
+    dependency_overrides: dependencyOverridesSchema.optional(),
+    actor: actorSchema.optional(),
+  })
+  .strict();
 
-const updateScheduleSchema = z.object({
-  name: z.string().optional(),
-  cron_expression: z.string().optional(),
-  timezone: z.string().optional(),
-  input: scheduleInputSchema.optional(),
-  enabled: z.boolean().optional(),
-  // `null` clears the override; omitted leaves it untouched.
-  model_id_override: z.string().nullable().optional(),
-  generation_config_override: modelGenerationSettingsSchema.nullable().optional(),
-  proxy_id_override: z.string().nullable().optional(),
-  version_override: z.string().nullable().optional(),
-  connection_overrides: connectionOverridesSchema.nullable().optional(),
-  dependency_overrides: dependencyOverridesSchema.nullable().optional(),
-  // No `.nullable()` — the actor can be re-pointed but never cleared (#735).
-  actor: actorSchema.optional(),
-});
+/** `.strict()` for the same reason as {@link createScheduleSchema}. */
+const updateScheduleSchema = z
+  .object({
+    name: z.string().optional(),
+    cron_expression: z.string().optional(),
+    timezone: z.string().optional(),
+    input: scheduleInputSchema.optional(),
+    enabled: z.boolean().optional(),
+    // `null` clears the override; omitted leaves it untouched.
+    model_id_override: z.string().nullable().optional(),
+    generation_config_override: modelGenerationSettingsSchema.nullable().optional(),
+    proxy_id_override: z.string().nullable().optional(),
+    version_override: z.string().nullable().optional(),
+    connection_overrides: connectionOverridesSchema.nullable().optional(),
+    dependency_overrides: dependencyOverridesSchema.nullable().optional(),
+    // No `.nullable()` — the actor can be re-pointed but never cleared (#735).
+    actor: actorSchema.optional(),
+  })
+  .strict();
 
 function validateGenerationOverride(
   generation: ModelGenerationSettings,
