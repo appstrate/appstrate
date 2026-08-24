@@ -163,30 +163,122 @@ function materializeInlineManifest(manifest: Record<string, unknown>): {
 }
 
 /**
- * The tool's file argument (fan-in by reference), under either spelling and
- * checked for a shape the launch body can carry.
+ * Every top-level argument the `run_and_wait` tool declares.
  *
- * Two silent-drop hazards live here, and both end the same way: the launch body
- * is built from an ALLOWLIST, so anything this function does not return never
- * reaches the route — which means the route cannot answer with its field-precise
- * 400 either. The launch succeeds, the run starts with nothing mounted, and no
- * layer says a file was discarded. The model reads a normal success and reports
- * the work done on a file the run never had.
+ * THE reason this list exists as data: the launch body is built from an
+ * ALLOWLIST, and the MCP transport does not validate tool arguments. So an
+ * argument the dispatch below does not read is not "rejected", it is
+ * INVISIBLE — it never reaches the route, the route cannot answer with its
+ * field-precise 400, the launch 201s, and the run executes without it. The
+ * model reads a normal success and reports work it did on an input the run
+ * never had. That failure mode has no other place to be caught.
  *
- *  1. **The retired spelling.** `context_documents` is the pre-#1177 name. It
- *     is no longer canonicalized — that alias is gone with the rest of the
- *     rename — but it is REFUSED here rather than left unrecognised, and the
- *     distinction is the whole point of this function. An argument this
- *     function does not return is not "rejected", it is invisible: the
- *     allowlist drops it, the route never sees it, and the run starts with
- *     nothing mounted. Naming it explicitly is what turns the retirement into
- *     an error the model can act on instead of a success it will misreport.
- *  2. **A wrong-typed value.** The MCP transport does not validate tool
- *     arguments, so a single URI passed bare, or a JSON-encoded array, used to
- *     be dropped on the floor exactly like an unknown field. It is refused
- *     instead — the same treatment {@link connectionOverridesArgument} gives the
- *     same mistake, for the same reason: this is the only place that signal can
- *     exist.
+ * Kept in step with the descriptor's `inputSchema.properties` by
+ * `run-and-wait-argument-parity.test.ts`, which reads both and compares them —
+ * a name added to one side and not the other is a silent drop again.
+ */
+const RUN_AND_WAIT_ARGUMENT_NAMES: ReadonlySet<string> = new Set([
+  "kind",
+  "scope",
+  "name",
+  "version",
+  "input",
+  "manifest",
+  "prompt",
+  "connection_overrides",
+  "context_files",
+]);
+
+/**
+ * Arguments that USED to exist, mapped to what replaced them.
+ *
+ * A model trained on an older tool description keeps emitting these, and the
+ * generic "unknown argument" message below would send it hunting through the
+ * schema. Naming the replacement turns the retirement into one actionable
+ * correction. This is a message-quality table, not an alias table: nothing
+ * here is accepted, canonicalized or relayed.
+ */
+const RUN_AND_WAIT_RETIRED_ARGUMENTS: Readonly<Record<string, string>> = {
+  context_documents: "context_files",
+};
+
+/**
+ * Refuse any argument the tool does not declare.
+ *
+ * Generic on purpose. The previous shape named exactly ONE retired spelling
+ * (`context_documents`) and let `context_file`, `contextFiles`, `files` and
+ * every other near-miss through to the same silent drop it was written to
+ * prevent. One membership test covers all of them, and the retired-name table
+ * above keeps the good message for the case that actually recurs.
+ */
+function unknownArgumentsError(args: Record<string, unknown>): string | undefined {
+  const unknown = Object.keys(args).filter(
+    (k) => !RUN_AND_WAIT_ARGUMENT_NAMES.has(k) && args[k] !== undefined,
+  );
+  if (unknown.length === 0) return undefined;
+
+  const renamed = unknown.filter((k) => k in RUN_AND_WAIT_RETIRED_ARGUMENTS);
+  if (renamed.length > 0) {
+    const first = renamed[0] as string;
+    return (
+      `\`${first}\` is not an argument of this tool — it was renamed to ` +
+      `\`${RUN_AND_WAIT_RETIRED_ARGUMENTS[first]}\`. Resend under the new name.`
+    );
+  }
+  return (
+    `Unknown argument${unknown.length > 1 ? "s" : ""} ${unknown.map((k) => `\`${k}\``).join(", ")}. ` +
+    `This tool accepts only: ${[...RUN_AND_WAIT_ARGUMENT_NAMES].map((k) => `\`${k}\``).join(", ")}. ` +
+    "An unrecognised argument is not applied, so it is refused here rather than ignored."
+  );
+}
+
+/**
+ * The tool's `input` argument — the run's input values.
+ *
+ * Refused when present but not a plain object, for the reason
+ * {@link RUN_AND_WAIT_ARGUMENT_NAMES} states: both dispatch branches guard the
+ * assignment with an object test, so a JSON-encoded string or a bare array —
+ * the two shapes a model actually produces, and the two the MCP transport
+ * cannot reject — were dropped silently. The agent branch made it worse: with
+ * `input` dropped the launch body is empty, and an empty body is sent as NO
+ * body, which the route accepts as "no input". The run then executes on the
+ * agent's stored defaults and answers 201.
+ */
+function inputArgument(args: Record<string, unknown>): {
+  input?: Record<string, unknown>;
+  error?: string;
+} {
+  const value = args.input;
+  if (value === undefined || value === null) return {};
+  const record = asRecord(value);
+  if (!record) {
+    return {
+      error:
+        "`input` must be a JSON object mapping each input field to its value " +
+        '(`{"field": "value"}`)' +
+        (typeof value === "string"
+          ? " — pass the object itself, not a JSON-encoded string."
+          : ".") +
+        " Omit the argument entirely when the run needs no input.",
+    };
+  }
+  return { input: record };
+}
+
+/**
+ * The tool's file argument (fan-in by reference), checked for a shape the
+ * launch body can carry.
+ *
+ * The retired `context_documents` spelling is refused upstream by
+ * {@link unknownArgumentsError}, along with every other undeclared name — it is
+ * not read, canonicalized or relayed here.
+ *
+ * What is left is the wrong-typed value. The MCP transport does not validate
+ * tool arguments, so a single URI passed bare, or a JSON-encoded array, used to
+ * be dropped on the floor: the launch succeeded, the run started with nothing
+ * mounted, and no layer said a file was discarded. It is refused instead — the
+ * same treatment {@link connectionOverridesArgument} and {@link inputArgument}
+ * give the same mistake, for the same reason.
  *
  * An empty array is not a mistake — it carries nothing to mount and forwards
  * nothing, as before.
@@ -195,14 +287,6 @@ function contextFilesArgument(args: Record<string, unknown>): {
   uris?: unknown[];
   error?: string;
 } {
-  if (args.context_documents !== undefined && args.context_documents !== null) {
-    return {
-      error:
-        "`context_documents` is not an argument of this tool — it was renamed to " +
-        "`context_files`. Resend with `context_files` (a JSON array of appfile:// URIs, " +
-        'e.g. `["appfile://file_abc123"]`).',
-    };
-  }
   const value = args.context_files;
   if (value === undefined || value === null) return {};
   if (!Array.isArray(value)) {
@@ -435,6 +519,16 @@ export async function launchRunAndWait(
   const kind = asString(args.kind);
   const headers = jsonHeaders(opts.headers);
 
+  const unknownArgs = unknownArgumentsError(args);
+  if (unknownArgs) {
+    return { ok: false, step: { payload: { error: unknownArgs }, isError: true } };
+  }
+
+  const inputArg = inputArgument(args);
+  if (inputArg.error) {
+    return { ok: false, step: { payload: { error: inputArg.error }, isError: true } };
+  }
+
   const connectionOverrides = connectionOverridesArgument(args);
   if (connectionOverrides.error) {
     return {
@@ -505,7 +599,7 @@ export async function launchRunAndWait(
     }
     launchPath = `/api/agents/${encodedId}/run` + (qs.size > 0 ? `?${qs.toString()}` : "");
     launchBody = {};
-    if (asRecord(args.input)) launchBody.input = args.input;
+    if (inputArg.input) launchBody.input = inputArg.input;
     if (Object.keys(launchBody).length === 0) launchBody = undefined;
   } else if (kind === "inline") {
     const manifest = asRecord(args.manifest);
@@ -555,7 +649,7 @@ export async function launchRunAndWait(
     }
     launchPath = "/api/runs/inline";
     launchBody = { manifest: materialized.manifest, prompt };
-    if (asRecord(args.input)) launchBody.input = args.input;
+    if (inputArg.input) launchBody.input = inputArg.input;
     // Fan-in by reference: entries forwarded verbatim; the route resolves each
     // URI through the file ACL and declares the reserved input field itself.
     // Always under the CANONICAL name — a legacy `context_documents` argument

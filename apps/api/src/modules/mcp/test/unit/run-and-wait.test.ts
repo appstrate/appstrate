@@ -120,6 +120,93 @@ describe("run_and_wait", () => {
     );
   });
 
+  // ── Argument-surface parity ────────────────────────────────────────────
+  //
+  // The launch body is built from an ALLOWLIST and the MCP transport does not
+  // validate tool arguments, so an argument the dispatch does not read is not
+  // rejected — it is INVISIBLE. These tests pin the two halves of the fix
+  // behaviourally rather than by comparing two lists, because the guarantee is
+  // "every declared name is honoured, every undeclared name is refused", not
+  // "two arrays are equal".
+
+  it("refuses an undeclared argument instead of silently dropping it", async () => {
+    const { tool, calls } = makeRunAndWait({});
+
+    const res = await tool.handler(
+      { kind: "agent", scope: "@acme", name: "writer", contextFiles: ["appfile://file_1"] },
+      noExtra,
+    );
+
+    expect(res.isError).toBe(true);
+    expect(parseResult(res).error).toContain("contextFiles");
+    // The whole point: no launch happened. A silent drop would have 201'd.
+    expect(calls.find((c) => c.method === "POST")).toBeUndefined();
+  });
+
+  it("names the replacement for a retired argument", async () => {
+    const { tool } = makeRunAndWait({});
+
+    const res = await tool.handler(
+      { kind: "inline", manifest: { display_name: "x" }, prompt: "p", context_documents: [] },
+      noExtra,
+    );
+
+    expect(res.isError).toBe(true);
+    expect(parseResult(res).error).toContain("`context_files`");
+  });
+
+  it("accepts every argument the descriptor declares", async () => {
+    const declared = Object.keys(
+      makeRunAndWait({}).tool.descriptor.inputSchema.properties as Record<string, unknown>,
+    );
+    // Positive control: a name absent from this list is refused (previous test),
+    // so an empty or truncated `declared` cannot make this pass vacuously.
+    expect(declared).toContain("context_files");
+    expect(declared.length).toBeGreaterThan(5);
+
+    for (const name of declared) {
+      const { tool } = makeRunAndWait({
+        launch: () => jsonResponse({ id: "run_x", status: "pending" }),
+        getRun: [jsonResponse({ id: "run_x", status: "success" })],
+      });
+      // A legal-but-minimal value per declared name, on an inline run (the kind
+      // that accepts the widest set). `kind`/`manifest`/`prompt` are the base.
+      const probe: Record<string, unknown> = {
+        kind: "inline",
+        manifest: { display_name: "probe" },
+        prompt: "p",
+      };
+      if (name === "scope") probe.scope = "@acme";
+      if (name === "name") probe.name = "writer";
+      if (name === "version") probe.version = "draft";
+      if (name === "input") probe.input = {};
+      if (name === "connection_overrides") probe.connection_overrides = {};
+      if (name === "context_files") probe.context_files = [];
+
+      const res = await tool.handler(probe, noExtra);
+      const payload = parseResult(res);
+      const error = typeof payload.error === "string" ? payload.error : "";
+      expect(error).not.toContain("Unknown argument");
+    }
+  });
+
+  it("refuses a wrong-typed `input` on both kinds instead of launching without it", async () => {
+    for (const probe of [
+      { kind: "agent", scope: "@acme", name: "writer", input: '{"topic":"x"}' },
+      { kind: "inline", manifest: { display_name: "x" }, prompt: "p", input: ["topic"] },
+    ]) {
+      const { tool, calls } = makeRunAndWait({});
+      const res = await tool.handler(probe, noExtra);
+
+      expect(res.isError).toBe(true);
+      expect(parseResult(res).error).toContain("`input` must be a JSON object");
+      // The agent branch was the worse half: with `input` dropped the launch
+      // body was empty, an empty body is sent as NO body, and the route reads
+      // that as "no input" — a 201 on the agent's stored defaults.
+      expect(calls.find((c) => c.method === "POST")).toBeUndefined();
+    }
+  });
+
   it("describes package authoring with the remaining file publisher", () => {
     const instructions = buildServerInstructions(new Set(["mcp:read"]));
 
