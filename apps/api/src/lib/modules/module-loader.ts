@@ -474,9 +474,27 @@ export function getModules(): ReadonlyMap<string, AppstrateModule> {
   return _modules;
 }
 
+/**
+ * Memoized derivations of `_modules`. Both are boot constants: the module set
+ * is frozen from `_initialized = true` until `clearAllState()`, which resets
+ * them. Neither getter had a cache, and both sit on the per-request path —
+ * `getModulePublicPaths()` alone runs twice per request from `index.ts`, plus
+ * once per `skipAuth` call in the auth pipeline, and every call rebuilt an
+ * array and a Set from scratch. `getModuleAuthStrategies()` was worse: it
+ * re-invoked each module's `authStrategies()` FACTORY every time.
+ *
+ * The accessors are handed to the pipeline as lazy function references
+ * precisely because they are wired before `boot()` finishes loading modules,
+ * so caching must key off the loaded set, not off first call — hence the reset
+ * in `clearAllState()` rather than a one-shot `??=` at module scope.
+ */
+let _publicPathsCache: Set<string> | null = null;
+let _authStrategiesCache: AuthStrategy[] | null = null;
+
 /** Collect all public paths from all loaded modules (Set for O(1) lookup). */
-export function getModulePublicPaths(): Set<string> {
-  return new Set(Array.from(_modules.values()).flatMap((m) => m.publicPaths ?? []));
+export function getModulePublicPaths(): ReadonlySet<string> {
+  _publicPathsCache ??= new Set(Array.from(_modules.values()).flatMap((m) => m.publicPaths ?? []));
+  return _publicPathsCache;
 }
 
 /**
@@ -577,12 +595,14 @@ export function getModuleOpenApiTags(): Array<{ name: string; description?: stri
  *
  * OSS invariant: returns `[]` when no module provides `authStrategies()`.
  */
-export function getModuleAuthStrategies(): AuthStrategy[] {
+export function getModuleAuthStrategies(): readonly AuthStrategy[] {
+  if (_authStrategiesCache) return _authStrategiesCache;
   const strategies: AuthStrategy[] = [];
   for (const mod of _modules.values()) {
     const contrib = mod.authStrategies?.();
     if (contrib) strategies.push(...contrib);
   }
+  _authStrategiesCache = strategies;
   return strategies;
 }
 
@@ -785,6 +805,8 @@ export function resetModules(): void {
 function clearAllState(): void {
   _modules.clear();
   _builtinCache = null;
+  _publicPathsCache = null;
+  _authStrategiesCache = null;
   _initialized = false;
   setModulePermissionsProvider(null);
   // Drop module-contributed execution backends so a reload (tests) does not

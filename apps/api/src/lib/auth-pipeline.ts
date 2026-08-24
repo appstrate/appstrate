@@ -47,7 +47,7 @@ interface AuthPipelineOptions {
    * before `await boot()` finishes loading modules, so a snapshot at
    * wire-time would miss module contributions.
    */
-  publicPaths: () => Set<string>;
+  publicPaths: () => ReadonlySet<string>;
   /**
    * Accessor for module-contributed auth strategies, iterated in order.
    * The first strategy returning a non-null resolution claims the
@@ -360,7 +360,11 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
  * (e.g. pairing-token bearer auth on /pair/redeem) without polluting the
  * static `publicPaths` allowlist with conditionals.
  */
-export function skipAuth(path: string, publicPaths: Set<string>, headers?: Headers): boolean {
+export function skipAuth(
+  path: string,
+  publicPaths: ReadonlySet<string>,
+  headers?: Headers,
+): boolean {
   if (!path.startsWith("/api/")) return true;
   if (path.startsWith("/api/auth/")) return true; // Better Auth handles its own auth
   if (path.startsWith("/api/realtime/")) return true; // SSE endpoints use cookie auth internally
