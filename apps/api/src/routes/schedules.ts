@@ -179,7 +179,7 @@ export function createSchedulesRouter() {
   const router = new Hono<AppEnv>();
 
   // GET /api/schedules — list all schedules (app-scoped)
-  router.get("/schedules", async (c) => {
+  router.get("/schedules", requirePermission("schedules", "read"), async (c) => {
     const scope = getAppScope(c);
     // The caller is the VIEWER of the run counters (`unread_count` is
     // recipient-scoped), never the schedules' own execution actor.
@@ -188,12 +188,17 @@ export function createSchedulesRouter() {
   });
 
   // GET /api/agents/:scope/:name/schedules — list schedules for an agent
-  router.get(`/agents/${SCOPED_PACKAGE_ROUTE}/schedules`, requireAgent(), async (c) => {
-    const scope = getAppScope(c);
-    const agent = c.get("package");
-    const schedules = await listPackageSchedules(scope, agent.id, getActor(c));
-    return c.json(listResponse(schedules));
-  });
+  router.get(
+    `/agents/${SCOPED_PACKAGE_ROUTE}/schedules`,
+    requirePermission("schedules", "read"),
+    requireAgent(),
+    async (c) => {
+      const scope = getAppScope(c);
+      const agent = c.get("package");
+      const schedules = await listPackageSchedules(scope, agent.id, getActor(c));
+      return c.json(listResponse(schedules));
+    },
+  );
 
   // POST /api/agents/:scope/:name/schedules — create a schedule
   router.post(
@@ -290,8 +295,8 @@ export function createSchedulesRouter() {
   );
 
   // GET /api/schedules/:id — get a single schedule
-  router.get("/schedules/:id", async (c) => {
-    const id = c.req.param("id");
+  router.get("/schedules/:id", requirePermission("schedules", "read"), async (c) => {
+    const id = c.req.param("id")!;
     const schedule = await getSchedule(id, getAppScope(c), getActor(c));
     if (!schedule) {
       throw notFound(`Schedule '${id}' not found`);
@@ -471,8 +476,8 @@ export function createSchedulesRouter() {
   });
 
   // GET /api/schedules/:id/runs — list runs for a schedule
-  router.get("/schedules/:id/runs", async (c) => {
-    const scheduleId = c.req.param("id");
+  router.get("/schedules/:id/runs", requirePermission("schedules", "read"), async (c) => {
+    const scheduleId = c.req.param("id")!;
     const scope = getAppScope(c);
     const { limit, offset } = parseListPagination(c, { defaultLimit: 20 });
     const result = await listScheduleRuns(scope, scheduleId, {

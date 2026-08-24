@@ -388,20 +388,25 @@ export function createRunsRouter() {
   );
 
   // GET /api/agents/:scope/:name/runs — list runs for an agent
-  router.get(`/agents/${SCOPED_PACKAGE_ROUTE}/runs`, requireAgent(), async (c) => {
-    const agent = c.get("package");
-    const scope = getAppScope(c);
-    const { limit, offset } = parseListPagination(c, { defaultLimit: 50 });
-    const endUser = c.get("endUser");
-    const result = await listPackageRuns(scope, agent.id, {
-      limit,
-      offset,
-      endUserId: endUser?.id,
-      actor: getActor(c),
-    });
-    setOffsetLinkHeader({ c, limit, offset, total: result.total });
-    return c.json(result);
-  });
+  router.get(
+    `/agents/${SCOPED_PACKAGE_ROUTE}/runs`,
+    requirePermission("runs", "read"),
+    requireAgent(),
+    async (c) => {
+      const agent = c.get("package");
+      const scope = getAppScope(c);
+      const { limit, offset } = parseListPagination(c, { defaultLimit: 50 });
+      const endUser = c.get("endUser");
+      const result = await listPackageRuns(scope, agent.id, {
+        limit,
+        offset,
+        endUserId: endUser?.id,
+        actor: getActor(c),
+      });
+      setOffsetLinkHeader({ c, limit, offset, total: result.total });
+      return c.json(result);
+    },
+  );
 
   // GET /api/runs — global paginated run list across the application.
   // Supports filtering by ?user=me (self-owned runs), ?kind=inline|package|all
@@ -413,7 +418,7 @@ export function createRunsRouter() {
   // `limit`/`offset` deliberately keep their `.catch()` defaults — a bad page
   // size returns the first page, which narrows rather than widens, and callers
   // paging by `Link` headers never construct them by hand.
-  router.get("/runs", async (c) => {
+  router.get("/runs", requirePermission("runs", "read"), async (c) => {
     const actor = getActor(c);
     const scope = getAppScope(c);
     const { limit, offset } = parseListPagination(c, { defaultLimit: 20 });
@@ -469,8 +474,8 @@ export function createRunsRouter() {
   // (run_update PG NOTIFY) with a periodic DB re-check as fallback — see
   // services/run-wait.ts. Auth/scoping is identical to the plain call:
   // ownership is verified BEFORE any waiting starts.
-  router.get("/runs/:id", async (c) => {
-    const runId = c.req.param("id");
+  router.get("/runs/:id", requirePermission("runs", "read"), async (c) => {
+    const runId = c.req.param("id")!;
     const scope = getAppScope(c);
     // Validate the wait param before touching the DB so a malformed value
     // 400s even for runs the caller could not read.
@@ -539,7 +544,7 @@ export function createRunsRouter() {
   // Rate limited at 120/min per identity (same budget as the inbound MCP
   // server) — the log history can be large and the CLI tail polls it in a
   // loop, so an unmetered caller could turn this read into a DB hammer.
-  router.get("/runs/:id/logs", rateLimit(120), async (c) => {
+  router.get("/runs/:id/logs", requirePermission("runs", "read"), rateLimit(120), async (c) => {
     const runId = c.req.param("id")!;
     const scope = getAppScope(c);
     const exec = await getRun(scope, runId);
