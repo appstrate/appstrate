@@ -304,25 +304,50 @@ FEATURED_MODELS_EXCLUDE="deepseek-chat,some-other-backing"
 ## Deployment ordering
 
 The platform and the runtime images (`appstrate-pi`, the sidecar) implement two
-halves of one contract, and they are deployed separately. **Ship the platform
-before or with the runtime images.**
+halves of one contract. A version-tag trio rule now refuses the disagreement
+outright: `findRuntimeImageTagMismatch` (`@appstrate/core/image-ref`, enforced by
+the `@appstrate/env` schema) **fails boot** unless `PI_IMAGE` and
+`SIDECAR_IMAGE` carry the same tag as the platform's own `APP_VERSION`. So the
+ordinary released deployment cannot reach either skew below, in either
+direction — it does not start.
 
-That direction is safe because the sidecar validates its private swap
-descriptor at boot and **fails closed**: an OLD platform that does not yet emit
-`clientApiShape` / `backingApiShape` against a NEW sidecar image gets its
-aliased runs refused, with the offending field named in an operator log (never
-its value). Aliased runs stop; nothing leaks. Non-aliased runs are unaffected —
-they carry no descriptor.
+The old-platform / new-images direction is safe on its own merits as well,
+which is what keeps the exempt cases below benign in that direction: the
+sidecar validates its private swap descriptor at boot and **fails closed**. An
+OLD platform that does not yet emit `clientApiShape` / `backingApiShape` against
+a NEW sidecar image gets its aliased runs refused, with the offending field
+named in an operator log (never its value). Aliased runs stop; nothing leaks.
+Non-aliased runs are unaffected — they carry no descriptor.
 
-The reverse is the dangerous direction, and nothing detects it. A NEW platform
-against OLD runtime images means the container is told to speak `pi-messages`
-and the sidecar has no `pi-messages` backend to terminate it, and the `/llm/*`
-surface allowlist is not there either — an old sidecar is a total passthrough.
-The aliased run does fail, because its inference call has no route; but it fails
-_after_ the container has had a verbatim proxy to the vendor's own endpoints for
-as long as it lived, which is long enough for one `GET /v1/models`. The platform's own side of the contract
-looks entirely satisfied throughout, so there is no signal to act on: the
-ordering is the control.
+The reverse is the dangerous direction, and nothing but the tag rule detects it.
+A NEW platform against OLD runtime images means the container is told to speak
+`pi-messages` and the sidecar has no `pi-messages` backend to terminate it, and
+the `/llm/*` surface allowlist is not there either — an old sidecar is a total
+passthrough. The aliased run does fail, because its inference call has no route;
+but it fails _after_ the container has had a verbatim proxy to the vendor's own
+endpoints for as long as it lived, which is long enough for one
+`GET /v1/models`. The platform's own side of the contract looks entirely
+satisfied throughout, so there is no runtime signal to act on.
+
+**Where ordering is still the only control.** The tag rule reads configuration
+at boot, so it is blind wherever the tag stops identifying the build. Two of its
+carve-outs are deliberate, and one gap is structural:
+
+- **A digest-pinned `PI_IMAGE` or `SIDECAR_IMAGE`** silences the comparison
+  outright — an operator pinning digests has taken explicit control of image
+  identity, and takes this ordering rule with it.
+- **A platform with no build identity** (`APP_VERSION` unset, empty, or `dev` —
+  a source run, a preview deployment) drops out of the trio, degrading the rule
+  to the pair rule. The two images are then still checked against each other,
+  but not against the platform, which is precisely this section's direction.
+- **A floating tag rebuilt on one side** (`:latest`) passes the comparison by
+  construction: both tags are equal and only the bytes moved.
+  `services/orchestrator/runtime-image-pair.ts` catches that case by comparing
+  the images' `org.opencontainers.image.revision` stamps after the pre-pull, but
+  it only **warns**, and it compares the pair to each other — never to the
+  platform.
+
+In all three, **ship the platform before or with the runtime images.**
 
 ## Threat B in two tiers
 

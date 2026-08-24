@@ -99,14 +99,16 @@ export const integrationConnections = pgTable(
     // opaquely at integration boot. Reset to 0 on any successful credential
     // write (`persistCredentialBundle`).
     refreshFailureCount: integer("refresh_failure_count").notNull().default(0),
-    // WRITTEN, NEVER READ in product code — the only reads are integration
-    // tests asserting the write happened. Note the asymmetry with the sibling
-    // above: `refresh_failure_count` IS read, and drives the reconnect
-    // decision; this timestamp is not part of that predicate. It is genuine
-    // debugging telemetry ("when did refresh last fail") with no surface, so
-    // keeping the column costs less than dropping data already collected.
-    // Left deliberately, not overlooked — nothing exposes it in any DTO.
-    lastRefreshFailureAt: timestamp("last_refresh_failure_at", { withTimezone: true }),
+    // NOTE — there is deliberately no `last_refresh_failure_at` here, and the
+    // same note sits on the `model_provider_credentials` twin. There was one,
+    // written beside `refresh_failure_count` on every transient refresh failure
+    // and read by nothing: no route, no DTO, no OpenAPI field, no `cloud`
+    // consumer, no predicate. Its only readers were the integration tests
+    // asserting the write happened. `refresh_failure_count` is the column that
+    // drives the reconnect escalation; the timestamp was never part of that
+    // predicate. Dropped by `0045_drop_integration_refresh_failure_timestamp`.
+    // If "when did refresh last fail" is ever needed, build the reader first —
+    // a column with no reader is not telemetry, it is write amplification.
     // User-facing display name, set at creation: the extracted identity
     // (email/login) when available, else "Connexion N" (N = existing connection
     // count + 1 in the same (app, integration, owner) group). Stable for the

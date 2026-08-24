@@ -182,7 +182,7 @@ export type EnrichedRun = RunWireDto & {
   unread: boolean;
   /**
    * Per-run file counts, always present on enriched list rows. `input` is
-   * the number of distinct `appfile://` (or legacy `document://`) references in
+   * the number of distinct `appfile://` references in
    * the run's persisted input; `output` is the number of files the run
    * produced.
    */

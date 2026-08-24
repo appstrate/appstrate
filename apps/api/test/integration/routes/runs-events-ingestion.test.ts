@@ -765,13 +765,15 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(row?.artifacts).toBeNull();
   });
 
-  it("STRIPS unknown artifacts keys instead of rejecting them (deployments are not atomic)", async () => {
+  it("STRIPS unknown artifacts keys instead of rejecting them", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
 
-    // A runtime image newer than the platform can legitimately add a field to
-    // the summary — or to a `failed` entry. An extra cosmetic key must not
-    // cost the run its finalize, so unknown keys are stripped and everything
-    // the platform DOES understand is persisted.
+    // Where the trio tag rule is blind — a floating tag rebuilt on one side, a
+    // digest-pinned ref, a platform with no build identity — a runtime image
+    // newer than the platform can legitimately add a field to the summary, or
+    // to a `failed` entry. An extra cosmetic key must not cost the run its
+    // finalize, so unknown keys are stripped and everything the platform DOES
+    // understand is persisted.
     const res = await postFinalize(runId, {
       memories: [],
       output: { ok: true },
@@ -827,9 +829,13 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(persisted?.failed.every((f) => f.name.length <= 512 && f.code.length <= 64)).toBe(true);
   });
 
-  // The `report` channel is gone: a runner older than the platform may still
-  // send the field, and it must be ignored without costing the run its
-  // finalize (no 400, no `runs.result` row invented from it).
+  // The `report` channel is gone. Finalize reports an ALREADY-FINISHED run, so
+  // a 400 there is a lost run, not a validation win — the field must be ignored
+  // whatever sends it (no 400, no `runs.result` row invented from it). The
+  // sender that still would is a runner older than the platform, which the
+  // image-trio tag rule refuses at boot except where it is blind: a floating
+  // tag rebuilt on one side, a digest-pinned ref, a platform with no build
+  // identity.
   it("ignores a retired report field on the finalize body", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
     const res = await postFinalize(runId, {

@@ -86,8 +86,7 @@ export interface ChatAttachmentRequest {
   /** Container the materialized file is anchored to (session-scoped ACL). */
   chatSessionId: string;
   /**
-   * `upload://upl_x` (materialize) or `appfile://file_x` (validate access) — the
-   * legacy `document://file_x` spelling is still accepted.
+   * `upload://upl_x` (materialize) or `appfile://file_x` (validate access).
    */
   uri: string;
 }
@@ -95,8 +94,7 @@ export interface ChatAttachmentRequest {
 /**
  * A chat attachment resolved to its stable `appfile://` URI + metadata. An
  * `upload://` was materialized into a chat-session-scoped file; an existing
- * `appfile://` (or legacy `document://`) was validated as readable by the
- * session owner. The URI is what the message persists (stable for the session's
+ * `appfile://` was validated as readable by the session owner. The URI is what the message persists (stable for the session's
  * lifetime) and what the model is told the attached file is addressed by.
  */
 export interface ResolvedChatAttachment {

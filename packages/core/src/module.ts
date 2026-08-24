@@ -1453,8 +1453,8 @@ export interface PlatformServices {
   /**
    * Resolve a chat composer file attachment to a durable `appfile://` URI:
    * materialize an `upload://` staged upload into a chat-session-scoped file
-   * (purpose `user_upload`), or validate that an existing `appfile://` (or the
-   * legacy `document://`) is readable by the session owner. The chat module has
+   * (purpose `user_upload`), or validate that an existing `appfile://` is
+   * readable by the session owner. The chat module has
    * no DB access, so materialization + the container-inherited ACL check cross
    * through here.
    * Rejections (over-cap, over-limit, not-found/foreign file) are thrown as

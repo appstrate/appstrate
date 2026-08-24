@@ -173,14 +173,17 @@ function materializeInlineManifest(manifest: Record<string, unknown>): {
  * layer says a file was discarded. The model reads a normal success and reports
  * the work done on a file the run never had.
  *
- *  1. **The legacy spelling.** `context_documents` is the pre-#1177 name, and
- *     `POST /runs/inline` accepts it forever (`body.context_files ??
- *     body.context_documents`). A model reaches for it from its own transcript —
- *     an earlier turn of the same conversation, made before the upgrade — or
- *     from a tool listing taken before it: the MCP server advertises
- *     `tools.listChanged: false`, so a client that calls the old shape
- *     afterwards is behaving correctly. Reading only the canonical name here
- *     defeated a compatibility promise the route already keeps.
+ *  1. **The legacy spelling.** `context_documents` is the pre-#1177 name. The
+ *     HTTP route no longer takes it — `POST /runs/inline` is `.strict()` and
+ *     answers a field-precise 400 — so this is the ONLY place the old spelling
+ *     is still understood, and it is understood by canonicalizing it (see the
+ *     launch-body construction below), never by relaying it. The reason is the
+ *     same one that keeps `RETIRED_MCP_TOOL_NAMES` alive: a model reaches for
+ *     the old argument from its own transcript — an earlier turn of the same
+ *     conversation, made before the upgrade — or from a tool listing taken
+ *     before it, and the MCP server advertises `tools.listChanged: false`, so a
+ *     client that calls the old shape afterwards is behaving correctly. Reading
+ *     only the canonical name here would turn that into a silent drop.
  *  2. **A wrong-typed value.** The MCP transport does not validate tool
  *     arguments, so a single URI passed bare, or a JSON-encoded array, used to
  *     be dropped on the floor exactly like an unknown field. It is refused

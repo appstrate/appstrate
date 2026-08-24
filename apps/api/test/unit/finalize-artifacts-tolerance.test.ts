@@ -9,10 +9,12 @@
  * finalize, the row stays `running`, and the watchdog eventually synthesises a
  * timeout/failure for a run that actually succeeded.
  *
- * `artifacts` is a purely cosmetic partial-deliverables signal, and deployments
- * are not atomic: a runtime image newer than the platform can legitimately send
- * a field the platform has never heard of. This guards that such a payload
- * still finalizes.
+ * `artifacts` is a purely cosmetic partial-deliverables signal, and a runtime
+ * image newer than the platform can still legitimately send a field the
+ * platform has never heard of: the trio tag rule refuses that pairing at boot,
+ * but it is blind to a floating tag rebuilt on one side, to a digest-pinned
+ * ref, and to a platform with no build identity. This guards that such a
+ * payload still finalizes.
  */
 
 import { describe, it, expect } from "bun:test";

@@ -188,10 +188,13 @@ export const RunResultSchema = z
     //   - size overruns are CLAMPED by `clampArtifacts` before validation (an
     //     over-long `failed` list, over-long name/code strings), mirroring the
     //     producer bounds in runtime-pi/publish.ts;
-    //   - unknown keys are STRIPPED rather than rejected: deployments are not
-    //     atomic, so a runtime image newer than the platform can legitimately
-    //     add a field to a `failed` entry, and an extra cosmetic key must not
-    //     cost the run its finalize;
+    //   - unknown keys are STRIPPED rather than rejected. The trio tag rule
+    //     (`findRuntimeImageTagMismatch`) refuses a runtime image newer than
+    //     the platform at boot, but not in the three places it is blind: a
+    //     floating tag rebuilt on one side, a digest-pinned ref, and a platform
+    //     with no build identity (a dev box, a preview). There, a newer image
+    //     can legitimately add a field to a `failed` entry, and an extra
+    //     cosmetic key must not cost the run its finalize;
     //   - anything still invalid degrades to `undefined` via `.catch`, leaving
     //     the column null while the run finalizes normally.
     // Absence is fine too: older containers do not send it.

@@ -607,10 +607,14 @@ describe("useRunLogStream source guards", () => {
 /**
  * Pre-#1177 wire compatibility. A chat session opened today replays run logs
  * and tool results written BEFORE the rename: they tag the frame
- * `event: "document"`, carry `document_id`, and address the file with the
- * `document://` scheme. Every one of those must still surface a chip — a reader
- * that only knows the new spelling would show an old conversation with no
- * files at all, and nothing anywhere would report an error.
+ * `event: "document"` and carry `document_id`. Those must still surface a chip
+ * — a reader that only knows the new spelling would show an old conversation
+ * with no files at all, and nothing anywhere would report an error.
+ *
+ * The `document://` URI SCHEME is the one shape that no longer resolves: it
+ * only ever addressed `doc_` ids, which the finished rename stopped accepting.
+ * A frame carrying one keeps its URI verbatim (nothing here re-mints it), and
+ * an attachment part carrying one degrades to inert.
  */
 describe("legacy `document` wire shapes", () => {
   const settled = { status: "success" as const, sweepDone: true };
@@ -664,16 +668,18 @@ describe("legacy `document` wire shapes", () => {
     expect(autoPresentFile({ files: mixed, ...settled })).toBeUndefined();
   });
 
-  it("resolves a historical `document://` attachment URI", () => {
-    // Persisted chat messages from before the rename carry the old scheme in
-    // their file parts; core's `parseFileUri` accepts both, and nothing here
-    // re-implements scheme parsing with a hardcoded prefix.
+  it("treats a retired `document://` attachment URI as inert, not as a file", () => {
+    // The scheme stopped being parseable when the id prefix moved to `file_`:
+    // a part persisted before #1177 addresses a `doc_` id, so there is nothing
+    // for it to resolve to. It degrades to `inert` with the raw URI carried
+    // along, the same as an unmaterialized `upload://` — never to a `file`
+    // chip pointing at an id that does not exist.
     expect(
       resolveAttachmentContent([{ type: "image", image: "document://file_abcd1234" }]),
-    ).toEqual({ kind: "file", id: "file_abcd1234" });
-    expect(resolveAttachmentContent([{ type: "file", data: "document://file_efgh5678" }])).toEqual({
-      kind: "file",
-      id: "file_efgh5678",
+    ).toEqual({ kind: "inert", uri: "document://file_abcd1234" });
+    expect(resolveAttachmentContent([{ type: "file", data: "document://doc_efgh5678" }])).toEqual({
+      kind: "inert",
+      uri: "document://doc_efgh5678",
     });
   });
 

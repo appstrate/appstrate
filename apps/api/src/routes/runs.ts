@@ -65,7 +65,8 @@ import { modelGenerationSettingsSchema } from "@appstrate/core/model-generation"
  * That is the exact failure `assertFieldsUnlocked` states as a rule
  * (`input-resolution.ts`) and the one #1179 fixed on the MCP surface, and the
  * launch body was the last place the rule did not hold. `POST /runs/remote` was
- * already `.strict()`; the three launch surfaces now agree.
+ * already `.strict()`; the schedule bodies (`routes/schedules.ts`) took the
+ * rule afterwards, and the four launch surfaces now agree.
  *
  * Deep semantics stay downstream in `parseRequestInput` (is this dependency
  * spec resolvable, does the replayed run belong to this agent) — this schema
@@ -97,7 +98,7 @@ export const runAgentBodySchema = z
  * grossly wrong-typed field (e.g. `input: "foo"`) with a 400 instead of letting
  * it cast through and surface later as a 500.
  *
- * `.strict()` since #1187, like the two other launch surfaces. It also closes
+ * `.strict()` since #1187, like the three other launch surfaces. It also closes
  * a live silent drop: `dependency_overrides` was accepted here (the parser read
  * it straight off the raw body) and then never applied — `triggerInlineRun`
  * does not forward it. Undeclared here, it is now a 400 instead of a run that

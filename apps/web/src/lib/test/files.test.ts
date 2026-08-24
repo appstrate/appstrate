@@ -283,10 +283,11 @@ describe("producedRunFiles", () => {
 });
 
 /**
- * The run page refreshes its file list off the run's live log stream. The tag
- * it matches on was renamed by #1177, but the emitter (API + runtime image)
- * deploys on its own clock — a version-skewed emitter still sends the old tag,
- * and a reader that only knows the new one leaves the list silently stale.
+ * The run page refreshes its file list off the run's live log stream, and it
+ * replays the same run's persisted history. The tag it matches on was renamed
+ * by #1177, so every row written by a release through `v1.0.0-beta.51` carries
+ * the old one — immutably. A reader that only knows the new tag leaves an older
+ * run's file list silently stale.
  */
 describe("isPublishedFileLogEvent", () => {
   it("accepts the current tag", () => {

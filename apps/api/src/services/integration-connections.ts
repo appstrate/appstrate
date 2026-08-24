@@ -2198,7 +2198,6 @@ export async function persistCredentialBundle(
     // again, so the escalation counter must not carry over. See
     // `recordIntegrationRefreshFailure`.
     refreshFailureCount: 0,
-    lastRefreshFailureAt: null,
     updatedAt: now,
   };
   if (input.accountId !== undefined) set.accountId = input.accountId;
@@ -2350,7 +2349,6 @@ export async function recordIntegrationRefreshFailure(
     .update(integrationConnections)
     .set({
       refreshFailureCount: sql`${integrationConnections.refreshFailureCount} + 1`,
-      lastRefreshFailureAt: sql`now()`,
       needsReconnection: sql`${integrationConnections.needsReconnection} OR (${integrationConnections.refreshFailureCount} + 1 >= ${maxFailures} AND ${integrationConnections.expiresAt} IS NOT NULL AND ${integrationConnections.expiresAt} < now() - make_interval(secs => ${graceSeconds}))`,
       updatedAt: sql`now()`,
     })

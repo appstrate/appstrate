@@ -17,18 +17,23 @@
  * for local resources. An opaque platform id under that scheme is ambiguous to
  * the model and to every MCP client, so the platform claims its own scheme.
  *
- * ## Why `document://` is still read
+ * ## Why the pre-#1177 `document://` spelling is NOT read
  *
- * The scheme was `document://` until issue #1177. Historical `runs.input` rows,
- * persisted chat attachments and model-authored prompts are full of it, and
- * those runs must stay re-runnable forever. So: **write `appfile://`, read
- * both.** Every parser/extractor below accepts either prefix; only
- * {@link fileUri} decides what gets written, and it only ever emits the
- * canonical one.
+ * The scheme was `document://` until issue #1177, and it was kept parseable
+ * afterwards so historical `runs.input` rows, persisted chat attachments and
+ * model-authored prompts stayed resolvable. That compatibility became
+ * unreachable when the rename was finished at the physical layer: every URI
+ * ever written under the old scheme addresses a `doc_` id, and
+ * {@link FILE_ID_RE} accepts only `file_`. So the pair `document://` +
+ * `file_xxx` — the only thing the accept-path could still have matched — is a
+ * form nothing has ever emitted, and a genuine `document://doc_xxx` fails on
+ * the id, not the scheme. One spelling is read and one is written, and they
+ * are the same one.
  *
  * The row id prefix is `file_`, minted by `prefixedId("file")`. It was `doc_`
  * until the rename was finished at the physical layer; nothing reads the old
- * spelling any more.
+ * spelling any more, which is exactly why the old scheme has nothing left to
+ * address.
  *
  * Dependency-free on purpose (no DB/storage imports) so the MCP tool layer,
  * the chat module, and the runtime can import it without pulling in the files
@@ -39,30 +44,18 @@
 export const FILE_URI_PREFIX = "appfile://";
 
 /**
- * `document://file_xxx` — the pre-#1177 spelling of {@link FILE_URI_PREFIX}.
- * **Read-only**: accepted by every parser here, never emitted. Live in
- * historical `runs.input`, chat attachments and run prompts.
- */
-export const LEGACY_DOCUMENT_URI_PREFIX = "document://";
-
-/**
- * Every accepted spelling of a stored-file URI, canonical first. The single
- * list every accept-path below iterates — adding a spelling here is the only
- * edit needed to make it parse everywhere.
- */
-export const ACCEPTED_FILE_URI_PREFIXES = [FILE_URI_PREFIX, LEGACY_DOCUMENT_URI_PREFIX] as const;
-
-/**
  * Every `run_logs.event` tag that announces a published file, canonical first.
  * The sink writes `"file"` today (`type='result' event='file'`); `"document"`
- * is the pre-#1177 spelling and stays readable FOREVER — a run page tails a
- * live stream whose emitter (the API, and behind it a runtime image) deploys
- * on its own clock, and a persisted log line is immutable once written.
+ * is the pre-#1177 spelling and stays readable FOREVER. Unlike the retired
+ * `document://` URI scheme, this one has live values behind it: `"document"` is
+ * what every release up to and including `v1.0.0-beta.51` wrote, a `run_logs`
+ * row is immutable once written, and the run page renders rows the current
+ * build never emitted.
  *
- * Lives here, beside {@link ACCEPTED_FILE_URI_PREFIXES}, because it is the same
- * kind of thing: pure data about a wire spelling that two independent readers
- * (the web shell's run page and the chat module's run card) must agree on. Two
- * copies of a compatibility list is how one of them silently stops matching.
+ * Lives here, beside {@link FILE_URI_PREFIX}, because it is the same kind of
+ * thing: pure data about a wire spelling that two independent readers (the web
+ * shell's run page and the chat module's run card) must agree on. Two copies of
+ * a compatibility list is how one of them silently stops matching.
  */
 export const PUBLISHED_FILE_LOG_EVENTS: readonly string[] = ["file", "document"];
 
@@ -117,12 +110,9 @@ export const FILE_ID_RE = /^file_[A-Za-z0-9_-]{8,}$/;
 /** Strict upload id shape: `upl_` + ≥8 id chars. Mirrors the uploads service validator. */
 export const UPLOAD_ID_RE = /^upl_[A-Za-z0-9_-]{8,}$/;
 
-/**
- * Is this value a stored-file reference — `appfile://…` or the legacy
- * `document://…` (prefix only, id not validated)?
- */
+/** Is this value an `appfile://…` reference (prefix only, id not validated)? */
 export function isFileUri(value: unknown): value is string {
-  return typeof value === "string" && ACCEPTED_FILE_URI_PREFIXES.some((p) => value.startsWith(p));
+  return typeof value === "string" && value.startsWith(FILE_URI_PREFIX);
 }
 
 /** Is this value an `upload://…` reference (prefix only, id not validated)? */
@@ -131,49 +121,40 @@ export function isUploadUri(value: unknown): value is string {
 }
 
 /**
- * Does `value` carry an accepted chat-attachment scheme (`upload://`,
- * `appfile://`, or the legacy `document://`)? Attachments flow only through the
- * file store, never inline (`data:`) or as arbitrary URLs.
+ * Does `value` carry an accepted chat-attachment scheme (`upload://` or
+ * `appfile://`)? Attachments flow only through the file store, never inline
+ * (`data:`) or as arbitrary URLs.
  */
 export function isAttachmentUri(value: unknown): value is string {
   return isUploadUri(value) || isFileUri(value);
 }
 
 /**
- * Extract the file id from an `appfile://file_xxx` (or legacy
- * `document://file_xxx`) URI, validating the id shape. Returns null if no
- * accepted prefix is present or the id is malformed.
+ * Extract the file id from an `appfile://file_xxx` URI, validating the id
+ * shape. Returns null if the prefix is absent or the id is malformed.
  */
 export function parseFileUri(uri: string): string | null {
-  if (typeof uri !== "string") return null;
-  for (const prefix of ACCEPTED_FILE_URI_PREFIXES) {
-    if (!uri.startsWith(prefix)) continue;
-    const id = uri.slice(prefix.length);
-    return FILE_ID_RE.test(id) ? id : null;
-  }
-  return null;
+  if (typeof uri !== "string" || !uri.startsWith(FILE_URI_PREFIX)) return null;
+  const id = uri.slice(FILE_URI_PREFIX.length);
+  return FILE_ID_RE.test(id) ? id : null;
 }
 
 /**
- * Scans a free-form text blob for an embedded stored-file URI under ANY
- * accepted prefix. Derived from {@link ACCEPTED_FILE_URI_PREFIXES} so a new
- * spelling is picked up here too; `file_` + ≥1 id char keeps the boundary scan
- * permissive, with the strict `{8,}` length enforced by {@link parseFileUri}.
+ * Scans a free-form text blob for an embedded stored-file URI. `file_` + ≥1 id
+ * char keeps the boundary scan permissive, with the strict `{8,}` length
+ * enforced by {@link parseFileUri}.
  */
-const EMBEDDED_FILE_URI_SCAN = new RegExp(
-  `(?:${ACCEPTED_FILE_URI_PREFIXES.map((p) => p.replace("://", "")).join("|")})://file_[A-Za-z0-9_-]+`,
-  "g",
-);
+const EMBEDDED_FILE_URI_SCAN = /appfile:\/\/file_[A-Za-z0-9_-]+/g;
 
-/** The canonical `appfile://` URI for a file id. Never emits the legacy form. */
+/** The canonical `appfile://` URI for a file id. */
 export function fileUri(id: string): string {
   return `${FILE_URI_PREFIX}${id}`;
 }
 
 /**
  * Walk an arbitrary JSON value (a run's persisted `input`, tool args, …) and
- * collect the set of file ids referenced by any `appfile://file_xxx` /
- * `document://file_xxx` string anywhere within it — nested objects and arrays
+ * collect the set of file ids referenced by any `appfile://file_xxx` string
+ * anywhere within it — nested objects and arrays
  * included. De-duplicated, insertion-order stable. Every candidate string is
  * validated through {@link parseFileUri}, so a malformed URI is silently
  * skipped (never yields a bogus id). Pure and dependency-free — the single
@@ -198,7 +179,7 @@ export function extractFileIds(value: unknown): string[] {
 }
 
 /**
- * Finds `appfile://file_xxx` / `document://file_xxx` occurrences embedded
+ * Finds `appfile://file_xxx` occurrences embedded
  * ANYWHERE inside a free-form text blob (e.g. a model-authored run prompt) —
  * not only when the whole string is a bare URI, which is all
  * {@link extractFileIds} matches on a leaf string. Each candidate is

@@ -23,8 +23,7 @@ import { chatSessions } from "./chat.ts";
 /**
  * Unified file store — durable, first-class deliverables and materialized user
  * uploads. One row per stored object, addressed by the opaque, lifelong
- * `appfile://file_xxx` URI (never re-minted; the pre-#1177 `document://`
- * spelling of the same URI is still read). Two origins share the table,
+ * `appfile://file_xxx` URI (never re-minted). Two origins share the table,
  * discriminated by `purpose`:
  *
  *  - `user_upload` — a staged `uploads` row materialized here the first time a
