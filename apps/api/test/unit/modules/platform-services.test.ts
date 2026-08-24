@@ -41,8 +41,8 @@ describe("ModuleInitContext.services — platform service wiring", () => {
     expect(typeof services.inProcess.dispatch).toBe("function");
   });
 
-  it("wires the subscription-chat channel (resolveSubscriptionChatModel + recordChatUsage + checkUsageAllowed)", () => {
-    expect(typeof services.resolveSubscriptionChatModel).toBe("function");
+  it("wires the subscription-chat channel (resolveChatModel + recordChatUsage + checkUsageAllowed)", () => {
+    expect(typeof services.resolveChatModel).toBe("function");
     expect(typeof services.recordChatUsage).toBe("function");
     expect(typeof services.checkUsageAllowed).toBe("function");
   });

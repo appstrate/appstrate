@@ -24,7 +24,7 @@ import { listLlmUsage, getSettledFrontierId } from "../../services/state/runs.ts
 import { dispatchInProcess } from "../platform-app.ts";
 import {
   recordChatUsage,
-  resolveSubscriptionChatModel,
+  resolveChatModel,
   checkUsageAllowed,
 } from "../../services/chat-subscription.ts";
 import {
@@ -97,7 +97,7 @@ export function getModuleRegistry(): string[] {
  * contract declared in `@appstrate/core/module`. The surface is intentionally
  * minimal — `usage.list` / `usage.settledFrontier` (the cloud metering module's cursor
  * sweep of the `llm_usage` ledger), `inProcess.dispatch`, and the chat seam
- * (`resolveSubscriptionChatModel` + `recordChatUsage` + `checkUsageAllowed`) by
+ * (`resolveChatModel` + `recordChatUsage` + `checkUsageAllowed`) by
  * which the chat module drives the single generic in-process Pi chat engine,
  * meters it, and gates admission — the module resolves credentials/tokens,
  * records usage, and gates through here because it has no DB access. See the
@@ -126,7 +126,7 @@ function buildPlatformServices(): PlatformServices {
     // fresh token (credential resolution stays server-side), meters each turn,
     // and gates admission for EVERY turn (subscription included) through these,
     // since it has no DB access.
-    resolveSubscriptionChatModel,
+    resolveChatModel,
     recordChatUsage,
     checkUsageAllowed,
     // Chat attachments — materialize a composer upload into a chat-session-scoped

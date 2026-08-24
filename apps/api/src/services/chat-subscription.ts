@@ -9,7 +9,7 @@
  * The module has no DB access, so the two pieces that need it cross through
  * `ctx.services` (wired in `lib/modules/registry.ts`):
  *
- *   - {@link resolveSubscriptionChatModel} — resolve the chosen model row to its
+ *   - {@link resolveChatModel} — resolve the chosen model row to its
  *     real upstream binding + a FRESH access token (server-side credential
  *     resolution; the real token only leaves as the returned in-memory string).
  *   - {@link recordChatUsage} — insert one `llm_usage` ledger row per turn (the
@@ -20,7 +20,7 @@
  * and a module must not depend on the API package.
  */
 
-import type { ChatUsageRecord, SubscriptionChatResolution } from "@appstrate/core/chat-contract";
+import type { ChatUsageRecord, ChatModelResolution } from "@appstrate/core/chat-contract";
 import type { UsageRejection } from "@appstrate/core/module";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { computeTokenCost } from "@appstrate/afps-runtime/runner";
@@ -40,10 +40,10 @@ import { logger } from "../lib/logger.ts";
  * chat-engine path; everything else returns `{ subscription: false }` so the
  * chat module binds the same engine to the llm-proxy instead.
  */
-export async function resolveSubscriptionChatModel(
+export async function resolveChatModel(
   orgId: string,
   presetId: string,
-): Promise<SubscriptionChatResolution> {
+): Promise<ChatModelResolution> {
   const resolved = await loadModel(orgId, presetId);
   if (!resolved) {
     // A model that resolves to nothing because its stored credential is dead —

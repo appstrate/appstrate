@@ -289,7 +289,7 @@ export async function handleChatStream(
   // binding + a fresh access token, or a reconnect signal when its credential is
   // dead. Both ride the SAME engine — this fact drives admission and the Pi
   // binding, never a choice of loop.
-  const subscription = await deps.resolveSubscriptionChatModel(orgId, chosen.id);
+  const subscription = await deps.resolveChatModel(orgId, chosen.id);
   const isSubscription = subscription.subscription;
 
   // Admission gate — EVERY turn. The platform

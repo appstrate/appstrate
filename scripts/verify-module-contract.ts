@@ -259,7 +259,7 @@ const SERVICE_LEDGER: Record<ServiceMember, NamedLedgerEntry> = {
   http: { owners: ["module-chat", "module-observability"] },
   usage: { owners: ["cloud"] },
   inProcess: { owners: ["module-chat"] },
-  resolveSubscriptionChatModel: { owners: ["module-chat"] },
+  resolveChatModel: { owners: ["module-chat"] },
   recordChatUsage: { owners: ["module-chat"] },
   resolveChatAttachment: { owners: ["module-chat"] },
   cleanupSessionFiles: { owners: ["module-chat"] },

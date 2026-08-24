@@ -222,6 +222,27 @@ them, it only names them in docblocks.
 
 ### Changed
 
+- **`SubscriptionChatResolution` → `ChatModelResolution`** (`./chat-contract`),
+  and the `PlatformServices` member `resolveSubscriptionChatModel` →
+  `resolveChatModel` (`./module`). Both were named after ONE of the two arms
+  they describe. The type's own discriminant is `subscription: boolean` and its
+  `{ subscription: false }` arm is the API-key path, so the old name said the
+  opposite of what half its values mean — and since the Pi unification put every
+  chat turn on one engine, resolving the row is what the call does regardless of
+  which credential backs it.
+
+  `SubscriptionChatModel` deliberately keeps its name: it describes only the
+  oauth2 arm, which is what it is. The `subscription` discriminant keeps its
+  name too — it is accurate, and it is a shape crossing `ctx.services`.
+
+  This is the item `docs/plans/post-pi-unification-cleanup.md` parked "for the
+  next core major". That major came and went as 7.0.0 without it; doing it here
+  is what stops it waiting for 9.0.0. Neither out-of-tree consumer (`cloud`,
+  `connect-helper`) imports `./chat-contract`, and the only in-tree consumer is
+  `@appstrate/module-chat`, which ships in the same image.
+  `scripts/verify-module-contract.ts` pins the service name and was updated in
+  the same commit.
+
 - **`ModelSwap`** (`./sidecar-types`) gains two **required** members,
   `clientApiShape` and `backingApiShape`. This is the one breaking change in
   this release that hits a CONSTRUCTOR rather than a reader: code that builds a

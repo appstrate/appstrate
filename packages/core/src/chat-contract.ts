@@ -9,7 +9,7 @@
  * (`runPiChat`) serving both credential modes. There is no per-provider
  * chat-handler seam and no second inference loop — the chat module resolves the
  * chosen model row through {@link PlatformServices}
- * (`resolveSubscriptionChatModel`) and drives Pi inline. An oauth2 row yields
+ * (`resolveChatModel`) and drives Pi inline. An oauth2 row yields
  * the real token + provider baseUrl (the engine talks to the provider
  * directly); an API-key row yields no secret at all and the engine is pointed
  * at the platform llm-proxy instead.
@@ -68,7 +68,7 @@ export interface SubscriptionChatModel {
  *   - `{ subscription: true, model }` — an oauth2 model with a fresh token → the
  *     engine talks to the provider directly with it, instead of the llm-proxy.
  */
-export type SubscriptionChatResolution =
+export type ChatModelResolution =
   | { subscription: false }
   | { subscription: true; needsReconnection: true }
   | { subscription: true; model: SubscriptionChatModel };

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `resolveSubscriptionChatModel` — the chat-module seam that routes an
+ * `resolveChatModel` — the chat-module seam that routes an
  * oauth-subscription model to the in-process Pi chat engine.
  *
  * Focus here: the aliased fail-close. Alias creation AND update reject
@@ -22,12 +22,9 @@ import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
 import { TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 import { createOrgModel } from "../../../src/services/org-models.ts";
-import {
-  recordChatUsage,
-  resolveSubscriptionChatModel,
-} from "../../../src/services/chat-subscription.ts";
+import { recordChatUsage, resolveChatModel } from "../../../src/services/chat-subscription.ts";
 
-describe("resolveSubscriptionChatModel", () => {
+describe("resolveChatModel", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -63,7 +60,7 @@ describe("resolveSubscriptionChatModel", () => {
       { aliased: true },
     );
 
-    const resolution = await resolveSubscriptionChatModel(ctx.orgId, presetId);
+    const resolution = await resolveChatModel(ctx.orgId, presetId);
     expect(resolution).toEqual({ subscription: false });
   });
 
@@ -77,7 +74,7 @@ describe("resolveSubscriptionChatModel", () => {
       credentialId,
     );
 
-    const resolution = await resolveSubscriptionChatModel(ctx.orgId, presetId);
+    const resolution = await resolveChatModel(ctx.orgId, presetId);
     expect(resolution.subscription).toBe(true);
     if (resolution.subscription && "model" in resolution) {
       expect(resolution.model.modelId).toBe("test-model");
@@ -97,7 +94,7 @@ describe("resolveSubscriptionChatModel", () => {
       credentialId,
     );
 
-    const resolution = await resolveSubscriptionChatModel(ctx.orgId, presetId);
+    const resolution = await resolveChatModel(ctx.orgId, presetId);
     expect(resolution.subscription).toBe(true);
     if (resolution.subscription && "model" in resolution) {
       expect(resolution.model.reasoningLevelMap).toEqual({ xhigh: "max" });
@@ -107,7 +104,7 @@ describe("resolveSubscriptionChatModel", () => {
   });
 
   it("returns { subscription: false } for an unknown preset", async () => {
-    const resolution = await resolveSubscriptionChatModel(ctx.orgId, "no-such-preset");
+    const resolution = await resolveChatModel(ctx.orgId, "no-such-preset");
     expect(resolution).toEqual({ subscription: false });
   });
 });

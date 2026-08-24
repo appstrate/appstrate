@@ -20,7 +20,7 @@ import type {
   ChatAttachmentRequest,
   ChatUsageRecord,
   ResolvedChatAttachment,
-  SubscriptionChatResolution,
+  ChatModelResolution,
 } from "./chat-contract.ts";
 import type { OrchestratorRegistration } from "./platform-types.ts";
 import type { ModelGenerationCapabilitiesOverride } from "./model-generation.ts";
@@ -1439,10 +1439,7 @@ export interface PlatformServices {
    * so the real subscription token never enters the module's own resolution
    * (only the returned in-memory string, used to build the Pi `AuthStorage`).
    */
-  resolveSubscriptionChatModel(
-    orgId: string,
-    presetId: string,
-  ): Promise<SubscriptionChatResolution>;
+  resolveChatModel(orgId: string, presetId: string): Promise<ChatModelResolution>;
   /**
    * Record one chat turn's LLM usage as an `llm_usage` ledger row (source
    * `proxy`, `run_id` null). The chat module has no DB access, so metering for

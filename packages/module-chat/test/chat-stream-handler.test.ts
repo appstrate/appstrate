@@ -219,7 +219,7 @@ describe("handleChatStream engine routing", () => {
       /** apiShape of the single scripted `/api/models` row. */
       apiShape?: string;
       /** Stand in for the platform's credential resolution. */
-      resolveSubscriptionChatModel?: ChatPlatformDeps["resolveSubscriptionChatModel"];
+      resolveChatModel?: ChatPlatformDeps["resolveChatModel"];
       /** Scripted `/api/me/context` body, to vary the payload between turns. */
       context?: () => Response;
     },
@@ -229,9 +229,7 @@ describe("handleChatStream engine routing", () => {
     const deps = {
       ...buildChatPlatformDeps(buildModuleInitContext()),
       dispatch: scriptedDispatch(overrides?.apiShape, overrides?.context),
-      ...(overrides?.resolveSubscriptionChatModel
-        ? { resolveSubscriptionChatModel: overrides.resolveSubscriptionChatModel }
-        : {}),
+      ...(overrides?.resolveChatModel ? { resolveChatModel: overrides.resolveChatModel } : {}),
     };
     const app = buildApp(deps, engine);
     const res = await app.request("/api/chat", {
@@ -266,7 +264,7 @@ describe("handleChatStream engine routing", () => {
       apiShape: "anthropic-messages",
       // The platform resolved the row to an oauth2 provider whose credential is
       // revoked or no longer decrypts.
-      resolveSubscriptionChatModel: async () => ({ subscription: true, needsReconnection: true }),
+      resolveChatModel: async () => ({ subscription: true, needsReconnection: true }),
     });
 
     expect(res.status).toBe(401);

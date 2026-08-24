@@ -14,21 +14,27 @@ re-discovered as oversights.
 
 ## Scope decision
 
-| #   | Item                                                 | This PR             | Why                                                                                                                                                                                                                                                      |
-| --- | ---------------------------------------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | `CHAT_PI_MAX_CONCURRENCY` from measured capacity     | **Partly**          | The measurement is an ops task on a cloud instance. What ships here is the instrumentation that makes it measurable, plus a boot-time warning.                                                                                                           |
-| 2   | `runPiChat` has no test (`engine.ts` at 4.9%)        | **Yes**             | The biggest genuine gap. Highest value item here.                                                                                                                                                                                                        |
-| 3   | `public-origin` coverage flag reports phantom misses | **Yes**             | Asked for explicitly. Caveat below.                                                                                                                                                                                                                      |
-| 4   | `isFinalChatStep` dead; `SubscriptionChat*` misnamed | **No, then partly** | Deferred here for the reason in the next section. `isFinalChatStep` was subsequently removed by the codebase-wide hygiene sweep, which carried the core major (7.0.0) that this PR deliberately would not. The `SubscriptionChat*` rename is still open. |
-| 5   | Pre-existing small debt                              | **Yes**             | Cheap, and adjacent enough that leaving it costs another pass.                                                                                                                                                                                           |
+| #   | Item                                                 | This PR             | Why                                                                                                                                                                                                                                                                                 |
+| --- | ---------------------------------------------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `CHAT_PI_MAX_CONCURRENCY` from measured capacity     | **Partly**          | The measurement is an ops task on a cloud instance. What ships here is the instrumentation that makes it measurable, plus a boot-time warning.                                                                                                                                      |
+| 2   | `runPiChat` has no test (`engine.ts` at 4.9%)        | **Yes**             | The biggest genuine gap. Highest value item here.                                                                                                                                                                                                                                   |
+| 3   | `public-origin` coverage flag reports phantom misses | **Yes**             | Asked for explicitly. Caveat below.                                                                                                                                                                                                                                                 |
+| 4   | `isFinalChatStep` dead; `SubscriptionChat*` misnamed | **No, then partly** | Deferred here for the reason in the next section. `isFinalChatStep` was subsequently removed by the codebase-wide hygiene sweep, which carried the core major (7.0.0) that this PR deliberately would not. **The `SubscriptionChat*` rename is now done too** — see the note below. |
+| 5   | Pre-existing small debt                              | **Yes**             | Cheap, and adjacent enough that leaving it costs another pass.                                                                                                                                                                                                                      |
 
 ### On item 4 — do not "fix" these here
 
-> **Superseded for half of this section.** `isFinalChatStep` is gone as of the
+> **Superseded — both halves are now done.** `isFinalChatStep` went with the
 > hygiene sweep, which took `@appstrate/core` to 7.0.0 and did the consumer
-> lockstep this PR was right to refuse to do alone. The reasoning below still
-> stands as the reason it was not done _here_, and still applies in full to
-> the `SubscriptionChat*` rename, which remains open.
+> lockstep this PR was right to refuse to do alone. The `SubscriptionChat*`
+> rename landed on the follow-up branch as `SubscriptionChatResolution` →
+> `ChatModelResolution` and `resolveSubscriptionChatModel` → `resolveChatModel`,
+> carried by the 8.0.0 major that the Cloud boot-gate fix required anyway.
+>
+> Worth recording, because "park it for the next core major" nearly cost a
+> second release: the 7.0.0 major arrived and passed WITHOUT the rename. A park
+> that names no owner and no trigger is a park that misses its window. The
+> reasoning below still stands as the reason it was not done _here_.
 
 `isFinalChatStep` is provably dead (`packages/core/src/chat-turn-metadata.ts`;
 its only caller was the deleted AI SDK step loop), and

@@ -13,7 +13,7 @@
  *     reachable only from the test harness, which builds deps without an init
  *     context — lives INSIDE this object, so callers never branch on it.
  *   - `rateLimit` is the platform's authenticated per-route limiter.
- *   - `resolveSubscriptionChatModel` resolves the chosen model row to an
+ *   - `resolveChatModel` resolves the chosen model row to an
  *     oauth-subscription binding + a fresh access token (or a reconnect signal),
  *     so the module's generic in-process Pi chat engine can drive ANY
  *     subscription provider without importing the provider module, the
@@ -33,7 +33,7 @@ import type {
   ChatAttachmentRequest,
   ChatUsageRecord,
   ResolvedChatAttachment,
-  SubscriptionChatResolution,
+  ChatModelResolution,
 } from "@appstrate/core/chat-contract";
 
 export interface ChatPlatformDeps {
@@ -51,10 +51,7 @@ export interface ChatPlatformDeps {
    * provider yields the real upstream binding + a fresh access token, or a
    * `needsReconnection` signal when its credential is dead.
    */
-  resolveSubscriptionChatModel(
-    orgId: string,
-    presetId: string,
-  ): Promise<SubscriptionChatResolution>;
+  resolveChatModel(orgId: string, presetId: string): Promise<ChatModelResolution>;
   /** Persist one metered `llm_usage` row for a completed chat turn. */
   recordChatUsage(record: ChatUsageRecord): Promise<void>;
   /**
@@ -118,8 +115,7 @@ export function buildChatPlatformDeps(ctx: ModuleInitContext): ChatPlatformDeps 
   return {
     dispatch: (request) => (inProcess ? inProcess.dispatch(request) : fetch(request)),
     rateLimit: (maxPerMinute) => ctx.services.http.rateLimit(maxPerMinute),
-    resolveSubscriptionChatModel: (orgId, presetId) =>
-      ctx.services.resolveSubscriptionChatModel(orgId, presetId),
+    resolveChatModel: (orgId, presetId) => ctx.services.resolveChatModel(orgId, presetId),
     recordChatUsage: (record) => ctx.services.recordChatUsage(record),
     resolveChatAttachment: (request) => ctx.services.resolveChatAttachment(request),
     cleanupSessionFiles: (chatSessionId, tx) => ctx.services.cleanupSessionFiles(chatSessionId, tx),

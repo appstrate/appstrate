@@ -13,7 +13,7 @@
 import type {
   ChatUsageRecord,
   SubscriptionChatModel,
-  SubscriptionChatResolution,
+  ChatModelResolution,
 } from "@appstrate/core/chat-contract";
 import {
   derivePiProvider,
@@ -203,7 +203,7 @@ export function createPiOAuthModelBinding(model: SubscriptionChatModel): PiOAuth
 /** Resolve authentication and model shape before the engine-routing branch. */
 export function resolvePiChatModelBinding(args: {
   model: OrgModel;
-  subscription: SubscriptionChatResolution;
+  subscription: ChatModelResolution;
   origin: string;
   mintBearer: () => string;
 }): PiChatModelBindingResolution {
