@@ -12,11 +12,11 @@
  * the release that added it omits the field, and the card must then show
  * nothing rather than a "0 B" that misrepresents the plan.
  *
- * It also arrives under EITHER spelling. `@appstrate/cloud` mints this field
- * from another repo, on its own deploy clock: #1177 renamed the concept to
- * `file_storage_bytes`, and the module in front of this SPA may still be
- * sending `document_storage_bytes`. Both are asserted below — reading only one
- * makes the storage line silently vanish on one side of the rename.
+ * ONE spelling: `file_storage_bytes`. `@appstrate/cloud` mints this field from
+ * another repo, but not on another deploy clock — its image is built `FROM` the
+ * platform image and serves this SPA, so the module and the dashboard reading
+ * it ship together. The pre-#1177 `document_storage_bytes` was removed from
+ * both sides in the same change.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -54,28 +54,6 @@ describe("PlanGrid storage entitlement", () => {
 
     expect(html).toContain("1.0 GB de stockage");
     expect(html).toContain("100 GB de stockage");
-  });
-
-  it("still reads the pre-#1177 `document_storage_bytes` spelling", () => {
-    const html = render([
-      { id: "free", name: "Free", price: 0, credit_quota: 5000, document_storage_bytes: GIB },
-    ]);
-    expect(html).toContain("1.0 GB de stockage");
-  });
-
-  it("prefers the current spelling when a module sends both", () => {
-    const html = render([
-      {
-        id: "free",
-        name: "Free",
-        price: 0,
-        credit_quota: 5000,
-        file_storage_bytes: 2 * GIB,
-        document_storage_bytes: GIB,
-      },
-    ]);
-    expect(html).toContain("2.0 GB de stockage");
-    expect(html).not.toContain("1.0 GB de stockage");
   });
 
   it("omits the line entirely when the plan reports no storage entitlement", () => {
