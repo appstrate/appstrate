@@ -1946,6 +1946,30 @@ the schedule-occurrence contract finding. Record the verdict here before a
 separate production implementation begins. The prototype branch is the primary
 source for rejected variants and must not be merged wholesale.
 
+**Product review, 24 August: the first prototype is rejected.** Its permanent
+selected-day rail made the calendar a secondary panel and consumed the space a
+real operational calendar needs. Do not iterate on that structure. The revised
+direction is a full-width calendar with **Day / Week / Month**, previous, next
+and Today controls. Week is the initial default for both Runs and Schedules;
+each collection later remembers its own last-used calendar scale.
+
+Clicking an event must keep the operator in the calendar. On desktop it opens
+an anchored preview, like Google Calendar; on mobile the same preview becomes
+a dialog or bottom sheet, never a side drawer. The preview contains the useful
+identity, state, time and operational summary plus an explicit `View details`
+destination. A crowded month's `+N` first opens that day's event list, then an
+event preview. Day and Week may use the time axis; Month uses bounded labels,
+status signals and overflow rather than miniature table rows.
+
+The architecture is decided. The next throwaway pass compares event density,
+preview hierarchy and crowded-day interaction, not calendars with different
+page layouts. It must exercise all three scales on both collections at 1440
+and 390, keyboard dismissal and focus return for the preview, Back-safe detail
+navigation, and a heavy day. Runs still needs complete pagination for its
+bounded range. Schedules still needs a server-computed occurrences range with
+the scheduler's exact recurrence, timezone and DST semantics; never reproduce
+cron in the browser.
+
 **11. Accessibility, which nothing here has ever checked.** The branch
 re-declares ARIA roles on the table because this file demands it, and that is
 the whole of it: not one contrast ratio, keyboard path or touch target has ever
