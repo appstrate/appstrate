@@ -99,6 +99,23 @@ export function runPiChat(input: PiChatInput): Response {
         if (chunk.type === "finish") streamFinished = true;
       };
 
+      // Open the stream NOW, before any of the turn's construction work.
+      //
+      // This chunk carries nothing but a message id, and it is what flips the
+      // client from "sending" to "the assistant is answering". It used to be
+      // written after the platform-MCP handshake, the Pi SDK's dynamic import
+      // and the agent-session construction — three round trips and a ~200 ms
+      // module evaluation during which the response body stayed empty and the
+      // user saw nothing. The HTTP response itself was already on its way (this
+      // producer runs eagerly and `runPiChat` returns synchronously), so the
+      // silence bought nothing.
+      //
+      // Safe with respect to the closing path: `closePiTurn` only emits a
+      // compensating `start` when `streamStarted` is false, so a construction
+      // failure now closes a turn that is already open rather than one that
+      // never began — the same start/finish envelope either way.
+      write(mapper.startChunk(crypto.randomUUID()));
+
       // Deadline + explicit-stop → one combined abort threaded into the prompt.
       // The two causes are NOT interchangeable at the finish line (an explicit
       // stop is a normal ending; a deadline is a truncation the user must be
@@ -281,8 +298,6 @@ export function runPiChat(input: PiChatInput): Response {
           // only the platform MCP meta-tools (extension tools stay enabled).
           noTools: "builtin",
         });
-
-        write(mapper.startChunk(crypto.randomUUID()));
 
         const typedSession = session as unknown as PiChatSession;
 

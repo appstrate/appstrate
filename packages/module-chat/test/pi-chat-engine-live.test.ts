@@ -46,6 +46,14 @@ interface Capture {
  * clean no-op. The engine THROWS if this handshake fails, so it is not optional
  * — this is the supported "module present, zero tools" shape.
  */
+/**
+ * When set, the stub blocks on this before answering `initialize`. Lets a test
+ * prove the UI stream opens BEFORE the handshake: if the `start` chunk were
+ * still written after it, reading the first chunk would deadlock rather than
+ * return, and the test times out instead of passing for the wrong reason.
+ */
+let mcpInitGate: Promise<void> | null = null;
+
 async function mcpResponse(req: Request): Promise<Response> {
   if (req.method === "GET") return new Response(null, { status: 405 });
   if (req.method === "DELETE") return new Response(null, { status: 202 });
@@ -57,6 +65,7 @@ async function mcpResponse(req: Request): Promise<Response> {
       headers: { "content-type": "application/json", ...extra },
     });
   if (msg.method === "initialize") {
+    if (mcpInitGate) await mcpInitGate;
     return json(
       {
         protocolVersion: "2025-06-18",
@@ -251,5 +260,73 @@ describe("runPiChat against a stub provider", () => {
     // retryable flag, no request id.
     expect(finish.messageMetadata?.appstrate?.turn).not.toHaveProperty("errorCategory");
     expect(JSON.stringify(chunks)).not.toContain("errorCategory");
+  }, 30_000);
+
+  it("opens the stream before the platform-MCP handshake completes", async () => {
+    // Hold the handshake open. If the `start` chunk were written after session
+    // construction — as it was before — the read below could not return, and
+    // this test would time out rather than pass.
+    let releaseHandshake!: () => void;
+    mcpInitGate = new Promise<void>((resolve) => {
+      releaseHandshake = resolve;
+    });
+
+    const binding = createPiProxyModelBinding({
+      model: orgModel(),
+      origin: ORIGIN,
+      mintBearer: () => "loopback-early",
+    })!;
+    const slot = acquirePiChatSlot();
+    expect(slot).not.toBeNull();
+
+    try {
+      const res = runPiChat({
+        slot: slot!,
+        modelBinding: binding,
+        presetId: "preset_live",
+        orgId: "org_live",
+        userId: "user_live",
+        chatSessionId: null,
+        messages: userTurn("dis bonjour"),
+        system: "You are a helpful assistant.",
+        generation: {},
+        platformMcp: { url: `${ORIGIN}/api/mcp/o/org_live?context=injected`, headers: {} },
+        abortSignal: new AbortController().signal,
+        onError: (error) => String(error),
+        recordUsage: () => {},
+      });
+
+      // Read only as far as the first complete SSE frame.
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffered = "";
+      let first: { type?: string } | undefined;
+      while (!first) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffered += decoder.decode(value, { stream: true });
+        for (const line of buffered.split("\n")) {
+          if (!line.startsWith("data:")) continue;
+          const data = line.slice(5).trim();
+          if (data && data !== "[DONE]") {
+            first = JSON.parse(data) as { type?: string };
+            break;
+          }
+        }
+      }
+
+      // The turn is open while the handshake is still blocked.
+      expect(first?.type).toBe("start");
+
+      releaseHandshake();
+      // Drain so the slot releases and no work outlives the test.
+      while (!(await reader.read()).done) {
+        /* drain */
+      }
+    } finally {
+      mcpInitGate = null;
+      releaseHandshake();
+      slot!.release();
+    }
   }, 30_000);
 });
