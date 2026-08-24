@@ -56,11 +56,22 @@ of the package. Core no longer reads `manifest.config` at all.
 `document` is a false friend: the entity is any file an agent produced —
 Markdown, HTML, source code, a PDF, an image — but the word promises a Word or
 PDF document to every reader, the model included. The concept is renamed to
-`file` throughout (#1177). Every wire-visible and persisted spelling keeps a
-read alias; only what gets WRITTEN changes. The platform-side environment
-variables moved too, with no alias (`FILE_MAX_BYTES`, `RUN_MAX_FILES`,
-`FILE_RETENTION_DAYS`, `WORKSPACE_MAX_FILES_BYTES`) — see the platform
-CHANGELOG; core reads none of them, it only names them in docblocks.
+`file` throughout (#1177).
+
+The rename first landed here with a read alias on every wire-visible and
+persisted spelling. **Those aliases are gone**, and they never reached npm: they
+were added and removed inside this same unreleased window, so relative to the
+published `7.0.0` they are not a deprecation, they simply never existed. What
+went with them is listed under Removed — the legacy permission-resource table,
+the retired runtime-tool event type, and the `document://` URI prefix. The
+compatibility that survives is the compatibility that a RELEASED build wrote
+into a place the current build still reads: `PUBLISHED_FILE_LOG_EVENTS` (a
+`run_logs` row is immutable once written) and the retired `publish_document`
+runtime-tool id on a persisted manifest (a published package version is
+immutable). The platform-side environment variables moved too, with no alias
+(`FILE_MAX_BYTES`, `RUN_MAX_FILES`, `FILE_RETENTION_DAYS`,
+`WORKSPACE_MAX_FILES_BYTES`) — see the platform CHANGELOG; core reads none of
+them, it only names them in docblocks.
 
 ### Added
 
@@ -74,26 +85,27 @@ CHANGELOG; core reads none of them, it only names them in docblocks.
 - **`validateAgainstSchema` / `SchemaValidationResult`** (`./schema-validation`)
   — `validateConfig` / `ConfigValidationResult` under a name that describes
   what they do. Same signature, same verdict.
-- **`./file-uri`** — the URI helpers, renamed from `./document-uri`. Writes
-  `appfile://<id>`; reads `appfile://` **and** `document://` forever (historical
-  `runs.input` rows are full of the old scheme). Deliberately NOT `file://` —
-  that scheme already means the local filesystem and MCP uses it for local
-  resources, so an opaque platform id under it is ambiguous to the model and to
-  every MCP client. Exports `FILE_URI_PREFIX`, `LEGACY_DOCUMENT_URI_PREFIX`,
-  `ACCEPTED_FILE_URI_PREFIXES`, `FILE_ID_RE`, `isFileUri`, `parseFileUri`,
-  `fileUri`, `extractFileIds`, `extractFileIdsFromText` (plus the unchanged
-  `upload://` helpers). `FILE_ID_RE` matches the `file_` row-id prefix — it was
-  `doc_` until the rename reached the physical layer, and the old shape is no
-  longer accepted.
+- **`./file-uri`** — the URI helpers, renamed from `./document-uri`.
+  `appfile://<id>` is the only spelling written AND the only one read.
+  Deliberately NOT `file://` — that scheme already means the local filesystem
+  and MCP uses it for local resources, so an opaque platform id under it is
+  ambiguous to the model and to every MCP client. Exports `FILE_URI_PREFIX`,
+  `FILE_ID_RE`, `isFileUri`, `parseFileUri`, `fileUri`, `extractFileIds`,
+  `extractFileIdsFromText` (plus the unchanged `upload://` helpers).
+  `FILE_ID_RE` matches the `file_` row-id prefix — it was `doc_` until the
+  rename reached the physical layer, and the old shape is no longer accepted,
+  which is what made the `document://` prefix unreachable (see Removed).
 - **`PUBLISHED_FILE_LOG_EVENTS`** (`./file-uri`) — every `run_logs.event` tag
   that announces a published file, canonical first: `["file", "document"]`. It
-  lives beside `ACCEPTED_FILE_URI_PREFIXES` because it is the same kind of
+  lives beside `FILE_URI_PREFIX` because it is the same kind of
   thing — pure data about a wire spelling that two independent readers (the web
   shell's run page and the chat module's run card) must agree on. Two copies of
   a compatibility list is how one of them silently stops matching and a file
   list never refreshes, with no error anywhere. The old tag stays readable
-  forever: a persisted log line is immutable once written, and the emitter
-  behind it — a runtime image — deploys on its own clock.
+  forever, and unlike the retired `document://` scheme it has live values
+  behind it: `"document"` is what every release up to and including
+  `v1.0.0-beta.51` wrote, a `run_logs` row is immutable once written, and the
+  run page renders rows the current build never emitted.
 - **`isFileProducedByRun`, `AGENT_OUTPUT_FILE_PURPOSE`** (`./file-uri`) — the
   one predicate answering "was this file row produced by this run, as opposed
   to merely consumed by it". Both halves of the pair are load-bearing:
@@ -137,20 +149,32 @@ CHANGELOG; core reads none of them, it only names them in docblocks.
   `canonicalRuntimeToolId` / `canonicalizeRuntimeToolIds`, never through
   `isSelectableRuntimeTool`, which answers "may the editor offer this?" and is
   canonical-only by design.
-- **`LEGACY_PERMISSION_RESOURCE_ALIASES`, `canonicalPermission`,
-  `canonicalPermissions`** (`./permissions`) — retired permission-resource
-  spellings and the normalizer for stored scope strings. A `resource:action`
-  string is persisted on API keys, OIDC grants and role snapshots; renaming a
-  resource without an alias silently demotes every principal granted under the
-  old spelling, and the only symptom is an unexplained 403.
-  `makePermissionGuard` additionally accepts a retired spelling directly, so
-  forgetting to normalize on read is not an authorization regression.
+- **`./image-ref`** — the image-reference parser and the runtime-image version
+  contract, added after `7.0.0` was published and undocumented here until now.
+  `parseImageRef` splits a ref into repository / tag / digest;
+  `findRuntimeImageTagMismatch(trio)` compares the platform's own version
+  against the `PI_IMAGE` and `SIDECAR_IMAGE` tags and reports which member
+  stands alone; `OCI_REVISION_LABEL` is the label the complementary
+  same-tag-two-builds check reads. Types: `ParsedImageRef`, `RuntimeImageTrio`,
+  `RuntimeImageMember`, `RuntimeImageTagMismatch`. `packages/env` composes the
+  operator wording; the rule and both its carve-outs live here.
 
 ### Changed
 
 - **`./document-uri` → `./file-uri`**, with the symbol renames listed above.
   No deprecated subpath alias is kept: the module is consumed in-tree only, and
   both out-of-tree consumers stay on the published version.
+- **`findImageTagMismatch` → `findRuntimeImageTagMismatch`** (`./image-ref`),
+  and it now takes the whole trio — `{ platformVersion, piImage, sidecarImage }`
+  — rather than the two image refs. The old signature compared the pair to
+  itself, so a platform at version X with both runtime images at X−1 passed. A
+  platform version that is absent, empty or `dev` means "no release identity"
+  and drops out of the comparison, degrading the rule to exactly the pair rule;
+  a digest-pinned ref on either image still silences it entirely. The returned
+  `oddOneOut` names the member whose value stands alone, which is NOT
+  necessarily the thing to fix: a platform at X against a matched pair at X−1
+  reports `"platform"`, and the fix there is to move the two images. Both names
+  are post-`7.0.0`, so nothing published ever saw the old one.
 - **`publish_document` → `publish_file`** — the runtime tool id, with
   `buildPublishDocumentDef` → `buildPublishFileDef`, `DocumentUploader` →
   `FileUploader`, `PublishedDocument` → `PublishedFile`,
@@ -162,7 +186,7 @@ CHANGELOG; core reads none of them, it only names them in docblocks.
   writes only `publish_file`, and a manifest naming both collapses to one entry.
 - **`CoreResources.documents` → `CoreResources.files`** (`./permissions`), with
   `documents` removed from `CORE_RESOURCE_NAMES`. A stored `documents:read` /
-  `documents:delete` scope still grants.
+  `documents:delete` scope no longer grants anything — see Removed.
 - **`documentCountExceeded` → `fileCountExceeded`** (`./api-errors`), problem
   code `document_count_exceeded` → `file_count_exceeded`.
 - **`recordDocumentCreated`, `recordDocumentDeleted`,
@@ -196,6 +220,47 @@ CHANGELOG; core reads none of them, it only names them in docblocks.
   `JSON.parse`d object cannot write through `__proto__`.
 - **`validateConfig` / `ConfigValidationResult`** (`./schema-validation`) —
   renamed, see Added.
+- **`LEGACY_PERMISSION_RESOURCE_ALIASES`, `canonicalPermission`,
+  `canonicalPermissions`, `acceptedPermissionSpellings`** (`./permissions`) —
+  the retired permission-resource table and the normalizer for stored scope
+  strings, together with the second-chance branch inside `makePermissionGuard`
+  that accepted a retired spelling directly. All three permission guards
+  (`requirePermission`, `requireCorePermission`, `requireModulePermission`)
+  delegate to that guard, so the removal reaches every one of them: a
+  `documents:read` scope is now denied where `files:read` is required, along
+  with the near-misses `file:read`, `files` and `files:read:extra`, and the
+  denial is pinned unit-level for all three.
+
+  This one has a caller behind it and the trade is deliberate. The alias never
+  shipped — it was added and removed inside this unreleased window — but
+  `documents:*` **is** the spelling every released Appstrate advertised, so a
+  third-party OAuth client integrated against `v1.0.0-beta.51` holds it in
+  config and now gets `invalid_scope` rather than a silent rewrite. For a beta
+  with no production data a loud refusal is the right failure and a silently
+  under-granted scope is not. Read-time normalization is also a translation
+  layer that would have to be applied at every site forever, and each site that
+  forgets it degrades silently: the scope is not rejected, it is dropped, and
+  the credential merely does less than it was granted. Three platform tests
+  were passing only because of the alias, which is the finding that justifies
+  the removal on its own.
+
+- **`LEGACY_RUNTIME_TOOL_EVENT_TYPES`** (`./runtime-tool-defs`) — the
+  retired `document.published` runtime-tool event type. Its removal is safe for
+  a structural reason rather than a version one: the only producer of that name
+  is core's own `filePublishedEvent`, bundled into the SAME artifact as the
+  trust-boundary acceptor that consumes it, so there is no version boundary
+  between them and the retired name can now only arrive from a forged upstream
+  event — which is what that acceptor's drop is for. Also post-`7.0.0` on both
+  ends.
+- **`LEGACY_DOCUMENT_URI_PREFIX`, `ACCEPTED_FILE_URI_PREFIXES`**
+  (`./file-uri`) — the `document://` scheme and the accept-list that carried
+  it. It survived to read historical rows, and finishing the rename at the
+  physical layer made it unreachable: every URI ever written under the old
+  scheme addresses a `doc_` id, and `FILE_ID_RE` accepts only `file_`. The one
+  pair the accept path could still have matched — `document://` + `file_…` — is
+  a form no build has ever emitted, since the scheme was replaced while ids
+  were still `doc_`. A `document://` value now fails at `parseFileUri` instead
+  of one line later on the id, in the same rejection.
 - **`swapRequestModel`** (`./model-swap`) — the alias→real request-body rewrite.
   Its last caller was deleted with the alias-opacity change (#1202); the
   adaptive-Anthropic branch it still carried had become a second implementation
