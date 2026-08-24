@@ -38,7 +38,29 @@ import { buildBaseSidecarEnv } from "./sidecar-env.ts";
 import { drainStream, tailFileLines } from "./subprocess-util.ts";
 import { SIGTERM_GRACE_SECONDS } from "./constants.ts";
 
-const DATA_DIR = resolve("./data/runs");
+/**
+ * Where per-run pidfiles live. Cwd-relative, and the cwd for anything in
+ * `apps/api` is the repo root — so this is the REAL `./data/runs` a
+ * `bun run dev` session writes into.
+ *
+ * Mutable only so a test can point it at a scratch directory.
+ * `apps/api/test/unit/process-orchestrator.test.ts` resolved the same
+ * `./data/runs` and `rm -rf`'d it in `beforeEach`, which meant running the unit
+ * suite beside a live dev server destroyed that server's pidfiles, and two
+ * concurrent test sessions wiped each other. There is no other way for the test
+ * to isolate itself: the module-level functions below (`ownerIsAlive`,
+ * `reapOrphanWorkspaceDirs`) read this directly and take no orchestrator
+ * instance.
+ */
+let dataDir = resolve("./data/runs");
+
+/**
+ * @internal Test-only. Point the run-data directory at a scratch path so a test
+ * never touches the live one. Pass no argument to restore the default.
+ */
+export function _setDataDirForTesting(dir?: string): void {
+  dataDir = resolve(dir ?? "./data/runs");
+}
 const SIDECAR_ENTRY = join(import.meta.dir, "../../../../../runtime-pi/sidecar/server.ts");
 const AGENT_ENTRY = join(import.meta.dir, "../../../../../runtime-pi/entrypoint.ts");
 
@@ -66,7 +88,7 @@ function workspaceDirFor(runId: string): string {
  *
  * A pid is deliberately enough: pids are global, so `kill(pid, 0)` answers
  * the ownership question from any working directory, which matters because
- * DATA_DIR is cwd-relative and a sibling worktree's pidfiles are invisible
+ * dataDir is cwd-relative and a sibling worktree's pidfiles are invisible
  * from here. Pid reuse can only make a dead owner look alive — it defers a
  * reclaim, it never causes a wrongful kill.
  */
@@ -112,7 +134,7 @@ async function ownerIsAlive(runId: string): Promise<boolean> {
  * is preserved: `os.tmpdir()` is shared by every instance on the host
  * regardless of working directory, so this sweep sees the live runs of
  * sibling instances — including ones started from another worktree, which
- * the cwd-relative DATA_DIR sweep cannot even see. Deleting those wiped a
+ * the cwd-relative dataDir sweep cannot even see. Deleting those wiped a
  * running agent's `/workspace` mid-run (#1130).
  *
  * The uid filter avoids two problems on shared hosts:
@@ -240,7 +262,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
   private pendingSpecs = new Map<string, PendingSpec>();
 
   async initialize(): Promise<void> {
-    await mkdir(DATA_DIR, { recursive: true });
+    await mkdir(dataDir, { recursive: true });
     logger.warn(
       "Running in PROCESS mode — agents execute without container isolation. " +
         "Use only with trusted agents in development or self-hosted environments.",
@@ -280,7 +302,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
    *
    * Mode `process` has no Docker label to scan, so every spawn writes a pidfile
    * inside its boundary directory (`./data/runs/<runId>/<role>.pid`). At boot,
-   * every subdirectory of `DATA_DIR` is by definition orphaned — boot.ts has
+   * every subdirectory of `dataDir` is by definition orphaned — boot.ts has
    * already marked any in-progress runs as failed before we run, and the new
    * platform process holds no in-memory handles yet. We SIGKILL each pid that
    * is still alive and rm -rf the boundary directory.
@@ -295,18 +317,18 @@ export class ProcessOrchestrator implements RunOrchestrator {
 
     let entries: string[];
     try {
-      entries = (await readdir(DATA_DIR)) as unknown as string[];
+      entries = (await readdir(dataDir)) as unknown as string[];
     } catch {
-      // Even when DATA_DIR is missing entirely, sweep tmpdir for
+      // Even when dataDir is missing entirely, sweep tmpdir for
       // orphan workspace dirs from crashed runs — they live outside
-      // DATA_DIR so the absence of DATA_DIR doesn't imply absence of
+      // dataDir so the absence of dataDir doesn't imply absence of
       // leaked workspaces.
       const workspaces = await reapOrphanWorkspaceDirs();
       return { workloads: 0, isolationBoundaries: 0, workspaces };
     }
 
     for (const name of entries) {
-      const dir = join(DATA_DIR, name);
+      const dir = join(dataDir, name);
       // `name` is the runId — see createIsolationBoundary. A boundary whose
       // owning platform process is still alive belongs to a sibling instance
       // started from this same working directory (two `bun run dev`, or a
@@ -356,11 +378,11 @@ export class ProcessOrchestrator implements RunOrchestrator {
     runId: string,
     opts?: IsolationBoundaryOptions,
   ): Promise<IsolationBoundary> {
-    const dir = join(DATA_DIR, runId);
+    const dir = join(dataDir, runId);
     // Create both the pidfile boundary dir and the shared workspace
     // dir in parallel — independent fs operations, no ordering
     // constraint. Workspace lives under os.tmpdir() rather than
-    // DATA_DIR so a host-side `rm -rf data/` doesn't accidentally
+    // dataDir so a host-side `rm -rf data/` doesn't accidentally
     // wipe the workspace for an active run.
     //
     // The sidecar port pair is allocated HERE (not in createSidecar) so
@@ -643,7 +665,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
    */
   private async writePidfile(runId: string, role: string, pid: number): Promise<void> {
     try {
-      await Bun.write(join(DATA_DIR, runId, `${role}.pid`), String(pid));
+      await Bun.write(join(dataDir, runId, `${role}.pid`), String(pid));
     } catch (err) {
       logger.warn("Failed to write sidecar/workload pidfile", {
         runId,
@@ -654,7 +676,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
   }
 
   private async removePidfile(runId: string, role: string): Promise<void> {
-    await rm(join(DATA_DIR, runId, `${role}.pid`), { force: true }).catch(() => {});
+    await rm(join(dataDir, runId, `${role}.pid`), { force: true }).catch(() => {});
   }
 
   private async findAvailablePort(retries = 5): Promise<number> {

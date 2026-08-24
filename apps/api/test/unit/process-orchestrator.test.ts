@@ -1,13 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdir, rm, writeFile, readdir } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { ProcessOrchestrator } from "../../src/services/orchestrator/process-orchestrator.ts";
+import { join } from "node:path";
+import {
+  ProcessOrchestrator,
+  _setDataDirForTesting,
+} from "../../src/services/orchestrator/process-orchestrator.ts";
 
-const DATA_DIR = resolve("./data/runs");
+/**
+ * A scratch run-data directory, NOT the live `./data/runs`.
+ *
+ * This file used to `resolve("./data/runs")` — the same expression the source
+ * uses — and `rm -rf` it in `beforeEach`. API tests must run from the repo root,
+ * so that is the real directory a `bun run dev` session writes run pidfiles
+ * into: running the unit suite beside a dev server destroyed its pidfiles, and
+ * two concurrent test sessions wiped each other. The source now takes a
+ * test-only override for exactly this.
+ */
+const DATA_DIR = await mkdtemp(join(tmpdir(), "appstrate-test-runs-"));
+_setDataDirForTesting(DATA_DIR);
 
 let orchestrator: ProcessOrchestrator;
 
@@ -15,7 +29,12 @@ afterEach(async () => {
   await orchestrator?.shutdown();
 });
 
-/** Wipe DATA_DIR so each test starts from a known empty state. */
+afterAll(async () => {
+  _setDataDirForTesting();
+  await rm(DATA_DIR, { recursive: true, force: true });
+});
+
+/** Wipe the scratch data dir so each test starts from a known empty state. */
 async function resetDataDir() {
   await rm(DATA_DIR, { recursive: true, force: true });
   await mkdir(DATA_DIR, { recursive: true });
@@ -133,10 +152,13 @@ describe("ProcessOrchestrator", () => {
       const report = await orchestrator.cleanupOrphans();
       expect(report.workloads).toBe(0);
       expect(report.isolationBoundaries).toBe(0);
-      // Workspaces reap sweeps os.tmpdir() globally — concurrent tests
-      // creating workspace dirs (or leftovers from prior runs) can
-      // contribute, so we don't pin the count.
-      expect(report.workspaces).toBeGreaterThanOrEqual(0);
+      // `report.workspaces` is deliberately NOT asserted. The workspace reap
+      // sweeps `os.tmpdir()` globally — unlike the run-data directory above,
+      // which this file now scopes to a scratch path — so concurrent tests and
+      // leftovers from prior runs both contribute. A `toBeGreaterThanOrEqual(0)`
+      // stood here, which reads as an assertion and is one no count can fail.
+      // Pinning it needs the workspace root injectable too; until then, silence
+      // is more honest than a green that proves nothing.
     });
 
     it("removes a boundary directory whose pidfile points at a dead pid", async () => {
