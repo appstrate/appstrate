@@ -794,5 +794,3 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
     };
   }
 }
-
-// Re-export the URL matcher so callers can reason about authorized_uris.

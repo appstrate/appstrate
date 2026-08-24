@@ -31,29 +31,6 @@ describe("run detail tabs", () => {
   });
 });
 
-describe("retired tab hashes", () => {
-  /**
-   * `#deliverable`, `#result`, `#memory`, `#logs`, `#info` and `#documents`
-   * were every other hash this page has ever put in a URL, each mapped onto
-   * the pane that absorbed it. They no longer resolve.
-   *
-   * Asserted rather than deleted with the mapping, because the consequence is
-   * silent: such a link opens the default pane and nothing says why. A test
-   * that merely disappeared would leave nothing recording that this was
-   * decided rather than overlooked.
-   */
-  const RETIRED = ["deliverable", "result", "memory", "logs", "info", "documents"];
-
-  it("are not part of the tab vocabulary any more", () => {
-    for (const hash of RETIRED) {
-      expect(RUN_DETAIL_TABS).not.toContain(hash as never);
-    }
-    // Positive control: the live panes ARE in it, so this cannot pass against
-    // an empty list.
-    expect([...RUN_DETAIL_TABS]).toHaveLength(4);
-  });
-});
-
 describe("initial tab", () => {
   it("leads with Outcome for a run that produced exactly one file", () => {
     expect(initialRunDetailTab(available({ producedFileCount: 1 }))).toBe("outcome");

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { isFileProducedByRun } from "./file-uri.ts";
+import { asRecordOrNull } from "./safe-json.ts";
 import { encodePackageIdPath, toSlug } from "./naming.ts";
 
 /**
@@ -96,10 +97,19 @@ export interface RunAndWaitFailureResult {
   step: RunAndWaitStep;
 }
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
+/**
+ * `asRecordOrNull`, adapted to the `undefined` this file's optional-argument
+ * shapes use.
+ *
+ * The predicate is NOT re-implemented here: `safe-json.ts` is a
+ * zero-dependency sibling in this package and already owns it. Nor is it named
+ * `asRecord` any more — that name is ALSO exported by `safe-json.ts`, where it
+ * returns `{}` for a non-object, i.e. a TRUTHY value. Two same-named helpers in
+ * one package with opposite falsiness is a reading hazard on a file whose whole
+ * job is deciding what reaches a launch body.
+ */
+function asRecordOrUndefined(value: unknown): Record<string, unknown> | undefined {
+  return asRecordOrNull(value) ?? undefined;
 }
 
 function asString(value: unknown): string | undefined {
@@ -250,7 +260,7 @@ function inputArgument(args: Record<string, unknown>): {
 } {
   const value = args.input;
   if (value === undefined || value === null) return {};
-  const record = asRecord(value);
+  const record = asRecordOrUndefined(value);
   if (!record) {
     return {
       error:
@@ -331,7 +341,7 @@ function connectionOverridesArgument(args: Record<string, unknown>): {
         "object itself — do not JSON-encode it.",
     };
   }
-  const overrides = asRecord(args.connection_overrides);
+  const overrides = asRecordOrUndefined(args.connection_overrides);
   if (!overrides && present) {
     return {
       error:
@@ -515,7 +525,7 @@ export async function launchRunAndWait(
   const signal = opts.signal;
   throwIfAborted(signal);
 
-  const args = asRecord(rawArgs) ?? {};
+  const args = asRecordOrUndefined(rawArgs) ?? {};
   const kind = asString(args.kind);
   const headers = jsonHeaders(opts.headers);
 
@@ -602,7 +612,7 @@ export async function launchRunAndWait(
     if (inputArg.input) launchBody.input = inputArg.input;
     if (Object.keys(launchBody).length === 0) launchBody = undefined;
   } else if (kind === "inline") {
-    const manifest = asRecord(args.manifest);
+    const manifest = asRecordOrUndefined(args.manifest);
     if (!manifest) {
       return {
         ok: false,
@@ -682,7 +692,7 @@ export async function launchRunAndWait(
     };
   }
 
-  const launchRecord = asRecord(launched);
+  const launchRecord = asRecordOrUndefined(launched);
   const runId = asString(launchRecord?.id);
   if (!launchRecord || !runId) {
     return {
@@ -748,7 +758,7 @@ export async function waitForRunAndWaitCompletion(
       return { payload: { status: waitRes.status, body: run }, isError: true };
     }
 
-    const runRecord = asRecord(run);
+    const runRecord = asRecordOrUndefined(run);
     lastRun = runRecord;
     if (isRunAndWaitTerminalStatus(runRecord?.status)) {
       return { payload: projectRunAndWaitPayload(runRecord, true) };
@@ -831,11 +841,11 @@ export async function fetchRunFiles(
     const url = apiUrl(opts.origin, runProducedFilesPath(runId));
     const res = await opts.fetch(url, { method: "GET", headers: new Headers(opts.headers) });
     if (!res.ok) return [];
-    const data = asRecord(await readJsonResponse(res))?.data;
+    const data = asRecordOrUndefined(await readJsonResponse(res))?.data;
     if (!Array.isArray(data)) return [];
     const out: RunAndWaitFile[] = [];
     for (const raw of data) {
-      const r = asRecord(raw);
+      const r = asRecordOrUndefined(raw);
       if (!r || !isFileProducedByRun(r, runId)) continue;
       const id = asString(r?.id);
       const uri = asString(r?.uri);

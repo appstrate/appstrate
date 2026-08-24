@@ -24,13 +24,6 @@ import { normalizeInstance } from "../../lib/instance-url.ts";
 import type { ResolvedRunConfig } from "@appstrate/shared-types";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
-/**
- * Wire shape returned by the run-config endpoint. The canonical type
- * lives in `@appstrate/shared-types`; this alias keeps the legacy
- * CLI-local name available to existing callers and tests.
- */
-type ResolvedRunConfigPayload = ResolvedRunConfig;
-
 export interface InheritedRunConfig {
   /** Model id to pass to the run pipeline, or null when nothing is set. */
   modelId: string | null;
@@ -78,7 +71,7 @@ export class RunConfigFetchError extends Error {
  */
 export async function fetchRunConfigPayload(
   input: FetchRunConfigInput,
-): Promise<ResolvedRunConfigPayload | null> {
+): Promise<ResolvedRunConfig | null> {
   const fetchFn = input.fetchImpl ?? fetch;
   const instance = normalizeInstance(input.instance);
   // applicationId is `app_<uuid>` — safe characters, no encoding needed.
@@ -101,12 +94,12 @@ export async function fetchRunConfigPayload(
       `Failed to fetch run-config: HTTP ${res.status} ${res.statusText}`,
     );
   }
-  return (await res.json()) as ResolvedRunConfigPayload;
+  return (await res.json()) as ResolvedRunConfig;
 }
 
 interface MergeRunConfigInputs {
   /** Inherited payload (null = no inheritance — flags + defaults only). */
-  inherited: ResolvedRunConfigPayload | null;
+  inherited: ResolvedRunConfig | null;
   /** `--model <id>` flag value. */
   flagModel?: string;
   /** `--proxy <id>` flag value. */

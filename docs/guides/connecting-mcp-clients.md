@@ -147,19 +147,20 @@ otherwise get wrong.
 | `run_and_wait`       | `mcp:invoke` | **Launch and wait.** Starts an agent run (`kind:"agent"`) or an inline run (`kind:"inline"`) and returns when it reaches a terminal status. |
 | `list_files`         | `mcp:read`   | List files visible to the caller (uploads + agent outputs), each with an `appfile://` URI.                                                  |
 
-**Retired tool names still answer.** `list_documents`, `read_document`,
-`validate_package_document` and `import_package_document` are the pre-#1177
+**Retired tool names do NOT answer.** `list_documents`, `read_document`,
+`validate_package_document` and `import_package_document` were the pre-#1177
 spellings of `list_files`, `read_file`, `validate_package_file` and
-`import_package_file`. They are withheld from `tools/list` but remain callable
-on the canonical handler, and a `document_uri` argument is renamed to `file_uri`
-on the way in. The server advertises `tools: { listChanged: false }`, which tells
-a client its list is stable for the life of the session — so a client that listed
-before an upgrade and calls the old name afterwards is behaving correctly, and
-would otherwise get `-32602 Unknown tool` mid-conversation. They stay hidden
-because the point of the rename is what the model sees: two entries for one
-capability, one of them named after a thing the tool does not do, is the problem
-being fixed. Likewise `document://` URIs are still parsed everywhere
-`appfile://` is; only `appfile://` is ever emitted.
+`import_package_file`. They were briefly kept callable-but-unlisted, then
+removed: calling one now returns `-32602 Unknown tool`, and a `document_uri`
+argument is not accepted. `document://` URIs are not parsed either — they fail
+at `parseFileUri`, in the same rejection as any other unknown scheme.
+
+The reason the aliases went is the reason they were tempting: this server
+advertises `tools: { listChanged: false }`, so a client that listed before an
+upgrade may call an old name afterwards. Keeping them answering bought that one
+client a working call at the price of a permanent second dispatch path whose
+only proof of life was its own test. **Re-list your tools after upgrading the
+platform** — that is the supported recovery, and it is one round trip.
 
 Prefer `run_and_wait` when you need a newly launched run's progress or terminal
 result. `runAgent` / `runInline` remain fully discoverable and invokable for

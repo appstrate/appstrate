@@ -4,9 +4,9 @@ import { useMemo } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { parseScopedName } from "@appstrate/core/naming";
 import { $api, client, type components, type paths } from "../api/client";
-import { useCurrentOrgId } from "./use-org";
 import { useCurrentApplicationId } from "./use-current-application";
 import { agentsKeys, packageKeys } from "../lib/query-keys";
+import { useOrgOnlyScope } from "./use-org-scope";
 
 /** Wire shape from the OpenAPI spec (GET /api/library response). */
 type LibraryResponse =
@@ -16,23 +16,14 @@ export type LibraryPackageItem = components["schemas"]["LibraryPackageList"][num
 
 export type LibraryApp = LibraryResponse["applications"][number];
 
-/**
- * Org context for the library query. The header is a spec-declared param
- * passed explicitly (instead of relying on the client middleware alone) so it
- * is part of the React Query key — switching org refetches instead of serving
- * another org's cached library.
- */
-function useLibraryScope() {
-  const orgId = useCurrentOrgId();
-  return {
-    enabled: !!orgId,
-    init: { params: { header: { "X-Org-Id": orgId ?? undefined } } },
-  };
-}
-
 export function useLibrary() {
-  const scope = useLibraryScope();
-  return $api.useQuery("get", "/api/library", scope.init, { enabled: scope.enabled });
+  const scope = useOrgOnlyScope();
+  return $api.useQuery(
+    "get",
+    "/api/library",
+    { params: { header: scope.header } },
+    { enabled: scope.enabled },
+  );
 }
 
 function updateLibraryCache(
@@ -96,9 +87,11 @@ export function usePackageInstallState(packageId: string) {
 
 export function useTogglePackageInstall() {
   const qc = useQueryClient();
-  const scope = useLibraryScope();
+  const scope = useOrgOnlyScope();
   // Exact key of the useLibrary query (same init) for the optimistic update.
-  const libraryKey = $api.queryOptions("get", "/api/library", scope.init).queryKey;
+  const libraryKey = $api.queryOptions("get", "/api/library", {
+    params: { header: scope.header },
+  }).queryKey;
 
   return useMutation({
     mutationFn: async ({

@@ -346,11 +346,6 @@ export function derivePiCompactionSettings(
   return { compaction: { enabled: true, reserveTokens, keepRecentTokens }, contextWindow };
 }
 
-// The `MODEL_API` → provider-key map lives in `provider-map.ts` (no Pi SDK
-// import) so boot-critical callers can pull it without dragging this module's
-// SDK graph. Re-exported here so the historical `pi-runner.ts` import path
-// keeps resolving.
-
 // Compile error if appstrate ever declares an apiShape Pi does not know.
 type _ApiShapeSubsetOfPi = ModelApiShape extends KnownApi ? true : never;
 const _assertApiShapeSubsetOfPi: _ApiShapeSubsetOfPi = true;
