@@ -221,13 +221,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `result.text_truncated` fields of the removed `report` tool left the run
   resource at the same time.
 
-  **Ship order, and it is not optional.** `@appstrate/cloud` binds the storage
-  capability off the LIVE services object the platform injects, not off its
-  pinned types, so a rename does not reach its read — it `TypeError`s its next
-  boot. Publish `@appstrate/core` 8.0.0 → release `cloud` (already moved to
-  `setFileStorageLimit` and `>=8.0.0`) → deploy this platform build. The
-  published `7.0.0` exposes only the old name, so cloud's range had to move
-  with it.
+  **Ship order, and it is not optional — the platform goes FIRST.**
+  `@appstrate/cloud` binds the storage capability off the LIVE services object
+  this platform injects, not off its pinned types, so the rename does not reach
+  its read. The instinct is to ship cloud first; the build topology says
+  otherwise. The cloud image is built
+  `FROM ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION}` and resolves
+  `@appstrate/core` out of that image, so the two are ONE deployed artifact and
+  never meet each other's old version at runtime. What gates cloud is its CI,
+  which typechecks inside the newest PUBLISHED release: `v1.0.0-beta.51` has
+  only `setDocumentStorageLimit`, so appstrate/cloud#52 is red until a release
+  carries the new name. Sequence: merge and release this → re-run cloud's
+  checks → merge cloud. Publishing core `8.0.0` to npm is NOT on that critical
+  path; cloud never resolves core from the registry.
 
   **What a consumer has to do:**
 
@@ -298,10 +304,12 @@ tool` and re-lists. That is the one alias here with a live protocol
      `services.setFileStorageLimit` off the LIVE services object this platform
      injects at boot, and the deprecated `setDocumentStorageLimit` alias that
      used to cover that seam is gone. A type-level pin never protected it: a
-     property read at boot does not typecheck. Ship order is core `8.0.0` on
-     npm → `cloud` (already moved, and its range raised to `>=8.0.0` because
-     the published `7.0.0` exposes only the old name) → this platform build.
-     Deploying the platform first `TypeError`s cloud at boot.
+     property read at boot does not typecheck. Ship order is this platform
+     release → `cloud` (appstrate/cloud#52, whose CI cannot go green until such
+     a release exists) → npm publication of core `8.0.0` when it suits other
+     consumers. Cloud's range is raised to `>=8.0.0` as a truthful declaration
+     — the published `7.0.0` exposes only the old name — not as a resolution
+     constraint, since core is an optional peer it takes from the image.
      `connect-helper` reads none of this surface. See
      `packages/core/CHANGELOG.md`.
 

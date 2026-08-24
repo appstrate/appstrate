@@ -33,8 +33,16 @@ build resolving `7.0.0` would typecheck against a services object without the
 member it now reads. Local dev resolves core through a workspace symlink and
 would not have caught it.
 
-**Ship order is therefore fixed**: core `8.0.0` on npm → `cloud` → the platform
-build. Deploying the platform first `TypeError`s cloud at boot.
+**Ship order is therefore fixed, and it is the platform FIRST**: platform
+release → `cloud` (appstrate/cloud#52) → npm publication of core `8.0.0`
+whenever it suits other consumers. The instinct is the opposite, so the reason
+is worth stating: the cloud image is built
+`FROM ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION}` and resolves core out
+of that image at `/app/packages/core`, so platform and cloud are ONE deployed
+artifact and cannot drift apart at runtime. What does gate cloud is its CI,
+which typechecks inside the newest PUBLISHED appstrate release — and
+`v1.0.0-beta.51` carries only the old name, so cloud stays red until a release
+ships the new one. Cloud never resolves core from npm at all.
 
 `cleanupSessionDocuments` → `cleanupSessionFiles` never had such an alias. Its
 only consumer is the in-tree `@appstrate/module-chat`, which ships in the same
