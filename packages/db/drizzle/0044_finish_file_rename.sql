@@ -54,13 +54,57 @@
 --
 -- The cost, written down rather than discovered: a database that already
 -- applied them carries a `drizzle.__drizzle_migrations` watermark of
--- 1787480000000, which now matches no journal entry. Drizzle compares
--- timestamps, not tags, so nothing errors — but the bookkeeping table records
--- two migrations this folder can no longer explain. This file's `when`
--- (1787562217863) is above that watermark, so it still runs on such a database.
--- The scope rewrites those two performed are forward-only data changes that
--- cannot be un-run and do not need to be: the scope strings they produced
--- (`files:*`) are exactly what current code reads.
+-- 1787480000000 (or 1787470000000, if it stopped after the old 0044), which now
+-- matches no journal entry. Drizzle compares timestamps, not tags, so nothing
+-- errors — but the bookkeeping table records two migrations this folder can no
+-- longer explain. This file's `when` (1787562217863) is above that watermark, so
+-- it still runs on such a database. The scope rewrites those two performed are
+-- forward-only data changes that cannot be un-run and do not need to be: the
+-- scope strings they produced (`files:*`) are exactly what current code reads.
+--
+-- One in-repo tool is NOT as forgiving as drizzle, and an operator who hits it
+-- should not have to debug it: `scripts/check-index-drift.ts` resolves the
+-- watermark to a snapshot by EXACT journal match, on purpose (a squashed journal
+-- makes the nearest neighbour a schema the database never had). On an orphaned
+-- watermark it refuses with `Cannot check: watermark <n> matches no entry in
+-- meta/_journal.json.` and exits 1. So such an environment loses index-drift
+-- coverage until it migrates past this file — at which point the watermark
+-- becomes 1787562217863 and matches again. Nothing to fix; just do not read that
+-- refusal as drift.
+--
+-- ═══ ROLLBACK ═══
+--
+-- CHANGELOG.md documents the hand rollback for `0043` — six `ALTER … RENAME`
+-- statements. Those are NOT sufficient once THIS file has run, and the gap is
+-- silent rather than loud: 0043 only renamed catalog objects, while 0044
+-- REWROTE row values that the previous release's code reads back. Reversed in
+-- this order, BEFORE 0043's renames (these statements name `files`, which 0043's
+-- reverse renames away), and a database snapshot taken before the deploy remains
+-- the fast path:
+--
+--   UPDATE "files" SET "storage_key" = 'documents/' || substring("storage_key" FROM 7)
+--   WHERE "storage_key" LIKE 'files/%';
+--   UPDATE "storage_deletion_jobs" SET "bucket" = 'documents' WHERE "bucket" = 'files';
+--   UPDATE "storage_deletion_jobs"
+--   SET "storage_key" = regexp_replace("storage_key", '^([^/]+)/files/', '\1/documents/')
+--   WHERE "bucket" = 'run-workspace' AND "storage_key" ~ '^[^/]+/files/';
+--   UPDATE "storage_deletion_jobs" SET "reason" = 'document_deleted' WHERE "reason" = 'file_deleted';
+--   UPDATE "storage_deletion_jobs" SET "reason" = 'document_expired' WHERE "reason" = 'file_expired';
+--   ALTER TABLE "model_provider_credentials"
+--     ADD COLUMN IF NOT EXISTS "last_refresh_failure_at" timestamp with time zone;
+--   ALTER TABLE "model_provider_pairings" ADD COLUMN IF NOT EXISTS "consumed_from_ip" text;
+--
+-- The two re-added columns come back EMPTY. That is harmless here precisely
+-- because of why they were dropped — the previous release only WROTE them — but
+-- the columns themselves must exist again or that release's writes error.
+--
+-- AND THE OBJECT MOVE IS YOURS TO UNDO TOO, in the same window: sync the `files`
+-- bucket back onto `documents` (or `mv ./data/storage/files
+-- ./data/storage/documents`), and rewrite every `{runId}/files/<name>`
+-- run-workspace key back to `{runId}/documents/<name>`. Reversing the SQL
+-- without reversing the bytes leaves the old code pointing at a bucket that no
+-- longer holds them, which is the same 404-on-a-file-that-exists failure the
+-- forward direction warns about.
 --
 -- ═══ IDEMPOTENCY ═══
 --

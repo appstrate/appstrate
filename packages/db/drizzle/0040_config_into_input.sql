@@ -12,15 +12,36 @@
 -- always written on the right. A key present in both keeps the `input` value —
 -- the same property the manifest merge applied.
 --
--- CONVERGENT, like its siblings 0039 and 0041-0044: running the whole file a
--- second time is a no-op, not an error. Every DDL statement is guarded on the
--- catalog and every fold is gated on its own effect, because this file has been
--- edited since it was first applied and drizzle keys applied migrations by
--- content hash — an existing dev database WILL run it again. Two of the
--- statements were destructive under a re-run and are now not: the RENAME (which
--- errored once `config` was gone) and the `application_packages` wrap (which
--- would have nested the row a second time into
--- `{"values":{"values":…,"locked":[]},"locked":[]}`).
+-- APPLIED EXACTLY ONCE, and it does not need to survive a re-run. Neither
+-- migrator in this repo keys on file CONTENT, so editing this file — its header
+-- included — does not make an existing database replay it:
+--
+--   * `drizzle-orm`'s pg dialect (`pg-core/dialect.js`, used by the postgres-js
+--     migrator in `apps/api/src/lib/boot.ts`) applies a migration only when
+--     `Number(lastDbMigration.created_at) < migration.folderMillis` — a
+--     TIMESTAMP WATERMARK read from `drizzle.__drizzle_migrations`. The content
+--     hash is written to that table and never compared. `boot.ts`'s
+--     `reconcileOAuthResourceColumns` docblock states the same rule from the
+--     other direction: a watermark ahead of reality SKIPS a migration.
+--   * `applyCorePGliteMigrations` (`apps/api/src/lib/pglite-migrate.ts`, tier 0)
+--     keys on the journal TAG. `0040_config_into_input` has not changed.
+--
+-- DO NOT gate the `application_packages` wrap on "does this row already look
+-- wrapped?". `config` held ARBITRARY author-declared parameter names, so an
+-- agent that declared parameters spelled `values` and `locked` (the latter an
+-- array) is byte-indistinguishable from an already-wrapped row: a shape-sniffing
+-- WHERE SKIPS it, `getInstalledPackageSettings` then resolves
+-- `asRecord("prod")` to `{}`, and the agent's configured values are gone while a
+-- field that does not exist reads as locked. Nothing errors. There is no sound
+-- shape test — the guard trades a re-run that cannot happen for silent data loss
+-- that can. Covered by
+-- `apps/api/test/integration/db/config-into-input-migration.test.ts`.
+--
+-- The statements that CAN converge soundly do, for a partially-applied
+-- environment rather than for a replay: the RENAME is catalog-guarded (it
+-- errored once `config` was gone), each fold is gated on its source column still
+-- existing, and the drops are `IF EXISTS`. Those guards are behaviour-identical
+-- to an unguarded statement on a first application; the wrap's was not.
 
 -- 1. application_packages.config -> input_settings { values, locked }
 --    `config` held the editor's stored values; they become `values` verbatim.
@@ -37,18 +58,13 @@ BEGIN
   END IF;
 END $$;--> statement-breakpoint
 ALTER TABLE "application_packages" ALTER COLUMN "input_settings" SET DEFAULT '{"values":{},"locked":[]}'::jsonb;--> statement-breakpoint
--- The wrap is gated on the row not already being wrapped. `input_settings` is
--- NOT NULL (it inherits `config`'s `DEFAULT '{}' NOT NULL`), so the predicate is
--- never NULL-tristate. Both keys are tested, and `locked` is tested for being an
--- array: `config` held arbitrary author-defined parameter names, and a single
--- field called `values` would otherwise make an unwrapped row read as wrapped.
+--    UNCONDITIONAL, and deliberately so — see the header. Every row reaching
+--    this statement holds a raw `config` object, because the RENAME above is the
+--    only thing that ever produced this column. `input_settings` is NOT NULL (it
+--    inherits `config`'s `DEFAULT '{}' NOT NULL`), so there is no NULL row to
+--    skip either.
 UPDATE "application_packages"
-SET "input_settings" = jsonb_build_object('values', "input_settings", 'locked', '[]'::jsonb)
-WHERE NOT (
-  "input_settings" ? 'values'
-  AND "input_settings" ? 'locked'
-  AND jsonb_typeof("input_settings" -> 'locked') = 'array'
-);--> statement-breakpoint
+SET "input_settings" = jsonb_build_object('values', "input_settings", 'locked', '[]'::jsonb);--> statement-breakpoint
 
 -- 2. package_schedules.config_override -> input
 --    LIVE data, not history: these are the values a schedule freezes and
