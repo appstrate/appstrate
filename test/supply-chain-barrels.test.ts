@@ -39,6 +39,64 @@ import * as runnerPiBarrel from "../packages/runner-pi/src/pi-sdk.ts";
 import * as runtimePiBarrel from "../runtime-pi/pi-sdk.ts";
 import * as sidecarPiBarrel from "../runtime-pi/sidecar/pi-sdk.ts";
 
+/**
+ * Every VALUE symbol imported from `<dir>/**\/<barrel>` by the files under
+ * `dir`, read from the source.
+ *
+ * Type-only imports are excluded on both spellings — a whole `import type {…}`
+ * statement, and a `type X` specifier inside a value import — because they
+ * erase at runtime and a missing type re-export surfaces as a tsc error on the
+ * consumer instead (see the module doc).
+ *
+ * Deliberately regex over the source rather than a TS AST: this file is outside
+ * every package's tsc program by design, and pulling a parser in to read five
+ * import statements would undo that.
+ *
+ * The specifier body is `[^}]*` and NOT `[\s\S]*?`. The lazy any-character
+ * form crosses statement boundaries: it anchors on the FIRST `import {` in the
+ * file and runs to the barrel import's closing brace, so the captured list
+ * holds several statements' specifiers and the `(type\s+)?` group reports on
+ * the wrong one — an `import type { Api, Model } from "./pi-sdk.ts"` preceded
+ * by any value import reads as a value import. A specifier list contains no
+ * braces, so `[^}]*` cannot leave its own statement. It still spans newlines,
+ * which is what prettier's wrapping needs.
+ */
+async function valueImportsOfBarrel(
+  dir: string,
+  barrelFile: string,
+  skipDirs: readonly string[] = [],
+): Promise<string[]> {
+  const { readdir, readFile } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+
+  const found = new Set<string>();
+  const walk = async (current: string): Promise<void> => {
+    for (const entry of await readdir(current, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (skipDirs.includes(entry.name) || entry.name === "node_modules") continue;
+        await walk(join(current, entry.name));
+        continue;
+      }
+      if (!entry.name.endsWith(".ts") || entry.name === barrelFile) continue;
+      const source = await readFile(join(current, entry.name), "utf8");
+      const pattern = new RegExp(
+        `import\\s+(type\\s+)?\\{([^}]*)\\}\\s+from\\s+"[./]*${barrelFile.replace(".", "\\.")}"`,
+        "g",
+      );
+      for (const match of source.matchAll(pattern)) {
+        if (match[1]) continue; // `import type { … }` — erased at runtime
+        for (const raw of (match[2] ?? "").split(",")) {
+          const specifier = raw.trim();
+          if (!specifier || specifier.startsWith("type ")) continue;
+          found.add((specifier.split(/\s+as\s+/)[0] ?? "").trim());
+        }
+      }
+    }
+  };
+  await walk(dir);
+  return [...found].filter(Boolean).sort();
+}
+
 describe("supply-chain: pi-sdk barrel completeness", () => {
   it("@appstrate/runner-pi barrel exposes the static Type value and the SDK loader handle", () => {
     const barrel = runnerPiBarrel as Record<string, unknown>;
@@ -66,10 +124,27 @@ describe("supply-chain: pi-sdk barrel completeness", () => {
     }
   });
 
-  it("runtime-pi barrel re-exports the value symbols its consumers import", () => {
-    const barrel = runtimePiBarrel as Record<string, unknown>;
+  it("runtime-pi barrel re-exports the value symbols its consumers import", async () => {
+    // DERIVED, not hardcoded. A literal list is a second statement of "what
+    // consumers import" that drifts from the first: this case carried
+    // `streamSimple` after its last consumer stopped importing it from the
+    // barrel, so the test demanded an export nothing needed — and would
+    // equally have stayed silent about a symbol a new consumer started
+    // importing. Reading the imports is the only version that tracks.
+    const imported = await valueImportsOfBarrel(
+      new URL("../runtime-pi", import.meta.url).pathname,
+      "pi-sdk.ts",
+      ["sidecar"], // the sidecar has its own barrel, asserted below
+    );
 
-    for (const name of ["Type", "streamSimple"] as const) {
+    // Positive control: an empty or truncated scan must not pass vacuously.
+    expect(
+      imported,
+      "no consumer of the runtime-pi barrel was found — the scan is broken",
+    ).toContain("Type");
+
+    const barrel = runtimePiBarrel as Record<string, unknown>;
+    for (const name of imported) {
       expect(
         barrel[name],
         `runtime-pi pi-sdk barrel is missing value export "${name}"`,
