@@ -100,7 +100,6 @@ interface PiMessagesRequestBody {
     temperature?: number;
     maxTokens?: number;
     reasoning?: ThinkingLevel;
-    cacheRetention?: SimpleStreamOptions["cacheRetention"];
     sessionId?: string;
   };
 }
@@ -154,11 +153,23 @@ export function buildBackingModel(deps: PiMessagesBackendDeps): Model<Api> {
     baseUrl: llm.baseUrl,
     reasoning: backing.reasoning,
     ...(backing.reasoningLevelMap ? { thinkingLevelMap: backing.reasoningLevelMap } : {}),
-    // pi-ai gates its adaptive branch on `compat.forceAdaptiveThinking`, which
-    // it sources from metadata it has none of for a record rebuilt from the
-    // platform's catalog. Without the flag an adaptive backing gets the classic
-    // `thinking: {type:"enabled", budget_tokens}` shape and answers 400.
-    ...(swap.anthropicAdaptiveReasoning ? { compat: { forceAdaptiveThinking: true } } : {}),
+    compat: {
+      // The STRUCTURAL half of the cache-retention refusal — see
+      // {@link FORWARDED_OPTION_KEYS} for the billing reason. Dropping the
+      // option from the whitelist closes the request-body route; this closes
+      // the class. pi-ai gates every long-retention emission on this one flag
+      // (`cache_control.ttl:"1h"` for anthropic-messages, `"24h"` for both
+      // OpenAI shapes), and reads it as `model.compat?.… ?? true`, so the
+      // record must say `false` OUT LOUD rather than stay silent. With it set,
+      // no option value and no `PI_CACHE_RETENTION` in any environment can
+      // produce a token bucket the platform cannot price.
+      supportsLongCacheRetention: false,
+      // pi-ai gates its adaptive branch on `compat.forceAdaptiveThinking`, which
+      // it sources from metadata it has none of for a record rebuilt from the
+      // platform's catalog. Without the flag an adaptive backing gets the classic
+      // `thinking: {type:"enabled", budget_tokens}` shape and answers 400.
+      ...(swap.anthropicAdaptiveReasoning ? { forceAdaptiveThinking: true } : {}),
+    },
     input: narrowInputModalities(backing.input),
     cost: { ...ZERO_RATES },
     // The REAL limits: `maxTokens` is the upstream response cap, `contextWindow`
@@ -181,21 +192,29 @@ function narrowInputModalities(input: ReadonlyArray<string>): ("text" | "image")
  * The `options` members this boundary forwards upstream — the whitelist half of
  * {@link projectRequestOptions}. All portable `pi-messages` vocabulary, so
  * forwarding them grants the container nothing it could not already ask for.
+ *
+ * `cacheRetention` is portable vocabulary too and is deliberately NOT here. The
+ * body is the CONTAINER's, so the agent picks its value, and Anthropic long
+ * retention bills cache-creation tokens at 2× the input rate — a bucket the
+ * platform's authoritative `computeTokenCost` has no term for. Forwarding it
+ * would let an aliased run make its own ledger row cheaper than the call it
+ * made. `apps/api/test/unit/runner-cost-parity.test.ts` pins that as the
+ * precondition for dropping pi-ai's `cacheWrite1h` branch.
  */
 export const FORWARDED_OPTION_KEYS: ReadonlySet<string> = new Set([
   "temperature",
   "maxTokens",
   "reasoning",
-  "cacheRetention",
   "sessionId",
 ]);
 
 /**
  * Log every field that reached this boundary and will NOT reach the backing:
  * `toolChoice`, whose value space differs per vendor so honouring it would mean
- * the per-vendor mapping table this design avoids, and `debug`, which asks a
- * backend for routing metadata about itself. Reported as a SET DIFFERENCE
- * against {@link FORWARDED_OPTION_KEYS}, never a blacklist of those two names,
+ * the per-vendor mapping table this design avoids; `cacheRetention`, which the
+ * platform cannot price (see {@link FORWARDED_OPTION_KEYS}); and `debug`, which
+ * asks a backend for routing metadata about itself. Reported as a SET DIFFERENCE
+ * against {@link FORWARDED_OPTION_KEYS}, never a blacklist of those three names,
  * so an option a future pi-ai adds is visible the day it appears instead of
  * vanishing with the constraint the agent asked for. WARNS, never rejects —
  * failing would break every aliased run on a pi upgrade. Names FIELDS only:
@@ -236,7 +255,6 @@ function projectRequestOptions(
     ...(incoming.temperature !== undefined ? { temperature: incoming.temperature } : {}),
     ...(incoming.maxTokens !== undefined ? { maxTokens: incoming.maxTokens } : {}),
     ...(incoming.reasoning !== undefined ? { reasoning: incoming.reasoning } : {}),
-    ...(incoming.cacheRetention !== undefined ? { cacheRetention: incoming.cacheRetention } : {}),
     ...(incoming.sessionId !== undefined ? { sessionId: incoming.sessionId } : {}),
     // A classic (non-adaptive) Anthropic call needs a request-scoped thinking
     // budget that `PiMessagesOptions` models no field for, so the container

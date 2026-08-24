@@ -449,6 +449,25 @@ export function buildPiModelFromEnv(env: RuntimeEnv): Model<Api> {
     baseUrl: env.modelBaseUrl ?? "",
     reasoning: env.modelReasoning,
     ...(env.modelReasoningLevelMap ? { thinkingLevelMap: env.modelReasoningLevelMap } : {}),
+    compat: {
+      // Long prompt-cache retention is REFUSED structurally, on the record
+      // itself, because the platform cannot price what it produces: Anthropic
+      // bills a 1h cache write at 2× the input rate and `computeTokenCost`
+      // (`@appstrate/afps-runtime/runner`) carries one cache-write rate, not
+      // two. pi-ai gates every long-retention emission on this flag
+      // (`cache_control.ttl:"1h"` for anthropic-messages, `prompt_cache_retention:"24h"`
+      // for both OpenAI shapes) and defaults it to TRUE when the record stays
+      // silent, resolving the request's retention from `options.cacheRetention`
+      // and then `process.env.PI_CACHE_RETENTION`. Both of those are reachable
+      // from inside the container — agent code runs in this process and can
+      // assign to `process.env` — so refusing the ENV at injection time
+      // (`packages/runner-pi/src/container-env.ts` never sets it) is necessary
+      // and not sufficient. This flag is the sufficient half, and it holds for
+      // any value the agent picks. The sidecar's `buildBackingModel`
+      // (`sidecar/pi-messages-backend.ts`) sets the same flag for the aliased
+      // path, where pi-ai runs one process to the left.
+      supportsLongCacheRetention: false,
+    },
     input: [...env.modelInput],
     // `Model.cost` is REQUIRED by the Pi SDK on every settled turn, so an unpriced
     // run still hands it zeros; the runner's `unpriced` flag stops the 0 escaping.
