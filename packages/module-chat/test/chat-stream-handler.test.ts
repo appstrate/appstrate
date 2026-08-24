@@ -101,23 +101,26 @@ function modelsResponse(apiShape = "openai-completions"): Response {
 }
 
 /** A minimal but non-empty `/api/me/context` payload. */
-function contextResponse(): Response {
+function contextResponse(recentRuns: unknown[] = []): Response {
   return Response.json({
     user: { name: "Chat Tester", email: "chat-tester@test.com" },
     org: { role: "owner", name: CONTEXT_ORG_MARKER, slug: "chat-handler-test" },
     connections: [],
     agents: [],
     skills: [],
-    recent_runs: [],
+    recent_runs: recentRuns,
   });
 }
 
 /** Build the scripted in-memory dispatch. Nothing leaves this process. */
-function scriptedDispatch(apiShape?: string): (req: Request) => Promise<Response> {
+function scriptedDispatch(
+  apiShape?: string,
+  context: () => Response = () => contextResponse(),
+): (req: Request) => Promise<Response> {
   return async (req: Request): Promise<Response> => {
     const path = new URL(req.url).pathname;
     if (path === "/api/models") return modelsResponse(apiShape);
-    if (path === "/api/me/context") return contextResponse();
+    if (path === "/api/me/context") return context();
     if (path === "/api/applications") {
       return Response.json({ data: [{ id: APP_ID, isDefault: true }] });
     }
@@ -216,17 +219,17 @@ describe("handleChatStream engine routing", () => {
       /** apiShape of the single scripted `/api/models` row. */
       apiShape?: string;
       /** Stand in for the platform's credential resolution. */
-      resolveSubscriptionChatModel?: ChatPlatformDeps["resolveSubscriptionChatModel"];
+      resolveChatModel?: ChatPlatformDeps["resolveChatModel"];
+      /** Scripted `/api/me/context` body, to vary the payload between turns. */
+      context?: () => Response;
     },
   ): Promise<Response> {
     // Real platform deps (the same context `init()` gets), with dispatch
     // overridden by the scripted one so no request leaves this process.
     const deps = {
       ...buildChatPlatformDeps(buildModuleInitContext()),
-      dispatch: scriptedDispatch(overrides?.apiShape),
-      ...(overrides?.resolveSubscriptionChatModel
-        ? { resolveSubscriptionChatModel: overrides.resolveSubscriptionChatModel }
-        : {}),
+      dispatch: scriptedDispatch(overrides?.apiShape, overrides?.context),
+      ...(overrides?.resolveChatModel ? { resolveChatModel: overrides.resolveChatModel } : {}),
     };
     const app = buildApp(deps, engine);
     const res = await app.request("/api/chat", {
@@ -261,7 +264,7 @@ describe("handleChatStream engine routing", () => {
       apiShape: "anthropic-messages",
       // The platform resolved the row to an oauth2 provider whose credential is
       // revoked or no longer decrypts.
-      resolveSubscriptionChatModel: async () => ({ subscription: true, needsReconnection: true }),
+      resolveChatModel: async () => ({ subscription: true, needsReconnection: true }),
     });
 
     expect(res.status).toBe(401);
@@ -389,6 +392,14 @@ describe("handleChatStream engine routing", () => {
     expect(input.system).toContain(CONTEXT_ORG_MARKER);
     expect(input.platformMcp.url).toContain(`/api/mcp/o/${encodeURIComponent(ctx.orgId)}`);
     expect(input.platformMcp.headers.Authorization).toMatch(/^Bearer /);
+    // The handshake transport is the platform's in-process dispatch, not global
+    // `fetch` — three JSON-RPC hops that used to open real loopback sockets back
+    // into this same process. Proven by calling it: it answers from the scripted
+    // dispatch, which a socket to a non-existent server could not do.
+    expect(typeof input.platformMcp.fetch).toBe("function");
+    const probed = await input.platformMcp.fetch!(new Request("http://127.0.0.1:1/api/models"));
+    expect(probed.status).toBe(200);
+    expect(await probed.json()).toMatchObject({ object: "list" });
 
     // (5) Wait for the connection-independent persist drain to settle.
     await waitForAssistantPersist(sessionId);
@@ -427,5 +438,50 @@ describe("handleChatStream engine routing", () => {
       .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.orgId, ctx.orgId)))
       .limit(1);
     expect(session?.activeStreamId).toBeNull();
+  }, 20_000);
+
+  /**
+   * The prompt-cache guard.
+   *
+   * pi-ai emits the system prompt as ONE text block carrying ONE `cache_control`
+   * breakpoint, and caching is prefix-based — so any per-turn difference in that
+   * block invalidates it AND the conversation-history breakpoint downstream of
+   * it. The prompt must therefore be byte-identical between turns for a given
+   * caller, whatever the platform reports about their runs in the meantime.
+   *
+   * This asserts the property at the seam the handler owns, so it fails whatever
+   * route a regression takes back in: a re-rendered `recent_runs`, a finer clock,
+   * a newly interpolated per-request value.
+   */
+  it("hands the engine a byte-identical system prompt across turns", async () => {
+    const first = scriptedEngine();
+    await postChat(mintSessionId(), undefined, first.engine, {
+      context: () => contextResponse([]),
+    });
+
+    // Same caller, same org — but the platform now reports runs that did not
+    // exist a moment ago, each with its own timestamp and error text.
+    const second = scriptedEngine();
+    await postChat(mintSessionId(), undefined, second.engine, {
+      context: () =>
+        contextResponse([
+          {
+            package_id: "@acme/report",
+            status: "failed",
+            run_number: 41,
+            started_at: new Date().toISOString(),
+            error: "provider timed out",
+          },
+          { package_id: "@acme/triage", status: "success", run_number: 42 },
+        ]),
+    });
+
+    expect(first.calls).toHaveLength(1);
+    expect(second.calls).toHaveLength(1);
+    expect(second.calls[0]!.system).toBe(first.calls[0]!.system);
+    // And the volatile payload really was delivered — otherwise the assertion
+    // above would pass for the wrong reason (a dispatch that never ran).
+    expect(second.calls[0]!.system).not.toContain("provider timed out");
+    expect(second.calls[0]!.system).not.toContain("@acme/report");
   }, 20_000);
 });

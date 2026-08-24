@@ -19,27 +19,75 @@
       "persistent": true,
       "cache": false
     },
+    // Same defect `//#typecheck:scripts` documents below, one scope up: the
+    // inputs must be what tsc COMPILES, not what the package is "about". Every
+    // workspace script is `tsc --noEmit`, so the program is its tsconfig's
+    // `include` — and seven workspaces reach past `src/`: apps/api declares no
+    // `include` at all (so tsc takes the whole directory, test/ included),
+    // apps/cli and packages/core add `test` + `scripts`, and afps-runtime,
+    // afps-shared, mcp-transport and runner-pi add `test`.
+    //
+    // Listing only `src/**` therefore let this task replay a cached PASS over
+    // code it never compiled: a type error introduced in apps/api/test/**
+    // alone moved no hash, turbo printed `Cached: 1`, and tsc never ran. `bun
+    // test` does not close it either — bun executes tests without typechecking
+    // them. Over-broad inputs cost one extra invalidation; under-broad inputs
+    // are a silent green.
+    //
+    // Probe when changing it: `turbo run typecheck --dry=json`, EDIT
+    // apps/api/test/unit/rate-limit.test.ts (append a line — turbo hashes
+    // content, so `touch` moves nothing and reads as a false negative), run
+    // again — the hash must move.
     "typecheck": {
       "dependsOn": ["^typecheck"],
-      "inputs": ["src/**", "tsconfig.json", "tsconfig.*.json", "package.json"]
+      "inputs": [
+        "src/**",
+        "test/**",
+        "scripts/**",
+        "tsconfig.json",
+        "tsconfig.*.json",
+        "package.json"
+      ]
     },
+    // `lint` is a bare `eslint .`, so its true scope is whatever
+    // eslint.config.mjs matches — these inputs only decide when turbo REPLAYS
+    // it. They must therefore track that config, not the other way round:
+    // a zone eslint newly covers but this list omits is a zone whose findings
+    // arrive once and are then cached away.
     "//#lint": {
       "inputs": [
         "apps/*/src/**",
         "apps/*/test/**",
+        "apps/*/scripts/**",
         "packages/*/src/**",
         "packages/*/test/**",
+        "packages/*/scripts/**",
         "runtime-pi/**/*.{ts,tsx,js,jsx,mjs,cjs}",
+        "e2e/**/*.ts",
         "scripts/**/*.ts",
         "test/**/*.ts",
-        "eslint.config.mjs",
+        "*.ts",
+        "*.mjs",
         "package.json"
       ]
     },
+    // Mirrors the glob list in the root `format:check` script. Same rule as
+    // `//#lint` above: an input list narrower than what prettier is asked to
+    // check turns a real drift into a cached pass.
     "//#format:check": {
       "inputs": [
         "apps/*/src/**",
+        "apps/*/test/**",
+        "apps/*/scripts/**",
         "packages/*/src/**",
+        "packages/*/test/**",
+        "packages/*/scripts/**",
+        "runtime-pi/**/*.ts",
+        "e2e/**/*.ts",
+        "scripts/**/*.ts",
+        "test/**/*.ts",
+        "*.ts",
+        "*.mjs",
         ".prettierrc",
         ".prettierignore",
         "package.json"
@@ -78,8 +126,34 @@
     "//#verify:dead-code": {
       "cache": false
     },
+    // `scripts/tsconfig.json` is not an allowlist any more, and the files it
+    // names are not the files it checks: several scripts (verify-openapi.ts,
+    // generate-api-types.ts, detect-breaking-changes.ts) import
+    // apps/api/src/openapi/, and tsc follows imports. The program is ~600
+    // files — 350 under apps/api, most of the rest under packages/*.
+    //
+    // Inputs that listed only scripts/** therefore let this task replay a
+    // cached PASS over code it never compiled, and CI restores the turbo cache
+    // across runs: a PR breaking a symbol one of those scripts imports got
+    // this gate for free. The list below is the program, not the entrypoints.
+    //
+    // Probe when changing it: `turbo run '//#typecheck:scripts' --dry=json`,
+    // EDIT apps/api/src/index.ts (append a line — turbo hashes content, so
+    // `touch` moves nothing and reads as a false negative), run again — the
+    // hash must move.
     "//#typecheck:scripts": {
-      "inputs": ["scripts/**/*.ts", "scripts/tsconfig.json", "tsconfig.base.json"]
+      "inputs": [
+        "scripts/**/*.ts",
+        "scripts/tsconfig.json",
+        "apps/*/src/**",
+        "apps/*/package.json",
+        "apps/*/tsconfig.json",
+        "packages/*/src/**",
+        "packages/*/package.json",
+        "packages/*/tsconfig.json",
+        "tsconfig.base.json",
+        "package.json"
+      ]
     }
   }
 }

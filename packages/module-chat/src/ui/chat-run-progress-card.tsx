@@ -169,7 +169,10 @@ export function ChatRunProgressCard({
   // Pace the log line: a burst of lines plays back one at a time (≥500ms each)
   // rather than flashing straight to the last one. `current` carries a stable
   // `id` so the line element remounts on change and re-runs its enter animation.
-  const current = useLogTicker(visibleLogEntries(logs));
+  // Memoized: this card lives inside the streaming thread, so it re-renders on
+  // every chunk, and the filter walked the whole log array each time.
+  const visible = React.useMemo(() => visibleLogEntries(logs), [logs]);
+  const current = useLogTicker(visible);
   const { openFile, t } = useChatHost();
   // A card that mounted already complete belongs to history: never let N old
   // runs fight over the panel. A card mounted for a live call presents through

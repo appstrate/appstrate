@@ -20,7 +20,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { isTextLikeMimeType } from "../../src/resolvers/http-call-core.ts";
+import { isTextLikeMimeType, serializeFetchResponse } from "../../src/resolvers/http-call-core.ts";
 
 const XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
@@ -39,6 +39,52 @@ describe("isTextLikeMimeType", () => {
     "application/x-www-form-urlencoded",
   ])("decodes %s as text", (contentType) => {
     expect(isTextLikeMimeType(contentType)).toBe(true);
+  });
+
+  // Regression: gating the charset rule on an ambiguous base type (see the
+  // note on `isTextLikeMimeType`) silently demoted every text media type that
+  // was NOT in `TEXT_SHAPED_MEDIA_TYPES` — it used to ride in on its charset
+  // parameter alone. The fix is in `@appstrate/afps-shared/mime`, not here: a
+  // text format must be classified as text with OR without a charset. Each of
+  // these is asserted both ways, because passing only with the parameter would
+  // mean the charset fallback is doing the work again.
+  it.each([
+    "application/toml",
+    "application/sql",
+    "application/graphql",
+    "application/json5",
+    "application/hjson",
+    "application/sgml",
+    "application/markdown",
+    "application/x-markdown",
+    "application/n-triples",
+    "application/n-quads",
+    "application/trig",
+    "application/node",
+    "application/typescript",
+    "application/x-typescript",
+    "application/dart",
+    "application/x-shellscript",
+    "application/pem-certificate-chain",
+    "application/pgp-keys",
+    "application/pgp-signature",
+  ])("decodes %s as text with or without a charset parameter", (mime) => {
+    expect(isTextLikeMimeType(mime)).toBe(true);
+    expect(isTextLikeMimeType(`${mime}; charset=utf-8`)).toBe(true);
+  });
+
+  // The other half of the same sweep: formats whose common form is ASCII but
+  // whose spec lets them embed raw bytes stay on the byte path, charset or
+  // not. Listing them pins the boundary — a later "it's text really" addition
+  // to the shared set has to argue with this test.
+  it.each([
+    "application/rtf", // \bin blocks carry raw bytes
+    "application/postscript", // binary-token PostScript is a valid encoding
+    "application/http", // a wrapped message whose body may be anything
+    "application/wasm", // registry marks it compressible; it is still bytecode
+  ])("keeps %s as bytes even with a charset parameter", (mime) => {
+    expect(isTextLikeMimeType(mime)).toBe(false);
+    expect(isTextLikeMimeType(`${mime}; charset=utf-8`)).toBe(false);
   });
 
   it.each([
@@ -72,6 +118,13 @@ describe("isTextLikeMimeType", () => {
     // this predicate exists to prevent.
     expect(isTextLikeMimeType(XLSX)).toBe(false);
     expect(isTextLikeMimeType(`${XLSX}; boundary=x`)).toBe(false);
+    // …and a server that blanket-appends a charset to every response must not
+    // be able to flip an OOXML container onto the lossy text path. "an OOXML
+    // container carries no charset" is a claim about upstream behaviour, not
+    // an invariant we control.
+    expect(isTextLikeMimeType(`${XLSX}; charset=utf-8`)).toBe(false);
+    expect(isTextLikeMimeType("application/pdf; charset=utf-8")).toBe(false);
+    expect(isTextLikeMimeType("image/png;charset=UTF-8")).toBe(false);
   });
 
   it("is case-insensitive and parameter-tolerant", () => {
@@ -85,5 +138,62 @@ describe("isTextLikeMimeType", () => {
     expect(isTextLikeMimeType(null)).toBe(false);
     expect(isTextLikeMimeType(undefined)).toBe(false);
     expect(isTextLikeMimeType("")).toBe(false);
+  });
+});
+
+/**
+ * The declared media type that reaches {@link serializeFetchResponse}'s
+ * sniffing step. `maybeSniffMimeType` compares it against the exact literal
+ * `"application/octet-stream"` to decide whether the upstream said anything
+ * useful — so the value MUST be normalized (parameters stripped, lowercased)
+ * before it gets there. A third hand-rolled parser used to strip parameters
+ * without lowercasing, which let `Application/Octet-Stream` masquerade as a
+ * specific declared type: sniffing was skipped and the mixed-case string was
+ * stored as the file's mime.
+ */
+describe("serializeFetchResponse declared-mime normalization", () => {
+  // 8-byte PNG signature + IHDR header — enough for `file-type` to identify.
+  const PNG_BYTES = new Uint8Array([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+    0x89,
+  ]);
+
+  async function serialize(contentType: string) {
+    return serializeFetchResponse(
+      new Response(PNG_BYTES, { headers: { "content-type": contentType } }),
+      { workspace: "/nonexistent-workspace", toolCallId: "t1" },
+    );
+  }
+
+  it.each([
+    "application/octet-stream",
+    "Application/Octet-Stream",
+    "APPLICATION/OCTET-STREAM",
+    "  application/octet-stream  ",
+  ])("sniffs magic bytes when the upstream declares %s", async (contentType) => {
+    const result = await serialize(contentType);
+    expect(result.body.kind).toBe("inline");
+    if (result.body.kind !== "inline") throw new Error("unreachable");
+    expect(result.body.mimeType).toBe("image/png");
+    expect(result.body.mimeTypeSniffed).toBe(true);
+  });
+
+  it("keeps a specific declared type and lowercases it", async () => {
+    const result = await serialize("Image/JPEG");
+    expect(result.body.kind).toBe("inline");
+    if (result.body.kind !== "inline") throw new Error("unreachable");
+    expect(result.body.mimeType).toBe("image/jpeg");
+    expect(result.body.mimeTypeSniffed).toBeUndefined();
+  });
+
+  it("falls back to application/octet-stream when no Content-Type is sent", async () => {
+    const result = await serializeFetchResponse(new Response(new TextEncoder().encode("hello")), {
+      workspace: "/nonexistent-workspace",
+      toolCallId: "t1",
+    });
+    expect(result.body.kind).toBe("inline");
+    if (result.body.kind !== "inline") throw new Error("unreachable");
+    expect(result.body.mimeType).toBe("application/octet-stream");
   });
 });

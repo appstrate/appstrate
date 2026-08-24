@@ -267,7 +267,9 @@ function llmFetchErrorResponse(c: Context, targetUrl: string, err: unknown): Res
   let domain: string | undefined;
   try {
     domain = new URL(targetUrl).hostname;
-  } catch {}
+  } catch {
+    // Not a parseable URL — omit the hostname hint rather than fail.
+  }
   const suffix = code ? `: ${code}` : "";
   // Only non-aliased requests reach an upstream fetch here, so the hostname
   // keeps its debugging value.

@@ -59,6 +59,7 @@ import {
   createOAuthClientSchema,
   updateOAuthClientSchema,
   smtpConfigUpsertSchema,
+  smtpConfigTestSchema,
   socialProviderUpsertSchema,
 } from "./routes.ts";
 import { oidcPaths } from "./openapi/paths.ts";
@@ -223,6 +224,12 @@ const oidcModule: AppstrateModule = {
         path: "/api/applications/{id}/smtp-config",
         jsonSchema: z.toJSONSchema(smtpConfigUpsertSchema) as Record<string, unknown>,
         description: "Upsert per-application SMTP configuration",
+      },
+      {
+        method: "POST",
+        path: "/api/applications/{id}/smtp-config/test",
+        jsonSchema: z.toJSONSchema(smtpConfigTestSchema) as Record<string, unknown>,
+        description: "Send a test email through the application's SMTP configuration",
       },
       {
         method: "PUT",

@@ -9,6 +9,9 @@
  * 3. Best practices lint — @redocly/openapi-core (recommended ruleset)
  * 4. Zod ↔ OpenAPI schema comparison — compares Zod-derived JSON Schemas (pre-converted
  *    in the registry via z.toJSONSchema()) against hand-written OpenAPI requestBody schemas
+ * 4b. Step 4 coverage — every endpoint whose spec declares an application/json request body
+ *    must be registered (core registry or a module's openApiSchemas()) or listed in
+ *    EXEMPT_REQUEST_BODIES with a stated reason; a stale exemption fails too
  * 5. Code subset Spec — statically enumerates router.METHOD() and app.METHOD() calls across
  *    apps/api/src/routes (per-domain route files) plus apps/api/src/modules (built-in modules)
  *    plus apps/api/src/index.ts, composes the mount prefix from app.route(prefix, factory) calls,
@@ -33,7 +36,10 @@ import { validate as validateOpenAPI } from "@readme/openapi-parser";
 import { lintFromString, createConfig } from "@redocly/openapi-core";
 import type { OpenApiSchemaEntry } from "@appstrate/core/module";
 import { buildOpenApiSpec } from "../apps/api/src/openapi/index.ts";
-import { buildZodSchemaRegistry } from "../apps/api/src/openapi/zod-schema-registry.ts";
+import {
+  buildZodSchemaRegistry,
+  EXEMPT_REQUEST_BODIES,
+} from "../apps/api/src/openapi/zod-schema-registry.ts";
 import {
   responseTypeRegistry,
   KNOWN_DRIFT,
@@ -201,6 +207,12 @@ try {
     }
   }
 } catch (err: unknown) {
+  // A section that throws IS a failed section. Without this the word "FAIL" is
+  // printed and the run still ends "ALL CHECKS PASSED" — any throw out of
+  // `createConfig` / `lintFromString` (a Redocly bump, a bad rule id, OOM on a
+  // 287-path spec) silently disabled the whole best-practice gate. Every other
+  // catch in this file sets it; this one was the outlier.
+  exitCode = 1;
   const msg = err instanceof Error ? err.message : String(err);
   console.log(`  FAIL — could not lint: ${msg}`);
 }
@@ -326,6 +338,109 @@ function compareShapeToSchema(
  * Returns undefined if the endpoint has no requestBody or no application/json content.
  * Resolves top-level `$ref` pointers so the comparison gets the actual schema.
  */
+/**
+ * A schema position that may hold a nested schema — `items`, or
+ * `additionalProperties` when it is a schema rather than the boolean form.
+ */
+/**
+ * The JSON media types a request body can be declared under.
+ *
+ * `application/json` plus the RFC 6839 `+json` structured suffix. The gate used
+ * to match the first exactly and dismiss the rest as having "no JSON schema to
+ * compare a Zod object against" — true for the multipart, form-encoded and
+ * octet-stream bodies, and false for exactly one endpoint:
+ * `POST /api/runs/{runId}/events` declares `application/cloudevents+json` with
+ * a hand-written 8-key schema, validated by a `.strict()` Zod object with the
+ * same 8 keys. It is the most skew-exposed body on the surface — the envelope
+ * is strict, so a spec/Zod divergence 400s the whole event, and it is the
+ * runtime→platform boundary the image-tag lockstep admits it cannot cover in
+ * three cases.
+ */
+function jsonBodySchemaOf(
+  content: Record<string, { schema?: unknown }> | undefined,
+): unknown | undefined {
+  if (!content) return undefined;
+  for (const [mediaType, entry] of Object.entries(content)) {
+    if (/^application\/([\w.+-]+\+)?json$/.test(mediaType)) return entry?.schema;
+  }
+  return undefined;
+}
+
+function asSchemaObject(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+/**
+ * Compare the scalar JSON-Schema keywords of one value position.
+ *
+ * UNIDIRECTIONAL by design: a constraint present in Zod but missing or
+ * differing in OpenAPI is flagged; an OpenAPI-only constraint is not. Zod is
+ * the runtime source of truth, so a Zod constraint absent from the spec is the
+ * drift that misleads consumers, while the spec legitimately carries
+ * descriptive constraints Zod does not enforce. KNOWN LIMITATION: tightening to
+ * bidirectional would require reconciling that pre-existing hand-authored drift
+ * first.
+ *
+ * `label` is the reported position — `field`, `field[]` for array items, or
+ * `field[*]` for a record's values.
+ */
+function compareValueConstraints(
+  label: string,
+  zodProp: Record<string, unknown>,
+  oaProp: Record<string, unknown>,
+  issues: string[],
+): void {
+  // maxLength (check anyOf variants for Zod nullable types)
+  const zodMaxLen =
+    zodProp.maxLength ??
+    (zodProp.anyOf as Record<string, unknown>[] | undefined)?.find((v) => v.maxLength)?.maxLength;
+  const oaMaxLen = oaProp.maxLength;
+  if (zodMaxLen !== undefined && oaMaxLen !== undefined && zodMaxLen !== oaMaxLen) {
+    issues.push(`Property "${label}" maxLength: Zod=${zodMaxLen}, OpenAPI=${oaMaxLen}`);
+  }
+  if (zodMaxLen !== undefined && oaMaxLen === undefined) {
+    issues.push(`Property "${label}" maxLength: Zod=${zodMaxLen}, OpenAPI=unset`);
+  }
+
+  // minLength
+  const zodMinLen =
+    zodProp.minLength ??
+    (zodProp.anyOf as Record<string, unknown>[] | undefined)?.find((v) => v.minLength)?.minLength;
+  const oaMinLen = oaProp.minLength;
+  if (zodMinLen !== undefined && oaMinLen !== undefined && zodMinLen !== oaMinLen) {
+    issues.push(`Property "${label}" minLength: Zod=${zodMinLen}, OpenAPI=${oaMinLen}`);
+  }
+  if (zodMinLen !== undefined && oaMinLen === undefined) {
+    issues.push(`Property "${label}" minLength: Zod=${zodMinLen}, OpenAPI=unset`);
+  }
+
+  // Pattern
+  if (zodProp.pattern && oaProp.pattern && zodProp.pattern !== oaProp.pattern) {
+    issues.push(
+      `Property "${label}" pattern: Zod="${zodProp.pattern}", OpenAPI="${oaProp.pattern}"`,
+    );
+  }
+
+  // Format (check anyOf variants for Zod nullable types)
+  const zodFormat =
+    zodProp.format ??
+    (zodProp.anyOf as Record<string, unknown>[] | undefined)?.find((v) => v.format)?.format;
+  if (zodFormat && oaProp.format && zodFormat !== oaProp.format) {
+    issues.push(`Property "${label}" format: Zod="${zodFormat}", OpenAPI="${oaProp.format}"`);
+  }
+
+  // Enum values
+  if (zodProp.enum && oaProp.enum) {
+    const zodEnumStr = JSON.stringify([...(zodProp.enum as unknown[])].sort());
+    const oaEnumStr = JSON.stringify([...(oaProp.enum as unknown[])].sort());
+    if (zodEnumStr !== oaEnumStr) {
+      issues.push(`Property "${label}" enum: Zod=${zodEnumStr}, OpenAPI=${oaEnumStr}`);
+    }
+  }
+}
+
 function getOpenApiRequestBodySchema(
   specPath: string,
   method: string,
@@ -337,7 +452,7 @@ function getOpenApiRequestBodySchema(
   const operation = pathObj[method.toLowerCase()] as any;
   if (!operation?.requestBody) return undefined;
 
-  let schema = operation.requestBody?.content?.["application/json"]?.schema as
+  let schema = jsonBodySchemaOf(operation.requestBody?.content) as
     Record<string, unknown> | undefined;
 
   // Resolve top-level $ref
@@ -361,6 +476,23 @@ function normalizeType(schema: Record<string, unknown>): {
     return resolved ? normalizeType(resolved) : { baseTypes: [], nullable: false };
   }
 
+  // `allOf` is a conjunction, not a union: merge the branches' base types with
+  // any sibling `type`. Without this a component built as
+  // `{ allOf: [ {$ref: <external>}, {type:"object", …} ] }` — the AFPS manifest
+  // schemas — normalizes to no type at all and reads as drift against a Zod
+  // `z.record(...)`.
+  if (Array.isArray(schema.allOf)) {
+    const normalized = (schema.allOf as Record<string, unknown>[]).map(normalizeType);
+    const merged = new Set(normalized.flatMap((branch) => branch.baseTypes));
+    if (typeof schema.type === "string") merged.add(schema.type);
+    if (merged.size > 0) {
+      return {
+        baseTypes: [...merged].sort(),
+        nullable: normalized.some((branch) => branch.nullable),
+      };
+    }
+  }
+
   const variants = Array.isArray(schema.anyOf)
     ? schema.anyOf
     : Array.isArray(schema.oneOf)
@@ -369,10 +501,17 @@ function normalizeType(schema: Record<string, unknown>): {
   if (variants) {
     // Zod and hand-authored OpenAPI use unions for nullable refs and scalars.
     const normalized = (variants as Record<string, unknown>[]).map(normalizeType);
-    return {
-      baseTypes: [...new Set(normalized.flatMap((variant) => variant.baseTypes))].sort(),
-      nullable: normalized.some((variant) => variant.nullable),
-    };
+    const baseTypes = [...new Set(normalized.flatMap((variant) => variant.baseTypes))].sort();
+    // A `oneOf` whose branches carry no `type` is not a type union — it is a
+    // constraint list on a node that declares its own type alongside it (the
+    // "exactly one of these keys is required" idiom). Fall through to the
+    // sibling `type` rather than reporting "no type".
+    if (baseTypes.length > 0 || schema.type === undefined) {
+      return {
+        baseTypes,
+        nullable: normalized.some((variant) => variant.nullable),
+      };
+    }
   }
 
   if (Array.isArray(schema.type)) {
@@ -479,73 +618,35 @@ for (const entry of zodSchemaRegistry) {
       );
     }
 
-    // String/length/format/enum constraint checks below are UNIDIRECTIONAL by
-    // design: they flag a constraint present in Zod but missing (or differing)
-    // in OpenAPI, not the reverse (OpenAPI-only constraint). Zod is the runtime
-    // source of truth, so a Zod constraint absent from the spec is the drift
-    // that misleads consumers; the spec legitimately carries descriptive
-    // constraints Zod does not enforce. KNOWN LIMITATION: OpenAPI-only
-    // constraints therefore go unreported here — tightening to bidirectional
-    // would require reconciling that pre-existing hand-authored drift first.
-    // String constraints — maxLength (check anyOf variants for Zod nullable types)
-    const zodMaxLen =
-      zodProp.maxLength ??
-      (zodProp.anyOf as Record<string, unknown>[] | undefined)?.find((v) => v.maxLength)?.maxLength;
-    const oaMaxLen = oaProp.maxLength;
-    if (zodMaxLen !== undefined && oaMaxLen !== undefined && zodMaxLen !== oaMaxLen) {
-      issues.push(`Property "${field}" maxLength: Zod=${zodMaxLen}, OpenAPI=${oaMaxLen}`);
-    }
-    if (zodMaxLen !== undefined && oaMaxLen === undefined) {
-      issues.push(`Property "${field}" maxLength: Zod=${zodMaxLen}, OpenAPI=unset`);
-    }
+    // The scalar keyword comparison, applied to the property AND to the two
+    // places a constraint can hide one level down.
+    //
+    // This used to be inline, and only the property's own keywords were read.
+    // `connection_overrides` is `z.record(z.string(), z.string().min(1))`: the
+    // `minLength` lives on the record's VALUES, i.e. on `additionalProperties`,
+    // so `zodProp.minLength` was `undefined` on both sides and every branch was
+    // skipped — the gate reported nothing. That is not hypothetical: 875df353f
+    // documents finding and fixing exactly that drift BY HAND, on three run
+    // surfaces, in the same range this gate was written.
+    compareValueConstraints(field, zodProp, oaProp, issues);
 
-    // String constraints — minLength
-    const zodMinLen =
-      zodProp.minLength ??
-      (zodProp.anyOf as Record<string, unknown>[] | undefined)?.find((v) => v.minLength)?.minLength;
-    const oaMinLen = oaProp.minLength;
-    if (zodMinLen !== undefined && oaMinLen !== undefined && zodMinLen !== oaMinLen) {
-      issues.push(`Property "${field}" minLength: Zod=${zodMinLen}, OpenAPI=${oaMinLen}`);
-    }
-    if (zodMinLen !== undefined && oaMinLen === undefined) {
-      issues.push(`Property "${field}" minLength: Zod=${zodMinLen}, OpenAPI=unset`);
-    }
-
-    // Pattern
-    const zodPattern = zodProp.pattern;
-    const oaPattern = oaProp.pattern;
-    if (zodPattern && oaPattern && zodPattern !== oaPattern) {
-      issues.push(`Property "${field}" pattern: Zod="${zodPattern}", OpenAPI="${oaPattern}"`);
-    }
-
-    // Format (check anyOf variants for Zod nullable types)
-    const zodFormat =
-      zodProp.format ??
-      (zodProp.anyOf as Record<string, unknown>[] | undefined)?.find((v) => v.format)?.format;
-    const oaFormat = oaProp.format;
-    if (zodFormat && oaFormat && zodFormat !== oaFormat) {
-      issues.push(`Property "${field}" format: Zod="${zodFormat}", OpenAPI="${oaFormat}"`);
-    }
-
-    // Enum values (also check inside array items)
-    const zodEnum = zodProp.enum ?? (zodProp.items as Record<string, unknown> | undefined)?.enum;
-    const oaEnum = oaProp.enum ?? (oaProp.items as Record<string, unknown> | undefined)?.enum;
-    if (zodEnum && oaEnum) {
-      const zodEnumStr = JSON.stringify([...(zodEnum as unknown[])].sort());
-      const oaEnumStr = JSON.stringify([...(oaEnum as unknown[])].sort());
-      if (zodEnumStr !== oaEnumStr) {
-        issues.push(`Property "${field}" enum: Zod=${zodEnumStr}, OpenAPI=${oaEnumStr}`);
-      }
+    const zodAdditional = asSchemaObject(zodProp.additionalProperties);
+    const oaAdditional = asSchemaObject(oaProp.additionalProperties);
+    if (zodAdditional && oaAdditional) {
+      compareValueConstraints(`${field}[*]`, zodAdditional, oaAdditional, issues);
     }
 
     // Array item type
     if (zodProp.type === "array" && oaProp.type === "array") {
-      const zodItems = zodProp.items as Record<string, unknown> | undefined;
-      const oaItems = oaProp.items as Record<string, unknown> | undefined;
+      const zodItems = asSchemaObject(zodProp.items);
+      const oaItems = asSchemaObject(oaProp.items);
       if (zodItems?.type && oaItems?.type && zodItems.type !== oaItems.type) {
         issues.push(
           `Property "${field}" array items type: Zod=${zodItems.type}, OpenAPI=${oaItems.type}`,
         );
+      }
+      if (zodItems && oaItems) {
+        compareValueConstraints(`${field}[]`, zodItems, oaItems, issues);
       }
     }
 
@@ -577,6 +678,71 @@ if (discrepancies.length === 0) {
       console.log(`          - ${issue}`);
     }
     console.log();
+  }
+}
+
+// Coverage enforcement — every endpoint whose spec declares an
+// `application/json` request body must be either registered (compared above)
+// or explicitly exempt with a stated reason. Without this the registry is
+// opt-in: a launch surface can accept fields its documented body never
+// mentions, and nothing notices. Same shape as §7b for response schemas.
+//
+// The universe is the SPEC, not the `readJsonBody()` call sites: the spec is
+// the published contract, and §5/§5b already assert that code and spec carry
+// the same endpoint set. Non-JSON bodies (multipart uploads, form-encoded
+// OAuth2, octet-stream) are out of scope — there is genuinely no JSON schema to
+// compare a Zod object against. `application/cloudevents+json` IS in scope: it
+// carries a hand-written JSON schema and a `.strict()` Zod object, and listing
+// it as exempt was the gate's one blind spot. See `jsonBodySchemaOf`.
+{
+  const registeredEndpoints = new Set(
+    zodSchemaRegistry.map((e) => `${e.method.toUpperCase()} ${e.path}`),
+  );
+  const jsonBodyEndpoints: string[] = [];
+  for (const [path, methods] of Object.entries(paths)) {
+    for (const [method, op] of Object.entries(methods)) {
+      const body = (op as { requestBody?: { content?: Record<string, { schema?: unknown }> } })
+        ?.requestBody;
+      if (jsonBodySchemaOf(body?.content) === undefined) continue;
+      jsonBodyEndpoints.push(`${method.toUpperCase()} ${path}`);
+    }
+  }
+  const uncoveredBodies = jsonBodyEndpoints
+    .filter((k) => !registeredEndpoints.has(k) && !(k in EXEMPT_REQUEST_BODIES))
+    .sort();
+  // A stale exemption (endpoint removed, or its body registered after all) is
+  // also a failure — keep the list honest.
+  const jsonBodySet = new Set(jsonBodyEndpoints);
+  const staleExemptBodies = Object.keys(EXEMPT_REQUEST_BODIES)
+    .filter((k) => !jsonBodySet.has(k) || registeredEndpoints.has(k))
+    .sort();
+
+  console.log(`\n  4b. Step 4 coverage (every JSON request body registered or exempt)`);
+  console.log(`  ------------------------------------------------------------------`);
+  if (uncoveredBodies.length === 0 && staleExemptBodies.length === 0) {
+    console.log(
+      `  OK — all ${jsonBodyEndpoints.length} JSON request bodies are registered ` +
+        `(${jsonBodyEndpoints.length - Object.keys(EXEMPT_REQUEST_BODIES).length}) or exempt ` +
+        `(${Object.keys(EXEMPT_REQUEST_BODIES).length}).`,
+    );
+  } else {
+    exitCode = 1;
+    if (uncoveredBodies.length > 0) {
+      console.log(
+        `  Endpoint(s) with a JSON request body that is neither registered nor exempt ` +
+          `(${uncoveredBodies.length}):`,
+      );
+      for (const k of uncoveredBodies) console.log(`    - ${k}`);
+      console.log(
+        `\n  Register the route's Zod schema in apps/api/src/openapi/zod-schema-registry.ts ` +
+          `(or the owning module's openApiSchemas()), or add the endpoint to ` +
+          `EXEMPT_REQUEST_BODIES with the reason it has no comparable schema.`,
+      );
+    }
+    if (staleExemptBodies.length > 0) {
+      console.log(`\n  Stale EXEMPT_REQUEST_BODIES entries (endpoint gone, or now registered):`);
+      for (const k of staleExemptBodies) console.log(`    - ${k}`);
+    }
   }
 }
 
@@ -1046,7 +1212,7 @@ for (const m of indexSrc.matchAll(
   const ident = exprRaw.replace(/\(\s*\)$/, "").trim();
 
   // Resolve identifier
-  let factory: string | "__default__" = ident;
+  let factory: string;
   let file: string | undefined;
 
   if (isCall) {
@@ -1093,12 +1259,12 @@ for (const m of indexSrc.matchAll(
 // 4b. Route files referenced by mounts — parse each factory body or default body
 //     and combine with the mount prefix.
 const SKIP_FILES = new Set<string>([
-  // Routes registered via runtime config with a VARIABLE path
-  // (`router.post(entry.urlPath, …)` — a bare identifier, not a string/template
-  // literal). The path can't be captured at all, so the emitted endpoints are
-  // covered by SPEC_ONLY_ALLOWLIST in §5b, which pins the three shapes the spec
-  // documents. (This used to read "covered by check #1" — the hand-typed
-  // endpoint list §5b replaced.) (packages.ts is NOT skipped: its template-literal
+  // Routes registered with a COMPUTED path (`router.post(llmProxyUrlPath(shape),
+  // …)` — a call, not a string/template literal). The path can't be captured
+  // statically, so the emitted endpoints are covered by SPEC_ONLY_ALLOWLIST in
+  // §5b. (This used to describe `router.post(entry.urlPath, …)`, a bare
+  // identifier read off a local config array; that array is gone. Before that
+  // it read "covered by check #1", the hand-typed endpoint list §5b replaced.) (packages.ts is NOT skipped: its template-literal
   // `${path}` routes are now expanded by resolveTemplatedPath against the
   // in-file ROUTE_CONFIGS `path:` literals and verified against the spec like
   // any literal route; an unresolvable `${…}` fails the run.)
@@ -1275,10 +1441,8 @@ const CODE_TO_SPEC_ALLOWLIST = new Set<string>([
   // Cookie-less HTML file preview — serves untrusted agent HTML (text/html)
   // from a hardened, session-less route OUTSIDE /api, authorized by a signed
   // token in the URL. Not a JSON API endpoint; intentionally undocumented in the
-  // OpenAPI surface (no typed client, no SDK consumer). Second entry: the
-  // deprecated pre-#1177 path, on the same handler.
+  // OpenAPI surface (no typed client, no SDK consumer).
   "GET /preview/files/{id}",
-  "GET /preview/documents/{id}",
   // MCP per-org endpoint method-not-allowed catch-all: `app.all(MCP_PATH, …)`
   // throws 405 for every verb other than the documented POST + GET channels.
   // These three are the catch-all, not real endpoints.
@@ -1381,11 +1545,18 @@ const SPEC_ONLY_ALLOWLIST = new Set<string>([
   "GET /health",
   "GET /api/openapi.json",
 
-  // LLM proxy shapes. `routes/llm-proxy.ts` registers them from a config array
-  // (`router.post(entry.urlPath, …)` — a bare identifier), which is why the
-  // whole file sits in SKIP_FILES. The spec is the only place these three paths
-  // appear as literals, so this allowlist is what keeps that skip honest:
-  // documenting a fourth shape without listing it here fails the run.
+  // LLM proxy shapes. `routes/llm-proxy.ts` mounts them from `LLM_PROXY_ROUTES`
+  // (`@appstrate/runner-pi`) via `llmProxyUrlPath(shape)`, a call this parser
+  // cannot evaluate, which is why the whole file sits in SKIP_FILES.
+  //
+  // Neither side spells these paths as literals any more: the spec derives its
+  // keys from the SAME table (`openapi/paths/llm-proxy.ts`). That is what keeps
+  // the skip honest now — not this list. A `baseSuffix` edit moves the mounted
+  // route and the document together, so they cannot disagree; the symmetry
+  // between a client's base URL and the server's mount is asserted directly in
+  // `packages/runner-pi/test/llm-proxy-routes.test.ts`. This allowlist remains
+  // only because §5b compares against code endpoints the skip removed, and
+  // documenting a fourth shape without listing it here still fails the run.
   "POST /api/llm-proxy/anthropic-messages/v1/messages",
   "POST /api/llm-proxy/openai-completions/v1/chat/completions",
   "POST /api/llm-proxy/mistral-conversations/v1/chat/completions",
@@ -1699,11 +1870,49 @@ if (responseDrifts.length === 0) {
   );
 }
 
-// Coverage enforcement — every named component schema must be either registered
+/**
+ * How many 2xx JSON responses name their schema, and how many inline it.
+ *
+ * Printed by §7b so the size of its blind spot is a measurement on every run,
+ * not a sentence someone has to keep true by hand.
+ */
+function countJsonResponseSchemaShapes(): { inline: number; named: number } {
+  let inline = 0;
+  let named = 0;
+  const paths = (openApiSpec.paths ?? {}) as Record<string, Record<string, unknown>>;
+  for (const methods of Object.values(paths)) {
+    for (const op of Object.values(methods)) {
+      const responses = (op as { responses?: Record<string, unknown> })?.responses;
+      if (!responses) continue;
+      for (const [status, resp] of Object.entries(responses)) {
+        if (!status.startsWith("2")) continue;
+        const schema = (resp as { content?: Record<string, { schema?: Record<string, unknown> }> })
+          ?.content?.["application/json"]?.schema;
+        if (!schema || typeof schema !== "object") continue;
+        if (typeof schema.$ref === "string") named++;
+        else inline++;
+      }
+    }
+  }
+  return { inline, named };
+}
+
+// Coverage enforcement — every NAMED component schema must be either registered
 // (a shared-type pair, checked above) or explicitly EXEMPT (no shared-type
-// consumer). This makes step 7 fail-closed: a new response schema can't slip
-// in unchecked. The opt-in gap (a schema nobody registers is never compared)
-// is closed by requiring an explicit, justified decision for every schema.
+// consumer). Requiring an explicit, justified decision for every named schema
+// closes the opt-in gap: one nobody registers is no longer silently uncompared.
+//
+// WHAT THIS DOES NOT COVER, and it is the majority. The universe is
+// `components.schemas` — schemas with a NAME. A 2xx response whose schema is
+// written INLINE at the operation has no name, so it is not in that universe
+// and no amount of registry discipline reaches it. The count is printed below
+// on every run rather than asserted here in prose, because prose is what went
+// stale: this block used to claim "step 7 is fail-closed: a new response schema
+// can't slip in unchecked", which is true only of the named third.
+//
+// Closing it needs a different shape — a registry keyed on
+// `(verb, path, status)` like §4b's request-body one, not on schema name. That
+// is a project, not a tightening, and it is deliberately not attempted here.
 {
   const registeredSpecNames = new Set(
     responseTypeRegistry.map((e) => e.specSchemaName).filter((n): n is string => !!n),
@@ -1726,6 +1935,11 @@ if (responseDrifts.length === 0) {
     console.log(
       `  OK — all ${allSchemaNames.length} component schemas are registered ` +
         `(${registeredSpecNames.size}) or exempt (${Object.keys(EXEMPT_SCHEMAS).length}).`,
+    );
+    const { inline, named } = countJsonResponseSchemaShapes();
+    console.log(
+      `  Out of scope: ${inline} of ${inline + named} 2xx JSON responses declare their ` +
+        `schema INLINE (no name), so this step cannot see them. See the note above.`,
     );
   } else {
     exitCode = 1;
@@ -1752,5 +1966,4 @@ console.log(`  ${"=".repeat(50)}`);
 console.log(`  ${exitCode === 0 ? "ALL CHECKS PASSED" : "SOME CHECKS FAILED"}`);
 console.log(`  ${"=".repeat(50)}\n`);
 
-// @ts-ignore Bun's type definitions for process.exit are incorrect (they say it returns never, but it actually returns void), so we ignore the type error here.
 process.exit(exitCode);

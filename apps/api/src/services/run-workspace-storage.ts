@@ -82,12 +82,7 @@ export function streamRunFile(
  */
 export function writeRunFilesManifest(runId: string, files: RunFileMeta[]): Promise<string> {
   assertUniqueWorkspaceNames(files.map((d) => d.workspace_name));
-  // Both keys carry the SAME array: `files` is canonical, `documents` is the
-  // pre-#1177 spelling a runtime image older than the platform still reads.
-  // Emitting both is the only thing that keeps input-file delivery working
-  // across an image/platform version skew — an old image reading a
-  // `files`-only manifest sees zero inputs and reports no error.
-  const manifest: RunFilesManifest = { files, documents: files };
+  const manifest: RunFilesManifest = { files };
   return storage.uploadFile(
     RUN_WORKSPACE_BUCKET,
     runWorkspaceManifestKey(runId),

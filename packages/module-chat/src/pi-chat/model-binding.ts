@@ -13,10 +13,12 @@
 import type {
   ChatUsageRecord,
   SubscriptionChatModel,
-  SubscriptionChatResolution,
+  ChatModelResolution,
 } from "@appstrate/core/chat-contract";
+import { PLATFORM_MODEL_COMPAT } from "@appstrate/runner-pi/model-compat";
 import {
   derivePiProvider,
+  llmProxyBaseUrl,
   type Api,
   type ExtensionFactory,
   type Model,
@@ -70,32 +72,6 @@ type PiChatModelBindingResolution =
   | { status: "needs-reconnection" }
   | { status: "unsupported" };
 
-/**
- * llm-proxy base URL per family, in the shape pi-ai expects — which is NOT
- * simply the route path. Each of pi-ai's clients appends a different suffix to
- * reach the same absolute URL, so the split between base and suffix moves:
- * its OpenAI client appends `/chat/completions`, its Anthropic client appends
- * `/v1/messages`, and its Mistral transport appends `v1/chat/completions`.
- * Hence `/v1` sits in the base for `openai-completions` and in the suffix for
- * the other two.
- *
- * Derive a new entry from that client's own path building and check the result
- * against the route declared in `apps/api/src/routes/llm-proxy.ts` — never by
- * pattern-matching the strings below, which look inconsistent on purpose.
- */
-function proxyBaseUrl(origin: string, apiShape: string): string | null {
-  switch (apiShape) {
-    case "openai-completions":
-      return `${origin}/api/llm-proxy/openai-completions/v1`;
-    case "anthropic-messages":
-      return `${origin}/api/llm-proxy/anthropic-messages`;
-    case "mistral-conversations":
-      return `${origin}/api/llm-proxy/mistral-conversations`;
-    default:
-      return null;
-  }
-}
-
 function toPiModel(input: {
   id: string;
   label?: string;
@@ -129,6 +105,10 @@ function toPiModel(input: {
       cacheRead: 0,
       cacheWrite: 0,
     }) as Model<Api>["cost"],
+    // One rule, one constant — see `PLATFORM_MODEL_COMPAT`. Chat runs in the
+    // API process, so `PI_CACHE_RETENTION` is reachable by whoever configures
+    // the deployment; the flag on the record is what holds regardless.
+    compat: { ...PLATFORM_MODEL_COMPAT },
     contextWindow: input.contextWindow ?? undefined,
     maxTokens: input.maxTokens ?? undefined,
   } as Model<Api>;
@@ -148,7 +128,7 @@ export function createPiProxyModelBinding(args: {
   origin: string;
   mintBearer: () => string;
 }): PiProxyModelBinding | null {
-  const baseUrl = proxyBaseUrl(args.origin, args.model.apiShape);
+  const baseUrl = llmProxyBaseUrl(args.origin, args.model.apiShape);
   if (!baseUrl) return null;
 
   const model = toPiModel({
@@ -203,7 +183,7 @@ export function createPiOAuthModelBinding(model: SubscriptionChatModel): PiOAuth
 /** Resolve authentication and model shape before the engine-routing branch. */
 export function resolvePiChatModelBinding(args: {
   model: OrgModel;
-  subscription: SubscriptionChatResolution;
+  subscription: ChatModelResolution;
   origin: string;
   mintBearer: () => string;
 }): PiChatModelBindingResolution {

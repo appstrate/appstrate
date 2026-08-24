@@ -217,8 +217,6 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
     "/api/integrations",
     "/api/uploads",
     "/api/files",
-    // Deprecated pre-#1177 spelling — mirrors `src/index.ts`.
-    "/api/documents",
   ];
 
   const appContextMiddleware = requireAppContext();

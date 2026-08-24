@@ -163,7 +163,7 @@ export const uploadsPaths = {
             "`UPLOAD_MAX_ACTIVE_PER_ACTOR` active staged uploads. Back-pressure, not an authz " +
             "denial: retry after consuming an upload or letting one expire.",
           headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            ...REQUEST_ID_ONLY_HEADERS,
             RateLimit: { $ref: "#/components/headers/RateLimit" },
             "RateLimit-Policy": { $ref: "#/components/headers/RateLimitPolicy" },
           },

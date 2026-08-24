@@ -34,7 +34,7 @@ import { createTestContext, type TestContext } from "../../../apps/api/test/help
 import { assertDbCount } from "../../../apps/api/test/helpers/assertions.ts";
 import { handleChatStream, type ChatEnv } from "../src/chat-stream.ts";
 import type { ChatPlatformDeps } from "../src/platform-services.ts";
-import type { SubscriptionChatResolution } from "@appstrate/core/chat-contract";
+import type { ChatModelResolution } from "@appstrate/core/chat-contract";
 import type { UsageRejection } from "@appstrate/core/module";
 import type { UIMessage } from "ai";
 
@@ -85,7 +85,7 @@ function fakeContext(opts: {
 
 interface DepsOverrides {
   checkUsageAllowed: ChatPlatformDeps["checkUsageAllowed"];
-  resolveSubscriptionChatModel?: ChatPlatformDeps["resolveSubscriptionChatModel"];
+  resolveChatModel?: ChatPlatformDeps["resolveChatModel"];
   /** Collects every platform path the turn dispatched (proves no MCP handshake). */
   dispatchPaths?: string[];
 }
@@ -100,9 +100,8 @@ function fakeDeps(o: DepsOverrides): ChatPlatformDeps {
       return new Response("unexpected dispatch: " + path, { status: 500 });
     },
     rateLimit: () => async (_c, next) => next(),
-    resolveSubscriptionChatModel:
-      o.resolveSubscriptionChatModel ??
-      (async (): Promise<SubscriptionChatResolution> => ({ subscription: false })),
+    resolveChatModel:
+      o.resolveChatModel ?? (async (): Promise<ChatModelResolution> => ({ subscription: false })),
     recordChatUsage: async () => {},
     checkUsageAllowed: o.checkUsageAllowed,
   };
@@ -210,7 +209,7 @@ describe("chat admission gate (handleChatStream)", () => {
           gateArgs.push(args);
           return null;
         },
-        resolveSubscriptionChatModel: async (): Promise<SubscriptionChatResolution> => ({
+        resolveChatModel: async (): Promise<ChatModelResolution> => ({
           subscription: true,
           needsReconnection: true,
         }),
@@ -245,7 +244,7 @@ describe("chat admission gate (handleChatStream)", () => {
         checkUsageAllowed: async () => REJECTION,
         // A LIVE subscription binding: without the gate this turn would go on to
         // drive the in-process Pi engine on platform compute.
-        resolveSubscriptionChatModel: async (): Promise<SubscriptionChatResolution> => ({
+        resolveChatModel: async (): Promise<ChatModelResolution> => ({
           subscription: true,
           model: {
             modelId: "claude-sonnet-4-20250514",

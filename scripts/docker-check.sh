@@ -15,7 +15,18 @@
 # `bun build` of the entrypoint) rather than hand-maintained here — so a newly
 # added package is auto-exercised.
 #
-# Usage: bash scripts/docker-check.sh
+# Usage: bun run docker:check   (local pre-release diagnostic, NOT a CI gate)
+#
+# Deliberately not wired into `check` or any workflow. It has a known
+# false-positive mode: it can red-flag an image that boots perfectly well, so a
+# failure here is a prompt to build and boot the image and see for yourself, not
+# a verdict. CI covers step 3 (the image builds and boots) through
+# `scripts/health-container-e2e.sh`; steps 1, 2 and 4 have no CI counterpart and
+# are why this exists.
+#
+# Before this had a package.json entry it was 12 KB of unreferenced shell that
+# nothing could reach — including the "refusing to pass vacuously" guard below,
+# which nobody had ever executed.
 # ============================================================================
 
 set -euo pipefail

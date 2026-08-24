@@ -39,7 +39,10 @@ export const endUsersPaths = {
                 },
                 metadata: {
                   type: "object",
-                  additionalProperties: { type: ["string", "number", "boolean", "null"] },
+                  additionalProperties: {
+                    type: ["string", "number", "boolean", "null"],
+                    maxLength: 500,
+                  },
                   description:
                     "Key-value metadata. Max 50 keys, key length 1\u201340 chars, values: string (max 500), number, boolean, or null.",
                 },
@@ -301,7 +304,10 @@ export const endUsersPaths = {
                 },
                 metadata: {
                   type: "object",
-                  additionalProperties: { type: ["string", "number", "boolean", "null"] },
+                  additionalProperties: {
+                    type: ["string", "number", "boolean", "null"],
+                    maxLength: 500,
+                  },
                   description:
                     "Key-value metadata. Max 50 keys, key length 1\u201340 chars, values: string (max 500), number, boolean, or null.",
                 },

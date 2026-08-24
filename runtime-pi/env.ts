@@ -17,6 +17,7 @@
 
 import { getErrorMessage } from "@appstrate/core/errors";
 import { derivePiProvider } from "@appstrate/runner-pi/provider-map";
+import { PLATFORM_MODEL_COMPAT } from "@appstrate/runner-pi/model-compat";
 import type { Api, Model } from "./pi-sdk.ts";
 import { MODEL_API_SHAPES } from "@appstrate/core/sidecar-types";
 import {
@@ -449,6 +450,9 @@ export function buildPiModelFromEnv(env: RuntimeEnv): Model<Api> {
     baseUrl: env.modelBaseUrl ?? "",
     reasoning: env.modelReasoning,
     ...(env.modelReasoningLevelMap ? { thinkingLevelMap: env.modelReasoningLevelMap } : {}),
+    // One rule, one constant — see `PLATFORM_MODEL_COMPAT` for why long
+    // cache retention is refused and why refusing the ENV alone is not enough.
+    compat: { ...PLATFORM_MODEL_COMPAT },
     input: [...env.modelInput],
     // `Model.cost` is REQUIRED by the Pi SDK on every settled turn, so an unpriced
     // run still hands it zeros; the runner's `unpriced` flag stops the 0 escaping.

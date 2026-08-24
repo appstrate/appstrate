@@ -5,14 +5,15 @@
  * {@link extractFileIdsFromText} (prose-scanning), a regression guard that
  * {@link extractFileIds} keeps matching only whole-string leaf values inside
  * structured JSON (objects/arrays) and never scans embedded prose, and the
- * dual-scheme contract: write `appfile://`, read `appfile://` AND the legacy
- * `appfile://` forever (historical `runs.input` rows are full of the latter).
+ * single-scheme contract: `appfile://` is the only spelling written AND the
+ * only one read. The pre-#1177 `document://` scheme is refused, which the last
+ * block below pins from both sides — a `doc_` id fails, and so does the
+ * `document://file_…` pairing that no build has ever emitted.
  */
 
 import { describe, it, expect } from "bun:test";
 import {
   FILE_URI_PREFIX,
-  LEGACY_DOCUMENT_URI_PREFIX,
   extractFileIds,
   extractFileIdsFromText,
   fileUri,
@@ -21,8 +22,8 @@ import {
   parseFileUri,
 } from "../src/file-uri.ts";
 
-const A = "doc_aaaaaaaa";
-const B = "doc_bbbbbbbb";
+const A = "file_aaaaaaaa";
+const B = "file_bbbbbbbb";
 
 describe("extractFileIdsFromText", () => {
   it("finds an appfile:// URI embedded in surrounding prose", () => {
@@ -40,11 +41,11 @@ describe("extractFileIdsFromText", () => {
   });
 
   it("skips a malformed candidate whose id is too short", () => {
-    expect(extractFileIdsFromText("see appfile://doc_bad here")).toEqual([]);
+    expect(extractFileIdsFromText("see appfile://file_bad here")).toEqual([]);
   });
 
   it("keeps a valid URI even when a malformed one is present", () => {
-    expect(extractFileIdsFromText(`appfile://doc_bad and appfile://${A}`)).toEqual([A]);
+    expect(extractFileIdsFromText(`appfile://file_bad and appfile://${A}`)).toEqual([A]);
   });
 
   it("returns [] for text with no appfile:// URIs", () => {
@@ -74,46 +75,42 @@ describe("extractFileIds — unchanged whole-string behavior on structured input
   });
 });
 
-describe("dual-scheme compatibility (#1177)", () => {
+describe("single-scheme contract (#1177)", () => {
   it("fileUri emits appfile:// and only appfile://", () => {
     expect(fileUri(A)).toBe(`${FILE_URI_PREFIX}${A}`);
     expect(fileUri(A)).toBe(`appfile://${A}`);
-    expect(fileUri(A).startsWith(LEGACY_DOCUMENT_URI_PREFIX)).toBe(false);
   });
 
-  it("parseFileUri accepts both schemes and yields the same id", () => {
+  it("parseFileUri refuses the retired document:// scheme", () => {
     expect(parseFileUri(`appfile://${A}`)).toBe(A);
-    expect(parseFileUri(`document://${A}`)).toBe(A);
+    // The only form the retired accept-path could still have matched, and no
+    // build ever emitted it: `document://` was replaced by `appfile://` in the
+    // same issue that eventually re-minted the id prefix to `file_`.
+    expect(parseFileUri(`document://${A}`)).toBeNull();
+    // The form that WAS written under the old scheme fails on the id, which is
+    // why the prefix had nothing left to address.
+    expect(parseFileUri("document://doc_aaaaaaaa")).toBeNull();
+    expect(parseFileUri("appfile://doc_aaaaaaaa")).toBeNull();
   });
 
-  it("parseFileUri still rejects a malformed id under either scheme", () => {
-    expect(parseFileUri("appfile://doc_bad")).toBeNull();
-    expect(parseFileUri("document://doc_bad")).toBeNull();
+  it("parseFileUri still rejects a malformed id and a foreign scheme", () => {
+    expect(parseFileUri("appfile://file_bad")).toBeNull();
     expect(parseFileUri(`file://${A}`)).toBeNull();
     expect(parseFileUri(`upload://upl_aaaaaaaa`)).toBeNull();
   });
 
-  it("isFileUri / isAttachmentUri accept both schemes", () => {
+  it("isFileUri / isAttachmentUri accept appfile:// only", () => {
     expect(isFileUri(`appfile://${A}`)).toBe(true);
-    expect(isFileUri(`document://${A}`)).toBe(true);
+    expect(isFileUri(`document://${A}`)).toBe(false);
     expect(isFileUri(`file://${A}`)).toBe(false);
-    expect(isAttachmentUri(`document://${A}`)).toBe(true);
+    expect(isAttachmentUri(`appfile://${A}`)).toBe(true);
+    expect(isAttachmentUri(`document://${A}`)).toBe(false);
     expect(isAttachmentUri(`upload://upl_aaaaaaaa`)).toBe(true);
     expect(isAttachmentUri(`https://example.com/x`)).toBe(false);
   });
 
-  it("extractFileIds finds legacy document:// references in a historical runs.input", () => {
-    // The exact shape a run persisted before #1177: the parser must keep
-    // resolving it, or every such run stops finding its own input files.
-    const historicalInput = { report: `document://${A}`, images: [`document://${B}`] };
-    expect(extractFileIds(historicalInput)).toEqual([A, B]);
-  });
-
-  it("extractFileIds de-duplicates across the two spellings of one id", () => {
-    expect(extractFileIds({ a: `document://${A}`, b: `appfile://${A}` })).toEqual([A]);
-  });
-
-  it("extractFileIdsFromText scans prose for either scheme", () => {
-    expect(extractFileIdsFromText(`old document://${A} and new appfile://${B}`)).toEqual([A, B]);
+  it("extractFileIds and extractFileIdsFromText ignore the retired scheme", () => {
+    expect(extractFileIds({ report: `document://${A}`, images: [`document://${B}`] })).toEqual([]);
+    expect(extractFileIdsFromText(`old document://${A} and new appfile://${B}`)).toEqual([B]);
   });
 });

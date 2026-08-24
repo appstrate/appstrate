@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
+
 /**
  * Shared tail of the four per-type list descriptions (skills / agents /
  * integrations / mcp-servers) — only the leading noun differs.
@@ -95,10 +97,7 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Bundle imported",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               // CASING: this import-result envelope is snake_case throughout
@@ -227,10 +226,7 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Package imported",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -315,10 +311,7 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Package imported",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -406,8 +399,7 @@ export const packagesPaths = {
         "200": {
           description: "File index",
           headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            ...STD_RESPONSE_HEADERS,
             ETag: {
               description:
                 'Strong entity-tag of this index representation (`"i-…"`), derived from the version artifact\'s integrity hash or from a content digest of the overlaid draft. It never matches a `files/content` tag.',
@@ -516,8 +508,7 @@ export const packagesPaths = {
         "200": {
           description: "Raw file bytes",
           headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+            ...STD_RESPONSE_HEADERS,
             ETag: {
               description:
                 'Strong entity-tag of THIS FILE (`"f-…"`), folding in both the snapshot identity and the `path`. Per RFC 9110 §8.8.1 it identifies one representation: a tag obtained for another `path`, or from the file index, will not match.',
@@ -674,10 +665,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Skill list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -733,7 +721,9 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["manifest"],
+              // `content` is mandatory on create for every type whose content
+              // file is (`agent`, `skill`) — the handler refuses a blank one.
+              required: ["manifest", "content"],
               properties: {
                 manifest: {
                   type: "object",
@@ -743,7 +733,8 @@ export const packagesPaths = {
                 },
                 content: {
                   type: "string",
-                  description: "SKILL.md content (markdown with YAML frontmatter).",
+                  description:
+                    "SKILL.md content (markdown with YAML frontmatter). Must not be blank.",
                 },
               },
             },
@@ -753,10 +744,7 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Skill created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: packageCreateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
@@ -785,10 +773,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version info",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -823,10 +808,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -868,6 +850,7 @@ export const packagesPaths = {
               properties: {
                 version: {
                   type: "string",
+                  minLength: 1,
                   description: "Optional semver version override (e.g. from bump selector)",
                 },
               },
@@ -878,10 +861,7 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Version created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: versionCreateResponseSchema(),
@@ -926,10 +906,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version restored",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: versionRestoreResponseSchema("#/components/schemas/OrgPackageItemDetail"),
@@ -973,10 +950,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Versioned skill detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/PackageVersionDetail" },
@@ -1004,9 +978,7 @@ export const packagesPaths = {
       responses: {
         "204": {
           description: "Version deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -1029,10 +1001,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Skill detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
@@ -1062,7 +1031,7 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["manifest", "content", "lock_version"],
+              required: ["lock_version"],
               properties: {
                 manifest: {
                   type: "object",
@@ -1079,10 +1048,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Skill updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: packageUpdateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
@@ -1110,9 +1076,7 @@ export const packagesPaths = {
       responses: {
         "204": {
           description: "Skill deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -1145,10 +1109,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Agent list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -1186,10 +1147,15 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
+              // `content` is mandatory on create for every type whose content
+              // file is (`agent`, `skill`) — the handler refuses a blank one.
               required: ["manifest", "content"],
               properties: {
                 manifest: { $ref: "#/components/schemas/AgentManifest" },
-                content: { type: "string", description: "Agent prompt (markdown)" },
+                content: {
+                  type: "string",
+                  description: "Agent prompt (markdown). Must not be blank.",
+                },
               },
             },
           },
@@ -1198,10 +1164,7 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Agent created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: packageCreateResponseSchema("#/components/schemas/AgentDetail"),
@@ -1237,10 +1200,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Agent detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/AgentDetail" },
@@ -1269,7 +1229,7 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["manifest", "content", "lock_version"],
+              required: ["lock_version"],
               properties: {
                 manifest: { $ref: "#/components/schemas/AgentManifest" },
                 content: { type: "string" },
@@ -1282,10 +1242,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Agent updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: packageUpdateResponseSchema("#/components/schemas/AgentDetail"),
@@ -1321,9 +1278,7 @@ export const packagesPaths = {
       responses: {
         "204": {
           description: "Agent deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -1354,10 +1309,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version info",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -1391,10 +1343,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -1436,6 +1385,7 @@ export const packagesPaths = {
               properties: {
                 version: {
                   type: "string",
+                  minLength: 1,
                   description: "Optional semver version override (e.g. from bump selector)",
                 },
               },
@@ -1446,10 +1396,7 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Version created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: versionCreateResponseSchema(),
@@ -1487,10 +1434,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version restored",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: versionRestoreResponseSchema("#/components/schemas/AgentDetail"),
@@ -1528,10 +1472,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/PackageVersionDetail" },
@@ -1559,9 +1500,7 @@ export const packagesPaths = {
       responses: {
         "204": {
           description: "Version deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -1612,10 +1551,7 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Package forked successfully",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -1654,9 +1590,7 @@ export const packagesPaths = {
         "422": {
           description:
             "The SOURCE package's published artifact expands past the platform's decompression ceiling and was refused (`package_archive_unreadable`). Nothing was written: the fork is rejected while reading the source, before the name-collision check and before any package or version row is created, so there is no partial copy to clean up. A fork always targets a package the calling organization does NOT own, so the caller cannot repair the source — report it to whoever publishes it (or to the platform operator if it is a system package). RFC 9457 problem+json.",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -1688,10 +1622,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Integration package list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -1749,10 +1680,7 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Integration package created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: packageCreateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
@@ -1781,10 +1709,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version info",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -1819,10 +1744,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -1864,6 +1786,7 @@ export const packagesPaths = {
               properties: {
                 version: {
                   type: "string",
+                  minLength: 1,
                   description: "Optional semver version override (e.g. from bump selector)",
                 },
               },
@@ -1874,10 +1797,7 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Version created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: versionCreateResponseSchema(),
@@ -1922,10 +1842,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version restored",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: versionRestoreResponseSchema("#/components/schemas/OrgPackageItemDetail"),
@@ -1969,10 +1886,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Versioned integration package detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/PackageVersionDetail" },
@@ -2000,9 +1914,7 @@ export const packagesPaths = {
       responses: {
         "204": {
           description: "Version deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -2025,10 +1937,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Integration package detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
@@ -2058,7 +1967,7 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["manifest", "lock_version"],
+              required: ["lock_version"],
               properties: {
                 manifest: {
                   type: "object",
@@ -2075,10 +1984,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Integration package updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: packageUpdateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
@@ -2106,9 +2012,7 @@ export const packagesPaths = {
       responses: {
         "204": {
           description: "Integration package deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -2144,10 +2048,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "MCP-server package list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -2203,10 +2104,7 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "MCP-server package created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: packageCreateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
@@ -2236,10 +2134,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version info",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -2274,10 +2169,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version list",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
@@ -2319,6 +2211,7 @@ export const packagesPaths = {
               properties: {
                 version: {
                   type: "string",
+                  minLength: 1,
                   description: "Optional semver version override (e.g. from bump selector)",
                 },
               },
@@ -2329,10 +2222,7 @@ export const packagesPaths = {
       responses: {
         "201": {
           description: "Version created",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: versionCreateResponseSchema(),
@@ -2377,10 +2267,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Version restored",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: versionRestoreResponseSchema("#/components/schemas/OrgPackageItemDetail"),
@@ -2424,10 +2311,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "Versioned MCP-server package detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/PackageVersionDetail" },
@@ -2455,9 +2339,7 @@ export const packagesPaths = {
       responses: {
         "204": {
           description: "Version deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -2480,10 +2362,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "MCP-server package detail",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/OrgPackageItemDetail" },
@@ -2513,7 +2392,7 @@ export const packagesPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["manifest", "content", "lock_version"],
+              required: ["lock_version"],
               properties: {
                 manifest: {
                   type: "object",
@@ -2530,10 +2409,7 @@ export const packagesPaths = {
       responses: {
         "200": {
           description: "MCP-server package updated",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
-          },
+          headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: packageUpdateResponseSchema("#/components/schemas/OrgPackageItemDetail"),
@@ -2561,9 +2437,7 @@ export const packagesPaths = {
       responses: {
         "204": {
           description: "MCP-server package deleted",
-          headers: {
-            "Request-Id": { $ref: "#/components/headers/RequestId" },
-          },
+          headers: REQUEST_ID_ONLY_HEADERS,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },

@@ -206,10 +206,13 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
   });
 
   // The envelope schema is `.strict()`, so every CloudEvents attribute the
-  // runtime emits must be modelled or the whole POST 400s. The runtime now
-  // stamps the OPTIONAL `dataschema` attribute on canonical events — assert
-  // the sink accepts it, and that strictness still rejects anything else.
-  it("accepts an envelope carrying the optional dataschema attribute", async () => {
+  // runtime emits must be modelled or the whole POST 400s. `dataschema` was
+  // modelled-and-ignored while a pre-removal runtime image could still stamp
+  // it; the runtime withdrew the attribute and the platform/runtime image trio
+  // is now version-locked at boot, so the field is gone from the schema. The
+  // assertion here is that its removal FAILS LOUDLY — a 400 naming the
+  // envelope, never a silently dropped event.
+  it("rejects an envelope carrying the withdrawn dataschema attribute", async () => {
     const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
 
     const envelope = {
@@ -218,15 +221,11 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     };
     const res = await postEvent(runId, envelope);
 
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { ok: boolean; outcome: string; sequence: number };
-    expect(body).toMatchObject({ ok: true, outcome: "persisted", sequence: 1 });
+    expect(res.status).toBe(400);
 
-    // `dataschema` is envelope metadata — it must not leak into the
-    // reconstructed RunEvent payload written to run_logs.
+    // Loud means loud: nothing was persisted behind the 400.
     const logs = await db.select().from(runLogs).where(eq(runLogs.runId, runId));
-    expect(logs).toHaveLength(1);
-    expect(JSON.stringify(logs[0])).not.toContain("schemas.afps.dev");
+    expect(logs).toHaveLength(0);
   });
 
   it("still rejects an unmodelled envelope attribute (strictness preserved)", async () => {
@@ -625,8 +624,8 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
   it("file.published events persist as run_logs(type='result', event='file')", async () => {
     const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
     const payload = {
-      file_id: "doc_abc12345",
-      uri: "appfile://doc_abc12345",
+      file_id: "file_abc12345",
+      uri: "appfile://file_abc12345",
       name: "report.html",
       mime: "text/html",
       size: 1234,
@@ -648,8 +647,8 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     expect(docLogs).toHaveLength(1);
     expect(docLogs[0]!.type).toBe("result");
     expect(docLogs[0]!.data).toMatchObject({
-      file_id: "doc_abc12345",
-      uri: "appfile://doc_abc12345",
+      file_id: "file_abc12345",
+      uri: "appfile://file_abc12345",
       name: "report.html",
       mime: "text/html",
       size: 1234,
@@ -766,13 +765,15 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(row?.artifacts).toBeNull();
   });
 
-  it("STRIPS unknown artifacts keys instead of rejecting them (deployments are not atomic)", async () => {
+  it("STRIPS unknown artifacts keys instead of rejecting them", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
 
-    // A runtime image newer than the platform can legitimately add a field to
-    // the summary — or to a `failed` entry. An extra cosmetic key must not
-    // cost the run its finalize, so unknown keys are stripped and everything
-    // the platform DOES understand is persisted.
+    // Where the trio tag rule is blind — a floating tag rebuilt on one side, a
+    // digest-pinned ref, a platform with no build identity — a runtime image
+    // newer than the platform can legitimately add a field to the summary, or
+    // to a `failed` entry. An extra cosmetic key must not cost the run its
+    // finalize, so unknown keys are stripped and everything the platform DOES
+    // understand is persisted.
     const res = await postFinalize(runId, {
       memories: [],
       output: { ok: true },
@@ -828,9 +829,13 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(persisted?.failed.every((f) => f.name.length <= 512 && f.code.length <= 64)).toBe(true);
   });
 
-  // The `report` channel is gone: a runner older than the platform may still
-  // send the field, and it must be ignored without costing the run its
-  // finalize (no 400, no `runs.result` row invented from it).
+  // The `report` channel is gone. Finalize reports an ALREADY-FINISHED run, so
+  // a 400 there is a lost run, not a validation win — the field must be ignored
+  // whatever sends it (no 400, no `runs.result` row invented from it). The
+  // sender that still would is a runner older than the platform, which the
+  // image-trio tag rule refuses at boot except where it is blind: a floating
+  // tag rebuilt on one side, a digest-pinned ref, a platform with no build
+  // identity.
   it("ignores a retired report field on the finalize body", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
     const res = await postFinalize(runId, {

@@ -28,6 +28,7 @@ import { invalidRequest, notFound, conflict, internalError } from "../lib/errors
 import { listResponse } from "../lib/list-response.ts";
 import { setOffsetLinkHeader, setSinceLinkHeader } from "../lib/pagination-link.ts";
 import { parseListPagination } from "../lib/list-query.ts";
+import { connectionOverridesSchema } from "../lib/launch-schemas.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { stopWorkloadAndWait } from "../services/stop-workload.ts";
@@ -65,7 +66,8 @@ import { modelGenerationSettingsSchema } from "@appstrate/core/model-generation"
  * That is the exact failure `assertFieldsUnlocked` states as a rule
  * (`input-resolution.ts`) and the one #1179 fixed on the MCP surface, and the
  * launch body was the last place the rule did not hold. `POST /runs/remote` was
- * already `.strict()`; the three launch surfaces now agree.
+ * already `.strict()`; the schedule bodies (`routes/schedules.ts`) took the
+ * rule afterwards, and the four launch surfaces now agree.
  *
  * Deep semantics stay downstream in `parseRequestInput` (is this dependency
  * spec resolvable, does the replayed run belong to this agent) — this schema
@@ -83,8 +85,7 @@ export const runAgentBodySchema = z
     modelId: z.string().optional(),
     generation: modelGenerationSettingsSchema.optional(),
     proxyId: z.string().optional(),
-    /** `.min(1)` for the same reason it is set on the inline schema below. */
-    connection_overrides: z.record(z.string(), z.string().min(1)).optional(),
+    connection_overrides: connectionOverridesSchema.optional(),
     dependency_overrides: z.record(z.string(), z.string()).optional(),
   })
   .strict();
@@ -97,7 +98,7 @@ export const runAgentBodySchema = z
  * grossly wrong-typed field (e.g. `input: "foo"`) with a 400 instead of letting
  * it cast through and surface later as a 500.
  *
- * `.strict()` since #1187, like the two other launch surfaces. It also closes
+ * `.strict()` since #1187, like the three other launch surfaces. It also closes
  * a live silent drop: `dependency_overrides` was accepted here (the parser read
  * it straight off the raw body) and then never applied — `triggerInlineRun`
  * does not forward it. Undeclared here, it is now a 400 instead of a run that
@@ -119,32 +120,15 @@ const inlineRunBodySchema = z
      */
     context_files: z.array(z.unknown()).optional(),
     /**
-     * `context_documents` — the pre-#1177 spelling of {@link context_files},
-     * accepted forever.
-     *
-     * This body schema is `.strict()`, so an UNDECLARED field is a 400 and a
-     * field the route reads but does not declare is stripped before the handler
-     * ever sees it: either way the caller's files vanish. The repo has been bitten
-     * by exactly that (#1189 — a launch-body field no surface allowlisted was
-     * dropped in silence and the model looped with no error to show). Declaring
-     * the legacy name keeps an unmodified caller working; `context_files` wins
-     * when both are present.
-     */
-    context_documents: z.array(z.unknown()).optional(),
-    /**
      * Per-integration connection picks for this run (resolver mechanism #2).
      * Declared here so the parse keeps the field for the preflight's readiness
      * gate, which runs BEFORE `parseRequestInput` and would otherwise never see
      * it.
      *
-     * `.min(1)` is owned here rather than delegated to `parseRequestInput`: an
-     * empty-string id is falsy at the resolver's `resolveOne`, so readiness would
-     * answer 412 before the parser's field-precise 400 could fire — and
-     * `POST /runs/inline/validate` never calls the parser at all, so the guard
-     * would have no owner there and the validator would disagree with the launch
-     * on the same body.
+     * `.min(1)` and the reason it is owned at the schema rather than in
+     * `parseRequestInput` live with the rule itself, in `lib/launch-schemas.ts`.
      */
-    connection_overrides: z.record(z.string(), z.string().min(1)).optional(),
+    connection_overrides: connectionOverridesSchema.optional(),
     /**
      * Not a field — a rejection. `rerun_from` is an agent-route concept (replay a
      * cataloged agent's prior input) and means nothing here, so its presence must
@@ -404,20 +388,25 @@ export function createRunsRouter() {
   );
 
   // GET /api/agents/:scope/:name/runs — list runs for an agent
-  router.get(`/agents/${SCOPED_PACKAGE_ROUTE}/runs`, requireAgent(), async (c) => {
-    const agent = c.get("package");
-    const scope = getAppScope(c);
-    const { limit, offset } = parseListPagination(c, { defaultLimit: 50 });
-    const endUser = c.get("endUser");
-    const result = await listPackageRuns(scope, agent.id, {
-      limit,
-      offset,
-      endUserId: endUser?.id,
-      actor: getActor(c),
-    });
-    setOffsetLinkHeader({ c, limit, offset, total: result.total });
-    return c.json(result);
-  });
+  router.get(
+    `/agents/${SCOPED_PACKAGE_ROUTE}/runs`,
+    requirePermission("runs", "read"),
+    requireAgent(),
+    async (c) => {
+      const agent = c.get("package");
+      const scope = getAppScope(c);
+      const { limit, offset } = parseListPagination(c, { defaultLimit: 50 });
+      const endUser = c.get("endUser");
+      const result = await listPackageRuns(scope, agent.id, {
+        limit,
+        offset,
+        endUserId: endUser?.id,
+        actor: getActor(c),
+      });
+      setOffsetLinkHeader({ c, limit, offset, total: result.total });
+      return c.json(result);
+    },
+  );
 
   // GET /api/runs — global paginated run list across the application.
   // Supports filtering by ?user=me (self-owned runs), ?kind=inline|package|all
@@ -429,7 +418,7 @@ export function createRunsRouter() {
   // `limit`/`offset` deliberately keep their `.catch()` defaults — a bad page
   // size returns the first page, which narrows rather than widens, and callers
   // paging by `Link` headers never construct them by hand.
-  router.get("/runs", async (c) => {
+  router.get("/runs", requirePermission("runs", "read"), async (c) => {
     const actor = getActor(c);
     const scope = getAppScope(c);
     const { limit, offset } = parseListPagination(c, { defaultLimit: 20 });
@@ -485,8 +474,8 @@ export function createRunsRouter() {
   // (run_update PG NOTIFY) with a periodic DB re-check as fallback — see
   // services/run-wait.ts. Auth/scoping is identical to the plain call:
   // ownership is verified BEFORE any waiting starts.
-  router.get("/runs/:id", async (c) => {
-    const runId = c.req.param("id");
+  router.get("/runs/:id", requirePermission("runs", "read"), async (c) => {
+    const runId = c.req.param("id")!;
     const scope = getAppScope(c);
     // Validate the wait param before touching the DB so a malformed value
     // 400s even for runs the caller could not read.
@@ -555,7 +544,7 @@ export function createRunsRouter() {
   // Rate limited at 120/min per identity (same budget as the inbound MCP
   // server) — the log history can be large and the CLI tail polls it in a
   // loop, so an unmetered caller could turn this read into a DB hammer.
-  router.get("/runs/:id/logs", rateLimit(120), async (c) => {
+  router.get("/runs/:id/logs", requirePermission("runs", "read"), rateLimit(120), async (c) => {
     const runId = c.req.param("id")!;
     const scope = getAppScope(c);
     const exec = await getRun(scope, runId);
@@ -707,14 +696,12 @@ export function createRunsRouter() {
       // schema off `preflight.manifest`, so the field has to be declared before
       // it walks the input. Everything after this block is the ordinary file
       // path — ACL (`getFileForActor`), byte + count caps, streaming into
-      // `documents/`, `file_links` — and the platform prompt announces the
+      // `files/`, `file_links` — and the platform prompt announces the
       // mounted files exactly as it does for an uploaded file.
       assertContextFilesFieldAvailable(preflight.manifest, body.input);
       // B2 — the explicit argument. Shape-checked first: a malformed URI 400s
       // without spending a file lookup.
-      const explicitFileUris = normalizeContextFileUris(
-        body.context_files ?? body.context_documents,
-      );
+      const explicitFileUris = normalizeContextFileUris(body.context_files);
       const { manifest: effectiveManifest, inputPatch } = injectContextFiles(
         preflight.manifest,
         explicitFileUris,
@@ -818,7 +805,7 @@ export function createRunsRouter() {
       // Same reserved-name rule as the run endpoint — a manifest that validates
       // here must be runnable there.
       assertContextFilesFieldAvailable(body.manifest, body.input);
-      normalizeContextFileUris(body.context_files ?? body.context_documents);
+      normalizeContextFileUris(body.context_files);
 
       // Structured validation result. Failures never reach this line — the
       // preflight throws problem+json ApiErrors (accumulated) — so a 200

@@ -527,8 +527,7 @@
           "log",
           "note",
           "pin",
-          "publish_file",
-          "publish_document"
+          "publish_file"
         ]
       }
     }

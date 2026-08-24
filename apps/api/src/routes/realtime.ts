@@ -194,6 +194,14 @@ function openRealtimeStream(
   verbose: boolean,
   onSubscribe?: (send: (evt: RealtimeEvent) => void) => void | Promise<void>,
 ) {
+  // Tell a reverse proxy not to buffer this response. nginx buffers by default
+  // (`proxy_buffering on`), which holds an SSE stream until a buffer fills or
+  // the response ends — turning a live feed into a batch delivered at the end.
+  // The header is nginx's documented opt-out and is ignored elsewhere. The chat
+  // stream already carries it because the AI SDK sets it on its own responses;
+  // this surface set nothing, so it was the one SSE endpoint unprotected
+  // against a buffering proxy. Costs nothing when no proxy is in front.
+  c.header("X-Accel-Buffering", "no");
   return streamSSE(c, async (stream) => {
     // Queue + signal so events written by PG NOTIFY callbacks are flushed
     // immediately via the stream's own async context (avoids Bun buffering).

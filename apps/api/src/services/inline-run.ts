@@ -279,7 +279,7 @@ interface ContextFilesInjection {
  *
  * Declaring the field is all the work: from here the URIs travel the NORMAL
  * file-ref path (`collectFileRefs` → `getFileForActor` ACL → byte/count caps
- * → stream into the run-workspace storage prefix `{runId}/documents/` →
+ * → stream into the run-workspace storage prefix `{runId}/files/` →
  * `file_links`), and the platform prompt announces them like any other input
  * file. Nothing is mounted by a side path, so nothing can be mounted
  * unannounced or unchecked.

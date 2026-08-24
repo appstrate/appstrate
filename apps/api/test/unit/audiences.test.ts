@@ -16,7 +16,7 @@ import {
   getMcpOrgResourceUri,
   orgIdFromMcpAudience,
   extractOrgIdFromAudiences,
-} from "../../audiences.ts";
+} from "../../src/lib/audiences.ts";
 
 // Derive the base the same way the parser does, so the test is independent of
 // the concrete APP_URL the env happens to carry.

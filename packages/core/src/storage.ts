@@ -11,9 +11,8 @@
  * instead of each hardcoding `100 * 1024 * 1024`.
  *
  * The DURABLE per-file cap is separate and operator-tunable
- * (`DOCUMENT_MAX_FILE_BYTES` — an env var deliberately left at its legacy name,
- * same 100 MiB default): a deployment may lower what
- * it stores forever without touching the staging contract the signed tokens and
+ * (`FILE_MAX_BYTES`, same 100 MiB default): a deployment may lower what it
+ * stores forever without touching the staging contract the signed tokens and
  * the client encode.
  */
 export const UPLOAD_MAX_BYTES = 100 * 1024 * 1024;

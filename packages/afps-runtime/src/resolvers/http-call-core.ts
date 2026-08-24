@@ -1249,27 +1249,29 @@ function toArrayBufferUint8(source: Uint8Array): Uint8Array<ArrayBuffer> {
  * nothing. Add formats in `@appstrate/afps-shared/mime`.
  *
  * This wrapper adds exactly ONE rule on top of the shared predicate, and that
- * rule is specific to `http_call`: an explicit `charset` parameter is treated
- * as a declaration of textness whatever the base type, because an upstream that
- * bothers to declare a charset is telling us the body is text. The shared
- * predicate is media-type-only on purpose — its other consumer (upload sniff
- * enforcement) must not let a caller talk a binary past the magic-byte check by
- * appending `; charset=utf-8`. An OOXML container carries no charset, so the
- * asymmetry cannot rescue one.
+ * rule is specific to `http_call`: when the base media type says nothing —
+ * `application/octet-stream`, or a header carrying only parameters — an
+ * explicit `charset` parameter is taken as a declaration of textness, because
+ * an upstream that bothers to declare a charset on an otherwise opaque body is
+ * telling us it is text. The shared predicate is media-type-only on purpose:
+ * its other consumer (upload sniff enforcement) must not let a caller talk a
+ * binary past the magic-byte check by appending `; charset=utf-8`.
+ *
+ * The rule is deliberately gated on an ambiguous base type. It used to run
+ * FIRST, ahead of the media-type check, defended by "an OOXML container carries
+ * no charset" — but that is an assumption about upstream servers, not an
+ * invariant: a server that blanket-appends `; charset=utf-8` to every response
+ * would have flipped an XLSX onto the lossy `fatal: false` decode and destroyed
+ * it, which is the exact corruption class this module exists to prevent. A
+ * declared binary container now wins over any parameter.
  */
 export function isTextLikeMimeType(contentType: string | null | undefined): boolean {
   if (!contentType) return false;
-  const ct = contentType.toLowerCase();
-  if (/;\s*charset=/.test(ct)) return true;
-  return isTextShapedMime(normalizeMime(ct));
-}
-
-function parseMimeType(contentType: string | null | undefined): string {
-  if (!contentType) return "application/octet-stream";
-  const semi = contentType.indexOf(";");
-  return (
-    (semi >= 0 ? contentType.slice(0, semi) : contentType).trim() || "application/octet-stream"
-  );
+  const base = normalizeMime(contentType);
+  if (isTextShapedMime(base)) return true;
+  // Ambiguous base type only: charset is the sole signal we have.
+  if (base !== "" && base !== "application/octet-stream") return false;
+  return /;\s*charset=/i.test(contentType);
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
@@ -1441,6 +1443,12 @@ function base64Encode(bytes: Uint8Array): string {
  * Uses `file-type` (^22) for the magic-byte lookup. Reads at most the
  * first 4 100 bytes (the library's internal look-ahead window).
  *
+ * `declaredMime` MUST already be normalized ({@link normalizeMime}: parameters
+ * stripped, lowercased). The ambiguity test below is an exact string compare,
+ * so an un-normalized `Application/Octet-Stream` would read as a specific
+ * declared type — sniffing skipped, and the mixed-case string stored as the
+ * body's mime.
+ *
  * Streaming responses (responseMode.toFile) are NOT sniffed by this
  * helper — bytes are written to disk before we buffer them. A future
  * improvement could sniff from the first chunk of the stream.
@@ -1497,10 +1505,12 @@ export interface SerializeFetchResponseContext {
  * preserved end-to-end — the regression fixed by issues #149 / #151 in
  * the sidecar resurfaced when the runtime moved from `curl` to typed
  * `{ns}__api_call` tools, because the client-side serializer still
- * stringified bytes as UTF-8. Decoding now follows a strict whitelist
- * (text/*, application/json, application/xml, +json/+xml suffixes,
- * `; charset=...`); everything else round-trips as base64 (`inline`)
- * or spills to a file (`file`).
+ * stringified bytes as UTF-8. Decoding now follows a strict media-type
+ * whitelist (text/*, application/json, application/xml, +json/+xml/+yaml
+ * suffixes — see {@link isTextLikeMimeType}); a `; charset=...` parameter is
+ * NOT a whitelist entry, only a fallback consulted when the base type is
+ * ambiguous (absent, or `application/octet-stream`). Everything else
+ * round-trips as base64 (`inline`) or spills to a file (`file`).
  */
 export async function serializeFetchResponse(
   res: Response,
@@ -1513,7 +1523,7 @@ export async function serializeFetchResponse(
 
   const requestedToFileEarly = ctx.responseMode?.toFile;
   const contentTypeEarly = res.headers.get("content-type");
-  const mimeTypeEarly = parseMimeType(contentTypeEarly);
+  const mimeTypeEarly = normalizeMime(contentTypeEarly) || "application/octet-stream";
 
   // Streaming response → file: write the body to disk in chunks while
   // computing size + sha256 on the fly. Avoids buffering large
@@ -1547,7 +1557,7 @@ export async function serializeFetchResponse(
   const bytes = new Uint8Array(arrayBuffer);
   const size = bytes.byteLength;
   const contentType = res.headers.get("content-type");
-  const mimeType = parseMimeType(contentType);
+  const mimeType = normalizeMime(contentType) || "application/octet-stream";
 
   // Read truncation metadata forwarded by the sidecar. X-Truncated is
   // set when the upstream response was sliced at MAX_RESPONSE_SIZE (or

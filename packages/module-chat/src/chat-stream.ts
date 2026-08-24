@@ -101,12 +101,25 @@ const ENGINE_LOOPBACK_TTL_MS = 30 * 60_000;
  */
 export type ChatEngine = (input: PiChatInput) => Response;
 
+/**
+ * Roles the engine's history projection actually handles. `buildStructuredPiTurn`
+ * (`pi-chat/structured-session.ts`) keeps `user` and `assistant` and DROPS every
+ * other role silently, so anything else must be refused at the door rather than
+ * accepted and discarded.
+ */
+const CHAT_MESSAGE_ROLES = new Set(["user", "assistant"]);
+
 // The client (assistant-ui / useChat) posts the full thread plus optional
-// session/model/context extras. `messages` are UIMessages; we keep validation
-// loose here and let `convertToModelMessages` enforce the real shape — with one
-// tightening: any `file` part MUST reference an `upload://` or `appfile://`
-// URI. That rejects inline `data:` bytes and arbitrary URLs in the chat channel
-// (attachments flow only through the file store, never inline).
+// session/model/context extras. `messages` are UIMessages; the shape itself is
+// the AI SDK's and stays loose here, with two tightenings the engine cannot
+// make for us:
+//   - `role` MUST be one of {@link CHAT_MESSAGE_ROLES}. Nothing legitimate
+//     sends another: the composer only produces user turns, and a reload
+//     replays what the server persisted — user or assistant, a server-authored
+//     notice included (persistence.ts stores it as `assistant`).
+//   - any `file` part MUST reference an `upload://` or `appfile://` URI. That
+//     rejects inline `data:` bytes and arbitrary URLs in the chat channel
+//     (attachments flow only through the file store, never inline).
 export const chatStreamSchema = z.object({
   id: z.string().optional(),
   messages: z
@@ -114,6 +127,14 @@ export const chatStreamSchema = z.object({
     .min(1, "messages must not be empty")
     .superRefine((messages, ctx) => {
       messages.forEach((message, i) => {
+        const role = (message as { role?: unknown }).role;
+        if (typeof role !== "string" || !CHAT_MESSAGE_ROLES.has(role)) {
+          ctx.addIssue({
+            code: "custom",
+            message: "Message role must be 'user' or 'assistant'.",
+            path: [i, "role"],
+          });
+        }
         const parts = (message as { parts?: unknown }).parts;
         if (!Array.isArray(parts)) return;
         parts.forEach((part, j) => {
@@ -268,7 +289,7 @@ export async function handleChatStream(
   // binding + a fresh access token, or a reconnect signal when its credential is
   // dead. Both ride the SAME engine — this fact drives admission and the Pi
   // binding, never a choice of loop.
-  const subscription = await deps.resolveSubscriptionChatModel(orgId, chosen.id);
+  const subscription = await deps.resolveChatModel(orgId, chosen.id);
   const isSubscription = subscription.subscription;
 
   // Admission gate — EVERY turn. The platform
@@ -462,7 +483,15 @@ export async function handleChatStream(
         messages,
         system,
         generation: generationSettings,
-        platformMcp: { url: platformMcpUrl(origin, orgId), headers: mcpHeaders },
+        platformMcp: {
+          url: platformMcpUrl(origin, orgId),
+          headers: mcpHeaders,
+          // Same in-process seam the preamble reads through: the engine's three
+          // MCP hops re-enter the platform app directly instead of opening real
+          // loopback sockets back into this process. Auth and RBAC still run on
+          // every hop, so the scoped bearer above is exactly as load-bearing.
+          fetch: platformFetch,
+        },
         // Decoupled from the request connection (see `generation` above).
         abortSignal: generation.signal,
         onError: clientErrorMessage,

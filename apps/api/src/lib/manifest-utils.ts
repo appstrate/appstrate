@@ -73,14 +73,16 @@ export function extractSkillIdsFromManifest(manifest: Partial<Manifest>): string
   return Object.keys(skillsMap).filter(Boolean);
 }
 
-/** Extract input/output JSON schemas from a manifest, with safe narrowing. */
-export function extractManifestSchemas(manifest: Partial<Manifest>): {
-  input?: JSONSchemaObject;
-  output?: JSONSchemaObject;
-} {
+/**
+ * Extract a manifest's output JSON schema, with safe narrowing.
+ *
+ * Output only. This returned `{ input, output }` until the input half ran out
+ * of readers: every input-schema caller reaches `manifest.input?.schema` at its
+ * own site (`routes/runs.ts`, `routes/schedules.ts`, `services/inline-run.ts`, …).
+ */
+export function extractManifestOutputSchema(
+  manifest: Partial<Manifest>,
+): JSONSchemaObject | undefined {
   const m = manifest as Record<string, { schema?: unknown } | undefined>;
-  return {
-    input: m.input?.schema ? asJSONSchemaObject(m.input.schema) : undefined,
-    output: m.output?.schema ? asJSONSchemaObject(m.output.schema) : undefined,
-  };
+  return m.output?.schema ? asJSONSchemaObject(m.output.schema) : undefined;
 }

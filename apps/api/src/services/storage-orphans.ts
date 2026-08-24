@@ -102,9 +102,6 @@ interface BucketDiff {
  * `uploads` TABLES persist the bucket as part of `storage_key`; `listObjects`
  * yields keys without it. Returns null when the row's key does not belong to
  * `bucket`.
- *
- * Note the asymmetry for `files`: its bucket is `documents`, so every
- * `files.storage_key` reads `documents/<path>`. See {@link FILES_BUCKET}.
  */
 function inBucketKey(storageKey: string, bucket: string): string | null {
   const prefix = `${bucket}/`;
@@ -114,8 +111,7 @@ function inBucketKey(storageKey: string, bucket: string): string | null {
 /**
  * Which run owns a `run-workspace` object. Two key shapes exist:
  * `{runId}.afps` (the bundle) and `{runId}/…` (`manifest.json` plus the run's
- * input objects under `{runId}/documents/<name>` — that prefix is still spelled
- * `documents/`, see the header).
+ * input objects under `{runId}/files/<name>`, see `runWorkspaceFileKey`).
  */
 export function runWorkspaceOwner(key: string): string | null {
   const slash = key.indexOf("/");
@@ -134,15 +130,13 @@ export function runWorkspaceOwner(key: string): string | null {
  * object can never be reported as an orphan — that is exactly why the
  * known-sets are built with no `orgId` filter at all.
  *
- * ## The first bucket is called `documents`, and that is correct
- *
- * There is no `files` bucket. #1177 renamed the TABLE `documents` → `files` and
- * deliberately left the S3 bucket / key prefix alone, because every stored
- * `storage_key` already begins with `documents/` and renaming it would orphan
- * every object in production. So the first descriptor below reconciles objects
- * under the `documents` bucket against `files.storage_key` values that all
- * start with `documents/`. `FILES_BUCKET === "documents"` — the constant is
- * named for the table it serves, not for its own value.
+ * The first descriptor reconciles objects under the `files` bucket
+ * ({@link FILES_BUCKET}) against `files.storage_key` values, which are all
+ * written as `files/<path>`. Bucket and stored key must agree or every object
+ * in the bucket reads as an orphan: they were both spelled `documents` until
+ * the #1177 rename was finished at the physical layer, and migration
+ * `0044_finish_file_rename` moved the stored keys in the same change that moved
+ * the constant.
  */
 export function orphanScanBuckets(): OrphanScanBucket[] {
   return [

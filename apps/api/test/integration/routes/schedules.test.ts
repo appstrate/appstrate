@@ -164,6 +164,61 @@ describe("Schedules API", () => {
 
       expect(res.status).toBe(201);
     });
+
+    /**
+     * The create route refuses a bad input "at this write rather than silently
+     * each tick". PUT had adopted only the locked-field half of that rule, so
+     * it answered 200 and the schedule then failed at EVERY fire — visible
+     * only in the schedule's own failure record.
+     */
+    it("refuses a PUT that replaces input with a value the schema rejects", async () => {
+      await seedAgentWithInput();
+      const fid = agentId("input-sched");
+
+      const created = await app.request(`/api/agents/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cron_expression: "0 9 * * 1-5",
+          input: { email: "test@example.com" },
+        }),
+      });
+      expect(created.status).toBe(201);
+      const { id } = (await created.json()) as any;
+
+      const res = await app.request(`/api/schedules/${id}`, {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ input: { note: "no email at all" } }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as any;
+      expect(JSON.stringify(body)).toContain("email");
+    });
+
+    it("accepts a PUT whose replacement input still satisfies the schema", async () => {
+      await seedAgentWithInput();
+      const fid = agentId("input-sched");
+
+      const created = await app.request(`/api/agents/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cron_expression: "0 9 * * 1-5",
+          input: { email: "test@example.com" },
+        }),
+      });
+      const { id } = (await created.json()) as any;
+
+      const res = await app.request(`/api/schedules/${id}`, {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ input: { email: "other@example.com" } }),
+      });
+
+      expect(res.status).toBe(200);
+    });
   });
 
   describe("POST /api/agents/:scope/:name/schedules", () => {

@@ -17,6 +17,19 @@ const TRACKED = [
   "USERCONTENT_URL",
   "PI_IMAGE",
   "SIDECAR_IMAGE",
+  "APP_VERSION",
+  // The retired file-limit names and their replacements. Both halves are
+  // tracked: `restore()` only cleans what is listed here, so a test that sets a
+  // retired name would otherwise leave it set for every test after it — which
+  // is exactly how the control below first failed.
+  "DOCUMENT_MAX_FILE_BYTES",
+  "DOCUMENT_RETENTION_DAYS",
+  "RUN_MAX_DOCUMENTS",
+  "WORKSPACE_MAX_DOCS_BYTES",
+  "FILE_MAX_BYTES",
+  "FILE_RETENTION_DAYS",
+  "RUN_MAX_FILES",
+  "WORKSPACE_MAX_FILES_BYTES",
 ] as const;
 
 type Snap = Record<(typeof TRACKED)[number], string | undefined>;
@@ -44,6 +57,7 @@ function setBaseEnv(): void {
   delete process.env.USERCONTENT_URL;
   delete process.env.PI_IMAGE;
   delete process.env.SIDECAR_IMAGE;
+  delete process.env.APP_VERSION;
 }
 
 describe("BETTER_AUTH_SECRETS namespace-collision scrub", () => {
@@ -434,7 +448,17 @@ describe("USERCONTENT_URL must be a genuinely separate preview origin", () => {
   });
 });
 
-describe("PI_IMAGE / SIDECAR_IMAGE are a version contract", () => {
+// The full case table for the rule itself lives on the pure function, in
+// `packages/core/test/image-ref.test.ts`. What is left here is the wiring: that
+// the schema calls it at all, and that it feeds it APP_VERSION — the value the
+// trio rule added, and the only way a *matched pair* can now abort boot.
+//
+// Plus the trios the repo itself boots. Those belong here and not only on the
+// pure function, because "does this configuration start the platform?" is a
+// question about `getEnv()`, and the two configurations below — the
+// health-container e2e job and the alias tag families `release.yml` publishes —
+// were both aborting boot while every case on the pure function passed.
+describe("APP_VERSION / PI_IMAGE / SIDECAR_IMAGE are a version contract", () => {
   let s: Snap;
 
   beforeEach(() => {
@@ -448,31 +472,166 @@ describe("PI_IMAGE / SIDECAR_IMAGE are a version contract", () => {
     _resetCacheForTesting();
   });
 
-  it("both unset is valid — the defaults are the matching dev pair", () => {
+  it("all three unset is valid — the defaults are the matching dev triple", () => {
     expect(getEnv().PI_IMAGE).toBe("appstrate-pi:latest");
     expect(getEnv().SIDECAR_IMAGE).toBe("appstrate-sidecar:latest");
   });
 
-  it("accepts a release pair pinned to the same tag", () => {
+  it("aborts boot when the runtime pair is one release behind the platform", () => {
+    process.env.APP_VERSION = "v1.0.0-beta.52";
     process.env.PI_IMAGE = "ghcr.io/appstrate/appstrate-pi:1.0.0-beta.51";
     process.env.SIDECAR_IMAGE = "ghcr.io/appstrate/appstrate-sidecar:1.0.0-beta.51";
-    expect(getEnv().SIDECAR_IMAGE).toBe("ghcr.io/appstrate/appstrate-sidecar:1.0.0-beta.51");
+    expect(() => getEnv()).toThrow(/platform build 1\.0\.0-beta\.52.*Out of step: the platform/s);
   });
 
-  it("rejects a pair one release apart (#1195 — the mismatched couple)", () => {
+  it("anchors the platform-outlier issue on a variable the operator can set", () => {
+    // `oddOneOut` has three values. In this trio the two images agree with each
+    // other and disagree with the platform, so `oddOneOut === "platform"` and
+    // BOTH images have to move. The path used to be a two-way ternary that sent
+    // this case to SIDECAR_IMAGE — the one variable the message says is not
+    // individually at fault — and nothing asserted the path, so it went unseen.
+    process.env.APP_VERSION = "v1.0.0-beta.52";
     process.env.PI_IMAGE = "ghcr.io/appstrate/appstrate-pi:1.0.0-beta.51";
-    process.env.SIDECAR_IMAGE = "ghcr.io/appstrate/appstrate-sidecar:1.0.0-beta.50";
-    expect(() => getEnv()).toThrow(/PI_IMAGE and SIDECAR_IMAGE must be pinned to the same tag/);
+    process.env.SIDECAR_IMAGE = "ghcr.io/appstrate/appstrate-sidecar:1.0.0-beta.51";
+
+    // Match the PATH prefix only. The message body legitimately names all three
+    // variables, so asserting over the whole line proves nothing.
+    let paths: string[] = [];
+    try {
+      getEnv();
+    } catch (err) {
+      paths = [...String((err as Error).message).matchAll(/^\s*- ([A-Z_]+):/gm)].map(
+        (m) => m[1] as string,
+      );
+    }
+    expect(paths, "no issue path parsed — the error format changed").not.toEqual([]);
+    expect(paths).toContain("PI_IMAGE");
+    expect(paths).not.toContain("SIDECAR_IMAGE");
   });
 
-  it("rejects a half-done upgrade (one ref still on the local :latest default)", () => {
-    process.env.SIDECAR_IMAGE = "ghcr.io/appstrate/appstrate-sidecar:1.0.0-beta.51";
-    expect(() => getEnv()).toThrow(/PI_IMAGE and SIDECAR_IMAGE must be pinned to the same tag/);
+  it("boots the health-container e2e trio (APP_VERSION=health-container-e2e, images :local)", () => {
+    // scripts/health-container-e2e.sh + test/setup/docker-compose.health-e2e.yml,
+    // verbatim. This is a CI job: if it cannot get past getEnv(), the container
+    // never reaches its own healthcheck.
+    process.env.APP_VERSION = "health-container-e2e";
+    process.env.PI_IMAGE = "appstrate-health-e2e:local";
+    process.env.SIDECAR_IMAGE = "appstrate-health-e2e:local";
+    expect(getEnv().PI_IMAGE).toBe("appstrate-health-e2e:local");
   });
 
-  it("accepts a digest pin — digests identify different images, nothing to compare", () => {
-    process.env.PI_IMAGE = `ghcr.io/appstrate/appstrate-pi@sha256:${"a".repeat(64)}`;
+  for (const tag of ["latest", "1.0", "sha-abc1234"]) {
+    it(`boots a released platform against runtime images pinned to :${tag}`, () => {
+      // `release.yml` publishes `{{version}}`, `{{major}}.{{minor}}`,
+      // `sha-<sha>` and `latest` for the same image, and every shipped compose
+      // file derives all three images from one ${APPSTRATE_VERSION}. The
+      // platform's APP_VERSION is a git ref name and can only ever equal a
+      // `{{version}}` tag, so these trios are coherent.
+      process.env.APP_VERSION = "v1.0.0-beta.51";
+      process.env.PI_IMAGE = `ghcr.io/appstrate/appstrate-pi:${tag}`;
+      process.env.SIDECAR_IMAGE = `ghcr.io/appstrate/appstrate-sidecar:${tag}`;
+      expect(getEnv().SIDECAR_IMAGE).toBe(`ghcr.io/appstrate/appstrate-sidecar:${tag}`);
+    });
+  }
+
+  it("still aborts boot when the two runtime refs sit in different tag families", () => {
+    process.env.APP_VERSION = "v1.0.0-beta.51";
+    process.env.PI_IMAGE = "ghcr.io/appstrate/appstrate-pi:latest";
     process.env.SIDECAR_IMAGE = "ghcr.io/appstrate/appstrate-sidecar:1.0.0-beta.51";
-    expect(getEnv().SIDECAR_IMAGE).toBe("ghcr.io/appstrate/appstrate-sidecar:1.0.0-beta.51");
+    expect(() => getEnv()).toThrow(
+      /PI_IMAGE tag latest.*Out of step: PI_IMAGE and SIDECAR_IMAGE, which disagree with each other/s,
+    );
+  });
+});
+
+describe("retired file-limit env names are refused, not ignored", () => {
+  let s: Snap;
+
+  beforeEach(() => {
+    s = snap();
+    setBaseEnv();
+    _resetCacheForTesting();
+  });
+
+  afterEach(() => {
+    restore(s);
+    _resetCacheForTesting();
+  });
+
+  // The four names #1177 retired, each with what replaced it. Zod strips
+  // unknown keys, so before this guard an `.env` carrying an old name parsed
+  // cleanly and the limit fell back to its default — in silence.
+  const RENAMES: [string, string][] = [
+    ["DOCUMENT_MAX_FILE_BYTES", "FILE_MAX_BYTES"],
+    ["DOCUMENT_RETENTION_DAYS", "FILE_RETENTION_DAYS"],
+    ["RUN_MAX_DOCUMENTS", "RUN_MAX_FILES"],
+    ["WORKSPACE_MAX_DOCS_BYTES", "WORKSPACE_MAX_FILES_BYTES"],
+  ];
+
+  for (const [retired, replacement] of RENAMES) {
+    it(`aborts boot on ${retired}, naming ${replacement}`, () => {
+      process.env[retired] = "30";
+      expect(() => getEnv()).toThrow(new RegExp(`${retired}.*${replacement}`, "s"));
+    });
+  }
+
+  it("control: the replacement name parses normally", () => {
+    // Without this the four assertions above would pass just as well against a
+    // schema that rejected every file-limit variable.
+    process.env.FILE_RETENTION_DAYS = "30";
+    expect(getEnv().FILE_RETENTION_DAYS).toBe(30);
+  });
+
+  it("the silent revert is what the guard prevents: retention would become permanent", () => {
+    // `retentionExpiry` returns null for an undefined value, so `expires_at` is
+    // null and files never expire. An operator who set DOCUMENT_RETENTION_DAYS
+    // for data-minimisation lost it on upgrade with no output at all — which is
+    // why this one is a boot failure rather than a warning.
+    process.env.DOCUMENT_RETENTION_DAYS = "30";
+    expect(() => getEnv()).toThrow(/no longer read/);
+  });
+});
+
+describe("an explicitly blanked retired name is not 'still set'", () => {
+  let s: Snap;
+
+  beforeEach(() => {
+    s = snap();
+    setBaseEnv();
+    _resetCacheForTesting();
+  });
+
+  afterEach(() => {
+    restore(s);
+    _resetCacheForTesting();
+  });
+
+  // `sanitizeEnv` (`@appstrate/core/env`) coalesces `""` to `undefined` for
+  // every field before Zod sees it, on the stated ground that "the host never
+  // sets a variable to a meaningful empty string". The retired-name check has
+  // to read raw `process.env` — the parsed object is where these no longer
+  // exist — which opts it out of that coalesce, so it redoes it by hand.
+  for (const retired of [
+    "DOCUMENT_MAX_FILE_BYTES",
+    "DOCUMENT_RETENTION_DAYS",
+    "RUN_MAX_DOCUMENTS",
+    "WORKSPACE_MAX_DOCS_BYTES",
+  ]) {
+    it(`boots with ${retired}= (blank), which reverts nothing`, () => {
+      // Compose's `${VAR:-}` forwarding produces exactly this when the host var
+      // is unset — sixteen times in this repo's own docker-compose.yml — and
+      // blanking a line is the normal dotenv way to disable a setting. Refusing
+      // it would abort boot over a variable carrying no value, with an error
+      // ("Leaving it set would silently revert the limit to its default")
+      // describing a hazard an empty value cannot cause.
+      process.env[retired] = "";
+      expect(() => getEnv()).not.toThrow();
+    });
+  }
+
+  it("control: the same name with a value is still refused", () => {
+    // Without this, the four above would pass just as well against a guard that
+    // had been deleted outright.
+    process.env.DOCUMENT_RETENTION_DAYS = "30";
+    expect(() => getEnv()).toThrow(/no longer read/);
   });
 });

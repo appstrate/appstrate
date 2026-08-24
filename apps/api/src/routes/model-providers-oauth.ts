@@ -19,7 +19,6 @@ import {
 import { invalidRequest, notFound, parseBody, unauthorized } from "../lib/errors.ts";
 import { readJsonBody } from "../lib/request-body.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
-import { getClientIp } from "../lib/client-ip.ts";
 import { getOrgModelProviderCredential } from "../services/model-providers/credentials.ts";
 
 /**
@@ -34,7 +33,7 @@ import { getOrgModelProviderCredential } from "../services/model-providers/crede
  * authorization servers only allowlist `http://localhost:PORT/...`
  * redirect_uris, so any platform-hosted callback URL is rejected.
  */
-const importBody = z.object({
+export const importBody = z.object({
   providerId: z
     .string()
     .min(1)
@@ -70,6 +69,25 @@ const importBody = z.object({
   accountId: z.string().min(1).max(120).optional(),
 });
 
+/** providerId regex matches the registry's canonical ids. */
+const providerIdSchema = z
+  .string()
+  .regex(/^[a-z0-9-]+$/, "providerId must be lowercase kebab-case");
+
+/**
+ * Body of `POST /api/model-providers-oauth/pairing`. Module-scoped (not
+ * closure-scoped inside the router factory) so the OpenAPI request-body
+ * registry can compare it against the documented schema — see
+ * `apps/api/src/openapi/zod-schema-registry.ts`.
+ */
+export const createPairingBody = z.object({
+  providerId: providerIdSchema.refine(
+    (id) => isOAuthModelProvider(id),
+    "providerId must be a registered OAuth model provider",
+  ),
+  credentialId: z.uuid().optional(),
+});
+
 /**
  * Pair-redeem handler for the canonical
  * `POST /api/model-providers-oauth/pair/redeem` route.
@@ -96,8 +114,7 @@ async function handlePairRedeem(c: Context<AppEnv>) {
     );
   }
 
-  const fromIp = getClientIp(c);
-  const consumed = await consumePairing(token, fromIp === "unknown" ? undefined : fromIp);
+  const consumed = await consumePairing(token);
 
   const input = await readJsonBody(c, importBody);
 
@@ -168,19 +185,6 @@ export function createModelProvidersOAuthRouter() {
 
   /** Pairing token TTL — 5 minutes is enough for the user to switch tabs and paste. */
   const PAIRING_TTL_SECONDS = 300;
-
-  /** providerId regex matches the registry's canonical ids. */
-  const providerIdSchema = z
-    .string()
-    .regex(/^[a-z0-9-]+$/, "providerId must be lowercase kebab-case");
-
-  const createPairingBody = z.object({
-    providerId: providerIdSchema.refine(
-      (id) => isOAuthModelProvider(id),
-      "providerId must be a registered OAuth model provider",
-    ),
-    credentialId: z.uuid().optional(),
-  });
 
   const pairingIdParam = z.object({
     id: z.string().regex(/^pair_[A-Za-z0-9_-]+$/, "id must look like pair_<base64url>"),

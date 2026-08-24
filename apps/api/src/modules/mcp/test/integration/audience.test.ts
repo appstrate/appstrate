@@ -27,7 +27,7 @@ import {
   restoreProtectedResources,
 } from "../../../../lib/protected-resources.ts";
 import { internalDispatchHeader } from "../../../../lib/internal-dispatch.ts";
-import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "../../audiences.ts";
+import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "../../../../lib/audiences.ts";
 
 // The protected-resource registry is a process-wide singleton shared with the
 // live app. Snapshot before this file mutates it and restore afterwards so a

@@ -565,10 +565,12 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
   //    structured failure rather than a raw exception.
   const requestStartedAt = performance.now();
   let upstream: Response;
-  let upstreamFinalUrl: string = resolvedUrl;
-  let upstreamHops = 0;
-  let requestHeaderNames: string[] = [];
-  let credentialInjection: "inject" | "caller_override" | "none" = "none";
+  // No initializers: the try below assigns all four and the catch returns,
+  // so any value here is unreadable.
+  let upstreamFinalUrl: string;
+  let upstreamHops: number;
+  let requestHeaderNames: string[];
+  let credentialInjection: "inject" | "caller_override" | "none";
   try {
     const r = await doUpstreamRequest(creds);
     upstream = r.response;
@@ -724,7 +726,9 @@ function wrapFetchError(err: unknown, label: string, url: string): ApiCallFailur
   let domain: string | undefined;
   try {
     domain = new URL(url).hostname;
-  } catch {}
+  } catch {
+    // Not a parseable URL — omit the hostname hint rather than fail.
+  }
   const suffix = code ? `: ${code}` : "";
   const domainHint = domain ? ` (${domain})` : "";
   return { ok: false, status: 502, error: `${label}${suffix}${domainHint}` };

@@ -37,6 +37,7 @@ import { forbidden, invalidRequest } from "../../lib/errors.ts";
 import { readJsonBody } from "../../lib/request-body.ts";
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { getOrgScope, type AppScope, type OrgScope } from "../../lib/scope.ts";
+import { parseListPagination } from "../../lib/list-query.ts";
 
 /**
  * Assert that an application belongs to the given org.
@@ -83,6 +84,11 @@ export const updateWebhookSchema = z.object({
   packageId: z.string().nullable().optional(),
   payloadMode: z.enum(["full", "summary"]).optional(),
   enabled: z.boolean().optional(),
+});
+
+/** Optional body of `POST /api/webhooks/{id}/rotate`. */
+export const rotateSecretSchema = z.object({
+  windowSeconds: z.number().int().positive().optional(),
 });
 
 export function createWebhooksRouter() {
@@ -258,9 +264,6 @@ export function createWebhooksRouter() {
   // 7-day window (capped at 30 days). The response carries both the new
   // secret (for consumer migration) and the previous one (still valid
   // until the window closes), plus the deadline.
-  const rotateSecretSchema = z.object({
-    windowSeconds: z.number().int().positive().optional(),
-  });
   router.post(
     "/api/webhooks/:id/rotate",
     rateLimit(5),
@@ -287,8 +290,8 @@ export function createWebhooksRouter() {
     async (c) => {
       // Coerce + bound the limit: a raw `Number("-5")`/`Number("x")` (NaN)
       // would otherwise reach the query and 500. Out-of-range / unparseable
-      // falls back to 20.
-      const limit = z.coerce.number().int().min(1).max(100).catch(20).parse(c.req.query("limit"));
+      // falls back to 20 — `parseListPagination` owns that idiom.
+      const { limit } = parseListPagination(c, { defaultLimit: 20 });
       const result = await listDeliveries(webhookScope(c), c.req.param("id")!, limit);
       return c.json(listResponse(result));
     },

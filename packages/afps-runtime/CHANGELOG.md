@@ -27,8 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (§events in `spec.md`, documents under `packages/schema/v0/events/`, a Pages
   job that copies them), and only then an attribute here.
 
-  **Receivers keep accepting `dataschema` on the wire.** Runtime images built
-  before this change still stamp it, and the ingestion schema is `.strict()`.
+  **Receivers reject `dataschema` on the wire.** The platform's ingestion
+  envelope is `.strict()` and declares no such member, so an envelope carrying
+  it 400s. That is safe because the platform / `PI_IMAGE` / `SIDECAR_IMAGE`
+  trio is version-locked at boot (#1201): a pre-removal image cannot reach a
+  post-removal receiver.
 
 ### Changed
 

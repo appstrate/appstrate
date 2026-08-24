@@ -2,7 +2,9 @@
 
 /**
  * `appstrate openapi` — explore the active profile's OpenAPI schema
- * without piping the full spec (~191 endpoints) through stdout.
+ * without piping the full spec through stdout — ~290 endpoints today
+ * (`bun run verify:openapi` prints the live count; the number here is only an
+ * order of magnitude).
  *
  * Three subcommands:
  *

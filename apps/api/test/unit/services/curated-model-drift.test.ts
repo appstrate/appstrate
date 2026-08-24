@@ -78,6 +78,12 @@
  *     `gpt-5.4-mini` for ChatGPT sign-in; `-nano` appears nowhere on it.
  *   - `gpt-5.6` — the plain id is the API model. Codex sign-in serves the
  *     documented `-sol` / `-terra` / `-luna` variants, which ARE curated.
+ *   - `gpt-5.6-cyber` — reviewed 2026-08-24 against the same doc, which
+ *     arrived with the pricing refresh in #1205. The page's 5.6 family is
+ *     exactly `5.6 Sol` / `5.6 Terra` / `5.6 Luna`; no `Cyber` appears on it,
+ *     and the security capability the name suggests is attributed to Sol
+ *     ("complex coding, computer use, research, and cybersecurity"). So it is
+ *     an API-catalog sibling, and the ChatGPT sign-in set does not serve it.
  *
  * ## The review floor is the OLDEST curated version, not the newest
  *

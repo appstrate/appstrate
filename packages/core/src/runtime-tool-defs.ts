@@ -41,7 +41,9 @@
  * sidecar can import it without pulling the Pi SDK into its bundle.
  */
 
-import Ajv, { type ValidateFunction } from "ajv";
+import type { ValidateFunction } from "ajv";
+import { asJSONSchemaObject } from "./form.ts";
+import { compileCached } from "./schema-validation.ts";
 import {
   EVENT_EMITTER_RUNTIME_TOOLS,
   type EventEmitterRuntimeTool,
@@ -79,25 +81,21 @@ export const CANONICAL_RUNTIME_TOOL_EVENT_TYPES = [
 ] as const;
 
 /**
- * Retired event-type spellings still ACCEPTED by {@link reEmitRuntimeToolEvents}
- * but never emitted. `document.published` was the canonical name until issue
- * #1177; the runtime image and the platform deploy independently, so an image
- * built before the rename can still hand this host a `document.published`
- * event. Forwarding it costs nothing (ingestion accepts both names) whereas
- * dropping it would silently lose a published file.
+ * Membership form of {@link CANONICAL_RUNTIME_TOOL_EVENT_TYPES}, for the trust
+ * boundary in `reEmitRuntimeToolEvents`.
+ *
+ * Named CANONICAL, not ACCEPTED. It was briefly the latter, when it also held
+ * the pre-#1177 `document.published` spelling; that member is gone and the
+ * name outlived it. On a set whose whole job is to be closed, a name promising
+ * a wider membership than it has is an invitation to add one back.
  */
-export const LEGACY_RUNTIME_TOOL_EVENT_TYPES = ["document.published"] as const;
-
-const ACCEPTED_RUNTIME_TOOL_EVENT_TYPE_SET: ReadonlySet<string> = new Set<string>([
-  ...CANONICAL_RUNTIME_TOOL_EVENT_TYPES,
-  ...LEGACY_RUNTIME_TOOL_EVENT_TYPES,
-]);
+const CANONICAL_RUNTIME_TOOL_EVENT_TYPE_SET: ReadonlySet<string> = new Set<string>(
+  CANONICAL_RUNTIME_TOOL_EVENT_TYPES,
+);
 
 /** A canonical run event carried back from a runtime tool call. */
 export interface RuntimeToolEvent {
-  type:
-    | (typeof CANONICAL_RUNTIME_TOOL_EVENT_TYPES)[number]
-    | (typeof LEGACY_RUNTIME_TOOL_EVENT_TYPES)[number];
+  type: (typeof CANONICAL_RUNTIME_TOOL_EVENT_TYPES)[number];
   [k: string]: unknown;
 }
 
@@ -134,8 +132,6 @@ export interface BuildRuntimeToolDefsOptions {
   outputSchema?: Record<string, unknown> | null;
 }
 
-const ajv = new Ajv({ allErrors: true, strict: false });
-
 function withEvents(text: string, events: RuntimeToolEvent[]): RuntimeToolResult {
   // Stamp a production-time `timestamp` on every canonical event at the single
   // point they are wrapped. Canonical run events (`log.written`, …) carry a
@@ -158,12 +154,34 @@ function toolError(text: string): RuntimeToolResult {
 }
 
 function buildOutputDef(outputSchema: Record<string, unknown> | null): RuntimeToolDef {
+  // Compile through the ONE shared Ajv2020 instance and its cache
+  // (`@appstrate/core/schema-validation`), not a private second instance.
+  //
+  // This used to be `new Ajv(...)` — the draft-07 default export, with no
+  // ajv-formats. The server validates the SAME `output.schema` on the 2020-12
+  // dialect with formats (`validateOutput` → `compileCached`), so a schema
+  // using `prefixItems`, `$dynamicRef` or `format` got two different verdicts
+  // on the two sides of the container boundary. That is the exact drift this
+  // in-container check exists to prevent.
+  //
+  // A private instance was doubly wrong: it never called `removeSchema`, so it
+  // retained every compiled schema AND threw "schema with key or id … already
+  // exists" the second time a schema carrying `$id` was compiled in the same
+  // process — which the `catch` below then swallowed into `validator = null`.
+  //
+  // A compile failure is now RECORDED, not swallowed. `if (validator && …)`
+  // meant an uncompilable schema silently accepted every payload: the agent saw
+  // a clean success and the run failed later, server-side, at the post-hoc
+  // check this tool exists to pre-empt. The server's `compileCached` throws on
+  // such a schema, so refusing here changes the failure's timing and legibility,
+  // not the run's outcome.
   let validator: ValidateFunction | null = null;
+  let schemaCompileError: string | null = null;
   if (outputSchema) {
     try {
-      validator = ajv.compile(outputSchema);
-    } catch {
-      validator = null;
+      validator = compileCached(asJSONSchemaObject(outputSchema));
+    } catch (err) {
+      schemaCompileError = err instanceof Error ? err.message : String(err);
     }
   }
   const dataSchema: Record<string, unknown> = outputSchema
@@ -198,6 +216,13 @@ function buildOutputDef(outputSchema: Record<string, unknown> | null): RuntimeTo
     },
     handler: async (rawArgs) => {
       const { data } = (rawArgs ?? {}) as { data?: Record<string, unknown> };
+      if (schemaCompileError) {
+        return toolError(
+          `This agent's declared output schema cannot be compiled: ${schemaCompileError}\n\n` +
+            "No output can be recorded until the manifest's `output.schema` is a valid " +
+            "JSON Schema 2020-12 document. This is not something the run can work around.",
+        );
+      }
       if (validator && !validator(data)) {
         const errors = (validator.errors ?? [])
           .map((e) => `  - ${e.instancePath || "/"} ${e.message}`)
@@ -373,11 +398,7 @@ export interface PublishedFile extends RunAndWaitFile {
   sha256: string;
 }
 
-/**
- * The canonical `file.published` run event for a stored file. Ingestion also
- * accepts the pre-#1177 shape (`type: "document.published"` with a
- * `document_id` field) from a runtime image built before the rename.
- */
+/** The canonical `file.published` run event for a stored file. */
 export interface FilePublishedEvent extends RuntimeToolEvent {
   type: "file.published";
   file_id: string;
@@ -495,11 +516,10 @@ export function reEmitRuntimeToolEvents(
       ev &&
       typeof ev === "object" &&
       typeof (ev as { type?: unknown }).type === "string" &&
-      // Trust boundary: only forward the closed set of accepted run-event
-      // types (canonical + the retired spellings above). A type outside it is
-      // dropped — it can only come from an untrusted upstream attempting to
-      // forge a run event.
-      ACCEPTED_RUNTIME_TOOL_EVENT_TYPE_SET.has((ev as { type: string }).type)
+      // Trust boundary: forward only the CLOSED canonical set. A type outside
+      // it is dropped — it can only come from an untrusted upstream attempting
+      // to forge a run event.
+      CANONICAL_RUNTIME_TOOL_EVENT_TYPE_SET.has((ev as { type: string }).type)
     ) {
       emit(ev as RuntimeToolEvent);
     }

@@ -1,14 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import {
-  RUN_DETAIL_TABS,
-  RUN_DETAIL_TAB_HASHES,
-  effectiveRunDetailTab,
-  initialRunDetailTab,
-  type RunDetailTabHash,
-  type RunTabAvailability,
-} from "../run-detail-tabs";
+import * as module_ from "../run-detail-tabs";
+import { RUN_DETAIL_TABS, initialRunDetailTab, type RunTabAvailability } from "../run-detail-tabs";
 
 const available = (overrides: Partial<RunTabAvailability> = {}): RunTabAvailability => ({
   producedFileCount: 0,
@@ -22,55 +16,18 @@ describe("run detail tabs", () => {
     expect([...RUN_DETAIL_TABS]).toEqual(["outcome", "files", "execution", "configuration"]);
   });
 
-  it("renders every pane for every run, so no hash can land on a missing tab", () => {
-    // The old set gated `result` and `memory` on their content; a deep link to
-    // either had to be bounced elsewhere. Nothing is gated any more, which is
-    // what lets `effectiveRunDetailTab` be a pure hash mapping.
-    for (const tab of RUN_DETAIL_TABS) {
-      expect(effectiveRunDetailTab(tab)).toBe(tab);
-    }
-  });
-});
-
-describe("retired tab hashes", () => {
-  /**
-   * Every hash the page has ever put in a URL. Each one is still out there in
-   * a bookmark, in back-history, or in a link pasted into an old chat message,
-   * and each must resolve to a pane that renders — a hash that stops resolving
-   * silently falls back to the default tab, which nobody reports as a bug.
-   */
-  const RETIRED: Record<string, string> = {
-    // The single featured output, and the `output` tool's value: both are
-    // sections of Outcome now.
-    deliverable: "outcome",
-    result: "outcome",
-    // Memory is something the run produced, so it moved with the rest.
-    memory: "outcome",
-    // The file list under its pre-#1177 name.
-    documents: "files",
-    // Both described how the run ran.
-    logs: "execution",
-    info: "execution",
-  };
-
-  for (const [hash, target] of Object.entries(RETIRED)) {
-    it(`sends #${hash} to the live "${target}" pane`, () => {
-      expect(RUN_DETAIL_TAB_HASHES).toContain(hash as RunDetailTabHash);
-      expect(RUN_DETAIL_TABS).not.toContain(hash as never);
-
-      const resolved = effectiveRunDetailTab(hash as RunDetailTabHash);
-      expect(resolved).toBe(target as never);
-      // The redirect target is a LIVE tab — never another retired hash.
-      expect(RUN_DETAIL_TABS).toContain(resolved);
-    });
-  }
-
-  it("accepts every retired hash regardless of what the run holds", () => {
-    // Unconditionally: all four panes render, so a redirect can never land on
-    // a blank pane — including for a run that produced nothing at all.
-    for (const hash of Object.keys(RETIRED)) {
-      expect(RUN_DETAIL_TABS).toContain(effectiveRunDetailTab(hash as RunDetailTabHash));
-    }
+  it("exports no hash vocabulary beyond the live panes", () => {
+    // The module used to export RUN_DETAIL_TAB_HASHES — the live tabs plus six
+    // retired ones — alongside a mapping function and an address-bar rewrite.
+    // The tab list IS the hash list now, which is what makes the URL contract
+    // one thing rather than two that can disagree.
+    expect(Object.keys(module_)).toEqual(
+      expect.not.arrayContaining([
+        "RUN_DETAIL_TAB_HASHES",
+        "effectiveRunDetailTab",
+        "runDetailTabHashRewrite",
+      ]),
+    );
   });
 });
 

@@ -63,11 +63,11 @@ async function seedDoc(
     endUserId?: string | null;
   } = {},
 ): Promise<string> {
-  const docId = `doc_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
+  const docId = `file_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
   const bytes = new TextEncoder().encode(opts.body ?? HTML);
   const safeName = "page.html";
   const storagePath = `${ctx.defaultAppId}/${docId}/${safeName}`;
-  await uploadStream("documents", storagePath, new Blob([bytes]).stream(), { exclusive: true });
+  await uploadStream("files", storagePath, new Blob([bytes]).stream(), { exclusive: true });
   await db.insert(files).values({
     id: docId,
     orgId: opts.orgId ?? ctx.orgId,
@@ -75,7 +75,7 @@ async function seedDoc(
     purpose: opts.purpose ?? "agent_output",
     userId: opts.userId ?? null,
     endUserId: opts.endUserId ?? null,
-    storageKey: `documents/${storagePath}`,
+    storageKey: `files/${storagePath}`,
     name: safeName,
     mime: opts.mime ?? "text/html",
     size: opts.size ?? bytes.byteLength,

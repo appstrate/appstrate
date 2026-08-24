@@ -47,7 +47,7 @@ interface AuthPipelineOptions {
    * before `await boot()` finishes loading modules, so a snapshot at
    * wire-time would miss module contributions.
    */
-  publicPaths: () => Set<string>;
+  publicPaths: () => ReadonlySet<string>;
   /**
    * Accessor for module-contributed auth strategies, iterated in order.
    * The first strategy returning a non-null resolution claims the
@@ -247,10 +247,18 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
     // end-users) from hitting platform routes. The realm is denormalized
     // onto the session row at create time (`databaseHooks.session.create
     // .before` + `session.additionalFields.realm` in packages/db/src/
-    // auth.ts), and `cookieCache` is disabled, so `getSession` always
-    // returns the fresh DB row with the declared additionalField — read
-    // it from there instead of re-querying the user table on every
-    // session-backed request. Fall back to the user-table lookup only
+    // auth.ts), so `getSession` returns it with the declared additionalField
+    // — read it from there instead of re-querying the user table on every
+    // session-backed request.
+    //
+    // This used to say "and `cookieCache` is disabled", which is no longer
+    // true in the absolute: it is an operator knob
+    // (`AUTH_SESSION_COOKIE_CACHE_SECONDS`, `packages/db/src/auth.ts`),
+    // defaulting to off. Nothing here depends on which way it is set — the
+    // cached cookie carries the same declared fields — but the fallback
+    // below is what keeps the read correct either way.
+    //
+    // Fall back to the user-table lookup only
     // when the field is absent (sessions created before the
     // denormalization shipped, or a BA version stripping undeclared
     // output fields) so audience enforcement never silently degrades.
@@ -360,7 +368,11 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
  * (e.g. pairing-token bearer auth on /pair/redeem) without polluting the
  * static `publicPaths` allowlist with conditionals.
  */
-export function skipAuth(path: string, publicPaths: Set<string>, headers?: Headers): boolean {
+export function skipAuth(
+  path: string,
+  publicPaths: ReadonlySet<string>,
+  headers?: Headers,
+): boolean {
   if (!path.startsWith("/api/")) return true;
   if (path.startsWith("/api/auth/")) return true; // Better Auth handles its own auth
   if (path.startsWith("/api/realtime/")) return true; // SSE endpoints use cookie auth internally
@@ -393,12 +405,8 @@ export function skipAuth(path: string, publicPaths: Set<string>, headers?: Heade
   return false;
 }
 
-// `documents` is the deprecated pre-#1177 spelling of `files` — a runtime image
-// older than the platform still calls it, and its requests carry a run HMAC and
-// NO session, so leaving it out of this pattern turns every one of them into a
-// 401 the image reports as a fatal provisioning fault.
 const REMOTE_RUN_EVENT_PATH_PATTERN =
-  /^\/api\/runs\/[^/]+\/(events(\/finalize|\/heartbeat)?|workspace|(files|documents)(\/[^/]+)?)$/;
+  /^\/api\/runs\/[^/]+\/(events(\/finalize|\/heartbeat)?|workspace|files(\/[^/]+)?)$/;
 
 /**
  * Device-flow + CLI-token content-type shim.

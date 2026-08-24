@@ -338,7 +338,6 @@ describe("integration refresh-failure escalation", () => {
       .select({
         refreshFailureCount: integrationConnections.refreshFailureCount,
         needsReconnection: integrationConnections.needsReconnection,
-        lastRefreshFailureAt: integrationConnections.lastRefreshFailureAt,
       })
       .from(integrationConnections)
       .where(eq(integrationConnections.id, connId))
@@ -355,7 +354,6 @@ describe("integration refresh-failure escalation", () => {
     const row = await readRow(connId);
     expect(row.refreshFailureCount).toBe(4);
     expect(row.needsReconnection).toBe(false); // expiry gate blocks escalation
-    expect(row.lastRefreshFailureAt).not.toBeNull();
   });
 
   it("does NOT escalate while the token is expired but within the grace window", async () => {
@@ -414,7 +412,6 @@ describe("integration refresh-failure escalation", () => {
 
     const row = await readRow(connId);
     expect(row.refreshFailureCount).toBe(0);
-    expect(row.lastRefreshFailureAt).toBeNull();
     expect(row.needsReconnection).toBe(false);
   });
 
@@ -444,7 +441,6 @@ describe("integration refresh-failure escalation", () => {
 
     const row = await readRow(connId);
     expect(row.refreshFailureCount).toBe(2);
-    expect(row.lastRefreshFailureAt).not.toBeNull();
   });
 
   it("a transient upstream failure during refresh increments the counter and rethrows", async () => {

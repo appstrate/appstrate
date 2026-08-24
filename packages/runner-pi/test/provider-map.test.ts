@@ -13,8 +13,9 @@ import {
   deriveProviderFromApi,
   derivePiProvider,
   PI_PROVIDER_BY_MODEL_PROVIDER,
-} from "../src/index.ts";
-import { getBuiltinProviders, streamSimple } from "../src/pi-sdk.ts";
+} from "../src/provider-map.ts";
+import { streamSimple } from "@earendil-works/pi-ai/compat";
+import { getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { Api, Model } from "../src/pi-sdk.ts";
 
 describe("deriveProviderFromApi", () => {

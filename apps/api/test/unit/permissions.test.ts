@@ -108,17 +108,31 @@ describe("validateScopes", () => {
     expect(memberResult).not.toContain("agents:write");
   });
 
-  it("rejects session-only permissions", () => {
+  it("throws on session-only permissions instead of dropping them", () => {
+    // org/members are real permissions but session-only: no API key can ever
+    // carry them, so asking for one is a caller error, not a narrowing.
     const scopes = ["org:read", "org:delete", "members:invite"];
-    const ownerResult = validateScopes(scopes, "owner");
-    // org/members are session-only, excluded from API keys
-    expect(ownerResult).toHaveLength(0);
+    expect(() => validateScopes(scopes, "owner")).toThrow(/org:read, org:delete, members:invite/);
   });
 
-  it("rejects invalid/unknown scope strings", () => {
+  it("throws on invalid/unknown scope strings, naming every offender", () => {
     const scopes = ["invalid:scope", "not-a-permission", ""];
-    const result = validateScopes(scopes, "owner");
-    expect(result).toHaveLength(0);
+    let thrown: unknown;
+    try {
+      validateScopes(scopes, "owner");
+    } catch (err) {
+      thrown = err;
+    }
+    const status = (thrown as { status?: number } | undefined)?.status;
+    expect(status).toBe(400);
+    expect((thrown as Error).message).toContain("invalid:scope");
+    expect((thrown as Error).message).toContain("not-a-permission");
+  });
+
+  it("still narrows silently when the scope is real but above the creator role", () => {
+    // A member cannot delegate what they do not hold — that is a rule, not a
+    // typo, and the scopes-omitted default depends on it.
+    expect(validateScopes(["agents:read", "agents:write"], "member")).toEqual(["agents:read"]);
   });
 
   it("returns empty array for empty input", () => {
@@ -154,33 +168,6 @@ describe("resolveApiKeyPermissions", () => {
     expect(perms.has("agents:read")).toBe(true);
     expect(perms.has("agents:write")).toBe(false);
     expect(perms.has("agents:delete")).toBe(false);
-  });
-});
-
-describe("retired permission-resource spellings (#1177)", () => {
-  /**
-   * `documents:read` / `documents:delete` are persisted inside every API key
-   * and OAuth grant issued before the rename. Both functions below FILTER —
-   * they drop what they do not recognise rather than rejecting it — so an
-   * un-normalized legacy scope is not an error: it is a credential that
-   * silently does less than it was granted. Migration `0044` rewrites the
-   * stored strings; this is the read side, which has to keep working for a
-   * token minted before the migration ran.
-   */
-  it("resolveApiKeyPermissions canonicalizes a stored documents:* scope", () => {
-    const perms = resolveApiKeyPermissions(["documents:read", "documents:delete"], "owner");
-    expect(perms.has("files:read")).toBe(true);
-    expect(perms.has("files:delete")).toBe(true);
-    expect(perms.size).toBe(2);
-  });
-
-  it("validateScopes accepts and rewrites a retired scope at key creation", () => {
-    expect(validateScopes(["documents:read"], "owner")).toEqual(["files:read"]);
-  });
-
-  it("does not duplicate when both spellings are stored on one key", () => {
-    const perms = resolveApiKeyPermissions(["documents:read", "files:read"], "owner");
-    expect([...perms]).toEqual(["files:read"]);
   });
 });
 

@@ -58,7 +58,10 @@ export function createApiKeysRouter() {
 
     const { name, expiresAt } = data;
     const orgRole = c.get("orgRole");
-    // If scopes omitted or empty, grant all API-key-allowed scopes for the creator's role
+    // If scopes omitted or empty, grant all API-key-allowed scopes for the
+    // creator's role. That branch hands `validateScopes` the allowlist itself,
+    // so it cannot trip the refusal — only the caller-supplied branch can, and
+    // only on a scope no API key could ever carry.
     const validatedScopes =
       data.scopes && data.scopes.length > 0
         ? validateScopes(data.scopes, orgRole)

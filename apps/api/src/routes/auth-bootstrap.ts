@@ -61,7 +61,7 @@ import {
 import { getErrorMessage } from "@appstrate/core/errors";
 import { triggerPostBootstrapOrg } from "../lib/post-bootstrap-hook.ts";
 
-const redeemSchema = z.object({
+export const redeemSchema = z.object({
   token: z.string().min(1).max(128),
   email: z.email().toLowerCase().trim(),
   name: z.string().min(1).max(120).trim(),

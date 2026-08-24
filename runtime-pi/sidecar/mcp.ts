@@ -62,6 +62,17 @@ import {
 } from "@appstrate/mcp-transport";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { isTextShapedContentType } from "@appstrate/core/mime";
+// The canonical api_call/api_upload naming. NOT copied: the reason this file
+// gave for copying it — "the sidecar bundle deliberately avoids the manifest
+// schema stack" — named `@appstrate/core/integration`, but the definition lives
+// in `@appstrate/afps-shared/api-tool-naming`, which imports one sibling module
+// and nothing else, and which this file already pulls in through
+// `@appstrate/core/mime` (a verbatim re-export of `@appstrate/afps-shared/mime`).
+import {
+  API_CALL_TOOL_NAME,
+  API_UPLOAD_TOOL_NAME,
+  apiUploadToolNameFor,
+} from "@appstrate/afps-shared/api-tool-naming";
 import {
   RUN_HISTORY_INJECTED_TOOL,
   RECALL_MEMORY_INJECTED_TOOL,
@@ -931,7 +942,7 @@ function buildSidecarTools(options: MountMcpOptions): {
     );
     if (protocols.length === 0) return null;
     const apiCallKey = apiCallToolKey(integ);
-    const uploadToolName = apiUploadToolKey(apiCallKey);
+    const uploadToolName = apiUploadToolNameFor(apiCallKey);
     return {
       descriptor: {
         name: `${integ.namespace}__${uploadToolName}`,
@@ -1798,15 +1809,11 @@ export function createApiCallToolDefs(
   out.push({ ...call, descriptor: { ...call.descriptor, name: apiCallKey } });
   const upload = makeApiUploadTool(integ);
   if (upload) {
-    const name = apiUploadToolKey(apiCallKey);
+    const name = apiUploadToolNameFor(apiCallKey);
     out.push({ ...upload, descriptor: { ...upload.descriptor, name } });
   }
   return out;
 }
-
-/** Unprefixed tool names for the generic credential-injecting tools. */
-const API_CALL_TOOL_NAME = "api_call";
-const API_UPLOAD_TOOL_NAME = "api_upload";
 
 /**
  * The auth-scoped, unprefixed tool key for an integration's api_call surface:
@@ -1822,17 +1829,6 @@ const API_UPLOAD_TOOL_NAME = "api_upload";
  */
 function apiCallToolKey(integ: ApiCallIntegrationConfig): string {
   return integ.toolName ?? API_CALL_TOOL_NAME;
-}
-
-/**
- * Derive the `api_upload` companion key from an api_call key, preserving the
- * auth-scoped token suffix. Mirrors `apiUploadToolNameFor` in
- * `@appstrate/core/integration` (which the platform catalog uses); the two are
- * pinned in lockstep by a core test. Duplicated rather than imported because
- * the sidecar bundle deliberately avoids the manifest schema stack.
- */
-function apiUploadToolKey(apiCallToolName: string): string {
-  return `${API_UPLOAD_TOOL_NAME}${apiCallToolName.slice(API_CALL_TOOL_NAME.length)}`;
 }
 
 /**

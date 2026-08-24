@@ -183,25 +183,17 @@ interface ScheduleFormDeps {
 }
 
 /**
- * The agent-detail query's failure, for a page that renders a loading state
- * until {@link useScheduleFormDeps} resolves. A deleted agent or a revoked
- * permission never lets the detail land, so without this the page spins
- * forever. Same query key as that hook — React Query serves it from the cache,
- * no second request.
- */
-export function useScheduleFormDepsError(
-  packageId: string | undefined,
-  version?: string,
-): Error | null {
-  return usePackageDetail("agent", packageId, { version }).error;
-}
-
-/**
  * Aggregates the agent-detail / model / proxy lookups that both
  * `ScheduleCreatePage` and `ScheduleEditPage` feed into `<ScheduleForm>`.
- * Returns `null` until the agent detail has landed — or when no agent is
- * selected — so a consumer can never mount a form on settings it does not
- * have yet.
+ *
+ * `deps` is `null` until the agent detail has landed — or when no agent is
+ * selected — so a consumer can never mount a form on settings it does not have
+ * yet. `error` is the agent-detail query's failure: a deleted agent or a
+ * revoked permission never lets the detail land, so a page that only watched
+ * `deps` would spin forever. They ride on ONE hook because they are two reads
+ * of the same query — split across two hooks the arguments had to be kept in
+ * sync by hand, and a `version` passed to one but not the other silently
+ * reported the wrong query's error.
  *
  * `version` (#770) pins the agent-detail projection to a published version so
  * the input / integrations / skills the form renders match the version the run
@@ -210,18 +202,18 @@ export function useScheduleFormDepsError(
 export function useScheduleFormDeps(
   packageId: string | undefined,
   version?: string,
-): ScheduleFormDeps | null {
-  const { data: agentDetail } = usePackageDetail("agent", packageId, { version });
+): { deps: ScheduleFormDeps | null; error: Error | null } {
+  const { data: agentDetail, error } = usePackageDetail("agent", packageId, { version });
   const { data: agentModel } = useAgentModel(packageId);
   const { data: agentProxy } = useAgentProxy(packageId);
 
-  // Null until the AGENT DETAIL itself lands, not merely until an agent is
-  // picked: `ScheduleForm` seeds its input state once, in a `useState`
+  // `deps` stays null until the AGENT DETAIL itself lands, not merely until an
+  // agent is picked: `ScheduleForm` seeds its input state once, in a `useState`
   // initialiser, and a form mounted on empty settings would seed a field that
   // has since been locked — unremovable through the UI and refused on save
   // (400 `locked_input_field`). `key={schedule.id}` means no remount when the
   // detail arrives, so the only safe answer while it is in flight is "not yet".
-  if (!packageId || !agentDetail) return null;
+  if (!packageId || !agentDetail) return { deps: null, error };
 
   const integrationDeps = (agentDetail.dependencies?.integrations ?? []).map((d) => ({
     id: d.id,
@@ -233,15 +225,18 @@ export function useScheduleFormDeps(
     ...(s.name ? { name: s.name } : {}),
   }));
   return {
-    // The detail's own object — a fresh literal here would change identity on
-    // every render and defeat the launch form's memoized partition.
-    inputWrapper: agentDetail.input,
-    persistedModelId: agentModel?.modelId ?? null,
-    persistedGenerationConfig: agentModel?.generation ?? null,
-    persistedProxyId: agentProxy?.proxyId ?? null,
-    persistedVersion: agentDetail.version ?? null,
-    hasFileInputs: schemaHasFileFields(agentDetail.input.schema),
-    agentIntegrations: integrationDeps,
-    skills: skillDeps,
+    deps: {
+      // The detail's own object — a fresh literal here would change identity on
+      // every render and defeat the launch form's memoized partition.
+      inputWrapper: agentDetail.input,
+      persistedModelId: agentModel?.modelId ?? null,
+      persistedGenerationConfig: agentModel?.generation ?? null,
+      persistedProxyId: agentProxy?.proxyId ?? null,
+      persistedVersion: agentDetail.version ?? null,
+      hasFileInputs: schemaHasFileFields(agentDetail.input.schema),
+      agentIntegrations: integrationDeps,
+      skills: skillDeps,
+    },
+    error,
   };
 }

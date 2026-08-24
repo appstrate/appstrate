@@ -28,6 +28,7 @@ import type { LlmProxyApiKeyConfig, ModelSwap, SidecarConfig } from "./helpers.t
 import { LLM_PROXY_TIMEOUT_MS } from "./helpers.ts";
 import { anthropicThinkingBudgets } from "@appstrate/core/model-generation";
 import { PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "@appstrate/runner-pi/provider-map";
+import { PLATFORM_MODEL_COMPAT } from "@appstrate/runner-pi/model-compat";
 import { logger } from "./logger.ts";
 import { syntheticAliasErrorBody, syntheticAliasErrorMessage } from "./model-swap.ts";
 import { streamBacking } from "./pi-sdk.ts";
@@ -53,11 +54,16 @@ export function _resetSdkDriftWarningForTesting(): void {
 }
 
 /**
- * Name a container/sidecar pi-ai mismatch once — the images deploy
- * independently (`PI_IMAGE`/`SIDECAR_IMAGE`) and `PiMessagesEvent` is
- * pi-ai-internal. Warns rather than rejects (a mismatch usually still works;
- * absent = older image). The header is container-controlled, so the latch is a
- * SINGLE flag and the value is TRUNCATED: keying a cache on it would let the
+ * Name a container/sidecar pi-ai mismatch once. `PI_IMAGE`/`SIDECAR_IMAGE` are
+ * a version contract, not two knobs — the env schema fails platform boot when
+ * their tags disagree — so what is left for this to catch is the drift a tag
+ * cannot express: the SAME tag built twice (`:latest` rebuilt on one side only,
+ * which `services/orchestrator/runtime-image-pair.ts` only warns about), or a
+ * digest-pinned pair, which the tag rule exempts. `PiMessagesEvent` is
+ * pi-ai-internal, so that drift matters here. Warns rather than rejects — a
+ * mismatch usually still works, and an absent header means a container built
+ * before the header existed. The header is container-controlled, so the latch is
+ * a SINGLE flag and the value is TRUNCATED: keying a cache on it would let the
  * container grow the sidecar's memory one distinct value at a time.
  */
 function warnOnSdkDrift(request: Request): void {
@@ -100,7 +106,6 @@ interface PiMessagesRequestBody {
     temperature?: number;
     maxTokens?: number;
     reasoning?: ThinkingLevel;
-    cacheRetention?: SimpleStreamOptions["cacheRetention"];
     sessionId?: string;
   };
 }
@@ -121,7 +126,12 @@ export interface PiMessagesBackendDeps {
   llm: LlmProxyApiKeyConfig;
   /** The alias descriptor. Its `backing` is what this module rebuilds the Model from. */
   swap: ModelSwap;
-  /** REAL (unmasked) token limits — the sidecar is trusted with them, the container is not. */
+  /**
+   * The backing's real token limits. Not a sidecar-only secret: the container
+   * gets the identical pair, because it needs them to size compaction and the
+   * `usage.input` count a run reports out-tells them anyway (`container-env.ts`,
+   * `MODEL_ALIASES.md`). They are here so the rebuilt `Model` clamps the same way.
+   */
   limits: Pick<SidecarConfig, "modelContextWindow" | "modelMaxTokens">;
   /** Defaults to {@link streamBacking}. */
   streamBackingFn?: BackingStreamFn;
@@ -154,11 +164,17 @@ export function buildBackingModel(deps: PiMessagesBackendDeps): Model<Api> {
     baseUrl: llm.baseUrl,
     reasoning: backing.reasoning,
     ...(backing.reasoningLevelMap ? { thinkingLevelMap: backing.reasoningLevelMap } : {}),
-    // pi-ai gates its adaptive branch on `compat.forceAdaptiveThinking`, which
-    // it sources from metadata it has none of for a record rebuilt from the
-    // platform's catalog. Without the flag an adaptive backing gets the classic
-    // `thinking: {type:"enabled", budget_tokens}` shape and answers 400.
-    ...(swap.anthropicAdaptiveReasoning ? { compat: { forceAdaptiveThinking: true } } : {}),
+    compat: {
+      // The STRUCTURAL half of the cache-retention refusal — see
+      // {@link FORWARDED_OPTION_KEYS} for the request-body half, and
+      // `PLATFORM_MODEL_COMPAT` for the billing reason both close.
+      ...PLATFORM_MODEL_COMPAT,
+      // pi-ai gates its adaptive branch on `compat.forceAdaptiveThinking`, which
+      // it sources from metadata it has none of for a record rebuilt from the
+      // platform's catalog. Without the flag an adaptive backing gets the classic
+      // `thinking: {type:"enabled", budget_tokens}` shape and answers 400.
+      ...(swap.anthropicAdaptiveReasoning ? { forceAdaptiveThinking: true } : {}),
+    },
     input: narrowInputModalities(backing.input),
     cost: { ...ZERO_RATES },
     // The REAL limits: `maxTokens` is the upstream response cap, `contextWindow`
@@ -181,21 +197,29 @@ function narrowInputModalities(input: ReadonlyArray<string>): ("text" | "image")
  * The `options` members this boundary forwards upstream — the whitelist half of
  * {@link projectRequestOptions}. All portable `pi-messages` vocabulary, so
  * forwarding them grants the container nothing it could not already ask for.
+ *
+ * `cacheRetention` is portable vocabulary too and is deliberately NOT here. The
+ * body is the CONTAINER's, so the agent picks its value, and Anthropic long
+ * retention bills cache-creation tokens at 2× the input rate — a bucket the
+ * platform's authoritative `computeTokenCost` has no term for. Forwarding it
+ * would let an aliased run make its own ledger row cheaper than the call it
+ * made. `apps/api/test/unit/runner-cost-parity.test.ts` pins that as the
+ * precondition for dropping pi-ai's `cacheWrite1h` branch.
  */
 export const FORWARDED_OPTION_KEYS: ReadonlySet<string> = new Set([
   "temperature",
   "maxTokens",
   "reasoning",
-  "cacheRetention",
   "sessionId",
 ]);
 
 /**
  * Log every field that reached this boundary and will NOT reach the backing:
  * `toolChoice`, whose value space differs per vendor so honouring it would mean
- * the per-vendor mapping table this design avoids, and `debug`, which asks a
- * backend for routing metadata about itself. Reported as a SET DIFFERENCE
- * against {@link FORWARDED_OPTION_KEYS}, never a blacklist of those two names,
+ * the per-vendor mapping table this design avoids; `cacheRetention`, which the
+ * platform cannot price (see {@link FORWARDED_OPTION_KEYS}); and `debug`, which
+ * asks a backend for routing metadata about itself. Reported as a SET DIFFERENCE
+ * against {@link FORWARDED_OPTION_KEYS}, never a blacklist of those three names,
  * so an option a future pi-ai adds is visible the day it appears instead of
  * vanishing with the constraint the agent asked for. WARNS, never rejects —
  * failing would break every aliased run on a pi upgrade. Names FIELDS only:
@@ -236,7 +260,6 @@ function projectRequestOptions(
     ...(incoming.temperature !== undefined ? { temperature: incoming.temperature } : {}),
     ...(incoming.maxTokens !== undefined ? { maxTokens: incoming.maxTokens } : {}),
     ...(incoming.reasoning !== undefined ? { reasoning: incoming.reasoning } : {}),
-    ...(incoming.cacheRetention !== undefined ? { cacheRetention: incoming.cacheRetention } : {}),
     ...(incoming.sessionId !== undefined ? { sessionId: incoming.sessionId } : {}),
     // A classic (non-adaptive) Anthropic call needs a request-scoped thinking
     // budget that `PiMessagesOptions` models no field for, so the container

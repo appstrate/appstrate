@@ -141,12 +141,27 @@ export async function recordLlmUsageReliably(
   }
 }
 
-export async function shutdownLlmUsageRetryWorker(): Promise<void> {
-  await usageRetryQueue?.shutdown();
+async function closeQueue(graceMs?: number): Promise<void> {
+  await usageRetryQueue?.shutdown(graceMs);
   usageRetryQueue = null;
 }
 
-/** Test-only reset for files that create the queue lifecycle explicitly. */
+export async function shutdownLlmUsageRetryWorker(): Promise<void> {
+  // Production grace: a row 500ms into backoff when SIGTERM arrives is billable
+  // traffic, and the queue's default budget lets its remaining attempts run.
+  await closeQueue();
+}
+
+/**
+ * Test-only reset for files that create the queue lifecycle explicitly.
+ *
+ * Zero grace, deliberately. This queue is process-global: under a full-suite
+ * run the jobs sleeping between attempts here were enqueued by OTHER test
+ * files — a ledger row whose org was truncated out from under it retries every
+ * 500ms/1s/2s/4s/8s and never succeeds. Inheriting the production budget makes
+ * a test's own teardown block on that foreign work until it times out. A test
+ * owns nothing it has not already asserted, so it waits for nothing.
+ */
 export async function _resetLlmUsageRetryWorkerForTests(): Promise<void> {
-  await shutdownLlmUsageRetryWorker();
+  await closeQueue(0);
 }

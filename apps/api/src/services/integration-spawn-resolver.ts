@@ -34,11 +34,7 @@ import {
   resolveAfpsHttpDelivery,
 } from "@appstrate/connect";
 import type { AfpsHttpDelivery as ConnectAfpsHttpDelivery } from "@appstrate/connect";
-import {
-  canonicalizeApiToolName,
-  getApiCallConfigs,
-  resolveEffectiveToolSelection,
-} from "@appstrate/core/integration";
+import { getApiCallConfigs, resolveEffectiveToolSelection } from "@appstrate/core/integration";
 import type {
   IntegrationManifest,
   ResolvedConnection,
@@ -218,9 +214,10 @@ export async function resolveIntegrationSpawns(
         // missing referenced package) stays a per-integration skip — now a
         // MARKED one: the reason travels back to the caller in `dropped`.
         if (err instanceof BundleError && err.code === "DEPENDENCY_UNRESOLVED") throw err;
-        // The server-side log stays: it carries `applicationId` and fires even
-        // for callers that ignore `dropped` (the credential proxy, tests). The
-        // run-visible marker is additive, not a replacement.
+        // The server-side log stays: it carries `applicationId`, which the
+        // run-visible marker does not, and it fires even for a caller that
+        // ignores `dropped` — today only tests, `run-context-builder.ts` being
+        // the sole production caller. The marker is additive, not a replacement.
         logger.warn("integration resolve failed; skipping", {
           integrationId: entry.id,
           applicationId,
@@ -338,9 +335,7 @@ async function resolveOne(
       (cfg) =>
         wildcardSelection ||
         selectedTools!.has(cfg.toolName) ||
-        (cfg.legacyToolName !== undefined && selectedTools!.has(cfg.legacyToolName)) ||
-        (cfg.uploadToolName !== undefined && selectedTools!.has(cfg.uploadToolName)) ||
-        (cfg.legacyUploadToolName !== undefined && selectedTools!.has(cfg.legacyUploadToolName)),
+        (cfg.uploadToolName !== undefined && selectedTools!.has(cfg.uploadToolName)),
     )
     .map((cfg) => {
       const auth = manifest.auths?.[cfg.authKey] as AfpsManifestAuth | undefined;
@@ -561,11 +556,7 @@ async function resolveOne(
   //   - the connect-login `toolName` when the wildcard branch is in effect
   //     (only then does the allowlist no longer filter it out)
   // Connect tools never reach the agent's LLM regardless of agent selection.
-  const hiddenToolsUnion: string[] = [...(manifest.hidden_tools ?? [])];
-  for (const name of manifest.hidden_tools ?? []) {
-    const canonical = canonicalizeApiToolName(manifest, name);
-    if (!hiddenToolsUnion.includes(canonical)) hiddenToolsUnion.push(canonical);
-  }
+  const hiddenToolsUnion: string[] = [...new Set(manifest.hidden_tools ?? [])];
   if (wildcardSelection && deliveries.connectLogin) {
     const loginName = deliveries.connectLogin.toolName;
     if (!hiddenToolsUnion.includes(loginName)) hiddenToolsUnion.push(loginName);

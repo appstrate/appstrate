@@ -1,38 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The wiring around `initialRunDetailTab` / `effectiveRunDetailTab`. The pure
- * functions have their own suite (`lib/test/run-detail-tabs.test.ts`); what is
- * covered here is the part that was untested and wrong — WHEN the default is
- * captured, and what the address bar is left holding.
+ * The wiring around `initialRunDetailTab`. The pure functions have their own
+ * suite (`lib/test/run-detail-tabs.test.ts`); what is covered here is the part
+ * that was untested and wrong — WHEN the default is captured.
  *
  * Same no-DOM harness as the other component suites: `renderToStaticMarkup`
  * runs the render path (state initialisers and the render-phase capture
  * included) but neither effects nor re-renders — and a component's hook state
  * does NOT survive a parent's render-phase update in this renderer (measured:
- * the child's `useState` initialiser simply runs again). So the two behaviours
- * that need a second render — the capture being FROZEN once taken, and the
- * retired-hash rewrite TERMINATING — are not observable here at all.
+ * the child's `useState` initialiser simply runs again). So the behaviour that
+ * needs a second render — the capture being FROZEN once taken — is not
+ * observable here at all.
  *
- * They are not pinned on source text either: `expect(SOURCE).toContain(…)` is
+ * It is not pinned on source text either: `expect(SOURCE).toContain(…)` is
  * satisfied by any file that happens to hold the string, fails on a rename, and
- * proves nothing about the behaviour. Both decisions live in pure functions
- * beside `effectiveRunDetailTab` instead (`capturedRunDetailTab`,
- * `runDetailTabHashRewrite`) and are tested as functions.
+ * proves nothing about the behaviour. That decision lives in a pure function
+ * (`capturedRunDetailTab`) and is tested as one.
  */
 
 import { describe, it, expect } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { RunDetailTabsController } from "../run-detail-tabs-controller.tsx";
-import {
-  RUN_DETAIL_TAB_HASHES,
-  capturedRunDetailTab,
-  effectiveRunDetailTab,
-  runDetailTabHashRewrite,
-  type RunDetailTabHash,
-  type RunTabAvailability,
-} from "../../lib/run-detail-tabs.ts";
+import { capturedRunDetailTab, type RunTabAvailability } from "../../lib/run-detail-tabs.ts";
 
 /** The tab the controller hands its children, for a given URL + inputs. */
 function activeTab(
@@ -121,34 +112,19 @@ describe("the default pane is captured from settled inputs", () => {
 });
 
 describe("retired tab hashes", () => {
-  it("renders the pane that absorbed the retired hash", () => {
-    expect(activeTab(NOTHING, { memorySettled: true, hash: "#documents" })).toBe("files");
-    expect(activeTab(NOTHING, { memorySettled: true, hash: "#deliverable" })).toBe("outcome");
+  it("falls through to the default pane instead of resolving", () => {
+    // `#deliverable` used to render Outcome and `#logs` Execution, each also
+    // rewritten in the address bar. Both now behave like any hash the page
+    // does not know: the default pane, silently. For a run that produced
+    // nothing that default is Execution — so `#logs` LOOKS unchanged here and
+    // `#deliverable` is the case that actually distinguishes the two.
+    expect(activeTab(NOTHING, { memorySettled: true, hash: "#deliverable" })).toBe("execution");
     expect(activeTab(NOTHING, { memorySettled: true, hash: "#logs" })).toBe("execution");
-  });
-
-  it("rewrites the address bar to the canonical tab, and terminates", () => {
-    // Rendering the right pane is not enough: the user copies the URL they see,
-    // and a dead `#documents` keeps propagating. `setActiveTab` navigates with
-    // `replace: true` (see `use-tab-with-hash.ts`), so back still leaves the page.
-    expect(runDetailTabHashRewrite("documents")).toBe("files");
-    expect(runDetailTabHashRewrite("logs")).toBe("execution");
-    // Termination is the property that matters: the rewrite runs from an
-    // effect, and an effect that rewrites the URL is exactly the construct
-    // that loops in production. It stops because the mapping is idempotent —
-    // f(f(x)) === f(x) — so whatever it rewrites TO asks for no further
-    // rewrite, for every hash the URL is allowed to carry.
-    for (const hash of RUN_DETAIL_TAB_HASHES) {
-      const effective = effectiveRunDetailTab(hash);
-      expect(effectiveRunDetailTab(effective)).toBe(effective);
-      expect(runDetailTabHashRewrite(effective as RunDetailTabHash)).toBeUndefined();
-    }
-  });
-
-  it("leaves a canonical hash alone rather than rewriting it to itself", () => {
-    for (const tab of ["outcome", "files", "execution", "configuration"] as const) {
-      expect(runDetailTabHashRewrite(tab)).toBeUndefined();
-    }
+    // And against a run whose default is Outcome, the retired hash cannot pull
+    // the reader to Execution any more either.
+    expect(activeTab({ ...NOTHING, hasOutput: true }, { memorySettled: true, hash: "#logs" })).toBe(
+      "outcome",
+    );
   });
 
   it("leaves a live hash alone", () => {

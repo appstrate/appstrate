@@ -4,19 +4,27 @@
  * `/api/llm-proxy/<api>/*` — server-side LLM model injection for
  * remote-backed AFPS runs (docs/specs/REMOTE_CLI_EXECUTION_SPEC.md §Phase 3).
  *
- * Three protocol families ship today (each `urlPath` mirrors the
- * upstream SDK's own path convention so a stored `baseUrl` produces
- * the same final URL whether pi-ai calls the upstream directly or via
- * this proxy):
+ * Three protocol families ship today. Each shape's path mirrors the upstream
+ * SDK's own convention, so a stored `baseUrl` produces the same final URL
+ * whether pi-ai calls the upstream directly or via this proxy:
  *
  *   - `openai-completions`   → `/v1/chat/completions`
  *   - `anthropic-messages`   → `/v1/messages`
  *   - `mistral-conversations` → `/v1/chat/completions`
  *
- * Additional API-key families (`openai-responses`, `google-generative-ai`, …)
- * are mechanical — drop a new adapter + route and wire it here. The
- * spec explicitly resists premature abstraction so each route keeps its
- * own adapter binding instead of sharing a single dispatch table.
+ * Those paths are NOT written here. They come from `LLM_PROXY_ROUTES`
+ * (`@appstrate/runner-pi`), the one table that also builds the base URL chat
+ * and the CLI point their vendor clients at — the three used to spell the
+ * convention out separately and drift silently. Adding a family is a table row
+ * plus an adapter in the `adapters` map below; the mount loop needs no edit.
+ *
+ * This header used to claim the opposite — that "the spec explicitly resists
+ * premature abstraction so each route keeps its own adapter binding instead of
+ * sharing a single dispatch table" — for a while AFTER the dispatch table
+ * landed. The phrase appears nowhere in `docs/`: it attributed to the spec a
+ * constraint the spec does not carry, which is worse than no rationale, because
+ * the next contributor reads it as one and hand-mounts a fourth route beside
+ * the loop.
  *
  * Subscription shapes are NOT served here:
  *   - OAuth-subscription models (`claude-code`, `codex`) never flow through this
@@ -55,6 +63,7 @@ import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { invalidRequest, forbidden, notFound } from "../lib/errors.ts";
 import { assertBearerOnly } from "../lib/bearer-only.ts";
+import { LLM_PROXY_ROUTES, llmProxyUrlPath, type ProxiedApiShape } from "@appstrate/runner-pi";
 import { getRunAttribution } from "../services/state/runs.ts";
 import { enforceSystemProxyAdmission } from "../services/system-proxy-admission.ts";
 import { recordLlmLatency } from "@appstrate/core/telemetry";
@@ -77,46 +86,27 @@ export function createLlmProxyRouter() {
   const router = new Hono<AppEnv>();
   const limits = getLlmProxyLimits();
 
-  // Protocol family → (adapter, upstream path). Keep one entry per API;
-  // the route surface stays concrete per the spec.
-  const routes: Array<{
-    urlPath: string;
-    upstreamPath: string;
-    adapter: LlmProxyAdapter;
-  }> = [
-    // `upstreamPath` mirrors each SDK's own path convention so a stored
-    // `baseUrl` produces the same final URL whether pi-ai calls the
-    // upstream directly (platform runner) or via this proxy (CLI).
-    //   - OpenAI SDK appends `/chat/completions` → baseUrl carries `/v1`
-    //     (`https://api.openai.com/v1`, `https://openrouter.ai/api/v1`).
-    //   - Anthropic SDK appends `/v1/messages` → baseUrl is the bare host
-    //     (`https://api.anthropic.com`).
-    {
-      urlPath: "/openai-completions/v1/chat/completions",
-      upstreamPath: "/chat/completions",
-      adapter: openaiCompletionsAdapter,
-    },
-    {
-      urlPath: "/anthropic-messages/v1/messages",
-      upstreamPath: "/v1/messages",
-      adapter: anthropicMessagesAdapter,
-    },
-    // Mistral SDK (`@mistralai/mistralai` `chat.stream`) appends
-    // `/v1/chat/completions` to its `serverURL` — same convention as
-    // Anthropic, NOT OpenAI.
-    {
-      urlPath: "/mistral-conversations/v1/chat/completions",
-      upstreamPath: "/v1/chat/completions",
-      adapter: mistralConversationsAdapter,
-    },
-  ];
+  // Protocol family → adapter. The PATHS are not spelled out here any more:
+  // `LLM_PROXY_ROUTES` (`@appstrate/runner-pi`) owns the convention, because
+  // the chat engine and the CLI have to build a base URL that agrees with it
+  // and used to do so by hand-copying these strings. Only the adapter — the
+  // request/response translation, which is genuinely this package's business —
+  // is bound here.
+  const adapters: Record<ProxiedApiShape, LlmProxyAdapter> = {
+    "openai-completions": openaiCompletionsAdapter,
+    "anthropic-messages": anthropicMessagesAdapter,
+    "mistral-conversations": mistralConversationsAdapter,
+  };
 
-  for (const entry of routes) {
+  for (const apiShape of Object.keys(adapters) as ProxiedApiShape[]) {
+    const adapter = adapters[apiShape];
+    // `sdkPath` doubles as the upstream path — see the note on the table.
+    const upstreamPath = LLM_PROXY_ROUTES[apiShape].sdkPath;
     router.post(
-      entry.urlPath,
+      llmProxyUrlPath(apiShape),
       rateLimit(limits.rate_per_min),
       requirePermission("llm-proxy", "call"),
-      async (c) => handleProxy(c, entry.adapter, entry.upstreamPath, limits),
+      async (c) => handleProxy(c, adapter, upstreamPath, limits),
     );
   }
 

@@ -24,19 +24,85 @@
 import { Glob } from "bun";
 import { resolve, dirname, relative, sep } from "node:path";
 
-const POLICY = (process.env.MODULE_ISOLATION_POLICY ?? "fail") as "warn" | "fail" | "off";
+// Under CI the override is ignored, so a green pipeline can never be bought
+// with `MODULE_ISOLATION_POLICY=off` — same pin `verify-module-contract.ts`
+// carries for the same reason.
+const POLICY = process.env.CI
+  ? "fail"
+  : ((process.env.MODULE_ISOLATION_POLICY ?? "fail") as "warn" | "fail" | "off");
 const ROOT = resolve(dirname(Bun.fileURLToPath(import.meta.url)), "..");
 
-/** Absolute module roots, keyed by module id. */
+/**
+ * Cross-module imports that exist today and are accepted for now, each with the
+ * reason and the exit. An entry is `<importing module>/<path>` → `<owning
+ * module>`, narrowed to ONE import specifier by `spec`.
+ *
+ * `spec` is not decoration. Without it an acceptance keyed only on file and
+ * owner grants that file blanket permission to import ANYTHING from that
+ * module: the three entries this list used to hold each named a specific symbol
+ * in their prose while matching every future import beside it. An acceptance
+ * that widens itself as the code grows is the blind spot this gate exists to
+ * close, one level down.
+ *
+ * Checked in BOTH directions: an entry that no longer matches a real import
+ * fails the gate, so this cannot quietly become a list of things that were
+ * fixed years ago. The list is currently EMPTY — the three `oidc → mcp` imports
+ * it carried are gone, the audience allowlist having moved to
+ * `apps/api/src/lib/audiences.ts` where two built-ins can share it without
+ * either reaching into the other.
+ */
+const ACCEPTED_CROSS_MODULE_IMPORTS: {
+  from: string;
+  to: string;
+  spec: string;
+  reason: string;
+}[] = [];
+
+/**
+ * Absolute module roots, keyed by module id.
+ *
+ * Built-ins are DISCOVERED, not listed. A hardcoded list here read
+ * `["oidc", "webhooks", "core-providers"]` while the directory held five: with
+ * `mcp` and `firecracker` absent, `ownerOf()` returned null for anything under
+ * them and the violation check — gated on a truthy owner — could not report an
+ * import INTO either one. Three real `oidc → mcp` imports passed while the
+ * script printed "module isolation clean". The discovery form below is the one
+ * `knip.config.ts` and `scripts/lib/module-openapi.ts` already use.
+ */
 const MODULE_ROOTS: Record<string, string> = {};
-for (const builtin of ["oidc", "webhooks", "core-providers"]) {
-  MODULE_ROOTS[builtin] = resolve(ROOT, "apps/api/src/modules", builtin);
+{
+  const builtinsDir = resolve(ROOT, "apps/api/src/modules");
+  const glob = new Glob("*/index.ts");
+  for await (const rel of glob.scan({ cwd: builtinsDir })) {
+    const id = rel.split("/")[0]!;
+    MODULE_ROOTS[id] = resolve(builtinsDir, id);
+  }
+  if (Object.keys(MODULE_ROOTS).length === 0) {
+    console.error(
+      `❌ no built-in modules discovered under ${builtinsDir} — the scan would be vacuous.`,
+    );
+    process.exit(1);
+  }
 }
 // Workspace npm modules (packages/module-*/src).
 {
   const glob = new Glob("module-*/src");
   for await (const rel of glob.scan({ cwd: resolve(ROOT, "packages"), onlyFiles: false })) {
-    const id = rel.split("/")[0].replace(/^module-/, "");
+    const id = rel.split("/")[0]!.replace(/^module-/, "");
+    // Refuse a collision rather than overwrite. This loop runs SECOND and wrote
+    // into the same map as the built-in discovery above, so extracting a
+    // built-in to `packages/module-<same-id>` would silently drop the built-in's
+    // root from the scan — `ownerOf()` returns null for it and every import into
+    // it becomes invisible. That is precisely the blind spot the hardcoded
+    // inventory used to have, reproduced without even the module count dropping.
+    if (MODULE_ROOTS[id]) {
+      console.error(
+        `❌ module id \`${id}\` is claimed twice: ${MODULE_ROOTS[id]} and ` +
+          `${resolve(ROOT, "packages", rel)}. One would shadow the other and ` +
+          `un-scan it in silence — rename one.`,
+      );
+      process.exit(1);
+    }
     MODULE_ROOTS[id] = resolve(ROOT, "packages", rel);
   }
 }
@@ -54,6 +120,7 @@ const IMPORT_RE =
   /\b(?:import|export)\b[^"']*?\bfrom\s*["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']/g;
 
 const problems: string[] = [];
+const matchedAcceptances = new Set<string>();
 let filesScanned = 0;
 
 for (const [moduleId, root] of Object.entries(MODULE_ROOTS)) {
@@ -73,10 +140,17 @@ for (const [moduleId, root] of Object.entries(MODULE_ROOTS)) {
         const target = resolve(dirname(filePath), spec);
         const owner = ownerOf(target);
         if (owner && owner !== moduleId) {
-          problems.push(
-            `${moduleId}/${rel} imports \`${spec}\` → reaches into module \`${owner}\`. ` +
-              `Modules talk via the platform API/events, never a direct cross-module import.`,
+          const accepted = ACCEPTED_CROSS_MODULE_IMPORTS.find(
+            (e) => e.from === `${moduleId}/${rel}` && e.to === owner && e.spec === spec,
           );
+          if (accepted) {
+            matchedAcceptances.add(`${accepted.from}→${accepted.to}→${accepted.spec}`);
+          } else {
+            problems.push(
+              `${moduleId}/${rel} imports \`${spec}\` → reaches into module \`${owner}\`. ` +
+                `Modules talk via the platform API/events, never a direct cross-module import.`,
+            );
+          }
         }
         continue;
       }
@@ -84,7 +158,7 @@ for (const [moduleId, root] of Object.entries(MODULE_ROOTS)) {
       // Bare specifier naming another module's npm package.
       const pkgMatch = /^@appstrate\/module-([a-z0-9-]+)/.exec(spec);
       if (pkgMatch) {
-        const owner = pkgMatch[1];
+        const owner = pkgMatch[1]!;
         if (MODULE_ROOTS[owner] && owner !== moduleId) {
           problems.push(
             `${moduleId}/${rel} imports \`${spec}\` (module \`${owner}\`'s package). ` +
@@ -96,12 +170,30 @@ for (const [moduleId, root] of Object.entries(MODULE_ROOTS)) {
   }
 }
 
+// Stale acceptance = an entry describing an import that no longer exists. It is
+// a failure, not a nit: an allowlist only checked in the "is it still allowed"
+// direction silently becomes a record of things fixed long ago, which is how
+// the endpoint allowlists in verify-openapi.ts accumulated dead entries.
+for (const entry of ACCEPTED_CROSS_MODULE_IMPORTS) {
+  if (!matchedAcceptances.has(`${entry.from}→${entry.to}`)) {
+    problems.push(
+      `ACCEPTED_CROSS_MODULE_IMPORTS lists \`${entry.from}\` → \`${entry.to}\`, but no such ` +
+        `import exists any more. Delete the entry.`,
+    );
+  }
+}
+
 for (const p of problems) console.error(`❌ ${p}`);
 
 if (problems.length === 0) {
+  const accepted = ACCEPTED_CROSS_MODULE_IMPORTS.length;
   console.log(
-    `✅ module isolation clean — ${filesScanned} files across ${Object.keys(MODULE_ROOTS).length} modules, no cross-module imports.`,
+    `✅ module isolation clean — ${filesScanned} files across ${Object.keys(MODULE_ROOTS).length} modules` +
+      `${accepted > 0 ? `, ${accepted} accepted cross-module import(s)` : ", no cross-module imports"}.`,
   );
+  for (const e of ACCEPTED_CROSS_MODULE_IMPORTS) {
+    console.log(`   accepted: ${e.from} → ${e.to} — ${e.reason}`);
+  }
 }
 
 if (problems.length > 0 && POLICY === "fail") process.exit(1);

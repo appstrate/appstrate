@@ -29,7 +29,7 @@ import { fileUri } from "@appstrate/core/file-uri";
 
 const app = getTestApp();
 
-const MISSING_DOC = "appfile://doc_00000000-0000-0000-0000-000000000000";
+const MISSING_DOC = "appfile://file_00000000-0000-0000-0000-000000000000";
 /** Unknown model → 404 raised after the injection + mount, see the file header. */
 const UNKNOWN_MODEL = "00000000-0000-0000-0000-0000000000ff";
 

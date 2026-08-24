@@ -22,7 +22,13 @@
  */
 
 import type { Api, Model } from "../../lib/pi-sdk.ts";
-import { deriveProviderFromApi, derivePiProvider, PROVIDER_BY_API } from "@appstrate/runner-pi";
+import {
+  deriveProviderFromApi,
+  derivePiProvider,
+  llmProxyBaseUrl,
+  PROVIDER_BY_API,
+} from "@appstrate/runner-pi";
+import { PLATFORM_MODEL_COMPAT } from "@appstrate/runner-pi/model-compat";
 import { ANTHROPIC_OAUTH_PLACEHOLDER_API_KEY } from "@appstrate/core/oauth-bearer-swap";
 import { listModelPresets, PROXY_SUPPORTED_APIS, type ModelPreset } from "../../lib/models.ts";
 
@@ -113,6 +119,13 @@ export function resolveModel(flags: ModelFlags): ResolvedModel {
     );
   }
 
+  // No `compat` here, deliberately: env mode bills nobody but the caller. The
+  // key is theirs, the request goes straight to the vendor, and no `llm_usage`
+  // row is written — so the under-billing `PLATFORM_MODEL_COMPAT` exists to
+  // prevent cannot occur, and refusing long retention would only make the
+  // user's own run more expensive. `resolvePresetModel` below is the opposite
+  // case and does carry it. (Pinned by the coverage test that enumerates the
+  // model builders, which lists this exemption with this reason.)
   const model: Model<Api> = {
     id: modelId,
     name: modelId,
@@ -153,7 +166,13 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
     );
   }
 
-  const baseUrl = buildProxyBaseUrl(inputs.instance, preset.apiShape);
+  // Non-null by construction: `PROXY_SUPPORTED_APIS` IS `Object.keys(
+  // LLM_PROXY_ROUTES)`, the exact predicate `llmProxyBaseUrl` tests, and the
+  // guard above already refused anything outside it. This used to run through a
+  // wrapper that re-tested the same predicate and threw a second, differently
+  // worded "does not yet route" error — a branch nothing could reach, kept in
+  // sync forever and coverable by no test.
+  const baseUrl = llmProxyBaseUrl(inputs.instance, preset.apiShape)!;
   // pi-ai's Anthropic SDK path sends auth as `x-api-key`, but the
   // platform's auth pipeline reads `Authorization: Bearer`. We inject
   // the bearer via model.headers and pass a placeholder `apiKey` to
@@ -203,6 +222,14 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
     },
     contextWindow: preset.contextWindow ?? 200_000,
     maxTokens: preset.maxTokens ?? 8192,
+    // Preset mode is platform-billed: `baseUrl` points at `/api/llm-proxy/*`,
+    // which resolves the upstream credential server-side and writes an
+    // `llm_usage` row. Without this the record stayed silent, pi-ai defaulted
+    // the flag to TRUE, and `PI_CACHE_RETENTION=long` in the USER'S OWN shell —
+    // the CLI runs on their machine — emitted a 1h cache write that the
+    // anthropic adapter forwards unaltered and the meter prices at the
+    // short-retention rate. See `PLATFORM_MODEL_COMPAT`.
+    compat: { ...PLATFORM_MODEL_COMPAT },
     headers,
   };
   // Placeholder for anthropic — never reaches upstream (see comment above).
@@ -268,32 +295,4 @@ function pickPreset(presets: ModelPreset[], requestedId?: string): ModelPreset {
     );
   }
   return defaultPreset;
-}
-
-function buildProxyBaseUrl(instance: string, api: string): string {
-  const trimmed = instance.replace(/\/+$/, "");
-  // Each SDK appends its own canonical suffix to `baseURL`; we stop one
-  // segment short so the suffix lands on the platform's
-  // `/api/llm-proxy/<api>/v1/…` route.
-  //   - OpenAI SDK appends `/chat/completions` → baseUrl carries `/v1`.
-  //   - Anthropic SDK appends `/v1/messages`   → baseUrl is the bare
-  //     route prefix (no `/v1`).
-  //   - Mistral SDK appends `/v1/chat/completions` → baseUrl is the bare
-  //     route prefix (no `/v1`). Despite the protocol family name
-  //     `mistral-conversations`, pi-ai uses Mistral's `chat.stream` which
-  //     hits `/v1/chat/completions`, not the Beta `/v1/conversations`
-  //     agentic API.
-  if (api === "openai-completions") {
-    return `${trimmed}/api/llm-proxy/openai-completions/v1`;
-  }
-  if (api === "anthropic-messages") {
-    return `${trimmed}/api/llm-proxy/anthropic-messages`;
-  }
-  if (api === "mistral-conversations") {
-    return `${trimmed}/api/llm-proxy/mistral-conversations`;
-  }
-  throw new ModelResolutionError(
-    `CLI preset mode does not yet route protocol "${api}"`,
-    `Supported today: ${Array.from(PROXY_SUPPORTED_APIS).join(", ")}. Pick a compatible preset or use --model-source env.`,
-  );
 }

@@ -405,13 +405,11 @@ describe("OAuth model providers — token-resolver hardening", () => {
 
     async function readFailureRow(credentialId: string): Promise<{
       refreshFailureCount: number;
-      lastRefreshFailureAt: Date | null;
       needsReconnection: boolean;
     }> {
       const [row] = await db
         .select({
           refreshFailureCount: modelProviderCredentials.refreshFailureCount,
-          lastRefreshFailureAt: modelProviderCredentials.lastRefreshFailureAt,
         })
         .from(modelProviderCredentials)
         .where(eq(modelProviderCredentials.id, credentialId));
@@ -434,7 +432,6 @@ describe("OAuth model providers — token-resolver hardening", () => {
       const row = await readFailureRow(id);
       expect(row.refreshFailureCount).toBe(4);
       expect(row.needsReconnection).toBe(false); // expiry gate blocks escalation
-      expect(row.lastRefreshFailureAt).not.toBeNull();
     });
 
     it("does NOT escalate while the token is expired but within the grace window", async () => {
@@ -497,7 +494,7 @@ describe("OAuth model providers — token-resolver hardening", () => {
       });
       await db
         .update(modelProviderCredentials)
-        .set({ refreshFailureCount: 2, lastRefreshFailureAt: new Date() })
+        .set({ refreshFailureCount: 2 })
         .where(eq(modelProviderCredentials.id, id));
 
       mockFetch(
@@ -517,7 +514,6 @@ describe("OAuth model providers — token-resolver hardening", () => {
 
       const row = await readFailureRow(id);
       expect(row.refreshFailureCount).toBe(0);
-      expect(row.lastRefreshFailureAt).toBeNull();
       expect(row.needsReconnection).toBe(false);
     });
 

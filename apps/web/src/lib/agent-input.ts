@@ -22,6 +22,7 @@ import {
   type JSONSchemaObject,
   type SchemaWrapper,
 } from "@appstrate/core/form";
+import { withoutLockedFields } from "@appstrate/core/input-resolution";
 
 /** The per-application layer that rides next to the schema on `AgentDetail.input`. */
 export interface AgentInputSettings {
@@ -123,22 +124,6 @@ function pickKeys<T>(
   if (!map) return undefined;
   const out = Object.fromEntries(Object.entries(map).filter(([key]) => keep.has(key)));
   return Object.keys(out).length > 0 ? out : undefined;
-}
-
-/**
- * Drop the locked keys from a set of values.
- *
- * Mirrors the server's `withoutLockedFields`: a re-run replaying an older run's
- * input, or a schedule saved before a field was locked, must not send a value
- * the launch would now refuse — it resolves from the editor's value instead.
- */
-export function withoutLockedFields(
-  values: Record<string, unknown>,
-  lockedFields: readonly string[],
-): Record<string, unknown> {
-  if (lockedFields.length === 0) return values;
-  const locked = new Set(lockedFields);
-  return Object.fromEntries(Object.entries(values).filter(([key]) => !locked.has(key)));
 }
 
 /** Whether the schema declares anything at all — lets a caller skip the section. */

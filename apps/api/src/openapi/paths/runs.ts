@@ -3,10 +3,9 @@
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 
 /**
- * One entry of the run input-file manifest. Shared by the canonical `files`
- * array and its deprecated `documents` twin so the two cannot describe
- * different shapes; a TS const rather than a component `$ref` because it is an
- * inline detail of one response, not a published contract object.
+ * One entry of the run input-file manifest. A TS const rather than a component
+ * `$ref` because it is an inline detail of one response, not a published
+ * contract object.
  */
 const runFileManifestEntry = {
   type: "object",
@@ -88,7 +87,7 @@ const canonicalRunsPaths = {
                   description:
                     "Run input values, validated against the agent's input schema. File fields " +
                     "take `upload://upl_xxx` references (from `createUpload`), " +
-                    "`appfile://doc_xxx` references (an existing file the caller can read), " +
+                    "`appfile://file_xxx` references (an existing file the caller can read), " +
                     "or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded).",
                 },
                 rerun_from: {
@@ -114,8 +113,8 @@ const canonicalRunsPaths = {
                 connection_overrides: {
                   type: "object",
                   description:
-                    'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.',
-                  additionalProperties: { type: "string" },
+                    'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.',
+                  additionalProperties: { type: "string", minLength: 1 },
                 },
                 dependency_overrides: {
                   type: "object",
@@ -245,8 +244,8 @@ const canonicalRunsPaths = {
           description:
             "`payload_too_large` — an inline `data:` input file exceeds the per-file inline cap " +
             "(4 MiB decoded), or the run's input files together exceed " +
-            "`WORKSPACE_MAX_DOCS_BYTES`. Or `file_count_exceeded` — the run would carry more " +
-            "than `RUN_MAX_DOCUMENTS` input files (uploads + inline + `appfile://` refs). " +
+            "`WORKSPACE_MAX_FILES_BYTES`. Or `file_count_exceeded` — the run would carry more " +
+            "than `RUN_MAX_FILES` input files (uploads + inline + `appfile://` refs). " +
             "Both are refused before the run launches, so nothing is charged and no workspace is " +
             'provisioned; distinct codes so a client can tell "one file too big" from "too ' +
             'many files".',
@@ -434,7 +433,7 @@ const canonicalRunsPaths = {
                   type: "object",
                   description:
                     "Run input validated against manifest.input.schema (AJV). File fields take " +
-                    "`upload://upl_xxx` references (from `createUpload`), `appfile://doc_xxx` " +
+                    "`upload://upl_xxx` references (from `createUpload`), `appfile://file_xxx` " +
                     "references, or inline `data:<mime>;name=<filename>;base64,<payload>` URIs " +
                     "(≤4 MiB decoded) — same contract as `POST /agents/{scope}/{name}/run`.",
                 },
@@ -442,7 +441,7 @@ const canonicalRunsPaths = {
                   type: "array",
                   items: { type: "string" },
                   description:
-                    "`appfile://doc_xxx` URIs to mount read-only into the run's `files/` " +
+                    "`appfile://file_xxx` URIs to mount read-only into the run's `files/` " +
                     "directory — fan-in by reference, without declaring a file field in the " +
                     "manifest. The platform declares a reserved `_context_files` input field " +
                     "for them, so they go through the same ACL, byte/count caps and " +
@@ -450,24 +449,11 @@ const canonicalRunsPaths = {
                     "the agent in its prompt. A manifest (or `input`) that already declares " +
                     "`_context_files` is rejected with a `400` — the name is reserved.",
                 },
-                context_documents: {
-                  type: "array",
-                  items: { type: "string" },
-                  deprecated: true,
-                  description:
-                    "DEPRECATED — the pre-#1177 spelling of `context_files`, same contract. " +
-                    "Declared because the server accepts it (`body.context_files ?? " +
-                    "body.context_documents`, `routes/runs.ts`) and the body schema is " +
-                    "`additionalProperties: false`: omitting it here would publish a contract " +
-                    "that FORBIDS a field the server honours, and a generated SDK or a " +
-                    "validating gateway would reject exactly the pinned legacy caller the " +
-                    "alias exists for. `context_files` wins when both are present.",
-                },
                 connection_overrides: {
                   type: "object",
                   description:
-                    'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.',
-                  additionalProperties: { type: "string" },
+                    'Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor.',
+                  additionalProperties: { type: "string", minLength: 1 },
                 },
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },
@@ -600,8 +586,8 @@ const canonicalRunsPaths = {
           description:
             "`payload_too_large` — an inline `data:` input file exceeds the per-file inline cap " +
             "(4 MiB decoded), or the run's input files together exceed " +
-            "`WORKSPACE_MAX_DOCS_BYTES`. Or `file_count_exceeded` — the run would carry more " +
-            "than `RUN_MAX_DOCUMENTS` input files (uploads + inline + `appfile://` refs). " +
+            "`WORKSPACE_MAX_FILES_BYTES`. Or `file_count_exceeded` — the run would carry more " +
+            "than `RUN_MAX_FILES` input files (uploads + inline + `appfile://` refs). " +
             "Both are refused before the run launches, so nothing is charged and no workspace is " +
             'provisioned; distinct codes so a client can tell "one file too big" from "too ' +
             'many files".',
@@ -680,24 +666,14 @@ const canonicalRunsPaths = {
                     "Same field as `POST /api/runs/inline` — validated here for shape and for the " +
                     "reserved `_context_files` name collision, never mounted.",
                 },
-                context_documents: {
-                  type: "array",
-                  items: { type: "string" },
-                  deprecated: true,
-                  description:
-                    "DEPRECATED — the pre-#1177 spelling of `context_files`, accepted here for " +
-                    "the same reason as on `POST /api/runs/inline`: the body schema is " +
-                    "`additionalProperties: false`, so a field the server honours has to be " +
-                    "declared or the published contract forbids it. `context_files` wins when " +
-                    "both are present.",
-                },
                 connection_overrides: {
                   type: "object",
-                  additionalProperties: { type: "string" },
+                  additionalProperties: { type: "string", minLength: 1 },
                   description:
                     "Same field as `POST /api/runs/inline` — applied to the integration readiness " +
                     "check so a pick that clears `must_choose_connection` here clears it on the " +
-                    "real launch too. Never persisted; no run is created.",
+                    "real launch too. Never persisted; no run is created. Values must be " +
+                    "non-empty, same rule and same reason as on the launch surfaces.",
                 },
                 modelId: { type: ["string", "null"] },
                 proxyId: { type: ["string", "null"] },
@@ -838,6 +814,7 @@ const canonicalRunsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
       },
     },
   },
@@ -955,6 +932,7 @@ const canonicalRunsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
     },
@@ -1026,6 +1004,7 @@ const canonicalRunsPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
@@ -1359,22 +1338,21 @@ const canonicalRunsPaths = {
                 "data",
                 "sequence",
               ],
+              // Kept in step with `CloudEventEnvelopeSchema` (routes/runs-events.ts)
+              // by verify-openapi §4 — the envelope is `.strict()`, so a
+              // divergence here 400s the whole event on the runtime→platform
+              // boundary the image-tag lockstep cannot always cover.
               properties: {
-                specversion: { const: "1.0" },
-                type: { type: "string" },
-                source: { type: "string" },
-                id: { type: "string" },
+                specversion: { type: "string", const: "1.0" },
+                type: { type: "string", minLength: 1 },
+                source: { type: "string", minLength: 1 },
+                id: { type: "string", minLength: 1 },
                 time: { type: "string", format: "date-time" },
-                datacontenttype: { const: "application/json" },
+                datacontenttype: { type: "string", const: "application/json" },
                 data: { type: "object" },
-                dataschema: {
-                  type: "string",
-                  format: "uri",
-                  description:
-                    "OPTIONAL CloudEvents attribute identifying a JSON Schema the `data` payload adheres to. Deprecated and no longer emitted by the Appstrate runtime — the URIs it carried were never served, and AFPS leaves RunEvent payloads open by design. Still accepted, and ignored, so runtime images built before the removal keep working.",
-                },
                 sequence: { type: "integer", minimum: 0 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -1605,17 +1583,10 @@ const canonicalRunsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["files", "documents"],
+                required: ["files"],
                 properties: {
                   files: {
                     type: "array",
-                    items: runFileManifestEntry,
-                  },
-                  documents: {
-                    type: "array",
-                    deprecated: true,
-                    description:
-                      "DEPRECATED — the pre-#1177 spelling of `files`, carrying the SAME entries. Still emitted because the runtime image and the platform deploy independently: a container built before the rename reads this key, and a `files`-only manifest would give it zero input files with no error anywhere. Read `files`.",
                     items: runFileManifestEntry,
                   },
                 },
@@ -1637,25 +1608,16 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "Publish an agent-produced file (HMAC, streaming)",
       description:
-        "Posted by the agent runtime — via the `publish_file` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` file attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `DOCUMENT_MAX_FILE_BYTES`, 100 MiB by default); metadata is carried in the `X-File-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing file with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).",
+        "Posted by the agent runtime — via the `publish_file` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` file attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `FILE_MAX_BYTES`, 100 MiB by default); metadata is carried in the `X-File-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing file with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).",
       parameters: [
         { name: "runId", in: "path", required: true, schema: { type: "string" } },
         {
           name: "X-File-Name",
           in: "header",
-          required: false,
+          required: true,
           schema: { type: "string" },
           description:
-            "Display name for the file, percent-encoded with `encodeURIComponent` (an HTTP header value cannot carry a raw non-ASCII filename). The server decodes it strictly and returns 400 on a malformed encoding, then sanitises the decoded name (path separators, control characters and `..` collapsed, 255 chars max). **Exactly one of `X-File-Name` or the deprecated `X-Document-Name` must be present** — a request with neither is a 400. Not marked `required` because a pre-#1177 runtime image sends only `X-Document-Name` and the handler accepts it; marking it required would make the very image the alias exists for non-conformant against this document, and a generated SDK or validating gateway would reject it before the server ever saw it. `X-File-Name` wins when both are present.",
-        },
-        {
-          name: "X-Document-Name",
-          in: "header",
-          required: false,
-          deprecated: true,
-          schema: { type: "string" },
-          description:
-            "DEPRECATED — the pre-#1177 spelling of `X-File-Name`, identical encoding rules. Still accepted because the runtime image and the platform deploy independently: a container built before the rename sends this header and it carries the deliverable's only name. Never emitted by a current runtime.",
+            "Display name for the file, percent-encoded with `encodeURIComponent` (an HTTP header value cannot carry a raw non-ASCII filename). The server decodes it strictly and returns 400 on a malformed encoding, then sanitises the decoded name (path separators, control characters and `..` collapsed, 255 chars max). A request without it is a 400.",
         },
         {
           name: "Content-Type",
@@ -1738,9 +1700,9 @@ const canonicalRunsPaths = {
         "413": {
           description:
             "`payload_too_large` — the file exceeds the per-file cap " +
-            "(`DOCUMENT_MAX_FILE_BYTES`) or the run's total output budget; the stream is cut " +
+            "(`FILE_MAX_BYTES`) or the run's total output budget; the stream is cut " +
             "mid-flight and any partial object deleted. Or `file_count_exceeded` — the run " +
-            "already holds `RUN_MAX_DOCUMENTS` files. Distinct codes so a client can tell " +
+            "already holds `RUN_MAX_FILES` files. Distinct codes so a client can tell " +
             '"one file too big" from "too many files".',
         },
         "429": { $ref: "#/components/responses/RateLimited" },
@@ -1831,40 +1793,4 @@ const canonicalRunsPaths = {
   },
 } as const;
 
-/**
- * Deprecated pre-#1177 `/api/runs/{runId}/documents…` aliases of the three
- * run-scoped file endpoints. Same handlers, same HMAC — see the DEPRECATED
- * ALIASES note in `routes/files.ts` for why they are registered AND documented
- * rather than rewritten. Derived from the canonical entries so they cannot
- * drift.
- */
-const DEPRECATED_RUN_FILE_PATHS = [
-  "/api/runs/{runId}/files",
-  "/api/runs/{runId}/files/{name}",
-] as const;
-
-const deprecatedRunFilePaths = Object.fromEntries(
-  DEPRECATED_RUN_FILE_PATHS.map((canonicalPath) => {
-    const operations = canonicalRunsPaths[canonicalPath] as Record<string, unknown>;
-    const out: Record<string, unknown> = {};
-    for (const [method, op] of Object.entries(operations)) {
-      const operation = op as { operationId: string; summary?: string; description?: string };
-      out[method] = {
-        ...operation,
-        operationId: `${operation.operationId}Deprecated`,
-        deprecated: true,
-        summary: `${operation.summary ?? operation.operationId} (deprecated)`,
-        description:
-          `DEPRECATED — use \`${canonicalPath}\`. Pre-#1177 spelling of the same operation, ` +
-          `served by the same handler; a runtime image older than the platform still calls ` +
-          `it.\n\n${operation.description ?? ""}`,
-      };
-    }
-    return [canonicalPath.replace("/files", "/documents"), out];
-  }),
-);
-
-export const runsPaths = {
-  ...canonicalRunsPaths,
-  ...deprecatedRunFilePaths,
-};
+export const runsPaths = canonicalRunsPaths;

@@ -72,7 +72,12 @@ function defaultErrorSink(err: unknown): void {
   try {
     process.stderr.write(`${JSON.stringify(line)}\n`);
   } catch {
-    // last-resort fallback if stderr is unavailable
+    // Last-resort fallback when the raw stderr write throws (closed pipe,
+    // detached fd). This is the ONE sanctioned `console.*` in the repo, and it
+    // is sanctioned precisely because it is the fallback FOR the write the ban
+    // points at: `console.error` swallows its own write failures by contract,
+    // so it cannot throw a second time out of an error path.
+    // eslint-disable-next-line no-console
     console.error("[sink-heartbeat]", err);
   }
 }

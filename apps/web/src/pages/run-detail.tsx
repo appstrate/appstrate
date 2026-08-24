@@ -125,7 +125,6 @@ export function RunDetailPage() {
   // pane's «Ce run n'a rien produit» state and this tab-selection input have to
   // agree, and a second spelling one prop away is how they stop agreeing.
   const hasOutput = runHasOutputValue(finalOutput);
-  const allLogs = historicalLogs;
 
   // Run-level memory rows (only those touched during this run).
   const runMemoriesQuery = useRunMemories(packageId, runId);
@@ -181,8 +180,8 @@ export function RunDetailPage() {
         // log frame — invalidate the run's files list (the tab body), the
         // run itself (its `file_counts` drives the tab badge) and the org
         // storage total those new bytes just moved, without a dedicated SSE
-        // channel. The tag set is legacy-tolerant (`isPublishedFileLogEvent`):
-        // a still-deployed pre-#1177 emitter must not go unnoticed here.
+        // channel. `isPublishedFileLogEvent` tests membership of the set the
+        // sink's own tag is built from — it carries no legacy spelling.
         if (entry.type === "result" && isPublishedFileLogEvent(entry.event)) {
           void qc.invalidateQueries({ queryKey: ["get", "/api/files"] });
           void qc.invalidateQueries({ queryKey: runKeys.detail(orgId, applicationId, runId) });
@@ -395,7 +394,7 @@ export function RunDetailPage() {
             </TabsContent>
 
             <TabsContent value="execution" className="mt-0">
-              <RunExecutionTab run={enrichedRun} logs={allLogs} turns={turnRows} />
+              <RunExecutionTab run={enrichedRun} logs={historicalLogs} turns={turnRows} />
             </TabsContent>
 
             <TabsContent value="configuration" className="mt-0">

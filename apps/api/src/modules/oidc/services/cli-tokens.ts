@@ -75,7 +75,6 @@ import { cliRefreshToken, deviceCode, oauthClient } from "@appstrate/db/schema";
 import { prefixedId } from "../../../lib/ids.ts";
 import { logger } from "../../../lib/logger.ts";
 import { getOidcAuthApi } from "../auth/api.ts";
-import { canonicalizeScopes } from "../auth/scopes.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
 /** 15 minutes — the industry-standard short-lived access token window
@@ -1246,24 +1245,13 @@ function hashRefreshToken(plain: string): string {
  * a privilege-escalation vector, so we drop all and audit-log instead. A
  * client that legitimately needs to mint scopes must declare them explicitly
  * on its `scopes` column.
- *
- * BOTH sides are canonicalized (`canonicalizeScopes`, #1177) before the
- * intersection. A scope string can still reach here in its pre-#1177 spelling
- * (`documents:read`) from several directions the migration chain cannot cover:
- * a `cli_refresh_tokens` / `device_codes` row minted between the code deploy
- * and migration 0045, an operator-set `OIDC_INSTANCE_CLIENTS` still listing the
- * old resource, or a replayed request. Intersecting raw strings would silently
- * DROP such a scope — the rotated JWT comes back with less authority than the
- * grant, and the only trace is a `logger.warn`. Canonicalizing first makes the
- * legacy spelling resolve instead of vanish, so the migration is a cleanup, not
- * a correctness prerequisite.
  */
 function narrowScopeToClient(
   requested: string,
   clientScopes: string[] | null,
   ctx: { clientId: string; userId: string; phase?: "device_code" | "refresh_token" },
 ): string {
-  const tokens = canonicalizeScopes(requested.split(/\s+/).filter(Boolean));
+  const tokens = requested.split(/\s+/).filter(Boolean);
   if (tokens.length === 0) return "";
   // Audit event discriminates where the drop fired — at the initial
   // device-code exchange (possible crafted `/device/code` request) or
@@ -1286,7 +1274,7 @@ function narrowScopeToClient(
     });
     return "";
   }
-  const allowed = new Set(canonicalizeScopes(clientScopes));
+  const allowed = new Set(clientScopes);
   const granted: string[] = [];
   const dropped: string[] = [];
   const seen = new Set<string>();

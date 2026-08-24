@@ -721,6 +721,7 @@ describe("Runs API", () => {
         applicationId: ctx.defaultAppId,
         createdBy: ctx.user.id,
         name: "user-filter-key",
+        scopes: ["runs:read"],
       });
       const ownRun = await seedRun({
         packageId: "@runorg/eu-filter-agent",
@@ -772,6 +773,7 @@ describe("Runs API", () => {
         applicationId: ctx.defaultAppId,
         createdBy: ctx.user.id,
         name: "user-filter-key-bad",
+        scopes: ["runs:read"],
       });
 
       const res = await app.request("/api/runs?user=garbage", {
@@ -1673,31 +1675,6 @@ describe("Runs API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.connections_used).toBeNull();
-    });
-
-    it("GET /api/runs/:id preserves a text-only historical report result", async () => {
-      await seedAgent({
-        id: "@runorg/legacy-result-agent",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-      });
-      const run = await seedRun({
-        packageId: "@runorg/legacy-result-agent",
-        orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
-        userId: ctx.user.id,
-        status: "success",
-        // Historical rows may contain only the deprecated report channel's
-        // `text`/`text_truncated` keys with no structured `output`. They remain
-        // readable for compatibility with existing agents and run history.
-        result: { text: "legacy report body", text_truncated: false } as never,
-      });
-
-      const res = await app.request(`/api/runs/${run.id}`, { headers: authHeaders(ctx) });
-
-      expect(res.status).toBe(200);
-      const body = (await res.json()) as any;
-      expect(body.result).toEqual({ text: "legacy report body", text_truncated: false });
     });
 
     it("GET /api/runs/:id returns endUserName for end-user runs", async () => {

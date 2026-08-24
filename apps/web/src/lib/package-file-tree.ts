@@ -38,7 +38,7 @@ interface DirNode extends NodeIdentity {
   children: TreeNode[];
 }
 
-export interface FileNode extends NodeIdentity {
+interface FileNode extends NodeIdentity {
   kind: "file";
   entry: PackageFileEntry;
 }

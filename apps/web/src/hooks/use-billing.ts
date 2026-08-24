@@ -2,9 +2,8 @@
 
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Sparkles, Zap, Crown, type LucideIcon } from "lucide-react";
-import { ApiError } from "../api/errors";
-import { getCurrentOrgId } from "../stores/org-store";
-import { getCurrentApplicationId } from "../stores/app-store";
+import { toApiError } from "../api/client";
+import { buildScopingHeaders } from "../lib/scoping-headers";
 import { useCurrentOrgId } from "./use-org";
 import { billingKeys } from "../lib/query-keys";
 
@@ -12,35 +11,28 @@ import { billingKeys } from "../lib/query-keys";
  * The `/api/billing/*` routes are contributed at runtime by the private
  * cloud module — they are deliberately ABSENT from the OSS OpenAPI spec
  * (Apache-2.0 core carries no billing vocabulary), so the typed client
- * cannot express them. This file-local fetch mirrors the typed client's
- * middleware (org/app headers, credentials, RFC 9457 → ApiError) and is the
- * single sanctioned untyped call site in the SPA.
+ * cannot express them. This file-local fetch REUSES the typed client's
+ * middleware pieces — `buildScopingHeaders` for the org/app wire contract and
+ * `toApiError` for the RFC 9457 mapping — rather than restating them, and is
+ * the single sanctioned untyped call site in the SPA.
+ *
+ * It used to restate both, and had already drifted: `toApiError` grew a sixth
+ * argument (`param`, the field name a validation problem points at) and the
+ * copy did not, so every billing error surfaced without field attribution and
+ * nothing failed. `scoping-headers.ts` calls itself the single source of truth
+ * for those header names; this was the one hand-rolled fetch not consuming it.
  */
 async function cloudApi<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  const orgId = getCurrentOrgId();
-  if (orgId) headers["X-Org-Id"] = orgId;
-  const applicationId = getCurrentApplicationId();
-  if (applicationId) headers["X-Application-Id"] = applicationId;
-
   const res = await fetch(`/api${path}`, {
     ...options,
     credentials: "include",
-    headers: { ...headers, ...options.headers },
+    headers: {
+      "Content-Type": "application/json",
+      ...buildScopingHeaders(),
+      ...options.headers,
+    },
   });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({ detail: res.statusText }));
-    if (body.code) {
-      throw new ApiError(
-        body.code,
-        body.detail || `API Error: ${res.status}`,
-        res.status,
-        body.errors,
-        body.requestId,
-      );
-    }
-    throw new Error(body.detail || `API Error: ${res.status}`);
-  }
+  if (!res.ok) throw await toApiError(res);
   const text = await res.text();
   return (text ? JSON.parse(text) : undefined) as T;
 }
@@ -69,31 +61,18 @@ export interface BillingPlanDetail {
   price: number;
   credit_quota: number;
   /**
-   * Durable-file storage the plan grants, in bytes. Optional: a cloud
-   * module older than the release that added it omits the field, and a plan
-   * card must still render — the storage line is dropped rather than showing
-   * "0 B" for a plan that actually grants capacity.
+   * Durable-file storage the plan grants, in bytes. Optional: a cloud module
+   * older than the release that added it omits the field, and a plan card must
+   * still render — the storage line is dropped rather than showing "0 B" for a
+   * plan that actually grants capacity.
    *
-   * FORWARD-COMPAT: no producer emits this name yet. `@appstrate/cloud` lives
-   * in another repo and deploys on its own clock — #1177 renamed the concept
-   * here, but the module in front of this SPA still sends
-   * `document_storage_bytes` (see below), which is why BOTH spellings are read
-   * (`planStorageBytes`). Reading only one name makes the storage line
-   * silently vanish — on one side of the rename or the other.
+   * ONE spelling. The pre-#1177 `document_storage_bytes` is gone from both
+   * sides in the same change: the cloud image is built `FROM` the platform
+   * image and serves this SPA, so the module and the dashboard reading it are
+   * one deployed artifact and cannot be a release apart. There is no window in
+   * which a dual read would answer anything a single read does not.
    */
   file_storage_bytes?: number;
-  /**
-   * The spelling actually on the wire TODAY: `@appstrate/cloud` still mints
-   * `document_storage_bytes` and nothing emits `file_storage_bytes` yet. Not
-   * deprecated — it is the live field, and it stays the one that answers until
-   * the cloud release carrying the rename ships.
-   */
-  document_storage_bytes?: number;
-}
-
-/** The plan's storage entitlement under either wire spelling, or `undefined`. */
-export function planStorageBytes(plan: BillingPlanDetail): number | undefined {
-  return plan.file_storage_bytes ?? plan.document_storage_bytes;
 }
 
 interface BillingInfo {

@@ -157,25 +157,25 @@ describe("featuredRunFile", () => {
 
   it("features nothing when the run produced no file", () => {
     expect(featuredRunFile([], RUN)).toBeUndefined();
-    expect(featuredRunFile([uploaded("doc_in_1"), uploaded("doc_in_2")], RUN)).toBeUndefined();
+    expect(featuredRunFile([uploaded("file_in_1"), uploaded("file_in_2")], RUN)).toBeUndefined();
   });
 
   it("features the single produced file", () => {
-    expect(featuredRunFile([produced("doc_out")], RUN)?.id).toBe("doc_out");
+    expect(featuredRunFile([produced("file_out")], RUN)?.id).toBe("file_out");
   });
 
   it("features nothing when the run produced several files — they are just listed", () => {
-    const three = [produced("doc_1"), produced("doc_2"), produced("doc_3")];
+    const three = [produced("file_1"), produced("file_2"), produced("file_3")];
     expect(featuredRunFile(three, RUN)).toBeUndefined();
   });
 
   it("never counts the files the run consumed as input", () => {
     // Two inputs + one output is still a single-file run, and one output among
     // several inputs stays the featured one.
-    const mixed = [uploaded("doc_in_1"), produced("doc_out"), uploaded("doc_in_2")];
-    expect(featuredRunFile(mixed, RUN)?.id).toBe("doc_out");
+    const mixed = [uploaded("file_in_1"), produced("file_out"), uploaded("file_in_2")];
+    expect(featuredRunFile(mixed, RUN)?.id).toBe("file_out");
     // Conversely, inputs never make up the "exactly one" count on their own.
-    expect(featuredRunFile([uploaded("doc_in_1")], RUN)).toBeUndefined();
+    expect(featuredRunFile([uploaded("file_in_1")], RUN)).toBeUndefined();
   });
 
   it("never counts a chained-in file another run produced", () => {
@@ -185,11 +185,11 @@ describe("featuredRunFile", () => {
     // carrying `purpose: "agent_output"` — it was produced by the earlier run
     // whose id it keeps. Matching on purpose alone featured (and previewed)
     // a file this run never produced.
-    expect(featuredRunFile([chained("doc_from_run_0")], RUN)).toBeUndefined();
+    expect(featuredRunFile([chained("file_from_run_0")], RUN)).toBeUndefined();
     // And the mixed case: one consumed + one produced is a single-file run,
     // not the two-file "list them, feature nothing" case.
-    expect(featuredRunFile([chained("doc_from_run_0"), produced("doc_out")], RUN)?.id).toBe(
-      "doc_out",
+    expect(featuredRunFile([chained("file_from_run_0"), produced("file_out")], RUN)?.id).toBe(
+      "file_out",
     );
   });
 });
@@ -227,17 +227,17 @@ describe("runFileDirection", () => {
 
   it("is the rule `producedRunFiles` selects on, so list and badge cannot drift", () => {
     const rows = [
-      { ...file({ purpose: "user_upload", run_id: RUN }), id: "doc_in" },
-      { ...file({ purpose: "agent_output", run_id: EARLIER }), id: "doc_chained" },
-      { ...file({ purpose: "agent_output", run_id: RUN }), id: "doc_out" },
+      { ...file({ purpose: "user_upload", run_id: RUN }), id: "file_in" },
+      { ...file({ purpose: "agent_output", run_id: EARLIER }), id: "file_chained" },
+      { ...file({ purpose: "agent_output", run_id: RUN }), id: "file_out" },
     ];
-    expect(producedRunFiles(rows, RUN).map((f) => f.id)).toEqual(["doc_out"]);
+    expect(producedRunFiles(rows, RUN).map((f) => f.id)).toEqual(["file_out"]);
     expect(rows.filter((f) => runFileDirection(f, RUN) === "output").map((f) => f.id)).toEqual(
       producedRunFiles(rows, RUN).map((f) => f.id),
     );
     expect(rows.filter((f) => runFileDirection(f, RUN) === "input").map((f) => f.id)).toEqual([
-      "doc_in",
-      "doc_chained",
+      "file_in",
+      "file_chained",
     ]);
   });
 });
@@ -254,47 +254,50 @@ describe("producedRunFiles", () => {
 
   it("keeps the produced files, in order, and drops every upload", () => {
     const mixed = [
-      uploaded("doc_in_1"),
-      produced("doc_1"),
-      uploaded("doc_in_2"),
-      produced("doc_2"),
+      uploaded("file_in_1"),
+      produced("file_1"),
+      uploaded("file_in_2"),
+      produced("file_2"),
     ];
-    expect(producedRunFiles(mixed, RUN).map((f) => f.id)).toEqual(["doc_1", "doc_2"]);
+    expect(producedRunFiles(mixed, RUN).map((f) => f.id)).toEqual(["file_1", "file_2"]);
   });
 
   it("returns nothing for a run whose only files were uploads", () => {
-    expect(producedRunFiles([uploaded("doc_in_1"), uploaded("doc_in_2")], RUN)).toEqual([]);
+    expect(producedRunFiles([uploaded("file_in_1"), uploaded("file_in_2")], RUN)).toEqual([]);
     expect(producedRunFiles([], RUN)).toEqual([]);
   });
 
   it("drops an `agent_output` file another run produced and this one consumed", () => {
     // Same container trap as above: `purpose` says who made it, `run_id` says
     // which run. Outcome answers "what did THIS run produce".
-    const mixed = [chained("doc_from_run_0"), produced("doc_1")];
-    expect(producedRunFiles(mixed, RUN).map((f) => f.id)).toEqual(["doc_1"]);
-    expect(producedRunFiles([chained("doc_from_run_0")], RUN)).toEqual([]);
+    const mixed = [chained("file_from_run_0"), produced("file_1")];
+    expect(producedRunFiles(mixed, RUN).map((f) => f.id)).toEqual(["file_1"]);
+    expect(producedRunFiles([chained("file_from_run_0")], RUN)).toEqual([]);
   });
 
   it("is what the featured rule counts, so the two cannot disagree", () => {
-    const one = [uploaded("doc_in_1"), chained("doc_from_run_0"), produced("doc_out")];
+    const one = [uploaded("file_in_1"), chained("file_from_run_0"), produced("file_out")];
     expect(producedRunFiles(one, RUN)).toHaveLength(1);
-    expect(featuredRunFile(one, RUN)?.id).toBe("doc_out");
+    expect(featuredRunFile(one, RUN)?.id).toBe("file_out");
   });
 });
 
 /**
- * The run page refreshes its file list off the run's live log stream. The tag
- * it matches on was renamed by #1177, but the emitter (API + runtime image)
- * deploys on its own clock — a version-skewed emitter still sends the old tag,
- * and a reader that only knows the new one leaves the list silently stale.
+ * The run page refreshes its file list off the run's live log stream, and it
+ * replays the same run's persisted history. The tag it matches on was renamed
+ * by #1177, so every row written by a release through `v1.0.0-beta.51` carries
+ * the old one — immutably. A reader that only knows the new tag leaves an older
+ * run's file list silently stale.
  */
 describe("isPublishedFileLogEvent", () => {
   it("accepts the current tag", () => {
     expect(isPublishedFileLogEvent("file")).toBe(true);
   });
 
-  it("still accepts the pre-#1177 `document` tag", () => {
-    expect(isPublishedFileLogEvent("document")).toBe(true);
+  it("rejects the retired pre-#1177 `document` tag", () => {
+    // Accepted until the rename finished. A row carrying it renders without
+    // its attachment — an absence, not an error — and no such row exists.
+    expect(isPublishedFileLogEvent("document")).toBe(false);
   });
 
   it("rejects every other run-log event, and the empty cases", () => {

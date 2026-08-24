@@ -3,7 +3,13 @@
 import { describe, it, expect } from "bun:test";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { validateManifest } from "@appstrate/core/validation";
-import { validateAgainstSchema, validateInput, validateOutput } from "../../src/services/schema.ts";
+import { MAX_CACHED_VALIDATORS } from "@appstrate/core/schema-validation";
+import {
+  validateAgainstSchema,
+  validateConnectionCredentials,
+  validateInput,
+  validateOutput,
+} from "../../src/services/schema.ts";
 
 // --- Fixtures ---
 
@@ -433,5 +439,54 @@ describe("validateOutput", () => {
     const result = validateOutput({ summary: "Done", count: "5" }, OUTPUT_SCHEMA);
     // AJV with coerceTypes should accept "5" as a number
     expect(result.valid).toBe(true);
+  });
+});
+
+/**
+ * The server-only validators (`validateInput` / `validateOutput` /
+ * `validateConnectionCredentials`) compile through the SAME cache as
+ * `@appstrate/core/schema-validation`'s own `validateAgainstSchema` — there is
+ * exactly one Ajv instance in the process. These are the two properties that
+ * the second, uncapped instance this module used to own did not have.
+ */
+describe("compiled-validator cache — shared bound", () => {
+  it("compiles a schema carrying a $id twice without colliding in the registry", () => {
+    // Two structurally identical but DISTINCT objects under one `$id`. An Ajv
+    // instance that keeps compiled schemas registered throws
+    // "schema with key or id ... already exists" on the second one.
+    const withId = (): JSONSchemaObject =>
+      ({
+        $id: "https://example.test/creds.json",
+        type: "object",
+        properties: { token: { type: "string" } },
+        required: ["token"],
+      }) as unknown as JSONSchemaObject;
+
+    expect(validateConnectionCredentials(withId(), { token: "a" }).valid).toBe(true);
+    expect(() => validateConnectionCredentials(withId(), { token: "b" })).not.toThrow();
+    // …and across the two callers, which now share the instance.
+    expect(() => validateAgainstSchema({ token: "c" }, withId())).not.toThrow();
+  });
+
+  it("keeps validating correctly past the eviction bound, on both callers", () => {
+    // Well past MAX_CACHED_VALIDATORS distinct schemas: every one evicts an
+    // older entry rather than growing the map, and an evicted schema simply
+    // recompiles. A caller that fell off the end must still get the right
+    // verdict.
+    const distinct = (i: number): JSONSchemaObject => ({
+      type: "object",
+      properties: { [`field_${i}`]: { type: "string" } },
+      required: [`field_${i}`],
+    });
+
+    for (let i = 0; i < MAX_CACHED_VALIDATORS + 50; i++) {
+      expect(validateInput({ [`field_${i}`]: "x" }, distinct(i)).valid).toBe(true);
+      expect(validateAgainstSchema({ [`field_${i}`]: "x" }, distinct(i)).valid).toBe(true);
+    }
+
+    // The very first schema was evicted long ago; it recompiles and still
+    // reaches the same verdict.
+    expect(validateInput({}, distinct(0)).valid).toBe(false);
+    expect(validateAgainstSchema({}, distinct(0)).valid).toBe(false);
   });
 });

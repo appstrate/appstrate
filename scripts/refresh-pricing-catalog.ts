@@ -140,8 +140,6 @@ const OURS_TO_MODELSDEV: Record<string, string> = {
   zai: "zai",
 };
 
-const PROVIDERS = Object.values(LITELLM_TO_OURS) as readonly string[];
-
 /** Compact projection of one LiteLLM entry — the shape we vendor. */
 interface CompactEntry {
   label?: string;
@@ -397,7 +395,7 @@ function deriveLabel(id: string): string {
   return id
     .replace(/[-_]/g, " ")
     .split(" ")
-    .map((word) => (word.length > 0 ? word[0].toUpperCase() + word.slice(1) : word))
+    .map((word) => (word.length > 0 ? word[0]!.toUpperCase() + word.slice(1) : word))
     .join(" ");
 }
 
@@ -731,7 +729,7 @@ async function main(): Promise<void> {
       console.log(`  Excluding ${excludedBackings.size} model-alias backing(s) from featured\n`);
     }
     for (const ourName of Object.keys(OURS_TO_MODELSDEV).sort()) {
-      const mdModels = modelsDev[OURS_TO_MODELSDEV[ourName]]?.models ?? {};
+      const mdModels = modelsDev[OURS_TO_MODELSDEV[ourName]!]?.models ?? {};
       upstreamFeatured[ourName] = buildFeatured(
         ourName,
         snapshots[ourName] ?? {},
@@ -761,7 +759,7 @@ async function main(): Promise<void> {
     summarize(summary);
     for (const p of changed) {
       console.log(
-        `    ${p}: [${(localFeatured[p] ?? []).join(", ")}] → [${upstreamFeatured[p].join(", ")}]`,
+        `    ${p}: [${(localFeatured[p] ?? []).join(", ")}] → [${(upstreamFeatured[p] ?? []).join(", ")}]`,
       );
     }
     if (apply && !summary.unchanged) {

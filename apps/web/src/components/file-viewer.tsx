@@ -47,7 +47,7 @@
  * sandbox.
  */
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { cn } from "@appstrate/ui/cn";
@@ -74,28 +74,52 @@ interface ViewableFile {
   preview_kind: "html" | "image" | "pdf" | "text" | null;
 }
 
-function MarkdownPreview({ id, unavailable }: { id: string; unavailable: string }) {
+/**
+ * Load remote text for a preview pane, with the cancel guard both panes need.
+ *
+ * The two callers differ only in HOW they fetch — the typed client for a file
+ * the platform serves, a bare `fetch` for a signed preview URL — and in what
+ * they render. Everything else (the `{ text?, failed? }` state, the
+ * `let cancelled` guard, treating any error as `failed`, and the
+ * loading/error/content branch order) was written out twice, identically.
+ *
+ * `load` must be stable or memoised by the caller: it is the effect's only
+ * dependency, so a fresh closure per render re-fetches on every render.
+ */
+function useRemoteText(load: (signal: { cancelled: boolean }) => Promise<string | undefined>): {
+  text?: string;
+  failed?: boolean;
+} {
   const [state, setState] = useState<{ text?: string; failed?: boolean }>({});
 
   useEffect(() => {
-    let cancelled = false;
+    const token = { cancelled: false };
     void (async () => {
       try {
-        const { data } = await client.GET("/api/files/{id}/content", {
-          params: { path: { id } },
-          parseAs: "text",
-        });
-        if (cancelled) return;
-        if (data === undefined) setState({ failed: true });
-        else setState({ text: data });
+        const text = await load(token);
+        if (token.cancelled) return;
+        setState(text === undefined ? { failed: true } : { text });
       } catch {
-        if (!cancelled) setState({ failed: true });
+        if (!token.cancelled) setState({ failed: true });
       }
     })();
     return () => {
-      cancelled = true;
+      token.cancelled = true;
     };
+  }, [load]);
+
+  return state;
+}
+
+function MarkdownPreview({ id, unavailable }: { id: string; unavailable: string }) {
+  const load = useCallback(async () => {
+    const { data } = await client.GET("/api/files/{id}/content", {
+      params: { path: { id } },
+      parseAs: "text",
+    });
+    return data;
   }, [id]);
+  const state = useRemoteText(load);
 
   if (state.failed) return <ErrorState message={unavailable} />;
   if (state.text === undefined) return <LoadingState />;
@@ -107,24 +131,12 @@ function MarkdownPreview({ id, unavailable }: { id: string; unavailable: string 
 }
 
 function TextPreview({ url, unavailable }: { url: string; unavailable: string }) {
-  const [state, setState] = useState<{ text?: string; failed?: boolean }>({});
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch(url, { referrerPolicy: "no-referrer" })
-      .then((response) =>
-        response.ok ? response.text() : Promise.reject(new Error("preview fetch failed")),
-      )
-      .then((text) => {
-        if (!cancelled) setState({ text });
-      })
-      .catch(() => {
-        if (!cancelled) setState({ failed: true });
-      });
-    return () => {
-      cancelled = true;
-    };
+  const load = useCallback(async () => {
+    const response = await fetch(url, { referrerPolicy: "no-referrer" });
+    if (!response.ok) throw new Error("preview fetch failed");
+    return await response.text();
   }, [url]);
+  const state = useRemoteText(load);
 
   if (state.failed) return <ErrorState message={unavailable} />;
   if (state.text === undefined) return <LoadingState />;

@@ -80,42 +80,6 @@ export function checkAliasInvariants(input: {
   return null;
 }
 
-/**
- * Rewrite the request body's top-level `model` alias→real, and restore the
- * adaptive `thinking` / `output_config` shape an Anthropic backing expects.
- * A body that isn't JSON, or whose `model` isn't the alias, is left verbatim.
- */
-export function swapRequestModel(bodyText: string, swap: ModelSwap): string {
-  try {
-    const obj = JSON.parse(bodyText) as Record<string, unknown>;
-    if (obj && typeof obj === "object" && obj["model"] === swap.alias) {
-      obj["model"] = swap.real;
-      const thinking = obj["thinking"];
-      if (
-        swap.anthropicAdaptiveReasoning &&
-        thinking &&
-        typeof thinking === "object" &&
-        (thinking as Record<string, unknown>)["type"] === "enabled"
-      ) {
-        const display = (thinking as Record<string, unknown>)["display"];
-        obj["thinking"] = {
-          type: "adaptive",
-          ...(typeof display === "string" ? { display } : {}),
-        };
-        const outputConfig = obj["output_config"];
-        obj["output_config"] = {
-          ...(outputConfig && typeof outputConfig === "object" ? outputConfig : {}),
-          effort: swap.anthropicAdaptiveReasoning.effort,
-        };
-      }
-      return JSON.stringify(obj);
-    }
-  } catch {
-    // Not JSON — pass through untouched.
-  }
-  return bodyText;
-}
-
 /** Rewrite the known `model` locations real→alias in a parsed object (mutates). */
 function rewriteModelRealToAlias(obj: unknown, swap: ModelSwap): void {
   if (!obj || typeof obj !== "object") return;

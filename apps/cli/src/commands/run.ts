@@ -92,7 +92,7 @@ import {
 } from "./run/mode.ts";
 import { runRemote } from "./run/remote-runner.ts";
 import { resolveSignalPolicy, readStdinIsTty } from "./run/signal-policy.ts";
-import { authorDefaults, type JSONSchemaObject } from "@appstrate/core/form";
+import { resolveLocalInput, validateLocalInput, type StoredInputLayer } from "./run/input.ts";
 import { onShutdown, shutdownSignal, shutdownExitCode } from "../lib/shutdown.ts";
 
 export interface RunCommandOptions {
@@ -294,6 +294,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     ? { values: inheritedConfig.inputValues, lockedFields: inheritedConfig.lockedInputFields }
     : undefined;
   const input = resolveLocalInput(bundle, await resolveInput(opts), storedInput);
+  validateLocalInput(bundle, input);
 
   // ─── 6. ExecutionContext + prompt inputs ──────────────────────────
   // Derive the full platform prompt (tools / skills / schemas / output)
@@ -1194,94 +1195,6 @@ export async function _buildResolverInputsForTesting(
   opts: RunCommandOptions,
 ): Promise<RemoteResolverInputs | LocalResolverInputs | null> {
   return buildResolverInputs(mode, opts);
-}
-
-/**
- * The per-application input layer a REMOTE package carries with it — what
- * `application_packages.input_settings` stores, as delivered by the
- * `run-config` endpoint. Absent for a bundle read off disk: that target has
- * no application row behind it, so there is nothing to inherit.
- */
-interface StoredInputLayer {
-  /** Editor-set values — layer 2 of the platform's input resolution. */
-  values: Record<string, unknown>;
-  /** Input fields the editor froze. */
-  lockedFields: readonly string[];
-}
-
-/**
- * Raised when the caller's `--input` / `--input-file` names a field the
- * editor locked. Mirrors the server's `400 locked_input_field`.
- */
-export class LockedInputFieldError extends Error {
-  constructor(public readonly field: string) {
-    super(
-      `Field '${field}' is locked on this agent and cannot be set at launch — remove it from the input.`,
-    );
-    this.name = "LockedInputFieldError";
-  }
-}
-
-/**
- * Layer the agent's stored input underneath a local run's caller input.
- *
- * Precedence, lowest first — the same order and the same shallow
- * per-property overlay the server applies in `resolveEffectiveInput`
- * (`apps/api/src/services/input-resolution.ts`):
- *
- *   1. author defaults — `manifest.input.schema` `default` keywords, read
- *      through the platform's own `authorDefaults` (`@appstrate/core/form`)
- *   2. editor values — `stored.values`, present only for a package fetched
- *      from a platform
- *   3-4. schedule values / caller input — the server owns layer 3 entirely;
- *      the CLI caller IS layer 4, and their value wins even when it is
- *      `null` or `""`. Only an ABSENT key falls through.
- *
- * A property with no value at any layer stays absent, so the bundle's own
- * `required` check sees the truth.
- *
- * A caller value naming a locked field is REFUSED, not dropped: silently
- * ignoring it would run the agent with parameters other than the ones
- * asked for. Be honest about what that buys — a developer running the CLI
- * already holds the bundle and executes it in their own shell, so nothing
- * here stops them from editing the manifest or the input afterwards. This
- * is NOT a security boundary against the caller. It is parity: the same
- * agent launched the same way yields the same parameters whether it runs
- * on the platform or locally, and a lock the editor set is never silently
- * ignored.
- */
-export function resolveLocalInput(
-  bundle: import("@appstrate/afps-runtime/bundle").Bundle,
-  callerInput: Record<string, unknown>,
-  stored?: StoredInputLayer | undefined,
-): Record<string, unknown> {
-  const locked = new Set(stored?.lockedFields ?? []);
-  for (const key of Object.keys(callerInput)) {
-    if (locked.has(key)) throw new LockedInputFieldError(key);
-  }
-  const schema = readBundleInputSchema(bundle);
-  return {
-    ...(schema ? authorDefaults(schema) : {}),
-    ...(stored?.values ?? {}),
-    ...callerInput,
-  };
-}
-
-/**
- * Pull the AFPS `input.schema` JSON Schema out of the bundle's root
- * package manifest. Returns `undefined` when the agent declares no input
- * schema (so default resolution is a no-op).
- */
-function readBundleInputSchema(
-  bundle: import("@appstrate/afps-runtime/bundle").Bundle,
-): JSONSchemaObject | undefined {
-  const rootPkg = bundle.packages.get(bundle.root);
-  const manifest = rootPkg?.manifest as Record<string, unknown> | undefined;
-  const section = manifest?.input;
-  if (!section || typeof section !== "object" || Array.isArray(section)) return undefined;
-  const schema = (section as Record<string, unknown>).schema;
-  if (!schema || typeof schema !== "object" || Array.isArray(schema)) return undefined;
-  return schema as JSONSchemaObject;
 }
 
 /**

@@ -8,12 +8,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import {
-  REDACTED_CONNECT_LINK,
-  readConnectOffer,
-  splitConnectPayload,
-  splitJsonText,
-} from "../src/connect-offer.ts";
+import { REDACTED_CONNECT_LINK, splitConnectPayload, splitJsonText } from "../src/connect-offer.ts";
 
 const URL_ = "https://app.example.com/api/integrations/connect/start?token=SECRET";
 

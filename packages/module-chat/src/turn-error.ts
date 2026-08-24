@@ -107,7 +107,7 @@ export function clientTurnErrorFromMarker(value: unknown): ClientTurnError | und
  * response.text())`, on both `sendMessages` and `reconnectToStream`, so the
  * resumed path lands here too. That body is the `application/problem+json` our
  * refusals answer with (`chat-stream.ts`), so parsing the message back into a
- * file recovers what the transport discarded. Its `code` is the
+ * problem document recovers what the transport discarded. Its `code` is the
  * stable machine-readable half of the contract; its `detail` is English prose
  * for API consumers (as everywhere else in this API) and must NOT be shown in
  * a localized UI. Return the code so the caller can pick its own sentence.

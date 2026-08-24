@@ -8,15 +8,107 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **BREAKING: `document` is now `file`, everywhere the concept is named
-  (#1177).** `publish_document` accepted Markdown, HTML, source code, a PDF, an
-  image — anything on the agent's filesystem — but "document" promises a Word or
-  a PDF to whoever reads the tool description, the model included. The word was
-  a false friend, so the concept is renamed from the schema to the wire.
+- **BREAKING: run and schedule `GET` routes now enforce a read permission.**
+  Eight reads were gated on org membership alone and enforced nothing about
+  what the caller may do, so any credential that could reach the org could
+  list runs, read a run, stream its logs, and read every schedule. Each now
+  requires the scope it was always documented to require:
 
-  Every wire-visible and persisted spelling keeps a READ alias; only what gets
-  written changes. What breaks anyway is listed under "What a consumer has to
-  do" below — read that list before upgrading.
+  | Route                                      | Scope            |
+  | ------------------------------------------ | ---------------- |
+  | `GET /api/runs`                            | `runs:read`      |
+  | `GET /api/runs/{id}`                       | `runs:read`      |
+  | `GET /api/runs/{id}/logs`                  | `runs:read`      |
+  | `GET /api/agents/{scope}/{name}/runs`      | `runs:read`      |
+  | `GET /api/schedules`                       | `schedules:read` |
+  | `GET /api/schedules/{id}`                  | `schedules:read` |
+  | `GET /api/schedules/{id}/runs`             | `schedules:read` |
+  | `GET /api/agents/{scope}/{name}/schedules` | `schedules:read` |
+
+  **No org role loses access.** Every role down to `viewer` holds both scopes,
+  and session auth derives permissions from the role, so the dashboard and any
+  cookie-authenticated client are unaffected.
+
+  **The change is breaking for API keys and OIDC clients**, which carry exactly
+  the scopes they were minted with, intersected with the creator's role — there
+  is no "narrow scope implies the rest" fallback. **Audit issued key scopes
+  before upgrading.**
+
+  Two callers are affected in a way worth naming, because both LAUNCH before
+  they read and so leave a billed run behind rather than failing cleanly:
+
+  - `appstrate run --remote` and `appstrate/github-action` trigger with
+    `agents:run`, then poll `GET /api/runs/{id}` and `…/logs`. A key narrowed
+    to `agents:run` now starts the run and 403s on every poll. The CLI's own
+    failure hint used to name `agents:run` alone and now names both scopes.
+  - `run_and_wait` over MCP dispatches the launch in-process with the caller's
+    own auth and then polls the same route; its tool description tells the
+    model not to fall back to `getRun`, so there was no recovery path. It now
+    pre-checks `runs:read` alongside `mcp:invoke` and refuses BEFORE launching.
+
+  `detect:breaking` reports these as non-breaking additions, and that is
+  correct about the OpenAPI _document_ — adding a `403` response is schema-
+  additive. It says nothing about runtime behaviour, which is why this entry
+  exists.
+
+- **BREAKING: `document` is now `file`, everywhere the concept is named
+  (#1177) — and the compatibility layer the rename shipped with is gone.**
+  `publish_document` accepted Markdown, HTML, source code, a PDF, an image —
+  anything on the agent's filesystem — but "document" promises a Word or a PDF
+  to whoever reads the tool description, the model included. The word was a
+  false friend, so the concept is renamed from the schema to the wire.
+
+  The rename first shipped a READ alias on every wire-visible spelling, each
+  one justified by a single sentence: "the runtime image and the platform
+  deploy independently". `v1.0.0-beta.51` is precisely the artifact on the
+  other side of that sentence, and it speaks every retired shape: it registers
+  `/api/runs/{runId}/documents` and `/api/runs/{runId}/documents/{name}` and
+  not one `/files` route; `runtime-pi/publish.ts` posts each deliverable to
+  `…/documents` under `X-Document-Name`; `runtime-pi/provision.ts` fetches its
+  input manifest from `…/documents`; `packages/afps-runtime/src/events/cloudevents.ts`
+  stamps `dataschema` on every canonical event; and its row ids are `doc_`. So
+  the argument for deleting the layer is NOT that nobody ever spoke the old
+  shapes — the last release did. It is that the PAIRING of such an artifact
+  with this platform is now refused at boot: the environment schema will not
+  start unless the platform's own `APP_VERSION` and both runtime image tags
+  agree (see the entry below), so an old image cannot be _configured_ against
+  a new platform.
+
+  **That rule has blind spots, and they are the whole residual risk.** They
+  come in two kinds. The comparison carves itself out wherever a tag cannot
+  answer the question — a runtime ref pinned by digest alone silences it
+  outright (`findRuntimeImageTagMismatch` returns `null` the moment either ref
+  parses to no tag), and a platform with no release identity drops out of the
+  trio, degrading the rule to the image-pair rule it grew from; the
+  authoritative list of those carve-outs lives with the comparison in
+  `@appstrate/core/image-ref`. And then there is the one that is not a carve-out
+  at all: this is an env-schema check evaluated at BOOT, so it says nothing
+  whatsoever about containers **already running** when the platform restarts.
+  (Same-tag-two-builds drift — `:latest` rebuilt on one side — is invisible to
+  tag comparison by construction; `runtime-image-pair.ts` catches it from the
+  OCI revision labels after the pre-pull, and only WARNS.)
+
+  That second kind is the operational one, and it needs a step in the upgrade
+  rather than a paragraph. A run container started by the PREVIOUS
+  platform process survives a `compose up -d`: the boot sweep finalizes only
+  runs whose heartbeat has already gone stale (`listOrphanRunIds`, cutoff
+  `RUN_STALL_THRESHOLD_SECONDS`), and the container sweep preserves anything in
+  state `running` (`isReclaimableContainer`); a container still executing a run
+  satisfies neither reap condition. It keeps posting to the new API, and its
+  `POST …/documents` now
+  404s. In the uploader a 404 is a non-retryable 4xx, so the deliverable is
+  abandoned and the outputs sweep reports `artifacts.status: "partial"`. That
+  field is not an input to the run's status — `mapTerminalStatus` reads only
+  `result.status` / `result.error` — so **a run whose work succeeded still
+  settles `success`, with its deliverable simply missing**, which is the exact
+  silent failure the aliases existed to prevent. **Drain in-flight runs before
+  restarting the platform**; see OPERATOR ACTIONS below.
+
+  What is verified about released consumers is narrower, and holds: the
+  released CLI never called the retired paths, neither `cloud` nor
+  `connect-helper` contains any retired wire shape, and the SPA is baked into
+  the platform image, so a served build cannot be older than the platform
+  serving it. The layer is deleted, not deprecated.
 
   | Surface             | Before                                                                                    | After                                                                     |
   | ------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
@@ -37,39 +129,171 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   filesystem and is what MCP uses for local resources, so an opaque platform id
   under it is ambiguous to the model and to every MCP client.
 
-  **Deliberately NOT renamed**, each because renaming it would move live data or
-  cost an ops migration for no user-visible gain: the `doc_` row-id prefix
-  (already in every row and every storage key); the `documents` storage bucket
-  and the `documents/` `storage_key` prefix (every stored object begins with it —
-  renaming orphans them all, with no error until a download 404s on a file that
-  is physically still there); the `document_deleted` value in
-  `storage_deletion_jobs.reason`; and the environment variables
-  `DOCUMENT_MAX_FILE_BYTES`, `DOCUMENT_RETENTION_DAYS`, `RUN_MAX_DOCUMENTS` and
-  `WORKSPACE_MAX_DOCS_BYTES`. See `docs/ENV.md` and
-  `docs/architecture/FILES.md`.
+  **The rename now reaches the physical layer too**, and none of it has an
+  alias. The row-id prefix is `file_` (`prefixedId("file")`, validated by
+  `FILE_ID_RE`); the durable storage bucket and its `storage_key` prefix are
+  `files`, and the run-workspace input prefix is `{runId}/files/`; the
+  `storage_deletion_jobs.reason` labels are `file_deleted` / `file_expired`;
+  and the four file-limit environment variables are renamed:
+
+  | Before                     | After                       |
+  | -------------------------- | --------------------------- |
+  | `DOCUMENT_MAX_FILE_BYTES`  | `FILE_MAX_BYTES`            |
+  | `DOCUMENT_RETENTION_DAYS`  | `FILE_RETENTION_DAYS`       |
+  | `RUN_MAX_DOCUMENTS`        | `RUN_MAX_FILES`             |
+  | `WORKSPACE_MAX_DOCS_BYTES` | `WORKSPACE_MAX_FILES_BYTES` |
+
+  An `.env` still carrying an old variable name is not read — the schema
+  ignores it and the limit silently reverts to its default — so grep for the
+  left column above. See `docs/ENV.md` and `docs/architecture/FILES.md`.
+
+  **What is gone, and what a caller gets instead:**
+
+  1. **The nine `/documents` route registrations — six on the file routes,
+     three run-scoped — are gone. They 404.** Eight operations drop out of the
+     OpenAPI document, along with both alias generators in the spec (the second
+     of which was a divergent copy that hand-rolled an unanchored
+     `replace("/files", "/documents")`). The baseline is regenerated in the same
+     commit, as `detect:breaking` requires, so CI reports no change and this
+     list is the record. Use `/api/files/*` and
+     `/api/runs/{id}/files[/{name}]`.
+  2. **`X-Document-Name` is gone, and `X-File-Name` is now properly
+     `required`** — the alias was the only reason it was not. An upload
+     arriving without `X-File-Name` is an explicit `400`.
+  3. **`context_documents` on both inline-run bodies, and the `dataschema`
+     CloudEvents attribute on the run-events ingestion route, are `400`s.**
+     Each of those bodies is `.strict()`, so the retired field is refused by
+     name rather than stripped. The `run_and_wait` TOOL ARGUMENT of the same
+     name used to be canonicalized to `context_files` by the shared launch
+     client; it is now refused by name there too. Refused rather than merely
+     unread, because that client builds the launch body from an allowlist —
+     an argument nobody names is invisible, and the run would start with
+     nothing mounted while every layer reported success.
+  4. **`document.published` is no longer accepted as a runtime-tool event**, at
+     either acceptor — and the two are safe for different reasons. Inside the
+     container the reason is structural: the only producer of that name is
+     core's own `filePublishedEvent`, bundled into the SAME artifact as the
+     trust-boundary acceptor `reEmitRuntimeToolEvents`, so there is no version
+     boundary between them and the retired name can only arrive forged, which
+     is what the acceptor's drop is for. The platform-side sink
+     (`persistRunEvent`) is a DIFFERENT artifact reached over HTTP, so that
+     argument does not reach it; what does is the image-tag rule above — plus
+     the fact that the event's own precondition went with it, since a
+     pre-`#1177` container emits `document.published` only after a SUCCESSFUL
+     `POST …/documents`, and that route now 404s.
+  5. **`workspace/documents/` and the `documents` twin key in the run-input
+     manifest are gone from both sides.** `runtime-pi/provision.ts` no longer
+     probes `/documents` after a `404` on `/files` (that `404` is the ordinary
+     "this run carries no input files" case, so the fallback cost a second
+     signed round-trip on the common boot path to reach a route no platform
+     serves), no longer reads `manifest.files ?? manifest.documents`, and no
+     longer symlinks `documents -> files` in the workspace. The manifest's
+     `documents` key was in `required`, which made the deprecated spelling
+     contractually mandatory. A pre-rename manifest object now fails loudly at
+     both consumers: the serve path `500`s and the container dies with
+     `Failed to fetch files manifest` rather than starting with an empty
+     workspace, and the deletion path throws and dead-letters.
+  6. **`document://` no longer parses.** It survived to read historical rows,
+     but every URI ever written under it addresses a `doc_` id and `FILE_ID_RE`
+     stopped accepting those, so the only form the accept path could still have
+     matched was `document://file_…` — which no build has ever emitted. A
+     `document://` value now fails at `parseFileUri` instead of one line later
+     on the id, in the same `400`.
+  7. **`documents:read` / `documents:delete` are refused, and this is the one
+     retirement with a real caller behind it.** The read-time alias layer is
+     gone: `LEGACY_PERMISSION_RESOURCE_ALIASES`, `canonicalPermission`,
+     `canonicalPermissions`, `acceptedPermissionSpellings`, the second-chance
+     branch inside `makePermissionGuard` (which backs all three permission
+     guards), and the scope canonicalizers across the OIDC module. The alias
+     itself never shipped — but `documents:*` **is** the spelling every
+     released Appstrate advertised, so a third-party OAuth client integrated
+     against `v1.0.0-beta.51` holds it in config and now gets `invalid_scope`
+     at `/oauth2/authorize` instead of being silently rewritten. That is a
+     deliberate trade: for a beta with no production data, a loud refusal is
+     the right failure and a silently under-granted scope is not. The live
+     windows are bounded by their own TTLs — an access token expires in 15
+     minutes, a pending authorization code in 10 — and an
+     `OIDC_INSTANCE_CLIENTS` value still naming `documents:read` fails boot
+     with a message that prints the offending string rather than rewriting it.
+     What the caller SENDS is refused; what is already STORED is migrated —
+     `0046` rewrites every persisted spelling, so no existing credential is
+     silently narrowed. See "Migrations" below.
+
+     The API-key write path now refuses on the same principle. `POST
+/api/api-keys` with a scope that is not grantable at all — an unknown
+     string, a retired spelling like `documents:read`, or a session-only
+     permission — is a `400` naming the offender, where it previously filtered
+     the value out and answered `201` with a key that then 403'd on
+     everything. A scope that is valid but above the creator's own role is
+     still narrowed silently: that is a real rule ("you cannot delegate more
+     than you hold"), not a swallowed typo, and the scopes-omitted default
+     branch relies on it.
+
+     Three tests were passing only because of the alias, which justifies the
+     removal on its own: `enduser-token-auth` minted tokens carrying
+     `documents:read` and asserted `/api/files/*` answered `200`. #1193 renamed
+     the routes and left the scopes on the old spelling; the alias hid the gap.
+
+  **Nothing reads an old spelling any more.** The rename shipped with a read
+  alias on every wire-visible spelling. The last five were kept on the
+  strongest ground available — a value a RELEASED build wrote into a place the
+  current build still reads, or a vocabulary a protocol had told a client was
+  stable — and they are gone too, because no such value and no such client
+  exists:
+
+  - `run_logs` rows tagged `event: "document"` are no longer rendered
+    (`PUBLISHED_FILE_LOG_EVENTS` is now just `["file"]`). Such a row would show
+    without its attachment — an absence, not an error.
+  - The `documents` key of a persisted `run_and_wait` result, and items keyed
+    `document_id`, are no longer read. Only `files` / `id` / `file_id` are.
+  - `publish_document` in `manifest.runtime_tools` is no longer canonicalized.
+    Author input naming it is REFUSED; a stored manifest has it DROPPED and the
+    drop REPORTED to the caller — never silently reinterpreted as `publish_file`.
+  - The four retired MCP tool names are no longer registered. A client holding
+    a cached tool list gets `-32602 Unknown tool` and re-lists; that was the one
+    alias with a live protocol argument behind it (`tools.listChanged: false`),
+    and the cost is transient where the second dispatch path was permanent.
+  - `context_documents` as a `run_and_wait` tool argument is REFUSED BY NAME.
+    That distinction is the whole point: the launch body is built from an
+    allowlist, so merely not reading it would make it invisible — the run would
+    start with nothing mounted and every layer would report success.
+
+  Two more went with them: the `setDocumentStorageLimit` platform-services
+  alias (`@appstrate/cloud` now binds `setFileStorageLimit`; see the ship order
+  below) and every retired run-detail tab hash. The `result.text` /
+  `result.text_truncated` fields of the removed `report` tool left the run
+  resource at the same time.
+
+  **Ship order, and it is not optional — the platform goes FIRST.**
+  `@appstrate/cloud` binds the storage capability off the LIVE services object
+  this platform injects, not off its pinned types, so the rename does not reach
+  its read. The instinct is to ship cloud first; the build topology says
+  otherwise. The cloud image is built
+  `FROM ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION}` and resolves
+  `@appstrate/core` out of that image, so the two are ONE deployed artifact and
+  never meet each other's old version at runtime. What gates cloud is its CI,
+  which typechecks inside the newest PUBLISHED release: `v1.0.0-beta.51` has
+  only `setDocumentStorageLimit`, so appstrate/cloud#52 is red until a release
+  carries the new name. Sequence: merge and release this → re-run cloud's
+  checks → merge cloud. Publishing core `8.0.0` to npm is NOT on that critical
+  path; cloud never resolves core from the registry.
 
   **What a consumer has to do:**
 
-  1. **`/api/documents/*` and `/api/runs/{id}/documents[/{name}]` still work,
-     as deprecated aliases.** Same handlers, same guards, marked
-     `deprecated: true` in the OpenAPI document with a `Deprecated` suffix on
-     each `operationId`. A generated client regenerated against the new spec
-     gets both. Move to `/api/files/*`; the aliases exist for callers pinned to
-     the old URLs, not as a permanent second contract.
-  2. **The run resource field `document_counts` is now `file_counts`, and
+  1. **The run resource field `document_counts` is now `file_counts`, and
      `primary_document_id` is gone.** There is NO response-side alias for
      either: an out-of-tree API consumer still reading them gets `undefined`,
      silently, with a `200`. This repo has already broken a consumer exactly
      this way (`github-action` sending a removed field), so it is spelled out
      rather than left to the diff. Read `file_counts.{input,output}`; for "which
      file to show", see the derived rule under Removed.
-  3. **Five RFC 9457 problem codes are renamed, and NONE of them has a read
+  2. **Five RFC 9457 problem codes are renamed, and NONE of them has a read
      alias.** The code is a string a client branches on; an unrecognised value
      falls to whatever the client's default arm does, silently.
 
      | Before                    | After                 | Raised by                                                                                       |
      | ------------------------- | --------------------- | ----------------------------------------------------------------------------------------------- |
-     | `document_count_exceeded` | `file_count_exceeded` | `413`, `RUN_MAX_DOCUMENTS` over-cap (`@appstrate/core/api-errors`)                              |
+     | `document_count_exceeded` | `file_count_exceeded` | `413`, `RUN_MAX_FILES` over-cap (`@appstrate/core/api-errors`)                                  |
      | `document_in_use`         | `file_in_use`         | `409`, `DELETE /api/files/{id}` on a file a live run still links (`services/files.ts`)          |
      | `document_unavailable`    | `file_unavailable`    | `409`, an input file deleted between resolve and run creation (`services/state/runs.ts`)        |
      | `duplicate_document_name` | `duplicate_file_name` | `400`, colliding workspace names in a run's input manifest (`services/run-file-naming.ts`)      |
@@ -77,23 +301,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
      The limits and the statuses are unchanged; only the strings moved.
 
-  4. **`publish_document` is now `publish_file` and no longer accepts
-     `presentation`.** A persisted manifest declaring
-     `runtime_tools: ["publish_document"]` keeps working — the id is
-     canonicalized on read, never dropped, and a manifest saved afterwards
-     writes only `publish_file`. This was the sharpest edge in the change:
-     `dropRetiredRuntimeTools()` silently DELETES runtime-tool ids it does not
-     recognise, so a bare rename would not have errored, it would have stripped
-     the tool from every agent that had selected it, with nothing in any log.
-     A caller that still sends `presentation` has it ignored, not rejected.
-  5. **The four MCP tools are renamed; the old names stay callable but hidden.**
+  3. **`publish_document` is now `publish_file` and no longer accepts
+     `presentation`.** The retired id is not aliased: author input naming it is
+     refused, and a stored manifest has it DROPPED with the drop REPORTED to
+     the caller. That report is the part that matters —
+     `dropRetiredRuntimeTools()` removes ids it does not recognise, so a silent
+     drop would strip the tool from an agent that had selected it with nothing
+     in any log. A caller that still sends `presentation` has it ignored, not
+     rejected.
+  4. **The four MCP tools are renamed, and the old names are gone.**
      `list_documents`, `read_document`, `import_package_document` and
-     `validate_package_document` forward to the canonical handler and rename a
-     `document_uri` argument to `file_uri` on the way in. They are withheld from
-     `tools/list` because the point of the rename is what the model sees. The
+     `validate_package_document` are no longer registered, hidden or otherwise,
+     and the `document_uri` argument is no longer renamed on the way in. The
      server advertises `tools: { listChanged: false }`, so a client that listed
-     before the upgrade and calls an old name after it is behaving correctly and
-     must not get `-32602 Unknown tool` mid-conversation.
+     before the upgrade and calls an old name after it gets `-32602 Unknown
+tool` and re-lists. That is the one alias here with a live protocol
+     argument behind it; the cost of dropping it is transient, where a second
+     dispatch path for four capabilities was permanent.
 
      One MCP break is NOT covered by any alias, and it is client-facing: a
      dynamically-registering client whose published Client ID Metadata Document
@@ -102,111 +326,213 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
      `ALLOWED_METADATA_FIELDS` and feeds it into
      `createOAuthClientEndpoint(..., { isRegister: true })`, which validates
      every requested scope against the server's set and throws on anything
-     outside it. The scope-canonicalising hook cannot help here:
-     `SCOPE_BEARING_PATHS` matches INBOUND request paths, and a metadata
-     document is fetched outbound by the server. Nothing is silently
-     mis-granted — registration is refused outright — but the client's own
-     metadata has to be updated to the `files:` spelling. Tell any partner
-     registering through CIMD before you deploy.
+     outside it. Nothing is silently mis-granted — registration is refused
+     outright — but the client's own metadata has to be updated to the `files:`
+     spelling. Tell any partner registering through CIMD before you deploy.
 
-  6. **The four OpenTelemetry metric series are renamed:
+  5. **The four OpenTelemetry metric series are renamed:
      `appstrate.documents.created`, `.deleted`, `.storage_limit_rejections` and
      `.partial_publications` are now `appstrate.files.*`.** Nothing errors —
      dashboards, alerts and recording rules built on the old series simply go to
      zero and stay there. Repoint them, and check any alert whose condition is
      "below threshold": those fire, and the ones that are "above threshold" go
      quiet without ever telling you why.
-  7. **`@appstrate/core`: the `./document-uri` subpath is now `./file-uri`**,
+  6. **`@appstrate/core`: the `./document-uri` subpath is now `./file-uri`**,
      with `DOCUMENT_URI_PREFIX` → `FILE_URI_PREFIX`, `isDocumentUri` →
      `isFileUri`, `parseDocumentUri` → `parseFileUri`, `documentUri()` →
      `fileUri()`, `extractDocumentIds[FromText]` → `extractFileIds[FromText]`,
      plus renames on `./permissions`, `./telemetry`, `./api-errors`, `./module`
-     and `./run-and-wait-client`. **Core is NOT published from this branch.**
-     `cloud` and `connect-helper` stay on the currently published version, but
-     the pin only protects them at the TYPE level: `cloud` binds
-     `services.setDocumentStorageLimit` off the LIVE services object this
-     platform injects at boot, so what keeps it working here is the deprecated
-     `setDocumentStorageLimit` alias kept beside the canonical
-     `setFileStorageLimit` — temporary, and the only thing holding that seam
-     together. The eventual major needs a matching code change in `cloud`, not
-     just a version bump. See `packages/core/CHANGELOG.md`.
-  8. **Migrations `0042` through `0045` run automatically at boot.** `0042`
-     drops the `presentation` column with its partial unique index and CHECK.
-     `0043` is a pure `ALTER … RENAME` of the tables, columns, enum type,
-     indexes and constraints — catalog-only, no table rewrite, no data movement,
-     no window where a constraint is absent. `0044` rewrites stored
-     `documents:*` permission scope strings to `files:*` across `api_keys` and
-     the four `oauth_*` scope columns; `0045` does the same for the two
-     space-delimited `text` scope columns the array pattern cannot reach
-     (`cli_refresh_tokens.scope`, `device_codes.scope`). All four are idempotent
-     and converge from a partially-applied state. Third-party provider scopes
-     (`integrations.scopes_granted`, `application_social_providers.scopes`) are
-     deliberately untouched.
+     and `./run-and-wait-client`. **Core is NOT published from this branch** —
+     but this build cannot ship before it is. `cloud` binds
+     `services.setFileStorageLimit` off the LIVE services object this platform
+     injects at boot, and the deprecated `setDocumentStorageLimit` alias that
+     used to cover that seam is gone. A type-level pin never protected it: a
+     property read at boot does not typecheck. Ship order is this platform
+     release → `cloud` (appstrate/cloud#52, whose CI cannot go green until such
+     a release exists) → npm publication of core `8.0.0` when it suits other
+     consumers. Cloud's range is raised to `>=8.0.0` as a truthful declaration
+     — the published `7.0.0` exposes only the old name — not as a resolution
+     constraint, since core is an optional peer it takes from the image.
+     `connect-helper` reads none of this surface. See
+     `packages/core/CHANGELOG.md`.
 
-     **Migration `0043` is irreversible, and the rollback is a hard outage,
-     not a degraded mode.** There is no down migration in the repo and `0043`
-     creates no compatibility view. Once boot has applied it, the previous
-     release's code queries `documents`, `document_links` and
-     `organizations.documents_bytes_*` — none of which exist under those names
-     any more. **Take a database snapshot immediately before the deploy**; it
-     is the only fast way back. To reverse by hand:
+  **OPERATOR ACTIONS, and SQL cannot perform them.** Migration
+  `0044_finish_file_rename` carries the data half — it rewrites every
+  `files.storage_key` from `documents/…` to `files/…`, the outbox's copy of the
+  bucket name, the run-workspace keys the outbox holds, and the two deletion
+  reasons. **It moves no bytes.** Until the objects follow, a download `404`s on
+  a file that physically exists. In the same window:
 
-     ```sql
-     ALTER TABLE "files" RENAME TO "documents";
-     ALTER TABLE "file_links" RENAME TO "document_links";
-     ALTER TABLE "document_links" RENAME COLUMN "file_id" TO "document_id";
-     ALTER TABLE "organizations" RENAME COLUMN "files_bytes_used" TO "documents_bytes_used";
-     ALTER TABLE "organizations" RENAME COLUMN "files_bytes_limit" TO "documents_bytes_limit";
-     ALTER TYPE "public"."file_purpose" RENAME TO "document_purpose";
-     ```
+  - **drain in-flight runs BEFORE the platform restarts**, and do not launch
+    new ones until the window closes. A container the previous platform process
+    started is not stopped by the upgrade and is not reaped at boot while it is
+    still heartbeating, so it survives into the new platform and its
+    `POST …/documents` 404s — losing the deliverable while the run finalizes
+    green. This is the same drain the run-workspace rename below needs, so one
+    drain covers both;
+  - copy the `documents` bucket onto `files` and drop the old one
+    (`aws s3 sync s3://documents s3://files`, or `mc mirror`); on filesystem
+    storage (tier ≤ 2) it is a directory rename under
+    `./data/storage/`, `documents` → `files`;
+  - rewrite the second key segment of every `{runId}/documents/<name>`
+    run-workspace object to `{runId}/files/<name>`. **In-flight runs do not
+    survive that rename — drain them first.**
 
-     Constraint and index names are cosmetic to the old code and can be left
-     alone. `0042` is not reversible at all — the `presentation` column and its
-     data are dropped, and only the snapshot brings them back.
+  **A database holding `doc_` ids should be reset, not migrated.** Existing
+  `files.id` values are deliberately NOT re-minted, and `FILE_ID_RE` now
+  accepts only `file_`, so those rows are unaddressable: the id fails
+  validation before any query reaches them. Re-minting is not a two-table
+  `UPDATE` — the id is quoted inside `runs.input`, `runs.result`, `run_logs`,
+  chat payloads and append-only `audit_events.after` — and a partial rewrite
+  would silently break every rerun, which is worse than none.
 
-     `0044` / `0045` need reversing too, and the reason is not obvious:
-     they rewrote stored `documents:*` scope strings to `files:*` in
-     `api_keys.scopes`, the four `oauth_*` scope columns and the two
-     space-delimited `cli_refresh_tokens.scope` / `device_codes.scope`
-     columns. It is the NEW code that canonicalizes a legacy scope on read
-     (`canonicalPermissions`); the pre-#1177 code has no `files` resource at
-     all (`CORE_RESOURCE_NAMES` lists `documents`) and drops an unknown scope
-     **silently** rather than rejecting it — so after a code-only rollback
-     every affected key and token keeps authenticating and quietly grants
-     less than it was issued with. Rewrite `files:` back to `documents:` in
-     those seven columns, or restore the snapshot.
+  **Stored permission scopes are the opposite case — they ARE migrated.** The
+  verdict above does not extend to them: `0046_legacy_permission_scope_strings`
+  rewrites every persisted `documents:*` spelling to `files:*` at migration
+  time, across all seven columns that carry the vocabulary — the five `text[]`
+  ones (`api_keys.scopes`, `oauth_clients.scopes`, `oauth_consents.scopes`,
+  `oauth_refresh_tokens.scopes`, `oauth_access_tokens.scopes`) and the two
+  space-delimited `text` ones (`cli_refresh_tokens.scope`, `device_codes.scope`).
+  A credential issued under the old spelling therefore keeps exactly the grant
+  it was issued with. That rewrite is load-bearing, not cosmetic: with the read
+  alias gone, `resolveApiKeyPermissions` intersects a key's stored scope set
+  with its creator's role permissions and DROPS what it does not recognise, so
+  an un-migrated `documents:read` would leave the key authenticating and
+  silently granting less — the same silent under-grant on every CLI refresh
+  rotation (`narrowScopeToClient`) and every live bearer token
+  (`scopesToPermissions`).
 
-  9. **Deploy order: roll the PLATFORM first, then the runtime image.** Two
-     things moved on the container boundary and the skew is NOT symmetric:
-     the run container's input directory is `workspace/files/` (was
-     `workspace/documents/`), and a published file is uploaded to
-     `POST /api/runs/{id}/files` (was `…/documents`).
+  **The read path stays canonical-only, by design.** Nothing translates
+  `documents:*` at read time any more, and nothing should: an OAuth client that
+  still SENDS the old spelling is refused outright with `invalid_scope` at
+  `/oauth2/authorize`. That is the deliberate trade — a loud refusal a caller
+  can see and fix, rather than a rewrite that hides the drift. The migration
+  fixes what is already STORED; it does not make the old spelling acceptable on
+  the wire.
 
-     - **New platform + old image — prompt-level miss.** `prompt-builder.ts`
-       announces `./files/<name>`; a pre-#1177 image provisioned `documents/`
-       only, so the agent is pointed at a directory that is not there. The
-       bytes ARE provisioned and the manifest carries both a `files` and a
-       `documents` key, so a run that goes looking still finds them.
-     - **New image + old platform — HARD FAILURE.** The previous release
-       registers `/runs/:runId/documents` and nothing else; `runtime-pi`'s
-       uploader posts unconditionally to `/files` with no fallback, so
-       **every `publish_file` call 404s**, the run finishes with no
-       deliverable, and nothing in the platform log says why. The image-side
-       `documents` → `files` symlink (`runtime-pi/provision.ts`) covers the
-       INPUT path across this skew; it cannot cover the upload.
+  **Migrations.** `0042` drops the `presentation` column with its partial unique
+  index and CHECK. `0043` is a pure `ALTER … RENAME` of the tables, columns,
+  enum type, indexes and constraints — catalog-only, no table rewrite, no data
+  movement, no window where a constraint is absent. The previous `0044` and
+  `0045`, which rewrote persisted `documents:*` scope strings, are **deleted**
+  along with their journal entries and snapshots, and their numbers reused:
+  `0044_finish_file_rename` is the physical-layer migration described above,
+  and `0045_drop_integration_refresh_failure_timestamp` drops one more
+  write-only column. Their scope rewrite is not lost — it lands at
+  `0046_legacy_permission_scope_strings`, which carries both column shapes in
+  one file. All of them are idempotent and converge from a partially applied
+  state.
 
-     `PI_IMAGE` defaults to `appstrate-pi:latest` and is operator-controlled,
-     so an eager pull lands the new image on the old platform by accident.
-     Pin the tag, or upgrade the platform first.
+  A database that already applied the OLD `0044`/`0045` carries a
+  `drizzle.__drizzle_migrations` watermark that now matches no journal entry.
+  Drizzle compares timestamps rather than tags, so nothing errors and the new
+  `0044`, `0045` and `0046` all still run; the bookkeeping table simply records
+  two migrations this folder can no longer explain, and the forward-only scope
+  rewrite they performed produced exactly the strings `0046` produces, so it
+  finds nothing left to do.
 
-  Read compatibility that needs no action, and is permanent: `document://` URIs
-  parse everywhere `appfile://` does (historical `runs.input` rows are full of
-  them); run logs written as `event: "document"` still render; the ingestion
-  route accepts a `document.published` event and an `X-Document-Name` header
-  from a runtime image older than the platform, and ignores the retired
-  `X-Document-Presentation`; `POST /api/runs/inline` accepts `context_documents`
-  as well as `context_files`; and `documents:read` / `documents:delete` scopes
-  minted before migration `0044` still grant.
+  **`0043` is irreversible, and the rollback is a hard outage, not a degraded
+  mode.** There is no down migration in the repo and `0043` creates no
+  compatibility view. Once boot has applied it, the previous release's code
+  queries `documents`, `document_links` and `organizations.documents_bytes_*` —
+  none of which exist under those names any more. **Take a database snapshot
+  immediately before the deploy**; it is the only fast way back. To reverse by
+  hand:
+
+  ```sql
+  ALTER TABLE "files" RENAME TO "documents";
+  ALTER TABLE "file_links" RENAME TO "document_links";
+  ALTER TABLE "document_links" RENAME COLUMN "file_id" TO "document_id";
+  ALTER TABLE "organizations" RENAME COLUMN "files_bytes_used" TO "documents_bytes_used";
+  ALTER TABLE "organizations" RENAME COLUMN "files_bytes_limit" TO "documents_bytes_limit";
+  ALTER TYPE "public"."file_purpose" RENAME TO "document_purpose";
+  ```
+
+  Constraint and index names are cosmetic to the old code and can be left
+  alone. `0042` is not reversible at all — the `presentation` column and its
+  data are dropped, and only the snapshot brings them back. Neither is the
+  physical `0044`: the object move it requires is yours to undo too.
+
+  **Deploy order is now enforced rather than documented — for the pairings the
+  check can see.** Rolling the platform and the runtime images out of step used
+  to be a live hazard — a new image against an old platform posted every
+  `publish_file` to a `/files` route that did not exist, so the run finished
+  with no deliverable and nothing in the platform log said why. The version
+  contract below refuses to boot on that pairing, so for a configured mismatch
+  the failure moved from "silent, at run time" to "loud, at start". It stays
+  silent wherever that check is blind — its own carve-outs (`image-ref.ts`),
+  and above all a container already running when the platform restarts, which
+  no boot-time check can see — which is why the drain step above is part of
+  this upgrade. Ship the platform and both images from one version, which is what
+  all four shipped compose paths already do.
+
+- **BREAKING: the runtime images must now agree with the PLATFORM's version,
+  not just with each other — and a disagreement fails boot.** #1201 turned
+  `PI_IMAGE` / `SIDECAR_IMAGE` into a version contract, but the check compared
+  the pair to itself: a platform at version X with both runtime images at X−1
+  booted happily and then failed runs with the opaque upstream error the
+  contract exists to prevent. That is exactly the skew half a dozen
+  compatibility shims in this codebase were justified by, including the
+  `document` aliases removed above.
+
+  The comparison now includes `APP_VERSION`, which already existed — baked by
+  the Dockerfile, fed by `release.yml` as the git ref, surfaced on `/health`
+  and in the SPA footer. No new variable, no file read at boot.
+
+  The two halves are deliberately not symmetric. `PI_IMAGE` and `SIDECAR_IMAGE`
+  are always compared to each other literally, as they were under the pair
+  rule: every compose file sets both from one `${APPSTRATE_VERSION}`, so any
+  difference between them is a half-done edit whatever tag family it is in. The
+  platform joins the comparison only when **all three values are release
+  versions**. `APP_VERSION` is a git ref name, so it can equal an image tag only
+  in the one family (`{{version}}`) the two namespaces share; `release.yml`
+  publishes three others for the very same image (`latest` — documented as the
+  compat fallback for consumers that skip the CLI —, `{{major}}.{{minor}}`, and
+  `sha-<sha>`). Comparing against those, or against a non-release build stamp
+  (`dev`, the Dockerfile default and source-run fallback; `health-container-e2e`,
+  what the container health job builds with against `:local` images), does not
+  detect skew — it makes the rule unsatisfiable, since no legitimately-built
+  image tag can ever equal such a value and the only escape would be pinning
+  digests. Any of those drops the platform out and the rule degrades to the pair
+  rule, which is what keeps dev boxes, preview deployments, that CI job and
+  `:latest` consumers booting. A digest-pinned ref on either image is exempt
+  outright: a digest identifies an image by content, so there is no version to
+  compare, and an operator pinning digests has taken explicit control of image
+  identity.
+
+  **What this deliberately does not catch.** Both runtime refs floating on
+  `:latest` under a released platform is accepted. That is not a gap left open
+  by choice of predicate — tag comparison cannot see it at all: `APP_VERSION` is
+  baked at build time and reads identically whether the platform image was
+  pulled by its version tag or by `:latest`, so `{platform 1.0.0-beta.52, pi
+latest, sidecar latest}` is byte-for-byte the same input as the supported
+  all-`:latest` deployment. Only something reading the images actually present
+  on the host can separate them. `runtime-image-pair.ts` is untouched and stays
+  complementary for exactly that reason: it compares OCI revision labels after
+  the pre-pull — the same-tag-two-builds case — and it warns rather than
+  refusing. Promoting that guard to a refusal, not re-tightening the tag rule,
+  is the way to close this.
+
+- **Long Anthropic cache retention is refused on the model record, not by
+  convention — and `cacheRetention` is no longer forwarded from the
+  container.** Both doorways to 1-hour cache creation were open:
+  `FORWARDED_OPTION_KEYS` carried `cacheRetention` and `projectRequestOptions`
+  relayed it verbatim from the container's own request body, and pi-ai also
+  resolves the option from `process.env` at request time, so agent code inside
+  the container could set `PI_CACHE_RETENTION` directly. Either way Anthropic
+  bills those cache-creation tokens at 2× the input rate while
+  `computeTokenCost` has no term for them, so the platform's authoritative
+  price came out low with nothing to notice.
+
+  Both model builders now set `compat.supportsLongCacheRetention: false`, which
+  pi-ai honours on every API shape it drives (`anthropic-messages`,
+  `openai-responses`, `openai-completions`); the sidecar's `compat` is no
+  longer conditional on adaptive reasoning, with the existing
+  `forceAdaptiveThinking` folded in. `cacheRetention` also leaves the forwarded
+  option set on boundary-hygiene grounds — `"none"` steers caching too, and the
+  sidecar has no business honouring a container-chosen knob whose semantics
+  differ per vendor. It is logged as discarded by the existing set difference.
+  Caching itself is unaffected; only the 1-hour TTL is.
 
 - **The run page is four fixed tabs: Outcome, Fichiers, Exécution,
   Configuration.** The previous set (Résultat / Deliverable / logs / memory /
@@ -224,13 +550,66 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   tool emitted, not a verdict on the run. The top bar states whether a run is an
   inline run or an agent run.
 
-  Every retired tab hash still resolves — `#deliverable`, `#result` and
-  `#memory` → `outcome`, `#documents` → `files`, `#logs` and `#info` →
-  `execution` — so a bookmark, a back-history entry or a link pasted into an old
-  chat message lands on the pane that absorbed it instead of silently falling
-  back to the default.
+  **The retired tab hashes no longer resolve.** `#deliverable`, `#result`,
+  `#memory`, `#documents`, `#logs` and `#info` were each mapped onto the pane
+  that absorbed them and rewritten in the address bar; the whole table, its
+  mapping function and the rewrite effect are gone. A bookmark, a back-history
+  entry or a link pasted into an old chat message now opens the default pane,
+  silently — the page cannot tell that anchor apart from any other it does not
+  know. Accepted so these anchors have one vocabulary rather than two.
+
+- **BREAKING: the schedule launch bodies are validated too — it was the fourth
+  launch surface, and the one where a bad value is permanent.** #1189 made every
+  agent-launch body `.strict()` and value-checked, and covered three surfaces.
+  `POST /api/agents/{scope}/{name}/schedules` and `PUT /api/schedules/{id}`
+  freeze exactly these fields onto `package_schedules` and replay them at every
+  fire, so a defect there is not one mis-executed run, it is a wrong run forever
+  with a `201` as the only receipt. Three gaps, all closed against the run
+  route's existing rules: `connection_overrides` values lacked `.min(1)`, and
+  the pin is applied with a truthy check, so an empty id was skipped without a
+  trace and every fire fell through to actor-fallback or died with
+  `412 must_choose_connection`; neither schema was `.strict()`, so an unknown
+  field was silently stripped; and `dependency_overrides` values were never
+  checked, because a schedule resolves through `resolveEffectiveInput` +
+  `validateInput` and never calls the parser the agent route gets that gate from
+  — so an unresolvable value froze onto the row and failed at every fire instead
+  of at the write. `minLength: 1` on `connection_overrides` is now documented at
+  the three run surfaces as well: the Zod has always enforced it, and the spec
+  said plain `{ "type": "string" }`.
+
+  **Why this is BREAKING and not a fix: `.strict()` makes read-modify-write a
+  `400`.** The spec's `Schedule` response component has 26 properties;
+  `updateScheduleSchema` accepts 11 of them (`name`, `cron_expression`,
+  `timezone`, `input`, `enabled`, the four `*_override` fields,
+  `connection_overrides`, `dependency_overrides` — plus `actor`, which is not a
+  response field). The other 15 are now refused BY NAME: `id`, `packageId`,
+  `userId`, `endUserId`, `orgId`, `applicationId`, `last_run_at`, `next_run_at`,
+  `createdAt`, `updatedAt`, `actor_name`, `actor_type`, `running_runs`,
+  `unread_count`, `last_run_number`. A third-party client that does the obvious
+  thing — `GET /api/schedules/{id}`, flip `enabled`, `PUT` the object back —
+  previously had those keys stripped and got a `200`; it now gets a `400` on
+  `id`. In-repo callers are unaffected: `useUpdateSchedule`
+  (`apps/web/src/hooks/use-schedules.ts`) destructures `id` into the path and
+  sends only the remaining fields as the body. Send only the fields you mean to
+  change.
 
 ### Removed
+
+- **Three columns that were written and never read**, with their writers
+  (migrations `0044` and `0045`). The `last_refresh_failure_at` columns on
+  `model_provider_credentials` and on `integration_connections` were stamped
+  beside `refresh_failure_count` on
+  every transient refresh failure; it is the COUNTER that drives the
+  `needs_reconnection` escalation, and the timestamp was never a term in that
+  predicate, appeared in no DTO and in no query, and was read only by the
+  integration tests asserting its own write.
+  `model_provider_pairings.consumed_from_ip` was written by `consumePairing`
+  and read by nothing — its "for audit" justification never held, because
+  `cleanupExpiredPairings` DELETEs the row an hour past expiry and the audit
+  entry written at redeem time omits the IP, so the trail it was meant to leave
+  was erased and the record that survives never carried it. All three had been
+  kept on the premise that they held real data already collected. Forward-only
+  and cheaply so: none was an input to any decision.
 
 - **`presentation: "primary"`, and everything behind it.** The
   `publish_document` argument, the `documents.presentation` column, its partial
@@ -264,6 +643,87 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`appstrate run` validates the resolved input against the agent's schema
+  again.** The `config` → `input` collapse (#1179) deleted the CLI's validation
+  and replaced it with nothing: at `v1.0.0-beta.51` the site read
+  `validateConfig(config, configSchema)` and exited with a field summary, and
+  afterwards it was a bare `resolveLocalInput(...)` with no validator at all.
+  The docstring claimed "the bundle's own `required` check sees the truth";
+  there is no such check — the runtime reads `input.schema.required` only to
+  print the word "required" beside the field. So a required field answered
+  nowhere reached the model as an empty render, and a wrong-typed or
+  out-of-enum value launched the container and burned tokens instead of failing
+  fast, which is exactly the local/remote parity #1179 set out to deliver.
+  `validateLocalInput` calls the same `validateAgainstSchema` the server's
+  `validateInput` wraps, so the same (input, schema) pair reaches the same
+  verdict on both sides. An agent declaring no `input.schema` accepts anything,
+  so the gate is a no-op there rather than a rejection.
+
+- **A `charset` parameter no longer routes a binary download through the text
+  decoder.** `isTextLikeMimeType` tested for `;charset=` BEFORE looking at the
+  media type, so an OOXML spreadsheet type answered with a `charset=utf-8`
+  parameter appended took the lossy `fatal:false` text decode — the OOXML
+  corruption class this resolver was rewritten to prevent.
+  The docblock defended the order with "an OOXML container carries no charset",
+  which is an assumption about upstream servers rather than an invariant: one
+  that blanket-appends a charset defeats it. The charset rule now applies only
+  when the base media type is ambiguous. A third local MIME parser in the same
+  file goes with it: it did not lowercase, and its output fed an exact-literal
+  comparison against `application/octet-stream`, so an upstream answering
+  `Application/Octet-Stream` was treated as unambiguous — magic-byte sniffing
+  was skipped and the stored file kept the mixed-case string as its `mime`.
+
+- **A graceful shutdown is no longer pinned to its full 10s cap by a job that
+  is only counting down.** `LocalQueue.shutdown()` waits for `activeJobs` to
+  reach zero, and a job sleeping between retry attempts counted as active — its
+  `run()` awaits its own retry timer. So a single permanently-failing job (a
+  ledger replay whose org was deleted, say) held the count above zero for its
+  entire retry schedule and delayed every restart by the full cap. `shutdown()`
+  now abandons jobs with nothing in flight, and the retry path refuses to
+  schedule or resume once shutting down — abandoning is this queue's documented
+  semantics, since in-memory jobs do not survive the process and a retry that
+  has not started has nothing to lose. Retry timers are `unref`'d, matching the
+  existing rationale for the drain and cron intervals. Found by diagnosing a
+  test flake rather than by raising its deadline: no test deadline changed.
+
+- **CLI output redirected to a file no longer contains terminal escape codes.**
+  `@clack` gates only an extra newline on CI and writes `cursor.up` /
+  `erase.down` unconditionally, so `appstrate install > install.log` wrote
+  control sequences into the file. The spinner now branches on `isTTY`, like
+  the CLI's own colour policy, and emits plain lines otherwise. In the same
+  pass, five more command modules (`doctor`, `models`, `internal`, `logout`,
+  `self-update`) take the `CommandIO` sink instead of writing to the process
+  globals, every direct `clack.*` call outside `lib/ui.ts` is gone, and
+  `no-console` is an ESLint rule over `apps/*/src` and `packages/*/src` rather
+  than a convention enforced by review — it was enabled nowhere, and one real
+  offender had survived in `lib/self-update.ts`.
+
+- **Sixteen endpoints' documented request bodies did not match the Zod that
+  validates them.** The OpenAPI gate locked ~42 documented request bodies to the Zod
+  that validates them and checked none of the rest, so a launch surface could
+  drift from its published body with every gate green. `verify-openapi.ts` §4b
+  now fails when a documented request body is neither registered against its
+  Zod nor exempt with a stated reason (16 are, each with one), mirroring what
+  §7b already did for responses. The drift it surfaced: the package `PUT`
+  bodies required `manifest` + `content` although the handler explicitly
+  supports content-only and manifest-only saves; `POST /api/packages/agents`
+  required `content` where its skill and integration siblings do not; six
+  documented fields were missing their length constraints; fields carrying a
+  `default:` were marked `required` (Zod's default output view marks a
+  `.default()` field required, which is wrong for a request body — the
+  conversion now uses `io: "input"`); and two module routes (`webhooks` rotate,
+  `smtp-config/test`) had no spec entry at all. The generated document is
+  otherwise byte-identical: the header-block and `{values, locked_fields}`
+  de-duplication in the same pass changed no wire shape.
+
+- **One Ajv instance, so the per-run validator cache behaves.** `apps/api` stood
+  up a second instance with its own `compileCached`, and the two had diverged:
+  core wraps `compile` in `try/finally` with `removeSchema` and evicts FIFO,
+  while the `apps/api` copy did neither — so its registry grew unbounded in a
+  long-lived process, and a schema carrying `$id` compiled twice from two
+  objects would throw. This is the per-run hot path. Both behaviours are now
+  pinned by tests from either caller.
+
 - **A file attached in the chat now becomes an input of the inline run it
   triggers.** It did not, for two independent reasons that had to be fixed
   together: the chat system prompt never told the model that a top-level
@@ -273,9 +733,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `context_files` name and dropped the legacy `context_documents` spelling
   before the HTTP call — an allowlist builds the launch body, so a model that
   reached for the argument under its pre-#1177 name, from an earlier turn or a
-  stale tool listing, watched it disappear with no 400 from the route that
-  accepts it forever. The run started anyway, with no error and no file — the agent
-  simply worked without the attachment the user had just given it.
+  stale tool listing, watched it disappear with no `400` from anywhere. The run
+  started anyway, with no error and no file — the agent simply worked without
+  the attachment the user had just given it. The client now canonicalizes the
+  retired argument name to `context_files`; the HTTP route itself no longer
+  knows the old spelling at all, and answers `400` to it.
 
 ### Added
 
@@ -292,7 +754,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Published packages are deliberately out of scope for public-export death:
   `@appstrate/core`, `@appstrate/afps-runtime` and the `@appstrate/module-*`
   packages are consumed out of tree, so "no in-repo reader" is not evidence.
-  knip treats every name in their `exports` map as an entry.
+  That exemption is obtained by hand, not inherited: knip derives no entry
+  from a package manifest — it reads neither `exports` nor `bin`, `main` or
+  `module` — and declaring an `entry` array for a workspace replaces even its
+  filename defaults. So each published workspace must re-declare every target
+  of its export map in `knip.config.ts`, or its whole public surface reads as
+  dead. Letting that drift is what produced a ~161-finding false red.
 
 ### Removed
 
@@ -418,12 +885,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `runs.config` merge into the respective `input`. On a key collision `input`
   wins, the same rule the manifest merge applies.
 
-  **Ordering matters and is not enforced.** The DDL runs automatically at boot,
-  while `scripts/migrate-config-to-input.ts --apply` — which rewrites manifests
-  and `{{config.x}}` prompt references — can only run afterwards, since it reads
-  the renamed column. In between, published agents still carry `{{config.x}}`,
-  which the renderer resolves to the empty string with no error. Run the script
-  immediately after deploying.
+  **The manifest half was a separate, manual pass.** The DDL runs automatically
+  at boot; rewriting manifests and `{{config.x}}` prompt references was done by
+  `scripts/migrate-config-to-input.ts --apply`, which could only run afterwards
+  because it read the renamed column. Until it had run, published agents still
+  carried `{{config.x}}`, which the renderer resolves to the empty string with
+  no error. That script was single-use and has since been deleted; nothing in
+  the tree declares a manifest `config` section any more.
 
 - **Three endpoints now report malformed JSON as `validation_failed` instead of
   `invalid_request`.** Two on `runs-events.ts` and one on `runs.ts`, as a side

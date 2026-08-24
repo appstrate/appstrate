@@ -9,7 +9,7 @@
  * (`runPiChat`) serving both credential modes. There is no per-provider
  * chat-handler seam and no second inference loop — the chat module resolves the
  * chosen model row through {@link PlatformServices}
- * (`resolveSubscriptionChatModel`) and drives Pi inline. An oauth2 row yields
+ * (`resolveChatModel`) and drives Pi inline. An oauth2 row yields
  * the real token + provider baseUrl (the engine talks to the provider
  * directly); an API-key row yields no secret at all and the engine is pointed
  * at the platform llm-proxy instead.
@@ -68,7 +68,7 @@ export interface SubscriptionChatModel {
  *   - `{ subscription: true, model }` — an oauth2 model with a fresh token → the
  *     engine talks to the provider directly with it, instead of the llm-proxy.
  */
-export type SubscriptionChatResolution =
+export type ChatModelResolution =
   | { subscription: false }
   | { subscription: true; needsReconnection: true }
   | { subscription: true; model: SubscriptionChatModel };
@@ -86,8 +86,7 @@ export interface ChatAttachmentRequest {
   /** Container the materialized file is anchored to (session-scoped ACL). */
   chatSessionId: string;
   /**
-   * `upload://upl_x` (materialize) or `appfile://doc_x` (validate access) — the
-   * legacy `document://doc_x` spelling is still accepted.
+   * `upload://upl_x` (materialize) or `appfile://file_x` (validate access).
    */
   uri: string;
 }
@@ -95,12 +94,11 @@ export interface ChatAttachmentRequest {
 /**
  * A chat attachment resolved to its stable `appfile://` URI + metadata. An
  * `upload://` was materialized into a chat-session-scoped file; an existing
- * `appfile://` (or legacy `document://`) was validated as readable by the
- * session owner. The URI is what the message persists (stable for the session's
+ * `appfile://` was validated as readable by the session owner. The URI is what the message persists (stable for the session's
  * lifetime) and what the model is told the attached file is addressed by.
  */
 export interface ResolvedChatAttachment {
-  /** `appfile://doc_x` — the durable, stable URI, always in canonical form. */
+  /** `appfile://file_x` — the durable, stable URI, always in canonical form. */
   uri: string;
   name: string;
   mime: string;

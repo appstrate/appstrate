@@ -77,11 +77,13 @@ the `_meta["dev.appstrate/api"]` extension. Each opted-in auth key (must exist i
 top-level `auths`) yields one `api_call` tool; a single opted-in auth → `api_call`,
 multiple → `api_call__<authToken>`. Keys up to 17 characters remain verbatim;
 longer AFPS-valid keys use a stable bounded token so the final MCP name stays valid.
-Previously persisted raw long-key names remain accepted as aliases.
-When this extension declares a synthetic name, that name and any persisted
-long-key alias are reserved and take precedence over a same-named native MCP
-tool. Without the extension, native tools named `api_call` or `api_upload`
-remain ordinary tools.
+The raw long-key spelling is **not** accepted — the alias layer that once
+carried it is gone, and a manifest using it resolves no `api_call` surface.
+When this extension declares a synthetic name, that name is reserved and takes
+precedence over a same-named native MCP tool. A native tool literally named
+`api_call__<authKey>` is therefore no longer swallowed by the synthetic surface:
+it collides with nothing and stays in the catalog. Without the extension, native
+tools named `api_call` or `api_upload` remain ordinary tools.
 
 ```jsonc
 "_meta": {
@@ -537,11 +539,33 @@ fields under the `dev.appstrate/connect` vendor extension key in `_meta` (§10).
   produces. These are the names you can reference in `delivery.*.value` as
   `{$outputs.<name>}`.
 
-> Either-or form. New manifests SHOULD use the spec-natural location
-> `connect.tool.name`. The vendor-extension form
-> `connect._meta["dev.appstrate/connect"].tool` remains accepted for back-compat. The
-> other Appstrate-specific fields (`run_at`, `persist_login_secret`, `reauth_on`,
-> `outputs`) live under `_meta["dev.appstrate/connect"]` regardless.
+> **Either-or form — but only one of the two is executed today.** The
+> spec-natural location `connect.tool.name` is where the name BELONGS, and it is
+> what `getConnectToolNames` (`@appstrate/core/integration`) reads to hide the
+> login primitive from the model's tool catalog. The executing path does not
+> read it: `OrchestratedStrategy` resolves the name from the vendor-extension
+> form `connect._meta["dev.appstrate/connect"].tool` with no fallback, so a
+> manifest carrying ONLY the spec-natural name is hidden from the catalog and
+> then fails at connect with `Auth '<key>' has no connect.tool declaration`.
+>
+> The divergence runs the other way too, and that half is quieter: a manifest
+> carrying ONLY the vendor-extension form connects fine, but `getConnectToolNames`
+> returns `[]` for it, so the login primitive is never added to the hide set and
+> stays in the model's tool catalog — the agent can see and call the credential
+> -acquisition tool. Nothing fails; the §"auto-hidden" claim below simply is not
+> true for that manifest. An author who followed the previous version of this
+> note (which blessed the vendor-only form as "accepted for back-compat") is
+> shipping exactly that today.
+>
+> Until the two readers agree, **declare the name in both places** — that is one
+> instruction with two independent reasons, one per direction. The fix is
+> one shared `connectToolName(auth)` checking both locations, called from
+> `getConnectToolNames` and from `OrchestratedStrategy`; the divergence is
+> tracked, not designed.
+>
+> The other Appstrate-specific fields (`run_at`, `persist_login_secret`,
+> `reauth_on`, `outputs`) live under `_meta["dev.appstrate/connect"]`
+> regardless.
 
 ---
 

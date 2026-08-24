@@ -78,7 +78,6 @@ export interface CoreResources {
   // Without it a minimally-scoped API key could download every `agent_output`
   // in the application. `delete` is owner/admin, plus the file's own
   // creator (enforced in the route handler, not RBAC).
-  // Was `documents` until #1177 — see `LEGACY_PERMISSION_RESOURCE_ALIASES`.
   files: "read" | "delete";
   schedules: "read" | "write" | "delete";
   // Unified `package_persistence` (checkpoints + memories) with first-class
@@ -99,75 +98,6 @@ export interface CoreResources {
   // installation. Connect/disconnect = manage credentials (connections) per
   // declared `auths.{key}`.
   integrations: "read" | "write" | "delete" | "install" | "uninstall" | "connect" | "disconnect";
-}
-
-// ---------------------------------------------------------------------------
-// Retired permission spellings
-//
-// A permission string is not just a compile-time union: it is PERSISTED. API
-// keys, OIDC grants and role snapshots store `resource:action` strings, and a
-// stored scope outlives any rename we make here. Renaming a resource without an
-// alias silently demotes every key that was granted under the old spelling —
-// the guard just stops matching, and the only symptom is a 403 nobody asked
-// for.
-// ---------------------------------------------------------------------------
-
-/**
- * Retired resource spellings and the canonical resource each maps to. The
- * single alias table for permission strings.
- *
- * `documents` → `files`: issue #1177.
- */
-export const LEGACY_PERMISSION_RESOURCE_ALIASES: Readonly<Record<string, string>> = Object.freeze({
-  documents: "files",
-});
-
-/**
- * Rewrite one stored `resource:action` scope onto its canonical spelling.
- * Returns the input unchanged when the resource is already canonical (or the
- * string is not a `resource:action` pair at all).
- *
- * Call this wherever a scope string is READ OUT OF STORAGE — building the
- * permission Set for an API key, an OIDC token, a stored role snapshot — so
- * everything downstream compares canonical strings only.
- */
-export function canonicalPermission(scope: string): string {
-  const sep = scope.indexOf(":");
-  if (sep <= 0) return scope;
-  const resource = scope.slice(0, sep);
-  const canonical = LEGACY_PERMISSION_RESOURCE_ALIASES[resource];
-  return canonical === undefined ? scope : `${canonical}${scope.slice(sep)}`;
-}
-
-/**
- * {@link canonicalPermission} over a whole stored scope collection, deduped.
- * The shape every reader of persisted scopes should use.
- */
-export function canonicalPermissions(scopes: Iterable<string>): string[] {
-  const out = new Set<string>();
-  for (const scope of scopes) out.add(canonicalPermission(scope));
-  return [...out];
-}
-
-/**
- * Every stored spelling that grants `required` — the canonical string first,
- * then any retired spelling that maps to it. Used by {@link makePermissionGuard}
- * as a second chance so a permission Set built WITHOUT
- * {@link canonicalPermissions} (a caller that predates the rename, a module
- * assembling its own Set) still grants. Belt and braces: normalising on read is
- * the primary mechanism; this makes forgetting it non-fatal rather than a
- * silent authorization regression.
- */
-function acceptedPermissionSpellings(required: string): string[] {
-  const sep = required.indexOf(":");
-  if (sep <= 0) return [required];
-  const resource = required.slice(0, sep);
-  const action = required.slice(sep);
-  const spellings = [required];
-  for (const [legacy, canonical] of Object.entries(LEGACY_PERMISSION_RESOURCE_ALIASES)) {
-    if (canonical === resource) spellings.push(`${legacy}${action}`);
-  }
-  return spellings;
 }
 
 /** Core resource names. */
@@ -521,14 +451,7 @@ export function makePermissionGuard(
 ): (c: HonoContextLike, next: HonoNextLike) => Promise<unknown> {
   return async (c, next) => {
     const perms = c.get("permissions") as ReadonlySet<string> | undefined;
-    const granted =
-      !!perms &&
-      typeof perms.has === "function" &&
-      // Canonical spelling first; a retired one (`documents:read` for
-      // `files:read`) is accepted too, so a scope persisted before a resource
-      // rename keeps granting even if its reader never called
-      // `canonicalPermissions`.
-      acceptedPermissionSpellings(required).some((spelling) => perms.has(spelling));
+    const granted = !!perms && typeof perms.has === "function" && perms.has(required);
     if (!granted) {
       // Audit is best-effort — a throwing handler must not escalate an
       // authz denial into a 500 (which would leak timing info and, worse,

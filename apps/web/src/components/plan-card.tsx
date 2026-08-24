@@ -4,12 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Check, Sparkles } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
 import { formatBytes } from "@appstrate/core/format";
-import {
-  PLAN_ICONS,
-  PLAN_DESCRIPTION_KEYS,
-  planStorageBytes,
-  type BillingPlanDetail,
-} from "../hooks/use-billing";
+import { PLAN_ICONS, PLAN_DESCRIPTION_KEYS, type BillingPlanDetail } from "../hooks/use-billing";
 
 interface PlanCardProps {
   plan: BillingPlanDetail;
@@ -29,7 +24,7 @@ function PlanCard({
   const { t } = useTranslation(["settings"]);
   const Icon = PLAN_ICONS[plan.id] ?? Sparkles;
   const descKey = PLAN_DESCRIPTION_KEYS[plan.id];
-  const storageBytes = planStorageBytes(plan);
+  const storageBytes = plan.file_storage_bytes;
 
   return (
     <button

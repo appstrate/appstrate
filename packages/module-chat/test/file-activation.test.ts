@@ -10,18 +10,18 @@ describe("fileActivation", () => {
   it("delegates a direct click to the host's single file opener", () => {
     const calls: Parameters<OpenFile>[] = [];
     const opener: OpenFile = (...args) => calls.push(args);
-    const activation = fileActivation({ id: "doc_1", name: "report.md" }, opener, () => {}, t);
+    const activation = fileActivation({ id: "file_1", name: "report.md" }, opener, () => {}, t);
 
     activation.onActivate();
 
-    expect(calls).toEqual([[{ id: "doc_1", name: "report.md" }]]);
+    expect(calls).toEqual([[{ id: "file_1", name: "report.md" }]]);
     expect(activation.label).toBe("file.previewOf");
   });
 
   it("keeps the authenticated download fallback when no host viewer exists", () => {
     const downloads: Array<[string, string]> = [];
     const activation = fileActivation(
-      { id: "doc_2", name: "data.csv" },
+      { id: "file_2", name: "data.csv" },
       null,
       (id, name) => downloads.push([id, name]),
       t,
@@ -29,7 +29,7 @@ describe("fileActivation", () => {
 
     activation.onActivate();
 
-    expect(downloads).toEqual([["doc_2", "data.csv"]]);
+    expect(downloads).toEqual([["file_2", "data.csv"]]);
     expect(activation.label).toBe("file.downloadOf");
   });
 });

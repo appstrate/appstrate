@@ -68,6 +68,20 @@ const globalIoBan = (target, selector) => ({
   message: `CLI tests must not take over the global ${target} (by assignment or \`spyOn\`). \`bun test\` runs every package in one process, so a global capture buffer also collects what other suites, libraries and the runner write — the assertion then fails non-deterministically and names an innocent test (issue #1180). Pass the command an injected CommandIO instead: createMemoryIO() from test/helpers/memory-io.ts.`,
 });
 
+// Message for both halves of the clack funnel below (direct `clack.x()` and
+// `clack.log.x()`). Declared once so the two selectors can never disagree
+// about what the rule is for.
+const PROCESS_STREAM_MESSAGE =
+  "Write through the command's `CommandIO` (`io.stdout.write` / `io.stderr.write`), never " +
+  "`process.stdout.write` / `process.stderr.write`. The process-global streams are invisible " +
+  "to an injected sink, so the output cannot be asserted on without capturing globals — the " +
+  "coupling issue #1180 is about. If this command genuinely owns a different output contract " +
+  "(a run's passthrough, a pre-sink host command), add it to this block's `ignores` with the " +
+  "reason, next to the ones already there.";
+
+const CLACK_FUNNEL_MESSAGE =
+  "Render through a `lib/ui.ts` wrapper (intro / outro / note / logInfo / logWarn / spinner / withSpinner / select / confirm / askText / cancel / exitWithError), never `clack.*` directly. Only `ui.ts` hands clack an `output`, so a direct call writes to the process-global stdout and is invisible to an injected CommandIO — the coupling issue #1180 is about. `clack.spinner()` additionally leaks its paint interval when the body throws; use `withSpinner`, or `spinner()` + a `finally` for a conditional start.";
+
 const AUTH_CLIENT_BAN = {
   // Matches "../lib/auth-client", "../../lib/auth-client" and
   // "@/lib/auth-client". Only hooks/use-auth.ts (the seam) may import it.
@@ -87,8 +101,32 @@ export default tseslint.config(
     ],
   },
   {
+    // The general TS config. `scripts/**/*.ts` and the root-level `*.ts` config
+    // files (knip.config.ts, commitlint.config.ts) are in here deliberately, and
+    // on the SAME rule set as application source rather than a relaxed one:
+    //   - They are ordinary TypeScript run by Bun, not a different dialect, and
+    //     several of them (verify-openapi, detect-breaking-changes,
+    //     check-consumer-versions, verify-module-contract) ARE the CI gates —
+    //     a gate that is itself unchecked is the weakest link in the chain.
+    //   - Before this, `turbo.json` claimed `scripts/**/*.ts` and `knip.config.ts`
+    //     as `//#lint` inputs while eslint answered "File ignored because no
+    //     matching configuration was supplied" for every one of them: the gate
+    //     was honest in intent and inert in fact.
+    //   - `*.ts` (no slash) matches root-level files only, so this does not
+    //     silently pull in arbitrary nested config files.
+    // Note on `console.*`: `no-console` is NOT set here. It is enabled in its
+    // own block below, over application source only — deliberately not over
+    // `scripts/**` or `**/test/**`, which this block does cover. See that block
+    // for why.
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
-    files: ["**/src/**/*.{ts,tsx}", "**/test/**/*.ts"],
+    files: [
+      "**/src/**/*.{ts,tsx}",
+      "**/test/**/*.ts",
+      "**/scripts/**/*.ts",
+      "e2e/**/*.ts",
+      "runtime-pi/**/*.ts",
+      "*.ts",
+    ],
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.node,
@@ -102,35 +140,156 @@ export default tseslint.config(
     },
   },
   {
+    // `console.*` ban — application source only (CLAUDE.md: "No `console.*`:
+    // use `@appstrate/core/logger`", and in `apps/cli` the `CommandIO` sink in
+    // `src/lib/io.ts`). Until now that rule was enforced by review alone:
+    // `no-console` is not part of `js.configs.recommended` and was set nowhere
+    // in this file, so the convention had no gate behind it.
+    //
+    // Why application source and not everything eslint covers:
+    //   - `scripts/**` (and the root `*.ts` config files) are report-printing
+    //     CLI utilities — `verify-openapi`, `detect-breaking-changes`,
+    //     `setup`, `check-consumer-versions`. Printing a report to the
+    //     developer's terminal IS their output contract; there is no logger to
+    //     route through and no sink to inject. They are covered by the general
+    //     block above for every other rule, and simply not matched here.
+    //   - `**/test/**` prints diagnostics on failure (the OpenAPI response
+    //     validators dump their error list before asserting). A test's console
+    //     line goes to the person reading the failure, not to a log pipeline.
+    //   - `apps/web` and `packages/ui` are in scope: a stray `console.log`
+    //     shipped to the browser bundle is exactly the thing worth catching.
+    //
+    // Two carve-outs inside the scope, both for directories that live under
+    // `src/` but are not source:
+    //   - `src/**/scripts/**` — dev tooling parked beside the module it
+    //     exercises rather than in the root `scripts/` directory
+    //     (`apps/api/src/modules/firecracker/scripts/dev/smoke.ts` prints its
+    //     `==> boot microVM` / `SMOKE PASS` progress). Same class as
+    //     `scripts/**`, same reason, so it gets the same treatment instead of
+    //     20 inline disables.
+    //   - `src/**/test/**` — a module's tests live inside its `src` tree
+    //     (`apps/api/src/modules/*/test/**`), and they are tests like any
+    //     other.
+    //
+    // `runtime-pi/**` (the agent image entrypoint + sidecar) has no `src/`
+    // segment, so it used to match none of the general blocks and was linted
+    // for the Pi-SDK import guard and nothing else — over the credential-proxy
+    // and MITM surface. It is in scope now: the general block above lists it
+    // explicitly, which also gives it the TypeScript parser espree lacks, and
+    // this block covers it for `no-console`. The migration cost was 10
+    // findings, all style, none a defect.
+    files: ["apps/*/src/**/*.{ts,tsx}", "packages/*/src/**/*.{ts,tsx}", "runtime-pi/**/*.ts"],
+    ignores: ["**/src/**/scripts/**", "**/src/**/test/**", "runtime-pi/**/test/**"],
+    rules: {
+      "no-console": "error",
+    },
+  },
+  {
     // Zod 4 regression guard: string formats are top-level functions
     // (z.email(), z.url(), z.uuid()) — the Zod 3 method forms are deprecated
     // and must not creep back in.
-    files: ["**/src/**/*.{ts,tsx}", "**/test/**/*.ts"],
+    // Scripts and root config files are in scope too: they parse manifests and
+    // API payloads with Zod like everything else. This block stays ABOVE the
+    // `**/test/**` and `apps/cli/src/**` blocks that re-declare
+    // `no-restricted-syntax`, so those still win (with the bans re-spread) for
+    // the files they cover — including `scripts/test/**`.
+    files: [
+      "**/src/**/*.{ts,tsx}",
+      "**/test/**/*.ts",
+      "**/scripts/**/*.ts",
+      "e2e/**/*.ts",
+      "runtime-pi/**/*.ts",
+      "*.ts",
+    ],
     rules: {
       "no-restricted-syntax": ["error", ...ZOD4_STRING_FORMAT_BANS],
     },
   },
   {
-    // Unguarded-spinner guard (issue #1180). A clack spinner paints from a
-    // `setInterval` that only `stop()` clears, so a `start()` whose body throws
-    // leaks a writer for the rest of the process — invisible in the shipped CLI
-    // (the error exits it), fatal under `bun test`, where one process runs every
-    // suite and the frames land in someone else's capture. `withSpinner`
-    // (src/lib/ui.ts) owns the start/stop pair; `ui.ts` itself is where the one
-    // remaining `clack.spinner()` call lives.
+    // `@clack/prompts` funnel (issue #1180). Every byte the CLI renders through
+    // clack must go through a `lib/ui.ts` wrapper, because that is the only
+    // layer that hands clack an `output` — the seam a test injects a
+    // `CommandIO` into instead of swapping the process-global streams. A direct
+    // `clack.note(...)` / `clack.intro(...)` / `clack.log.warn(...)` writes to
+    // the real stdout by name and is invisible to any injected sink.
+    //
+    // The original form of this rule banned `clack.spinner` alone, which was
+    // the acute case: a spinner paints from a `setInterval` that only `stop()`
+    // clears, so a `start()` whose body throws leaks a writer for the rest of
+    // the process — invisible in the shipped CLI (the error exits it), fatal
+    // under `bun test`, where one process runs every suite and the frames land
+    // in someone else's capture. `withSpinner` owns the start/stop pair. The
+    // other 29 call sites had the same destination problem without the leak,
+    // and a guard naming one of thirty reads as coverage it does not have.
+    //
+    // Two selectors: `clack.x(...)` and `clack.log.x(...)` (`clack.log` is a
+    // namespace object, so the direct-member selector cannot see through it).
+    // `clack.isCancel(...)` is allow-listed — it is a type predicate over a
+    // returned symbol, renders nothing, and has no sink to route through.
+    // Bare MEMBER REFERENCES (`typeof clack.select`, `deps.note ?? clack.note`)
+    // are deliberately out of scope: `commands/install.ts` uses them as the
+    // production default of its own prompt-DI seams, and a call through such a
+    // local is not a call on `clack`.
+    //
+    // `lib/ui.ts` is the funnel itself; `lib/io.ts` owns `DEFAULT_IO.cancel`,
+    // which is wired to `clack.cancel` there on purpose so the dependency arrow
+    // stays `ui.ts → io.ts` and never the reverse.
     //
     // Re-declares `no-restricted-syntax` for a subset of the Zod block above,
     // which fully REPLACES its options here — hence the explicit spread.
     files: ["apps/cli/src/**/*.ts"],
-    ignores: ["apps/cli/src/lib/ui.ts"],
+    ignores: [
+      "apps/cli/src/lib/ui.ts",
+      "apps/cli/src/lib/io.ts",
+      // The `process.*.write` ban below has a longer exemption list than the
+      // clack ban, and it lives HERE rather than only in `lib/io.ts`'s
+      // docstring — a list a linter cannot read is documentation, not a rule.
+      // Each of these owns a different output contract, spelled out in that
+      // docstring: `run.ts` + `run/**` stream a run's own stdout/stderr
+      // through, `runner.ts` and `lifecycle.ts` are host-level commands that
+      // run before any command sink exists, `install.ts` predates the sink and
+      // keeps its own prompt-DI seams, and `cli.ts` is the top-level error
+      // handler that must still print when everything else has failed.
+      "apps/cli/src/cli.ts",
+      "apps/cli/src/commands/run.ts",
+      "apps/cli/src/commands/run/**/*.ts",
+      "apps/cli/src/commands/runner.ts",
+      "apps/cli/src/commands/lifecycle.ts",
+      "apps/cli/src/commands/install.ts",
+      // `lib/keyring.ts` emits ONE lifetime warning when the OS keyring is
+      // unavailable, from a module with no command context and therefore no
+      // sink to inject. The one exemption the io.ts docstring did not account
+      // for; named here so it is a decision rather than an oversight.
+      "apps/cli/src/lib/keyring.ts",
+    ],
     rules: {
       "no-restricted-syntax": [
         "error",
         ...ZOD4_STRING_FORMAT_BANS,
         {
-          selector: "CallExpression[callee.object.name='clack'][callee.property.name='spinner']",
-          message:
-            "Use `withSpinner` from lib/ui.ts — it stops the spinner on every exit path. A raw `clack.spinner()` leaks its paint interval when the body throws (issue #1180). For a conditional start, use `spinner()` from lib/ui.ts and stop it in a `finally`.",
+          selector:
+            "CallExpression[callee.object.name='clack']:not([callee.property.name='isCancel'])",
+          message: CLACK_FUNNEL_MESSAGE,
+        },
+        {
+          selector: "CallExpression[callee.object.object.name='clack']",
+          message: CLACK_FUNNEL_MESSAGE,
+        },
+        // The third door, and the most direct one. `2d71e0297` was titled "put
+        // every command's output behind the sink, AND ENFORCE IT" and enforced
+        // `console.*` (via no-console) and `clack.*` (above) — leaving the
+        // literal `process.stdout.write("…")` a new command could reach for,
+        // which passes `bun run check` untouched and is invisible to an
+        // injected CommandIO exactly like the other two.
+        {
+          selector:
+            "CallExpression[callee.property.name='write'][callee.object.object.name='process'][callee.object.property.name='stdout']",
+          message: PROCESS_STREAM_MESSAGE,
+        },
+        {
+          selector:
+            "CallExpression[callee.property.name='write'][callee.object.object.name='process'][callee.object.property.name='stderr']",
+          message: PROCESS_STREAM_MESSAGE,
         },
       ],
     },
@@ -241,6 +400,12 @@ export default tseslint.config(
       "packages/runner-pi/src/pi-sdk.ts",
       "apps/cli/src/lib/pi-sdk.ts",
       "runtime-pi/pi-sdk.ts",
+      // Tests may reach the vendor directly. The guard protects the PRODUCTION
+      // import graph — routing a test probe through a barrel instead put the
+      // vendor's 2.1 MB provider catalog on the container's boot path (see the
+      // note in `packages/runner-pi/src/pi-sdk.ts`). `packages/*/test/**` was
+      // never in `files`; only runtime-pi's own tests needed exempting.
+      "runtime-pi/**/test/**/*.ts",
       // The sidecar image is built from `runtime-pi/sidecar/*.ts` alone, so it
       // cannot reach the agent's barrel one directory up — it needs its own.
       // It carries pi-ai to RE-ORIGINATE an aliased run's inference call

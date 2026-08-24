@@ -37,6 +37,7 @@
   ],
   "exports": {
     ".": "./src/index.ts",
+    "./model-compat": "./src/model-compat.ts",
     "./provider-map": "./src/provider-map.ts",
     "./runtime-tools": "./src/runtime-tools/index.ts"
   },

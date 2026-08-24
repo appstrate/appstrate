@@ -38,29 +38,6 @@ describe("createInProcessPair — round-trip via SDK Client/Server", () => {
     }
   });
 
-  it("registers a hidden tool for tools/call but withholds it from tools/list", async () => {
-    // The one intended use is a RETIRED tool name kept callable after a rename
-    // (issue #1177): the server advertises `listChanged: false`, so a client is
-    // entitled to cache the list for its whole session and will call a name it
-    // learned before the rename. Listing the alias too would put two entries
-    // for one capability in front of the model, which is what the rename fixes.
-    const alias: AppstrateToolDefinition = { ...echoTool(), hidden: true };
-    alias.descriptor = { ...alias.descriptor, name: "echo_legacy" };
-    const pair = await createInProcessPair([echoTool(), alias]);
-    try {
-      const listed = await pair.client.listTools();
-      expect(listed.tools.map((t) => t.name)).toEqual(["echo"]);
-
-      const called = await pair.client.callTool({
-        name: "echo_legacy",
-        arguments: { message: "still works" },
-      });
-      expect(called.content).toEqual([{ type: "text", text: "still works" }]);
-    } finally {
-      await pair.close();
-    }
-  });
-
   it("dispatches tools/call to the matching handler", async () => {
     const pair = await createInProcessPair([echoTool()]);
     try {

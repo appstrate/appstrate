@@ -142,7 +142,7 @@ async function orgBytesUsed(orgId: string): Promise<number> {
 
 async function fileObjectKeys(prefix?: string): Promise<string[]> {
   const keys: string[] = [];
-  for await (const object of listObjects("documents", prefix)) keys.push(object.key);
+  for await (const object of listObjects("files", prefix)) keys.push(object.key);
   return keys.sort();
 }
 
@@ -302,7 +302,7 @@ describe("files service + routes", () => {
     expect(body).toEqual(bytes);
 
     // Unknown id → 404.
-    const missing = await app.request(`/api/files/doc_missing123/content`, {
+    const missing = await app.request(`/api/files/file_missing123/content`, {
       headers: authHeaders(ctx),
     });
     expect(missing.status).toBe(404);
@@ -401,7 +401,7 @@ describe("files service + routes", () => {
   });
 
   it("a nonexistent file ref in input is simply absent (no error)", async () => {
-    const missingUri = `appfile://doc_${crypto.randomUUID()}`;
+    const missingUri = `appfile://file_${crypto.randomUUID()}`;
     const runId = await seedRunRow(scope, { input: { file: missingUri } });
     const { row: docB } = await publishStream(scope, runId, "out.txt", "produced");
 
@@ -602,7 +602,7 @@ describe("files service + routes", () => {
     expect(keptByAdmin!.expiresAt).toBeNull();
 
     // Unknown id → 404.
-    const missing = await app.request(`/api/files/doc_missing123/keep`, {
+    const missing = await app.request(`/api/files/file_missing123/keep`, {
       method: "POST",
       headers: authHeaders(ctx),
     });
@@ -675,7 +675,7 @@ describe("files service + routes", () => {
   });
 
   it("rejects an over-cap file synchronously (413)", async () => {
-    await withEnv("DOCUMENT_MAX_FILE_BYTES", "4", async () => {
+    await withEnv("FILE_MAX_BYTES", "4", async () => {
       const runId = await seedRunRow(scope);
       const up = await stageUpload(
         scope,
@@ -703,8 +703,8 @@ describe("files service + routes", () => {
     );
     await expect(
       materializeRunUploads(scope, userActor, runId, "@scope/agent", [
-        { uploadId: goodUpload, fileId: `doc_${crypto.randomUUID()}` },
-        { uploadId: "upl_does_not_exist", fileId: `doc_${crypto.randomUUID()}` },
+        { uploadId: goodUpload, fileId: `file_${crypto.randomUUID()}` },
+        { uploadId: "upl_does_not_exist", fileId: `file_${crypto.randomUUID()}` },
       ]),
     ).rejects.toMatchObject({ status: 404 });
 
@@ -852,7 +852,7 @@ describe("files service + routes", () => {
     const content = "fills-cap";
 
     await withEnv("RUN_MAX_OUTPUT_BYTES", String(content.length), async () => {
-      await withEnv("RUN_MAX_DOCUMENTS", "1", async () => {
+      await withEnv("RUN_MAX_FILES", "1", async () => {
         // Hold the same serialization lock commits use until BOTH request
         // objects have landed. This deterministically makes both optimistic
         // dedup SELECTs miss before either caller can insert.
@@ -1183,7 +1183,7 @@ describe("files service + routes", () => {
     const up = await stageUpload(scope, ctx.user.id, "x.txt", new TextEncoder().encode("x"));
     await createFileFromUpload(scope, userActor, up, { runId });
 
-    const del = await app.request(`/api/files/doc_missing`, {
+    const del = await app.request(`/api/files/file_missing`, {
       method: "DELETE",
       headers: authHeaders(ctx),
     });
@@ -1365,7 +1365,7 @@ describe("files service + routes", () => {
       .from(storageDeletionJobs)
       .where(eq(storageDeletionJobs.storageKey, rest.join("/")));
     expect(jobs).toHaveLength(1);
-    expect(jobs[0]!.reason).toBe("document_deleted");
+    expect(jobs[0]!.reason).toBe("file_deleted");
     expect(await downloadStream(bucket!, rest.join("/"))).not.toBeNull();
     // Draining the worker removes the object.
     await processStorageDeletionJobs();
@@ -1431,13 +1431,13 @@ describe("files service + routes", () => {
     await expect(
       (async () =>
         db.insert(files).values({
-          id: `doc_${crypto.randomUUID()}`,
+          id: `file_${crypto.randomUUID()}`,
           orgId: ctx.orgId,
           applicationId: ctx.defaultAppId,
           purpose: "agent_output",
           runId,
           chatSessionId: sessionId,
-          storageKey: "documents/x/y/z.txt",
+          storageKey: "files/x/y/z.txt",
           name: "z.txt",
           mime: "text/plain",
           size: 3,
@@ -1452,13 +1452,13 @@ describe("files service + routes", () => {
     let error: unknown;
     try {
       await db.insert(files).values({
-        id: `doc_${crypto.randomUUID()}`,
+        id: `file_${crypto.randomUUID()}`,
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
         purpose: "agent_output",
         runId,
         chatSessionId: sessionId,
-        storageKey: "documents/x/y/z2.txt",
+        storageKey: "files/x/y/z2.txt",
         name: "z2.txt",
         mime: "text/plain",
         size: 3,
@@ -1495,7 +1495,7 @@ describe("files service + routes", () => {
   it("createRun fails atomically when an input file is unavailable", async () => {
     const pkg = await seedPackage({ id: "@chain/missing", orgId: ctx.orgId });
     const consumerRun = `run_${crypto.randomUUID()}`;
-    const missingFileId = `doc_${crypto.randomUUID()}`;
+    const missingFileId = `file_${crypto.randomUUID()}`;
 
     try {
       await createRunState(scope, {

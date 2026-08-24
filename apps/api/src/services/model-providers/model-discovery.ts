@@ -19,11 +19,33 @@
  *     Discovery is then a truthful no-op: it reports the current list.
  *
  *   - probe (default, when `modelDiscovery` is omitted — API-key providers) —
- *     empirical: a 1-token inference request per candidate, persisting the ids
- *     that answered 2xx. Candidates come from `modelDiscoveryCandidates`
- *     (falling back to `featuredModels`); the platform stays provider-agnostic
- *     and just sends whatever `testModelConfig` builds (generic `/models` wire
- *     format).
+ *     persists the candidate ids that answered 2xx. Candidates come from
+ *     `modelDiscoveryCandidates` (falling back to `featuredModels`).
+ *
+ *     !! READ THIS BEFORE TRUSTING `available_model_ids` !!
+ *
+ *     This is NOT a per-model check, whatever the loop below looks like.
+ *     `testModelConfig` → `buildModelTestRequest` (`services/org-models.ts`)
+ *     accepts a `modelId` and never reads it: every branch builds a plain
+ *     `GET <baseUrl>/models` listing request. So all `MAX_CANDIDATES` probes
+ *     are byte-identical, they all succeed or all fail together, and what the
+ *     run actually establishes is "this credential works" — not "these models
+ *     are served". A candidate the provider does not serve is recorded as
+ *     verified.
+ *
+ *     The tests do not catch this: `ModelDiscoveryDeps.probe` is injected, and
+ *     the scripted prober answers from a (modelId → result) table, so the suite
+ *     exercises per-model discrimination that the real dependency cannot
+ *     perform. The seam made the mock strictly more capable than production.
+ *
+ *     Fixing it is a feature, not a cleanup — either parse the `/models`
+ *     response body and intersect it with the candidates (per-provider response
+ *     shapes), or send the real 1-token inference request this comment used to
+ *     claim. Both need a decision about which; neither belongs in a hygiene
+ *     pass. Until then the fan-out below is 24 identical requests, and it is
+ *     left in place rather than collapsed to one, because collapsing it would
+ *     force the tests to assert "all candidates verified" — moving the lie out
+ *     of this comment and into the data.
  *
  * The classification below applies only to the probe path:
  *

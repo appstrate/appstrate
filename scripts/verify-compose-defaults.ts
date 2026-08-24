@@ -28,6 +28,12 @@ import {
 const REPO_ROOT = join(import.meta.dir, "..");
 
 const COMPOSE_FILES = [
+  // The two files that ship at the repo root: `bun run docker:prod` runs the
+  // first and `bun run docker:dev` the second, so they are the compose files
+  // most likely to drift from the schema — and the ones this gate used to
+  // skip entirely while scanning only the examples.
+  "docker-compose.yml",
+  "docker-compose.dev.yml",
   "examples/self-hosting/docker-compose.yml",
   "examples/self-hosting/docker-compose.tier1.yml",
   "examples/self-hosting/docker-compose.tier2.yml",

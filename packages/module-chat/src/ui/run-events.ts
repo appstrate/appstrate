@@ -20,7 +20,12 @@
 
 import { z } from "zod";
 import { runStatusValues, TERMINAL_RUN_STATUSES } from "@appstrate/db/run-status";
-import { fileUri, parseFileUri, PUBLISHED_FILE_LOG_EVENTS } from "@appstrate/core/file-uri";
+import {
+  fileUri,
+  isFileProducedByRun,
+  parseFileUri,
+  PUBLISHED_FILE_LOG_EVENTS,
+} from "@appstrate/core/file-uri";
 import { asRecord, unwrapResult } from "./tool-result.ts";
 
 /** Operation ids whose result launches a run we can follow. */
@@ -75,7 +80,7 @@ export function isRunLaunchOp(opId: string | undefined): opId is RunLaunchOp {
  * than enum'd so a future level can't drop a line; `data` may be a record,
  * the literal `"[payload too large]"`, or absent (non-verbose subscribers).
  */
-export const runLogLineSchema = z.object({
+const runLogLineSchema = z.object({
   id: z.number(),
   level: z.string().nullable().optional(),
   type: z.string().nullable().optional(),
@@ -339,10 +344,10 @@ export const UNNAMED_FILE = "file";
 function asChatRunFile(raw: unknown): ChatRunFile | undefined {
   const r = asRecord(raw);
   if (!r) return undefined;
-  // `id` in the tool result; `file_id` in the `file.published` log frame; the
-  // pre-#1177 frames used `document_id` — read it too (same reason the legacy
-  // `event` tag stays accepted: persisted frames are immutable once written).
-  const id = nonEmptyString(r.id) ?? nonEmptyString(r.file_id) ?? nonEmptyString(r.document_id);
+  // `id` in the tool result; `file_id` in the `file.published` log frame. The
+  // pre-#1177 `document_id` spelling is no longer read: no persisted frame
+  // carries it.
+  const id = nonEmptyString(r.id) ?? nonEmptyString(r.file_id);
   const uri = nonEmptyString(r.uri) ?? (id ? fileUri(id) : undefined);
   const name = nonEmptyString(r.name) ?? UNNAMED_FILE;
   if (!id || !uri) return undefined;
@@ -354,23 +359,17 @@ function asChatRunFile(raw: unknown): ChatRunFile | undefined {
 }
 
 /**
- * The keys a persisted `run_and_wait` result can carry its published file list
- * under, canonical first. `files` is what the tool writes today; `documents` is
- * the pre-#1177 spelling and stays readable FOREVER — this payload IS the
- * reload-safe source (it exists precisely because run logs get pruned), so a
- * conversation reopened from before the rename would otherwise come back with
- * no chips at all, permanently, once its logs are gone.
+ * The published file list of a persisted `run_and_wait` result. The tool
+ * writes it under `files`, and that is the only key read.
+ *
+ * The pre-#1177 `documents` spelling used to be accepted here as well, on the
+ * grounds that this payload IS the reload-safe source (it exists precisely
+ * because run logs get pruned). It is gone with the rest of the rename: no
+ * persisted result carries it.
  */
-const PUBLISHED_FILE_RESULT_KEYS = ["files", "documents"] as const;
-
-/** First `PUBLISHED_FILE_RESULT_KEYS` entry present on `record` as an array. */
 function rawFileList(record: Record<string, unknown> | null | undefined): unknown[] | undefined {
-  if (!record) return undefined;
-  for (const key of PUBLISHED_FILE_RESULT_KEYS) {
-    const value = record[key];
-    if (Array.isArray(value)) return value;
-  }
-  return undefined;
+  const value = record?.files;
+  return Array.isArray(value) ? value : undefined;
 }
 
 /**
@@ -394,9 +393,9 @@ export function extractRunFiles(result: unknown): ChatRunFile[] {
 /**
  * Extract published files from the live run log stream — the
  * `type='result' event='file'` frames the sink persists for each
- * `file.published` event (and the legacy `event='document'` frames written
- * before #1177). Lets the card show a chip the moment an agent publishes,
- * before the run terminates.
+ * `file.published` event. Lets the card show a chip the moment an agent
+ * publishes, before the run terminates. No pre-#1177 `event='document'` frame
+ * is read — that spelling is gone with the rest of the rename.
  *
  * These frames are publications, i.e. files the agent PRODUCED: the only
  * emitters are the `publish_file` runtime tool and the end-of-run
@@ -453,19 +452,10 @@ interface ProducedFileList {
  * nothing, which is a complete answer; a body that is not an envelope is no
  * answer at all. See {@link shouldRaiseSweepDone}.
  *
- * Both halves of the filter are load-bearing and `purpose` alone is NOT
- * enough: the endpoint answers the run's whole CONTAINER, so a file chained in
- * as INPUT from an earlier run is listed here while still carrying
- * `purpose: "agent_output"` — it was produced by that earlier run. Ownership is
- * decided by the row's own `run_id`.
- *
- * The produced-by-this-run predicate exists in THREE places and they must not
- * drift: `producedRunFiles()` in `apps/web/src/lib/files.ts` (the run page),
- * this function (the chat card), and `fetchRunFiles()` in
- * `@appstrate/core/run-and-wait-client` (the server-side `run_and_wait`
- * payload). All three agree with the server's own predicate. The duplication is
- * deliberate: `@appstrate/module-chat` is an optional package the web shell
- * consumes, and a package may not import from `apps/web`.
+ * Which rows count is `isFileProducedByRun` (`@appstrate/core/file-uri`), the
+ * one predicate the run page's Outcome pane and the server-side
+ * `run_and_wait` payload also read — a package may not import from
+ * `apps/web`, but all three can import core.
  */
 export function producedFilesFromFileList(
   payload: unknown,
@@ -478,7 +468,7 @@ export function producedFilesFromFileList(
   for (const row of rows) {
     const r = asRecord(row);
     if (!r) continue;
-    if (r.purpose !== "agent_output" || r.run_id !== runId) continue;
+    if (!isFileProducedByRun(r, runId)) continue;
     const file = asChatRunFile(r);
     if (file) out.push(file);
   }

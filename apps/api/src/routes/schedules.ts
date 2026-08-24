@@ -2,6 +2,7 @@
 
 import { Hono } from "hono";
 import { z } from "zod";
+import { connectionOverridesSchema, dependencyOverridesSchema } from "../lib/launch-schemas.ts";
 import {
   ModelGenerationError,
   modelGenerationSettingsSchema,
@@ -20,7 +21,6 @@ import {
   deleteSchedule,
 } from "../services/scheduler.ts";
 import { isValidCron } from "../lib/cron.ts";
-import { validateInput } from "../services/schema.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { ApiError, invalidRequest, notFound, validationFailed } from "../lib/errors.ts";
@@ -33,7 +33,8 @@ import { getOrgMember } from "../services/organizations.ts";
 import { getEndUser } from "../services/end-users.ts";
 import { assertExplicitModelExists, resolveModel } from "../services/org-models.ts";
 import { getInstalledPackageSettings } from "../services/application-packages.ts";
-import { assertFieldsUnlocked, resolveEffectiveInput } from "../services/input-resolution.ts";
+import { resolveAndValidateScheduleInput } from "../services/input-resolution.ts";
+import { getPackage } from "../services/package-catalog.ts";
 import { asJSONSchemaObject, schemaHasFileFields } from "@appstrate/core/form";
 import { listScheduleRuns } from "../services/state/runs.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
@@ -42,15 +43,26 @@ import { listResponse } from "../lib/list-response.ts";
 import { scheduleInputSchema } from "../lib/jsonb-schemas.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 
-// Per-integration connection picks frozen on the schedule row (cascade
-// mechanism #3). Same wire shape as the run-route's connection_overrides;
-// loses to admin pins at fire time. Shape: { "@scope/integration": "<connection_id>" }.
-const connectionOverridesSchema = z.record(z.string(), z.string());
+// Both maps are the shared launch rules (`lib/launch-schemas.ts`). A schedule
+// freezes them onto the row and replays them on every tick, which is what makes
+// a second, drifting copy expensive here: the write answers 200 once and every
+// subsequent fire is silently wrong.
 
-// Per-dependency version overrides frozen on the schedule row (#666/#686).
-// Same wire shape as the run-route's dependency_overrides; keys may name a
-// declared skill OR integration. Shape: { "@scope/dep": "draft" | "<spec>" }.
-const dependencyOverridesSchema = z.record(z.string(), z.string());
+/**
+ * The 400 a schedule's stored input earns when it no longer satisfies the
+ * agent's schema. One shape for the create route and the update route, so the
+ * two cannot answer the same bad body differently.
+ */
+function scheduleInputInvalid(errors: { field: string; message: string }[]): ApiError {
+  return validationFailed(
+    errors.map((e) => ({
+      field: e.field ? `input.${e.field}` : "input",
+      code: "invalid_input",
+      title: "Invalid Input",
+      message: e.message,
+    })),
+  );
+}
 
 // #738: schedule execution identity, chosen by an admin from the form.
 // XOR — exactly one of user_id / end_user_id. Omitted at create → defaults to
@@ -106,36 +118,48 @@ async function resolveScheduleActor(
   return { type: "end_user", id: selected.end_user_id! };
 }
 
-const createScheduleSchema = z.object({
-  name: z.string().optional(),
-  cron_expression: z.string().min(1, "cron_expression is required"),
-  timezone: z.string().default("UTC"),
-  input: scheduleInputSchema.default({}),
-  model_id_override: z.string().optional(),
-  generation_config_override: modelGenerationSettingsSchema.optional(),
-  proxy_id_override: z.string().optional(),
-  version_override: z.string().optional(),
-  connection_overrides: connectionOverridesSchema.optional(),
-  dependency_overrides: dependencyOverridesSchema.optional(),
-  actor: actorSchema.optional(),
-});
+/**
+ * `.strict()` (#1187's rule, extended to this surface): an unknown field is a
+ * 400, never a silent drop. A schedule is the strongest case for it — the other
+ * launch surfaces mis-execute ONE run, whereas a schedule freezes exactly these
+ * fields onto `package_schedules` and replays them on every fire, so a stripped
+ * field is a wrong run forever with a 201 as the only receipt.
+ */
+export const createScheduleSchema = z
+  .object({
+    name: z.string().optional(),
+    cron_expression: z.string().min(1, "cron_expression is required"),
+    timezone: z.string().default("UTC"),
+    input: scheduleInputSchema.default({}),
+    model_id_override: z.string().optional(),
+    generation_config_override: modelGenerationSettingsSchema.optional(),
+    proxy_id_override: z.string().optional(),
+    version_override: z.string().optional(),
+    connection_overrides: connectionOverridesSchema.optional(),
+    dependency_overrides: dependencyOverridesSchema.optional(),
+    actor: actorSchema.optional(),
+  })
+  .strict();
 
-const updateScheduleSchema = z.object({
-  name: z.string().optional(),
-  cron_expression: z.string().optional(),
-  timezone: z.string().optional(),
-  input: scheduleInputSchema.optional(),
-  enabled: z.boolean().optional(),
-  // `null` clears the override; omitted leaves it untouched.
-  model_id_override: z.string().nullable().optional(),
-  generation_config_override: modelGenerationSettingsSchema.nullable().optional(),
-  proxy_id_override: z.string().nullable().optional(),
-  version_override: z.string().nullable().optional(),
-  connection_overrides: connectionOverridesSchema.nullable().optional(),
-  dependency_overrides: dependencyOverridesSchema.nullable().optional(),
-  // No `.nullable()` — the actor can be re-pointed but never cleared (#735).
-  actor: actorSchema.optional(),
-});
+/** `.strict()` for the same reason as {@link createScheduleSchema}. */
+export const updateScheduleSchema = z
+  .object({
+    name: z.string().optional(),
+    cron_expression: z.string().optional(),
+    timezone: z.string().optional(),
+    input: scheduleInputSchema.optional(),
+    enabled: z.boolean().optional(),
+    // `null` clears the override; omitted leaves it untouched.
+    model_id_override: z.string().nullable().optional(),
+    generation_config_override: modelGenerationSettingsSchema.nullable().optional(),
+    proxy_id_override: z.string().nullable().optional(),
+    version_override: z.string().nullable().optional(),
+    connection_overrides: connectionOverridesSchema.nullable().optional(),
+    dependency_overrides: dependencyOverridesSchema.nullable().optional(),
+    // No `.nullable()` — the actor can be re-pointed but never cleared (#735).
+    actor: actorSchema.optional(),
+  })
+  .strict();
 
 function validateGenerationOverride(
   generation: ModelGenerationSettings,
@@ -155,7 +179,7 @@ export function createSchedulesRouter() {
   const router = new Hono<AppEnv>();
 
   // GET /api/schedules — list all schedules (app-scoped)
-  router.get("/schedules", async (c) => {
+  router.get("/schedules", requirePermission("schedules", "read"), async (c) => {
     const scope = getAppScope(c);
     // The caller is the VIEWER of the run counters (`unread_count` is
     // recipient-scoped), never the schedules' own execution actor.
@@ -164,12 +188,17 @@ export function createSchedulesRouter() {
   });
 
   // GET /api/agents/:scope/:name/schedules — list schedules for an agent
-  router.get(`/agents/${SCOPED_PACKAGE_ROUTE}/schedules`, requireAgent(), async (c) => {
-    const scope = getAppScope(c);
-    const agent = c.get("package");
-    const schedules = await listPackageSchedules(scope, agent.id, getActor(c));
-    return c.json(listResponse(schedules));
-  });
+  router.get(
+    `/agents/${SCOPED_PACKAGE_ROUTE}/schedules`,
+    requirePermission("schedules", "read"),
+    requireAgent(),
+    async (c) => {
+      const scope = getAppScope(c);
+      const agent = c.get("package");
+      const schedules = await listPackageSchedules(scope, agent.id, getActor(c));
+      return c.json(listResponse(schedules));
+    },
+  );
 
   // POST /api/agents/:scope/:name/schedules — create a schedule
   router.post(
@@ -202,25 +231,13 @@ export function createSchedulesRouter() {
       // refused (400 `locked_input_field`) at this write rather than silently
       // each tick.
       const packageSettings = await getInstalledPackageSettings(scope.applicationId, agent.id);
-      const resolvedInput = resolveEffectiveInput({
-        ...(inputSchema ? { schema: asJSONSchemaObject(inputSchema) } : {}),
+      const resolution = resolveAndValidateScheduleInput({
+        inputSchema,
         editorDefaults: packageSettings.values,
         lockedFields: packageSettings.locked,
-        scheduleValues: data.input,
+        input: data.input,
       });
-      if (inputSchema) {
-        const inputValidation = validateInput(resolvedInput, asJSONSchemaObject(inputSchema));
-        if (!inputValidation.valid) {
-          throw validationFailed(
-            inputValidation.errors.map((e) => ({
-              field: e.field ? `input.${e.field}` : "input",
-              code: "invalid_input",
-              title: "Invalid Input",
-              message: e.message,
-            })),
-          );
-        }
-      }
+      if (resolution.errors) throw scheduleInputInvalid(resolution.errors);
 
       // #738: actor defaults to the caller; an admin may override it from the
       // form (validated against this org/app scope).
@@ -278,8 +295,8 @@ export function createSchedulesRouter() {
   );
 
   // GET /api/schedules/:id — get a single schedule
-  router.get("/schedules/:id", async (c) => {
-    const id = c.req.param("id");
+  router.get("/schedules/:id", requirePermission("schedules", "read"), async (c) => {
+    const id = c.req.param("id")!;
     const schedule = await getSchedule(id, getAppScope(c), getActor(c));
     if (!schedule) {
       throw notFound(`Schedule '${id}' not found`);
@@ -311,10 +328,24 @@ export function createSchedulesRouter() {
       existing.packageId,
     );
 
-    // A schedule may not answer a locked field — same refusal the create route
-    // and the fire path apply, so the three cannot disagree.
-    if (data.input !== undefined) {
-      assertFieldsUnlocked(data.input, packageSettings.locked, "schedule input");
+    // Same resolve-and-validate the create route runs, for the same stated
+    // reason: refuse at THIS write rather than silently at every tick. This
+    // path used to run only the lock half, so a PUT replacing `input` with a
+    // wrong-typed or incomplete value answered 200 and then died on every
+    // subsequent fire, visible only in the schedule's failure record.
+    //
+    // `data.input ?? existing.input` because a PATCH that omits `input` must
+    // still be checked against the CURRENT schema and locks — both can have
+    // tightened since the schedule was written.
+    if (data.input !== undefined || existing.input !== undefined) {
+      const agentForInput = await getPackage(existing.packageId, scope.orgId);
+      const resolution = resolveAndValidateScheduleInput({
+        inputSchema: agentForInput?.manifest.input?.schema,
+        editorDefaults: packageSettings.values,
+        lockedFields: packageSettings.locked,
+        input: data.input ?? (existing.input as Record<string, unknown> | undefined),
+      });
+      if (resolution.errors) throw scheduleInputInvalid(resolution.errors);
     }
 
     // Reject a `model_id_override` that references no real model (no-op when
@@ -445,8 +476,8 @@ export function createSchedulesRouter() {
   });
 
   // GET /api/schedules/:id/runs — list runs for a schedule
-  router.get("/schedules/:id/runs", async (c) => {
-    const scheduleId = c.req.param("id");
+  router.get("/schedules/:id/runs", requirePermission("schedules", "read"), async (c) => {
+    const scheduleId = c.req.param("id")!;
     const scope = getAppScope(c);
     const { limit, offset } = parseListPagination(c, { defaultLimit: 20 });
     const result = await listScheduleRuns(scope, scheduleId, {

@@ -7,7 +7,7 @@
  *  - an `upload://` file part materializes into a chat-session-scoped file
  *    and the part is rewritten to the stable `appfile://` URI, both in memory
  *    and once persisted into `chat_messages.content`;
- *  - a historical `document://` URI still resolves to its file (#1177);
+ *  - the retired `document://` URI scheme is refused (#1177);
  *  - an `appfile://` belonging to another user is rejected (container ACL);
  *  - file parts flatten to the model-facing `[Attached file: …]` block in
  *    both the transcript builder and the shared serializer;
@@ -153,10 +153,12 @@ describe("chat attachments", () => {
     expect(storedPart!.url).toBe(`appfile://${fileId}`);
   });
 
-  it("still resolves a historical document:// URI to the same file", async () => {
-    // Chat messages persisted before #1177 carry the old scheme. The resolver
-    // must accept it — core's `parseFileUri` reads both — or every attachment
-    // in an older conversation becomes unresolvable on reload.
+  it("refuses the retired document:// scheme", async () => {
+    // Kept resolvable until the id prefix moved to `file_`. Every URI ever
+    // written under the old scheme addresses a `doc_` id, which `parseFileUri`
+    // rejects, so the prefix could only still have matched `document://file_…`
+    // — a pairing no build ever emitted. Both halves are refused now, and the
+    // one that used to get through failed one line later anyway.
     const bytes = new TextEncoder().encode("legacy-scheme payload");
     const sessionId = await createSession(ctx.orgId, ctx.user.id);
     const uploadId = await stageUpload(scope, ctx.user.id, "vieux.txt", bytes);
@@ -172,10 +174,10 @@ describe("chat attachments", () => {
     ).url;
     const fileId = canonical.slice("appfile://".length);
 
-    const legacy = await resolve(`document://${fileId}`);
-    expect(legacy.uri).toBe(canonical);
-    expect(legacy.name).toBe("vieux.txt");
-    expect(legacy.size).toBe(bytes.byteLength);
+    await expect(resolve(`document://${fileId}`)).rejects.toThrow(/upload:\/\/' or 'appfile:\/\//);
+    await expect(resolve("document://doc_aaaaaaaa")).rejects.toThrow(
+      /upload:\/\/' or 'appfile:\/\//,
+    );
   });
 
   it("rejects an appfile:// belonging to another user (container ACL)", async () => {

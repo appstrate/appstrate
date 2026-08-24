@@ -260,8 +260,8 @@ export const mePaths = {
               type: "object",
               required: ["agent_package_id", "integration_package_id", "connection_id"],
               properties: {
-                agent_package_id: { type: "string" },
-                integration_package_id: { type: "string" },
+                agent_package_id: { type: "string", minLength: 1 },
+                integration_package_id: { type: "string", minLength: 1 },
                 connection_id: { type: "string", format: "uuid" },
               },
             },

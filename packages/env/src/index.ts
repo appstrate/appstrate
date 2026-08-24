@@ -2,7 +2,10 @@
 
 import { z } from "zod";
 import { createEnvGetter } from "@appstrate/core/env";
-import { findImageTagMismatch } from "@appstrate/core/image-ref";
+import {
+  findRuntimeImageTagMismatch,
+  type RuntimeImageTagMismatch,
+} from "@appstrate/core/image-ref";
 
 // Boolean-from-string env transform: `"true"`/`"1"` (case-insensitive) → true,
 // anything else → false. Shared by every on/off flag so the parse semantics
@@ -54,6 +57,42 @@ const urlHost = (v: string): string | null => {
   }
 };
 
+// Boot error for a runtime-image version trio that disagrees. Built here rather
+// than in `@appstrate/core/image-ref` because the wording is operator-facing
+// boot copy, like every other message in this file; core owns the rule and
+// reports only what it compared.
+//
+// The message has to answer three questions the operator cannot answer from a
+// failed run: what each of the three currently claims, which one stands apart,
+// and what to set. The last one is not "pin both images to the same tag" any
+// more — it is "pin both images to the PLATFORM's version", and the shipped
+// compose files already do exactly that from one `APPSTRATE_VERSION`.
+const describeRuntimeImageMismatch = (m: RuntimeImageTagMismatch): string => {
+  const observed = [
+    ...(m.platformVersion ? [`platform build ${m.platformVersion}`] : []),
+    `PI_IMAGE tag ${m.piTag}`,
+    `SIDECAR_IMAGE tag ${m.sidecarTag}`,
+  ].join(", ");
+
+  const outOfStep =
+    m.oddOneOut === "platform"
+      ? "the platform — PI_IMAGE and SIDECAR_IMAGE agree with each other but not with the build they are launched by, so BOTH images have to move"
+      : m.oddOneOut === "pi"
+        ? "PI_IMAGE"
+        : m.oddOneOut === "sidecar"
+          ? "SIDECAR_IMAGE"
+          : m.platformVersion
+            ? "all three — no two of them agree"
+            : "PI_IMAGE and SIDECAR_IMAGE, which disagree with each other";
+
+  return (
+    "The platform, PI_IMAGE and SIDECAR_IMAGE must all carry the same version — the agent runtime and the sidecar speak a wire protocol to each other, and both speak a container boundary to the platform, and all of it changes in the same commit. A trio that disagrees boots fine and then fails runs with an opaque upstream error naming none of the three (#1195 for the pair, #1177 for the platform boundary). " +
+    `Observed: ${observed}. Out of step: ${outOfStep}. ` +
+    "Pin both image refs to the platform's own version — the shipped docker-compose derives the platform image and both runtime images from a single ${APPSTRATE_VERSION}, which is the layout to copy — or rebuild both locally with `bun run docker:build:runtime` and run the platform from source. " +
+    "Exempt, deliberately: a digest-pinned ref (either half — a digest identifies an image by content, there is no version to compare), and any value that is not a release version — a platform with no release identity (a source run, an image built without APP_VERSION), or images pinned to one of the alias tag families the release publishes alongside the version (`latest`, `1.0`, `sha-<sha>`). In those the platform drops out of the comparison and the two images are still checked against each other."
+  );
+};
+
 // ─── Schema ──────────────────────────────────────────────────
 //
 // MAINTAINER NOTE: this Zod schema is the single source of truth for env
@@ -64,6 +103,18 @@ const urlHost = (v: string): string | null => {
 // self-host shipped with zero model providers for weeks). The script's
 // hand-maintained table is intentional: Zod defaults are entangled with
 // transforms/refinements that don't extract cleanly via static analysis.
+
+/**
+ * Env vars retired by the `document` -> `file` rename (#1177), mapped to what
+ * replaced them. Boot refuses while one is still set — see the superRefine
+ * below for why silence is the wrong answer here.
+ */
+const RETIRED_ENV_RENAMES: Record<string, string> = {
+  DOCUMENT_MAX_FILE_BYTES: "FILE_MAX_BYTES",
+  DOCUMENT_RETENTION_DAYS: "FILE_RETENTION_DAYS",
+  RUN_MAX_DOCUMENTS: "RUN_MAX_FILES",
+  WORKSPACE_MAX_DOCS_BYTES: "WORKSPACE_MAX_FILES_BYTES",
+};
 
 const envSchema = z
   .object({
@@ -529,11 +580,7 @@ const envSchema = z
     // and streamed to disk by the agent), so this is a policy limit, not a
     // memory-safety floor — but it also bounds what the platform buffers
     // while consuming uploads. Default 256 MiB.
-    // NAME IS LEGACY: issue #1177 renamed the entity from `document` to
-    // `file` everywhere except the env vars. Renaming an env var is an ops
-    // migration on every deployment for no user-visible gain, so the four
-    // `*DOCUMENT*` / `*DOCS*` variables keep their spelling.
-    WORKSPACE_MAX_DOCS_BYTES: z.coerce
+    WORKSPACE_MAX_FILES_BYTES: z.coerce
       .number()
       .int()
       .positive()
@@ -574,20 +621,12 @@ const envSchema = z
     // tiny files). Enforced platform-side at input-parse (413) and at
     // agent-output commit under the org FOR UPDATE lock (413
     // `file_count_exceeded`). Default 200.
-    // NAME IS LEGACY: issue #1177 renamed the entity from `document` to
-    // `file` everywhere except the env vars. Renaming an env var is an ops
-    // migration on every deployment for no user-visible gain, so the four
-    // `*DOCUMENT*` / `*DOCS*` variables keep their spelling.
-    RUN_MAX_DOCUMENTS: z.coerce.number().int().positive().default(200),
+    RUN_MAX_FILES: z.coerce.number().int().positive().default(200),
 
     // Per-file ceiling on a durable file (materialized upload or agent
     // output). Enforced synchronously at write time — over-cap writes 413.
     // Default 100 MiB, aligned with the staged-upload absolute ceiling.
-    // NAME IS LEGACY: issue #1177 renamed the entity from `document` to
-    // `file` everywhere except the env vars. Renaming an env var is an ops
-    // migration on every deployment for no user-visible gain, so the four
-    // `*DOCUMENT*` / `*DOCS*` variables keep their spelling.
-    DOCUMENT_MAX_FILE_BYTES: z.coerce
+    FILE_MAX_BYTES: z.coerce
       .number()
       .int()
       .positive()
@@ -611,11 +650,7 @@ const envSchema = z
     // at creation time so the operator sets an instance-wide policy (GitLab
     // pattern). Absent ⇒ permanent (files never auto-expire) — the OSS
     // default; livrable expiry is the #1 complaint, so this stays opt-in.
-    // NAME IS LEGACY: issue #1177 renamed the entity from `document` to
-    // `file` everywhere except the env vars. Renaming an env var is an ops
-    // migration on every deployment for no user-visible gain, so the four
-    // `*DOCUMENT*` / `*DOCS*` variables keep their spelling.
-    DOCUMENT_RETENTION_DAYS: z.coerce.number().int().positive().optional(),
+    FILE_RETENTION_DAYS: z.coerce.number().int().positive().optional(),
 
     // Poll cadence for the transactional storage-deletion worker (the outbox
     // that physically purges S3/FS objects after their DB row is gone). Each
@@ -899,14 +934,31 @@ const envSchema = z
     message: "APP_URL must use https:// when NODE_ENV=production (http://localhost is allowed)",
     path: ["APP_URL"],
   })
-  // `PI_IMAGE` and `SIDECAR_IMAGE` are a version contract, not two independent
-  // knobs: the agent runtime and the sidecar speak a wire protocol that changes
-  // in the same commit, so a pair pinned to two different release tags boots
-  // fine and then fails runs with an opaque upstream error naming neither image
-  // (#1195). Detectable here, before anything starts.
+  // The platform, `PI_IMAGE` and `SIDECAR_IMAGE` are a version contract, not
+  // three independent knobs: the agent runtime and the sidecar speak a wire
+  // protocol to each other, and both speak a container boundary to the
+  // platform, and all of it changes in the same commit. A trio that disagrees
+  // boots fine and then fails runs with an opaque upstream error naming none of
+  // the three (#1195 for the pair, #1177 for the platform boundary). Detectable
+  // here, before anything starts. The rule itself, both carve-outs and the
+  // worked examples live with the comparison in `@appstrate/core/image-ref`.
+  //
+  // The platform's own version is `APP_VERSION` — already declared above,
+  // already baked into the image by the Dockerfile (`ARG` → `ENV`, fed by the
+  // release workflow's `github.ref_name`), already surfaced on /health. No new
+  // variable, and no file read at boot: the root `package.json` carries no
+  // version field at all, and the release tag is the identity the image tags
+  // are cut from anyway. The platform only joins the comparison when all three
+  // values are release versions — `APP_VERSION` is a git ref name, so it can
+  // equal an image tag only in the one family the two namespaces share. Any
+  // other build stamp (`dev`, the Dockerfile ARG default and the source-run
+  // fallback; `health-container-e2e`, what the health e2e job builds with) or
+  // any alias tag family the release also publishes (`latest`, `1.0`,
+  // `sha-<sha>`) takes it out, which is what keeps dev boxes, preview
+  // deployments, that CI job and `:latest` consumers booting.
   //
   // Deliberately NOT conditioned on `RUN_ADAPTER`. The rule is a property of
-  // the two values, and every backend that consumes them wants it: the docker
+  // the values, and every backend that consumes them wants it: the docker
   // orchestrator reads both at run time, and the firecracker rootfs build
   // (`modules/firecracker/scripts/build-rootfs.sh`) reads both from this same
   // environment to bake a guest image — a mismatched pair there produces the
@@ -915,12 +967,69 @@ const envSchema = z
   // and branching on a backend id would put a closed list of backends back in
   // the codebase that the orchestrator registry exists to keep open.
   //
-  // A digest-pinned ref is exempt (see `findImageTagMismatch`): digests
-  // identify different images by construction, so there is nothing to compare.
-  .refine((env) => !findImageTagMismatch(env.PI_IMAGE, env.SIDECAR_IMAGE), {
-    message:
-      "PI_IMAGE and SIDECAR_IMAGE must be pinned to the same tag — the agent runtime and the sidecar speak a wire protocol that changes in lockstep, and a mismatched pair boots fine then fails runs with an opaque upstream error (#1195). Rebuild both with `bun run docker:build:runtime`, or pin both refs to the same release tag.",
-    path: ["SIDECAR_IMAGE"],
+  // `superRefine`, not `refine`, because the message has to name which of the
+  // three is out of step and what each one currently claims — a fixed string
+  // cannot, and "one of your three images is wrong" is the opaque error this
+  // check exists to replace.
+  .superRefine((env, ctx) => {
+    const mismatch = findRuntimeImageTagMismatch({
+      platformVersion: env.APP_VERSION,
+      piImage: env.PI_IMAGE,
+      sidecarImage: env.SIDECAR_IMAGE,
+    });
+    if (!mismatch) return;
+    ctx.addIssue({
+      code: "custom",
+      message: describeRuntimeImageMismatch(mismatch),
+      // Anchor on a ref the operator can actually change. `oddOneOut` has
+      // THREE values, not two: when it is "platform" the two images agree with
+      // each other and disagree with the build launching them, so both have to
+      // move and neither is "the outlier". The previous two-way ternary sent
+      // that case to SIDECAR_IMAGE — naming the one variable the message says
+      // is not individually at fault. `APP_VERSION` is not the answer either:
+      // it is baked into the image by the Dockerfile, so an operator cannot
+      // set it. PI_IMAGE is where they start; `describeRuntimeImageMismatch`
+      // carries "BOTH images have to move".
+      path: [mismatch.oddOneOut === "sidecar" ? "SIDECAR_IMAGE" : "PI_IMAGE"],
+    });
+  })
+  // The four file-limit variables were renamed by #1177 with no alias, and Zod
+  // strips unknown keys — so an `.env` still carrying an old name booted
+  // cleanly with the limit silently back at its default. That is not a cosmetic
+  // regression for two of them: `DOCUMENT_RETENTION_DAYS` unset makes
+  // `retentionExpiry` return null, so `expires_at` is null and files NEVER
+  // expire; `DOCUMENT_MAX_FILE_BYTES` unset reverts a tightened per-file cap to
+  // 100 MiB. An operator who set either for data-minimisation loses it without
+  // a single line of output.
+  //
+  // Read from raw `process.env` rather than the parsed object, because the
+  // parsed object is exactly where these no longer exist. Same shape as
+  // `retiredScopeRenames()` in the oidc module, which this branch wrote for the
+  // retired `documents:*` scope spellings — a retired name should say what
+  // replaced it, not evaporate.
+  .superRefine((_env, ctx) => {
+    for (const [retired, replacement] of Object.entries(RETIRED_ENV_RENAMES)) {
+      const raw = process.env[retired];
+      // An explicitly blanked name carries no value, so it cannot revert
+      // anything — refusing it would be refusing a no-op. This mirrors
+      // `sanitizeEnv` (`@appstrate/core/env`), which coalesces `""` to
+      // `undefined` for EVERY field before Zod sees it precisely because "the
+      // host never sets a variable to a meaningful empty string". Compose's
+      // `${VAR:-}` forwarding produces exactly that, sixteen times in this
+      // repo's own `docker-compose.yml`, and blanking a line is the normal
+      // dotenv way to disable a setting — reading raw `process.env` here (which
+      // this check must, since the parsed object is where these no longer
+      // exist) opts out of that coalesce, so it has to redo it by hand.
+      if (raw === undefined || raw === "") continue;
+      ctx.addIssue({
+        code: "custom",
+        message:
+          `${retired} was renamed to ${replacement} (#1177) and is no longer read. ` +
+          `Leaving it set would silently revert the limit to its default. ` +
+          `Rename it in your .env.`,
+        path: [replacement],
+      });
+    }
   })
   // The untrusted-preview origin must actually BE a different origin. See the
   // long note on USERCONTENT_URL above for what a same-host value costs: it is

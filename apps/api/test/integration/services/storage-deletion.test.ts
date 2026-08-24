@@ -122,7 +122,7 @@ describe("storage-deletion outbox", () => {
     expect(jobs).toHaveLength(1);
     const job = jobs[0]!;
     expect(job.bucket).toBe(bucket);
-    expect(job.reason).toBe("document_deleted");
+    expect(job.reason).toBe("file_deleted");
     expect(job.completedAt).toBeNull();
     expect(job.attempts).toBe(0);
 
@@ -165,8 +165,8 @@ describe("storage-deletion outbox", () => {
   it("worker: mixed batch — success completes, failure increments attempts + backoff + lastError", async () => {
     await db.transaction((tx) =>
       enqueueStorageDeletion(tx, [
-        { bucket: "documents", storageKey: "ok/a.txt", reason: "document_deleted" },
-        { bucket: "documents", storageKey: "fail/b.txt", reason: "document_deleted" },
+        { bucket: "files", storageKey: "ok/a.txt", reason: "file_deleted" },
+        { bucket: "files", storageKey: "fail/b.txt", reason: "file_deleted" },
       ]),
     );
 
@@ -204,9 +204,9 @@ describe("storage-deletion outbox", () => {
   it("dead letter: a job past the threshold shows in the dead list; retry resets nextAttemptAt", async () => {
     await db.transaction((tx) =>
       enqueueStorageDeletion(tx, {
-        bucket: "documents",
+        bucket: "files",
         storageKey: "dead/x",
-        reason: "document_deleted",
+        reason: "file_deleted",
       }),
     );
     const [j] = await db
@@ -249,9 +249,9 @@ describe("storage-deletion outbox", () => {
     await db.insert(storageDeletionJobs).values(
       ["a", "b", "c"].map((suffix) => ({
         id: `sdj_cursor_${suffix}`,
-        bucket: "documents",
+        bucket: "files",
         storageKey: `cursor/${suffix}`,
-        reason: "document_deleted",
+        reason: "file_deleted",
         createdAt,
       })),
     );
@@ -302,9 +302,9 @@ describe("storage-deletion outbox", () => {
 
     const failed = await processStorageDeletionJobs({ deleteFile, downloadFile, rand: () => 0 });
     expect(failed.failed).toBe(1);
-    // `documents/` is the run-workspace STORAGE prefix and did not move with the
-    // #1177 rename — see `runWorkspaceFileKey`.
-    expect(deleted).toEqual([`${runId}/documents/a.txt`, `${runId}/documents/b.txt`]);
+    // `files/` is the run-workspace input STORAGE prefix — see
+    // `runWorkspaceFileKey`.
+    expect(deleted).toEqual([`${runId}/files/a.txt`, `${runId}/files/b.txt`]);
     expect(deleted).not.toContain(manifestKey);
 
     failB = false;
@@ -316,8 +316,8 @@ describe("storage-deletion outbox", () => {
     const retried = await processStorageDeletionJobs({ deleteFile, downloadFile });
     expect(retried.completed).toBe(1);
     expect(deleted.slice(-3)).toEqual([
-      `${runId}/documents/a.txt`,
-      `${runId}/documents/b.txt`,
+      `${runId}/files/a.txt`,
+      `${runId}/files/b.txt`,
       manifestKey,
     ]);
   });
@@ -486,19 +486,18 @@ describe("storage-deletion outbox", () => {
       .from(storageDeletionJobs)
       .where(eq(storageDeletionJobs.storageKey, inKey));
     expect(jobs).toHaveLength(1);
-    // Pre-#1177 spelling on purpose — `reason` is a persisted free-text label
-    // on live rows that no migration rewrites, so it stays aligned with its
-    // sibling `document_deleted` rather than splitting production into two
-    // spellings of the same event.
-    expect(jobs[0]!.reason).toBe("document_expired");
+    // The expiry sweep gets its OWN label, distinct from its `file_deleted`
+    // sibling, so an operator's `GROUP BY reason` separates a user delete from
+    // a retention sweep.
+    expect(jobs[0]!.reason).toBe("file_expired");
     expect(jobs[0]!.completedAt).toBeNull();
   });
 
   it("a second pass does not re-claim already-completed jobs", async () => {
     await db.transaction((tx) =>
       enqueueStorageDeletion(tx, [
-        { bucket: "documents", storageKey: "seq/1", reason: "document_deleted" },
-        { bucket: "documents", storageKey: "seq/2", reason: "document_deleted" },
+        { bucket: "files", storageKey: "seq/1", reason: "file_deleted" },
+        { bucket: "files", storageKey: "seq/2", reason: "file_deleted" },
       ]),
     );
     const seen: string[] = [];
@@ -522,7 +521,7 @@ describe("storage-deletion outbox", () => {
     await db.transaction((tx) =>
       enqueueStorageDeletion(
         tx,
-        keys.map((k) => ({ bucket: "documents", storageKey: k, reason: "document_deleted" })),
+        keys.map((k) => ({ bucket: "files", storageKey: k, reason: "file_deleted" })),
       ),
     );
     const seen: string[] = [];
@@ -552,9 +551,9 @@ describe("storage-deletion outbox", () => {
   it("counts the attempt at CLAIM time, so a job that kills its worker still reaches dead-letter", async () => {
     await db.transaction((tx) =>
       enqueueStorageDeletion(tx, {
-        bucket: "documents",
+        bucket: "files",
         storageKey: "crash/loop",
-        reason: "document_deleted",
+        reason: "file_deleted",
       }),
     );
     const [job] = await db

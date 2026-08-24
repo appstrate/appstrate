@@ -23,6 +23,7 @@ import { dirname, join } from "node:path";
 import { runCommand, type CommandResult } from "./install/os.ts";
 import { CLI_USER_AGENT, CLI_VERSION, DEV_CLI_VERSION } from "./version.ts";
 import { streamDownload, type ProgressFn } from "./download.ts";
+import { DEFAULT_IO } from "./io.ts";
 import { normalizeVersion, stripVersionPrefix } from "@appstrate/core/semver";
 
 // Re-exported so `normalizeVersion` stays importable from this module (its
@@ -398,7 +399,12 @@ interface PerformCurlUpdateOptions {
   currentVersion?: string;
   /** Override deps for tests. */
   deps?: SelfUpdateDeps;
-  /** Logger sink — defaults to `console.error` so tests can collect output. */
+  /**
+   * Progress-line sink. Defaults to the CLI's stderr seam (`DEFAULT_IO`), the
+   * same channel every other command reports on; tests pass their own
+   * collector. Never `console.*` — the repo routes all CLI output through
+   * `CommandIO` (`lib/io.ts`) so nothing writes to a global stream by name.
+   */
   log?: (line: string) => void;
   /** Download-progress sink for the CLI binary (bytes/percent/rate). */
   onProgress?: ProgressFn;
@@ -421,7 +427,7 @@ export async function performCurlUpdate(
   opts: PerformCurlUpdateOptions,
 ): Promise<PerformCurlUpdateResult> {
   const deps = opts.deps ?? defaultSelfUpdateDeps;
-  const log = opts.log ?? ((l) => console.error(l));
+  const log = opts.log ?? ((l: string) => DEFAULT_IO.stderr.write(`${l}\n`));
   const current = opts.currentVersion ?? CLI_VERSION;
   const target = opts.targetVersion;
 

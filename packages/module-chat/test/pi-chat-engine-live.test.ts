@@ -23,7 +23,7 @@
  * pi-ai's own request shape — that is the SDK's contract, not ours.
  */
 
-import { describe, it, expect, afterAll } from "bun:test";
+import { describe, it, expect, afterAll, afterEach } from "bun:test";
 import type { UIMessage } from "ai";
 import type { ChatUsageRecord } from "@appstrate/core/chat-contract";
 import { createPiProxyModelBinding } from "../src/pi-chat/model-binding.ts";
@@ -46,6 +46,21 @@ interface Capture {
  * clean no-op. The engine THROWS if this handshake fails, so it is not optional
  * — this is the supported "module present, zero tools" shape.
  */
+/**
+ * When set, the stub blocks on this before answering `initialize`. Lets a test
+ * prove the UI stream opens BEFORE the handshake: if the `start` chunk were
+ * still written after it, reading the first chunk would deadlock rather than
+ * return, and the test times out instead of passing for the wrong reason.
+ */
+// Module-level, and therefore process-level: `mcpResponse` awaits it on EVERY
+// subsequent handshake. Cleared in `afterEach` rather than in the one test's
+// `finally`, because the failure that test guards against is a TIMEOUT — and a
+// timed-out body never reaches its `finally`. A gate left pending would then
+// hang every later turn in this file at 30 s apiece, burying the one real
+// failure under a cascade. Harmless today only because that test happens to be
+// last in the describe.
+let mcpInitGate: Promise<void> | null = null;
+
 async function mcpResponse(req: Request): Promise<Response> {
   if (req.method === "GET") return new Response(null, { status: 405 });
   if (req.method === "DELETE") return new Response(null, { status: 202 });
@@ -57,6 +72,7 @@ async function mcpResponse(req: Request): Promise<Response> {
       headers: { "content-type": "application/json", ...extra },
     });
   if (msg.method === "initialize") {
+    if (mcpInitGate) await mcpInitGate;
     return json(
       {
         protocolVersion: "2025-06-18",
@@ -103,6 +119,9 @@ const server = Bun.serve({
 const ORIGIN = `http://127.0.0.1:${server.port}`;
 
 afterAll(() => server.stop(true));
+afterEach(() => {
+  mcpInitGate = null;
+});
 
 function orgModel(): OrgModel {
   return {
@@ -124,7 +143,11 @@ function userTurn(text: string): UIMessage[] {
 }
 
 /** Drive one real turn and collect its UI-message-stream chunks. */
-async function runTurn(mintBearer: () => string) {
+async function runTurn(
+  mintBearer: () => string,
+  abortSignal?: AbortSignal,
+  platformFetch?: typeof fetch,
+) {
   const binding = createPiProxyModelBinding({ model: orgModel(), origin: ORIGIN, mintBearer })!;
   const slot = acquirePiChatSlot();
   expect(slot).not.toBeNull();
@@ -145,8 +168,12 @@ async function runTurn(mintBearer: () => string) {
       messages: userTurn("dis bonjour"),
       system: "You are a helpful assistant.",
       generation: {},
-      platformMcp: { url: `${ORIGIN}/api/mcp/o/org_live?context=injected`, headers: {} },
-      abortSignal: new AbortController().signal,
+      platformMcp: {
+        url: `${ORIGIN}/api/mcp/o/org_live?context=injected`,
+        headers: {},
+        ...(platformFetch ? { fetch: platformFetch } : {}),
+      },
+      abortSignal: abortSignal ?? new AbortController().signal,
       onError: (error) => String(error),
       recordUsage: (record) => usage.push(record),
     });
@@ -218,5 +245,133 @@ describe("runPiChat against a stub provider", () => {
     expect(capture.authHeaders.length).toBe(minted);
     expect(new Set(capture.authHeaders).size).toBe(capture.authHeaders.length);
     expect(capture.authHeaders.every((h) => h.startsWith("Bearer fresh-"))).toBe(true);
+  }, 30_000);
+
+  it("closes a stopped turn as a plain stop, with no error chunk", async () => {
+    // The engine's OUTER catch is the only place the abort suppression lives:
+    //
+    //     ...(aborted ? {} : { error: err }),
+    //     finishReason: aborted ? "stop" : "error",
+    //
+    // `closePiTurn` itself does not suppress anything — hand it an error and it
+    // emits an `error` chunk whatever `aborted` says (asserted in
+    // `pi-chat-turn-closure.test.ts`). So this decision is only reachable
+    // through the engine, and only on the exit where an exception escapes with
+    // the turn already aborted: a stop that lands during setup, before the
+    // prompt's own try/catch exists to swallow it. Aborting the signal up front
+    // is exactly that shape — `buildPlatformMcpTools` is the first await and it
+    // throws on an already-aborted signal.
+    //
+    // Delete the suppression and this fails twice over: an `error` chunk
+    // appears in the stream, and the persisted metadata gains an
+    // `errorCategory` — a user pressing stop would be shown a failed turn.
+    const stopped = new AbortController();
+    stopped.abort(new Error("stopped by user"));
+    const { chunks } = await runTurn(() => "unused", stopped.signal);
+
+    expect(chunks.map((c) => c.type)).toEqual(["start", "finish"]);
+    const finish = chunks.find((c) => c.type === "finish") as {
+      messageMetadata?: { appstrate?: { turn?: Record<string, unknown> } };
+    };
+    expect(finish.messageMetadata?.appstrate?.turn?.finishReason).toBe("stop");
+    // Nothing about the abort is persisted as a failure: no category, no
+    // retryable flag, no request id.
+    expect(finish.messageMetadata?.appstrate?.turn).not.toHaveProperty("errorCategory");
+    expect(JSON.stringify(chunks)).not.toContain("errorCategory");
+  }, 30_000);
+
+  it("opens the stream before the platform-MCP handshake completes", async () => {
+    // Hold the handshake open. If the `start` chunk were written after session
+    // construction — as it was before — the read below could not return, and
+    // this test would time out rather than pass.
+    let releaseHandshake!: () => void;
+    mcpInitGate = new Promise<void>((resolve) => {
+      releaseHandshake = resolve;
+    });
+
+    const binding = createPiProxyModelBinding({
+      model: orgModel(),
+      origin: ORIGIN,
+      mintBearer: () => "loopback-early",
+    })!;
+    const slot = acquirePiChatSlot();
+    expect(slot).not.toBeNull();
+
+    try {
+      const res = runPiChat({
+        slot: slot!,
+        modelBinding: binding,
+        presetId: "preset_live",
+        orgId: "org_live",
+        userId: "user_live",
+        chatSessionId: null,
+        messages: userTurn("dis bonjour"),
+        system: "You are a helpful assistant.",
+        generation: {},
+        platformMcp: { url: `${ORIGIN}/api/mcp/o/org_live?context=injected`, headers: {} },
+        abortSignal: new AbortController().signal,
+        onError: (error) => String(error),
+        recordUsage: () => {},
+      });
+
+      // Read only as far as the first complete SSE frame.
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffered = "";
+      let first: { type?: string } | undefined;
+      while (!first) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffered += decoder.decode(value, { stream: true });
+        for (const line of buffered.split("\n")) {
+          if (!line.startsWith("data:")) continue;
+          const data = line.slice(5).trim();
+          if (data && data !== "[DONE]") {
+            first = JSON.parse(data) as { type?: string };
+            break;
+          }
+        }
+      }
+
+      // The turn is open while the handshake is still blocked.
+      expect(first?.type).toBe("start");
+
+      releaseHandshake();
+      // Drain so the slot releases and no work outlives the test.
+      while (!(await reader.read()).done) {
+        /* drain */
+      }
+    } finally {
+      mcpInitGate = null;
+      releaseHandshake();
+      slot!.release();
+    }
+  }, 30_000);
+
+  it("carries the caller's fetch all the way into the MCP transport", async () => {
+    // The route→engine hop is asserted in `chat-stream-handler.test.ts`, which
+    // probes `input.platformMcp.fetch`. The two hops AFTER it — engine →
+    // `buildPlatformMcpTools`, and that → `createMcpHttpClient` — were only
+    // ever evaluated on their falsy branch, because every fixture in this file
+    // built `platformMcp` without a `fetch`. Deleting either conditional spread
+    // left the whole suite green while production silently went back to opening
+    // real loopback TCP connections per turn — and kept using them for every
+    // `tools/call` after the handshake, since the override lives for the
+    // client's whole lifetime.
+    const seen: string[] = [];
+    const recording: typeof fetch = (input, init) => {
+      seen.push(new Request(input as RequestInfo, init).url);
+      return fetch(input as RequestInfo, init);
+    };
+
+    const { chunks } = await runTurn(() => "bearer-mcp-fetch", undefined, recording);
+
+    // It reached the transport: the handshake and the tool listing both went
+    // through the injected fetch rather than the global one.
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every((u) => u.includes("/api/mcp/"))).toBe(true);
+    // And the turn still completed, so the injection is not merely observed —
+    // it is what actually served the handshake.
+    expect(chunks.at(-1)?.type).toBe("finish");
   }, 30_000);
 });

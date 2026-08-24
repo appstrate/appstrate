@@ -8,8 +8,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 Breaking, batched per the release policy in `.github/workflows/publish-core.yml`:
-these changes accumulate here until a deliberate major. `7.0.0` is already
-published without them, so the version in `package.json` does not move.
+these changes accumulate here until a deliberate major. **This is that major —
+`8.0.0`** — and the version moves in `package.json` even though nothing is
+published yet, which is the opposite of what this section said for most of the
+cycle. The reason it had to move is worth stating, because the argument for
+holding it at `7.0.0` was sound about the thing it was reasoning about and
+silent about the thing that actually breaks.
+
+`CORE_VERSION` (`src/module.ts`) is not documentation. It is the **only** input
+to the platform's module-compatibility gate: `enforceCoreVersionContract` reads
+the `@appstrate/core` range a module declares and calls
+`matchVersion([CORE_VERSION], declared)`, and a `null` result throws at boot
+under the default `MODULE_CONTRACT_ENFORCE=fail`. That check runs against the
+declared range regardless of how the module resolves core — so "cloud never
+resolves core from npm" (true, and stated below) does not exempt it. With
+`cloud` declaring `>=8.0.0` and the constant reading `7.0.0`,
+`maxSatisfying(["7.0.0"], ">=8.0.0")` is `null` and **Cloud mode does not
+boot**. `@appstrate/cloud` is not a built-in, and `>=8.0.0` matches none of
+`IN_TREE_RANGE_PREFIXES`, so no carve-out applies.
+
+The symmetric half is worse, because it is silent: a module declaring the
+`^7.0.0` this file recommended is **admitted** by the same comparison and then
+calls `services.setDocumentStorageLimit`, which the removals below deleted.
+That is verbatim the risk the gate's own message names — "a stale module can
+call a platform service whose signature moved under it — silently, without an
+error." Holding the constant at a version whose surface no longer exists is
+what produced both halves.
+
+Publishing `8.0.0` to npm stays gated on the `core@8.0.0` tag and is still
+independent of this branch; what moves here is the constant the platform
+compares against, plus the `version` field the drift guard
+(`test/core-version.test.ts`) pins it to.
 
 **Out-of-tree consumers.** The config removals below touch nothing `cloud` or
 `connect-helper` import. The `document` → `file` rename (#1177) does: both
@@ -18,30 +47,43 @@ lands on all four — the symbols a consumer imports today are
 `PlatformServices.cleanupSessionDocuments` / `setDocumentStorageLimit`,
 `documentCountExceeded`, `recordDocument*` and `CoreResources.documents`.
 
-Staying pinned to the published `7.0.0` protects them at the TYPE level only.
-`cloud` also binds one of these off the LIVE services object the platform
-injects at runtime — `services.setDocumentStorageLimit.bind(services)`
-(`cloud/src/billing/storage-entitlement.ts`) — and a compile-time pin does
-nothing for a property read at boot. What keeps `cloud` working against this
-branch is the **deprecated `setDocumentStorageLimit` alias**: `PlatformServices`
-declares it beside the canonical `setFileStorageLimit`, and the platform
-registry assigns both names the same function. It is declared REQUIRED, not
-optional, and that detail is load-bearing in both directions. `cloud` reads it
-unconditionally, and it typechecks against the platform image's core rather
-than against npm, so an optional member is a `TS18048 possibly 'undefined'`
-build failure in the repo the alias exists to protect. Required also keeps the
-compiler's grip on the platform side: with `?`, deleting the binding in
-`buildPlatformServices()` would still typecheck. The alias is temporary and is
-the only thing holding the seam together — `cloud` must move to
-`setFileStorageLimit` before it is removed.
+Holding the version at the published `7.0.0` would have protected them at the
+TYPE level only, which is the second reason it was the wrong lever. `cloud`
+also binds one of these off the LIVE services object the platform injects at
+runtime — until #1177 that read was
+`services.setDocumentStorageLimit.bind(services)`
+(`cloud/src/billing/storage-entitlement.ts`; it binds `setFileStorageLimit`
+today, see below) — and a compile-time pin does nothing for a property read at
+boot.
 
-`cleanupSessionDocuments` → `cleanupSessionFiles` deliberately gets NO such
-alias. Its only consumer is the in-tree `@appstrate/module-chat`, which ships
-in the same image and was renamed in the same commit, so an alias would need a
+That seam was held open for a while by a deprecated `setDocumentStorageLimit`
+alias declared beside the canonical `setFileStorageLimit`. **The alias is now
+gone**, and the two repos move in lockstep instead: `cloud` binds
+`setFileStorageLimit` and declares `@appstrate/core` `>=8.0.0`. That range is
+not cosmetic — the published `7.0.0` exposes ONLY the old name, so a cloud
+build resolving `7.0.0` would typecheck against a services object without the
+member it now reads. Local dev resolves core through a workspace symlink and
+would not have caught it.
+
+**Ship order is therefore fixed, and it is the platform FIRST**: platform
+release → `cloud` (appstrate/cloud#52) → npm publication of core `8.0.0`
+whenever it suits other consumers. The instinct is the opposite, so the reason
+is worth stating: the cloud image is built
+`FROM ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION}` and resolves core out
+of that image at `/app/packages/core`, so platform and cloud are ONE deployed
+artifact and cannot drift apart at runtime. What does gate cloud is its CI,
+which typechecks inside the newest PUBLISHED appstrate release — and
+`v1.0.0-beta.51` carries only the old name, so cloud stays red until a release
+ships the new one. Cloud never resolves core from npm at all.
+
+`cleanupSessionDocuments` → `cleanupSessionFiles` never had such an alias. Its
+only consumer is the in-tree `@appstrate/module-chat`, which ships in the same
+image and was renamed in the same commit, so an alias would have needed a
 ledger owner in `scripts/verify-module-contract.ts` that does not exist — a
 fiction rather than a contract. An out-of-tree module binding the old name off
 the live services object WILL break; that is the accepted cost, recorded here
-rather than left as an oversight.
+rather than left as an oversight. The same now goes for the storage-limit
+capability.
 
 `connect-helper` reads none of this surface and is unaffected either way.
 
@@ -56,14 +98,45 @@ of the package. Core no longer reads `manifest.config` at all.
 `document` is a false friend: the entity is any file an agent produced —
 Markdown, HTML, source code, a PDF, an image — but the word promises a Word or
 PDF document to every reader, the model included. The concept is renamed to
-`file` throughout (#1177). Every wire-visible and persisted spelling keeps a
-read alias; only what gets WRITTEN changes. Environment variables are
-deliberately NOT renamed (`DOCUMENT_MAX_FILE_BYTES`, `RUN_MAX_DOCUMENTS`,
-`DOCUMENT_RETENTION_DAYS`, …): renaming one is an ops migration on every
-deployment for zero user-visible gain.
+`file` throughout (#1177).
+
+The rename first landed here with a read alias on every wire-visible and
+persisted spelling. **Those aliases are gone**, and they never reached npm: they
+were added and removed inside this same unreleased window, so relative to the
+published `7.0.0` they are not a deprecation, they simply never existed. What
+went with them is listed under Removed — the legacy permission-resource table,
+the retired runtime-tool event type, and the `document://` URI prefix.
+
+**No read alias survives this release.** The two that were argued for on the
+grounds that a RELEASED build had written values a current build still reads —
+the `"document"` tag in `PUBLISHED_FILE_LOG_EVENTS` (a `run_logs` row is
+immutable once written) and the `publish_document` runtime-tool id on a
+persisted manifest (a published package version is immutable) — are gone too:
+no such row and no such manifest exists. A deployment that held one would see
+that single log row render without its attachment, and that one tool id
+dropped from the manifest with the drop reported — never a silent
+reinterpretation. The platform-side environment variables moved too, with no alias
+(`FILE_MAX_BYTES`, `RUN_MAX_FILES`, `FILE_RETENTION_DAYS`,
+`WORKSPACE_MAX_FILES_BYTES`) — see the platform CHANGELOG; core reads none of
+them, it only names them in docblocks.
 
 ### Added
 
+- **Alias-opacity surface** (`./model-swap`, #1202) — `ALIAS_CLIENT_API_SHAPE`,
+  `AliasBackingApiShape`, `isAliasBackingShape`, `isAliasClientShape`,
+  `isAliasInferenceCall`, `syntheticAliasErrorMessage`, and `ModelSwapBacking`
+  (`./sidecar-types`). Together they let a caller-facing surface answer about an
+  aliased model without naming the vendor behind it.
+- **`isImageMime`** (`./mime`) — the one image-media-type test, replacing four
+  copies.
+- **`runProducedFilesPath`** (`./run-and-wait-client`) — the run-scoped files
+  path, so callers stop building it by hand.
+- **`anthropicThinkingBudgets`** (`./model-generation`) — the reasoning-budget
+  table, published now that two runtimes read it.
+- **`MAX_CACHED_VALIDATORS`** (`./schema-validation`) and **`OCI_REVISION_LABEL`,
+  `ParsedImageRef`, `RuntimeImageMember`, `RuntimeImageTagMismatch`,
+  `RuntimeImageTrio`** (`./image-ref`) — the bounds and types behind the
+  compiled-validator cache and the image trio check.
 - **`authorDefaults(schema)`** (`./form`) — the top-level properties of a JSON
   Schema that declare a `default`, as a plain value map. This is the author
   layer of input resolution, published so the platform and the CLI compute it
@@ -74,67 +147,143 @@ deployment for zero user-visible gain.
 - **`validateAgainstSchema` / `SchemaValidationResult`** (`./schema-validation`)
   — `validateConfig` / `ConfigValidationResult` under a name that describes
   what they do. Same signature, same verdict.
-- **`./file-uri`** — the URI helpers, renamed from `./document-uri`. Writes
-  `appfile://<id>`; reads `appfile://` **and** `document://` forever (historical
-  `runs.input` rows are full of the old scheme). Deliberately NOT `file://` —
-  that scheme already means the local filesystem and MCP uses it for local
-  resources, so an opaque platform id under it is ambiguous to the model and to
-  every MCP client. Exports `FILE_URI_PREFIX`, `LEGACY_DOCUMENT_URI_PREFIX`,
-  `ACCEPTED_FILE_URI_PREFIXES`, `FILE_ID_RE`, `isFileUri`, `parseFileUri`,
-  `fileUri`, `extractFileIds`, `extractFileIdsFromText` (plus the unchanged
-  `upload://` helpers). The row id prefix stays `doc_` — it is in every stored
-  row and every live storage key.
+- **`./file-uri`** — the URI helpers, renamed from `./document-uri`.
+  `appfile://<id>` is the only spelling written AND the only one read.
+  Deliberately NOT `file://` — that scheme already means the local filesystem
+  and MCP uses it for local resources, so an opaque platform id under it is
+  ambiguous to the model and to every MCP client. Exports `FILE_URI_PREFIX`,
+  `FILE_ID_RE`, `isFileUri`, `parseFileUri`, `fileUri`, `extractFileIds`,
+  `extractFileIdsFromText` (plus the unchanged `upload://` helpers).
+  `FILE_ID_RE` matches the `file_` row-id prefix — it was `doc_` until the
+  rename reached the physical layer, and the old shape is no longer accepted,
+  which is what made the `document://` prefix unreachable (see Removed).
 - **`PUBLISHED_FILE_LOG_EVENTS`** (`./file-uri`) — every `run_logs.event` tag
-  that announces a published file, canonical first: `["file", "document"]`. It
-  lives beside `ACCEPTED_FILE_URI_PREFIXES` because it is the same kind of
+  that announces a published file. It is `["file"]`: no retired spelling
+  survives, for the reason stated under "No read alias survives this release"
+  above. It lives beside `FILE_URI_PREFIX` because it is the same kind of
   thing — pure data about a wire spelling that two independent readers (the web
-  shell's run page and the chat module's run card) must agree on. Two copies of
-  a compatibility list is how one of them silently stops matching and a file
-  list never refreshes, with no error anywhere. The old tag stays readable
-  forever: a persisted log line is immutable once written, and the emitter
-  behind it — a runtime image — deploys on its own clock.
-- **`LEGACY_RUNTIME_TOOL_ALIASES`, `LegacyRuntimeToolId`,
-  `LEGACY_RUNTIME_TOOL_IDS`, `ACCEPTED_RUNTIME_TOOL_IDS`,
-  `AcceptedRuntimeToolId`, `canonicalRuntimeToolId`,
-  `canonicalizeRuntimeToolIds`** (`./runtime-tools-catalog`) — the single alias
-  table for retired `runtime_tools` spellings, and the helpers that resolve
-  them. `runtime_tools` is persisted inside agent manifests (published ZIPs
-  included, which are immutable by construction), and the read path drops ids it
-  does not recognise — so a bare rename would not error, it would silently strip
-  the tool from every agent that already selected it. Read stored ids through
-  `canonicalRuntimeToolId` / `canonicalizeRuntimeToolIds`, never through
-  `isSelectableRuntimeTool`, which answers "may the editor offer this?" and is
-  canonical-only by design.
-- **`LEGACY_RUNTIME_TOOL_EVENT_TYPES`** (`./runtime-tool-defs`) — retired
-  run-event spellings `reEmitRuntimeToolEvents` still forwards but never emits.
-  The runtime image and the platform deploy independently, so an image built
-  before the rename still hands the host a `document.published` event.
-- **`LEGACY_PERMISSION_RESOURCE_ALIASES`, `canonicalPermission`,
-  `canonicalPermissions`** (`./permissions`) — retired permission-resource
-  spellings and the normalizer for stored scope strings. A `resource:action`
-  string is persisted on API keys, OIDC grants and role snapshots; renaming a
-  resource without an alias silently demotes every principal granted under the
-  old spelling, and the only symptom is an unexplained 403.
-  `makePermissionGuard` additionally accepts a retired spelling directly, so
-  forgetting to normalize on read is not an authorization regression.
+  shell's run page and the chat module's run card) must agree on, and two
+  copies of it is how one of them silently stops matching and a file list never
+  refreshes, with no error anywhere. It stays a list rather than a bare string
+  so a future second tag is a data change here, not a predicate change in both
+  readers.
+- **`isFileProducedByRun`, `AGENT_OUTPUT_FILE_PURPOSE`** (`./file-uri`) — the
+  one predicate answering "was this file row produced by this run, as opposed
+  to merely consumed by it". Both halves of the pair are load-bearing:
+  `GET /api/files?run_id=X` answers the run's whole CONTAINER, so a file
+  chained in from an earlier run still carries `purpose: "agent_output"`, while
+  an upload made FOR this run carries this run's id under
+  `purpose: "user_upload"`. It had three independent implementations (the run
+  page, the chat module's run card, the server-side `run_and_wait` payload) kept
+  in step by a comment naming the other two; they now share this one. Lives in
+  `./file-uri` for the same reason `PUBLISHED_FILE_LOG_EVENTS` does — a package
+  may not import from `apps/web`, but all three can import core.
+- **`./input-resolution`** — the platform's input resolution, previously
+  private to `apps/api` and re-implemented by the CLI down to a byte-identical
+  error message. `resolveEffectiveInput` collapses author defaults
+  (`authorDefaults`), the editor's stored values and an ordered list of
+  `overlays` into what a run executes with; `assertFieldsUnlocked` and
+  `withoutLockedFields` are the two rules around locked fields. The overlays are
+  a LIST rather than named fields because the hosts do not have the same layers:
+  the platform resolves a scheduled trigger's frozen values under the caller's
+  input, a local `appstrate run` has no schedules at all, and a named
+  `scheduleValues` would leave the CLI carrying a field it can never fill. The
+  refusal is injected (`lockedFieldError`) so each host keeps its own error
+  surface — `ApiError(400, "locked_input_field")` on the platform, a CLI error
+  type locally — without re-deriving the rule.
+- **`compileCached`, `MAX_CACHED_VALIDATORS`** (`./schema-validation`) — the
+  module's compiled-validator cache, exported so `apps/api`'s three server-only
+  validators compile through it instead of standing up a second Ajv instance.
+  The second instance had diverged: no `removeSchema`, so its registry grew
+  unbounded in a long-lived process and a schema carrying `$id` threw the second
+  time it was compiled; and it evicted by clearing the whole map rather than
+  FIFO.
+- **`ACCEPTED_RUNTIME_TOOL_IDS`, `canonicalizeRuntimeToolIds`**
+  (`./runtime-tools-catalog`) — the set of `runtime_tools` ids a PERSISTED
+  manifest may carry, and the one helper every read path funnels stored ids
+  through. It drops ids the platform does not know, collapses duplicates,
+  preserves the author's order, and — the part that matters — REPORTS every
+  drop to its caller rather than swallowing it.
+
+  An alias table (`LEGACY_RUNTIME_TOOL_ALIASES` and friends, mapping the
+  retired `publish_document` forward to `publish_file`) was drafted for this
+  release and removed again before it shipped, so it never reached npm and
+  needs no deprecation. Nothing carries the retired spelling: no system
+  package, no stored manifest. An unknown id is now refused on author input
+  and dropped-with-a-report on read — never guessed at.
+
+- **`./image-ref`** — the image-reference parser and the runtime-image version
+  contract, added after `7.0.0` was published and undocumented here until now.
+  `parseImageRef` splits a ref into repository / tag / digest;
+  `findRuntimeImageTagMismatch(trio)` compares the platform's own version
+  against the `PI_IMAGE` and `SIDECAR_IMAGE` tags and reports which member
+  stands alone; `OCI_REVISION_LABEL` is the label the complementary
+  same-tag-two-builds check reads. Types: `ParsedImageRef`, `RuntimeImageTrio`,
+  `RuntimeImageMember`, `RuntimeImageTagMismatch`. `packages/env` composes the
+  operator wording; the rule and both its carve-outs live here.
 
 ### Changed
 
-- **`./document-uri` → `./file-uri`**, with the symbol renames listed above.
+- **`SubscriptionChatResolution` → `ChatModelResolution`** (`./chat-contract`),
+  and the `PlatformServices` member `resolveSubscriptionChatModel` →
+  `resolveChatModel` (`./module`). Both were named after ONE of the two arms
+  they describe. The type's own discriminant is `subscription: boolean` and its
+  `{ subscription: false }` arm is the API-key path, so the old name said the
+  opposite of what half its values mean — and since the Pi unification put every
+  chat turn on one engine, resolving the row is what the call does regardless of
+  which credential backs it.
+
+  `SubscriptionChatModel` deliberately keeps its name: it describes only the
+  oauth2 arm, which is what it is. The `subscription` discriminant keeps its
+  name too — it is accurate, and it is a shape crossing `ctx.services`.
+
+  This is the item `docs/plans/post-pi-unification-cleanup.md` parked "for the
+  next core major". That major came and went as 7.0.0 without it; doing it here
+  is what stops it waiting for 9.0.0. Neither out-of-tree consumer (`cloud`,
+  `connect-helper`) imports `./chat-contract`, and the only in-tree consumer is
+  `@appstrate/module-chat`, which ships in the same image.
+  `scripts/verify-module-contract.ts` pins the service name and was updated in
+  the same commit.
+
+- **`ModelSwap`** (`./sidecar-types`) gains two **required** members,
+  `clientApiShape` and `backingApiShape`. This is the one breaking change in
+  this release that hits a CONSTRUCTOR rather than a reader: code that builds a
+  `ModelSwap` against 7.0.0 does not compile against 8.0.0. Both are needed
+  because an aliased call is re-originated against the real backing — the
+  client speaks one protocol shape and the backing another, and the sidecar's
+  inbound allowlist keys on the CLIENT one (keying it on the backing would
+  refuse every aliased call). The optional `backing` member is additive.
+- **`./document-uri` → `./file-uri`**, symbol by symbol so a consumer can find
+  the name it is holding: `DOCUMENT_URI_PREFIX` → `FILE_URI_PREFIX`,
+  `DOCUMENT_ID_RE` → `FILE_ID_RE`, `isDocumentUri` → `isFileUri`,
+  `parseDocumentUri` → `parseFileUri`, `documentUri` → `fileUri`,
+  `extractDocumentIds` → `extractFileIds`, `extractDocumentIdsFromText` →
+  `extractFileIdsFromText`. The `upload://` helpers are unchanged.
   No deprecated subpath alias is kept: the module is consumed in-tree only, and
   both out-of-tree consumers stay on the published version.
+- **`findImageTagMismatch` → `findRuntimeImageTagMismatch`** (`./image-ref`),
+  and it now takes the whole trio — `{ platformVersion, piImage, sidecarImage }`
+  — rather than the two image refs. The old signature compared the pair to
+  itself, so a platform at version X with both runtime images at X−1 passed. A
+  platform version that is absent, empty or `dev` means "no release identity"
+  and drops out of the comparison, degrading the rule to exactly the pair rule;
+  a digest-pinned ref on either image still silences it entirely. The returned
+  `oddOneOut` names the member whose value stands alone, which is NOT
+  necessarily the thing to fix: a platform at X against a matched pair at X−1
+  reports `"platform"`, and the fix there is to move the two images. Both names
+  are post-`7.0.0`, so nothing published ever saw the old one.
 - **`publish_document` → `publish_file`** — the runtime tool id, with
   `buildPublishDocumentDef` → `buildPublishFileDef`, `DocumentUploader` →
   `FileUploader`, `PublishedDocument` → `PublishedFile`,
   `DocumentPublishedEvent` → `FilePublishedEvent` (field `document_id` →
   `file_id`), `documentPublishedEvent` → `filePublishedEvent`, and the canonical
-  event `document.published` → `file.published`. The legacy tool id is accepted
-  on any persisted manifest and normalized to the canonical one by
-  `validateManifest` / `dropRetiredRuntimeTools`; a manifest saved afterwards
-  writes only `publish_file`, and a manifest naming both collapses to one entry.
+  event `document.published` → `file.published`. The legacy id is NOT accepted
+  and NOT normalized: `publish_document` is refused on author input and
+  dropped-with-a-report on read (`canonicalizeRuntimeToolIds`), never guessed
+  at. See the `ACCEPTED_RUNTIME_TOOL_IDS` note under Changed.
 - **`CoreResources.documents` → `CoreResources.files`** (`./permissions`), with
   `documents` removed from `CORE_RESOURCE_NAMES`. A stored `documents:read` /
-  `documents:delete` scope still grants.
+  `documents:delete` scope no longer grants anything — see Removed.
 - **`documentCountExceeded` → `fileCountExceeded`** (`./api-errors`), problem
   code `document_count_exceeded` → `file_count_exceeded`.
 - **`recordDocumentCreated`, `recordDocumentDeleted`,
@@ -150,9 +299,9 @@ deployment for zero user-visible gain.
   `context_documents` becomes `context_files`, the terminal payload key
   `documents` becomes `files`, the inline default `runtime_tools` selects
   `publish_file`, and the client calls `GET /api/files`.
-- **`schema/agent.schema.json`** — the `runtime_tools` enum accepts BOTH
-  `publish_file` and `publish_document`, so a persisted manifest carrying
-  either validates.
+- **`schema/agent.schema.json`** — the `runtime_tools` enum lists the canonical
+  ids only. `publish_document` is not among them: an author manifest naming it
+  fails validation, and a stored one has it dropped and reported.
 
 ### Removed
 
@@ -168,6 +317,63 @@ deployment for zero user-visible gain.
   `JSON.parse`d object cannot write through `__proto__`.
 - **`validateConfig` / `ConfigValidationResult`** (`./schema-validation`) —
   renamed, see Added.
+- **`LEGACY_PERMISSION_RESOURCE_ALIASES`, `canonicalPermission`,
+  `canonicalPermissions`, `acceptedPermissionSpellings`** (`./permissions`) —
+  the retired permission-resource table and the normalizer for stored scope
+  strings, together with the second-chance branch inside `makePermissionGuard`
+  that accepted a retired spelling directly. All three permission guards
+  (`requirePermission`, `requireCorePermission`, `requireModulePermission`)
+  delegate to that guard, so the removal reaches every one of them: a
+  `documents:read` scope is now denied where `files:read` is required, along
+  with the near-misses `file:read`, `files` and `files:read:extra`, and the
+  denial is pinned unit-level for all three.
+
+  This one has a caller behind it and the trade is deliberate. The alias never
+  shipped — it was added and removed inside this unreleased window — but
+  `documents:*` **is** the spelling every released Appstrate advertised, so a
+  third-party OAuth client integrated against `v1.0.0-beta.51` holds it in
+  config and now gets `invalid_scope` rather than a silent rewrite. For a beta
+  with no production data a loud refusal is the right failure and a silently
+  under-granted scope is not. Read-time normalization is also a translation
+  layer that would have to be applied at every site forever, and each site that
+  forgets it degrades silently: the scope is not rejected, it is dropped, and
+  the credential merely does less than it was granted. Three platform tests
+  were passing only because of the alias, which is the finding that justifies
+  the removal on its own.
+
+- **`LEGACY_RUNTIME_TOOL_EVENT_TYPES`** (`./runtime-tool-defs`) — the
+  retired `document.published` runtime-tool event type. Its removal is safe for
+  a structural reason rather than a version one: the only producer of that name
+  is core's own `filePublishedEvent`, bundled into the SAME artifact as the
+  trust-boundary acceptor that consumes it, so there is no version boundary
+  between them and the retired name can now only arrive from a forged upstream
+  event — which is what that acceptor's drop is for. Also post-`7.0.0` on both
+  ends.
+- **`LEGACY_DOCUMENT_URI_PREFIX`, `ACCEPTED_FILE_URI_PREFIXES`**
+  (`./file-uri`) — the `document://` scheme and the accept-list that carried
+  it. It survived to read historical rows, and finishing the rename at the
+  physical layer made it unreachable: every URI ever written under the old
+  scheme addresses a `doc_` id, and `FILE_ID_RE` accepts only `file_`. The one
+  pair the accept path could still have matched — `document://` + `file_…` — is
+  a form no build has ever emitted, since the scheme was replaced while ids
+  were still `doc_`. A `document://` value now fails at `parseFileUri` instead
+  of one line later on the id, in the same rejection.
+- **`swapRequestModel`** (`./model-swap`) — the alias→real request-body rewrite.
+  Its last caller was deleted with the alias-opacity change (#1202); the
+  adaptive-Anthropic branch it still carried had become a second implementation
+  of the live `compat: { forceAdaptiveThinking: true }` path. Verified to have
+  no reader in this repo, in `cloud`, or in `connect-helper`.
+- **`ALIASABLE_API_SHAPES`, `isAliasableApiShape`** (`./model-swap`) — the
+  set of protocol shapes an alias could be backed by, and its membership test.
+  Replaced by `AliasBackingApiShape` + `isAliasBackingShape`, which name the
+  same concept from the side that matters at the sidecar's inbound allowlist.
+- **`canonicalizeApiToolName`** (`./integration`) — collapsed to the identity
+  function once the raw long-auth-key `api_call` aliases went, so its six call
+  sites now test the name directly. Not re-exported under another name: there
+  is nothing left to canonicalize.
+- **`NpmVendorInput`, `PypiVendorInput`, `PypiRegistryResponse`**
+  (`./mcp-server-bundle`) — un-exported, not deleted. They describe the vendor
+  helpers' internal inputs and had no reader outside their own modules.
 - **`InlineRunBody.config`** (`./platform-types`) — the inline-run routes no
   longer accept the field.
 - **`publish_document.presentation`** (`./runtime-tool-defs`) — the

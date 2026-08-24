@@ -93,7 +93,7 @@ describe("consumePairing", () => {
 
   it("happy path — flips consumed_at and returns the row", async () => {
     const token = await mint();
-    const consumed = await consumePairing(token, "127.0.0.1");
+    const consumed = await consumePairing(token);
     expect(consumed.providerId).toBe("test-oauth");
     expect(consumed.orgId).toBe(fix.org.id);
     expect(consumed.consumedAt).toBeInstanceOf(Date);

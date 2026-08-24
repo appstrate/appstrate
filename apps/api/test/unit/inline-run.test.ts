@@ -18,8 +18,8 @@ import { ApiError } from "../../src/lib/errors.ts";
 import type { AgentManifest } from "../../src/types/index.ts";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 
-const DOC_A = "appfile://doc_aaaaaaaa";
-const DOC_B = "appfile://doc_bbbbbbbb";
+const DOC_A = "appfile://file_aaaaaaaa";
+const DOC_B = "appfile://file_bbbbbbbb";
 
 // A manifest input schema declaring `file` (and `also`) as FILE fields
 // (`format:"uri"` + `contentMediaType`) — the only fields whose `appfile://`

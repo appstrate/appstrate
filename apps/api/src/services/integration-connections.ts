@@ -2198,7 +2198,6 @@ export async function persistCredentialBundle(
     // again, so the escalation counter must not carry over. See
     // `recordIntegrationRefreshFailure`.
     refreshFailureCount: 0,
-    lastRefreshFailureAt: null,
     updatedAt: now,
   };
   if (input.accountId !== undefined) set.accountId = input.accountId;
@@ -2350,7 +2349,6 @@ export async function recordIntegrationRefreshFailure(
     .update(integrationConnections)
     .set({
       refreshFailureCount: sql`${integrationConnections.refreshFailureCount} + 1`,
-      lastRefreshFailureAt: sql`now()`,
       needsReconnection: sql`${integrationConnections.needsReconnection} OR (${integrationConnections.refreshFailureCount} + 1 >= ${maxFailures} AND ${integrationConnections.expiresAt} IS NOT NULL AND ${integrationConnections.expiresAt} < now() - make_interval(secs => ${graceSeconds}))`,
       updatedAt: sql`now()`,
     })
@@ -2514,7 +2512,13 @@ export async function listUsableIntegrationsForActor(
     acc.set(row.integrationId, entry);
   }
 
-  const ids = [...acc.keys()];
+  // Sorted, and that is load-bearing rather than cosmetic. The chat renders this
+  // list into its system prompt, which pi-ai emits as ONE cache block with ONE
+  // breakpoint: a reshuffle rewrites the prompt and invalidates the cached
+  // prefix — and the conversation history behind it — for no reason. Map
+  // insertion order follows the row order of an unordered SELECT, so Postgres is
+  // free to hand back a different permutation between two identical calls.
+  const ids = [...acc.keys()].sort();
   const pkgRows = await db
     .select({ id: packages.id, draftManifest: packages.draftManifest })
     .from(packages)

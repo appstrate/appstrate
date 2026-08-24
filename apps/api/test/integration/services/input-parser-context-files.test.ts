@@ -4,7 +4,7 @@
  * Integration tests for the reserved context-files field END TO END through
  * `parseRequestInput` — the proof that declaring the field is ALL the work:
  * from there the URIs travel the ordinary file-ref path (container ACL, byte +
- * count caps, streaming into `documents/`, `file_links` consumption).
+ * count caps, streaming into `files/`, `file_links` consumption).
  *
  * Drives the parser directly with a minimal fake Hono context (same harness as
  * `input-parser-stream.test.ts`) so no run pipeline, Docker or LLM is involved.
@@ -217,7 +217,7 @@ describe("parseRequestInput — reserved context-files field", () => {
   it("refuses an unknown file id", async () => {
     const ctx = await createTestContext({ orgSlug: "ctxdocs-missing" });
     const { manifest, inputPatch } = injectContextFiles(inlineManifest(), [
-      "appfile://doc_00000000-0000-0000-0000-000000000000",
+      "appfile://file_00000000-0000-0000-0000-000000000000",
     ]);
     await expect(
       parseRequestInput(

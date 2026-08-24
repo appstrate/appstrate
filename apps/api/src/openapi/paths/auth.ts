@@ -155,7 +155,7 @@ export const authPaths = {
                   description: "Bootstrap token from the install banner / .env.",
                 },
                 email: { type: "string", format: "email" },
-                password: { type: "string", minLength: 8 },
+                password: { type: "string", minLength: 8, maxLength: 256 },
                 name: { type: "string", minLength: 1, maxLength: 120 },
               },
             },

@@ -18,6 +18,7 @@ import type { Api, Message } from "@appstrate/runner-pi";
 import { messagesWithAttachmentsAsText } from "../attachments.ts";
 import { redactConnectPayload, splitJsonText } from "../connect-offer.ts";
 import { uiMessageText } from "../message-text.ts";
+import { PI_CHAT_CWD } from "./resource-loader.ts";
 
 export interface PiHistoryModel {
   api: Api;
@@ -26,7 +27,7 @@ export interface PiHistoryModel {
 }
 
 /** Estimate the tokens one Pi message occupies — Pi's own exported heuristic. */
-export type EstimateTokens = (message: Message) => number;
+type EstimateTokens = (message: Message) => number;
 
 export interface BuildStructuredPiTurnOptions {
   estimateTokens: EstimateTokens;
@@ -50,7 +51,6 @@ interface StructuredPiTurn {
 
 interface SessionManagerLike {
   appendMessage(message: Message): string;
-  buildSessionContext(): { messages: unknown[] };
   getSessionFile(): string | undefined;
 }
 
@@ -118,10 +118,23 @@ function json(value: unknown): string {
 }
 
 /**
- * Convert one tool output into Pi tool-result content. Image blocks are carried
- * through as `ImageContent` (Pi serializes them natively) instead of being
- * JSON-stringified — a base64 payload inlined into a text block would be both
- * useless to the model and a context bomb.
+ * Convert one persisted tool output into Pi tool-result content.
+ *
+ * TEXT ONLY, because that is all a chat tool can produce: every tool a turn can
+ * call goes through `mcp-tools.ts`, whose forwarder renders an MCP image block
+ * as the pointer `[image <mime>]` and whose `run_and_wait` result is JSON text.
+ * Replay must reproduce what the live turn showed the model, so a block type
+ * the live path cannot emit has no branch here either.
+ *
+ * The one exception is an MCP-shaped result whose blocks are ALL non-text. The
+ * generic JSON fallback below would stringify it whole — and for an image block
+ * that means the raw base64 lands in the model's context, the exact thing the
+ * live forwarder exists to prevent. Such a result should not reach here (the
+ * forwarder textifies images before anything is persisted), but "should not"
+ * is not "cannot": a row written by an older build, or a foreign persisted
+ * shape, still replays through this function. So a content array with no
+ * surviving text block is rendered as pointers, the same way the forwarder
+ * would have rendered it live.
  */
 function toolResultContent(value: unknown): ToolResultContent {
   if (value && typeof value === "object") {
@@ -129,24 +142,22 @@ function toolResultContent(value: unknown): ToolResultContent {
     if (Array.isArray(content)) {
       const blocks = content.flatMap((part): ToolResultContent => {
         if (!part || typeof part !== "object") return [];
-        const type = (part as { type?: unknown }).type;
-        if (type === "text") {
-          return [
-            {
-              type: "text",
-              text: splitJsonText(String((part as { text?: unknown }).text ?? "")).text,
-            },
-          ];
-        }
-        if (type === "image") {
-          const { data, mimeType } = part as { data?: unknown; mimeType?: unknown };
-          if (typeof data === "string" && typeof mimeType === "string") {
-            return [{ type: "image", data, mimeType }];
-          }
-        }
-        return [];
+        if ((part as { type?: unknown }).type !== "text") return [];
+        return [
+          {
+            type: "text",
+            text: splitJsonText(String((part as { text?: unknown }).text ?? "")).text,
+          },
+        ];
       });
       if (blocks.length > 0) return blocks;
+      const pointers = content.flatMap((part): ToolResultContent => {
+        if (!part || typeof part !== "object") return [];
+        const type = String((part as { type?: unknown }).type ?? "unknown");
+        const mime = (part as { mimeType?: unknown }).mimeType;
+        return [{ type: "text", text: `[${type}${mime ? ` ${String(mime)}` : ""}]` }];
+      });
+      if (pointers.length > 0) return pointers;
     }
   }
   return [{ type: "text", text: json(redactConnectPayload(value)) }];
@@ -324,7 +335,7 @@ export function reconstructPiSession<T extends SessionManagerLike>(
   SessionManager: SessionManagerFactory<T>,
   history: Message[],
 ): T {
-  const session = SessionManager.inMemory("/tmp");
+  const session = SessionManager.inMemory(PI_CHAT_CWD);
   for (const message of history) session.appendMessage(message);
   return session;
 }

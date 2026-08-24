@@ -60,6 +60,24 @@ export function normalizeMime(mime: string | null | undefined): string {
  * Media types whose payload is text, matched EXACTLY. A substring test would
  * classify `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
  * as XML — see the module doc.
+ *
+ * Membership criterion, applied to every entry below:
+ *
+ *  1. the format's specification defines the payload as a character sequence,
+ *     so a UTF-8 decode is lossless and a base64 round-trip is pure noise to
+ *     the model;
+ *  2. it plausibly arrives as an HTTP response body (request-only grammars
+ *     such as `application/sparql-query` or `application/jsonpath` are out);
+ *  3. it is not a container that may embed raw bytes. `application/rtf`
+ *     (`\bin` blocks), `application/postscript` (binary-token PostScript) and
+ *     `application/http` (a message whose body may be anything) all fail this
+ *     and stay on the byte path even though their common form is ASCII.
+ *
+ * Completeness matters more than it used to. `isTextLikeMimeType` in
+ * `@appstrate/afps-runtime` used to treat any `; charset=…` parameter as a
+ * declaration of textness ahead of this set; it now consults that parameter
+ * only for an ambiguous base type, so a text format MISSING from this set is
+ * base64'd to the model even when the upstream declared a charset.
  */
 export const TEXT_SHAPED_MEDIA_TYPES: ReadonlySet<string> = new Set([
   // JSON family
@@ -68,22 +86,49 @@ export const TEXT_SHAPED_MEDIA_TYPES: ReadonlySet<string> = new Set([
   "application/x-ndjson",
   "application/jsonl",
   "application/json-seq",
-  // XML family
+  "application/json5",
+  "application/hjson",
+  // XML / SGML family
   "application/xml",
   "application/xml-dtd",
   "application/xml-external-parsed-entity", // RFC 7303
+  "application/sgml",
   "image/svg+xml", // XML-based, file-type never matches it
   // YAML family
   "application/yaml",
   "application/x-yaml",
+  // TOML
+  "application/toml",
+  // Markdown — `text/markdown` is the registered spelling and already matches
+  // on the `text/` prefix; these two are the widespread unregistered ones.
+  "application/markdown",
+  "application/x-markdown",
+  // Query / schema languages served as source text
+  "application/sql", // RFC 6922
+  "application/graphql",
+  // RDF text serialisations. The `+json` / `+xml` RDF spellings already match
+  // on their structured suffix, and Turtle is registered as `text/turtle`.
+  "application/n-triples",
+  "application/n-quads",
+  "application/trig",
   // Scripting / tabular / form encodings with no magic signature
   "application/javascript",
   "application/x-javascript",
   "application/ecmascript",
+  "application/node",
+  "application/typescript",
+  "application/x-typescript",
+  "application/dart",
   "application/csv",
   "application/x-sh",
+  "application/x-shellscript",
   "application/x-httpd-php",
   "application/x-www-form-urlencoded",
+  // ASCII-armored / PEM blocks — base64 wrapped in text framing. Re-encoding
+  // them as base64 hides the framing the model needs to read.
+  "application/pem-certificate-chain", // RFC 8555
+  "application/pgp-keys", // RFC 3156 — the armored form
+  "application/pgp-signature", // RFC 3156 — the armored form
 ]);
 
 /**

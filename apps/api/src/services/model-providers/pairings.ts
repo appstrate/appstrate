@@ -128,14 +128,13 @@ export async function createPairing(args: CreatePairingArgs): Promise<CreatePair
  * not by re-issuing the result, because re-issuing credentials to a second
  * caller would defeat the one-shot guarantee.
  */
-export async function consumePairing(token: string, fromIp?: string): Promise<ConsumedPairing> {
+export async function consumePairing(token: string): Promise<ConsumedPairing> {
   const tokenHash = await hashPairingSecret(token);
 
   const rows = await db
     .update(modelProviderPairings)
     .set({
       consumedAt: sql`now()`,
-      consumedFromIp: fromIp ?? null,
     })
     .where(
       and(

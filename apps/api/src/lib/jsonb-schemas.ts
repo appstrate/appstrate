@@ -54,9 +54,8 @@ export const scheduleInputSchema = z
  * `output` (runner-produced structured output) and nothing else. Unknown keys
  * are stripped and the byte cap bounds the row-sized JSONB column.
  *
- * Rows written before the `report` runtime tool was retired may still carry
- * `text` / `text_truncated`; those are read back verbatim from the column and
- * never re-validated — this is the WRITE boundary only.
+ * This is the WRITE boundary only; the column itself is jsonb and whatever a
+ * row already holds is read back verbatim without re-validation.
  */
 export const runResultSchema = z
   .object({

@@ -39,15 +39,6 @@ import { chatSessions } from "./chat.ts";
 export type RunResultPayload = {
   /** Structured output emitted via the `output` tool (schema-validated). */
   output?: unknown;
-  /**
-   * HISTORICAL ONLY — markdown aggregate of the retired `report` runtime
-   * tool. No code path writes it any more (`runResultSchema` rejects the
-   * key); rows finalized before the removal keep theirs and are served
-   * verbatim, which is why the shape still declares them.
-   */
-  text?: string;
-  /** HISTORICAL ONLY — present when the retired `text` hit its 256 KiB cap. */
-  text_truncated?: true;
 };
 
 /**

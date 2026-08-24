@@ -3,14 +3,24 @@
   "compilerOptions": {
     "types": ["bun"]
   },
-  "include": [
-    "verify-module-contract.ts",
-    "verify-package-resolves.ts",
-    "check-consumer-versions.ts",
-    "check-index-drift.ts",
-    "lib/config-to-input.ts",
-    "test/check-consumer-versions.test.ts",
-    "test/check-index-drift.test.ts",
-    "test/config-to-input.test.ts"
-  ]
+  // Everything under scripts/, not an allowlist. The allowlist this replaced
+  // named 4 of the 17 root scripts, so `verify-openapi.ts`,
+  // `detect-breaking-changes.ts`, `generate-api-types.ts`,
+  // `verify-module-isolation.ts`, `build-system-packages.ts`,
+  // `lint-manifest-casing.ts`, `docker-build-runtime.ts`, `setup.ts` and
+  // `refresh-pricing-catalog.ts` — several of them CI gates — shipped
+  // unchecked. Inverting it surfaced 11 real errors, since fixed. There is
+  // deliberately no `exclude`: every file under scripts/ resolves and
+  // typechecks, and excluding one to keep this gate green would rebuild the
+  // hole it exists to close.
+  //
+  // The one non-`scripts/` entry is not a stray. Several scripts import
+  // `apps/api/src/openapi/`, which reaches `lib/modules/module-loader.ts`,
+  // whose `ModulePermissionContribution` collapses to `never` unless the
+  // `declare module "@appstrate/core/permissions"` augmentations shipped by
+  // the built-in modules are in the same program (see the type's own doc
+  // comment in packages/core/src/module.ts). Listing the module entrypoints
+  // supplies them; without it this config reports 9 phantom errors in a file
+  // that is clean under `apps/api/tsconfig.json`.
+  "include": ["**/*.ts", "../apps/api/src/modules/*/index.ts"]
 }

@@ -408,7 +408,7 @@ async function runPlatformContainerImpl(
       // Forward the effective per-file cap so the runtime's outputs
       // sweep agrees with the server-authoritative gate (avoids silently
       // skipping large deliverables when an operator raises the platform cap).
-      maxFileBytes: getEnv().DOCUMENT_MAX_FILE_BYTES,
+      maxFileBytes: getEnv().FILE_MAX_BYTES,
       forwardProxyUrl: skipSidecar ? undefined : boundary.sidecarEndpoints.forwardProxyUrl,
       noProxy: skipSidecar ? undefined : boundary.sidecarEndpoints.noProxy,
       sink: {
@@ -616,17 +616,35 @@ async function waitForWorkload(
 
 // --- Helpers ---
 
+/** Leading dash-separated segments a placeholder may keep. */
+const PLACEHOLDER_PREFIX_SEGMENTS = 2;
+
 /**
- * Derive a placeholder that preserves the key's dash-separated prefix.
- * The last segment (the secret) is replaced; prefix segments are kept intact.
- * This ensures the SDK's prefix-based behavior (e.g. OAuth detection, auth header
- * format, beta headers) works identically with the placeholder.
+ * Derive a placeholder that preserves the key's dash-separated prefix, so the
+ * SDK's prefix-based behavior (OAuth detection, auth header format, beta
+ * headers) works identically with the placeholder.
+ *
+ * Bounded on both axes, because the original rule — drop the LAST segment,
+ * keep everything before it — did not bound what it keeps. A key body is
+ * base64url, whose alphabet contains `-`, so `sk-ant-api03-AbC-dEf-XyZ` kept
+ * `sk-ant-api03-AbC-dEf`: real secret material placed inside the agent
+ * container. Two segments is what prefix sniffing actually reads (`sk-ant-`,
+ * `sk-proj-`, `sk-or-`), and the half-length ceiling keeps a short key from
+ * handing over most of itself.
+ *
+ * This still names the VENDOR, which is correct here and only here: on a
+ * non-aliased run the container is told the provider outright via
+ * `MODEL_PROVIDER`. An aliased run never reaches this value — see
+ * `ALIAS_API_KEY_PLACEHOLDER` in `@appstrate/runner-pi`.
  */
 function deriveKeyPlaceholder(key: string | undefined): string {
   if (!key) return "sk-placeholder";
   const parts = key.split("-");
   if (parts.length <= 1) return "sk-placeholder";
-  return parts.slice(0, -1).join("-") + "-placeholder";
+  const kept = parts.slice(0, Math.min(PLACEHOLDER_PREFIX_SEGMENTS, parts.length - 1)).join("-");
+  const ceiling = Math.floor(key.length / 2);
+  const bounded = kept.length > ceiling ? kept.slice(0, ceiling) : kept;
+  return bounded ? `${bounded}-placeholder` : "sk-placeholder";
 }
 
 /**

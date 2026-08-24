@@ -57,22 +57,27 @@ describe("getModuleRegistry", () => {
 });
 
 /**
- * `setDocumentStorageLimit` is the pre-#1177 spelling of `setFileStorageLimit`,
- * kept as a deprecated alias because out-of-tree modules (cloud) bind the
- * capability off the LIVE services object the platform injects, not off their
- * pinned `PlatformServices` types — the rename never reaches their read, so
- * dropping the name would `TypeError` their next boot on a deploy clock this
- * repo does not control. Both names MUST resolve to the same implementation.
+ * The storage-limit capability is exposed under ONE name.
+ *
+ * `setDocumentStorageLimit` was kept beside it as a deprecated alias, because
+ * out-of-tree modules bind this capability off the LIVE services object the
+ * platform injects rather than off their pinned `PlatformServices` types — a
+ * rename does not reach their read, it `TypeError`s their next boot. The alias
+ * is gone and `@appstrate/cloud` binds the canonical name, so the two now move
+ * in lockstep: core 8.0.0 on npm, then cloud, then this.
+ *
+ * Asserted rather than deleted because a reintroduced alias is invisible: it
+ * would typecheck, pass every other test, and quietly restore two names for
+ * one capability.
  */
 describe("buildModuleInitContext().services — storage-limit capability", () => {
-  it("exposes both the canonical name and the deprecated alias", () => {
+  it("exposes the canonical name", () => {
     const { services } = buildModuleInitContext();
     expect(typeof services.setFileStorageLimit).toBe("function");
-    expect(typeof services.setDocumentStorageLimit).toBe("function");
   });
 
-  it("binds the alias to the very same function as the canonical name", () => {
+  it("exposes no pre-#1177 alias beside it", () => {
     const { services } = buildModuleInitContext();
-    expect(services.setDocumentStorageLimit).toBe(services.setFileStorageLimit);
+    expect(services).not.toHaveProperty("setDocumentStorageLimit");
   });
 });

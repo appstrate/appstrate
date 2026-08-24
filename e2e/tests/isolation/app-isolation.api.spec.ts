@@ -15,7 +15,6 @@ import {
   createApiKey,
   createApplication,
   createSchedule,
-  installPackageInApp,
 } from "../../helpers/seed.ts";
 import { createApiClient } from "../../helpers/api-client.ts";
 
@@ -97,9 +96,7 @@ test.describe("Cross-app resource isolation", () => {
     });
 
     test("Org-level webhook appears in all application-filtered lists", async ({
-      request,
       apiClient: clientA,
-      orgContext,
       orgOnlyClient,
     }) => {
       const appB = await createApplication(orgOnlyClient, `AppB-wh-org-${Date.now()}`);

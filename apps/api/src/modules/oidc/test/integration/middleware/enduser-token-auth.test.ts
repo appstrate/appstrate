@@ -293,6 +293,10 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       actor_type: "end_user",
       end_user_id: endUserId,
       application_id: applicationId,
+      // `/api/runs` is used here as a convenient authenticated route — the
+      // subject under test is app-context pinning. It enforces `runs:read`
+      // like every other read route, so the token has to carry it.
+      scope: "openid runs:read",
     });
     const res = await app.request(`/api/runs`, {
       headers: {
@@ -382,6 +386,9 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       actor_type: "end_user",
       end_user_id: endUserId,
       application_id: applicationId,
+      // The subject under test is the azp/disabled-client check; `/api/runs`
+      // is the probe route and enforces `runs:read`.
+      scope: "openid runs:read",
     });
 
     // Token should work while client is active.
@@ -520,14 +527,14 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
   });
 
   // -------------------------------------------------------------------------
-  // `documents:read` over OIDC
+  // `files:read` over OIDC
   //
-  // The documents read routes are gated on `documents:read`. An OIDC token's
+  // The file read routes are gated on `files:read`. An OIDC token's
   // permissions are derived from its SCOPES, so the scope has to be in the
   // requestable vocabulary (`OIDC_ALLOWED_SCOPES`, which also feeds
   // `APPSTRATE_BUILTIN_SCOPES` → discovery `scopes_supported`) or every OIDC
-  // caller loses document access outright — including `run_and_wait`'s
-  // document enrichment, which is best-effort and would silently return an
+  // caller loses file access outright — including `run_and_wait`'s
+  // file enrichment, which is best-effort and would silently return an
   // EMPTY list rather than an error.
   // -------------------------------------------------------------------------
 
@@ -565,7 +572,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     await db.insert(organizationMembers).values({ userId: authUserId, orgId, role });
   }
 
-  it("dashboard token carrying documents:read reads the org's documents", async () => {
+  it("dashboard token carrying files:read reads the org's files", async () => {
     await addDashboardMembership();
     const { docId } = await seedRunFile();
 
@@ -575,7 +582,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       org_id: orgId,
       org_role: "admin",
       email: "stage3@example.com",
-      scope: "openid documents:read",
+      scope: "openid files:read",
     });
     const headers = {
       Authorization: `Bearer ${token}`,
@@ -595,13 +602,13 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     expect(await content.text()).toBe("oidc deliverable");
   });
 
-  it("dashboard token without documents:read is refused on every read route", async () => {
+  it("dashboard token without files:read is refused on every read route", async () => {
     await addDashboardMembership();
     const { docId } = await seedRunFile();
 
     // A token that requested a DIFFERENT, legitimate scope: the caller is a
-    // real org admin (whose role grants `documents:read`), so only the token's
-    // scope set stands between it and the documents — which is exactly the
+    // real org admin (whose role grants `files:read`), so only the token's
+    // scope set stands between it and the files — which is exactly the
     // property the gate is supposed to have.
     const token = await mintToken({
       sub: authUserId,
@@ -622,7 +629,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     }
   });
 
-  it("end-user token carrying documents:read reads its own run's document", async () => {
+  it("end-user token carrying files:read reads its own run's file", async () => {
     const { docId } = await seedRunFile({ endUserId });
 
     const token = await mintToken({
@@ -631,7 +638,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       end_user_id: endUserId,
       application_id: applicationId,
       email: "stage3@example.com",
-      scope: "openid runs:read documents:read",
+      scope: "openid runs:read files:read",
     });
     const res = await app.request(`/api/files/${docId}`, {
       headers: {

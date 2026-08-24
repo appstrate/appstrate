@@ -14,7 +14,12 @@ import type {
   RunConnectionMissingParams,
   RunStatusChangeParams,
 } from "@appstrate/core/module";
-import { createWebhooksRouter, createWebhookSchema, updateWebhookSchema } from "./routes.ts";
+import {
+  createWebhooksRouter,
+  createWebhookSchema,
+  updateWebhookSchema,
+  rotateSecretSchema,
+} from "./routes.ts";
 import {
   dispatchRunConnectionMissingWebhook,
   dispatchRunWebhook,
@@ -78,6 +83,12 @@ const webhooksModule: AppstrateModule = {
         path: "/api/webhooks/{id}",
         jsonSchema: z.toJSONSchema(updateWebhookSchema) as Record<string, unknown>,
         description: "Update webhook",
+      },
+      {
+        method: "POST",
+        path: "/api/webhooks/{id}/rotate",
+        jsonSchema: z.toJSONSchema(rotateSecretSchema) as Record<string, unknown>,
+        description: "Rotate webhook signing secret",
       },
     ];
   },

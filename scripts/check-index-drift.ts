@@ -333,7 +333,7 @@ async function main(): Promise<number> {
   }
 
   const sql = new Bun.SQL(url);
-  let trackingTableExists = false;
+  let trackingTableExists: boolean;
   let watermark: number | null = null;
   const actual = new Set<string>();
   const constraintBacked = new Set<string>();

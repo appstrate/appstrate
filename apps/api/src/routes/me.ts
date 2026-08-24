@@ -189,7 +189,7 @@ router.get("/connections", async (c) => {
  * a different validation rule (the connection must be `sharedWithOrg`);
  * the two sets coexist in the same table, discriminated by `user_id`.
  */
-const upsertMemberPinSchema = z.object({
+export const upsertMemberPinSchema = z.object({
   agent_package_id: z.string().min(1),
   integration_package_id: z.string().min(1),
   connection_id: z.uuid(),

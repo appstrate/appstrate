@@ -358,7 +358,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
       name: "file.pdf",
       size: PDF_BYTES.length,
     });
-    expect(result.input!.doc as string).toStartWith("appfile://doc_");
+    expect(result.input!.doc as string).toStartWith("appfile://file_");
     expect(result.pendingFiles).toHaveLength(1);
     // The replayed file landed in the NEW run's workspace.
     const docStream = await downloadRunFileStream(newRunId, "file.pdf");

@@ -470,6 +470,16 @@ export async function forwardMeteredResponse(
         });
       });
     const headers = buildClientHeaders(upstream.headers, swap);
+    // Tell an intermediary not to buffer this stream. `/api/realtime/*` sets
+    // this and the chat stream inherits it from the AI SDK's own
+    // `UI_MESSAGE_STREAM_HEADERS`; this was the third SSE producer and had
+    // neither, because both header paths above it derive from the UPSTREAM
+    // reply and no model vendor sends it. `/api/llm-proxy/*` is a documented
+    // public endpoint returning `text/event-stream`, so a self-hoster who put
+    // nginx in front got the whole completion in one batch at the end — the
+    // exact symptom the realtime fix was written to remove, on a surface the
+    // self-hosting guide told them was already covered.
+    headers.set("X-Accel-Buffering", "no");
     // Guard the raw client branch FIRST (before the alias-swap pipe) so the
     // swapped stream is fed by a source that never errors — see
     // {@link guardSseTeardown} for why guarding after `pipeThrough` would leave

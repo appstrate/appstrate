@@ -5,7 +5,6 @@ import {
   buildPublishFileDef,
   buildRuntimeToolDefs,
   CANONICAL_RUNTIME_TOOL_EVENT_TYPES,
-  LEGACY_RUNTIME_TOOL_EVENT_TYPES,
   filePublishedEvent,
   reEmitRuntimeToolEvents,
   RUNTIME_TOOL_EVENTS_META_KEY,
@@ -117,8 +116,8 @@ describe("reEmitRuntimeToolEvents", () => {
 
 describe("buildPublishFileDef", () => {
   const publishedFile: PublishedFile = {
-    id: "doc_primary",
-    uri: "appfile://doc_primary",
+    id: "file_primary",
+    uri: "appfile://file_primary",
     name: "Final report.html",
     mime: "text/html",
     size: 42,
@@ -166,8 +165,8 @@ describe("buildPublishFileDef", () => {
   it("emits a file.published event with no presentation field", () => {
     expect(filePublishedEvent(publishedFile)).toEqual({
       type: "file.published",
-      file_id: "doc_primary",
-      uri: "appfile://doc_primary",
+      file_id: "file_primary",
+      uri: "appfile://file_primary",
       name: "Final report.html",
       mime: "text/html",
       size: 42,
@@ -228,30 +227,107 @@ describe("buildPublishFileDef", () => {
 });
 
 describe("run-event type compatibility (#1177)", () => {
-  it("file.published is canonical; document.published is accepted, not emitted", () => {
+  it("file.published is canonical and document.published is no longer accepted", () => {
     expect([...CANONICAL_RUNTIME_TOOL_EVENT_TYPES]).toContain("file.published");
     expect([...CANONICAL_RUNTIME_TOOL_EVENT_TYPES]).not.toContain("document.published" as never);
-    expect([...LEGACY_RUNTIME_TOOL_EVENT_TYPES]).toEqual(["document.published"]);
-  });
 
-  it("reEmitRuntimeToolEvents forwards a legacy document.published from an older image", () => {
-    // Runtime image and platform deploy independently: an image built before
-    // the rename still hands this host `document.published`. Dropping it at the
-    // trust boundary would silently lose a published file.
+    // The only producer of the retired name is this module's own
+    // `filePublishedEvent`, bundled into the SAME artifact as the acceptor
+    // below — there is no version boundary between them, so the name can now
+    // only arrive forged, and the acceptor drops it like any other.
     const emitted: unknown[] = [];
     reEmitRuntimeToolEvents(
       {
         [RUNTIME_TOOL_EVENTS_META_KEY]: [
-          { type: "document.published", document_id: "doc_legacy" },
-          { type: "file.published", file_id: "doc_new" },
+          { type: "document.published", document_id: "file_legacy" },
+          { type: "file.published", file_id: "file_new" },
           { type: "forged.event", x: 1 },
         ],
       },
       (e) => emitted.push(e),
     );
-    expect(emitted).toEqual([
-      { type: "document.published", document_id: "doc_legacy" },
-      { type: "file.published", file_id: "doc_new" },
-    ]);
+    expect(emitted).toEqual([{ type: "file.published", file_id: "file_new" }]);
+  });
+});
+
+describe("output — schema dialect and compile failure", () => {
+  /**
+   * The in-container check exists to pre-empt the server's post-hoc
+   * `validateOutput`. It can only do that if both sides speak the SAME
+   * dialect. This used to be a private draft-07 Ajv with no ajv-formats
+   * beside the server's shared Ajv2020; a 2020-12 keyword compiled on one
+   * side and not the other.
+   */
+  it("compiles a 2020-12-only schema and enforces it", async () => {
+    const def = buildRuntimeToolDefs({
+      runtimeTools: ["output"],
+      outputSchema: {
+        type: "object",
+        properties: {
+          pair: {
+            type: "array",
+            // `prefixItems` is 2020-12. Draft-07 does not know it and treats
+            // it as an unknown annotation, so this constraint vanished.
+            prefixItems: [{ type: "string" }, { type: "number" }],
+            minItems: 2,
+          },
+        },
+        required: ["pair"],
+      },
+    })[0]!;
+
+    const bad = await def.handler({ data: { pair: [1, "x"] } });
+    expect(bad.isError).toBe(true);
+    expect(bad.content[0]).toMatchObject({ text: expect.stringContaining("validation failed") });
+
+    const good = await def.handler({ data: { pair: ["x", 1] } });
+    expect(good.isError).toBeUndefined();
+  });
+
+  /**
+   * A schema that cannot compile used to set `validator = null`, and the guard
+   * was `if (validator && !validator(data))` — so EVERY payload was accepted,
+   * silently, and the run failed later at the server check this tool exists to
+   * pre-empt.
+   */
+  it("refuses every output when the declared schema cannot compile", async () => {
+    const def = buildRuntimeToolDefs({
+      runtimeTools: ["output"],
+      outputSchema: { type: "object", properties: { n: { type: "not-a-json-schema-type" } } },
+    })[0]!;
+
+    const res = await def.handler({ data: { anything: true } });
+    expect(res.isError).toBe(true);
+    expect(res.content[0]).toMatchObject({
+      text: expect.stringContaining("cannot be compiled"),
+    });
+  });
+
+  /**
+   * Regression guard for the second half of the private-instance bug: it never
+   * called `removeSchema`, so compiling two schemas carrying the same `$id` in
+   * one process threw "schema with key or id … already exists" — caught, and
+   * turned into the silent accept-everything above.
+   */
+  it("compiles two schemas carrying the same $id in one process", async () => {
+    const schema = {
+      $id: "https://example.test/out.json",
+      type: "object",
+      properties: { n: { type: "number" } },
+      required: ["n"],
+    };
+    const first = buildRuntimeToolDefs({
+      runtimeTools: ["output"],
+      outputSchema: { ...schema },
+    })[0]!;
+    const second = buildRuntimeToolDefs({
+      runtimeTools: ["output"],
+      outputSchema: { ...schema },
+    })[0]!;
+
+    for (const def of [first, second]) {
+      expect((await def.handler({ data: { n: "nope" } })).isError).toBe(true);
+      expect((await def.handler({ data: { n: 1 } })).isError).toBeUndefined();
+    }
   });
 });

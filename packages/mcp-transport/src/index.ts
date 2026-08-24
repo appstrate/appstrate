@@ -81,17 +81,22 @@ export interface AppstrateToolDefinition {
    */
   descriptor: Tool;
   handler: AppstrateToolHandler;
-  /**
-   * Registered for `tools/call` but withheld from `tools/list`. The one
-   * intended use is a RETIRED tool name kept callable after a rename: this
-   * server advertises `tools: { listChanged: false }`, so a client is entitled
-   * to cache the tool list for the life of its session and call a name it
-   * learned before the rename. Listing the old name instead would put two
-   * entries for one capability in front of the model, which is the opposite of
-   * what a rename is for.
-   */
-  hidden?: boolean;
 }
+
+// There is no `hidden` flag on a tool definition.
+//
+// One existed, for exactly one use: a RETIRED tool name kept callable but
+// unlisted after a rename, because this server advertises
+// `tools: { listChanged: false }` and a client may cache the list for its whole
+// session. That use was then removed — `apps/api/src/modules/mcp/tools.ts`
+// registers no retired name, listed or hidden, on the grounds that the cost was
+// "a permanent second dispatch path whose only proof of life was its own test".
+// The flag outlived its only consumer by three commits, leaving a filter that
+// filtered nothing and a test asserting a capability nothing used.
+//
+// If a future rename wants it back it is three lines. Do not re-add it
+// speculatively: an unlisted-but-callable name is a second dispatch path, and
+// this codebase has now twice decided it does not want one.
 
 const DEFAULT_SERVER_INFO: Implementation = {
   name: "appstrate-mcp-server",
@@ -188,7 +193,7 @@ export function createMcpServer(
   const server = new Server(serverInfo, { capabilities, instructions: options.instructions });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [...registry.values()].filter((t) => !t.hidden).map((t) => t.descriptor),
+    tools: [...registry.values()].map((t) => t.descriptor),
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {

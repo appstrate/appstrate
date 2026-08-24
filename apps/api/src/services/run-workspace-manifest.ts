@@ -8,7 +8,7 @@
  *
  *   `<runId>.afps`                  the AFPS bundle (manifest + prompt + skills)
  *   `<runId>/manifest.json`         the files manifest (also the DELETION INDEX)
- *   `<runId>/documents/<name>`      one object per input file
+ *   `<runId>/files/<name>`          one object per input file
  *
  * The manifest doubles as the deletion index — teardown enqueues the bundle and
  * the manifest key, and the outbox worker expands the manifest into its file
@@ -32,7 +32,6 @@ export const RUN_WORKSPACE_BUCKET = "run-workspace";
  *
  * `name` is the human display name; `workspace_name` (snake_case on the wire) is
  * the unique single-segment filename the agent writes into `workspace/files/`
- * (`workspace/documents/` on a pre-#1177 runtime image)
  * and fetches the bytes by. The two are separated so two files sharing a
  * display name never overwrite each other on disk — see run-file-naming.ts.
  */
@@ -45,18 +44,13 @@ export interface RunFileMeta {
 /**
  * The files manifest served at `GET /api/runs/:runId/files`.
  *
- * `documents` is the pre-#1177 spelling of the SAME array. It is still WRITTEN
- * (see `writeRunFilesManifest`) and still READ, because the runtime image and
- * the platform deploy independently: a container built before the rename reads
- * `manifest.documents`, and a manifest object written before the rename — a run
- * still in flight, or one whose storage teardown has not run yet — only carries
- * that key. Dropping either half loses input files, or leaks every input object
- * of an in-flight run, with no error on any path.
+ * ONE key. The pre-#1177 `documents` twin is gone from both the written object
+ * and the reader: the platform validates its runtime image tags against its own
+ * version at boot, so the container reading this manifest is never older than
+ * the platform that wrote it.
  */
 export interface RunFilesManifest {
   files: RunFileMeta[];
-  /** @deprecated Pre-#1177 alias of {@link RunFilesManifest.files}. */
-  documents: RunFileMeta[];
 }
 
 /** Key of a run's AFPS bundle. */
@@ -68,14 +62,15 @@ export const runWorkspaceManifestKey = (runId: string): string => `${runId}/mani
 /**
  * Key of one input file inside a run's workspace prefix.
  *
- * The `documents/` segment is a STORAGE LAYOUT, not vocabulary: every object of
- * every run already provisioned lives under it, and the deletion index resolves
- * teardown keys through this same builder. Issue #1177 renamed the identifier,
- * never the literal — changing it would strand the objects of every in-flight
- * run with no error until a fetch 404s mid-provisioning.
+ * The `files/` segment is a STORAGE LAYOUT: every input object of every
+ * provisioned run lives under it, and the deletion index resolves teardown keys
+ * through this same builder. It was spelled `documents/` until the #1177 rename
+ * was finished at the physical layer. Changing it again strands the objects of
+ * every in-flight run — with no error until a fetch 404s mid-provisioning — so
+ * it moves only alongside a pass over the objects already stored.
  */
 export const runWorkspaceFileKey = (runId: string, workspaceName: string): string =>
-  `${runId}/documents/${workspaceName}`;
+  `${runId}/files/${workspaceName}`;
 
 /** Matches a files-manifest key, capturing the runId that owns it. */
 const MANIFEST_KEY_RE = /^([^/]+)\/manifest\.json$/;
@@ -91,7 +86,7 @@ export function parseRunWorkspaceManifestKey(storageKey: string): string | null 
 
 /**
  * Is `name` a single, safe path segment? Anything else (empty, `.`, `..`, or a
- * name containing a separator) would escape the run's `documents/` prefix when
+ * name containing a separator) would escape the run's `files/` prefix when
  * concatenated into a key.
  */
 function isSafeSegment(name: string): boolean {
@@ -101,12 +96,15 @@ function isSafeSegment(name: string): boolean {
 }
 
 /**
- * Parse + validate a files manifest read from storage. Accepts `files` or the
- * pre-#1177 `documents` key (a manifest written before the rename is live data
- * the deletion index still has to expand). Throws on anything that is not a
- * well-formed manifest: bad JSON, neither key present or not an array,
- * an entry that is not an object, a non-string `workspace_name`, or a
- * `workspace_name` that is not a single safe path segment.
+ * Parse + validate a files manifest read from storage. `files` is the only key
+ * read: an object still carrying the pre-#1177 `documents` spelling throws
+ * here — an explicit `Invalid run workspace manifest` on both the serve path
+ * (500) and the deletion path (retry, then dead letter) rather than an agent
+ * booting with an empty workspace or a teardown silently skipping every input
+ * object. Throws on anything else that is not a well-formed manifest too: bad
+ * JSON, `files` absent or not an array, an entry that is not an object, a
+ * non-string `workspace_name`, or a `workspace_name` that is not a single safe
+ * path segment.
  *
  * Strict by design — this is the ONE reader for both the serve path and the
  * deletion path, and both derive object keys from `workspace_name`. Failing
@@ -121,8 +119,8 @@ export function parseRunFilesManifest(bytes: Uint8Array, storageKey: string): Ru
   } catch {
     throw new Error(`Invalid run workspace manifest (not JSON): ${storageKey}`);
   }
-  const root = parsed as { files?: unknown; documents?: unknown } | null;
-  const files = Array.isArray(root?.files) ? root.files : root?.documents;
+  const root = parsed as { files?: unknown } | null;
+  const files = root?.files;
   if (!Array.isArray(files)) {
     throw new Error(`Invalid run workspace manifest: ${storageKey}`);
   }
@@ -138,5 +136,5 @@ export function parseRunFilesManifest(bytes: Uint8Array, storageKey: string): Ru
       size: typeof e?.size === "number" ? e.size : 0,
     };
   });
-  return { files: entries, documents: entries };
+  return { files: entries };
 }

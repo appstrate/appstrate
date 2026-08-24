@@ -6,7 +6,7 @@ import {
   preserveRequestedThinkingLevel,
   type PiModelConfig,
 } from "../src/pi-runner.ts";
-import { streamSimple } from "../src/pi-sdk.ts";
+import { streamSimple } from "@earendil-works/pi-ai/compat";
 
 const model = (over: Partial<PiModelConfig> = {}): PiModelConfig =>
   ({

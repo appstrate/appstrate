@@ -16,7 +16,7 @@ import { buildAgentPackage } from "./package-storage.ts";
 import { getLatestVersionInfo } from "./package-versions.ts";
 import { resolveProxy } from "./org-proxies.ts";
 import { resolveModel } from "./org-models.ts";
-import { extractManifestSchemas } from "../lib/manifest-utils.ts";
+import { extractManifestOutputSchema } from "../lib/manifest-utils.ts";
 import { resolveIntegrationSpawns, type DroppedIntegration } from "./integration-spawn-resolver.ts";
 import { appendRunLog } from "./state/runs.ts";
 import type { OrgScope } from "../lib/scope.ts";
@@ -285,9 +285,9 @@ export async function buildRunContext(params: {
   // here would silently drop every author's runtime-tool selection.
   //
   // Read it off the BUNDLE root manifest, not `agent.manifest`: the stored
-  // manifest may still name a retired spelling (`publish_document`, #1177) and
-  // `buildAgentPackage` canonicalizes it on the way into the bundle. That
-  // bundle is the exact byte stream the container loads and gates its tool
+  // manifest may name an id the platform no longer builds, and
+  // `buildAgentPackage` strips those on the way into the bundle. That bundle
+  // is the exact byte stream the container loads and gates its tool
   // registration on, so deriving the plan from the same bytes is what keeps
   // the platform-side plan and the container-side gate from disagreeing about
   // which tools the agent has.
@@ -307,7 +307,7 @@ export async function buildRunContext(params: {
   const plan: AppstrateRunPlan = {
     bundle,
     rawPrompt: agent.prompt,
-    outputSchema: extractManifestSchemas(agent.manifest).output,
+    outputSchema: extractManifestOutputSchema(agent.manifest),
     ...(runtimeTools && runtimeTools.length > 0 ? { runtimeTools } : {}),
     llmConfig: modelResult,
     generationConfig,

@@ -48,8 +48,11 @@ function duplicateFileName(name: string): ApiError {
  * storage key ({@link sanitizeStorageKey}), and never emit an empty string or a
  * `.`/`..` segment (which the container provisioning guard rejects). This is
  * the segment the collision resolver disambiguates.
+ *
+ * Not exported: {@link assignWorkspaceNames} is the only caller and the only
+ * surface worth pinning, so its tests cover this too.
  */
-export function toWorkspaceSegment(displayName: string): string {
+function toWorkspaceSegment(displayName: string): string {
   const seg = sanitizeStorageKey(sanitizeFilename(displayName));
   if (seg === "" || seg === "." || seg === "..") return "file";
   return seg;

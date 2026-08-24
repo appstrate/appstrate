@@ -388,7 +388,7 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
         resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name),
       );
       for (const name of defaultTools) {
-        if (!catalog.has(canonicalizeApiToolName(manifest, name))) {
+        if (!catalog.has(name)) {
           ctx.addIssue({
             code: "custom",
             message: `default_tools contains "${name}" which is not a tool this integration exposes`,
@@ -636,14 +636,10 @@ export function resolveIntegrationToolCatalog(
       : [{ name: config.toolName }],
   );
   const syntheticApiNames = new Set(syntheticApiEntries.map((entry) => entry.name));
-  for (const config of apiCallConfigs) {
-    if (config.legacyToolName) syntheticApiNames.add(config.legacyToolName);
-    if (config.legacyUploadToolName) syntheticApiNames.add(config.legacyUploadToolName);
-  }
-  // Synthetic capability names (including persisted long-key aliases) are
-  // reserved only when the integration opts into that exact capability. Give
-  // the trusted surface canonical precedence over a same-named native MCP tool
-  // instead of advertising an ambiguous duplicate or an unselectable `_2`.
+  // Synthetic capability names are reserved only when the integration opts
+  // into that exact capability. Give the trusted surface canonical precedence
+  // over a same-named native MCP tool instead of advertising an ambiguous
+  // duplicate or an unselectable `_2`.
   base = [
     ...base.filter(
       (entry) =>
@@ -664,14 +660,8 @@ export function resolveIntegrationToolCatalog(
   // but never leave an orphan upload in the catalog when its dependency is
   // hidden.
   for (const config of apiCallConfigs) {
-    const callHidden =
-      hidden.has(config.toolName) ||
-      (config.legacyToolName !== undefined && hidden.has(config.legacyToolName));
-    const uploadHidden =
-      config.uploadToolName !== undefined &&
-      (hidden.has(config.uploadToolName) ||
-        (config.legacyUploadToolName !== undefined && hidden.has(config.legacyUploadToolName)));
-    if (callHidden) hidden.add(config.toolName);
+    const callHidden = hidden.has(config.toolName);
+    const uploadHidden = config.uploadToolName !== undefined && hidden.has(config.uploadToolName);
     if (config.uploadToolName && (callHidden || uploadHidden)) {
       hidden.add(config.uploadToolName);
     }
@@ -707,12 +697,6 @@ export interface ApiCallConfig {
    * `api_call__{authToken}` when it opts in several.
    */
   toolName: string;
-  /**
-   * Pre-bounding `api_call__{authKey}` name accepted for manifests/selections
-   * persisted before long auth keys gained a transport-safe canonical token.
-   * Present only when it differs from {@link ApiCallConfig.toolName}.
-   */
-  legacyToolName?: string;
   /** Upload-protocol identifiers (open set; reserved values in RESERVED_INTEGRATION_UPLOAD_PROTOCOLS). */
   uploadProtocols: string[];
   /**
@@ -722,8 +706,6 @@ export interface ApiCallConfig {
    * the runtime won't serve.
    */
   uploadToolName?: string;
-  /** Legacy upload alias corresponding to {@link ApiCallConfig.legacyToolName}. */
-  legacyUploadToolName?: string;
 }
 
 /** Read `_meta["dev.appstrate/api"].auths` as a raw record (or undefined). */
@@ -771,37 +753,15 @@ export function getApiCallConfigs(manifest: IntegrationManifest): ApiCallConfig[
     const uploadProtocols = Array.isArray(raw)
       ? raw.filter((v): v is string => typeof v === "string" && v.length > 0)
       : [];
-    const legacyToolName = single ? API_CALL_TOOL_NAME : `${API_CALL_TOOL_NAME}__${authKey}`;
     const toolName = apiCallToolNameForAuth(authKey, !single);
     const uploadToolName = uploadProtocols.length > 0 ? apiUploadToolNameFor(toolName) : undefined;
-    const legacyUploadToolName =
-      uploadProtocols.length > 0 ? apiUploadToolNameFor(legacyToolName) : undefined;
     return {
       authKey,
       toolName,
-      ...(legacyToolName !== toolName ? { legacyToolName } : {}),
       uploadProtocols,
       ...(uploadToolName ? { uploadToolName } : {}),
-      ...(legacyUploadToolName && legacyUploadToolName !== uploadToolName
-        ? { legacyUploadToolName }
-        : {}),
     };
   });
-}
-
-/**
- * Canonicalise a persisted synthetic API tool name without touching native
- * tool names. Long multi-auth names used to embed the full auth key; accept
- * those aliases indefinitely, but emit only the bounded canonical form.
- */
-export function canonicalizeApiToolName(manifest: IntegrationManifest, name: string): string {
-  for (const config of getApiCallConfigs(manifest)) {
-    if (name === config.legacyToolName) return config.toolName;
-    if (name === config.legacyUploadToolName && config.uploadToolName) {
-      return config.uploadToolName;
-    }
-  }
-  return name;
 }
 
 /**
@@ -1065,7 +1025,7 @@ export function validateAgentIntegrationScopes(
     if (catalog.length > 0) {
       const allowed = new Set(catalog.map((e) => e.name));
       for (const tool of selection.tools) {
-        if (allowed.has(canonicalizeApiToolName(integrationManifest, tool))) continue;
+        if (allowed.has(tool)) continue;
         errors.push({
           field: `integrations_configuration.${selection.id}.tools`,
           code: "unknown_tool",

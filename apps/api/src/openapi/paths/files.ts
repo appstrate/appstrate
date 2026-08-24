@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
-import { legacyFilesPath } from "../../lib/legacy-file-paths.ts";
 
 // Shared File object schema (mirrors FileDto in services/files.ts).
 // Field casing follows CASING_CONVENTIONS.md carve-out 4b: `applicationId`,
@@ -31,10 +30,10 @@ const fileSchema = {
   ],
   properties: {
     object: { type: "string", enum: ["file"] },
-    id: { type: "string", description: "Opaque file id (`doc_…`)." },
+    id: { type: "string", description: "Opaque file id (`file_…`)." },
     uri: {
       type: "string",
-      description: "Stable `appfile://doc_…` reference — pass in a run's file input field.",
+      description: "Stable `appfile://file_…` reference — pass in a run's file input field.",
     },
     purpose: { type: "string", enum: ["user_upload", "agent_output"] },
     applicationId: { type: "string" },
@@ -165,7 +164,7 @@ const pipelineResponses = {
   "404": { $ref: "#/components/responses/NotFound" },
 } as const;
 
-const canonicalFilesPaths = {
+export const filesPaths = {
   "/api/files": {
     get: {
       operationId: "listFiles",
@@ -417,56 +416,3 @@ const canonicalFilesPaths = {
     },
   },
 } as const;
-
-/**
- * The pre-#1177 `/api/documents…` spelling of every path above, published as a
- * DEPRECATED alias of the same operation.
- *
- * Derived rather than hand-copied: the aliases cannot drift from the canonical
- * paths, and adding an operation above adds its alias for free. The rename
- * itself comes from `lib/legacy-file-paths.ts` — the one place the segment pair
- * is spelled, shared with the rate limiter, which must collapse the alias back
- * onto the canonical pattern so the two spellings share one bucket.
- *
- * Each alias gets `deprecated: true`, a `Deprecated` operationId suffix
- * (OpenAPI requires operationIds to be unique, and a generated client would
- * otherwise collide), and a description line naming the replacement.
- *
- * They are documented rather than merely tolerated because they are REGISTERED
- * — `routes/files.ts` binds both spellings to one handler, and
- * `scripts/verify-openapi.ts` §5 fails on any registered endpoint the spec does
- * not describe. A spec that hides half of what the server answers is the drift
- * that gate exists to catch.
- */
-function deprecateOperations(
-  operations: Record<string, unknown>,
-  canonicalPath: string,
-): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [method, op] of Object.entries(operations)) {
-    const operation = op as { operationId: string; summary?: string; description?: string };
-    out[method] = {
-      ...operation,
-      operationId: `${operation.operationId}Deprecated`,
-      deprecated: true,
-      summary: `${operation.summary ?? operation.operationId} (deprecated)`,
-      description:
-        `DEPRECATED — use \`${canonicalPath}\`. This path is the pre-#1177 spelling of the ` +
-        `same operation, served by the same handler with the same authorization, and is kept ` +
-        `for callers pinned to it.\n\n${operation.description ?? ""}`,
-    };
-  }
-  return out;
-}
-
-const deprecatedFilesPaths = Object.fromEntries(
-  Object.entries(canonicalFilesPaths).map(([path, operations]) => [
-    legacyFilesPath(path),
-    deprecateOperations(operations as Record<string, unknown>, path),
-  ]),
-);
-
-export const filesPaths = {
-  ...canonicalFilesPaths,
-  ...deprecatedFilesPaths,
-};

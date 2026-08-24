@@ -24,7 +24,6 @@ import {
 import { logger } from "../../../src/lib/logger.ts";
 import { _resetRunMetricBroadcasterForTests } from "../../../src/services/run-metric-broadcaster.ts";
 import type { RunEvent } from "@appstrate/afps-runtime/types";
-import { LEGACY_RUNTIME_TOOL_EVENT_TYPES } from "@appstrate/core/runtime-tool-defs";
 import type { ModelCost } from "@appstrate/core/module";
 import { db } from "@appstrate/db/client";
 import { runLogs, llmUsage, runs } from "@appstrate/db/schema";
@@ -99,32 +98,51 @@ describe("persistRunEvent", () => {
     expect(await loadLogs()).toHaveLength(0);
   });
 
-  // The published-file event has more than one accepted spelling: the runtime
-  // image and the platform deploy independently, so a container built before
-  // #1177 still emits `document.published` / `document_id`. The set of accepted
-  // spellings is core's `LEGACY_RUNTIME_TOOL_EVENT_TYPES`, so this test is
-  // driven BY that table — a spelling core forwards but the sink does not
-  // ingest is a file stored with no run_log to show for it, and nothing
-  // anywhere saying why. Adding an entry to the table without touching the
-  // sink must keep working; if it ever does not, this fails.
-  it("ingests every published-file spelling core still forwards", async () => {
-    const spellings = ["file.published", ...LEGACY_RUNTIME_TOOL_EVENT_TYPES];
-    // Pins today's table so the loop cannot silently degrade to one case.
-    expect(spellings).toContain("document.published");
-
-    for (const type of spellings) {
-      const id = `doc_${type.replace(/\W/g, "_")}`;
-      // A pre-rename image emits the retired TYPE with the retired payload KEY.
-      const payload = type.startsWith("document.") ? { document_id: id } : { file_id: id };
-      await persist(event(type, { ...payload, name: "a.md", mime: "text/markdown", size: 3 }));
-    }
+  // `file.published` / `file_id` is the ONE published-file spelling. The
+  // pre-#1177 `document.published` / `document_id` twin is gone from the sink.
+  //
+  // The "producer and acceptor are the same build, so there is no version
+  // boundary" argument does NOT cover this drop, and it is worth writing down
+  // because it reads as if it does. That argument belongs to the CONTAINER-side
+  // acceptor `reEmitRuntimeToolEvents`, which core bundles into the runtime
+  // image alongside the producer `filePublishedEvent`. `persistRunEvent` is the
+  // PLATFORM-side sink — a separate artifact, reached over HTTP by whatever
+  // image the operator happens to have launched — so a version boundary very
+  // much exists across it.
+  //
+  // What makes the drop safe across that boundary is the image-tag rule plus
+  // the event's own precondition. `findRuntimeImageTagMismatch`, enforced by
+  // the env schema at boot, refuses to start a platform whose `APP_VERSION`
+  // disagrees with either runtime image tag. Where that rule is blind — its own
+  // carve-outs (see `@appstrate/core/image-ref`), and containers already
+  // running when the platform restarted, which a boot check cannot see at all —
+  // a pre-#1177 container still cannot reach here with the retired name: it
+  // emits `document.published` only after a SUCCESSFUL
+  // `POST /api/runs/:id/documents`, and that route 404s now. The dispatcher's
+  // `default:` drop is the backstop for a forged event, not the argument for
+  // removing the case.
+  it("ingests file.published and drops the retired document.published", async () => {
+    await persist(
+      event("file.published", {
+        file_id: "file_canonical",
+        name: "a.md",
+        mime: "text/markdown",
+        size: 3,
+      }),
+    );
+    await persist(
+      event("document.published", {
+        document_id: "file_retired",
+        name: "b.md",
+        mime: "text/markdown",
+        size: 3,
+      }),
+    );
 
     const fileLogs = (await loadLogs()).filter((l) => l.event === "file");
-    expect(fileLogs).toHaveLength(spellings.length);
-    expect(fileLogs.map((l) => l.type)).toEqual(spellings.map(() => "result"));
-    expect(fileLogs.map((l) => (l.data as { file_id: string }).file_id)).toEqual(
-      spellings.map((type) => `doc_${type.replace(/\W/g, "_")}`),
-    );
+    expect(fileLogs).toHaveLength(1);
+    expect(fileLogs[0]!.type).toBe("result");
+    expect((fileLogs[0]!.data as { file_id: string }).file_id).toBe("file_canonical");
   });
 
   it("maps log.written into run_logs with the original level + message", async () => {

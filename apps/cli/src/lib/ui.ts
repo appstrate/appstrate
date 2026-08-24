@@ -12,6 +12,19 @@ import { DeviceFlowError } from "./device-flow.ts";
 import { ApiError, AuthError } from "./api.ts";
 import { InsecureInstanceError } from "./instance-url.ts";
 
+/** What every prompt in this CLI says when the user Ctrl-Cs out of it. */
+const CANCELLED = "Cancelled.";
+
+/**
+ * Exit code for a user-declined action. `130` is the shell's `128 + SIGINT`
+ * convention, which `lib/shutdown.ts` and the lifecycle commands already use —
+ * one value here means `if appstrate …; then` wrappers see the same code
+ * whichever layer the cancel came from. Exported for the two commands that
+ * decline on an explicit "no" rather than on Ctrl-C (`uninstall --purge`,
+ * the installer's tier/backend picks).
+ */
+export const EXIT_CANCELLED = 130;
+
 /**
  * Adapt a `CommandIO` into the stream clack renders to.
  *
@@ -54,12 +67,66 @@ export function outro(message: string, io: CommandIO = DEFAULT_IO): void {
 }
 
 /**
+ * Framed multi-line block (`clack.note`) — the CLI's report renderer:
+ * `doctor`'s installation table, `runner`'s preflight / diagnostics /
+ * post-install config, the installer's summaries.
+ *
+ * Same seam as `intro` / `outro`: the frame lands in the caller's sink when
+ * one is injected, and on the real stdout otherwise.
+ */
+export function note(message: string, title?: string, io: CommandIO = DEFAULT_IO): void {
+  clack.note(message, title, { output: clackOutput(io) });
+}
+
+/**
+ * Single-line advisory lines (`clack.log.info` / `clack.log.warn`).
+ *
+ * Distinct from `note`: no frame, one line, and `logWarn` carries clack's
+ * warning glyph. Used for in-flight remarks the user should notice but that
+ * do not end the command (a missing `.env`, a preserved token, a skipped
+ * upgrade step).
+ */
+export function logInfo(message: string, io: CommandIO = DEFAULT_IO): void {
+  clack.log.info(message, { output: clackOutput(io) });
+}
+
+export function logWarn(message: string, io: CommandIO = DEFAULT_IO): void {
+  clack.log.warn(message, { output: clackOutput(io) });
+}
+
+/**
+ * The terminal-error banner WITHOUT the exit.
+ *
+ * `exitWithError` is what almost every failure wants: render, then stop. The
+ * exception is a command that *reports* a failure rather than aborting on one
+ * — `appstrate runner doctor` prints its diagnostics, banners the verdict and
+ * sets `process.exitCode`, so the whole report stays on screen and a wrapper
+ * script can still branch on the code.
+ *
+ * Routed through `io.cancel` (production: `clack.cancel`) for the same reason
+ * `exitWithError` is: one renderer, one channel, and a test sink sees the
+ * message as plain text.
+ */
+export function cancel(message: string, io: CommandIO = DEFAULT_IO): void {
+  io.cancel(message);
+}
+
+/**
  * Defensive fail-fast for prompts with no matching non-interactive
  * flag (Bun install confirm, "Start dev server?", upgrade confirm, the
  * login instance URL askText, etc.). Without this, `@clack/prompts`
  * reads a closed/missing stdin and either hangs or SIGKILLs with no
  * readable error — issue #184. Callers that do have a flag (resolveTier,
  * resolveDir) should guard earlier with a specific message naming it.
+ */
+/**
+ * The three prompt wrappers below each take a trailing `io`, like every other
+ * wrapper in this file. They did not, and the ESLint funnel message named them
+ * anyway ("Only `ui.ts` hands clack an `output`") — so a command with an
+ * injected sink still had its prompt bytes and its "Cancelled." go to the real
+ * stdout. `requireTTY` gates on stdin, not stdout, so this was reachable in
+ * production too: `appstrate login > login.log` from a terminal wrote clack's
+ * cursor escapes into the file.
  */
 function requireTTY(message: string): void {
   if (!process.stdin.isTTY) {
@@ -71,22 +138,28 @@ function requireTTY(message: string): void {
   }
 }
 
-export async function askText(message: string, initialValue?: string): Promise<string> {
+export async function askText(
+  message: string,
+  initialValue?: string,
+  io: CommandIO = DEFAULT_IO,
+): Promise<string> {
   requireTTY(message);
-  const value = await clack.text({ message, initialValue });
+  const value = await clack.text({ message, initialValue, output: clackOutput(io) });
   if (clack.isCancel(value)) {
-    clack.cancel("Cancelled.");
-    process.exit(130);
+    exitWithError(CANCELLED, io, EXIT_CANCELLED);
   }
   return value;
 }
 
-export async function confirm(message: string, initialValue = true): Promise<boolean> {
+export async function confirm(
+  message: string,
+  initialValue = true,
+  io: CommandIO = DEFAULT_IO,
+): Promise<boolean> {
   requireTTY(message);
-  const value = await clack.confirm({ message, initialValue });
+  const value = await clack.confirm({ message, initialValue, output: clackOutput(io) });
   if (clack.isCancel(value)) {
-    clack.cancel("Cancelled.");
-    process.exit(130);
+    exitWithError(CANCELLED, io, EXIT_CANCELLED);
   }
   return value;
 }
@@ -115,18 +188,72 @@ export async function select<T>(
   message: string,
   options: SelectOption<T>[],
   initialValue?: T,
+  io: CommandIO = DEFAULT_IO,
 ): Promise<T> {
   requireTTY(message);
   const value = await clack.select<T>({
     message,
     options: options as unknown as Parameters<typeof clack.select<T>>[0]["options"],
     initialValue,
+    output: clackOutput(io),
   });
   if (clack.isCancel(value)) {
-    clack.cancel("Cancelled.");
-    process.exit(130);
+    exitWithError(CANCELLED, io, EXIT_CANCELLED);
   }
   return value as T;
+}
+
+/**
+ * The subset of clack's `SpinnerResult` this CLI drives. Kept local (not
+ * exported) so `verify:dead-code` has no unread public type to flag; the two
+ * factories below are the only producers and `ReturnType<typeof spinner>`
+ * names it for any caller that needs to.
+ */
+interface Spinner {
+  start(msg: string): void;
+  message(msg: string): void;
+  stop(msg?: string): void;
+}
+
+/**
+ * A spinner is a *repaint*, and a repaint needs a cursor.
+ *
+ * `@clack/prompts` does not check for one. Its frame-clear writes
+ * `cursor.up` / `cursor.to(0)` / `erase.down()` unconditionally; the only
+ * thing it gates is one extra newline, on `isCI = process.env.CI === "true"`.
+ * So `appstrate install > install.log` on a developer's box — no `CI` set,
+ * stdout a file — lands `ESC[1G ESC[J` between every frame in the log (plus a
+ * leading `ESC[1A` per extra wrapped row, and the `ESC[?25l` / `ESC[?25h`
+ * cursor hide/show around the pair).
+ * The spinner also calls clack's `block()`, which puts a real TTY's stdin in
+ * raw mode; there is nothing to put in raw mode when the command is being
+ * piped.
+ *
+ * The gate is `process.stdout.isTTY`, the same predicate the run sink already
+ * uses to decide whether ANSI colour is legible (`commands/run/sink.ts`), and
+ * it is read per call rather than at import so a test can exercise either
+ * branch in a child process. Redirected output gets the same information as
+ * plain lines: the start label when the work begins, the resolved stop label
+ * when it ends.
+ */
+function plainSpinner(io: CommandIO): Spinner {
+  let last = "";
+  return {
+    start(msg) {
+      last = msg;
+      io.stdout.write(`${msg}\n`);
+    },
+    // Progress ticks are deliberately dropped, not written: they exist to
+    // overwrite the previous frame, and a download that ticks per chunk would
+    // otherwise put thousands of near-identical lines in the log. The latest
+    // one is retained so a bare `stop()` still names what finished.
+    message(msg) {
+      last = msg;
+    },
+    stop(msg) {
+      io.stdout.write(`${msg ?? last}\n`);
+    },
+  };
 }
 
 /**
@@ -138,11 +265,8 @@ export async function select<T>(
  * self-update download starts on the first byte-tick), and stop it in a
  * `finally`.
  */
-export function spinner(io: CommandIO = DEFAULT_IO): {
-  start(msg: string): void;
-  message(msg: string): void;
-  stop(msg?: string): void;
-} {
+export function spinner(io: CommandIO = DEFAULT_IO): Spinner {
+  if (!process.stdout.isTTY) return plainSpinner(io);
   return clack.spinner({ output: clackOutput(io) });
 }
 
@@ -163,6 +287,10 @@ export function spinner(io: CommandIO = DEFAULT_IO): {
  * dev server's pid). `errorLabel` defaults to `startLabel`: the frame closes
  * on what it was doing, and the thrown error is the report. Pass it when the
  * failure has a name of its own ("Docker not found").
+ *
+ * Off a TTY there are no frames at all — `spinner()` degrades to two plain
+ * lines (start, then the resolved stop/error label), so a redirected run keeps
+ * the same narrative without the cursor escapes.
  */
 export async function withSpinner<T>(
   startLabel: string,
@@ -170,7 +298,7 @@ export async function withSpinner<T>(
   stopLabel: string | ((value: T) => string),
   opts: { io?: CommandIO; errorLabel?: string } = {},
 ): Promise<T> {
-  const spin = clack.spinner({ output: clackOutput(opts.io ?? DEFAULT_IO) });
+  const spin = spinner(opts.io ?? DEFAULT_IO);
   spin.start(startLabel);
   let value: T;
   try {

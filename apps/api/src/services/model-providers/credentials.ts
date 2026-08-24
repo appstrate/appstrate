@@ -220,25 +220,6 @@ export async function loadCredentialRow(
   };
 }
 
-/**
- * Registry-derived credential metadata: the protocol family + base URL, with
- * no interest in the secret itself. Resolvable for a credential whose blob no
- * longer decrypts, which is what lets the callers render a dead row.
- */
-type CredentialMetadata = Pick<RawCredentialLoad, "providerId" | "apiShape" | "baseUrl">;
-
-/**
- * Thin projection of {@link loadCredentialRow}, which now carries these three
- * fields itself. Kept only because `routes/models.ts` still calls it; every
- * other caller reads the projection straight off the raw load.
- */
-export async function loadCredentialMetadata(
-  id: string,
-  orgId: string,
-): Promise<CredentialMetadata | null> {
-  return loadCredentialRow(id, orgId);
-}
-
 // ─── Create ────────────────────────────────────────────────────────────────
 
 interface CreateApiKeyCredentialInput {
@@ -382,7 +363,6 @@ export async function reconnectOAuthCredential(
       credentialsEncrypted: encryptCredentials(blob as unknown as Record<string, unknown>),
       expiresAt: expiresAt !== null ? new Date(expiresAt) : null,
       refreshFailureCount: 0,
-      lastRefreshFailureAt: null,
       updatedAt: new Date(),
     })
     .where(
@@ -598,7 +578,7 @@ export async function updateOAuthCredentialTokens(
     // working refresh proves the credential is healthy again, so the
     // escalation counter must not carry over. See
     // `recordModelCredentialRefreshFailure`.
-    { refreshFailureCount: 0, lastRefreshFailureAt: null },
+    { refreshFailureCount: 0 },
   );
 }
 
@@ -643,7 +623,6 @@ export async function recordModelCredentialRefreshFailure(
     .update(modelProviderCredentials)
     .set({
       refreshFailureCount: sql`${modelProviderCredentials.refreshFailureCount} + 1`,
-      lastRefreshFailureAt: sql`now()`,
       updatedAt: sql`now()`,
     })
     .where(

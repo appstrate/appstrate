@@ -46,6 +46,28 @@ describe("isValidDependencyOverride", () => {
   it("treats an empty/whitespace value as the semver `*` wildcard (node-semver semantics)", () => {
     // `semver.validRange("")` → "*", so an empty override is a valid (if
     // surprising) wildcard range, not a malformed value.
+    //
+    // This looks like the empty-string hole that `connection_overrides` had
+    // (an empty id there was FALSY at the connection resolver's `resolveOne`,
+    // so the pin was skipped in silence — closed with `.min(1)` on all four
+    // launch surfaces). It is not the same bug, and the difference is one
+    // operator. Traced end to end:
+    //
+    //   1. `RunPackageCatalog.resolve` applies the override with
+    //      `override ?? versionSpec` — NULLISH coalescing, not a truthy check,
+    //      so `""` really does replace the manifest pin instead of falling
+    //      back to it.
+    //   2. `pickVersion` → `resolveVersionString("")` reaches its step-3
+    //      range branch, since `semver.validRange("")` is the truthy `"*"`.
+    //   3. `semver.maxSatisfying(versions, "")` returns the highest
+    //      non-yanked published version — byte-identical to passing `"*"`,
+    //      which this file already accepts as valid above.
+    //
+    // So `""` is MEANINGFUL ("any published version"), never a silent skip,
+    // and `.min(1)` here would remove a working selector rather than close a
+    // hole. Leave the predicate alone.
     expect(isValidDependencyOverride("")).toBe(true);
+    // The name promises whitespace too, and `validRange(" ")` is likewise "*".
+    expect(isValidDependencyOverride(" ")).toBe(true);
   });
 });

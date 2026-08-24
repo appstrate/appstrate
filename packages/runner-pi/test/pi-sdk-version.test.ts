@@ -14,7 +14,18 @@ import { expect, it } from "bun:test";
 import { PI_SDK_VERSION } from "../src/provider-map.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "../../..");
-const SKIP = new Set(["node_modules", ".git", ".turbo", ".worktrees", "dist", "coverage"]);
+// `.claude` holds this repo's git worktrees (`.claude/worktrees/`, gitignored):
+// walking into it reads OTHER branches' checkouts, so a manifest that is not on
+// this branch could fail this test — or, worse, agree by luck until it does not.
+const SKIP = new Set([
+  "node_modules",
+  ".git",
+  ".turbo",
+  ".worktrees",
+  ".claude",
+  "dist",
+  "coverage",
+]);
 const PIN = "@earendil-works/pi-ai";
 const BLOCKS = ["dependencies", "devDependencies", "peerDependencies"] as const;
 

@@ -4,7 +4,7 @@
  * Regression guard for a load-bearing library contract: the AS must honour a
  * per-org MCP resource audience added to `validAudiences` AT RUNTIME.
  *
- * The org-aware allowlist (`mcp/audiences.ts`) mutates the array passed by
+ * The org-aware allowlist (`lib/audiences.ts`) mutates the array passed by
  * reference into the oauth-provider + oidc-guards plugins. This proves both read
  * it LIVE on `/oauth2/token`: a per-org resource is rejected before it is added
  * and accepted (past the resource gate) right after — no restart, no re-wire.
@@ -32,7 +32,7 @@ import {
   orgIdFromMcpAudience,
   addMcpOrgAudience,
   _resetMcpOrgAudiencesForTesting,
-} from "../../../../mcp/audiences.ts";
+} from "../../../../../lib/audiences.ts";
 import oidcModule from "../../../index.ts";
 
 const app = getTestApp({ modules: [oidcModule] });

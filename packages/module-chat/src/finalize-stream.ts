@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Disconnect-proof persistence + live resume for one chat turn — shared by both
- * engines and extracted here so the guarantees are unit-testable.
+ * Disconnect-proof persistence + live resume for one chat turn, extracted from
+ * the route so the guarantees are unit-testable.
  *
  * The engine's UI-message stream (a Response body) is teed:
  *  - one branch feeds the resumable producer via `context.run(streamId)` AND the
@@ -31,7 +31,7 @@
 import type { UIMessage } from "ai";
 import type { ResumableStreamContext } from "assistant-stream/resumable";
 import { logger } from "./logger.ts";
-import { extractAssistantMessages } from "./stream-parse.ts";
+import { extractAssistantMessage } from "./stream-parse.ts";
 import { trackTurn } from "./inflight.ts";
 import { getResumableContext } from "./resumable.ts";
 
@@ -41,15 +41,14 @@ interface FinalizeChatStreamOptions {
   /** Resumable producer key — the id stored as `chat_sessions.active_stream_id`. */
   streamId: string;
   /**
-   * Persist ONE assistant message, chained onto `parentId`, and return the id it
-   * was stored under. Called once per assistant message the turn emits, in order,
-   * with each call's `parentId` set to the previous call's return value (the first
-   * chains onto {@link parentId}). Omit when there is no session to persist into
-   * (the stream is still drained so the source completes). Runs to completion
+   * Persist the turn's assistant message, chained onto {@link parentId}. Called
+   * at most once — a turn carries exactly one assistant message (see
+   * `stream-parse.ts`). Omit when there is no session to persist into (the
+   * stream is still drained so the source completes). Runs to completion
    * independently of the client connection.
    */
-  onAssistant?: (message: UIMessage, parentId: string | null) => Promise<string> | string;
-  /** Parent for the first assistant message — the user turn's message id. */
+  onAssistant?: (message: UIMessage, parentId: string | null) => unknown;
+  /** Parent for the assistant message — the user turn's message id. */
   parentId?: string | null;
   /** Best-effort teardown after persistence settles (close MCP, unregister stop, clear active stream). */
   onSettled?: () => void;
@@ -78,27 +77,19 @@ export async function finalizeChatStream(opts: FinalizeChatStreamOptions): Promi
         return;
       }
       // Consume the stream ONCE, up front: parse before persisting so a persist
-      // failure can be retried without re-reading the (now drained) branch. A turn
-      // may emit several assistant messages — persist each in order, chaining each
-      // onto the previous (the first onto the user turn's `parentId`).
-      const assistants = (await extractAssistantMessages(forPersist)).filter(
-        (m) => m.role === "assistant",
-      );
-      const persistAll = async () => {
-        let parent = parentId ?? null;
-        for (const assistant of assistants) {
-          parent = await onAssistant(assistant, parent);
-        }
-      };
+      // failure can be retried without re-reading the (now drained) branch.
+      const assistant = await extractAssistantMessage(forPersist);
+      if (!assistant) return;
+      const persist = () => onAssistant(assistant, parentId ?? null);
       try {
-        await persistAll();
+        await persist();
       } catch (firstErr) {
         // Retry once after a short delay: a transient DB hiccup should not silently
-        // lose the assistant turn. Upserts are keyed by (session, message id), so
-        // re-running any already-persisted messages is idempotent.
+        // lose the assistant turn. The upsert is keyed by (session, message id), so
+        // re-running an already-persisted message is idempotent.
         await new Promise((r) => setTimeout(r, 250));
         try {
-          await persistAll();
+          await persist();
         } catch {
           throw firstErr;
         }

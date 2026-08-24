@@ -39,7 +39,6 @@ import { resolveVersionFromCatalog } from "@appstrate/core/semver";
 import type { ManifestIntegrationEntry } from "@appstrate/core/dependencies";
 import { planCreateVersionOutcome } from "@appstrate/core/version-policy";
 import {
-  canonicalizeApiToolName,
   resolveEffectiveToolSelection,
   resolveIntegrationToolCatalog,
   validateAgentIntegrationScopes,
@@ -230,7 +229,7 @@ function selectsNoCallableTool(
   // selection provably registers nothing.
   if (!surfaceIsKnown) return false;
   const callable = new Set(catalog.map((e) => e.name));
-  return !effective.some((t) => callable.has(canonicalizeApiToolName(integrationManifest, t)));
+  return !effective.some((t) => callable.has(t));
 }
 
 /**

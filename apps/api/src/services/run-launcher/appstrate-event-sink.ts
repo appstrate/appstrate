@@ -15,8 +15,7 @@
 
 import type { RunEvent } from "@appstrate/afps-runtime/types";
 import { isPlainObject } from "@appstrate/core/safe-json";
-import { fileUri } from "@appstrate/core/file-uri";
-import { LEGACY_RUNTIME_TOOL_EVENT_TYPES } from "@appstrate/core/runtime-tool-defs";
+import { fileUri, PUBLISHED_FILE_LOG_EVENT } from "@appstrate/core/file-uri";
 import type { Db } from "@appstrate/db/client";
 import { modelCostSchema, type ModelCost } from "@appstrate/core/module";
 import { computeTokenCost, type TokenPricingStatus } from "@appstrate/afps-runtime/runner";
@@ -31,23 +30,6 @@ import type { TokenUsage } from "./types.ts";
 import { scheduleRunMetricBroadcast } from "../run-metric-broadcaster.ts";
 
 const FILE_PUBLISHED_EVENT_TYPE = "file.published";
-
-/** Forward-map a retired event type: the `document.` subject became `file.`. */
-function canonicalRuntimeToolEventType(type: string): string {
-  return type.startsWith("document.") ? `file.${type.slice("document.".length)}` : type;
-}
-
-/**
- * Every spelling this sink ingests as a published run file. Derived from
- * `LEGACY_RUNTIME_TOOL_EVENT_TYPES` rather than hand-listed, so an alias added
- * there cannot fall through to `default` here.
- */
-const FILE_PUBLISHED_EVENT_TYPES: ReadonlySet<string> = new Set<string>([
-  FILE_PUBLISHED_EVENT_TYPE,
-  ...LEGACY_RUNTIME_TOOL_EVENT_TYPES.filter(
-    (type) => canonicalRuntimeToolEventType(type) === FILE_PUBLISHED_EVENT_TYPE,
-  ),
-]);
 
 /**
  * Dispatch one {@link RunEvent} through the platform write-through table.
@@ -66,13 +48,7 @@ export async function persistRunEvent(
     modelCost?: ModelCost | null;
   } = {},
 ): Promise<string | null> {
-  // Normalise every accepted alias onto its canonical type before dispatch, so
-  // the switch below carries one `case` per event.
-  const eventType = FILE_PUBLISHED_EVENT_TYPES.has(event.type)
-    ? FILE_PUBLISHED_EVENT_TYPE
-    : event.type;
-
-  switch (eventType) {
+  switch (event.type) {
     case "output.emitted": {
       await appendRunLog(
         scope,
@@ -104,18 +80,17 @@ export async function persistRunEvent(
     case FILE_PUBLISHED_EVENT_TYPE: {
       // The `files` row already exists (POST /api/runs/:id/files); this event
       // only persists a run_log so the file streams over the run_log SSE. The
-      // `"file"` tag written below must stay the first member of
-      // `PUBLISHED_FILE_LOG_EVENTS` (`@appstrate/core/file-uri`) — every reader
-      // filters run_log lines on that list, and retired values must stay in it
-      // for historical rows. `document_id` is the pre-rename payload key.
-      const rawFileId = event.file_id ?? event.document_id;
-      const fileId = typeof rawFileId === "string" ? rawFileId : null;
+      // tag comes from `PUBLISHED_FILE_LOG_EVENT` (`@appstrate/core/file-uri`),
+      // which is also what the readers' membership set is built from — writing
+      // the literal here is what let a "shared" list have an unshared writer.
+      // The set carries no retired spelling: none survives the rename.
+      const fileId = typeof event.file_id === "string" ? event.file_id : null;
       if (fileId) {
         await appendRunLog(
           scope,
           runId,
           "result",
-          "file",
+          PUBLISHED_FILE_LOG_EVENT,
           null,
           {
             file_id: fileId,
@@ -351,10 +326,19 @@ function resolveRunnerCost(
 const REPORTED_COST_DIVERGENCE_USD = 1e-6;
 
 /**
- * CUTOVER INSTRUMENT — delete once the recompute has been observed clean in
- * production, together with the container's `cost` on the event envelope. The
- * server number stays authoritative regardless; parity is pinned by
- * `apps/api/test/unit/runner-cost-parity.test.ts`.
+ * Divergence probe on the container's advisory `cost`. The server number is
+ * authoritative either way — this only reports that the two formulas disagreed.
+ *
+ * It retires with the `cost` field on the `appstrate.metric` envelope, in the
+ * same commit: the probe is the evidence for dropping that field, and dropping
+ * the field is what makes the probe unreachable. Concrete signal to do both: a
+ * deployment window over which `runner-reported cost diverges` appears zero
+ * times in the platform logs. Until the field is gone the probe stays, because
+ * a container is otherwise free to report a number nothing looks at.
+ *
+ * `apps/api/test/unit/runner-cost-parity.test.ts` pins the two formulas against
+ * each other on constructed input; this catches the inputs that test does not
+ * model.
  *
  * Fires at most once per run, on the terminal write: the counters are
  * cumulative, so that snapshot carries the run's full gap.

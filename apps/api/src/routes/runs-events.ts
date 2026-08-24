@@ -17,7 +17,6 @@
  */
 
 import { Hono } from "hono";
-import type { Handler } from "hono";
 import { z } from "zod";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
@@ -56,7 +55,7 @@ import type { AppEnv } from "../types/index.ts";
  * `data` carries the RunEvent-specific payload; we validate lightly here
  * and let the handler narrow further before dispatch.
  */
-const CloudEventEnvelopeSchema = z
+export const CloudEventEnvelopeSchema = z
   .object({
     specversion: z.literal("1.0"),
     type: z.string().min(1),
@@ -65,18 +64,6 @@ const CloudEventEnvelopeSchema = z
     time: z.iso.datetime(),
     datacontenttype: z.literal("application/json"),
     data: z.record(z.string(), z.unknown()),
-    // OPTIONAL CloudEvents attribute (§3.1). The runtime NO LONGER emits it:
-    // the URIs it carried (`schemas.afps.dev/v0/events/*`) were never served,
-    // and they asserted a payload shape AFPS deliberately leaves open — the
-    // specification reserves event namespaces, not shapes. See
-    // `@appstrate/afps-runtime`'s `events/cloudevents.ts` header.
-    //
-    // Accepted anyway, and this is load-bearing: runtime images built before
-    // the removal keep stamping it, and this schema is `.strict()`, so
-    // dropping the field would 400 every canonical event coming from an older
-    // image. Ingestion never read it (`envelopeToRunEvent` consumes
-    // `data`/`type`/`time` only), so accepting and ignoring costs nothing.
-    dataschema: z.string().min(1).optional(),
     sequence: z.number().int().nonnegative(),
   })
   .strict();
@@ -200,10 +187,13 @@ export const RunResultSchema = z
     //   - size overruns are CLAMPED by `clampArtifacts` before validation (an
     //     over-long `failed` list, over-long name/code strings), mirroring the
     //     producer bounds in runtime-pi/publish.ts;
-    //   - unknown keys are STRIPPED rather than rejected: deployments are not
-    //     atomic, so a runtime image newer than the platform can legitimately
-    //     add a field to a `failed` entry, and an extra cosmetic key must not
-    //     cost the run its finalize;
+    //   - unknown keys are STRIPPED rather than rejected. The trio tag rule
+    //     (`findRuntimeImageTagMismatch`) refuses a runtime image newer than
+    //     the platform at boot, but not in the three places it is blind: a
+    //     floating tag rebuilt on one side, a digest-pinned ref, and a platform
+    //     with no build identity (a dev box, a preview). There, a newer image
+    //     can legitimately add a field to a `failed` entry, and an extra
+    //     cosmetic key must not cost the run its finalize;
     //   - anything still invalid degrades to `undefined` via `.catch`, leaving
     //     the column null while the run finalizes normally.
     // Absence is fine too: older containers do not send it.
@@ -385,7 +375,7 @@ export function createRunsEventsRouter() {
   // enumerates this, then fetches each file by name. A 404 means the run
   // carries no input files (the common case), which the runtime treats as
   // an empty file set — not a fault.
-  const filesManifest: Handler<AppEnv> = async (c) => {
+  router.get("/runs/:runId/files", verifyRunSignature, eventLimiter, async (c) => {
     const run = c.get("run")!;
     const manifest = await downloadRunFilesManifest(run.id);
     if (!manifest) throw notFound(`no input files for run ${run.id}`);
@@ -399,11 +389,7 @@ export function createRunsEventsRouter() {
     // safe single-segment name before this point.
     assertUniqueWorkspaceNames(manifest.files.map((d) => d.workspace_name));
     return c.json(manifest);
-  };
-  router.get("/runs/:runId/files", verifyRunSignature, eventLimiter, filesManifest);
-  // Deprecated pre-#1177 spelling — a runtime-pi image older than the platform
-  // still calls it. Same handler, same HMAC. See RUNTIME SKEW below.
-  router.get("/runs/:runId/documents", verifyRunSignature, eventLimiter, filesManifest);
+  });
 
   // POST /api/runs/:runId/files — agent-published run output (Phase 2).
   //
@@ -414,8 +400,8 @@ export function createRunsEventsRouter() {
   // payload streams straight to storage without being buffered for the hash).
   //
   // The bytes stream through a counting/hashing/cap transform into the durable
-  // file bucket (`documents`, see FILES_BUCKET — the table was renamed by
-  // #1177, the bucket was not): the per-file cap and per-run output budget cut the
+  // file bucket (`files`, see FILES_BUCKET): the per-file cap and per-run
+  // output budget cut the
   // stream mid-flight (413, deleting any partial object), the org quota is
   // enforced transactionally (403). Idempotent for the sweep's retries: an
   // identical (run, sha256, name) upload returns the existing file (200).
@@ -423,7 +409,7 @@ export function createRunsEventsRouter() {
   // Signature before limiter — see the MIDDLEWARE ORDER note at the top of
   // this router. Here the budget being protected is the run's finalize
   // `outputs/` sweep.
-  const publishFile: Handler<AppEnv> = async (c) => {
+  router.post("/runs/:runId/files", verifyRunUploadSignature, fileLimiter, async (c) => {
     const run = c.get("run")!;
 
     // Only a live run may publish — a file arriving after finalize (or
@@ -445,33 +431,18 @@ export function createRunsEventsRouter() {
     // value outside the encoder's alphabet, an over-long one, or a malformed
     // escape is a typed 400 rather than a guess, so a mis-encoded client fails
     // loudly instead of silently storing a corrupted deliverable name.
-    //
-    // RUNTIME SKEW: `X-Document-Name` is the pre-#1177 spelling and is accepted
-    // forever. The runtime-pi image and the platform deploy independently, so a
-    // running container built before the rename still sends the old header; it
-    // holds the deliverable's only name, and rejecting it would silently turn
-    // every publish from an older image into a 400. The new name wins when both
-    // are present. `runtime-pi/publish.ts` emits only `X-File-Name`.
-    const legacyName = c.req.header("X-Document-Name");
-    const rawName = c.req.header("X-File-Name") ?? legacyName;
-    const nameHeader = c.req.header("X-File-Name") ? "X-File-Name" : "X-Document-Name";
+    const rawName = c.req.header("X-File-Name");
     if (!rawName) throw invalidRequest("X-File-Name header is required", "X-File-Name");
     const decodedName = decodeFilenameHeader(rawName);
     if (decodedName === null) {
       throw invalidRequest(
-        `${nameHeader} must be a percent-encoded (encodeURIComponent) UTF-8 filename`,
-        nameHeader,
+        "X-File-Name must be a percent-encoded (encodeURIComponent) UTF-8 filename",
+        "X-File-Name",
       );
     }
     const name = sanitizeFilename(decodedName);
     const mime = c.req.header("Content-Type");
     if (!mime) throw invalidRequest("Content-Type header is required", "Content-Type");
-    // `X-Document-Presentation` is RETIRED (issue #1177). That is its real
-    // spelling — there was never an `X-File-Presentation`: the header was
-    // retired BEFORE the `document` → `file` rename, so no image ever emitted a
-    // `file`-spelled one. A runtime-pi image older than the platform still sends
-    // `X-Document-Presentation`; the header is read by nobody and must never be
-    // a 400 — the deliverable matters, its retired presentation hint does not.
 
     const body = c.req.raw.body;
     if (!body) throw invalidRequest("request body is required");
@@ -520,26 +491,20 @@ export function createRunsEventsRouter() {
       },
       deduped ? 200 : 201,
     );
-  };
-  router.post("/runs/:runId/files", verifyRunUploadSignature, fileLimiter, publishFile);
-  // Deprecated pre-#1177 spelling — the same skew argument as the header above.
-  router.post("/runs/:runId/documents", verifyRunUploadSignature, fileLimiter, publishFile);
+  });
 
   // GET /api/runs/:runId/files/:name — a single input file, streamed
   // straight from storage so neither the platform nor the agent buffers the
   // whole payload. The agent streams the response body to `files/<name>`.
   // A 404 on a file the manifest listed is a fatal provisioning fault.
-  const fetchFile: Handler<AppEnv> = async (c) => {
+  router.get("/runs/:runId/files/:name", verifyRunSignature, eventLimiter, async (c) => {
     const run = c.get("run")!;
     const name = c.req.param("name")!;
     const stream = await downloadRunFileStream(run.id, name);
     if (!stream) throw notFound(`file ${name} not found for run ${run.id}`);
     c.header("Content-Type", "application/octet-stream");
     return c.body(stream);
-  };
-  router.get("/runs/:runId/files/:name", verifyRunSignature, eventLimiter, fetchFile);
-  // Deprecated pre-#1177 spelling — same skew argument.
-  router.get("/runs/:runId/documents/:name", verifyRunSignature, eventLimiter, fetchFile);
+  });
 
   return router;
 }

@@ -225,47 +225,58 @@ export async function getInstalledPackage(scope: AppScope, packageId: string) {
  * Single query via LEFT JOIN — no N+1.
  */
 export async function listAccessiblePackages(scope: AppScope, type: PackageType) {
-  return db
-    .select({
-      id: packages.id,
-      type: packages.type,
-      draftManifest: packages.draftManifest,
-      draftContent: packages.draftContent,
-      source: packages.source,
-      // application_packages columns (null for system packages). The agent's
-      // stored input values are NOT projected here — `getInstalledPackageSettings`
-      // is the reader for those, and it travels with the locks.
-      appModelId: applicationPackages.modelId,
-      appProxyId: applicationPackages.proxyId,
-      appVersionId: applicationPackages.versionId,
-      appEnabled: applicationPackages.enabled,
-      // `latest` dist-tag version id — non-null iff the package has a published
-      // version. Lets callers tell published agents from draft-only ones without
-      // an N+1 (a draft-only agent must be run with `version=draft`).
-      latestVersionId: packageDistTags.versionId,
-    })
-    .from(packages)
-    .leftJoin(
-      applicationPackages,
-      and(
-        eq(applicationPackages.packageId, packages.id),
-        eq(applicationPackages.applicationId, scope.applicationId),
-      ),
-    )
-    .leftJoin(
-      packageDistTags,
-      and(eq(packageDistTags.packageId, packages.id), eq(packageDistTags.tag, "latest")),
-    )
-    .where(
-      and(
-        eq(packages.type, type),
-        orgOrSystemFilter(scope.orgId),
-        notEphemeralFilter(),
-        // system packages always visible, local packages only if installed
-        or(eq(packages.source, "system"), isNotNull(applicationPackages.packageId)),
-      ),
-    )
-    .orderBy(sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`);
+  return (
+    db
+      .select({
+        id: packages.id,
+        type: packages.type,
+        draftManifest: packages.draftManifest,
+        draftContent: packages.draftContent,
+        source: packages.source,
+        // application_packages columns (null for system packages). The agent's
+        // stored input values are NOT projected here — `getInstalledPackageSettings`
+        // is the reader for those, and it travels with the locks.
+        appModelId: applicationPackages.modelId,
+        appProxyId: applicationPackages.proxyId,
+        appVersionId: applicationPackages.versionId,
+        appEnabled: applicationPackages.enabled,
+        // `latest` dist-tag version id — non-null iff the package has a published
+        // version. Lets callers tell published agents from draft-only ones without
+        // an N+1 (a draft-only agent must be run with `version=draft`).
+        latestVersionId: packageDistTags.versionId,
+      })
+      .from(packages)
+      .leftJoin(
+        applicationPackages,
+        and(
+          eq(applicationPackages.packageId, packages.id),
+          eq(applicationPackages.applicationId, scope.applicationId),
+        ),
+      )
+      .leftJoin(
+        packageDistTags,
+        and(eq(packageDistTags.packageId, packages.id), eq(packageDistTags.tag, "latest")),
+      )
+      .where(
+        and(
+          eq(packages.type, type),
+          orgOrSystemFilter(scope.orgId),
+          notEphemeralFilter(),
+          // system packages always visible, local packages only if installed
+          or(eq(packages.source, "system"), isNotNull(applicationPackages.packageId)),
+        ),
+      )
+      // System first, then by id. The tie-break is load-bearing rather than
+      // cosmetic: Postgres does not order rows within an equal sort key, so two
+      // identical calls could hand back different permutations. The chat renders
+      // this list (capped, via `listInstalledPackageHints`) into its system
+      // prompt, which pi-ai emits as ONE cache block with ONE breakpoint — a
+      // reshuffle rewrites the prompt and invalidates the cached prefix, and the
+      // conversation history behind it. It also makes the CAP itself stable:
+      // without a total order, which 15 of N packages survive the limit is
+      // undefined.
+      .orderBy(sql`CASE WHEN ${packages.source} = 'system' THEN 0 ELSE 1 END`, packages.id)
+  );
 }
 
 // ---------------------------------------------------------------------------

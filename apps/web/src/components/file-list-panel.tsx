@@ -146,7 +146,7 @@ export function FileListPanel({
       ? files.filter((file) => runFileDirection(file, runId) === filter.value)
       : files;
 
-  // Preview is URL-addressable via a `?preview=<doc_id>` param so it can be
+  // Preview is URL-addressable via a `?preview=<file_id>` param so it can be
   // deep-linked and shared, and the browser back button closes it. A deep-linked
   // file may be outside the currently loaded page, so an empty name is fine — the
   // preview modal falls back to the fetched DTO's name.

@@ -475,12 +475,16 @@ await progress("bundle loaded", { bundlePrepareMs: phaseTimings.bundlePrepareMs 
 // the root package manifest. Reused by the no-sidecar extension registration,
 // the `publish_file` gate, and the PiRunner's terminal-tool decision.
 //
-// Canonicalized here too (#1177). The platform already rewrites the retired
-// `publish_document` spelling into the bundle it builds, but the platform and
-// this image deploy independently: a NEW image running against an OLDER
-// platform receives the raw stored ids, and the gates below are exact string
-// matches. Resolving the alias in one place, at the single read, is what keeps
-// that version skew from silently unregistering the publish tool.
+// Canonicalized here too. The platform already strips ids it cannot build
+// from the bundle (`buildAgentPackage`), so this is a second line of defence
+// at the trust boundary rather than the only one — and the gates below are
+// exact string matches, so an unrecognised id reaching them silently
+// unregisters the publish tool. The version skew that would deliver one (a NEW
+// image against an OLDER platform) is refused at boot by the image-trio tag
+// rule, except where that rule is blind: a floating tag rebuilt on one side, a
+// digest-pinned ref, and a platform with no build identity. Filtering once, at
+// the single read, costs a function call and does not depend on which of those
+// is true.
 const declaredRuntimeTools: string[] = canonicalizeRuntimeToolIds(
   (bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: unknown[] } | undefined)
     ?.runtime_tools ?? [],
@@ -797,11 +801,11 @@ function buildPiRunner(): PiRunner {
 }
 
 /** Compiled fallback when the platform did not forward its effective cap. */
-const DEFAULT_DOCUMENT_MAX_FILE_BYTES = 100 * 1024 * 1024;
+const DEFAULT_FILE_MAX_BYTES = 100 * 1024 * 1024;
 
 /**
  * Client-side per-file bound for the outputs sweep — the platform's EFFECTIVE
- * `DOCUMENT_MAX_FILE_BYTES` (forwarded by the run-launcher), falling back to the
+ * `FILE_MAX_BYTES` (forwarded by the run-launcher), falling back to the
  * compiled 100 MiB default when absent/unparseable. The server is the
  * authoritative gate (it cuts an over-cap stream mid-flight); this just avoids
  * streaming a file that is certain to be rejected. Reading the forwarded value
@@ -809,12 +813,12 @@ const DEFAULT_DOCUMENT_MAX_FILE_BYTES = 100 * 1024 * 1024;
  * sees large deliverables silently skipped here.
  */
 function resolveMaxFileBytes(): number {
-  const raw = process.env.DOCUMENT_MAX_FILE_BYTES;
+  const raw = process.env.FILE_MAX_BYTES;
   if (raw !== undefined && raw !== "") {
     const parsed = Number(raw);
     if (Number.isFinite(parsed) && parsed > 0) return parsed;
   }
-  return DEFAULT_DOCUMENT_MAX_FILE_BYTES;
+  return DEFAULT_FILE_MAX_BYTES;
 }
 
 const OUTPUTS_SWEEP_MAX_FILE_BYTES = resolveMaxFileBytes();

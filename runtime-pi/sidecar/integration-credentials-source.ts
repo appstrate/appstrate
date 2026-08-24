@@ -373,7 +373,7 @@ export function createIntegrationCredentialsSource(
   };
 
   async function runRelogin(authKey: string, handler: () => Promise<boolean>): Promise<boolean> {
-    let ok = false;
+    let ok: boolean;
     try {
       ok = await handler();
     } catch (err) {

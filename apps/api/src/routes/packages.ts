@@ -211,16 +211,48 @@ export const forkSchema = z.object({
  * Both objects are non-strict, so an unknown key (a client still sending the
  * retired `source_code`, say) is silently stripped rather than rejected.
  */
-const packageJsonCreateSchema = z.object({
+export const packageJsonCreateSchema = z.object({
   manifest: z.record(z.string(), z.unknown()),
   content: z.string().optional(),
 });
 
-const packageJsonUpdateSchema = z.object({
+/**
+ * The create body of a type whose content file is MANDATORY — `agent` and
+ * `skill`, i.e. every {@link PackageRouteConfig} carrying `requireContent`.
+ *
+ * The requirement is spelled here rather than as a handler check so the
+ * published body can state it: the create schemas back the spec's request
+ * bodies through `zod-schema-registry.ts`, and a handler-only rule left
+ * `POST /api/packages/agents {"manifest": …}` documented as valid and
+ * answered with a 400. Blank-but-present content is refused by the same rule
+ * — an all-whitespace prompt is the empty prompt with extra characters — and
+ * it is a `refine` rather than `.min(1)` because "not blank" has no JSON
+ * Schema spelling, so the published body says `required` and nothing more.
+ */
+export const packageJsonCreateWithContentSchema = z.object({
+  manifest: z.record(z.string(), z.unknown()),
+  content: z.string().refine((v) => v.trim().length > 0, "Content cannot be empty"),
+});
+
+export const packageJsonUpdateSchema = z.object({
   manifest: z.record(z.string(), z.unknown()).optional(),
   content: z.string().optional(),
-  lock_version: z.number().optional(),
+  /**
+   * Optimistic-lock token. Mandatory and integral — the value is a row version,
+   * never a fraction. This used to be `z.number().optional()` with a hand-rolled
+   * `null / typeof !== "number"` check in the handler restating both rules; the
+   * schema now carries them, so the spec's `required: ["lock_version"]` and
+   * `type: "integer"` have exactly one runtime counterpart.
+   */
+  lock_version: z.number().int(),
 });
+
+/**
+ * Body of `POST /api/packages/{type}/{scope}/{name}/versions`. The body itself
+ * is optional (`requestBody.required: false`) — the SPA omits it entirely when
+ * no override is chosen — so `version` is the only member and it is optional.
+ */
+export const createVersionBodySchema = z.object({ version: z.string().min(1).optional() });
 
 /** Enrich items with creator display names (batch lookup). */
 async function enrichWithCreatorNames<T extends { created_by?: string | null }>(
@@ -466,7 +498,12 @@ interface PackageRouteConfig {
   requireMutableForVersionOps?: boolean;
   /** If true, this type uses JSON body for create (not ZIP upload parsing). */
   jsonBodyCreate?: boolean;
-  /** If true, content is required when creating via JSON body. */
+  /**
+   * If true, this type's content file is mandatory: create refuses a body
+   * without a non-blank `content` (through
+   * {@link packageJsonCreateWithContentSchema}, so the published body says so
+   * too), and update refuses a save that would leave the stored content blank.
+   */
   requireContent?: boolean;
   /** Custom GET detail handler, replaces makeGetHandler when provided. */
   getHandler?: (c: Context<AppEnv>) => Promise<Response>;
@@ -579,7 +616,15 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
     // JSON body create path: { manifest, content?, source? }
     if (rcfg.jsonBodyCreate) {
-      const body = await readJsonBody(c, packageJsonCreateSchema);
+      // The two create bodies differ only in whether `content` is mandatory,
+      // which is what `requireContent` means. Selecting the schema here — as
+      // opposed to re-checking the parsed body afterwards — is what lets the
+      // spec publish the difference: `zod-schema-registry.ts` registers
+      // whichever of the two schemas this package type's route uses.
+      const body = await readJsonBody(
+        c,
+        rcfg.requireContent ? packageJsonCreateWithContentSchema : packageJsonCreateSchema,
+      );
 
       const manifest = body.manifest;
       const content = body.content ?? "";
@@ -590,10 +635,6 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         orgId,
         "author",
       );
-
-      if (rcfg.requireContent && !content.trim()) {
-        throw invalidRequest("Content cannot be empty", "content");
-      }
 
       if (rcfg.validateContent) {
         const validation = rcfg.validateContent(content);
@@ -914,10 +955,6 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
 
     const body = await readJsonBody(c, packageJsonUpdateSchema);
 
-    if (body.lock_version == null || typeof body.lock_version !== "number") {
-      throw invalidRequest("lock_version (integer) is required for updates", "lock_version");
-    }
-
     // A PUT that omits `manifest` is a content-only edit: the stored draft is
     // carried forward untouched. That makes this handler directional per
     // request — `manifest` SUPPLIED is author input, `manifest` OMITTED is the
@@ -1233,7 +1270,7 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     // a present-but-malformed body is a 400, not a silent no-override.
     let versionOverride: string | undefined;
     if (c.req.raw.body !== null) {
-      const body = await readJsonBody(c, z.object({ version: z.string().min(1).optional() }));
+      const body = await readJsonBody(c, createVersionBodySchema);
       versionOverride = body.version;
     }
 

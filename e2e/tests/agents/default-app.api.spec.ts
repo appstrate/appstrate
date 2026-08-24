@@ -46,8 +46,8 @@ test.describe("Default app vs custom app access", () => {
     const agent1Name = `agent-cust-1-${Date.now()}`;
     const agent2Name = `agent-cust-2-${Date.now()}`;
     const agent3Name = `agent-cust-3-${Date.now()}`;
-    const agent1 = await createAgent(apiClient, scope, agent1Name);
-    const agent2 = await createAgent(apiClient, scope, agent2Name);
+    await createAgent(apiClient, scope, agent1Name);
+    await createAgent(apiClient, scope, agent2Name);
     await createAgent(apiClient, scope, agent3Name);
 
     // Create custom app and install only agent1
@@ -219,12 +219,7 @@ test.describe("Default app vs custom app access", () => {
     expect(detailB.input?.values?.mode).toBe("custom-app-value");
   });
 
-  test("Installed packages list is per-app", async ({
-    request,
-    apiClient,
-    orgContext,
-    orgOnlyClient,
-  }) => {
+  test("Installed packages list is per-app", async ({ apiClient, orgContext, orgOnlyClient }) => {
     const scope = `@${orgContext.org.orgSlug}`;
     const agentName = `agent-pkg-list-${Date.now()}`;
     await createAgent(apiClient, scope, agentName);

@@ -602,7 +602,14 @@ async function triggerRun(opts: RunRemoteOptions, deps: HttpDeps): Promise<strin
       body: detail,
       hint:
         res.status === 401 || res.status === 403
-          ? "Verify --api-key / `appstrate login` is current and has agents:run permission."
+          ? // Both scopes, because `--remote` is launch-then-poll: the trigger
+            // needs `agents:run`, and `pollRun` / `fetchLogs` below read
+            // `/api/runs/{id}` and `/api/runs/{id}/logs`, which enforce
+            // `runs:read`. A key narrowed to `agents:run` alone starts the run
+            // and then 403s on every poll — the run bills, the caller never
+            // sees the result — so naming only the first scope here sent
+            // operators to mint exactly the credential that breaks.
+            "Verify --api-key / `appstrate login` is current and has agents:run + runs:read permissions."
           : res.status === 404
             ? `Agent ${opts.scope}/${opts.name} not found on ${opts.instance}.`
             : undefined,

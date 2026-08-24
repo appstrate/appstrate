@@ -1,112 +1,78 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unified input resolution — the single place the platform decides what an
- * agent run actually receives in `input`.
+ * The platform's binding of `@appstrate/core/input-resolution`.
  *
- * An AFPS manifest declares ONE parameter schema (`input`). Whether a value is
- * asked at every launch or set once and reused is a platform concern, not a
- * manifest concern: it is expressed as stored values plus per-field locks on
- * `application_packages`.
+ * The resolution itself — the layer order, the shallow per-property overlay,
+ * the refusal of a locked field — lives in core, shared verbatim with the CLI
+ * (`appstrate run --local`) so the same agent launched the same way yields the
+ * same parameters wherever it runs. What lives HERE is the part that is the
+ * API's alone: the HTTP error a refusal produces, and the write-time guard on
+ * the lock configuration itself, which has no local-run counterpart.
  *
- * Four layers, last one wins:
+ * The API's layers, last one wins:
  *
  *   author default   (manifest `input.schema` JSON Schema `default` keyword)
  *     -> editor default   (`application_packages.input_settings.values`)
- *       -> schedule values   (`package_schedules.input`)
- *         -> run-time caller input   <- REFUSED on a locked field
+ *       -> the overlay   <- REFUSED on a locked field
  *
- * The merge is a shallow per-property overlay: a layer either supplies a
- * top-level property or it does not. There is no deep merge — a property's
- * value is owned by exactly one layer, which is what makes "which layer did
- * this come from" answerable at every call site.
+ * The top layer is the single `overlay`, and which source fills it is what
+ * each call site declares: a manual launch and the inline preflight pass the
+ * run-time caller's input (`origin: "input"`), the schedule paths pass the
+ * schedule's frozen values (`origin: "schedule input"`) because a cron fire
+ * has no caller. No path has both.
  */
 
 import { ApiError } from "../lib/errors.ts";
-import { authorDefaults, type JSONSchemaObject } from "@appstrate/core/form";
+import { asJSONSchemaObject, authorDefaults, type JSONSchemaObject } from "@appstrate/core/form";
+import { validateInput } from "./schema.ts";
+import {
+  assertFieldsUnlocked as assertFieldsUnlockedCore,
+  resolveEffectiveInput as resolveEffectiveInputCore,
+  type InputLayers,
+  type InputOverlayOrigin,
+} from "@appstrate/core/input-resolution";
 
 /**
- * The layers of one run's input, in precedence order. Every field is
- * optional: an origin that has no such layer (an inline run has no stored
- * editor defaults, a manual run has no schedule) simply omits it.
+ * The refusal the API owes a caller that set a locked field: a 400 naming the
+ * offending field and the layer it must be removed from.
  */
-interface InputLayers {
-  /** `manifest.input.schema` — its `default` keywords are the author layer. */
-  schema?: JSONSchemaObject | undefined;
-  /**
-   * `application_packages.input_settings.values` — values the editor stored
-   * once.
-   */
-  editorDefaults?: Record<string, unknown> | undefined;
-  /** `application_packages.input_settings.locked` — fields no caller may override. */
-  lockedFields?: readonly string[] | undefined;
-  /** `package_schedules.input` — values frozen on a scheduled trigger. */
-  scheduleValues?: Record<string, unknown> | undefined;
-  /** What the caller sent on this launch. */
-  callerInput?: Record<string, unknown> | undefined;
+function lockedFieldError(field: string, origin: InputOverlayOrigin): ApiError {
+  return new ApiError({
+    status: 400,
+    code: "locked_input_field",
+    title: "Locked Input Field",
+    detail: `Field '${field}' is locked on this agent and cannot be set at launch — remove it from the ${origin}.`,
+    param: `input.${field}`,
+  });
 }
 
 /**
- * Refuse an attempt to set a locked field.
+ * Refuse an attempt to set a locked field, throwing
+ * `ApiError(400, "locked_input_field")`.
  *
- * Locking a field means its value is decided by the editor, so a launch that
- * tries to set it is not silently ignored — silently dropping a value the
- * caller sent is how a run does something other than what was asked. The
- * offending field is named so the caller can fix the request.
+ * Called directly by the write path that validates a schedule's stored input
+ * before persisting it; the launch paths get it for free through
+ * {@link resolveEffectiveInput}.
  */
 export function assertFieldsUnlocked(
   values: Record<string, unknown> | undefined,
   lockedFields: readonly string[] | undefined,
-  origin: "input" | "schedule input" = "input",
+  origin: InputOverlayOrigin = "input",
 ): void {
-  if (!values || !lockedFields || lockedFields.length === 0) return;
-  const locked = new Set(lockedFields);
-  for (const key of Object.keys(values)) {
-    if (!locked.has(key)) continue;
-    throw new ApiError({
-      status: 400,
-      code: "locked_input_field",
-      title: "Locked Input Field",
-      detail: `Field '${key}' is locked on this agent and cannot be set at launch — remove it from the ${origin}.`,
-      param: `input.${key}`,
-    });
-  }
+  assertFieldsUnlockedCore({ origin, values }, lockedFields, lockedFieldError);
 }
 
 /**
- * Collapse the four layers into the input a run executes with.
+ * Collapse the layers into the input a run executes with.
  *
- * Throws `ApiError(400, "locked_input_field")` when the caller's input or a
- * schedule's frozen values name a locked field.
+ * Throws `ApiError(400, "locked_input_field")` when the overlay — the caller's
+ * input, or a schedule's frozen values — names a locked field.
  */
-export function resolveEffectiveInput(layers: InputLayers): Record<string, unknown> {
-  assertFieldsUnlocked(layers.scheduleValues, layers.lockedFields, "schedule input");
-  assertFieldsUnlocked(layers.callerInput, layers.lockedFields, "input");
-
-  return {
-    ...authorDefaults(layers.schema),
-    ...(layers.editorDefaults ?? {}),
-    ...(layers.scheduleValues ?? {}),
-    ...(layers.callerInput ?? {}),
-  };
-}
-
-/**
- * Drop the locked keys from a set of values.
- *
- * Used for a `rerun_from` replay: the caller sent a run id, not values, so the
- * prior run's snapshot is not "the caller setting a field". Replaying it
- * verbatim would 400 on every field locked since that run; dropping the locked
- * keys lets the replay resolve them from the current editor value, which is
- * exactly what a fresh launch would do.
- */
-export function withoutLockedFields(
-  values: Record<string, unknown>,
-  lockedFields: readonly string[] | undefined,
+export function resolveEffectiveInput(
+  layers: Omit<InputLayers, "lockedFieldError">,
 ): Record<string, unknown> {
-  if (!lockedFields || lockedFields.length === 0) return values;
-  const locked = new Set(lockedFields);
-  return Object.fromEntries(Object.entries(values).filter(([key]) => !locked.has(key)));
+  return resolveEffectiveInputCore({ ...layers, lockedFieldError });
 }
 
 /**
@@ -139,4 +105,45 @@ export function assertLockedFieldsSatisfiable(
       param: `locked_fields.${field}`,
     });
   }
+}
+
+/**
+ * Resolve a schedule's stored input through the layers and validate the result
+ * against the agent's schema, WITHOUT choosing a failure channel.
+ *
+ * Three call sites need exactly this pair, and they answer differently: the
+ * create route throws `validationFailed`, the update route does too, and the
+ * fire path calls `failSchedule` and logs. Writing the pair out per site is
+ * what let them drift — `PUT /api/schedules/:id` had adopted only the
+ * lock half (`assertFieldsUnlocked`) and skipped the validation entirely, so a
+ * PUT that replaced `input` with a wrong-typed or incomplete value answered
+ * 200 and then failed at EVERY subsequent tick. The create route's own comment
+ * says the point is to refuse "at this write rather than silently each tick";
+ * its sibling did the opposite.
+ *
+ * A `null` schema means the agent declares none, in which case there is
+ * nothing to validate and the resolved input is returned as-is. Resolution
+ * itself can still throw `ApiError(400, "locked_input_field")` — that refusal
+ * has one shape everywhere and is deliberately left to propagate.
+ */
+export function resolveAndValidateScheduleInput(args: {
+  inputSchema: unknown;
+  editorDefaults: Record<string, unknown> | undefined;
+  lockedFields: readonly string[] | undefined;
+  input: Record<string, unknown> | undefined;
+}):
+  | { resolved: Record<string, unknown>; errors?: undefined }
+  | { errors: { field: string; message: string }[] } {
+  const schema = args.inputSchema ? asJSONSchemaObject(args.inputSchema) : undefined;
+  const resolved = resolveEffectiveInput({
+    ...(schema ? { schema } : {}),
+    editorDefaults: args.editorDefaults,
+    lockedFields: args.lockedFields,
+    overlay: { origin: "schedule input", values: args.input },
+  });
+  if (!schema) return { resolved };
+
+  const validation = validateInput(resolved, schema);
+  if (!validation.valid) return { errors: validation.errors };
+  return { resolved };
 }

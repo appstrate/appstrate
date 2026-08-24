@@ -75,7 +75,12 @@ function makeRunAndWait(opts: {
   const tools = buildMcpTools({
     origin: "http://test.local",
     authHeaders: new Headers({ "X-Org-Id": "org_1", "X-Application-Id": "app_1" }),
-    permissions: new Set(opts.permissions ?? ["mcp:invoke"]),
+    // `runs:read` is in the default because the tool cannot function without
+    // it: its second half polls `GET /api/runs/{id}` through the same dispatch,
+    // under the caller's own scopes. A caller holding only `mcp:invoke` is
+    // covered by its own case below, which asserts the refusal happens BEFORE
+    // the launch.
+    permissions: new Set(opts.permissions ?? ["mcp:invoke", "runs:read"]),
     dispatch,
     actor: { type: "user", id: "user_1" },
     scope: { orgId: "org_1", applicationId: "app_1" },
@@ -118,6 +123,93 @@ describe("run_and_wait", () => {
         output: expect.any(Object),
       }),
     );
+  });
+
+  // ── Argument-surface parity ────────────────────────────────────────────
+  //
+  // The launch body is built from an ALLOWLIST and the MCP transport does not
+  // validate tool arguments, so an argument the dispatch does not read is not
+  // rejected — it is INVISIBLE. These tests pin the two halves of the fix
+  // behaviourally rather than by comparing two lists, because the guarantee is
+  // "every declared name is honoured, every undeclared name is refused", not
+  // "two arrays are equal".
+
+  it("refuses an undeclared argument instead of silently dropping it", async () => {
+    const { tool, calls } = makeRunAndWait({});
+
+    const res = await tool.handler(
+      { kind: "agent", scope: "@acme", name: "writer", contextFiles: ["appfile://file_1"] },
+      noExtra,
+    );
+
+    expect(res.isError).toBe(true);
+    expect(parseResult(res).error).toContain("contextFiles");
+    // The whole point: no launch happened. A silent drop would have 201'd.
+    expect(calls.find((c) => c.method === "POST")).toBeUndefined();
+  });
+
+  it("names the replacement for a retired argument", async () => {
+    const { tool } = makeRunAndWait({});
+
+    const res = await tool.handler(
+      { kind: "inline", manifest: { display_name: "x" }, prompt: "p", context_documents: [] },
+      noExtra,
+    );
+
+    expect(res.isError).toBe(true);
+    expect(parseResult(res).error).toContain("`context_files`");
+  });
+
+  it("accepts every argument the descriptor declares", async () => {
+    const declared = Object.keys(
+      makeRunAndWait({}).tool.descriptor.inputSchema.properties as Record<string, unknown>,
+    );
+    // Positive control: a name absent from this list is refused (previous test),
+    // so an empty or truncated `declared` cannot make this pass vacuously.
+    expect(declared).toContain("context_files");
+    expect(declared.length).toBeGreaterThan(5);
+
+    for (const name of declared) {
+      const { tool } = makeRunAndWait({
+        launch: () => jsonResponse({ id: "run_x", status: "pending" }),
+        getRun: [jsonResponse({ id: "run_x", status: "success" })],
+      });
+      // A legal-but-minimal value per declared name, on an inline run (the kind
+      // that accepts the widest set). `kind`/`manifest`/`prompt` are the base.
+      const probe: Record<string, unknown> = {
+        kind: "inline",
+        manifest: { display_name: "probe" },
+        prompt: "p",
+      };
+      if (name === "scope") probe.scope = "@acme";
+      if (name === "name") probe.name = "writer";
+      if (name === "version") probe.version = "draft";
+      if (name === "input") probe.input = {};
+      if (name === "connection_overrides") probe.connection_overrides = {};
+      if (name === "context_files") probe.context_files = [];
+
+      const res = await tool.handler(probe, noExtra);
+      const payload = parseResult(res);
+      const error = typeof payload.error === "string" ? payload.error : "";
+      expect(error).not.toContain("Unknown argument");
+    }
+  });
+
+  it("refuses a wrong-typed `input` on both kinds instead of launching without it", async () => {
+    for (const probe of [
+      { kind: "agent", scope: "@acme", name: "writer", input: '{"topic":"x"}' },
+      { kind: "inline", manifest: { display_name: "x" }, prompt: "p", input: ["topic"] },
+    ]) {
+      const { tool, calls } = makeRunAndWait({});
+      const res = await tool.handler(probe, noExtra);
+
+      expect(res.isError).toBe(true);
+      expect(parseResult(res).error).toContain("`input` must be a JSON object");
+      // The agent branch was the worse half: with `input` dropped the launch
+      // body was empty, an empty body is sent as NO body, and the route reads
+      // that as "no input" — a 201 on the agent's stored defaults.
+      expect(calls.find((c) => c.method === "POST")).toBeUndefined();
+    }
   });
 
   it("describes package authoring with the remaining file publisher", () => {
@@ -190,7 +282,7 @@ describe("run_and_wait", () => {
         kind: "inline",
         manifest: { name: "tmp" },
         prompt: "do it",
-        input: { screenshot: "appfile://doc_abc12345" },
+        input: { screenshot: "appfile://file_abc12345" },
       },
       noExtra,
     );
@@ -198,7 +290,7 @@ describe("run_and_wait", () => {
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({
       manifest: defaultInlineManifest({ name: "tmp" }),
       prompt: expect.stringContaining("do it"),
-      input: { screenshot: "appfile://doc_abc12345" },
+      input: { screenshot: "appfile://file_abc12345" },
     });
   });
 
@@ -285,12 +377,17 @@ describe("run_and_wait", () => {
       ],
       files: [
         {
-          id: "doc_abcd1234",
-          uri: "appfile://doc_abcd1234",
+          id: "file_abcd1234",
+          uri: "appfile://file_abcd1234",
           name: "report.html",
           mime: "text/html",
           size: 120,
           run_id: "run_7",
+          // `fetchRunFiles` filters every returned row through
+          // `isFileProducedByRun`, which needs BOTH halves — the run's file
+          // container also holds the files mounted as its INPUT. The real
+          // route always sends `purpose`, so the stub must too.
+          purpose: "agent_output",
         },
       ],
     });
@@ -302,14 +399,14 @@ describe("run_and_wait", () => {
     expect(links).toHaveLength(1);
     expect(links[0]).toMatchObject({
       type: "resource_link",
-      uri: "appfile://doc_abcd1234",
+      uri: "appfile://file_abcd1234",
       name: "report.html",
       mimeType: "text/html",
     });
     // The text payload also echoes the files (parity with the chat path).
     const docs = (parseResult(res).files as Array<Record<string, unknown>>) ?? [];
     expect(docs).toHaveLength(1);
-    expect(docs[0]).toMatchObject({ uri: "appfile://doc_abcd1234" });
+    expect(docs[0]).toMatchObject({ uri: "appfile://file_abcd1234" });
   });
 
   it("returns only a text block when the run published no files", async () => {
@@ -371,5 +468,20 @@ describe("run_and_wait", () => {
     const res = await denied.tool.handler({ kind: "agent", scope: "@a", name: "b" }, noExtra);
     expect(res.isError).toBe(true);
     expect(denied.calls.length).toBe(0);
+  });
+
+  it("refuses a caller that can launch but not read, BEFORE launching", async () => {
+    // `agents:run` without `runs:read` is a reachable credential — both are
+    // separately requestable OIDC scopes, and it is the canonical shape of a
+    // headless CI key. The launch dispatches in-process with the caller's own
+    // auth, and `internal-dispatch` neither elevates nor alters identity, so
+    // the poll would take a 403 on a run that is already provisioned and
+    // already spending. `calls.length === 0` is the whole assertion: the
+    // refusal has to precede the side effect, not follow it.
+    const { tool, calls } = makeRunAndWait({ permissions: ["mcp:invoke"] });
+    const res = await tool.handler({ kind: "agent", scope: "@a", name: "b" }, noExtra);
+    expect(res.isError).toBe(true);
+    expect(parseResult(res).error).toContain("runs:read");
+    expect(calls.length).toBe(0);
   });
 });

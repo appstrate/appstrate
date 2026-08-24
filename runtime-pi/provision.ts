@@ -142,24 +142,18 @@ export async function provisionWorkspace(deps: ProvisionDeps): Promise<void> {
  * file the manifest listed IS fatal, same reasoning as the bundle (#549).
  */
 export async function provisionFiles(deps: ProvisionDeps): Promise<void> {
-  // PLATFORM SKEW: `/files` is the canonical path since issue #1177; a platform
-  // older than this image only serves `/documents`. A 404 is AMBIGUOUS there —
-  // it is also the legitimate "this run carries no input files" answer — so the
-  // legacy path is probed before concluding the run has none. Without the probe
-  // an older platform silently provisions zero files and the agent starts with
-  // an empty workspace, which is not an error anywhere.
-  let manifestUrl = deps.sinkUrl.replace(/\/events$/, "/files");
+  // `/files` is the ONLY manifest path. There is no `/documents` probe: the
+  // platform that serves this container validates at boot that `PI_IMAGE` and
+  // `SIDECAR_IMAGE` carry its own version (`@appstrate/env`, via
+  // `findRuntimeImageTagMismatch`), so the counterpart on the other end of this
+  // request is never a platform older than this image — and no released
+  // platform ever served `/documents` anyway (the rename landed after
+  // `v1.0.0-beta.51`). A 404 here therefore carries exactly ONE meaning, the
+  // one the route documents: this run carries no input files.
+  const manifestUrl = deps.sinkUrl.replace(/\/events$/, "/files");
   let manifestRes: Response;
   try {
     manifestRes = await signedGetWithRetry(manifestUrl, deps);
-    if (manifestRes.status === 404) {
-      const legacyUrl = deps.sinkUrl.replace(/\/events$/, "/documents");
-      const legacyRes = await signedGetWithRetry(legacyUrl, deps);
-      if (legacyRes.ok) {
-        manifestUrl = legacyUrl;
-        manifestRes = legacyRes;
-      }
-    }
   } catch (err) {
     return await deps.die(`Failed to fetch files manifest: ${getErrorMessage(err)}`);
   }
@@ -174,29 +168,21 @@ export async function provisionFiles(deps: ProvisionDeps): Promise<void> {
   // reader rejects any entry without one — so two files never overwrite
   // each other here (see the platform's run-file-naming.ts). The runtime
   // still type-checks the field rather than trusting the JSON blindly.
-  // `documents` is the pre-#1177 key; a platform older than this image emits
-  // only that one.
   const manifest = (await manifestRes.json()) as {
     files?: { workspace_name?: unknown }[];
-    documents?: { workspace_name?: unknown }[];
   };
-  const names = (manifest.files ?? manifest.documents ?? [])
+  const names = (manifest.files ?? [])
     .map((d) => d.workspace_name)
     .filter((n): n is string => typeof n === "string" && n.length > 0);
   if (names.length === 0) return;
 
-  // `files/` is the directory the platform prompt announces since issue #1177.
-  // `documents/` is symlinked onto it so a PLATFORM older than this image —
-  // whose prompt still says `./documents/` — points the agent at the same
-  // bytes. The symlink is best-effort: a filesystem that refuses it costs the
-  // legacy path, never the canonical one.
+  // `files/` is the ONE directory the run's input files land in, and the one
+  // the platform prompt announces (`prompt-builder.ts` — `./files/<name>`,
+  // unconditionally). The two must stay spelled the same: a divergence is a
+  // prompt-level miss with the bytes sitting in a directory the agent is never
+  // told about, and nothing reports a fault.
   const dir = path.join(deps.workspace, "files");
   await fs.mkdir(dir, { recursive: true });
-  try {
-    await fs.symlink("files", path.join(deps.workspace, "documents"));
-  } catch {
-    // Already present, or unsupported — the canonical `files/` is what matters.
-  }
 
   // Sequential: input-file sets are small (typically 1–few files), so
   // streaming each in turn bounds open connections and peak memory without a
@@ -217,7 +203,7 @@ export async function provisionFiles(deps: ProvisionDeps): Promise<void> {
       return await deps.die(`Failed to fetch file ${name}: HTTP ${docRes.status}`);
     }
     // Stream the response body to disk chunk-by-chunk — peak memory stays
-    // bounded regardless of file size (WORKSPACE_MAX_DOCS_BYTES allows up
+    // bounded regardless of file size (WORKSPACE_MAX_FILES_BYTES allows up
     // to 256 MiB). We DO NOT use `Bun.write(path, docRes)` / `Bun.write(path,
     // docRes.body)`: handing the fetch `Response`/stream to `Bun.write` for
     // streaming-consume busy-loops at 100% CPU in the bundled runtime,

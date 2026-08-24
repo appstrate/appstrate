@@ -56,7 +56,7 @@ import {
   orgIdFromMcpAudience,
   addMcpOrgAudience,
   _resetMcpOrgAudiencesForTesting,
-} from "../../../../mcp/audiences.ts";
+} from "../../../../../lib/audiences.ts";
 import { decodeJwt } from "jose";
 
 // The protected-resource registry is a process-wide singleton shared with the

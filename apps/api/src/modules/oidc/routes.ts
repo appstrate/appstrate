@@ -187,7 +187,7 @@ export const smtpConfigUpsertSchema = z.object({
   secureMode: z.enum(["auto", "tls", "starttls", "none"]).optional(),
 });
 
-const smtpConfigTestSchema = z.object({
+export const smtpConfigTestSchema = z.object({
   to: z.email(),
 });
 

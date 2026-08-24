@@ -24,7 +24,7 @@ import { listLlmUsage, getSettledFrontierId } from "../../services/state/runs.ts
 import { dispatchInProcess } from "../platform-app.ts";
 import {
   recordChatUsage,
-  resolveSubscriptionChatModel,
+  resolveChatModel,
   checkUsageAllowed,
 } from "../../services/chat-subscription.ts";
 import {
@@ -97,7 +97,7 @@ export function getModuleRegistry(): string[] {
  * contract declared in `@appstrate/core/module`. The surface is intentionally
  * minimal — `usage.list` / `usage.settledFrontier` (the cloud metering module's cursor
  * sweep of the `llm_usage` ledger), `inProcess.dispatch`, and the chat seam
- * (`resolveSubscriptionChatModel` + `recordChatUsage` + `checkUsageAllowed`) by
+ * (`resolveChatModel` + `recordChatUsage` + `checkUsageAllowed`) by
  * which the chat module drives the single generic in-process Pi chat engine,
  * meters it, and gates admission — the module resolves credentials/tokens,
  * records usage, and gates through here because it has no DB access. See the
@@ -126,7 +126,7 @@ function buildPlatformServices(): PlatformServices {
     // fresh token (credential resolution stays server-side), meters each turn,
     // and gates admission for EVERY turn (subscription included) through these,
     // since it has no DB access.
-    resolveSubscriptionChatModel,
+    resolveChatModel,
     recordChatUsage,
     checkUsageAllowed,
     // Chat attachments — materialize a composer upload into a chat-session-scoped
@@ -147,12 +147,6 @@ function buildPlatformServices(): PlatformServices {
     // org's technical byte ceiling here; the platform enforces it on every write.
     // Billing-neutral: the core stores a byte limit, never a plan/price.
     setFileStorageLimit: setOrgFileStorageLimit,
-    // Deprecated pre-#1177 spelling of the SAME implementation. Out-of-tree
-    // modules (cloud) bind this off the live services object rather than off
-    // their pinned types, so the rename alone does not reach them and their
-    // next boot would `TypeError` on a deploy clock we do not control. Drop
-    // this line once every out-of-tree consumer binds `setFileStorageLimit`.
-    setDocumentStorageLimit: setOrgFileStorageLimit,
   };
 }
 

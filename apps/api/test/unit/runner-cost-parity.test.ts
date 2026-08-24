@@ -16,6 +16,9 @@ import { describe, it, expect } from "bun:test";
 import { computeTokenCost, type TokenCost } from "@appstrate/afps-runtime/runner";
 import { modelCostSchema } from "@appstrate/core/module";
 import type { TokenUsage } from "@appstrate/shared-types";
+// The record the CONTAINER drives its pi-ai session with — the process whose
+// `calculateCost` this file transcribes. Built here, not read as text.
+import { parseRuntimeEnv, buildPiModelFromEnv } from "../../../../runtime-pi/env.ts";
 
 /** Pi's own four counters, as `installSessionBridge` reads them off the SDK. */
 interface PiUsage {
@@ -32,8 +35,8 @@ interface PiUsage {
  *
  * Two of the library's branches are dropped, each pinned by its own test below:
  * `tiers` (the platform's `ModelCost` cannot carry them) and `cacheWrite1h`
- * (non-zero only under Anthropic long cache retention, which the platform never
- * requests).
+ * (non-zero only under Anthropic long cache retention, which the model records
+ * the platform builds refuse structurally).
  *
  * The container reaches this function through `runtime-pi`'s `parseModelCost`,
  * which defaults an absent `cacheRead`/`cacheWrite` to `0` — the same value
@@ -126,17 +129,43 @@ describe("runner cost parity: server recompute vs pi-ai calculateCost (container
     expect(parsed).toEqual({ input: 3, output: 15 });
   });
 
-  it("the platform never requests Anthropic long cache retention", async () => {
-    // Precondition for dropping `cacheWrite1h` from `piReference`: pi-ai
-    // reports it only under long cache retention, which needs an explicit
-    // option or `PI_CACHE_RETENTION=long` in the container env. The platform
-    // sets neither, so every cache-creation token is a short write. Turning
-    // long retention on reopens a real divergence — those tokens are priced at
-    // 2× the INPUT rate, which `computeTokenCost` has no equivalent for.
-    const containerEnv = await Bun.file(
-      new URL("../../../../packages/runner-pi/src/container-env.ts", import.meta.url),
-    ).text();
-    expect(containerEnv).not.toContain("PI_CACHE_RETENTION");
+  it("the model record the container drives REFUSES long cache retention", () => {
+    // Precondition for dropping `cacheWrite1h` from `piReference`. pi-ai sets
+    // that counter only from `cache_creation.ephemeral_1h_input_tokens`, which
+    // Anthropic returns only for a request carrying `cache_control.ttl: "1h"`,
+    // which pi-ai emits only when the MODEL RECORD does not refuse it:
+    //
+    //   const ttl = retention === "long" && getAnthropicCompat(model).supportsLongCacheRetention ? "1h" : undefined;
+    //   supportsLongCacheRetention: model.compat?.supportsLongCacheRetention ?? true,
+    //
+    // That one flag is the WHOLE precondition, which is why this test asserts
+    // it and nothing else. It holds for every `options.cacheRetention` value
+    // and for every `PI_CACHE_RETENTION` in the environment — including one an
+    // agent assigns to `process.env` from inside its own container, which no
+    // check on what the PLATFORM injects could ever see. It also defaults to
+    // TRUE, so the record has to refuse OUT LOUD; silence is consent.
+    //
+    // Asserted on the real builder, not on a hand-written record: this must
+    // fail when `buildPiModelFromEnv` stops setting it. The sidecar's own
+    // record (`buildBackingModel`, the aliased path, where pi-ai runs one
+    // process to the left) carries the same flag, proven end-to-end against
+    // real originated bytes in `runtime-pi/sidecar/test/pi-messages-backend.test.ts`.
+    const model = buildPiModelFromEnv(
+      parseRuntimeEnv({
+        AGENT_RUN_ID: "run_parity",
+        APPSTRATE_SINK_URL: "https://api.example.com/api/runs/run_parity/events",
+        APPSTRATE_SINK_FINALIZE_URL: "https://api.example.com/api/runs/run_parity/events/finalize",
+        APPSTRATE_SINK_SECRET: "abcdefghijklmnopqrstuvwxyz0123456789",
+        MODEL_API: "anthropic-messages",
+        MODEL_ID: "claude-sonnet-4-6",
+        AGENT_PROMPT: "You are a helpful agent.",
+      }),
+    );
+    // Asserted on the compat OBJECT, not `model.compat?.supportsLongCacheRetention`:
+    // pi-ai types `compat` per API shape and `BedrockCompat` — one arm of that
+    // union — declares no such key, so the property read does not typecheck on
+    // a `Model<Api>`. `toMatchObject` states the same thing without a cast.
+    expect(model.compat).toMatchObject({ supportsLongCacheRetention: false });
   });
 
   it("library formula unchanged — the transcription above still matches node_modules", async () => {

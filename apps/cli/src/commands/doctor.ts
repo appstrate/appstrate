@@ -8,13 +8,14 @@
  * the rendered output without touching commander or the real PATH.
  */
 
-import * as clack from "@clack/prompts";
 import {
   formatDoctorReport,
   runDoctor,
   type DoctorReport,
   type RunDoctorOptions,
 } from "../lib/doctor.ts";
+import { intro, note, outro } from "../lib/ui.ts";
+import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 
 interface DoctorCommandOptions {
   /** When true, skip clack framing and emit JSON. Useful for scripts. */
@@ -23,21 +24,24 @@ interface DoctorCommandOptions {
   runOptions?: RunDoctorOptions;
 }
 
-export async function doctorCommand(opts: DoctorCommandOptions = {}): Promise<void> {
+export async function doctorCommand(
+  opts: DoctorCommandOptions = {},
+  io: CommandIO = DEFAULT_IO,
+): Promise<void> {
   const report = await runDoctor(opts.runOptions);
   if (opts.json) {
-    process.stdout.write(`${JSON.stringify(serializeReport(report), null, 2)}\n`);
+    io.stdout.write(`${JSON.stringify(serializeReport(report), null, 2)}\n`);
     return;
   }
-  clack.intro("Appstrate doctor");
+  intro("Appstrate doctor", io);
   const execPath = opts.runOptions?.execPath ?? process.execPath;
   const body = formatDoctorReport(report, execPath);
-  // clack.note prints inside a framed box; multiline content is rendered as-is.
-  clack.note(body, "Installations");
+  // `note` prints inside a framed box; multiline content is rendered as-is.
+  note(body, "Installations", io);
   if (report.dualInstall) {
-    clack.outro("Detected more than one installation. See above for cleanup hints.");
+    outro("Detected more than one installation. See above for cleanup hints.", io);
   } else {
-    clack.outro("Healthy — single installation on PATH.");
+    outro("Healthy — single installation on PATH.", io);
   }
 }
 

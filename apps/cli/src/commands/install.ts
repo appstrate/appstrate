@@ -14,7 +14,18 @@
 import { closeSync, openSync, writeSync } from "node:fs";
 import { join, resolve } from "node:path";
 import * as clack from "@clack/prompts";
-import { intro, outro, askText, confirm, withSpinner, exitWithError } from "../lib/ui.ts";
+import {
+  intro,
+  outro,
+  askText,
+  confirm,
+  withSpinner,
+  exitWithError,
+  logInfo,
+  logWarn,
+  note,
+  EXIT_CANCELLED,
+} from "../lib/ui.ts";
 import {
   generateBootstrapToken,
   generateEnvForTier,
@@ -203,18 +214,18 @@ export function postInstallBrowserUrl(localUrl: string, bootstrap: BootstrapOver
  *
  * Token-leak hardening: when stdout is NOT a TTY (the install output
  * is being piped/tee'd to a file), the token line is written directly
- * to `/dev/tty` instead of through clack.note. The clack-rendered
- * note still appears with the URL + .env hint, but the secret itself
- * goes only to the operator's terminal — not to disk.
+ * to `/dev/tty` instead of through the framed note. The note still
+ * appears with the URL + .env hint, but the secret itself goes only to
+ * the operator's terminal — not to disk.
  */
 export function printBootstrapFollowup(
   appUrl: string,
   bootstrap: BootstrapOverrides,
-  note: (message: string, title?: string) => void = clack.note,
+  renderNote: (message: string, title?: string) => void = note,
 ): void {
   const email = bootstrap.bootstrapOwnerEmail;
   if (email) {
-    note(
+    renderNote(
       `Opened  ${appUrl}/register  in your browser.\nSign up as  ${email}  (the form is pre-filled and locked)\nPick any password — the org "${bootstrap.bootstrapOrgName ?? "Default"}" is created automatically.`,
       "Next: create your owner account",
     );
@@ -225,18 +236,18 @@ export function printBootstrapFollowup(
     const stdoutIsTty = process.stdout.isTTY === true;
     if (stdoutIsTty) {
       // Interactive install: stdout IS the operator's terminal, so
-      // printing the token inline is fine — and clack.note frames it
-      // nicely. No risk of capture into a log file.
-      note(
+      // printing the token inline is fine — and the framed note renders
+      // it nicely. No risk of capture into a log file.
+      renderNote(
         `Open  ${appUrl}/claim\nPaste the token below + your owner email/password.\n\n  Bootstrap token:\n  ${token}\n\nThe token is single-use, also stored in <dir>/.env\nas AUTH_BOOTSTRAP_TOKEN. Public signup is disabled\nuntil you claim the instance.`,
         "Closed-by-default install — claim ownership",
       );
       return;
     }
-    // Piped/tee'd install: render the framing note via clack (which
-    // hits stdout — fine, doesn't contain the secret) and write the
-    // token itself directly to the TTY.
-    note(
+    // Piped/tee'd install: render the framing note on stdout (fine, it
+    // doesn't contain the secret) and write the token itself directly to
+    // the TTY.
+    renderNote(
       `Open  ${appUrl}/claim\nThe bootstrap token is printed below directly to your\nterminal (and stored in <dir>/.env, mode 0600). It does\nNOT appear in the install log if you tee'd this output.\nPublic signup is disabled until you claim the instance.`,
       "Closed-by-default install — claim ownership",
     );
@@ -270,7 +281,7 @@ const defaultInstallDeps: Required<InstallCommandDeps> = {
   installDockerTier,
   isDockerAvailable,
   findRunningComposeProject: findRunningComposeProjectImport,
-  info: (message: string) => clack.log.info(message),
+  info: (message: string) => logInfo(message),
 };
 
 export async function installCommand(
@@ -422,7 +433,7 @@ export async function composeUpgradeCommand(
   try {
     const dir = resolveComposeUpgradeDir(opts.dir);
     const outcome = await runComposeUpgrade(dir, deps);
-    clack.note(formatComposeUpgradeResult(outcome), "docker-compose.yml");
+    note(formatComposeUpgradeResult(outcome), "docker-compose.yml");
     switch (outcome.status) {
       case "no-install":
         // A wrong --dir (or no install) is a user-actionable failure —
@@ -494,14 +505,14 @@ export async function resolveBootstrapEmail(opts: {
   // Empty input is the documented "skip" path; clack returns "" on Enter
   // with no `placeholder`. The note explains *why* this prompt exists so
   // the user understands the trade-off before answering.
-  clack.note(
+  note(
     "Closed mode locks down public signup so only invited users can join.\nLeave empty to keep the default open mode (anyone with the URL can sign up).",
     "Invitation-only mode (optional)",
   );
   const answer = (await askText("Bootstrap admin email (or empty to skip):", "")).trim();
   if (!answer) return {};
   if (!isValidBootstrapEmail(answer)) {
-    clack.log.warn(
+    logWarn(
       `"${answer}" doesn't look like an email — keeping open mode. Edit .env manually to enable closed mode later.`,
     );
     return {};
@@ -544,7 +555,7 @@ export async function resolveAppUrl(
     const inherited = opts.existing.existingEnv.APP_URL;
     if (inherited) {
       if (requested !== undefined && requested !== inherited) {
-        clack.log.warn(
+        logWarn(
           `app URL ${requested} ignored on upgrade — existing .env pins APP_URL=${inherited}, and config is preserved across upgrades (see mergeEnv). Edit <dir>/.env manually (APP_URL + TRUSTED_ORIGINS + TRUST_PROXY) to change the public URL.`,
         );
       }
@@ -562,7 +573,7 @@ export async function resolveAppUrl(
   // of `--yes` / `--tier N` (remote deploys pass --app-url explicitly).
   if (opts.tier === 0 || opts.nonInteractive) return fallback;
 
-  clack.note(
+  note(
     `Remote deployment (behind a reverse proxy)? Enter the public URL users will\nhit, e.g. https://appstrate.example.com — it drives OAuth redirects, CORS\n(TRUSTED_ORIGINS), and email links. The reverse proxy itself (TLS, forwarding\nto localhost:${port}) is not provisioned by the installer.\nPress Enter to keep the local default.`,
     "Public URL (optional)",
   );
@@ -676,7 +687,7 @@ export async function resolveAppstratePort(
       // via pure fallback is not a user intent we need to flag.
       const userExpressed = (raw ?? envValue ?? "") !== "";
       if (userExpressed && requested !== inherited) {
-        clack.log.warn(
+        logWarn(
           `port ${requested} ignored on upgrade — existing .env pins PORT=${inherited}, and secrets/config are preserved across upgrades (see mergeEnv). Edit <dir>/.env manually to change the port.`,
         );
       }
@@ -699,7 +710,7 @@ function readExistingPort(existingEnv: EnvVars, key: string, fallback: number): 
   if (raw === undefined || raw === "") return fallback;
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
-    clack.log.warn(
+    logWarn(
       `Ignoring invalid ${key}="${raw}" in existing .env — using default ${fallback}. Fix the .env manually to silence this warning.`,
     );
     return fallback;
@@ -774,7 +785,7 @@ async function ensurePortFree(
       // log.info (not warn) because this is the designed happy path of
       // --yes — "just pick a free port". The message still names the
       // override knobs so a user who does care can redirect on re-run.
-      clack.log.info(
+      logInfo(
         `Port ${port} (${label}) in use.${holderHint} Auto-picked ${next} instead — pass ${flagName} <n> or pipe via \`curl … | ${envVar}=<n> bash\` to override.`,
       );
       return next;
@@ -798,7 +809,7 @@ async function ensurePortFree(
     );
   }
 
-  clack.log.warn(
+  logWarn(
     `Port ${port} (${label}) is already in use.${holderHint} Free it or pick a different port.`,
   );
   const pick = await askText(`New port for ${label}`, String(port));
@@ -818,7 +829,8 @@ async function ensurePortFree(
 interface TierResolverDeps {
   select?: typeof clack.select;
   isCancel?: typeof clack.isCancel;
-  note?: typeof clack.note;
+  /** Framed-note renderer; production is `note` from lib/ui.ts. */
+  note?: (message: string, title?: string) => void;
   isDockerAvailable?: () => Promise<boolean>;
   /**
    * When true, skip the `clack.select` prompt entirely and return the
@@ -859,7 +871,9 @@ export async function resolveTier(
   }
   const select = deps.select ?? clack.select;
   const isCancel = deps.isCancel ?? clack.isCancel;
-  const note = deps.note ?? clack.note;
+  // `renderNote`, not `note`: a local named after the import it falls back to
+  // would shadow it and throw on its own initialiser.
+  const renderNote = deps.note ?? note;
   const probe = deps.isDockerAvailable ?? isDockerAvailable;
 
   // --yes path: bypass the clack.select call entirely (never enters raw
@@ -870,7 +884,7 @@ export async function resolveTier(
   if (deps.autoConfirm === true) {
     const dockerOk = await probe();
     const autoTier: Tier = dockerOk ? 2 : 0;
-    note(
+    renderNote(
       dockerOk
         ? "--yes: Tier 2 selected automatically (Docker detected). Re-run with `--tier N` to override."
         : "--yes: Tier 0 selected automatically (Docker not detected). Install Docker and re-run with `--tier 2` for the production stack.",
@@ -895,7 +909,7 @@ export async function resolveTier(
   const dockerOk = await probe();
   const defaultTier: Tier = dockerOk ? 2 : 0;
   if (!dockerOk) {
-    note(
+    renderNote(
       "Docker not detected — Tier 0 selected by default. Install Docker Desktop and re-run for the production stack (Tier 2).",
     );
   }
@@ -913,8 +927,7 @@ export async function resolveTier(
     ],
   });
   if (isCancel(chosen)) {
-    clack.cancel("Cancelled.");
-    process.exit(130);
+    exitWithError("Cancelled.", undefined, EXIT_CANCELLED);
   }
   return chosen;
 }
@@ -1163,7 +1176,7 @@ export async function resolveRunBackend(
   const confirmPrompt = deps.confirm ?? clack.confirm;
   const detectIp = deps.detectLanIpv4 ?? detectLanIpv4;
   const mintToken = deps.generateToken ?? generateRunnerToken;
-  const warn = deps.warn ?? ((message: string) => clack.log.warn(message));
+  const warn = deps.warn ?? ((message: string) => logWarn(message));
   const { appPort, nonInteractive } = inputs;
 
   // 1. Which adapter? Flag > env > prompt (interactive) > docker.
@@ -1191,8 +1204,7 @@ export async function resolveRunBackend(
       ],
     });
     if (isCancel(chosen)) {
-      clack.cancel("Cancelled.");
-      process.exit(130);
+      exitWithError("Cancelled.", undefined, EXIT_CANCELLED);
     }
     adapter = chosen;
   }
@@ -1224,8 +1236,7 @@ export async function resolveRunBackend(
       ],
     });
     if (isCancel(chosen)) {
-      clack.cancel("Cancelled.");
-      process.exit(130);
+      exitWithError("Cancelled.", undefined, EXIT_CANCELLED);
     }
     topology = chosen;
   }
@@ -1334,8 +1345,7 @@ export async function resolveRunBackend(
         initialValue: false,
       });
       if (isCancel(proceed)) {
-        clack.cancel("Cancelled.");
-        process.exit(130);
+        exitWithError("Cancelled.", undefined, EXIT_CANCELLED);
       }
       if (!proceed) {
         throw new Error(
@@ -1488,17 +1498,18 @@ export async function runSameHostRunnerInstall(
   },
 ): Promise<void> {
   const run = opts.run ?? ((cmd, args) => runCommand(cmd, args, { stdio: "inherit" }));
-  // Wrap the clack helpers in arrows — extracting `clack.log.info` as a bare
-  // value would drop its `this` binding.
-  const note = opts.note ?? ((message: string, title?: string) => clack.note(message, title));
-  const logInfo = opts.logInfo ?? ((message: string) => clack.log.info(message));
-  const logWarn = opts.logWarn ?? ((message: string) => clack.log.warn(message));
+  // Named `render*` rather than reusing the helper names: these are the
+  // injectable overrides, and a `const note = … note …` would shadow the
+  // import it falls back to (a TDZ throw, not a fallback).
+  const renderNote = opts.note ?? note;
+  const renderInfo = opts.logInfo ?? logInfo;
+  const renderWarn = opts.logWarn ?? logWarn;
   const cliInvocation = opts.cliInvocation ?? resolveCliInvocation();
   const args = buildRunnerInstallArgs(cliInvocation, rb.platformUrl, rb.token);
   const manualCommand = `sudo ${args.join(" ")}`;
 
   if (opts.nonInteractive) {
-    note(
+    renderNote(
       "The platform is configured for Firecracker. Install the runner daemon on this host " +
         `(needs root + KVM) with:\n\n  ${manualCommand}`,
       "Next: install the runner daemon",
@@ -1506,7 +1517,7 @@ export async function runSameHostRunnerInstall(
     return;
   }
 
-  logInfo(
+  renderInfo(
     "Installing the Firecracker runner daemon on this host — sudo is required, " +
       "you may be prompted for your password.",
   );
@@ -1538,7 +1549,7 @@ export async function runSameHostRunnerInstall(
     else process.env[RUNNER_TOKEN_ENV] = prevToken;
   }
   if (!res.ok) {
-    logWarn(
+    renderWarn(
       `The runner daemon install did not complete (exit ${res.exitCode}). The platform is ` +
         `installed and running; finish the runner setup manually:\n\n  ${manualCommand}`,
     );
@@ -1769,7 +1780,7 @@ async function installDockerTier(
   // `daemon.json` before the first run fails with the opaque `ErrNoMoreSubnets`.
   const budget = await checkDockerNetworkBudget();
   if (budget) {
-    clack.note(
+    note(
       [
         `Detected ${budget.used} Docker networks on this host (default ceiling ≈ 31).`,
         "Appstrate consumes several networks at boot + 1 per agent run, so you may",
@@ -1795,7 +1806,7 @@ async function installDockerTier(
     // makes the decision visible so a user re-running `curl|bash --yes`
     // on a live stack isn't surprised.
     if (opts.autoConfirm) {
-      clack.log.info(
+      logInfo(
         `--yes: upgrading existing install at ${dir} (secrets preserved, backups written to <file>.backup).`,
       );
     } else {
@@ -1906,7 +1917,7 @@ async function installDockerTier(
     if (runBackend.topology === "same-host") {
       await runSameHostRunnerInstall(runBackend, { nonInteractive: opts.nonInteractive });
     }
-    clack.note(
+    note(
       firecrackerFollowupNote(runBackend),
       runBackend.topology === "remote"
         ? "Firecracker — install the runner on your KVM host"
@@ -1921,7 +1932,7 @@ async function installDockerTier(
   // explicitly instead of letting a dead public URL look like a failed
   // install.
   if (isRemoteAppUrl(appUrl)) {
-    clack.note(
+    note(
       `The platform listens on ${localUrl} (host port ${port}).\nPoint your reverse proxy (Caddy, nginx, Traefik) at it so that\n${appUrl} → ${localUrl}. TLS termination happens at the proxy;\nTRUST_PROXY=true is already set in .env. Until the proxy is up,\nthe platform is reachable at ${localUrl} only.`,
       "Reverse proxy required",
     );

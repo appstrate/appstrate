@@ -25,8 +25,18 @@ export interface JobQueue<T> {
   /** Start processing jobs with the given handler. */
   process(handler: JobHandler<T>, opts?: WorkerOptions): void;
 
-  /** Graceful shutdown: drain active jobs, close connections. */
-  shutdown(): Promise<void>;
+  /**
+   * Graceful shutdown: drain active jobs, close connections.
+   *
+   * `graceMs` is how long draining may take. It is a PARAMETER rather than a
+   * constant because the right budget depends on who is shutting down: a
+   * process handling SIGTERM wants to finish work that is mid-retry, while a
+   * test tearing down its own worker wants the queue gone now — and, since the
+   * queue is process-global, would otherwise block on jobs belonging to other
+   * test files. Implementations default it to their production value; pass `0`
+   * for an immediate teardown.
+   */
+  shutdown(graceMs?: number): Promise<void>;
 
   /**
    * Current queue depth — jobs waiting/delayed/active, i.e. not yet

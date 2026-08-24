@@ -266,7 +266,7 @@ describe("re-originated request shape", () => {
 });
 
 describe("buildBackingModel", () => {
-  it("keeps the REAL token limits, not the container's masked pair", () => {
+  it("keeps the backing's real token limits — the same pair the container gets", () => {
     const model = buildBackingModel(depsFor(BACKINGS[0]!));
     expect(model.contextWindow).toBe(CONTEXT_WINDOW);
     expect(model.maxTokens).toBe(MAX_TOKENS);
@@ -351,6 +351,79 @@ const USAGE: Usage = {
   totalTokens: 152,
   cost: { input: 0.28, output: 0.42, cacheRead: 0.01, cacheWrite: 0.02, total: 0.73 },
 };
+
+/**
+ * Long prompt-cache retention is refused STRUCTURALLY, on the rebuilt record,
+ * not by hoping nothing asks for it.
+ *
+ * The billing reason is in {@link FORWARDED_OPTION_KEYS}: Anthropic bills a 1h
+ * cache write at 2x the input rate and the platform's `computeTokenCost`
+ * carries one cache-write rate, not two. Dropping `cacheRetention` from the
+ * forwarded set closes the request-body route; `compat.supportsLongCacheRetention`
+ * closes the class, including the route no whitelist can reach — pi-ai falls
+ * back to `PI_CACHE_RETENTION` in the AMBIENT process environment
+ * (`resolveCacheRetention`), which is not the request and not this boundary.
+ *
+ * BEHAVIORAL, like the rest of this file: it reads the bytes pi-ai actually
+ * originated, so it fails if a pi upgrade moves the gate rather than passing on
+ * a transcription of today's source.
+ */
+describe("long cache retention", () => {
+  const ANTHROPIC = BACKINGS.find((b) => b.apiShape === "anthropic-messages")!;
+
+  it("emits no `ttl` even with `PI_CACHE_RETENTION=long` in the environment", async () => {
+    // The env var is the route that survives every request-level defence: on
+    // the aliased path pi-ai runs HERE, so this is the sidecar's own
+    // environment; on the direct path it is the container's, where agent code
+    // can assign `process.env` at will. Restored in `finally` — `bun test`
+    // shares one process across the whole repo.
+    const prev = process.env.PI_CACHE_RETENTION;
+    process.env.PI_CACHE_RETENTION = "long";
+    let payload: Record<string, unknown>;
+    try {
+      payload = await originatedPayload(ANTHROPIC);
+    } finally {
+      if (prev === undefined) delete process.env.PI_CACHE_RETENTION;
+      else process.env.PI_CACHE_RETENTION = prev;
+    }
+
+    const serialized = JSON.stringify(payload);
+    // Non-vacuity: prompt caching is ON. A payload with no `cache_control` at
+    // all would pass a bare "no ttl" assertion while proving nothing.
+    expect(serialized).toContain('"cache_control"');
+    expect(serialized).not.toContain('"ttl"');
+  });
+
+  it("control: the same call WITHOUT the flag does emit `ttl: 1h`", async () => {
+    // Without this, the assertion above could be passing because the harness
+    // cannot see a ttl on any payload. The record is the native one this file
+    // already uses as its byte-identical reference — the ONLY difference is
+    // the absent `compat`.
+    let payload: unknown;
+    const model: Model<Api> = {
+      id: ANTHROPIC.modelId,
+      name: ANTHROPIC.modelId,
+      api: ANTHROPIC.apiShape,
+      provider: ANTHROPIC.providerId,
+      baseUrl: ANTHROPIC.baseUrl,
+      reasoning: true,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: CONTEXT_WINDOW,
+      maxTokens: MAX_TOKENS,
+    };
+    const result = await streamBacking(model, CONTEXT, {
+      apiKey: "sk-real-key",
+      cacheRetention: "long",
+      onPayload: (next: unknown) => {
+        payload = next;
+        throw new Error("payload captured");
+      },
+    }).result();
+    expect(result.errorMessage).toBe("payload captured");
+    expect(JSON.stringify(payload)).toContain('"ttl":"1h"');
+  });
+});
 
 describe("event projection", () => {
   it("drops `partial` — the vendor identity rides on it, on every event", () => {
@@ -543,6 +616,25 @@ describe("discarded request fields", () => {
     expect(warnings).toHaveLength(1);
     expect(warnings[0]!["discarded"]).toEqual(["options.toolChoice"]);
     expect(String(warnings[0]!["msg"])).toContain("not forwarded");
+  });
+
+  it("does not forward `cacheRetention` — the container cannot make its run cheaper", async () => {
+    // Long Anthropic cache retention bills cache-creation tokens at 2× the
+    // input rate, and the platform's authoritative `computeTokenCost` has no
+    // term for that bucket. The body is the container's, so forwarding this
+    // would let an aliased agent under-bill itself. Pinned from the other side
+    // by `apps/api/test/unit/runner-cost-parity.test.ts`.
+    const { options, warnings } = await forwardedOptions({
+      model: "appstrate-medium",
+      context: CONTEXT,
+      options: { reasoning: "high", cacheRetention: "long" },
+    });
+
+    expect(options["cacheRetention"]).toBeUndefined();
+    expect(options["reasoning"]).toBe("high");
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]!["discarded"]).toEqual(["options.cacheRetention"]);
   });
 
   it("warns about `debug`, which rides the URL query rather than the body", async () => {

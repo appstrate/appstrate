@@ -17,7 +17,7 @@ import {
   FileVideo,
   type LucideIcon,
 } from "lucide-react";
-import { PUBLISHED_FILE_LOG_EVENTS } from "@appstrate/core/file-uri";
+import { isFileProducedByRun, PUBLISHED_FILE_LOG_EVENTS } from "@appstrate/core/file-uri";
 
 /** Minimal shape the helpers read — a structural subset of the `FileDto`. */
 export interface FileLike {
@@ -37,28 +37,15 @@ export type RunFileDirection = "output" | "input";
  * Outcome list ({@link producedRunFiles}) — so a badge and a filter can never
  * disagree about the same row.
  *
- * Both halves of the predicate are load-bearing, and NEITHER alone is enough.
- * A file row carries two independent facts: `purpose` says who created it,
- * `run_id` says which run it is anchored to.
- *
- * - `purpose` alone is wrong because `GET /api/files?run_id=X` deliberately
- *   answers the run's whole CONTAINER: it ORs `files.run_id = X` with the ids
- *   extracted from `runs.input`, so a file chained in from an earlier run via
- *   `appfile://` is listed here while still carrying `purpose: "agent_output"`
- *   — it was produced by that earlier run, and is an INPUT to this one.
- * - `run_id` alone is wrong because an upload made FOR this run is committed
- *   with `purpose: "user_upload"` AND that run's id (`services/files.ts`), so
- *   matching the id would call the run's own input an output.
- *
- * Ownership is therefore decided by the pair, exactly as `fetchRunFiles()` in
- * `@appstrate/core/run-and-wait-client` decides it server-side; the two rules
- * must not drift.
+ * The ownership question itself is `isFileProducedByRun`
+ * (`@appstrate/core/file-uri`), which documents why both halves of the pair
+ * are load-bearing; this function only names the two sides for the UI.
  */
 export function runFileDirection<T extends Pick<FileLike, "purpose" | "run_id">>(
   file: T,
   runId: string,
 ): RunFileDirection {
-  return file.purpose === "agent_output" && file.run_id === runId ? "output" : "input";
+  return isFileProducedByRun(file, runId) ? "output" : "input";
 }
 
 /**
@@ -98,9 +85,10 @@ export function featuredRunFile<T extends Pick<FileLike, "purpose" | "run_id">>(
 
 /**
  * Does this run-log `event` tag announce a published file? The accepted set
- * (current + pre-#1177 spelling) lives in `@appstrate/core/file-uri`, shared
- * with the chat module's run card: a tag one of them misses is a file list
- * that silently never refreshes, with no error anywhere.
+ * lives in `@appstrate/core/file-uri` and is built from the tag the sink
+ * writes, shared with the chat module's run card: a tag one of them misses is
+ * a file list that silently never refreshes, with no error anywhere. No
+ * pre-#1177 spelling is accepted — none survives the rename.
  */
 export function isPublishedFileLogEvent(event: string | null | undefined): boolean {
   return !!event && PUBLISHED_FILE_LOG_EVENTS.includes(event);

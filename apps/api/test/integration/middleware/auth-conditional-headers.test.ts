@@ -49,6 +49,7 @@ describe("auth-conditional header guard (Appstrate-User)", () => {
       applicationId: ctx.defaultAppId,
       createdBy: ctx.user.id,
       name: "guard-key-badprefix",
+      scopes: ["runs:read"],
     });
 
     const res = await app.request("/api/runs", {
@@ -90,6 +91,7 @@ describe("auth-conditional header guard (Appstrate-User)", () => {
       applicationId: ctx.defaultAppId,
       createdBy: ctx.user.id,
       name: "guard-key-valid",
+      scopes: ["runs:read"],
     });
 
     const res = await app.request("/api/runs", {

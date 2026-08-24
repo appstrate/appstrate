@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Chat API — session CRUD + opaque history entries.
+ * Chat API — session CRUD + history READ.
  *
- * Sessions are personal: every query filters by (orgId, userId). The
- * message store follows assistant-ui's NATIVE history-adapter contract
- * (ported from the appstrate-chat satellite): the client encodes each tree
- * node with its format adapter and POSTs `{ id, parent_id, format,
- * content }`; the server stores it verbatim (upsert on the client id) and
- * only peeks inside for a best-effort title. The live conversation flows
- * through `POST /api/chat` (streaming) — the history endpoints are pure
- * persistence.
+ * Sessions are personal: every query filters by (orgId, userId).
+ *
+ * Persistence is server-authoritative and `POST /api/chat` is its ONLY writer:
+ * it stores the user turn before inference and the assistant turn when the
+ * stream finalizes (`persistence.ts`, `finalize-stream.ts`). The routes below
+ * therefore never accept a message — `GET /api/chat/sessions/:id` returns the
+ * stored tree nodes for the client's read-only history adapter, in the
+ * `{ id, parent_id, format, content }` shape assistant-ui's `ai-sdk/v6` format
+ * adapter decodes.
  *
  * Rate limiting: `services.http.rateLimit` (platform capability), captured into
  * the router's `ChatPlatformDeps` at module init (see index.ts).
@@ -147,7 +148,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
           title: data.title ?? null,
         })
         .returning();
-      await notifySessionUpdate(row!.id, row!.orgId, row!.userId);
+      notifySessionUpdate(row!.id, row!.orgId, row!.userId);
       return c.json(toSessionDto(row!), 201);
     },
   );
@@ -167,7 +168,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
       .update(chatSessions)
       .set({ title, updatedAt: new Date() })
       .where(eq(chatSessions.id, session.id));
-    await notifySessionUpdate(session.id, session.orgId, session.userId);
+    notifySessionUpdate(session.id, session.orgId, session.userId);
     return c.body(null, 204);
   });
 
@@ -189,7 +190,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
           lastReadSeq: sql`GREATEST(coalesce(${chatSessions.lastReadSeq}, 0), coalesce(${chatSessions.lastAssistantSeq}, 0))`,
         })
         .where(eq(chatSessions.id, session.id));
-      await notifySessionUpdate(session.id, session.orgId, session.userId);
+      notifySessionUpdate(session.id, session.orgId, session.userId);
       return c.body(null, 204);
     },
   );
@@ -211,7 +212,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
       await deps.cleanupSessionFiles(session.id, tx);
       await tx.delete(chatSessions).where(eq(chatSessions.id, session.id));
     });
-    await notifySessionUpdate(session.id, session.orgId, session.userId);
+    notifySessionUpdate(session.id, session.orgId, session.userId);
     return c.body(null, 204);
   });
 
