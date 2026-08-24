@@ -677,7 +677,12 @@ latest, sidecar latest}` is byte-for-byte the same input as the supported
   Published packages are deliberately out of scope for public-export death:
   `@appstrate/core`, `@appstrate/afps-runtime` and the `@appstrate/module-*`
   packages are consumed out of tree, so "no in-repo reader" is not evidence.
-  knip treats every name in their `exports` map as an entry.
+  That exemption is obtained by hand, not inherited: knip derives no entry
+  from a package manifest — it reads neither `exports` nor `bin`, `main` or
+  `module` — and declaring an `entry` array for a workspace replaces even its
+  filename defaults. So each published workspace must re-declare every target
+  of its export map in `knip.config.ts`, or its whole public surface reads as
+  dead. Letting that drift is what produced a ~161-finding false red.
 
 ### Removed
 
