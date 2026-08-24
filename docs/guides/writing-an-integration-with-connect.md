@@ -548,7 +548,17 @@ fields under the `dev.appstrate/connect` vendor extension key in `_meta` (§10).
 > manifest carrying ONLY the spec-natural name is hidden from the catalog and
 > then fails at connect with `Auth '<key>' has no connect.tool declaration`.
 >
-> Until the two readers agree, **declare the name in both places**. The fix is
+> The divergence runs the other way too, and that half is quieter: a manifest
+> carrying ONLY the vendor-extension form connects fine, but `getConnectToolNames`
+> returns `[]` for it, so the login primitive is never added to the hide set and
+> stays in the model's tool catalog — the agent can see and call the credential
+> -acquisition tool. Nothing fails; the §"auto-hidden" claim below simply is not
+> true for that manifest. An author who followed the previous version of this
+> note (which blessed the vendor-only form as "accepted for back-compat") is
+> shipping exactly that today.
+>
+> Until the two readers agree, **declare the name in both places** — that is one
+> instruction with two independent reasons, one per direction. The fix is
 > one shared `connectToolName(auth)` checking both locations, called from
 > `getConnectToolNames` and from `OrchestratedStrategy`; the divergence is
 > tracked, not designed.

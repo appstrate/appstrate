@@ -50,9 +50,11 @@ lands on all four — the symbols a consumer imports today are
 Holding the version at the published `7.0.0` would have protected them at the
 TYPE level only, which is the second reason it was the wrong lever. `cloud`
 also binds one of these off the LIVE services object the platform injects at
-runtime — `services.setDocumentStorageLimit.bind(services)`
-(`cloud/src/billing/storage-entitlement.ts`) — and a compile-time pin does
-nothing for a property read at boot.
+runtime — until #1177 that read was
+`services.setDocumentStorageLimit.bind(services)`
+(`cloud/src/billing/storage-entitlement.ts`; it binds `setFileStorageLimit`
+today, see below) — and a compile-time pin does nothing for a property read at
+boot.
 
 That seam was held open for a while by a deprecated `setDocumentStorageLimit`
 alias declared beside the canonical `setFileStorageLimit`. **The alias is now

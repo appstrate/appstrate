@@ -1139,7 +1139,12 @@ describe("getDeclaredToolNames / getAvailableScopes", () => {
 });
 
 // ─────────────────────────────────────────────
-// getConnectToolNames — spec-natural + vendor _meta back-compat (R8b N-2)
+// getConnectToolNames — spec-natural ONLY (R8b N-2)
+//
+// No vendor-`_meta` fallback exists: `getConnectToolNames` reads
+// `connect.tool.name` and nothing else. The header claimed one for as long as
+// this section has existed, which is the same false back-compat the guide
+// correction deleted from `writing-an-integration-with-connect.md`.
 // ─────────────────────────────────────────────
 
 /** Build a custom-auth integration carrying a `connect.tool` block under the

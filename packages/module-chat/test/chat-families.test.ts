@@ -9,16 +9,24 @@
  * which reach their provider natively instead of through the proxy.
  *
  * The drift this catches: `pickModel` gates on `CHAT_USABLE_FAMILIES` BEFORE
- * a binding is ever built, so a proxy family added to `proxyBaseUrl` but not to
- * `CHAT_USABLE_FAMILIES` is silently unreachable — the model just disappears
- * from the picker with no error anywhere.
+ * a binding is ever built, so a proxy family added to `LLM_PROXY_ROUTES` but
+ * not to `CHAT_USABLE_FAMILIES` is silently unreachable — the model just
+ * disappears from the picker with no error anywhere.
  *
- * To catch that, the routed set must be DISCOVERED, never restated: a
+ * Note where that trigger now lives: `LLM_PROXY_ROUTES` is in
+ * `@appstrate/runner-pi`, a DIFFERENT package. Nobody reviewing a change to
+ * this one will be looking at it, which is exactly why the check has to be
+ * mechanical. (It used to be a private `proxyBaseUrl()` switch in
+ * `pi-chat/model-binding.ts`, deleted when the three copies of the path
+ * convention were consolidated — this docblock described that switch for a
+ * while after it was gone.)
+ *
+ * To catch the drift, the routed set must be DISCOVERED, never restated: a
  * hand-copied list of proxy families is a third source of truth that stays
- * green precisely when a new `case` is added to `proxyBaseUrl` alone. So we
- * enumerate every `ModelApiShape` and probe the binding resolver — which is
- * `proxyBaseUrl` (a private switch) made observable: it reports `unsupported`
- * for exactly the families that switch does not route.
+ * green precisely when a row is added to the table alone. So we enumerate
+ * every `ModelApiShape` and probe the binding resolver — the table made
+ * observable: it reports `unsupported` for exactly the families it does not
+ * route.
  *
  * The enumeration comes from `PROVIDER_BY_API`, a `Record<ModelApiShape, …>`:
  * being keyed by the closed union, the compiler refuses it a missing member,
@@ -50,7 +58,7 @@ function bind(apiShape: string) {
   });
 }
 
-/** `proxyBaseUrl` routes it ⟺ the resolver returns a ready proxy binding. */
+/** The table routes it ⟺ the resolver returns a ready proxy binding. */
 function isProxyRouted(apiShape: string): boolean {
   return bind(apiShape).status === "ready";
 }
