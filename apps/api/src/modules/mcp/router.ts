@@ -394,7 +394,7 @@ export function createMcpRouter(): Hono<AppEnv> {
       scope,
     };
     const tools = buildMcpTools(toolCtx);
-    // `resources/read` for `appfile://doc_xxx` — resolves through the same
+    // `resources/read` for `appfile://file_xxx` — resolves through the same
     // forwarded-auth in-process dispatch as the tools (files are NOT listed
     // under `resources/list`; they surface only via `resource_link`).
     const resources = buildFileResourceProvider(toolCtx);

@@ -249,9 +249,7 @@ export function payloadTooLarge(detail: string): ApiError {
 /**
  * 413 with a distinct `file_count_exceeded` problem type — the number of
  * files a run may reference as input or publish as output
- * (`RUN_MAX_DOCUMENTS`, an env var deliberately NOT renamed with the concept:
- * renaming it is an ops migration on every deployment for zero user-visible
- * gain) would be exceeded. Mirrors the per-file 413
+ * (`RUN_MAX_FILES`) would be exceeded. Mirrors the per-file 413
  * ({@link payloadTooLarge}) but branches separately so a client can tell "too
  * many files" from "one file too big".
  */

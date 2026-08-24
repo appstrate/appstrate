@@ -24,7 +24,7 @@ const SHARED_SECRET = "s".repeat(32);
 
 describe("signKeyringToken / verifyKeyringToken — round trip", () => {
   it("verifies a token under the domain it was signed with", () => {
-    const payload = { fileId: "doc_abc12345", exp: 1_800_000_000 };
+    const payload = { fileId: "file_abc12345", exp: 1_800_000_000 };
     const token = signKeyringToken(PREVIEW_DOMAIN, payload, SHARED_SECRET);
     expect(verifyKeyringToken<typeof payload>(PREVIEW_DOMAIN, token, SHARED_SECRET)).toEqual(
       payload,
@@ -64,8 +64,8 @@ describe("domain separation — asserted in BOTH directions", () => {
 
 describe("signature integrity", () => {
   it("rejects a tampered payload under the correct domain", () => {
-    const token = signKeyringToken(PREVIEW_DOMAIN, { fileId: "doc_mine" }, SHARED_SECRET);
-    const forgedBody = Buffer.from(JSON.stringify({ fileId: "doc_yours" }), "utf-8").toString(
+    const token = signKeyringToken(PREVIEW_DOMAIN, { fileId: "file_mine" }, SHARED_SECRET);
+    const forgedBody = Buffer.from(JSON.stringify({ fileId: "file_yours" }), "utf-8").toString(
       "base64url",
     );
     const tampered = `${forgedBody}.${token.slice(token.indexOf(".") + 1)}`;

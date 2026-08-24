@@ -184,7 +184,7 @@ describe("per-endpoint buckets", () => {
     app.route("/api", files);
 
     expect((await app.request("/api/files")).status).toBe(200);
-    expect((await app.request("/api/files/doc_1")).status).toBe(200);
+    expect((await app.request("/api/files/file_1")).status).toBe(200);
   });
 });
 

@@ -33,7 +33,7 @@ const RUN_ID = "run_1";
 
 function file(name: string): FileDto {
   return {
-    id: `doc_${name}`,
+    id: `file_${name}`,
     purpose: "agent_output",
     run_id: RUN_ID,
     packageId: "@acme/reporter",

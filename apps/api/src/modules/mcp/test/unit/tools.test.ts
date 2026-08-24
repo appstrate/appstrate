@@ -131,19 +131,19 @@ describe("retired pre-#1177 tool names", () => {
     // vocabulary sends `document_uri`. Without the rename the tool answers
     // "file_uri is required" for an argument the caller did supply.
     // Reaching the URI-PARSE failure is the whole signal: it can only happen
-    // once the argument has been renamed (`doc_x` is too short for FILE_ID_RE,
+    // once the argument has been renamed (`file_x` is too short for FILE_ID_RE,
     // so the parse rejects before any DB lookup — this stays a pure unit test).
     await expect(
       byName
         .get("validate_package_document")!
-        .handler({ document_uri: "appfile://doc_x" }, noExtra),
+        .handler({ document_uri: "appfile://file_x" }, noExtra),
     ).rejects.toThrow(/Not a file URI/);
     // Negative control: the canonical tool gets no rename, so the very same
     // arguments stop at the "required" guard before any lookup happens. If this
     // stopped holding, the assertion above would no longer distinguish a working
     // rename from a missing one.
     await expect(
-      byName.get("validate_package_file")!.handler({ document_uri: "appfile://doc_x" }, noExtra),
+      byName.get("validate_package_file")!.handler({ document_uri: "appfile://file_x" }, noExtra),
     ).rejects.toThrow(/file_uri is required/);
   });
 });

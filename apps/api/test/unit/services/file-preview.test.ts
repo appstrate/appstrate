@@ -26,18 +26,18 @@ function nowSec(): number {
 
 describe("preview token", () => {
   it("round-trips a valid, unexpired token", () => {
-    const token = signPreviewToken({ d: "doc_abc12345", o: "org_1", e: nowSec() + 60 }, SECRET);
+    const token = signPreviewToken({ d: "file_abc12345", o: "org_1", e: nowSec() + 60 }, SECRET);
     const payload = verifyPreviewToken(token, SECRET);
-    expect(payload).toEqual({ d: "doc_abc12345", o: "org_1", e: expect.any(Number) });
+    expect(payload).toEqual({ d: "file_abc12345", o: "org_1", e: expect.any(Number) });
   });
 
   it("rejects an expired token", () => {
-    const token = signPreviewToken({ d: "doc_abc12345", o: "org_1", e: nowSec() - 1 }, SECRET);
+    const token = signPreviewToken({ d: "file_abc12345", o: "org_1", e: nowSec() - 1 }, SECRET);
     expect(verifyPreviewToken(token, SECRET)).toBeNull();
   });
 
   it("rejects a tampered signature and a wrong secret", () => {
-    const token = signPreviewToken({ d: "doc_abc12345", o: "org_1", e: nowSec() + 60 }, SECRET);
+    const token = signPreviewToken({ d: "file_abc12345", o: "org_1", e: nowSec() + 60 }, SECRET);
     expect(verifyPreviewToken(token + "x", SECRET)).toBeNull();
     expect(verifyPreviewToken(token, "a-different-secret-key-abcdefgh")).toBeNull();
   });
@@ -45,7 +45,10 @@ describe("preview token", () => {
   it("verifies against every key in a rotation keyring", () => {
     const oldKey = "old-preview-secret-key-000000000";
     const newKey = "new-preview-secret-key-111111111";
-    const signedWithOld = signPreviewToken({ d: "doc_x1234567", o: "o", e: nowSec() + 60 }, oldKey);
+    const signedWithOld = signPreviewToken(
+      { d: "file_x1234567", o: "o", e: nowSec() + 60 },
+      oldKey,
+    );
     // Keyring [new, old]: new signs, both verify — an in-flight old token stays valid.
     expect(verifyPreviewToken(signedWithOld, [newKey, oldKey])).not.toBeNull();
   });
@@ -64,7 +67,7 @@ describe("preview token", () => {
     // rejection can only come from the domain-separated signature — not from a
     // missing field the upload verifier happens to check.
     const previewToken = signPreviewToken(
-      { d: "doc_abc12345", o: "org_1", e: nowSec() + 60, k: "files/x", s: 0, m: "" } as never,
+      { d: "file_abc12345", o: "org_1", e: nowSec() + 60, k: "files/x", s: 0, m: "" } as never,
       SECRET,
     );
     expect(verifyFsUploadToken(previewToken, SECRET)).toBeNull();

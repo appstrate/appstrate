@@ -21,8 +21,8 @@ import {
   parseFileUri,
 } from "../src/file-uri.ts";
 
-const A = "doc_aaaaaaaa";
-const B = "doc_bbbbbbbb";
+const A = "file_aaaaaaaa";
+const B = "file_bbbbbbbb";
 
 describe("extractFileIdsFromText", () => {
   it("finds an appfile:// URI embedded in surrounding prose", () => {
@@ -40,11 +40,11 @@ describe("extractFileIdsFromText", () => {
   });
 
   it("skips a malformed candidate whose id is too short", () => {
-    expect(extractFileIdsFromText("see appfile://doc_bad here")).toEqual([]);
+    expect(extractFileIdsFromText("see appfile://file_bad here")).toEqual([]);
   });
 
   it("keeps a valid URI even when a malformed one is present", () => {
-    expect(extractFileIdsFromText(`appfile://doc_bad and appfile://${A}`)).toEqual([A]);
+    expect(extractFileIdsFromText(`appfile://file_bad and appfile://${A}`)).toEqual([A]);
   });
 
   it("returns [] for text with no appfile:// URIs", () => {
@@ -87,8 +87,8 @@ describe("dual-scheme compatibility (#1177)", () => {
   });
 
   it("parseFileUri still rejects a malformed id under either scheme", () => {
-    expect(parseFileUri("appfile://doc_bad")).toBeNull();
-    expect(parseFileUri("document://doc_bad")).toBeNull();
+    expect(parseFileUri("appfile://file_bad")).toBeNull();
+    expect(parseFileUri("document://file_bad")).toBeNull();
     expect(parseFileUri(`file://${A}`)).toBeNull();
     expect(parseFileUri(`upload://upl_aaaaaaaa`)).toBeNull();
   });

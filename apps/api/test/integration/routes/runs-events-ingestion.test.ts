@@ -624,8 +624,8 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
   it("file.published events persist as run_logs(type='result', event='file')", async () => {
     const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
     const payload = {
-      file_id: "doc_abc12345",
-      uri: "appfile://doc_abc12345",
+      file_id: "file_abc12345",
+      uri: "appfile://file_abc12345",
       name: "report.html",
       mime: "text/html",
       size: 1234,
@@ -647,8 +647,8 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     expect(docLogs).toHaveLength(1);
     expect(docLogs[0]!.type).toBe("result");
     expect(docLogs[0]!.data).toMatchObject({
-      file_id: "doc_abc12345",
-      uri: "appfile://doc_abc12345",
+      file_id: "file_abc12345",
+      uri: "appfile://file_abc12345",
       name: "report.html",
       mime: "text/html",
       size: 1234,

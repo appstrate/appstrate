@@ -19,7 +19,6 @@ import {
 import { invalidRequest, notFound, parseBody, unauthorized } from "../lib/errors.ts";
 import { readJsonBody } from "../lib/request-body.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
-import { getClientIp } from "../lib/client-ip.ts";
 import { getOrgModelProviderCredential } from "../services/model-providers/credentials.ts";
 
 /**
@@ -115,8 +114,7 @@ async function handlePairRedeem(c: Context<AppEnv>) {
     );
   }
 
-  const fromIp = getClientIp(c);
-  const consumed = await consumePairing(token, fromIp === "unknown" ? undefined : fromIp);
+  const consumed = await consumePairing(token);
 
   const input = await readJsonBody(c, importBody);
 

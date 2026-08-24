@@ -797,11 +797,11 @@ function buildPiRunner(): PiRunner {
 }
 
 /** Compiled fallback when the platform did not forward its effective cap. */
-const DEFAULT_DOCUMENT_MAX_FILE_BYTES = 100 * 1024 * 1024;
+const DEFAULT_FILE_MAX_BYTES = 100 * 1024 * 1024;
 
 /**
  * Client-side per-file bound for the outputs sweep — the platform's EFFECTIVE
- * `DOCUMENT_MAX_FILE_BYTES` (forwarded by the run-launcher), falling back to the
+ * `FILE_MAX_BYTES` (forwarded by the run-launcher), falling back to the
  * compiled 100 MiB default when absent/unparseable. The server is the
  * authoritative gate (it cuts an over-cap stream mid-flight); this just avoids
  * streaming a file that is certain to be rejected. Reading the forwarded value
@@ -809,12 +809,12 @@ const DEFAULT_DOCUMENT_MAX_FILE_BYTES = 100 * 1024 * 1024;
  * sees large deliverables silently skipped here.
  */
 function resolveMaxFileBytes(): number {
-  const raw = process.env.DOCUMENT_MAX_FILE_BYTES;
+  const raw = process.env.FILE_MAX_BYTES;
   if (raw !== undefined && raw !== "") {
     const parsed = Number(raw);
     if (Number.isFinite(parsed) && parsed > 0) return parsed;
   }
-  return DEFAULT_DOCUMENT_MAX_FILE_BYTES;
+  return DEFAULT_FILE_MAX_BYTES;
 }
 
 const OUTPUTS_SWEEP_MAX_FILE_BYTES = resolveMaxFileBytes();

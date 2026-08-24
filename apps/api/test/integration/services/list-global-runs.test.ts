@@ -214,14 +214,14 @@ describe("listGlobalRuns", () => {
   });
 
   async function seedRunFile(runId: string, purpose: "agent_output" | "user_upload") {
-    const docId = `doc_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
+    const docId = `file_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
     await db.insert(files).values({
       id: docId,
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       purpose,
       runId,
-      storageKey: `documents/${ctx.defaultAppId}/${docId}/out.txt`,
+      storageKey: `files/${ctx.defaultAppId}/${docId}/out.txt`,
       name: "out.txt",
       mime: "text/plain",
       size: 3,
@@ -247,10 +247,10 @@ describe("listGlobalRuns", () => {
       status: "success",
       startedAt: new Date(),
       input: {
-        file: "appfile://doc_aaaaaaaa",
-        again: "appfile://doc_aaaaaaaa",
-        nested: { other: "appfile://doc_bbbbbbbb" },
-        bogus: "appfile://doc_x",
+        file: "appfile://file_aaaaaaaa",
+        again: "appfile://file_aaaaaaaa",
+        nested: { other: "appfile://file_bbbbbbbb" },
+        bogus: "appfile://file_x",
       },
     });
     await seedOutputFile(withDocs.id);

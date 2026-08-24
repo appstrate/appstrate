@@ -429,7 +429,7 @@ export function isStrippedInlineMarker(uri: string): boolean {
 /**
  * Reject when the combined size of a run's input files exceeds the
  * per-run ceiling. Pure so it can be unit-tested without a DB or request
- * context; callers pass `getEnv().WORKSPACE_MAX_DOCS_BYTES` as the limit.
+ * context; callers pass `getEnv().WORKSPACE_MAX_FILES_BYTES` as the limit.
  * Throws `payloadTooLarge` (413) — a policy violation, surfaced before the
  * run launches rather than as a mid-flight failure.
  */
@@ -691,9 +691,9 @@ export async function parseRequestInput(
         // inline + appfile:// refs) — the byte caps below do not bound the
         // COUNT (thousands of tiny files). Rejected before any streaming.
         const totalInputDocs = resolved.length + inline.length + docRefs.length;
-        if (totalInputDocs > getEnv().RUN_MAX_DOCUMENTS) {
+        if (totalInputDocs > getEnv().RUN_MAX_FILES) {
           throw fileCountExceeded(
-            `A run may carry at most ${getEnv().RUN_MAX_DOCUMENTS} input files (got ${totalInputDocs})`,
+            `A run may carry at most ${getEnv().RUN_MAX_FILES} input files (got ${totalInputDocs})`,
           );
         }
 
@@ -748,7 +748,7 @@ export async function parseRequestInput(
             ...inline.map((i) => ({ size: i.file.bytes.byteLength })),
             ...resolvedDocs.map(({ doc }) => ({ size: doc.size })),
           ],
-          getEnv().WORKSPACE_MAX_DOCS_BYTES,
+          getEnv().WORKSPACE_MAX_FILES_BYTES,
         );
 
         // Files quota + per-file cap on the uploads that will be
@@ -813,8 +813,8 @@ export async function parseRequestInput(
         );
         const fileWorkspaceNames = workspaceNames.slice(resolved.length + inline.length);
         // Storage keys for rollback — the workspace names are the on-disk /
-        // object-store segments (`{runId}/documents/<workspaceName>` — see
-        // `runWorkspaceFileKey`, whose `documents/` is storage layout, not vocabulary).
+        // object-store segments (`{runId}/files/<workspaceName>` — see
+        // `runWorkspaceFileKey`, whose `files/` segment is storage layout, not vocabulary).
         docNames = workspaceNames;
 
         // Stream each upload straight from the uploads bucket into the run
@@ -945,12 +945,12 @@ export async function parseRequestInput(
 
         // Materialization (D1): each consumed upload becomes a durable
         // `files` row. Mint the id now, rewrite the persisted input value
-        // `upload://upl_x` → `appfile://doc_y` (durable source of truth — a
+        // `upload://upl_x` → `appfile://file_y` (durable source of truth — a
         // rerun re-resolves the file, no upload retention window needed),
         // and defer the row insert to `prepareAndExecuteRun` (after `createRun`,
         // because `files.run_id` is a hard FK).
         pendingFiles = resolved.map(({ ref, id }) => {
-          const fileId = prefixedId("doc");
+          const fileId = prefixedId("file");
           const uri = fileUri(fileId);
           if (ref.index === undefined) {
             input[ref.fieldName] = uri;

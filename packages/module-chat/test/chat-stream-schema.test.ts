@@ -29,7 +29,7 @@ describe("chatStreamSchema file-part validation", () => {
   });
 
   it("accepts an appfile:// file part", () => {
-    const result = chatStreamSchema.safeParse(messageWithFileUrl("appfile://doc_abcdefgh"));
+    const result = chatStreamSchema.safeParse(messageWithFileUrl("appfile://file_abcdefgh"));
     expect(result.success).toBe(true);
   });
 
@@ -37,7 +37,7 @@ describe("chatStreamSchema file-part validation", () => {
     // Chat messages persisted before #1177 carry the old scheme; a reload
     // replays them through this same schema, so rejecting it would make an old
     // conversation unsendable.
-    const result = chatStreamSchema.safeParse(messageWithFileUrl("document://doc_abcdefgh"));
+    const result = chatStreamSchema.safeParse(messageWithFileUrl("document://file_abcdefgh"));
     expect(result.success).toBe(true);
   });
 

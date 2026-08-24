@@ -130,7 +130,7 @@ describe("chat session delete — file teardown", () => {
     expect(jobs).toHaveLength(1);
     // The persisted reason keeps its pre-#1177 spelling: it is live data in
     // `storage_deletion_jobs`, deliberately left alone by the rename.
-    expect(jobs[0]!.reason).toBe("document_deleted");
+    expect(jobs[0]!.reason).toBe("file_deleted");
   });
 
   it("rolls the teardown back when the session-row delete fails (atomic)", async () => {

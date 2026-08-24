@@ -30,10 +30,10 @@ const fileSchema = {
   ],
   properties: {
     object: { type: "string", enum: ["file"] },
-    id: { type: "string", description: "Opaque file id (`doc_…`)." },
+    id: { type: "string", description: "Opaque file id (`file_…`)." },
     uri: {
       type: "string",
-      description: "Stable `appfile://doc_…` reference — pass in a run's file input field.",
+      description: "Stable `appfile://file_…` reference — pass in a run's file input field.",
     },
     purpose: { type: "string", enum: ["user_upload", "agent_output"] },
     applicationId: { type: "string" },

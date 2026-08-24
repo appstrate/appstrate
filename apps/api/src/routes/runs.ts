@@ -694,7 +694,7 @@ export function createRunsRouter() {
       // schema off `preflight.manifest`, so the field has to be declared before
       // it walks the input. Everything after this block is the ordinary file
       // path — ACL (`getFileForActor`), byte + count caps, streaming into
-      // `documents/`, `file_links` — and the platform prompt announces the
+      // `files/`, `file_links` — and the platform prompt announces the
       // mounted files exactly as it does for an uploaded file.
       assertContextFilesFieldAvailable(preflight.manifest, body.input);
       // B2 — the explicit argument. Shape-checked first: a malformed URI 400s

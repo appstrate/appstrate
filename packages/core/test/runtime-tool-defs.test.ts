@@ -116,8 +116,8 @@ describe("reEmitRuntimeToolEvents", () => {
 
 describe("buildPublishFileDef", () => {
   const publishedFile: PublishedFile = {
-    id: "doc_primary",
-    uri: "appfile://doc_primary",
+    id: "file_primary",
+    uri: "appfile://file_primary",
     name: "Final report.html",
     mime: "text/html",
     size: 42,
@@ -165,8 +165,8 @@ describe("buildPublishFileDef", () => {
   it("emits a file.published event with no presentation field", () => {
     expect(filePublishedEvent(publishedFile)).toEqual({
       type: "file.published",
-      file_id: "doc_primary",
-      uri: "appfile://doc_primary",
+      file_id: "file_primary",
+      uri: "appfile://file_primary",
       name: "Final report.html",
       mime: "text/html",
       size: 42,
@@ -239,13 +239,13 @@ describe("run-event type compatibility (#1177)", () => {
     reEmitRuntimeToolEvents(
       {
         [RUNTIME_TOOL_EVENTS_META_KEY]: [
-          { type: "document.published", document_id: "doc_legacy" },
-          { type: "file.published", file_id: "doc_new" },
+          { type: "document.published", document_id: "file_legacy" },
+          { type: "file.published", file_id: "file_new" },
           { type: "forged.event", x: 1 },
         ],
       },
       (e) => emitted.push(e),
     );
-    expect(emitted).toEqual([{ type: "file.published", file_id: "doc_new" }]);
+    expect(emitted).toEqual([{ type: "file.published", file_id: "file_new" }]);
   });
 });

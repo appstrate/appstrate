@@ -203,7 +203,7 @@ function contextFilesArgument(args: Record<string, unknown>): {
     return {
       error:
         `\`${name}\` must be a JSON array of appfile:// URIs (e.g. ` +
-        '`["appfile://doc_abc123"]`)' +
+        '`["appfile://file_abc123"]`)' +
         (typeof value === "string"
           ? " — pass the array itself, not a single URI and not a JSON-encoded string."
           : ".") +

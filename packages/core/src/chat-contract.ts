@@ -86,8 +86,8 @@ export interface ChatAttachmentRequest {
   /** Container the materialized file is anchored to (session-scoped ACL). */
   chatSessionId: string;
   /**
-   * `upload://upl_x` (materialize) or `appfile://doc_x` (validate access) — the
-   * legacy `document://doc_x` spelling is still accepted.
+   * `upload://upl_x` (materialize) or `appfile://file_x` (validate access) — the
+   * legacy `document://file_x` spelling is still accepted.
    */
   uri: string;
 }
@@ -100,7 +100,7 @@ export interface ChatAttachmentRequest {
  * lifetime) and what the model is told the attached file is addressed by.
  */
 export interface ResolvedChatAttachment {
-  /** `appfile://doc_x` — the durable, stable URI, always in canonical form. */
+  /** `appfile://file_x` — the durable, stable URI, always in canonical form. */
   uri: string;
   name: string;
   mime: string;

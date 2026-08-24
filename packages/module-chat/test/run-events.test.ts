@@ -118,7 +118,7 @@ describe("run-events helpers", () => {
       duration: null,
       // Retired field a not-yet-deployed server may still send (#1177): dropped
       // like any other extra, never a parse failure.
-      primary_document_id: "doc_primary",
+      primary_document_id: "file_primary",
       agentScope: "@inline",
       cost: 0,
     });
@@ -160,8 +160,8 @@ describe("run-events helpers", () => {
         done: true,
         files: [
           {
-            id: "doc_1",
-            uri: "appfile://doc_1",
+            id: "file_1",
+            uri: "appfile://file_1",
             name: "report.html",
             mime: "text/html",
             size: 12,
@@ -169,15 +169,15 @@ describe("run-events helpers", () => {
         ],
       }),
     ).toEqual([
-      { id: "doc_1", uri: "appfile://doc_1", name: "report.html", mime: "text/html", size: 12 },
+      { id: "file_1", uri: "appfile://file_1", name: "report.html", mime: "text/html", size: 12 },
     ]);
 
     // Nested under the invoke_operation envelope's `body`.
     expect(
       extractRunFiles({
-        body: { id: "run_1", files: [{ id: "doc_2", uri: "appfile://doc_2", name: "a.pdf" }] },
+        body: { id: "run_1", files: [{ id: "file_2", uri: "appfile://file_2", name: "a.pdf" }] },
       }),
-    ).toEqual([{ id: "doc_2", uri: "appfile://doc_2", name: "a.pdf" }]);
+    ).toEqual([{ id: "file_2", uri: "appfile://file_2", name: "a.pdf" }]);
 
     // No files → empty.
     expect(extractRunFiles({ id: "run_1", status: "success" })).toEqual([]);
@@ -192,8 +192,8 @@ describe("run-events helpers", () => {
         type: "result",
         event: "file",
         data: {
-          file_id: "doc_9",
-          uri: "appfile://doc_9",
+          file_id: "file_9",
+          uri: "appfile://file_9",
           name: "out.csv",
           mime: "text/csv",
           size: 40,
@@ -206,8 +206,8 @@ describe("run-events helpers", () => {
     ];
     expect(publishedFilesFromLogs(logs)).toEqual([
       {
-        id: "doc_9",
-        uri: "appfile://doc_9",
+        id: "file_9",
+        uri: "appfile://file_9",
         name: "out.csv",
         mime: "text/csv",
         size: 40,
@@ -216,21 +216,21 @@ describe("run-events helpers", () => {
   });
 
   it("merges regular file lists without projecting any featured flag", () => {
-    const persisted = [{ id: "doc_1", uri: "appfile://doc_1", name: "report" }];
+    const persisted = [{ id: "file_1", uri: "appfile://file_1", name: "report" }];
     const live = [
       {
-        id: "doc_1",
-        uri: "appfile://doc_1",
+        id: "file_1",
+        uri: "appfile://file_1",
         name: "report.html",
         mime: "text/html",
       },
-      { id: "doc_2", uri: "appfile://doc_2", name: "data.json" },
+      { id: "file_2", uri: "appfile://file_2", name: "data.json" },
     ];
     const merged = mergeRunFiles(persisted, live);
-    expect(merged.map((d) => d.id)).toEqual(["doc_1", "doc_2"]);
+    expect(merged.map((d) => d.id)).toEqual(["file_1", "file_2"]);
     expect(merged[0]).toEqual({
-      id: "doc_1",
-      uri: "appfile://doc_1",
+      id: "file_1",
+      uri: "appfile://file_1",
       name: "report.html",
       mime: "text/html",
     });
@@ -240,14 +240,14 @@ describe("run-events helpers", () => {
     // Image part: the converter puts the URI in the `image` field.
     expect(
       resolveAttachmentContent([
-        { type: "image", image: "appfile://doc_abcd1234", filename: "photo.png" },
+        { type: "image", image: "appfile://file_abcd1234", filename: "photo.png" },
       ]),
-    ).toEqual({ kind: "file", id: "doc_abcd1234" });
+    ).toEqual({ kind: "file", id: "file_abcd1234" });
 
     // File part: the URI lives in the `data` field instead.
-    expect(resolveAttachmentContent([{ type: "file", data: "appfile://doc_efgh5678" }])).toEqual({
+    expect(resolveAttachmentContent([{ type: "file", data: "appfile://file_efgh5678" }])).toEqual({
       kind: "file",
-      id: "doc_efgh5678",
+      id: "file_efgh5678",
     });
 
     // Just-sent optimistic upload:// (not yet materialized to appfile://) →
@@ -305,11 +305,11 @@ describe("autoPresentFile", () => {
   });
 
   it("presents the single produced file, with nothing declared by the agent", () => {
-    expect(autoPresentFile({ files: [file("doc_1")], ...settled })).toEqual(file("doc_1"));
+    expect(autoPresentFile({ files: [file("file_1")], ...settled })).toEqual(file("file_1"));
   });
 
   it("presents nothing when the run produced several files — the user picks", () => {
-    const three = [file("doc_1"), file("doc_2"), file("doc_3")];
+    const three = [file("file_1"), file("file_2"), file("file_3")];
     expect(autoPresentFile({ files: three, ...settled })).toBeUndefined();
   });
 
@@ -317,7 +317,7 @@ describe("autoPresentFile", () => {
     // Same first file, four moments of the same run. Only the last one — the
     // terminal status WITH the produced-file sweep completed — may present
     // anything.
-    const one = [file("doc_1")];
+    const one = [file("file_1")];
     expect(autoPresentFile({ files: one, status: "running", sweepDone: false })).toBeUndefined();
     expect(autoPresentFile({ files: one, status: undefined, sweepDone: false })).toBeUndefined();
     // Terminal, but the sweep that would reveal files 2 and 3 has not landed.
@@ -326,14 +326,14 @@ describe("autoPresentFile", () => {
     // handshaking, so `live` was still its initial `false`.
     expect(autoPresentFile({ files: one, status: "success", sweepDone: false })).toBeUndefined();
     expect(autoPresentFile({ files: one, status: "success", sweepDone: true })).toEqual(
-      file("doc_1"),
+      file("file_1"),
     );
   });
 
   it("still presents the single file of a run that failed", () => {
     // A failed run that nonetheless published one file has a result to show.
-    expect(autoPresentFile({ files: [file("doc_1")], status: "failed", sweepDone: true })).toEqual(
-      file("doc_1"),
+    expect(autoPresentFile({ files: [file("file_1")], status: "failed", sweepDone: true })).toEqual(
+      file("file_1"),
     );
   });
 
@@ -341,22 +341,22 @@ describe("autoPresentFile", () => {
     // Three files, one of them flagged primary by an old runtime image. The
     // flag changes nothing: three produced files present nothing.
     const logs: RunLogLine[] = [
-      { id: 1, event: "file", data: { file_id: "doc_a", name: "a.md" } },
+      { id: 1, event: "file", data: { file_id: "file_a", name: "a.md" } },
       {
         id: 2,
         event: "file",
-        data: { file_id: "doc_b", name: "b.md", presentation: "primary" },
+        data: { file_id: "file_b", name: "b.md", presentation: "primary" },
       },
-      { id: 3, event: "file", data: { file_id: "doc_c", name: "c.md" } },
+      { id: 3, event: "file", data: { file_id: "file_c", name: "c.md" } },
     ];
     const files = publishedFilesFromLogs(logs);
-    expect(files.map((d) => d.id)).toEqual(["doc_a", "doc_b", "doc_c"]);
+    expect(files.map((d) => d.id)).toEqual(["file_a", "file_b", "file_c"]);
     expect(autoPresentFile({ files, ...settled })).toBeUndefined();
 
     // And a lone file flagged `primary` is presented because it is the ONLY
     // one, not because it was flagged.
     const lone = publishedFilesFromLogs([logs[1]!]);
-    expect(autoPresentFile({ files: lone, ...settled })?.id).toBe("doc_b");
+    expect(autoPresentFile({ files: lone, ...settled })?.id).toBe("file_b");
   });
 
   it("counts only publications: a run's input attachments are not produced files", () => {
@@ -365,13 +365,13 @@ describe("autoPresentFile", () => {
     // sweep emit those. A run that consumed two inputs and produced one file
     // is a single-file run.
     const logs: RunLogLine[] = [
-      { id: 1, event: "input", data: { file_id: "doc_in_1", name: "brief.pdf" } },
-      { id: 2, event: "log", message: "reading doc_in_2" },
-      { id: 3, event: "file", data: { file_id: "doc_out", name: "report.md" } },
+      { id: 1, event: "input", data: { file_id: "file_in_1", name: "brief.pdf" } },
+      { id: 2, event: "log", message: "reading file_in_2" },
+      { id: 3, event: "file", data: { file_id: "file_out", name: "report.md" } },
     ];
     const files = publishedFilesFromLogs(logs);
-    expect(files.map((d) => d.id)).toEqual(["doc_out"]);
-    expect(autoPresentFile({ files, ...settled })?.id).toBe("doc_out");
+    expect(files.map((d) => d.id)).toEqual(["file_out"]);
+    expect(autoPresentFile({ files, ...settled })?.id).toBe("file_out");
 
     // A run that only consumed inputs produced nothing to present.
     expect(
@@ -409,7 +409,7 @@ describe("autoPresentFile", () => {
  */
 describe("producedFilesFromFileList", () => {
   const row = (over: Record<string, unknown>) => ({
-    id: "doc_x",
+    id: "file_x",
     name: "x.md",
     mime: "text/markdown",
     size: 3,
@@ -419,10 +419,10 @@ describe("producedFilesFromFileList", () => {
   });
 
   it("maps the list rows to chips, deriving the canonical uri from the id", () => {
-    const payload = { object: "list", data: [row({ id: "doc_a", name: "a.md" })] };
+    const payload = { object: "list", data: [row({ id: "file_a", name: "a.md" })] };
     expect(producedFilesFromFileList(payload, "run_1")).toEqual({
       files: [
-        { id: "doc_a", uri: "appfile://doc_a", name: "a.md", mime: "text/markdown", size: 3 },
+        { id: "file_a", uri: "appfile://file_a", name: "a.md", mime: "text/markdown", size: 3 },
       ],
       hasMore: false,
     });
@@ -433,7 +433,7 @@ describe("producedFilesFromFileList", () => {
     // field. Discarding it truncated a >100-file run's chips row silently.
     // It never endangers the auto-present rule — a truncated page holds at
     // least 100 rows, never exactly 1 — so surfacing it is the whole fix.
-    const payload = { object: "list", data: [row({ id: "doc_a" })], hasMore: true };
+    const payload = { object: "list", data: [row({ id: "file_a" })], hasMore: true };
     expect(producedFilesFromFileList(payload, "run_1")?.hasMore).toBe(true);
   });
 
@@ -445,13 +445,13 @@ describe("producedFilesFromFileList", () => {
     // silently switch the auto-present rule off.
     const payload = {
       data: [
-        row({ id: "doc_in", run_id: "run_0" }),
-        row({ id: "doc_out" }),
-        row({ id: "doc_upload", purpose: "user_upload" }),
+        row({ id: "file_in", run_id: "run_0" }),
+        row({ id: "file_out" }),
+        row({ id: "file_upload", purpose: "user_upload" }),
       ],
     };
     expect(producedFilesFromFileList(payload, "run_1")?.files.map((f) => f.id)).toEqual([
-      "doc_out",
+      "file_out",
     ]);
   });
 
@@ -482,13 +482,13 @@ describe("producedFilesFromFileList", () => {
 describe("nameless publication frames", () => {
   it("keeps the file, with a placeholder name, instead of dropping it", () => {
     const logs: RunLogLine[] = [
-      { id: 1, type: "result", event: "file", data: { file_id: "doc_1", name: null } },
-      { id: 2, type: "result", event: "file", data: { file_id: "doc_2", name: "b.md" } },
+      { id: 1, type: "result", event: "file", data: { file_id: "file_1", name: null } },
+      { id: 2, type: "result", event: "file", data: { file_id: "file_2", name: "b.md" } },
     ];
     const files = publishedFilesFromLogs(logs);
     // Two produced files, so nothing is auto-presented. Dropping the nameless
     // one would leave a count of 1 and open the WRONG file.
-    expect(files.map((f) => f.id)).toEqual(["doc_1", "doc_2"]);
+    expect(files.map((f) => f.id)).toEqual(["file_1", "file_2"]);
     expect(files[0]?.name).toBe("file");
     expect(autoPresentFile({ files, status: "success", sweepDone: true })).toBeUndefined();
   });
@@ -554,7 +554,7 @@ describe("shouldRaiseSweepDone", () => {
     // `/api/files` — the read that exists to cover exactly that case — answers
     // 500. Settling here auto-opens the FIRST of two files.
     const fromLogs = publishedFilesFromLogs([
-      { id: 1, type: "result", event: "file", data: { file_id: "doc_1", name: "a.md" } },
+      { id: 1, type: "result", event: "file", data: { file_id: "file_1", name: "a.md" } },
     ]);
     expect(fromLogs).toHaveLength(1);
     const sweepDone = shouldRaiseSweepDone({
@@ -621,15 +621,15 @@ describe("legacy `document` wire shapes", () => {
         id: 1,
         type: "result",
         event: "document",
-        data: { document_id: "doc_legacy1", name: "rapport.md", mime: "text/markdown", size: 12 },
+        data: { document_id: "file_legacy1", name: "rapport.md", mime: "text/markdown", size: 12 },
       },
     ];
     expect(publishedFilesFromLogs(logs)).toEqual([
       {
-        id: "doc_legacy1",
+        id: "file_legacy1",
         // No `uri` on the frame — derived through core's `fileUri()`, which
         // emits the canonical scheme even for a legacy id.
-        uri: "appfile://doc_legacy1",
+        uri: "appfile://file_legacy1",
         name: "rapport.md",
         mime: "text/markdown",
         size: 12,
@@ -642,25 +642,25 @@ describe("legacy `document` wire shapes", () => {
       {
         id: 1,
         event: "document",
-        data: { document_id: "doc_legacy2", uri: "document://doc_legacy2", name: "a.pdf" },
+        data: { document_id: "file_legacy2", uri: "document://file_legacy2", name: "a.pdf" },
       },
     ];
-    expect(publishedFilesFromLogs(logs)[0]?.uri).toBe("document://doc_legacy2");
+    expect(publishedFilesFromLogs(logs)[0]?.uri).toBe("document://file_legacy2");
   });
 
   it("feeds the derived presentation rule from legacy frames alone", () => {
     // One legacy publication = a single-file run, exactly as a new-tag frame.
     const one = publishedFilesFromLogs([
-      { id: 1, event: "document", data: { document_id: "doc_only", name: "only.md" } },
+      { id: 1, event: "document", data: { document_id: "file_only", name: "only.md" } },
     ]);
-    expect(autoPresentFile({ files: one, ...settled })?.id).toBe("doc_only");
+    expect(autoPresentFile({ files: one, ...settled })?.id).toBe("file_only");
 
     // Mixed old/new tags in the same run still count as two — nothing presented.
     const mixed = publishedFilesFromLogs([
-      { id: 1, event: "document", data: { document_id: "doc_old", name: "old.md" } },
-      { id: 2, event: "file", data: { file_id: "doc_new", name: "new.md" } },
+      { id: 1, event: "document", data: { document_id: "file_old", name: "old.md" } },
+      { id: 2, event: "file", data: { file_id: "file_new", name: "new.md" } },
     ]);
-    expect(mixed.map((f) => f.id)).toEqual(["doc_old", "doc_new"]);
+    expect(mixed.map((f) => f.id)).toEqual(["file_old", "file_new"]);
     expect(autoPresentFile({ files: mixed, ...settled })).toBeUndefined();
   });
 
@@ -668,21 +668,21 @@ describe("legacy `document` wire shapes", () => {
     // Persisted chat messages from before the rename carry the old scheme in
     // their file parts; core's `parseFileUri` accepts both, and nothing here
     // re-implements scheme parsing with a hardcoded prefix.
-    expect(resolveAttachmentContent([{ type: "image", image: "document://doc_abcd1234" }])).toEqual(
-      { kind: "file", id: "doc_abcd1234" },
-    );
-    expect(resolveAttachmentContent([{ type: "file", data: "document://doc_efgh5678" }])).toEqual({
+    expect(
+      resolveAttachmentContent([{ type: "image", image: "document://file_abcd1234" }]),
+    ).toEqual({ kind: "file", id: "file_abcd1234" });
+    expect(resolveAttachmentContent([{ type: "file", data: "document://file_efgh5678" }])).toEqual({
       kind: "file",
-      id: "doc_efgh5678",
+      id: "file_efgh5678",
     });
   });
 
   it("still reads a persisted tool result whose items carry `document_id`", () => {
     expect(
       extractRunFiles({
-        body: { id: "run_1", files: [{ document_id: "doc_x", name: "x.md" }] },
+        body: { id: "run_1", files: [{ document_id: "file_x", name: "x.md" }] },
       }),
-    ).toEqual([{ id: "doc_x", uri: "appfile://doc_x", name: "x.md" }]);
+    ).toEqual([{ id: "file_x", uri: "appfile://file_x", name: "x.md" }]);
   });
 
   it("still reads a persisted tool result whose list sits under `documents`", () => {
@@ -697,8 +697,8 @@ describe("legacy `document` wire shapes", () => {
         done: true,
         documents: [
           {
-            id: "doc_1",
-            uri: "document://doc_1",
+            id: "file_1",
+            uri: "document://file_1",
             name: "report.html",
             mime: "text/html",
             size: 12,
@@ -706,22 +706,22 @@ describe("legacy `document` wire shapes", () => {
         ],
       }),
     ).toEqual([
-      { id: "doc_1", uri: "document://doc_1", name: "report.html", mime: "text/html", size: 12 },
+      { id: "file_1", uri: "document://file_1", name: "report.html", mime: "text/html", size: 12 },
     ]);
 
     expect(
       extractRunFiles({
-        body: { id: "run_1", documents: [{ document_id: "doc_2", name: "a.pdf" }] },
+        body: { id: "run_1", documents: [{ document_id: "file_2", name: "a.pdf" }] },
       }),
-    ).toEqual([{ id: "doc_2", uri: "appfile://doc_2", name: "a.pdf" }]);
+    ).toEqual([{ id: "file_2", uri: "appfile://file_2", name: "a.pdf" }]);
   });
 
   it("prefers the canonical `files` key when a payload carries both", () => {
     expect(
       extractRunFiles({
-        files: [{ id: "doc_new", name: "new.md" }],
-        documents: [{ id: "doc_old", name: "old.md" }],
+        files: [{ id: "file_new", name: "new.md" }],
+        documents: [{ id: "file_old", name: "old.md" }],
       }).map((f) => f.id),
-    ).toEqual(["doc_new"]);
+    ).toEqual(["file_new"]);
   });
 });

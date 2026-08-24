@@ -399,8 +399,8 @@ export function createRunsEventsRouter() {
   // payload streams straight to storage without being buffered for the hash).
   //
   // The bytes stream through a counting/hashing/cap transform into the durable
-  // file bucket (`documents`, see FILES_BUCKET — the table was renamed by
-  // #1177, the bucket was not): the per-file cap and per-run output budget cut the
+  // file bucket (`files`, see FILES_BUCKET): the per-file cap and per-run
+  // output budget cut the
   // stream mid-flight (413, deleting any partial object), the org quota is
   // enforced transactionally (403). Idempotent for the sweep's retries: an
   // identical (run, sha256, name) upload returns the existing file (200).

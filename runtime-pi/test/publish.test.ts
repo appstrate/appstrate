@@ -108,7 +108,7 @@ beforeAll(() => {
         }
         return new Response(`error ${status}`, { status, headers });
       }
-      const id = `doc_${sha256.slice(0, 12)}`;
+      const id = `file_${sha256.slice(0, 12)}`;
       return Response.json({
         id,
         uri: `appfile://${id}`,
@@ -628,7 +628,7 @@ describe("sweepOutputs", () => {
           if (sha === failSha) return new Response("boom", { status: 500 });
           const rawHeader = (init?.headers as Record<string, string>)["X-File-Name"]!;
           const name = sanitizeFilename(decodeFilenameHeader(rawHeader)!);
-          const id = `doc_${sha.slice(0, 12)}`;
+          const id = `file_${sha.slice(0, 12)}`;
           return Response.json({
             id,
             uri: `appfile://${id}`,
@@ -852,7 +852,7 @@ describe("buildPublishFileDef (publish_file tool)", () => {
     const events = (result._meta?.["dev.appstrate/events"] ?? []) as Array<Record<string, unknown>>;
     expect(events).toHaveLength(1);
     expect(events[0]!.type).toBe("file.published");
-    expect(events[0]!.file_id).toMatch(/^doc_/);
+    expect(events[0]!.file_id).toMatch(/^file_/);
     expect(events[0]!).not.toHaveProperty("presentation");
   });
 

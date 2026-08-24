@@ -228,8 +228,8 @@ describe("run_and_wait client", () => {
           object: "list",
           data: [
             {
-              id: "doc_1",
-              uri: "appfile://doc_1",
+              id: "file_1",
+              uri: "appfile://file_1",
               name: "report.html",
               mime: "text/html",
               size: 2048,
@@ -265,8 +265,8 @@ describe("run_and_wait client", () => {
       done: true,
       files: [
         {
-          id: "doc_1",
-          uri: "appfile://doc_1",
+          id: "file_1",
+          uri: "appfile://file_1",
           name: "report.html",
           mime: "text/html",
           size: 2048,
@@ -306,8 +306,8 @@ describe("run_and_wait client", () => {
         object: "list",
         data: [
           {
-            id: "doc_in",
-            uri: "appfile://doc_in",
+            id: "file_in",
+            uri: "appfile://file_in",
             name: "input.pdf",
             mime: "application/pdf",
             size: 10,
@@ -315,8 +315,8 @@ describe("run_and_wait client", () => {
             run_id: "run_0",
           },
           {
-            id: "doc_out",
-            uri: "appfile://doc_out",
+            id: "file_out",
+            uri: "appfile://file_out",
             name: "report.html",
             mime: "text/html",
             size: 20,
@@ -324,8 +324,8 @@ describe("run_and_wait client", () => {
             run_id: "run_1",
           },
           {
-            id: "doc_detached",
-            uri: "appfile://doc_detached",
+            id: "file_detached",
+            uri: "appfile://file_detached",
             name: "orphan.txt",
             mime: "text/plain",
             size: 30,
@@ -345,8 +345,8 @@ describe("run_and_wait client", () => {
       }),
     ).resolves.toEqual([
       {
-        id: "doc_out",
-        uri: "appfile://doc_out",
+        id: "file_out",
+        uri: "appfile://file_out",
         name: "report.html",
         mime: "text/html",
         size: 20,
@@ -420,7 +420,7 @@ describe("launchRunAndWait launch body", () => {
         kind: "inline",
         manifest: { display_name: "Analyse café" },
         prompt: "do it",
-        input: { screenshot: "appfile://doc_abc12345" },
+        input: { screenshot: "appfile://file_abc12345" },
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
@@ -435,7 +435,7 @@ describe("launchRunAndWait launch body", () => {
           display_name: "Analyse café",
         }),
         prompt: expect.stringContaining("do it"),
-        input: { screenshot: "appfile://doc_abc12345" },
+        input: { screenshot: "appfile://file_abc12345" },
       },
     });
     const body = captured()?.body as { manifest?: unknown } | undefined;
@@ -559,13 +559,13 @@ describe("launchRunAndWait launch body", () => {
         kind: "inline",
         manifest: { name: "tmp" },
         prompt: "compile",
-        context_files: ["appfile://doc_abc12345", "appfile://doc_def67890"],
+        context_files: ["appfile://file_abc12345", "appfile://file_def67890"],
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
 
     expect(captured()?.body).toMatchObject({
-      context_files: ["appfile://doc_abc12345", "appfile://doc_def67890"],
+      context_files: ["appfile://file_abc12345", "appfile://file_def67890"],
     });
   });
 
@@ -603,13 +603,13 @@ describe("launchRunAndWait launch body", () => {
         kind: "inline",
         manifest: { name: "tmp" },
         prompt: "compile",
-        context_documents: ["appfile://doc_abc12345"],
+        context_documents: ["appfile://file_abc12345"],
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
 
     const body = captured()?.body as Record<string, unknown>;
-    expect(body).toMatchObject({ context_files: ["appfile://doc_abc12345"] });
+    expect(body).toMatchObject({ context_files: ["appfile://file_abc12345"] });
     // One spelling on the wire, whatever the model spelled.
     expect(body).not.toHaveProperty("context_documents");
   });
@@ -622,19 +622,19 @@ describe("launchRunAndWait launch body", () => {
         kind: "inline",
         manifest: { name: "tmp" },
         prompt: "compile",
-        context_files: ["appfile://doc_abc12345"],
-        context_documents: ["appfile://doc_def67890"],
+        context_files: ["appfile://file_abc12345"],
+        context_documents: ["appfile://file_def67890"],
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
 
-    expect(captured()?.body).toMatchObject({ context_files: ["appfile://doc_abc12345"] });
+    expect(captured()?.body).toMatchObject({ context_files: ["appfile://file_abc12345"] });
   });
 
   // A wrong-typed argument used to be indistinguishable from an absent one:
   // dropped on the floor, run launched with no file, nothing anywhere saying so.
   it("refuses a context_files that is not an array instead of dropping it", async () => {
-    for (const value of ["appfile://doc_abc12345", '["appfile://doc_abc12345"]', 42]) {
+    for (const value of ["appfile://file_abc12345", '["appfile://file_abc12345"]', 42]) {
       const { fetchImpl, captured } = captureLaunch();
 
       const result = await launchRunAndWait(
@@ -659,7 +659,7 @@ describe("launchRunAndWait launch body", () => {
         kind: "inline",
         manifest: { name: "tmp" },
         prompt: "compile",
-        context_documents: "appfile://doc_abc12345",
+        context_documents: "appfile://file_abc12345",
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
@@ -678,7 +678,7 @@ describe("launchRunAndWait launch body", () => {
         kind: "agent",
         scope: "@acme",
         name: "writer",
-        context_documents: ["appfile://doc_abc12345"],
+        context_documents: ["appfile://file_abc12345"],
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
@@ -698,7 +698,7 @@ describe("launchRunAndWait launch body", () => {
         kind: "agent",
         scope: "@acme",
         name: "writer",
-        context_files: ["appfile://doc_abc12345"],
+        context_files: ["appfile://file_abc12345"],
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );

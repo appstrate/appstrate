@@ -19,8 +19,8 @@ import { ApiError } from "../../src/lib/errors.ts";
 import { isFileField, asJSONSchemaObject, type JSONSchemaObject } from "@appstrate/core/form";
 import type { AgentManifest } from "../../src/types/index.ts";
 
-const DOC_A_ID = "doc_aaaaaaaa";
-const DOC_B_ID = "doc_bbbbbbbb";
+const DOC_A_ID = "file_aaaaaaaa";
+const DOC_B_ID = "file_bbbbbbbb";
 const DOC_A = `appfile://${DOC_A_ID}`;
 const DOC_B = `appfile://${DOC_B_ID}`;
 

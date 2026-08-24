@@ -589,7 +589,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: "3.0.0" },
       applicationId: ctx.defaultAppId,
-      input: { file: "appfile://doc_abc123" },
+      input: { file: "appfile://file_abc123" },
     });
 
     expect(res.status).toBe(400);

@@ -408,7 +408,7 @@ async function runPlatformContainerImpl(
       // Forward the effective per-file cap so the runtime's outputs
       // sweep agrees with the server-authoritative gate (avoids silently
       // skipping large deliverables when an operator raises the platform cap).
-      maxFileBytes: getEnv().DOCUMENT_MAX_FILE_BYTES,
+      maxFileBytes: getEnv().FILE_MAX_BYTES,
       forwardProxyUrl: skipSidecar ? undefined : boundary.sidecarEndpoints.forwardProxyUrl,
       noProxy: skipSidecar ? undefined : boundary.sidecarEndpoints.noProxy,
       sink: {

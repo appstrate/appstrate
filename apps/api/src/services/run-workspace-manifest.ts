@@ -8,7 +8,7 @@
  *
  *   `<runId>.afps`                  the AFPS bundle (manifest + prompt + skills)
  *   `<runId>/manifest.json`         the files manifest (also the DELETION INDEX)
- *   `<runId>/documents/<name>`      one object per input file
+ *   `<runId>/files/<name>`          one object per input file
  *
  * The manifest doubles as the deletion index — teardown enqueues the bundle and
  * the manifest key, and the outbox worker expands the manifest into its file
@@ -62,14 +62,15 @@ export const runWorkspaceManifestKey = (runId: string): string => `${runId}/mani
 /**
  * Key of one input file inside a run's workspace prefix.
  *
- * The `documents/` segment is a STORAGE LAYOUT, not vocabulary: every object of
- * every run already provisioned lives under it, and the deletion index resolves
- * teardown keys through this same builder. Issue #1177 renamed the identifier,
- * never the literal — changing it would strand the objects of every in-flight
- * run with no error until a fetch 404s mid-provisioning.
+ * The `files/` segment is a STORAGE LAYOUT: every input object of every
+ * provisioned run lives under it, and the deletion index resolves teardown keys
+ * through this same builder. It was spelled `documents/` until the #1177 rename
+ * was finished at the physical layer. Changing it again strands the objects of
+ * every in-flight run — with no error until a fetch 404s mid-provisioning — so
+ * it moves only alongside a pass over the objects already stored.
  */
 export const runWorkspaceFileKey = (runId: string, workspaceName: string): string =>
-  `${runId}/documents/${workspaceName}`;
+  `${runId}/files/${workspaceName}`;
 
 /** Matches a files-manifest key, capturing the runId that owns it. */
 const MANIFEST_KEY_RE = /^([^/]+)\/manifest\.json$/;
@@ -85,7 +86,7 @@ export function parseRunWorkspaceManifestKey(storageKey: string): string | null 
 
 /**
  * Is `name` a single, safe path segment? Anything else (empty, `.`, `..`, or a
- * name containing a separator) would escape the run's `documents/` prefix when
+ * name containing a separator) would escape the run's `files/` prefix when
  * concatenated into a key.
  */
 function isSafeSegment(name: string): boolean {

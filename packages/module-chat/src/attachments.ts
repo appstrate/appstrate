@@ -7,7 +7,7 @@
  * ai-SDK `file` part carrying an `upload://upl_x` URI (see `ui/upload.ts`).
  * Before the user turn is persisted or shown to the model, each `upload://` part
  * is materialized into a durable, chat-session-scoped file and its URI
- * rewritten to the stable `appfile://doc_x` form (a chat session outlives the
+ * rewritten to the stable `appfile://file_x` form (a chat session outlives the
  * ephemeral upload staging window, so only `appfile://` is ever stored).
  *
  * The model never sees raw file parts (an `upload://`/`appfile://` URL is not a
@@ -39,7 +39,7 @@ function partSize(part: FileUIPart): number | null {
 
 /**
  * The model-facing line for one file part — English (it reaches the model), e.g.
- * `[Attached file: rapport.pdf — appfile://doc_abc123 — application/pdf, 2.3 MB]`.
+ * `[Attached file: rapport.pdf — appfile://file_abc123 — application/pdf, 2.3 MB]`.
  * Size is included when the materialized part carries it.
  */
 function attachmentTextBlock(part: FileUIPart): string {

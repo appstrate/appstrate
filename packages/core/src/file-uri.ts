@@ -4,7 +4,7 @@
  * Canonical `appfile://` (and companion `upload://`) URI contract.
  *
  * The durable file store addresses every stored file by an opaque, stable
- * `appfile://doc_xxx` URI; a staged (not-yet-materialized) upload carries the
+ * `appfile://file_xxx` URI; a staged (not-yet-materialized) upload carries the
  * ephemeral `upload://upl_xxx` form. Both the platform (apps/api files/uploads
  * services + MCP router) and the chat module validate/parse these URIs, so the
  * pure, dependency-free helpers live here — one source of truth for the prefix
@@ -26,20 +26,20 @@
  * {@link fileUri} decides what gets written, and it only ever emits the
  * canonical one.
  *
- * The row id prefix stays `doc_` — it is already in every stored row and
- * carries no vocabulary weight; re-minting it would be a data migration for
- * zero gain.
+ * The row id prefix is `file_`, minted by `prefixedId("file")`. It was `doc_`
+ * until the rename was finished at the physical layer; nothing reads the old
+ * spelling any more.
  *
  * Dependency-free on purpose (no DB/storage imports) so the MCP tool layer,
  * the chat module, and the runtime can import it without pulling in the files
  * service's graph.
  */
 
-/** `appfile://doc_xxx` — the opaque, stable URI form of a stored file. */
+/** `appfile://file_xxx` — the opaque, stable URI form of a stored file. */
 export const FILE_URI_PREFIX = "appfile://";
 
 /**
- * `document://doc_xxx` — the pre-#1177 spelling of {@link FILE_URI_PREFIX}.
+ * `document://file_xxx` — the pre-#1177 spelling of {@link FILE_URI_PREFIX}.
  * **Read-only**: accepted by every parser here, never emitted. Live in
  * historical `runs.input`, chat attachments and run prompts.
  */
@@ -107,12 +107,12 @@ export function isFileProducedByRun(
 export const UPLOAD_URI_PREFIX = "upload://";
 
 /**
- * Strict file id shape: `doc_` + ≥8 id chars. `prefixedId("doc")` is well
+ * Strict file id shape: `file_` + ≥8 id chars. `prefixedId("file")` is well
  * above this, so the bound is safely below the real minimum. Rejects malformed
  * input before it reaches any database SELECT. Mirrors the service-side
  * validator (`apps/api/src/services/files.ts`).
  */
-export const FILE_ID_RE = /^doc_[A-Za-z0-9_-]{8,}$/;
+export const FILE_ID_RE = /^file_[A-Za-z0-9_-]{8,}$/;
 
 /** Strict upload id shape: `upl_` + ≥8 id chars. Mirrors the uploads service validator. */
 export const UPLOAD_ID_RE = /^upl_[A-Za-z0-9_-]{8,}$/;
@@ -140,8 +140,8 @@ export function isAttachmentUri(value: unknown): value is string {
 }
 
 /**
- * Extract the file id from an `appfile://doc_xxx` (or legacy
- * `document://doc_xxx`) URI, validating the id shape. Returns null if no
+ * Extract the file id from an `appfile://file_xxx` (or legacy
+ * `document://file_xxx`) URI, validating the id shape. Returns null if no
  * accepted prefix is present or the id is malformed.
  */
 export function parseFileUri(uri: string): string | null {
@@ -157,11 +157,11 @@ export function parseFileUri(uri: string): string | null {
 /**
  * Scans a free-form text blob for an embedded stored-file URI under ANY
  * accepted prefix. Derived from {@link ACCEPTED_FILE_URI_PREFIXES} so a new
- * spelling is picked up here too; `doc_` + ≥1 id char keeps the boundary scan
+ * spelling is picked up here too; `file_` + ≥1 id char keeps the boundary scan
  * permissive, with the strict `{8,}` length enforced by {@link parseFileUri}.
  */
 const EMBEDDED_FILE_URI_SCAN = new RegExp(
-  `(?:${ACCEPTED_FILE_URI_PREFIXES.map((p) => p.replace("://", "")).join("|")})://doc_[A-Za-z0-9_-]+`,
+  `(?:${ACCEPTED_FILE_URI_PREFIXES.map((p) => p.replace("://", "")).join("|")})://file_[A-Za-z0-9_-]+`,
   "g",
 );
 
@@ -172,8 +172,8 @@ export function fileUri(id: string): string {
 
 /**
  * Walk an arbitrary JSON value (a run's persisted `input`, tool args, …) and
- * collect the set of file ids referenced by any `appfile://doc_xxx` /
- * `document://doc_xxx` string anywhere within it — nested objects and arrays
+ * collect the set of file ids referenced by any `appfile://file_xxx` /
+ * `document://file_xxx` string anywhere within it — nested objects and arrays
  * included. De-duplicated, insertion-order stable. Every candidate string is
  * validated through {@link parseFileUri}, so a malformed URI is silently
  * skipped (never yields a bogus id). Pure and dependency-free — the single
@@ -198,7 +198,7 @@ export function extractFileIds(value: unknown): string[] {
 }
 
 /**
- * Finds `appfile://doc_xxx` / `document://doc_xxx` occurrences embedded
+ * Finds `appfile://file_xxx` / `document://file_xxx` occurrences embedded
  * ANYWHERE inside a free-form text blob (e.g. a model-authored run prompt) —
  * not only when the whole string is a bare URI, which is all
  * {@link extractFileIds} matches on a leaf string. Each candidate is

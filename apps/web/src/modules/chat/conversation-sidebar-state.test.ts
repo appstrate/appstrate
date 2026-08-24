@@ -17,29 +17,29 @@ describe("conversation sidebar state", () => {
   it("shows every file through the same preview action", () => {
     const first = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
       type: "show-file",
-      file: file("doc_a"),
+      file: file("file_a"),
     });
     const second = conversationSidebarReducer(first, {
       type: "show-file",
-      file: file("doc_b"),
+      file: file("file_b"),
     });
 
     expect(second).toMatchObject({
       expanded: true,
       activeTab: "preview",
-      selectedFile: file("doc_b"),
+      selectedFile: file("file_b"),
     });
   });
 
   it("collapses without discarding the selected file", () => {
     const open = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
       type: "show-file",
-      file: file("doc_a"),
+      file: file("file_a"),
     });
     const collapsed = conversationSidebarReducer(open, { type: "toggle" });
 
     expect(collapsed.expanded).toBe(false);
-    expect(collapsed.selectedFile).toEqual(file("doc_a"));
+    expect(collapsed.selectedFile).toEqual(file("file_a"));
   });
 
   it("reopens the panel when a header tab is selected", () => {
@@ -60,20 +60,20 @@ describe("conversation sidebar state", () => {
   it("opens the modal only as an explicit second action", () => {
     const selected = conversationSidebarReducer(INITIAL_CONVERSATION_SIDEBAR_STATE, {
       type: "show-file",
-      file: file("doc_a"),
+      file: file("file_a"),
     });
     expect(selected.modalFile).toBeNull();
 
     const modal = conversationSidebarReducer(selected, { type: "open-modal" });
-    expect(modal.modalFile).toEqual(file("doc_a"));
+    expect(modal.modalFile).toEqual(file("file_a"));
   });
 
   it("clears file state on navigation but keeps the user's panel layout", () => {
     const state: ConversationSidebarState = {
       expanded: false,
       activeTab: "runs",
-      selectedFile: file("doc_a"),
-      modalFile: file("doc_a"),
+      selectedFile: file("file_a"),
+      modalFile: file("file_a"),
     };
 
     expect(conversationSidebarReducer(state, { type: "conversation-change" })).toEqual({

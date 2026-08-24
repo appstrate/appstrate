@@ -163,7 +163,7 @@ describe("POST /api/runs/inline — input file fields (parseRequestInput wiring)
     const res = await post({
       manifest: manifestWithFileInput(),
       prompt: "describe the screenshot",
-      input: { screenshot: "appfile://doc_00000000-0000-0000-0000-000000000000" },
+      input: { screenshot: "appfile://file_00000000-0000-0000-0000-000000000000" },
     });
     expect(res.status).toBe(404);
     const body = (await res.json()) as { detail?: string };
@@ -171,7 +171,7 @@ describe("POST /api/runs/inline — input file fields (parseRequestInput wiring)
     // details, so it would still match if the request failed for an unrelated
     // reason. `notFound("File '<id>' not found")` — input-parser.ts.
     expect(body.detail ?? "").toMatch(
-      /^File 'doc_00000000-0000-0000-0000-000000000000' not found$/,
+      /^File 'file_00000000-0000-0000-0000-000000000000' not found$/,
     );
   });
 
@@ -199,7 +199,7 @@ describe("POST /api/runs/inline — input file fields (parseRequestInput wiring)
     await post({
       manifest: manifestWithFileInput(),
       prompt: "describe the screenshot",
-      input: { screenshot: "appfile://doc_00000000-0000-0000-0000-000000000000" },
+      input: { screenshot: "appfile://file_00000000-0000-0000-0000-000000000000" },
     });
     const rows = await db.select().from(packages).where(eq(packages.ephemeral, true));
     expect(rows).toHaveLength(0);
@@ -211,7 +211,7 @@ describe("POST /api/runs/inline — input file fields (parseRequestInput wiring)
     const res = await post({
       manifest: validManifest(),
       prompt:
-        "Read this image: appfile://doc_627ff7c8-f102-41e2-9c8d-136f8bbc00f5 and describe it.",
+        "Read this image: appfile://file_627ff7c8-f102-41e2-9c8d-136f8bbc00f5 and describe it.",
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as { errors?: { code?: string; field?: string }[] };

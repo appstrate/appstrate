@@ -117,7 +117,7 @@ describe("getFileCapabilities", () => {
 
 describe("toFileDto — capabilities + metadata degradation", () => {
   const uploadRow = (over: Partial<FileRow> = {}): FileRow => ({
-    id: "doc_degrade12345",
+    id: "file_degrade12345",
     orgId: "org-1",
     applicationId: "app-1",
     purpose: "user_upload",
@@ -126,7 +126,7 @@ describe("toFileDto — capabilities + metadata degradation", () => {
     packageId: null,
     userId: "user-a",
     endUserId: null,
-    storageKey: "documents/app-1/doc_degrade12345/secret.pdf",
+    storageKey: "files/app-1/file_degrade12345/secret.pdf",
     name: "secret.pdf",
     mime: "application/pdf",
     size: 42,
@@ -164,7 +164,7 @@ describe("toFileDto — capabilities + metadata degradation", () => {
 
 describe("toFileDto — preview_url honours the downloadable gate (S1)", () => {
   const htmlRow = (over: Partial<FileRow> = {}): FileRow => ({
-    id: "doc_previewgate12",
+    id: "file_previewgate12",
     orgId: "org-1",
     applicationId: "app-1",
     purpose: "user_upload",
@@ -173,7 +173,7 @@ describe("toFileDto — preview_url honours the downloadable gate (S1)", () => {
     packageId: null,
     userId: "user-a",
     endUserId: null,
-    storageKey: "documents/app-1/doc_previewgate12/page.html",
+    storageKey: "files/app-1/file_previewgate12/page.html",
     name: "page.html",
     mime: "text/html",
     size: 10,
@@ -201,14 +201,14 @@ describe("toFileDto — preview_url honours the downloadable gate (S1)", () => {
     const dto = singleDto(htmlRow(), userA);
     expect(dto.downloadable).toBe(true);
     expect(dto.previewable).toBe(true);
-    expect(dto.preview_url).toContain("/preview/files/doc_previewgate12?t=");
+    expect(dto.preview_url).toContain("/preview/files/file_previewgate12?t=");
   });
 
   it("an html agent_output stays previewable by anyone who resolved the container", () => {
     const dto = singleDto(htmlRow({ purpose: "agent_output" }), userB);
     expect(dto.downloadable).toBe(true);
     expect(dto.previewable).toBe(true);
-    expect(dto.preview_url).toContain("/preview/files/doc_previewgate12?t=");
+    expect(dto.preview_url).toContain("/preview/files/file_previewgate12?t=");
   });
 
   it("list rows carry `previewable` but never mint a `preview_url`", () => {
@@ -269,16 +269,16 @@ describe("retentionExpiry", () => {
 
 describe("file URI helpers", () => {
   it("round-trips a valid file id", () => {
-    const uri = fileUri("doc_abc12345");
-    expect(uri).toBe("appfile://doc_abc12345");
+    const uri = fileUri("file_abc12345");
+    expect(uri).toBe("appfile://file_abc12345");
     expect(isFileUri(uri)).toBe(true);
-    expect(parseFileUri(uri)).toBe("doc_abc12345");
+    expect(parseFileUri(uri)).toBe("file_abc12345");
   });
 
   it("rejects malformed / foreign URIs", () => {
     expect(isFileUri("upload://upl_x")).toBe(false);
     expect(parseFileUri("appfile://nope")).toBeNull();
-    expect(parseFileUri("appfile://doc_short")).toBeNull(); // < 8 id chars
+    expect(parseFileUri("appfile://file_short")).toBeNull(); // < 8 id chars
     expect(parseFileUri("upload://upl_abc12345")).toBeNull();
   });
 });

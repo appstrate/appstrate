@@ -12,7 +12,7 @@
 -- always written on the right. A key present in both keeps the `input` value —
 -- the same property the manifest merge applied.
 --
--- CONVERGENT, like its siblings 0039 and 0041-0045: running the whole file a
+-- CONVERGENT, like its siblings 0039 and 0041-0044: running the whole file a
 -- second time is a no-op, not an error. Every DDL statement is guarded on the
 -- catalog and every fold is gated on its own effect, because this file has been
 -- edited since it was first applied and drizzle keys applied migrations by

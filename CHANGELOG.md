@@ -37,16 +37,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   filesystem and is what MCP uses for local resources, so an opaque platform id
   under it is ambiguous to the model and to every MCP client.
 
-  **Deliberately NOT renamed**, each because renaming it would move live data or
-  cost an ops migration for no user-visible gain: the `doc_` row-id prefix
-  (already in every row and every storage key); the `documents` storage bucket
-  and the `documents/` `storage_key` prefix (every stored object begins with it —
-  renaming orphans them all, with no error until a download 404s on a file that
-  is physically still there); the `document_deleted` value in
-  `storage_deletion_jobs.reason`; and the environment variables
-  `DOCUMENT_MAX_FILE_BYTES`, `DOCUMENT_RETENTION_DAYS`, `RUN_MAX_DOCUMENTS` and
-  `WORKSPACE_MAX_DOCS_BYTES`. See `docs/ENV.md` and
-  `docs/architecture/FILES.md`.
+  **The rename now reaches the physical layer too**, and none of it has an
+  alias. The row-id prefix is `file_` (`prefixedId("file")`, validated by
+  `FILE_ID_RE`); the durable storage bucket and its `storage_key` prefix are
+  `files`, and the run-workspace input prefix is `{runId}/files/`; the
+  `storage_deletion_jobs.reason` labels are `file_deleted` / `file_expired`;
+  and the four file-limit environment variables are renamed:
+
+  | Before                     | After                       |
+  | -------------------------- | --------------------------- |
+  | `DOCUMENT_MAX_FILE_BYTES`  | `FILE_MAX_BYTES`            |
+  | `DOCUMENT_RETENTION_DAYS`  | `FILE_RETENTION_DAYS`       |
+  | `RUN_MAX_DOCUMENTS`        | `RUN_MAX_FILES`             |
+  | `WORKSPACE_MAX_DOCS_BYTES` | `WORKSPACE_MAX_FILES_BYTES` |
+
+  Migration `0044_finish_file_rename` carries the data half (it rewrites every
+  `files.storage_key`, the outbox's bucket/key/reason values, and drops two
+  write-only columns). **It cannot move object storage.** Upgrading means
+  copying the `documents` bucket to `files` and rewriting every
+  `{runId}/documents/<name>` run-workspace object to `{runId}/files/<name>` in
+  the same window, with runs drained — otherwise downloads 404 on files that are
+  physically still there. An `.env` still carrying an old variable name is not
+  read and the limit silently reverts to its default, so grep for the left
+  column above. See `docs/ENV.md` and `docs/architecture/FILES.md`.
 
   **What a consumer has to do:**
 
@@ -69,7 +82,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
      | Before                    | After                 | Raised by                                                                                       |
      | ------------------------- | --------------------- | ----------------------------------------------------------------------------------------------- |
-     | `document_count_exceeded` | `file_count_exceeded` | `413`, `RUN_MAX_DOCUMENTS` over-cap (`@appstrate/core/api-errors`)                              |
+     | `document_count_exceeded` | `file_count_exceeded` | `413`, `RUN_MAX_FILES` over-cap (`@appstrate/core/api-errors`)                                  |
      | `document_in_use`         | `file_in_use`         | `409`, `DELETE /api/files/{id}` on a file a live run still links (`services/files.ts`)          |
      | `document_unavailable`    | `file_unavailable`    | `409`, an input file deleted between resolve and run creation (`services/state/runs.ts`)        |
      | `duplicate_document_name` | `duplicate_file_name` | `400`, colliding workspace names in a run's input manifest (`services/run-file-naming.ts`)      |

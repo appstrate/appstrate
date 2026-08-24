@@ -3987,7 +3987,7 @@ export interface paths {
         put?: never;
         /**
          * Publish an agent-produced file (HMAC, streaming)
-         * @description Posted by the agent runtime — via the `publish_file` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` file attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `DOCUMENT_MAX_FILE_BYTES`, 100 MiB by default); metadata is carried in the `X-File-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing file with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).
+         * @description Posted by the agent runtime — via the `publish_file` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` file attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `FILE_MAX_BYTES`, 100 MiB by default); metadata is carried in the `X-File-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing file with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).
          */
         post: operations["publishRunFile"];
         delete?: never;
@@ -6203,14 +6203,14 @@ export interface operations {
                         data: {
                             /** @example sdj_0c9f… */
                             id: string;
-                            /** @example documents */
+                            /** @example files */
                             bucket: string;
                             /**
                              * @description In-bucket object key (no bucket prefix).
-                             * @example app_abc/doc_def/report.pdf
+                             * @example app_abc/file_def/report.pdf
                              */
                             storage_key: string;
-                            /** @description Why the object is being purged (document_deleted | document_expired | org_deleted | application_deleted | end_user_deleted | run_workspace_deleted | version_deleted | upload_expired | materialization_failed). Free text, not a constrained enum; the `document_*` labels keep their pre-#1177 spelling because they are persisted on live rows that no migration rewrites. */
+                            /** @description Why the object is being purged (file_deleted | file_expired | org_deleted | application_deleted | end_user_deleted | run_workspace_deleted | version_deleted | upload_expired | materialization_failed). Free text, not a constrained enum. */
                             reason: string;
                             /** @description Delete attempts made so far. */
                             attempts: number;
@@ -6885,7 +6885,7 @@ export interface operations {
                  *     }
                  */
                 "application/json": {
-                    /** @description Run input values, validated against the agent's input schema. File fields take `upload://upl_xxx` references (from `createUpload`), `appfile://doc_xxx` references (an existing file the caller can read), or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded). */
+                    /** @description Run input values, validated against the agent's input schema. File fields take `upload://upl_xxx` references (from `createUpload`), `appfile://file_xxx` references (an existing file the caller can read), or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded). */
                     input?: Record<string, never>;
                     /** @description Run id whose persisted `input` to replay on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + application scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). Staged `upload://` inputs are materialized on the original run and rewritten in its persisted input as durable `appfile://` references, so later reruns reuse the same files without depending on upload retention. Existing `appfile://` inputs remain unchanged. **Limitation:** inline `data:` inputs are NOT replayable — their bytes are materialized into the original run's workspace and stripped from the stored input (only a payload-less marker is persisted), so replaying a run whose input carried an inline file returns 409 `rerun_inline_input_unavailable`. Stage the file with `createUpload` when the input must be replayable. */
                     rerun_from?: string;
@@ -7031,7 +7031,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description `payload_too_large` — an inline `data:` input file exceeds the per-file inline cap (4 MiB decoded), or the run's input files together exceed `WORKSPACE_MAX_DOCS_BYTES`. Or `file_count_exceeded` — the run would carry more than `RUN_MAX_DOCUMENTS` input files (uploads + inline + `appfile://` refs). Both are refused before the run launches, so nothing is charged and no workspace is provisioned; distinct codes so a client can tell "one file too big" from "too many files". */
+            /** @description `payload_too_large` — an inline `data:` input file exceeds the per-file inline cap (4 MiB decoded), or the run's input files together exceed `WORKSPACE_MAX_FILES_BYTES`. Or `file_count_exceeded` — the run would carry more than `RUN_MAX_FILES` input files (uploads + inline + `appfile://` refs). Both are refused before the run launches, so nothing is charged and no workspace is provisioned; distinct codes so a client can tell "one file too big" from "too many files". */
             413: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -10182,9 +10182,9 @@ export interface operations {
                         data: {
                             /** @enum {string} */
                             object: "file";
-                            /** @description Opaque file id (`doc_…`). */
+                            /** @description Opaque file id (`file_…`). */
                             id: string;
-                            /** @description Stable `appfile://doc_…` reference — pass in a run's file input field. */
+                            /** @description Stable `appfile://file_…` reference — pass in a run's file input field. */
                             uri: string;
                             /** @enum {string} */
                             purpose: "user_upload" | "agent_output";
@@ -10274,9 +10274,9 @@ export interface operations {
                     "application/json": {
                         /** @enum {string} */
                         object: "file";
-                        /** @description Opaque file id (`doc_…`). */
+                        /** @description Opaque file id (`file_…`). */
                         id: string;
-                        /** @description Stable `appfile://doc_…` reference — pass in a run's file input field. */
+                        /** @description Stable `appfile://file_…` reference — pass in a run's file input field. */
                         uri: string;
                         /** @enum {string} */
                         purpose: "user_upload" | "agent_output";
@@ -10467,9 +10467,9 @@ export interface operations {
                     "application/json": {
                         /** @enum {string} */
                         object: "file";
-                        /** @description Opaque file id (`doc_…`). */
+                        /** @description Opaque file id (`file_…`). */
                         id: string;
-                        /** @description Stable `appfile://doc_…` reference — pass in a run's file input field. */
+                        /** @description Stable `appfile://file_…` reference — pass in a run's file input field. */
                         uri: string;
                         /** @enum {string} */
                         purpose: "user_upload" | "agent_output";
@@ -18086,9 +18086,9 @@ export interface operations {
                     manifest: Record<string, never>;
                     /** @description Contents of prompt.md — the agent's system prompt. */
                     prompt: string;
-                    /** @description Run input validated against manifest.input.schema (AJV). File fields take `upload://upl_xxx` references (from `createUpload`), `appfile://doc_xxx` references, or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded) — same contract as `POST /agents/{scope}/{name}/run`. */
+                    /** @description Run input validated against manifest.input.schema (AJV). File fields take `upload://upl_xxx` references (from `createUpload`), `appfile://file_xxx` references, or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded) — same contract as `POST /agents/{scope}/{name}/run`. */
                     input?: Record<string, never>;
-                    /** @description `appfile://doc_xxx` URIs to mount read-only into the run's `files/` directory — fan-in by reference, without declaring a file field in the manifest. The platform declares a reserved `_context_files` input field for them, so they go through the same ACL, byte/count caps and `file_links` chaining as any other file input, and are announced to the agent in its prompt. A manifest (or `input`) that already declares `_context_files` is rejected with a `400` — the name is reserved. */
+                    /** @description `appfile://file_xxx` URIs to mount read-only into the run's `files/` directory — fan-in by reference, without declaring a file field in the manifest. The platform declares a reserved `_context_files` input field for them, so they go through the same ACL, byte/count caps and `file_links` chaining as any other file input, and are announced to the agent in its prompt. A manifest (or `input`) that already declares `_context_files` is rejected with a `400` — the name is reserved. */
                     context_files?: string[];
                     /** @description Per-integration connection picks for THIS run (flat-connections mechanism #2). Flat map: `{ "@scope/integration": "<connection_id>" }` — one connection per integration; the chosen connection carries its own authKey. Loses to admin pins (mechanism #1), beats the schedule-frozen layer (#3) and the actor-fallback (#4). Resolved at kickoff, persisted on `runs.connection_overrides` and snapshotted into `runs.resolved_connections` so the spawn loader + MITM credentials refresh honour the same pick. Values must be non-empty: the server enforces `.min(1)` (`routes/runs.ts`), because an empty id is falsy at the connection resolver (`resolveOne`) and would skip the pin in silence rather than fail. Returns 412 `missing_integration_connection` if the chosen id is not accessible to the actor. */
                     connection_overrides?: {
@@ -18211,7 +18211,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description `payload_too_large` — an inline `data:` input file exceeds the per-file inline cap (4 MiB decoded), or the run's input files together exceed `WORKSPACE_MAX_DOCS_BYTES`. Or `file_count_exceeded` — the run would carry more than `RUN_MAX_DOCUMENTS` input files (uploads + inline + `appfile://` refs). Both are refused before the run launches, so nothing is charged and no workspace is provisioned; distinct codes so a client can tell "one file too big" from "too many files". */
+            /** @description `payload_too_large` — an inline `data:` input file exceeds the per-file inline cap (4 MiB decoded), or the run's input files together exceed `WORKSPACE_MAX_FILES_BYTES`. Or `file_count_exceeded` — the run would carry more than `RUN_MAX_FILES` input files (uploads + inline + `appfile://` refs). Both are refused before the run launches, so nothing is charged and no workspace is provisioned; distinct codes so a client can tell "one file too big" from "too many files". */
             413: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -19097,7 +19097,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description `payload_too_large` — the file exceeds the per-file cap (`DOCUMENT_MAX_FILE_BYTES`) or the run's total output budget; the stream is cut mid-flight and any partial object deleted. Or `file_count_exceeded` — the run already holds `RUN_MAX_DOCUMENTS` files. Distinct codes so a client can tell "one file too big" from "too many files". */
+            /** @description `payload_too_large` — the file exceeds the per-file cap (`FILE_MAX_BYTES`) or the run's total output budget; the stream is cut mid-flight and any partial object deleted. Or `file_count_exceeded` — the run already holds `RUN_MAX_FILES` files. Distinct codes so a client can tell "one file too big" from "too many files". */
             413: {
                 headers: {
                     [name: string]: unknown;

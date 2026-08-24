@@ -101,7 +101,7 @@ app.use("*", cors({ origin: trustedOrigins, credentials: true }));
 // signed max replaces this cap and chunked encoding cannot bypass it.
 const globalBodyLimit = bodyLimit(env.API_BODY_LIMIT_BYTES);
 // Matches the agent-output ingestion POST — its body is a raw file stream
-// (up to DOCUMENT_MAX_FILE_BYTES, 100 MiB by default) enforced mid-stream by
+// (up to FILE_MAX_BYTES, 100 MiB by default) enforced mid-stream by
 // the route's own counting cap, so the global JSON-sized cap must not reject it.
 const RUN_FILE_UPLOAD_PATH = /^\/api\/runs\/[^/]+\/files$/;
 app.use("*", async (c, next) => {

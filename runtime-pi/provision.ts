@@ -203,7 +203,7 @@ export async function provisionFiles(deps: ProvisionDeps): Promise<void> {
       return await deps.die(`Failed to fetch file ${name}: HTTP ${docRes.status}`);
     }
     // Stream the response body to disk chunk-by-chunk — peak memory stays
-    // bounded regardless of file size (WORKSPACE_MAX_DOCS_BYTES allows up
+    // bounded regardless of file size (WORKSPACE_MAX_FILES_BYTES allows up
     // to 256 MiB). We DO NOT use `Bun.write(path, docRes)` / `Bun.write(path,
     // docRes.body)`: handing the fetch `Response`/stream to `Bun.write` for
     // streaming-consume busy-loops at 100% CPU in the bundled runtime,

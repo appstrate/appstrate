@@ -109,7 +109,7 @@ describe("persistRunEvent", () => {
   it("ingests file.published and drops the retired document.published", async () => {
     await persist(
       event("file.published", {
-        file_id: "doc_canonical",
+        file_id: "file_canonical",
         name: "a.md",
         mime: "text/markdown",
         size: 3,
@@ -117,7 +117,7 @@ describe("persistRunEvent", () => {
     );
     await persist(
       event("document.published", {
-        document_id: "doc_retired",
+        document_id: "file_retired",
         name: "b.md",
         mime: "text/markdown",
         size: 3,
@@ -127,7 +127,7 @@ describe("persistRunEvent", () => {
     const fileLogs = (await loadLogs()).filter((l) => l.event === "file");
     expect(fileLogs).toHaveLength(1);
     expect(fileLogs[0]!.type).toBe("result");
-    expect((fileLogs[0]!.data as { file_id: string }).file_id).toBe("doc_canonical");
+    expect((fileLogs[0]!.data as { file_id: string }).file_id).toBe("file_canonical");
   });
 
   it("maps log.written into run_logs with the original level + message", async () => {

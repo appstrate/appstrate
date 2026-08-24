@@ -4,12 +4,12 @@
  * Files service — the durable, first-class file store.
  *
  * A `files` row is the source of truth for a stored object, addressed by
- * the opaque `appfile://doc_xxx` URI. Two origins share the table:
+ * the opaque `appfile://file_xxx` URI. Two origins share the table:
  *
  *  - `user_upload` — a staged upload materialized here the first time a run (or
  *    chat session) consumes it (`createFileFromUpload`). The bytes move
  *    from the ephemeral `uploads` bucket to the durable file bucket
- *    (`documents` on the wire — see {@link FILES_BUCKET}).
+ *    (`files` on the wire — see {@link FILES_BUCKET}).
  *  - `agent_output` — a deliverable an agent published from a run (Phase 2).
  *
  * Access is never a per-file grant (D2): `getFileForActor` derives it from
@@ -95,15 +95,18 @@ import {
 /**
  * Durable files bucket (distinct from the ephemeral `uploads` bucket).
  *
- * The VALUE stays `"documents"` and must never be changed. Every
- * `files.storage_key` already written — in every deployment — begins with the
- * literal `documents/` prefix, and `parseStorageKey` splits the bucket back out
- * of it at read time. Renaming the literal would point every download,
+ * The VALUE and every stored `files.storage_key` must agree: a key is written
+ * as `${FILES_BUCKET}/<path>` and `parseStorageKey` splits the bucket back out
+ * of it at read time. The bucket was spelled `documents` until the #1177 rename
+ * was finished at the physical layer; migration `0044_finish_file_rename` is
+ * the data half of that move — it rewrote the `documents/` key prefix on every
+ * `files` row in the same change that flipped this literal.
+ *
+ * Changing it again without a matching key rewrite points every download,
  * deletion and orphan sweep at a bucket that holds nothing, with no error until
- * a download 404s on a file that is still physically there. Only the CONSTANT
- * was renamed by issue #1177; the storage layout is data, not vocabulary.
+ * a download 404s on a file that is physically still there.
  */
-export const FILES_BUCKET = "documents";
+export const FILES_BUCKET = "files";
 
 /**
  * Split a `bucket/path/to/object` storage key into its `{ bucket, path }` parts,
@@ -424,7 +427,7 @@ export async function setOrgFileStorageLimit(orgId: string, bytes: number | null
 }
 
 /**
- * `expiresAt` a fresh file is stamped with, from `DOCUMENT_RETENTION_DAYS`.
+ * `expiresAt` a fresh file is stamped with, from `FILE_RETENTION_DAYS`.
  * Undefined ⇒ permanent (null column). Pure given `now`.
  */
 export function retentionExpiry(retentionDays: number | undefined, now = new Date()): Date | null {
@@ -665,7 +668,7 @@ export async function createFileFromUpload(
   opts: { fileId?: string; packageId?: string | null } = {},
 ): Promise<FileRow> {
   const env = getEnv();
-  const fileId = opts.fileId ?? prefixedId("doc");
+  const fileId = opts.fileId ?? prefixedId("file");
 
   // Access context: the acting principal is threaded into peek/consume so a
   // member can only materialize their OWN staged upload (ownership gate).
@@ -716,7 +719,7 @@ export async function createFileFromUpload(
     mime: meta!.mime,
     byteCount,
     sha256,
-    expiresAt: retentionExpiry(env.DOCUMENT_RETENTION_DAYS),
+    expiresAt: retentionExpiry(env.FILE_RETENTION_DAYS),
   });
   return committed.row;
 }
@@ -1007,11 +1010,11 @@ export async function createFileFromStream(
   },
 ): Promise<CreatedFileFromStream> {
   const env = getEnv();
-  const fileId = prefixedId("doc");
+  const fileId = prefixedId("file");
   const storagePath = fileStoragePath(scope, fileId, input.name);
 
   const digester = createHashingCounter({
-    perFileCap: env.DOCUMENT_MAX_FILE_BYTES,
+    perFileCap: env.FILE_MAX_BYTES,
   });
 
   // Sniff the magic bytes as the stream flows so the STORED mime can be made
@@ -1063,13 +1066,13 @@ export async function createFileFromStream(
       mime: storedMime,
       byteCount,
       sha256,
-      expiresAt: retentionExpiry(env.DOCUMENT_RETENTION_DAYS),
+      expiresAt: retentionExpiry(env.FILE_RETENTION_DAYS),
       // Authoritative (and only) per-run cap checks — re-summed/re-counted under
       // the org `FOR UPDATE` lock inside commitFileRow. Enforced here, not
       // mid-stream, so a retried publish of an already-committed file reaches
       // dedup first.
       runOutputCap: env.RUN_MAX_OUTPUT_BYTES,
-      runMaxFiles: env.RUN_MAX_DOCUMENTS,
+      runMaxFiles: env.RUN_MAX_FILES,
     });
     return committed;
   } catch (err) {
@@ -1104,7 +1107,7 @@ function assertWithinFileCap(size: number, cap: number): void {
  */
 export async function assertWithinFileLimits(orgId: string, sizes: number[]): Promise<void> {
   const env = getEnv();
-  for (const size of sizes) assertWithinFileCap(size, env.DOCUMENT_MAX_FILE_BYTES);
+  for (const size of sizes) assertWithinFileCap(size, env.FILE_MAX_BYTES);
   if (sizes.length === 0) return;
   const total = sizes.reduce((sum, s) => sum + s, 0);
   const [org] = await db
@@ -1297,7 +1300,7 @@ export async function loadFileForPreview(orgId: string, docId: string): Promise<
  *  - `upload://upl_x` → materialize it into a chat-session-scoped file
  *    (purpose `user_upload`, attributed to the session owner) and return the new
  *    `appfile://` URI. Quota/cap rejections propagate as RFC 9457 errors.
- *  - `appfile://doc_x` → validate the session owner can read it (container ACL)
+ *  - `appfile://file_x` → validate the session owner can read it (container ACL)
  *    and echo it back; a foreign/missing file is a 404.
  *
  * Chat sessions are per dashboard user, so the actor is always a `user`.
@@ -1344,7 +1347,7 @@ export interface ListFilesFilters {
 /**
  * The `run_id` filter clause for the file gallery. A run's files are not
  * only the ones it PRODUCED (`files.run_id = run`) — a run also CONSUMES
- * files passed as input (`appfile://doc_xxx` references in `runs.input`),
+ * files passed as input (`appfile://file_xxx` references in `runs.input`),
  * whose own container is wherever they were first materialized (a chat session,
  * or another run). So the filter is the union: rows anchored to the run, OR rows
  * whose id is referenced by the run's input JSONB.
@@ -1653,7 +1656,7 @@ export async function detachOrDeleteContainedFiles(
     // the row delete, so a committed delete never orphans the object (replaces
     // the old best-effort post-commit delete).
     const jobs = removed
-      .map((r) => storageKeyToDeletionJob(r.storageKey, "document_deleted"))
+      .map((r) => storageKeyToDeletionJob(r.storageKey, "file_deleted"))
       .filter((j): j is StorageDeletionJobInput => j !== null);
     await enqueueStorageDeletion(exec, jobs);
     return removed.length;
@@ -1728,7 +1731,7 @@ export async function deleteFile(scope: AppScope, docId: string): Promise<void> 
     if (deleted.length === 0) throw notFound(`File '${docId}' not found`);
     await decrementOrgFileBytes(tx, scope.orgId, deleted[0]!.size);
 
-    const job = storageKeyToDeletionJob(row.storageKey, "document_deleted");
+    const job = storageKeyToDeletionJob(row.storageKey, "file_deleted");
     if (job) await enqueueStorageDeletion(tx, job);
   });
   // Reaching here means the transaction committed exactly one row delete (it
@@ -1836,12 +1839,12 @@ export async function cleanupExpiredFiles(): Promise<number> {
         // Transactional outbox: enqueue the storage purge atomically with the row
         // delete (replaces the old best-effort post-commit delete).
         const jobs = removed
-          // `document_*` is kept at its pre-#1177 spelling for the SAME reason
-          // `document_deleted` is (see `storage_deletion_jobs.reason`): it is a
-          // persisted free-text audit/metric label on live rows, rewritten by no
-          // migration, so a rename only splits an operator's `GROUP BY reason`
-          // across two spellings of the same event.
-          .map((r) => storageKeyToDeletionJob(r.storageKey, "document_expired"))
+          // `file_expired` is the expiry-sweep sibling of `file_deleted` (see
+          // `storage_deletion_jobs.reason`) — one label per cause, so an
+          // operator's `GROUP BY reason` separates a user delete from a
+          // retention sweep. Both were spelled `document_*` before the #1177
+          // rename was finished at the physical layer.
+          .map((r) => storageKeyToDeletionJob(r.storageKey, "file_expired"))
           .filter((j): j is StorageDeletionJobInput => j !== null);
         await enqueueStorageDeletion(tx, jobs);
         return removed;

@@ -190,7 +190,7 @@ describe("run_and_wait", () => {
         kind: "inline",
         manifest: { name: "tmp" },
         prompt: "do it",
-        input: { screenshot: "appfile://doc_abc12345" },
+        input: { screenshot: "appfile://file_abc12345" },
       },
       noExtra,
     );
@@ -198,7 +198,7 @@ describe("run_and_wait", () => {
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({
       manifest: defaultInlineManifest({ name: "tmp" }),
       prompt: expect.stringContaining("do it"),
-      input: { screenshot: "appfile://doc_abc12345" },
+      input: { screenshot: "appfile://file_abc12345" },
     });
   });
 
@@ -285,12 +285,17 @@ describe("run_and_wait", () => {
       ],
       files: [
         {
-          id: "doc_abcd1234",
-          uri: "appfile://doc_abcd1234",
+          id: "file_abcd1234",
+          uri: "appfile://file_abcd1234",
           name: "report.html",
           mime: "text/html",
           size: 120,
           run_id: "run_7",
+          // `fetchRunFiles` filters every returned row through
+          // `isFileProducedByRun`, which needs BOTH halves — the run's file
+          // container also holds the files mounted as its INPUT. The real
+          // route always sends `purpose`, so the stub must too.
+          purpose: "agent_output",
         },
       ],
     });
@@ -302,14 +307,14 @@ describe("run_and_wait", () => {
     expect(links).toHaveLength(1);
     expect(links[0]).toMatchObject({
       type: "resource_link",
-      uri: "appfile://doc_abcd1234",
+      uri: "appfile://file_abcd1234",
       name: "report.html",
       mimeType: "text/html",
     });
     // The text payload also echoes the files (parity with the chat path).
     const docs = (parseResult(res).files as Array<Record<string, unknown>>) ?? [];
     expect(docs).toHaveLength(1);
-    expect(docs[0]).toMatchObject({ uri: "appfile://doc_abcd1234" });
+    expect(docs[0]).toMatchObject({ uri: "appfile://file_abcd1234" });
   });
 
   it("returns only a text block when the run published no files", async () => {

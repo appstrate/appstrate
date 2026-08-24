@@ -202,7 +202,7 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
     Number.isFinite(opts.maxFileBytes) &&
     opts.maxFileBytes > 0
   ) {
-    env.DOCUMENT_MAX_FILE_BYTES = String(opts.maxFileBytes);
+    env.FILE_MAX_BYTES = String(opts.maxFileBytes);
   }
 
   if (opts.forwardProxyUrl && !opts.noSidecar) {

@@ -39,7 +39,7 @@ const VIEWER_HEIGHT_CLASS = "h-[max(24rem,calc(100vh-28rem))]";
 
 function file(overrides: Partial<FileDto> & { name: string }): FileDto {
   return {
-    id: `doc_${overrides.name}`,
+    id: `file_${overrides.name}`,
     purpose: "agent_output",
     run_id: RUN_ID,
     packageId: "@acme/reporter",

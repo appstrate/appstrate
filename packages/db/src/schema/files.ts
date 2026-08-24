@@ -23,7 +23,7 @@ import { chatSessions } from "./chat.ts";
 /**
  * Unified file store — durable, first-class deliverables and materialized user
  * uploads. One row per stored object, addressed by the opaque, lifelong
- * `appfile://doc_xxx` URI (never re-minted; the pre-#1177 `document://`
+ * `appfile://file_xxx` URI (never re-minted; the pre-#1177 `document://`
  * spelling of the same URI is still read). Two origins share the table,
  * discriminated by `purpose`:
  *
@@ -50,14 +50,15 @@ import { chatSessions } from "./chat.ts";
  * creator-only via `userId`). The `chk_files_single_container` CHECK allows
  * at most one container — both NULL is legal, both set is not.
  *
- * The row id prefix stays `doc_` (#1177): it is in every stored row and in
- * every live `storage_key`, and re-minting it would be a data migration for
- * zero gain.
+ * The row id prefix is `file_`, minted by `prefixedId("file")`. It was `doc_`
+ * until the #1177 rename was finished at the physical layer; the id shape is
+ * pinned once in `FILE_ID_RE` (`@appstrate/core/file-uri`), which every
+ * validator and URI parser reads.
  */
 export const files = pgTable(
   "files",
   {
-    /** `doc_` prefixed identifier (also used in `appfile://` URIs). Stable for life. */
+    /** `file_` prefixed identifier (also used in `appfile://` URIs). Stable for life. */
     id: text("id").primaryKey(),
     orgId: uuid("org_id")
       .notNull()
@@ -82,10 +83,10 @@ export const files = pgTable(
     /** Creator attribution (end-user), copied from the run/caller. */
     endUserId: text("end_user_id").references(() => endUsers.id, { onDelete: "cascade" }),
     /**
-     * `documents/{applicationId}/{fileId}/{safeName}` in the files bucket.
-     * The `documents/` prefix and the bucket name are LIVE DATA (#1177): every
-     * stored object already carries them, so the concept was renamed and the
-     * storage literal deliberately was not.
+     * `files/{applicationId}/{fileId}/{safeName}` — the leading segment is the
+     * bucket (`FILES_BUCKET`), which `parseStorageKey` splits back off at read
+     * time. Bucket literal and stored key must agree; both were spelled
+     * `documents` until migration `0044_finish_file_rename` moved them together.
      */
     storageKey: text("storage_key").notNull(),
     name: text("name").notNull(),
@@ -181,7 +182,7 @@ export const files = pgTable(
  * consumerRunId`) — a run's own outputs never link to themselves.
  *
  * This is the chaining-protection ledger: the "durable & chainable" promise
- * means run B can consume `appfile://doc_x` produced by run A. When A's runs
+ * means run B can consume `appfile://file_x` produced by run A. When A's runs
  * are deleted, the delete service-path consults these links — a file still
  * consumed by a live run outside the deleted set is DETACHED (container NULLed,
  * see `files`) instead of cascade-deleted, so B's rerun still resolves it.

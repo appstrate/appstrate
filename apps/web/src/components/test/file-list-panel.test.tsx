@@ -39,7 +39,7 @@ const INPUT_BADGE = "Utilisé en entrée";
 
 function file(overrides: Partial<FileDto> & { name: string }): FileDto {
   return {
-    id: `doc_${overrides.name}`,
+    id: `file_${overrides.name}`,
     purpose: "agent_output",
     run_id: RUN,
     packageId: "@acme/reporter",

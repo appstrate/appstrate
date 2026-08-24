@@ -568,11 +568,7 @@ const envSchema = z
     // and streamed to disk by the agent), so this is a policy limit, not a
     // memory-safety floor — but it also bounds what the platform buffers
     // while consuming uploads. Default 256 MiB.
-    // NAME IS LEGACY: issue #1177 renamed the entity from `document` to
-    // `file` everywhere except the env vars. Renaming an env var is an ops
-    // migration on every deployment for no user-visible gain, so the four
-    // `*DOCUMENT*` / `*DOCS*` variables keep their spelling.
-    WORKSPACE_MAX_DOCS_BYTES: z.coerce
+    WORKSPACE_MAX_FILES_BYTES: z.coerce
       .number()
       .int()
       .positive()
@@ -613,20 +609,12 @@ const envSchema = z
     // tiny files). Enforced platform-side at input-parse (413) and at
     // agent-output commit under the org FOR UPDATE lock (413
     // `file_count_exceeded`). Default 200.
-    // NAME IS LEGACY: issue #1177 renamed the entity from `document` to
-    // `file` everywhere except the env vars. Renaming an env var is an ops
-    // migration on every deployment for no user-visible gain, so the four
-    // `*DOCUMENT*` / `*DOCS*` variables keep their spelling.
-    RUN_MAX_DOCUMENTS: z.coerce.number().int().positive().default(200),
+    RUN_MAX_FILES: z.coerce.number().int().positive().default(200),
 
     // Per-file ceiling on a durable file (materialized upload or agent
     // output). Enforced synchronously at write time — over-cap writes 413.
     // Default 100 MiB, aligned with the staged-upload absolute ceiling.
-    // NAME IS LEGACY: issue #1177 renamed the entity from `document` to
-    // `file` everywhere except the env vars. Renaming an env var is an ops
-    // migration on every deployment for no user-visible gain, so the four
-    // `*DOCUMENT*` / `*DOCS*` variables keep their spelling.
-    DOCUMENT_MAX_FILE_BYTES: z.coerce
+    FILE_MAX_BYTES: z.coerce
       .number()
       .int()
       .positive()
@@ -650,11 +638,7 @@ const envSchema = z
     // at creation time so the operator sets an instance-wide policy (GitLab
     // pattern). Absent ⇒ permanent (files never auto-expire) — the OSS
     // default; livrable expiry is the #1 complaint, so this stays opt-in.
-    // NAME IS LEGACY: issue #1177 renamed the entity from `document` to
-    // `file` everywhere except the env vars. Renaming an env var is an ops
-    // migration on every deployment for no user-visible gain, so the four
-    // `*DOCUMENT*` / `*DOCS*` variables keep their spelling.
-    DOCUMENT_RETENTION_DAYS: z.coerce.number().int().positive().optional(),
+    FILE_RETENTION_DAYS: z.coerce.number().int().positive().optional(),
 
     // Poll cadence for the transactional storage-deletion worker (the outbox
     // that physically purges S3/FS objects after their DB row is gone). Each

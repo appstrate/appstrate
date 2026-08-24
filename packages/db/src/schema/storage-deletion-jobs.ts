@@ -29,25 +29,20 @@ export const storageDeletionJobs = pgTable(
   {
     /** `sdj_` prefixed identifier (app-generated). */
     id: text("id").primaryKey(),
-    /**
-     * Storage bucket (e.g. "documents", "uploads"). The `documents` value is
-     * LIVE DATA — the bucket literal was deliberately NOT renamed with the
-     * concept in #1177, because every stored object's key starts with it.
-     */
+    /** Storage bucket (e.g. "files", "uploads"). */
     bucket: text("bucket").notNull(),
     /** Object key WITHIN the bucket (no bucket prefix). */
     storageKey: text("storage_key").notNull(),
     /**
-     * Why the object is being purged — one of `document_deleted`,
-     * `document_expired`, `org_deleted`, `application_deleted`,
-     * `end_user_deleted`, `run_workspace_deleted`, `version_deleted`,
-     * `upload_expired`, `materialization_failed`.
+     * Why the object is being purged — one of `file_deleted`, `file_expired`,
+     * `org_deleted`, `application_deleted`, `end_user_deleted`,
+     * `run_workspace_deleted`, `version_deleted`, `upload_expired`,
+     * `materialization_failed`.
      *
-     * The two `document_*` labels are kept at their pre-#1177 spelling: they
-     * are persisted free-text values on live rows that no migration rewrites,
-     * and the label buys nothing by being renamed — while renaming ONE of them
-     * would leave production holding two spellings of the same class of event,
-     * so an operator grouping by `reason` sees it split.
+     * The two `file_*` labels were spelled `document_*` until the #1177 rename
+     * was finished at the physical layer; migration `0044_finish_file_rename`
+     * rewrote the stored values, so an operator grouping by `reason` sees one
+     * spelling per class of event rather than two.
      *
      * Free text (audit/metric label), not a constrained enum.
      */

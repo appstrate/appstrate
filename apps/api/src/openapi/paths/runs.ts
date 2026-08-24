@@ -87,7 +87,7 @@ const canonicalRunsPaths = {
                   description:
                     "Run input values, validated against the agent's input schema. File fields " +
                     "take `upload://upl_xxx` references (from `createUpload`), " +
-                    "`appfile://doc_xxx` references (an existing file the caller can read), " +
+                    "`appfile://file_xxx` references (an existing file the caller can read), " +
                     "or inline `data:<mime>;name=<filename>;base64,<payload>` URIs (≤4 MiB decoded).",
                 },
                 rerun_from: {
@@ -244,8 +244,8 @@ const canonicalRunsPaths = {
           description:
             "`payload_too_large` — an inline `data:` input file exceeds the per-file inline cap " +
             "(4 MiB decoded), or the run's input files together exceed " +
-            "`WORKSPACE_MAX_DOCS_BYTES`. Or `file_count_exceeded` — the run would carry more " +
-            "than `RUN_MAX_DOCUMENTS` input files (uploads + inline + `appfile://` refs). " +
+            "`WORKSPACE_MAX_FILES_BYTES`. Or `file_count_exceeded` — the run would carry more " +
+            "than `RUN_MAX_FILES` input files (uploads + inline + `appfile://` refs). " +
             "Both are refused before the run launches, so nothing is charged and no workspace is " +
             'provisioned; distinct codes so a client can tell "one file too big" from "too ' +
             'many files".',
@@ -433,7 +433,7 @@ const canonicalRunsPaths = {
                   type: "object",
                   description:
                     "Run input validated against manifest.input.schema (AJV). File fields take " +
-                    "`upload://upl_xxx` references (from `createUpload`), `appfile://doc_xxx` " +
+                    "`upload://upl_xxx` references (from `createUpload`), `appfile://file_xxx` " +
                     "references, or inline `data:<mime>;name=<filename>;base64,<payload>` URIs " +
                     "(≤4 MiB decoded) — same contract as `POST /agents/{scope}/{name}/run`.",
                 },
@@ -441,7 +441,7 @@ const canonicalRunsPaths = {
                   type: "array",
                   items: { type: "string" },
                   description:
-                    "`appfile://doc_xxx` URIs to mount read-only into the run's `files/` " +
+                    "`appfile://file_xxx` URIs to mount read-only into the run's `files/` " +
                     "directory — fan-in by reference, without declaring a file field in the " +
                     "manifest. The platform declares a reserved `_context_files` input field " +
                     "for them, so they go through the same ACL, byte/count caps and " +
@@ -586,8 +586,8 @@ const canonicalRunsPaths = {
           description:
             "`payload_too_large` — an inline `data:` input file exceeds the per-file inline cap " +
             "(4 MiB decoded), or the run's input files together exceed " +
-            "`WORKSPACE_MAX_DOCS_BYTES`. Or `file_count_exceeded` — the run would carry more " +
-            "than `RUN_MAX_DOCUMENTS` input files (uploads + inline + `appfile://` refs). " +
+            "`WORKSPACE_MAX_FILES_BYTES`. Or `file_count_exceeded` — the run would carry more " +
+            "than `RUN_MAX_FILES` input files (uploads + inline + `appfile://` refs). " +
             "Both are refused before the run launches, so nothing is charged and no workspace is " +
             'provisioned; distinct codes so a client can tell "one file too big" from "too ' +
             'many files".',
@@ -1600,7 +1600,7 @@ const canonicalRunsPaths = {
       tags: ["Runs"],
       summary: "Publish an agent-produced file (HMAC, streaming)",
       description:
-        "Posted by the agent runtime — via the `publish_file` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` file attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `DOCUMENT_MAX_FILE_BYTES`, 100 MiB by default); metadata is carried in the `X-File-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing file with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).",
+        "Posted by the agent runtime — via the `publish_file` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` file attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `FILE_MAX_BYTES`, 100 MiB by default); metadata is carried in the `X-File-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing file with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).",
       parameters: [
         { name: "runId", in: "path", required: true, schema: { type: "string" } },
         {
@@ -1692,9 +1692,9 @@ const canonicalRunsPaths = {
         "413": {
           description:
             "`payload_too_large` — the file exceeds the per-file cap " +
-            "(`DOCUMENT_MAX_FILE_BYTES`) or the run's total output budget; the stream is cut " +
+            "(`FILE_MAX_BYTES`) or the run's total output budget; the stream is cut " +
             "mid-flight and any partial object deleted. Or `file_count_exceeded` — the run " +
-            "already holds `RUN_MAX_DOCUMENTS` files. Distinct codes so a client can tell " +
+            "already holds `RUN_MAX_FILES` files. Distinct codes so a client can tell " +
             '"one file too big" from "too many files".',
         },
         "429": { $ref: "#/components/responses/RateLimited" },

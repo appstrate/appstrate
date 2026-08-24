@@ -57,10 +57,10 @@ of the package. Core no longer reads `manifest.config` at all.
 Markdown, HTML, source code, a PDF, an image — but the word promises a Word or
 PDF document to every reader, the model included. The concept is renamed to
 `file` throughout (#1177). Every wire-visible and persisted spelling keeps a
-read alias; only what gets WRITTEN changes. Environment variables are
-deliberately NOT renamed (`DOCUMENT_MAX_FILE_BYTES`, `RUN_MAX_DOCUMENTS`,
-`DOCUMENT_RETENTION_DAYS`, …): renaming one is an ops migration on every
-deployment for zero user-visible gain.
+read alias; only what gets WRITTEN changes. The platform-side environment
+variables moved too, with no alias (`FILE_MAX_BYTES`, `RUN_MAX_FILES`,
+`FILE_RETENTION_DAYS`, `WORKSPACE_MAX_FILES_BYTES`) — see the platform
+CHANGELOG; core reads none of them, it only names them in docblocks.
 
 ### Added
 
@@ -82,8 +82,9 @@ deployment for zero user-visible gain.
   every MCP client. Exports `FILE_URI_PREFIX`, `LEGACY_DOCUMENT_URI_PREFIX`,
   `ACCEPTED_FILE_URI_PREFIXES`, `FILE_ID_RE`, `isFileUri`, `parseFileUri`,
   `fileUri`, `extractFileIds`, `extractFileIdsFromText` (plus the unchanged
-  `upload://` helpers). The row id prefix stays `doc_` — it is in every stored
-  row and every live storage key.
+  `upload://` helpers). `FILE_ID_RE` matches the `file_` row-id prefix — it was
+  `doc_` until the rename reached the physical layer, and the old shape is no
+  longer accepted.
 - **`PUBLISHED_FILE_LOG_EVENTS`** (`./file-uri`) — every `run_logs.event` tag
   that announces a published file, canonical first: `["file", "document"]`. It
   lives beside `ACCEPTED_FILE_URI_PREFIXES` because it is the same kind of

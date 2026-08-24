@@ -219,14 +219,15 @@ export const modelProviderCredentials = pgTable(
     // (`updateOAuthCredentialTokens`). Mirrors
     // `integration_connections.refresh_failure_count`.
     refreshFailureCount: integer("refresh_failure_count").notNull().default(0),
-    // WRITTEN, NEVER READ in product code — the only reads are integration
-    // tests asserting the write happened. Note the asymmetry with the sibling
-    // above: `refresh_failure_count` IS read, and drives the reconnect
-    // decision; this timestamp is not part of that predicate. It is genuine
-    // debugging telemetry ("when did refresh last fail") with no surface, so
-    // exposing it in the credential DTO costs less than dropping data already
-    // collected. Left deliberately, not overlooked.
-    lastRefreshFailureAt: timestamp("last_refresh_failure_at", { withTimezone: true }),
+    // NOTE — there is deliberately no `last_refresh_failure_at` here. There was
+    // one, written beside `refresh_failure_count` on every transient refresh
+    // failure and read by nothing: no route, no DTO, no OpenAPI field, no
+    // `cloud` consumer, no predicate. Its only readers were the integration
+    // tests asserting the write happened. `refresh_failure_count` is the
+    // column that drives the reconnect escalation; the timestamp was never
+    // part of that predicate. Dropped by `0044_finish_file_rename`. If "when
+    // did refresh last fail" is ever needed, build the reader first — a column
+    // with no reader is not telemetry, it is write amplification.
     /**
      * Model ids empirically verified against this credential — filled by
      * the model-discovery probe (post-OAuth-import + manual refresh). The
@@ -311,23 +312,16 @@ export const modelProviderPairings = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     /** When the helper successfully POSTed credentials. NULL means still pending. */
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
-    /**
-     * IP address that consumed the pairing.
-     *
-     * WRITTEN, NEVER READ — `consumePairing` in `services/model-providers/pairings.ts` is the
-     * only writer; no route, DTO, OpenAPI field or `cloud` consumer reads it.
-     * Its "for audit" justification does not survive contact with two facts:
-     * `cleanupExpiredPairings` DELETEs the row an hour after expiry, and the
-     * audit entry `handlePairRedeem` writes at redeem time omits the IP. So the
-     * forensic trail this was meant to leave is erased, and the record that
-     * survives does not carry it.
-     *
-     * Kept deliberately rather than dropped: the column holds real consumption
-     * IPs in production today. The open decision is build the reader (surface
-     * it on `GET /pairing/:id`, or put it in the audit `after` payload where it
-     * would outlive the row) or drop it — not "leave it here unexamined".
-     */
-    consumedFromIp: text("consumed_from_ip"),
+    // NOTE — there is deliberately no `consumed_from_ip` here. There was one,
+    // written by `consumePairing` (`services/model-providers/pairings.ts`) and
+    // read by nothing: no route, no DTO, no OpenAPI field, no `cloud` consumer.
+    // Its "for audit" justification did not survive two facts:
+    // `cleanupExpiredPairings` DELETEs the row an hour after expiry, and the
+    // audit entry `handlePairRedeem` writes at redeem time omits the IP — so
+    // the forensic trail it was meant to leave was erased, and the record that
+    // survives never carried it. Dropped by `0044_finish_file_rename`. If the
+    // consuming IP is wanted, put it in the audit `after` payload, which
+    // outlives the row — do not re-add a column nothing reads.
     /**
      * Final `model_provider_credentials.id` created or reconnected by the
      * helper. NULL while pending; surfaced via `GET /pairing/:id` after redeem

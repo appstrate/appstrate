@@ -226,7 +226,7 @@ describe("parseRequestInput — inline data: URIs", () => {
     // becomes a durable appfile:// id (materialization deferred to the run
     // pipeline — one pending entry), the inline entry becomes its stripped marker.
     const docs = result.input?.docs as string[];
-    expect(docs[0]).toStartWith("appfile://doc_");
+    expect(docs[0]).toStartWith("appfile://file_");
     expect(docs[1]).toBe("data:application/pdf;name=docs-1.pdf;base64,");
     expect(result.pendingFiles).toHaveLength(1);
     expect(result.pendingFiles![0]).toMatchObject({ uploadId });

@@ -1217,7 +1217,7 @@ function buildReadFileTool(ctx: McpToolContext): AppstrateToolDefinition {
 // --- resources/read for appfile:// ----------------------------------------
 
 /**
- * The `resources/read` provider for `appfile://doc_xxx` URIs — lets an MCP
+ * The `resources/read` provider for `appfile://file_xxx` URIs — lets an MCP
  * client read a file referenced by a `resource_link` (or a known
  * `appfile://` URI) WITHOUT going through the REST API.
  *

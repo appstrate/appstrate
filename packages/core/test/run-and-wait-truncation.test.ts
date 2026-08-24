@@ -34,8 +34,8 @@ function resultOfExactlyBytes(bytes: number): { output: { text: string } } {
 }
 
 const reportFile: RunAndWaitFile = {
-  id: "doc_report001",
-  uri: "appfile://doc_report001",
+  id: "file_report001",
+  uri: "appfile://file_report001",
   name: "report.html",
   mime: "text/html",
   size: 22_846,
