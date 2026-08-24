@@ -43,9 +43,6 @@ export type ChatEnv = {
   };
 };
 
-/** Max length of a run error message rendered in the caller-context block. */
-const RUN_ERROR_MAX_CHARS = 200;
-
 export const SYSTEM_PROMPT = `You are Appstrate's assistant. You help the user operate their Appstrate instance through the available tools.
 
 **You have no ability of your own to act on the outside world.** You cannot browse the web, read email, call third-party APIs, or use any integration or MCP directly. Your only power is invoking Appstrate operations. You are the brain/orchestrator; your hands are Appstrate agents. Any request that needs an integration, an MCP, or any action external to Appstrate MUST be carried out by running an agent and reading its result back — never by you claiming to have done it yourself.
@@ -98,6 +95,14 @@ Files the user attaches to the conversation are shown to you as \`[Attached file
 
 The reverse direction — the user asks for a file or downloadable deliverable (a report, a CSV, an image, a PDF…) — needs a FILE, not text in the output payload: instruct the sub-agent, in its \`prompt\`, to WRITE the deliverable as a file into the \`outputs/\` directory of its workspace (creating it if needed). Everything under \`outputs/\` is published automatically when the run ends: the files appear on the run's page, come back in the \`run_and_wait\` result's \`files\` list, and render as downloadable chips in this chat. Content merely returned through the \`output\` tool is plain data for YOU — it never becomes a file the user can open or download. Do both when useful: the file in \`outputs/\` for the user, a short \`output\` payload for your own summary. Give every deliverable a concise, descriptive, task-specific kebab-case filename in the user's language, including enough subject or scope to remain understandable after it is downloaded outside this run (for example, \`analyse-concurrents-restaurants-lyon.md\`). NEVER use context-free names such as ${CONTEXT_FREE_FILENAMES_PHRASE}. When the user asks for a report or summary without naming a format, default to markdown with such a descriptive filename; only reach for another format (PDF, HTML…) when the user explicitly asks for it.
 
+Your context block below is DATA — the user's identity and role, the current date, the integrations they have connected, the agents they can run, and the skills available. How to act on it:
+- Use the current date to resolve relative dates and schedules.
+- Use every \`@scope/name\` id verbatim: in \`dependencies.integrations\`, in \`run_and_wait\`'s \`scope\`/\`name\`, and in \`dependencies.skills\`.
+- Prefer running an existing agent over doing the work inline when one fits the task. Run it with \`run_and_wait\` using \`kind:"agent"\`, then answer from the returned result.
+- Skills are not run on their own. When you build or configure an agent and one of the listed skills fits the task, declare it under the agent manifest's \`dependencies.skills\` keyed by its id (e.g. \`"@appstrate/web-research": "^1.2.0"\`) — use the version shown, or \`"*"\` if none. The run route validates that declared skills exist.
+- A list marked \`(list truncated)\` is partial: call \`invoke_operation\` with \`operation_id: "listAgents"\` or \`"listSkills"\` for the full one.
+- The context carries NO run history. When the user asks about a recent or failed run, or wants to re-run something, without naming it, call \`listRuns\` (newest first) before answering, then fetch full details with the run get operation when needed.
+
 Respect the user's role: actions beyond it will be refused by the platform — don't attempt them.`;
 
 /** Shape of GET /api/me/context (the `get_me` payload). Validated loosely. */
@@ -105,8 +110,12 @@ interface CallerContext {
   user?: { name?: string | null; email?: string | null } | null;
   org?: { role?: string | null; name?: string | null; slug?: string | null } | null;
   /**
-   * The caller's most recent runs (actor-scoped), newest first — lets the model
-   * reference the last run/failure without a discovery round-trip.
+   * The caller's most recent runs (actor-scoped), newest first.
+   *
+   * Present on the wire but NOT rendered into the prompt — see the note in
+   * `formatCallerContext`. This interface describes the `/api/me/context`
+   * payload, which also backs the platform MCP `get_me` tool, so the field is
+   * documented here even though this module no longer reads it.
    */
   recent_runs?:
     | {
@@ -175,7 +184,7 @@ export function normalizeChatLocale(raw: string | undefined): string {
  * Render the caller context into a system-prompt block. Returns "" when the
  * payload is unusable so the caller can skip injection.
  */
-export function formatCallerContext(raw: unknown, opts?: { locale?: string }): string {
+export function formatCallerContext(raw: unknown, opts?: { locale?: string; now?: Date }): string {
   const ctx = (raw ?? {}) as CallerContext;
   const name = ctx.user?.name?.trim();
   const email = ctx.user?.email?.trim();
@@ -189,8 +198,7 @@ export function formatCallerContext(raw: unknown, opts?: { locale?: string }): s
     !orgName &&
     !ctx.connections?.length &&
     !ctx.agents?.length &&
-    !ctx.skills?.length &&
-    !ctx.recent_runs?.length
+    !ctx.skills?.length
   )
     return "";
 
@@ -204,15 +212,23 @@ export function formatCallerContext(raw: unknown, opts?: { locale?: string }): s
   ];
   // Ground "today" from the server clock. The chat carries no browser-supplied
   // clock/timezone (none is persisted server-side), so this is always UTC.
-  // Rounded to the minute: the system prompt is prefix-cached (anthropic
-  // cache_control / OpenAI auto-prefix), and a per-request seconds+millis
-  // timestamp would bust that cache on every turn for zero grounding value.
-  const now = new Date();
-  now.setUTCSeconds(0, 0);
-  lines.push(
-    `Current date and time: ${now.toISOString()} (UTC). ` +
-      "Use this to resolve relative dates and schedules.",
-  );
+  //
+  // Rounded to the HOUR, and that number is load-bearing. This block sits in the
+  // system prompt, which pi-ai emits as ONE text block carrying ONE
+  // `cache_control` breakpoint (`anthropic-messages.js` — the non-OAuth branch
+  // builds `params.system` as a single entry). A breakpoint covers the whole
+  // block, so ANY per-turn difference invalidates the entire cached prefix —
+  // and, because caching is prefix-based, the conversation-history breakpoint
+  // downstream of it with it. The ephemeral retention is 5 minutes, so an
+  // hour-granular clock is stable across every window a cache entry can live
+  // in, while still grounding the model to the right hour. A minute-granular
+  // clock (what this used to be) misses on any turn that crosses a minute —
+  // i.e. most interactive turns.
+  //
+  // `opts.now` exists so the stability invariant is testable without fake timers.
+  const now = new Date(opts?.now ?? Date.now());
+  now.setUTCMinutes(0, 0, 0);
+  lines.push(`Current date and time: ${now.toISOString()} (UTC, rounded to the hour).`);
   // UI language forwarded by the client (`X-Chat-Locale`), defaulting to the
   // platform's default locale (fr) when absent.
   lines.push(
@@ -233,10 +249,10 @@ export function formatCallerContext(raw: unknown, opts?: { locale?: string }): s
     // activated > inactive) and the default-vs-tool_catalog selection rule live
     // once in the platform MCP server instructions (apps/api/src/modules/mcp/
     // router.ts), which the engine already receives through its own MCP
-    // handshake; don't restate them here or the two drift.
-    lines.push(
-      `Integrations the user has connected and could attach to an agent: ${list}. Use the \`@scope/name\` id verbatim.`,
-    );
+    // handshake; don't restate them here or the two drift. The "use the id
+    // verbatim" instruction lives in SYSTEM_PROMPT for the same reason — see
+    // the block-wide rule below.
+    lines.push(`Integrations the user has connected and could attach to an agent: ${list}.`);
   } else {
     lines.push("The user has no connected integrations yet.");
   }
@@ -251,16 +267,7 @@ export function formatCallerContext(raw: unknown, opts?: { locale?: string }): s
           `${a.published === false ? "; draft only — run with version=draft" : ""})`,
       );
     }
-    if (ctx.agents_truncated) {
-      lines.push(
-        "More agents are available — call `invoke_operation` with " +
-          '`operation_id: "listAgents"` for the full list.',
-      );
-    }
-    lines.push(
-      "Prefer running an existing agent over doing the work inline when one fits the task. " +
-        'Run it with `run_and_wait` using `kind:"agent"`, then answer from the returned result.',
-    );
+    if (ctx.agents_truncated) lines.push("(list truncated)");
   }
   if (ctx.skills?.length) {
     lines.push("", "## Skills you can attach to an agent");
@@ -272,40 +279,18 @@ export function formatCallerContext(raw: unknown, opts?: { locale?: string }): s
           (desc ? `: ${desc}` : ""),
       );
     }
-    if (ctx.skills_truncated) {
-      lines.push(
-        "More skills are available — call `invoke_operation` with " +
-          '`operation_id: "listSkills"` for the full list.',
-      );
-    }
-    lines.push(
-      "Skills are not run on their own. When you build or configure an agent and one of these " +
-        "skills fits the task, declare it under the agent manifest's `dependencies.skills` keyed by " +
-        'its id (e.g. `"@appstrate/web-research": "^1.2.0"`) — use the version shown, or `"*"` ' +
-        "if none. The run route validates that declared skills exist.",
-    );
+    if (ctx.skills_truncated) lines.push("(list truncated)");
   }
-  if (ctx.recent_runs?.length) {
-    lines.push("", "## The user's recent runs (newest first)");
-    for (const r of ctx.recent_runs) {
-      const num = typeof r.run_number === "number" ? ` #${r.run_number}` : "";
-      const when = r.started_at?.trim() ? `, ${r.started_at.trim()}` : "";
-      const err = r.error?.trim()
-        ? ` — error: ${truncate(r.error.trim(), RUN_ERROR_MAX_CHARS)}`
-        : "";
-      lines.push(`- \`${r.package_id}\`${num} — ${r.status}${when}${err}`);
-    }
-    lines.push(
-      "Reference these when the user asks about a recent or failed run, or wants to re-run " +
-        "something; fetch full details with the run get operation when needed.",
-    );
-  }
+  // `recent_runs` is DELIBERATELY not rendered. It carried `started_at` and
+  // rewrote itself the moment the user launched anything — i.e. on exactly the
+  // turns this product exists for — which busted the system prompt's single
+  // cache breakpoint, and the conversation history behind it, on every one of
+  // them. The payload field stays on `CallerContext` because the same
+  // `/api/me/context` response backs the platform MCP `get_me` tool; only this
+  // rendering goes. SYSTEM_PROMPT tells the model to call `listRuns` when the
+  // user refers to a run without naming it — one tool call on that path, in
+  // exchange for a cacheable prefix on every turn.
   return lines.join("\n");
-}
-
-/** Clamp a string for prompt size, appending an ellipsis when truncated. */
-function truncate(s: string, max: number): string {
-  return s.length <= max ? s : `${s.slice(0, max)}…`;
 }
 
 /**

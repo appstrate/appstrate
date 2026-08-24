@@ -146,8 +146,54 @@ describe("caller-context prompt hygiene", () => {
     expect(formatCallerContext(identity)).toContain("Reply in the user's language (fr)");
   });
 
-  it("rounds the grounding timestamp to the minute (prompt prefix-cache stability)", () => {
+  it("rounds the grounding timestamp to the HOUR (prompt prefix-cache stability)", () => {
+    // The system prompt is ONE cache block with ONE breakpoint, so any per-turn
+    // difference invalidates it and the conversation history behind it. Anthropic's
+    // ephemeral retention is 5 minutes, so hour granularity is stable across every
+    // window an entry can live in. Minute granularity — what this used to be —
+    // missed on any turn that crossed a minute, i.e. most interactive turns.
     const out = formatCallerContext(identity);
-    expect(out).toMatch(/Current date and time: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00\.000Z \(UTC\)/);
+    expect(out).toMatch(
+      /Current date and time: \d{4}-\d{2}-\d{2}T\d{2}:00:00\.000Z \(UTC, rounded to the hour\)/,
+    );
+  });
+
+  it("keeps the block free of standing instructions — they belong to SYSTEM_PROMPT", () => {
+    // Everything the model must DO with the context is a constant, so it lives in
+    // the static prompt. The block renders data only; the sole exception is the
+    // reply-language line, which is parameterised by the `X-Chat-Locale` header.
+    const out = formatCallerContext({
+      user: { name: "Ada" },
+      org: { role: "member" },
+      connections: [{ integration_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
+      agents: [{ package_id: "@appstrate/triage", takes_input: false }],
+      agents_truncated: true,
+      skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
+      skills_truncated: true,
+    });
+    // Gone from the block…
+    for (const imperative of [
+      "Use the `@scope/name` id verbatim",
+      "Prefer running an existing agent",
+      "dependencies.skills",
+      'operation_id: "listAgents"',
+      'operation_id: "listSkills"',
+      "Use this to resolve relative dates",
+      "More agents are available",
+      "More skills are available",
+    ]) {
+      expect(out).not.toContain(imperative);
+    }
+    // …and standing in the static prompt instead.
+    for (const imperative of [
+      "Use the current date to resolve relative dates",
+      "Use every `@scope/name` id verbatim",
+      "Prefer running an existing agent over doing the work inline",
+      "declare it under the agent manifest's `dependencies.skills`",
+      '`operation_id: "listAgents"` or `"listSkills"`',
+      "call `listRuns` (newest first)",
+    ]) {
+      expect(SYSTEM_PROMPT).toContain(imperative);
+    }
   });
 });

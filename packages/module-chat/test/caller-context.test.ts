@@ -62,10 +62,10 @@ describe("formatCallerContext", () => {
     expect(out).toContain("(own; default: api_call)");
     // No declared default → an explicit "select tools yourself" signal.
     expect(out).toContain("(shared; no default — you must select tools explicitly)");
-    // Connected integrations are rendered as data + the verbatim-id hint. The
-    // preference order and tool-catalog rule live in the platform MCP server
-    // instructions now, not restated here.
-    expect(out).toContain("Use the `@scope/name` id verbatim");
+    // Connected integrations are rendered as DATA ONLY. The verbatim-id rule,
+    // like the preference order and the tool-catalog rule, lives outside this
+    // block — in SYSTEM_PROMPT and in the platform MCP server instructions.
+    expect(out).not.toContain("Use the `@scope/name` id verbatim");
   });
 
   it("renders the wildcard and empty default-tools markers", () => {
@@ -130,11 +130,12 @@ describe("formatCallerContext", () => {
     expect(out).toContain("(takes input: no)");
     expect(out).toContain("`@acme/report`");
     expect(out).toContain("(takes input: yes)");
-    expect(out).toContain("Prefer running an existing agent");
-    expect(out).not.toContain("More agents are available");
+    // Data only — the "prefer an existing agent" rule moved to SYSTEM_PROMPT.
+    expect(out).not.toContain("Prefer running an existing agent");
+    expect(out).not.toContain("(list truncated)");
   });
 
-  it("adds the listAgents note only when the agent list is truncated", () => {
+  it("marks the agent list as truncated without restating how to page it", () => {
     const out = formatCallerContext({
       user: { name: "Ada" },
       org: { role: "member" },
@@ -142,7 +143,9 @@ describe("formatCallerContext", () => {
       agents: [{ package_id: "@appstrate/triage", takes_input: false }],
       agents_truncated: true,
     });
-    expect(out).toContain('`operation_id: "listAgents"`');
+    // The marker is data; SYSTEM_PROMPT owns what to DO about it (listAgents).
+    expect(out).toContain("(list truncated)");
+    expect(out).not.toContain('`operation_id: "listAgents"`');
   });
 
   it("renders a context block from agents alone (no identity/connections)", () => {
@@ -185,12 +188,12 @@ describe("formatCallerContext", () => {
     expect(out).toContain("`@acme/pdf`");
     // No version → no version suffix rendered.
     expect(out).not.toContain("@acme/pdf` (v");
-    expect(out).toContain("dependencies.skills");
-    // Not truncated → no search hint within the skills section.
-    expect(out).not.toContain("More skills are available");
+    // Data only — the `dependencies.skills` authoring rule moved to SYSTEM_PROMPT.
+    expect(out).not.toContain("dependencies.skills");
+    expect(out).not.toContain("(list truncated)");
   });
 
-  it("adds the skill search hint only when the skill list is truncated", () => {
+  it("marks the skill list as truncated without restating how to page it", () => {
     const out = formatCallerContext({
       user: { name: "Ada" },
       org: { role: "member" },
@@ -198,11 +201,12 @@ describe("formatCallerContext", () => {
       skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
       skills_truncated: true,
     });
-    expect(out).toContain("More skills are available");
-    // The escape hatch must name the operation. `search_operations` ranks
+    // The marker is data; SYSTEM_PROMPT owns what to DO about it (listSkills).
+    // That instruction must name the operation: `search_operations` ranks
     // `listSkills` below every create/delete variant, so a keyword search is
     // not a reliable path back to the truncated list.
-    expect(out).toContain('`operation_id: "listSkills"`');
+    expect(out).toContain("(list truncated)");
+    expect(out).not.toContain('`operation_id: "listSkills"`');
   });
 
   it("renders a context block from skills alone (no identity/connections/agents)", () => {
@@ -240,17 +244,17 @@ describe("formatCallerContext", () => {
     expect(out).toContain('in the organization "Acme" (`acme`)');
     // No browser clock/timezone is forwarded to this route — always server UTC.
     expect(out).toContain("Current date and time:");
-    expect(out).toContain("(UTC)");
+    expect(out).toContain("(UTC, rounded to the hour)");
     expect(out).toContain("Reply in the user's language (fr)");
   });
 
   it("always grounds date/language from the server (UTC + fr)", () => {
     const out = formatCallerContext({ user: { name: "Ada" }, org: { role: "member" } });
-    expect(out).toContain("(UTC)");
+    expect(out).toContain("(UTC, rounded to the hour)");
     expect(out).toContain("Reply in the user's language (fr)");
   });
 
-  it("renders recent runs, surfacing the error for a failed run", () => {
+  it("does NOT render recent runs — they would bust the prompt cache every turn", () => {
     const out = formatCallerContext({
       user: { name: "Ada" },
       org: { role: "member" },
@@ -265,19 +269,40 @@ describe("formatCallerContext", () => {
         { package_id: "@acme/report", status: "success", run_number: 6 },
       ],
     });
-    expect(out).toContain("## The user's recent runs");
-    expect(out).toContain("`@appstrate/triage` #7 — failed");
-    expect(out).toContain("error: Gmail token expired");
-    expect(out).toContain("`@acme/report` #6 — success");
+    // The payload field still exists (it backs the MCP `get_me` tool); the
+    // RENDERING is what was removed. `started_at` rewrote the system prompt on
+    // every turn that launched a run, invalidating its single cache breakpoint
+    // and the conversation history behind it. SYSTEM_PROMPT tells the model to
+    // call `listRuns` instead.
+    expect(out).not.toContain("The user's recent runs");
+    expect(out).not.toContain("@appstrate/triage");
+    expect(out).not.toContain("Gmail token expired");
+    expect(out).not.toContain("2026-06-25");
   });
 
-  it("renders a context block from recent_runs alone (no identity)", () => {
-    const out = formatCallerContext({
-      recent_runs: [{ package_id: "@acme/report", status: "success", run_number: 1 }],
-    });
-    expect(out).toContain("## Your context");
-    expect(out).toContain("Current date and time:");
-    expect(out).toContain("## The user's recent runs");
+  it("returns an empty block when recent_runs is the only usable field", () => {
+    expect(
+      formatCallerContext({
+        recent_runs: [{ package_id: "@acme/report", status: "success", run_number: 1 }],
+      }),
+    ).toBe("");
+  });
+
+  it("is byte-identical across a 45-minute gap (the cache invariant)", () => {
+    const ctx = {
+      user: { name: "Ada", email: "ada@acme.com" },
+      org: { role: "member", name: "Acme", slug: "acme" },
+      connections: [{ integration_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
+      agents: [{ package_id: "@appstrate/triage", takes_input: false }],
+      skills: [{ package_id: "@appstrate/web-research", version: "1.2.0" }],
+    };
+    const at = new Date("2026-06-25T09:05:00.000Z");
+    const later = new Date("2026-06-25T09:50:00.000Z");
+    expect(formatCallerContext(ctx, { now: later })).toBe(formatCallerContext(ctx, { now: at }));
+    // And the rendered hour is the floor, not the raw stamp.
+    expect(formatCallerContext(ctx, { now: at })).toContain("2026-06-25T09:00:00.000Z");
+    // No time-of-day precision survives anywhere in the block.
+    expect(formatCallerContext(ctx, { now: at })).not.toMatch(/T\d{2}:(?!00:00\.000Z)/);
   });
 });
 

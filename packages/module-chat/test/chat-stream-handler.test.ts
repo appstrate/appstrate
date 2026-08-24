@@ -101,23 +101,26 @@ function modelsResponse(apiShape = "openai-completions"): Response {
 }
 
 /** A minimal but non-empty `/api/me/context` payload. */
-function contextResponse(): Response {
+function contextResponse(recentRuns: unknown[] = []): Response {
   return Response.json({
     user: { name: "Chat Tester", email: "chat-tester@test.com" },
     org: { role: "owner", name: CONTEXT_ORG_MARKER, slug: "chat-handler-test" },
     connections: [],
     agents: [],
     skills: [],
-    recent_runs: [],
+    recent_runs: recentRuns,
   });
 }
 
 /** Build the scripted in-memory dispatch. Nothing leaves this process. */
-function scriptedDispatch(apiShape?: string): (req: Request) => Promise<Response> {
+function scriptedDispatch(
+  apiShape?: string,
+  context: () => Response = () => contextResponse(),
+): (req: Request) => Promise<Response> {
   return async (req: Request): Promise<Response> => {
     const path = new URL(req.url).pathname;
     if (path === "/api/models") return modelsResponse(apiShape);
-    if (path === "/api/me/context") return contextResponse();
+    if (path === "/api/me/context") return context();
     if (path === "/api/applications") {
       return Response.json({ data: [{ id: APP_ID, isDefault: true }] });
     }
@@ -217,13 +220,15 @@ describe("handleChatStream engine routing", () => {
       apiShape?: string;
       /** Stand in for the platform's credential resolution. */
       resolveSubscriptionChatModel?: ChatPlatformDeps["resolveSubscriptionChatModel"];
+      /** Scripted `/api/me/context` body, to vary the payload between turns. */
+      context?: () => Response;
     },
   ): Promise<Response> {
     // Real platform deps (the same context `init()` gets), with dispatch
     // overridden by the scripted one so no request leaves this process.
     const deps = {
       ...buildChatPlatformDeps(buildModuleInitContext()),
-      dispatch: scriptedDispatch(overrides?.apiShape),
+      dispatch: scriptedDispatch(overrides?.apiShape, overrides?.context),
       ...(overrides?.resolveSubscriptionChatModel
         ? { resolveSubscriptionChatModel: overrides.resolveSubscriptionChatModel }
         : {}),
@@ -427,5 +432,50 @@ describe("handleChatStream engine routing", () => {
       .where(and(eq(chatSessions.id, sessionId), eq(chatSessions.orgId, ctx.orgId)))
       .limit(1);
     expect(session?.activeStreamId).toBeNull();
+  }, 20_000);
+
+  /**
+   * The prompt-cache guard.
+   *
+   * pi-ai emits the system prompt as ONE text block carrying ONE `cache_control`
+   * breakpoint, and caching is prefix-based — so any per-turn difference in that
+   * block invalidates it AND the conversation-history breakpoint downstream of
+   * it. The prompt must therefore be byte-identical between turns for a given
+   * caller, whatever the platform reports about their runs in the meantime.
+   *
+   * This asserts the property at the seam the handler owns, so it fails whatever
+   * route a regression takes back in: a re-rendered `recent_runs`, a finer clock,
+   * a newly interpolated per-request value.
+   */
+  it("hands the engine a byte-identical system prompt across turns", async () => {
+    const first = scriptedEngine();
+    await postChat(mintSessionId(), undefined, first.engine, {
+      context: () => contextResponse([]),
+    });
+
+    // Same caller, same org — but the platform now reports runs that did not
+    // exist a moment ago, each with its own timestamp and error text.
+    const second = scriptedEngine();
+    await postChat(mintSessionId(), undefined, second.engine, {
+      context: () =>
+        contextResponse([
+          {
+            package_id: "@acme/report",
+            status: "failed",
+            run_number: 41,
+            started_at: new Date().toISOString(),
+            error: "provider timed out",
+          },
+          { package_id: "@acme/triage", status: "success", run_number: 42 },
+        ]),
+    });
+
+    expect(first.calls).toHaveLength(1);
+    expect(second.calls).toHaveLength(1);
+    expect(second.calls[0]!.system).toBe(first.calls[0]!.system);
+    // And the volatile payload really was delivered — otherwise the assertion
+    // above would pass for the wrong reason (a dispatch that never ran).
+    expect(second.calls[0]!.system).not.toContain("provider timed out");
+    expect(second.calls[0]!.system).not.toContain("@acme/report");
   }, 20_000);
 });

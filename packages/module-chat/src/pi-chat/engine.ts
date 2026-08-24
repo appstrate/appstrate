@@ -157,6 +157,26 @@ export function runPiChat(input: PiChatInput): Response {
           thinkingLevel,
           thinkingBudgets,
         } = prepareRequestedThinkingLevel(piModel, requestedThinkingLevel);
+
+        // Assemble the FINAL system prompt here, before the turn is projected,
+        // so `baseTokens` below can be measured on the string Pi actually sends.
+        // It used to be built 46 lines further down, after the projection, which
+        // meant the compaction baseline silently omitted the multi-KB MCP
+        // instructions + operation index.
+        //
+        // `applyOperationIndexPolicy` is applied to the MCP instructions ALONE,
+        // not to the concatenation. The policy slices from the FIRST occurrence
+        // of `## Operation index` to the end of the string, and `input.system`
+        // carries org-authored text (agent display names, descriptions) — an
+        // agent named after the heading would truncate the whole prompt. The
+        // heading only ever legitimately appears in the server's instructions,
+        // so cutting there and concatenating afterwards removes the hazard by
+        // construction. See the note in `chat-stream.ts` that documents it.
+        const mcpInstructions = mcpTools.instructions
+          ? applyOperationIndexPolicy(mcpTools.instructions, model.api)
+          : undefined;
+        const system = mcpInstructions ? `${input.system}\n\n${mcpInstructions}` : input.system;
+
         const projectedTurn = buildStructuredPiTurn(
           input.messages,
           {
@@ -168,9 +188,13 @@ export function runPiChat(input: PiChatInput): Response {
             estimateTokens,
             // The system prompt is part of every request Pi sends, so it counts
             // toward the context the compaction threshold is measured against.
+            // Still a floor, not a measurement: tool schemas and this turn's own
+            // prompt text are not in it (`projectedTurn.prompt` is not history).
+            // That gap is pre-existing — do not close it silently, `contextTokens`
+            // seeds Pi's compaction threshold via `historyUsage`.
             baseTokens: estimateTokens({
               role: "user",
-              content: [{ type: "text", text: input.system }],
+              content: [{ type: "text", text: system }],
               timestamp: 0,
             }),
           },
@@ -210,14 +234,6 @@ export function runPiChat(input: PiChatInput): Response {
             modelBinding.runtimeApiKey,
           );
         }
-
-        // MCP server usage guidance is appended to the system prompt, then the
-        // (uncacheable) operation index is dropped for providers without a
-        // prompt cache.
-        let system = mcpTools.instructions
-          ? `${input.system}\n\n${mcpTools.instructions}`
-          : input.system;
-        system = applyOperationIndexPolicy(system, model.api);
 
         const generationExtensions =
           input.generation.temperature === undefined
