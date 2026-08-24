@@ -421,8 +421,14 @@ function ConversationInner({
     messages: initialMessages,
     transport,
     // Reconnect to an in-flight turn on mount (mid-inference reload). 204 when
-    // nothing is generating (the common case) → no-op.
-    resume: true,
+    // nothing is generating → no-op.
+    //
+    // Gated on `isPersisted` (which the parent pins to its mount-time value): a
+    // conversation the client just minted has no server row, so the resume GET
+    // is a guaranteed 204. Spending a request on that answer competes for
+    // connections with the model list and the session list at exactly the
+    // moment the composer is trying to become usable.
+    resume: isPersisted,
   });
 
   // LOCAL-FIRST sidebar state for this conversation. The turn's lifecycle is

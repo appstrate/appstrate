@@ -49,6 +49,16 @@ const queryClient = new QueryClient({
 startAuthBootstrap();
 primeOrgList();
 
+// Warm the chat route's chunk on the same idle window. `ChatModulePage` is
+// `lazy()`, so its download only STARTS once the route element renders — which
+// is after the auth gate and the org gate have both resolved. That chunk pulls
+// assistant-ui, the AI SDK and react-markdown, so on a cold cache the composer
+// appears a full serial download after the app is otherwise ready. Kicking it
+// here overlaps it with the two fetches above instead. Failure is ignored: this
+// is a warm-up, and `lazy()` will re-import (and surface a real error) if the
+// user actually navigates there.
+void import("./modules/chat/chat-page").catch(() => undefined);
+
 // Wait for the active language's namespaces to load before the first render
 // so the UI never flashes raw translation keys. Render anyway on failure —
 // i18next falls back to key echo, which beats a blank page.

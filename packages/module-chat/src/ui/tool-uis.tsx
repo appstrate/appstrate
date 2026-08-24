@@ -179,7 +179,10 @@ export function ToolCallCard({
   timing?: unknown;
 }) {
   const [open, setOpen] = React.useState(false);
-  const unwrapped = unwrapResult(result);
+  // `unwrapResult` JSON-parses the tool payload. Unmemoized it re-parsed on
+  // every render of this card — and during a stream the thread re-renders per
+  // chunk, so a tool-heavy conversation paid it once per card per frame.
+  const unwrapped = React.useMemo(() => unwrapResult(result), [result]);
   const status = httpStatusOf(unwrapped);
   const durationMs = readDurationMs(timing);
   const errorMsg = phase === "error" ? extractErrorMessage(unwrapped) : undefined;
@@ -254,7 +257,8 @@ type AnyToolProps = ToolCallMessagePartProps<Record<string, unknown>, unknown>;
 function RunLaunchCard(props: AnyToolProps): React.ReactNode {
   const runId = extractRunId(props.result);
   const initialFiles = React.useMemo(() => extractRunFiles(props.result), [props.result]);
-  const unwrapped = unwrapResult(props.result);
+  // Same reason as `ToolCallCard` — see the note there.
+  const unwrapped = React.useMemo(() => unwrapResult(props.result), [props.result]);
   const meta = definedEntries({
     tool_call_id: props.toolCallId,
     is_error: props.isError,
