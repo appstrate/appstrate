@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { KeyRound, Plus } from "lucide-react";
+import { ExternalLink, KeyRound, Plus } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
 import { ConfirmModal } from "../components/confirm-modal";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
@@ -52,19 +52,19 @@ export function ApiKeysPage() {
             <Plus />
             {t("settings:apiKeys.createBtn")}
           </DropdownMenuItem>
+          <DropdownMenuItem asChild>
+            <a
+              href="/api/docs"
+              target="_blank"
+              rel="noopener noreferrer"
+              data-page-action="api-docs"
+            >
+              <ExternalLink />
+              {t("settings:apiKeys.swaggerLink")}
+            </a>
+          </DropdownMenuItem>
         </PageActionsMenu>
       </SettingsPageActions>
-
-      <div className="mb-4 flex items-center justify-end">
-        <a
-          href="/api/docs"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-primary text-sm no-underline hover:underline"
-        >
-          {t("settings:apiKeys.swaggerLink")}
-        </a>
-      </div>
 
       <DataTable
         label={t("settings:orgSettings.tabApiKeys")}

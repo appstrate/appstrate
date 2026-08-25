@@ -2338,8 +2338,9 @@ its New key deed in the body beside the documentation link. It is now the ninth
 settings DataTable: Name, Key, Status, Expiration, Permissions, Last used and
 Created by are comparable columns, while Revoke is the destructive deed in the
 row menu. Identity plus Actions survive on a phone. The creation deed now uses
-SettingsPageActions at title height while API documentation remains contextual
-content. DataTable also still exposed an `appearance="integrated"` escape hatch
+SettingsPageActions at title height, and API documentation is the second item
+in that same Actions menu with an external-link icon and a new-tab target.
+DataTable also still exposed an `appearance="integrated"` escape hatch
 even though the surface decision belongs to the containing DOM. That prop is
 gone: every table is a white framed card unless the settings content marker
 integrates it, so a caller cannot silently invent a third treatment.
@@ -2494,6 +2495,10 @@ column choices have real behaviour. Small settings tables do not gain inert
 controls merely for visual symmetry. The shared `ListToolbar` search surface is
 now explicitly white inside a dialog, matching the level-one collection search
 instead of inheriting the grey form-input treatment reserved for setting rows.
+
+API Keys now treats Documentation API as a page deed rather than detached body
+content. It lives in Actions beside key creation, carries the external-link
+icon, and keeps the existing new-tab contract.
 
 **12. Accessibility, which nothing here has ever checked.** The branch
 re-declares ARIA roles on the table because this file demands it, and that is
