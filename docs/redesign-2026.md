@@ -2275,48 +2275,28 @@ Integration editors. MCP Servers remain browse-only in the web app, so their
 honest manual path is the existing package import modal, not an invented empty
 editor. Build with Chat opens a new Appstrate Chat and seeds its composer with a
 resource-specific prompt without sending it. The reader can edit or discard the
-brief before the first turn. The prompt names only operation ids present in the
-OpenAPI catalogue, with the ids compile-time checked as `keyof operations`,
-requires `describe_operation` before `invoke_operation`, and requires a
-reviewable draft plus explicit confirmation before publication. Prompt prose
-lives in the EN/FR i18next catalogues; one prompt projection assembles either
-language instead of hiding a second localization system in TypeScript.
+brief before the first turn. Prompt prose lives in the EN/FR i18next catalogues;
+one prompt projection assembles either language instead of hiding a second
+localization system in TypeScript. This intentionally transports the reader's
+intent and leaves the current Chat, MCP and skill contracts to the assistant
+that receives it.
 
-MCP-server authoring uses the deeper workflow the platform MCP already exposes:
-`get_runtime_capabilities`, one inline `run_and_wait` that writes and packages
-the executable files and publishes the archive with `publish_document`, then
-`validate_package_document`, followed by `import_package_document` only when
-the result is both valid and importable, the caller has the tool, and the user
-confirmed. It is therefore a real Chat capability, not a disabled promise, even
-though there is no web editor for it.
+Delegate to a coding agent remains visible but disabled. Its production action
+depends on a stable instruction endpoint that does not exist yet, and an active
+button must not copy a dead URL or make the web app own authoring instructions.
+When that endpoint exists, the action will copy one short instruction that
+points to the resource-specific remote document. The document may then change
+without a web deployment. This pass records that contract but does not build
+the endpoint and does not modify the separate `appstrate/skills` repository.
 
-Delegate to a coding agent opens a second step with a copyable prompt and the
-same `McpClientConnect` component used by Organisation settings > MCP access.
-Claude Code, Cursor, VS Code and generic JSON therefore derive their endpoint,
-commands and deeplinks from `buildMcpClientConfig`; the handoff does not duplicate
-connection strings that could drift. A coding agent without that MCP is told to
-stop and ask for the connection rather than reconstructing an endpoint.
-The chooser reads the installation's module capabilities before offering those
-handoffs: Chat is disabled with an explanation when `features.chat` is absent,
-and coding-agent delegation is disabled when `features.mcp` is absent. Manual
-creation remains available. A shared navigation hook owns opening, closing and
-the unsent Chat draft so the collection implementations cannot drift.
-
-The prompt and URL projections have unit coverage. `lab:creation` exercises the
-four three-choice modals at 1440 and 390, the coding prompt and canonical MCP
-connection instructions, all four resource-specific unsent Chat drafts, all
-three existing manual editors, and the MCP import destination. The four modal
-surfaces are also permanent nominal lab screens, so `lab:shots` keeps their
-fixtures and pixels visible.
-
-The four nominal screens produced eight inspected captures at 1440 and 390
-with no fixture hole. Their dialog and viewport geometry has zero overflow at
-both widths. `bun test apps/web packages/module-chat` is green at 977 tests,
-`lab:tables` and `lab:creation` are green, and `bun run check` is green at 33/33
-tasks with the same nine pre-existing warnings. The first check reproduced the
-documented worktree setup trap because the copied `.env` lacked
-`CONNECT_SESSION_SECRET`; adding the ignored local value let the complete gate
-run rather than misreading an environment refusal as a code failure.
+The chooser reads the installation's Chat capability before enabling the Chat
+handoff; Manual remains available. A shared navigation hook owns opening,
+closing and the unsent Chat draft so the collection implementations cannot
+drift. `lab:creation` exercises the four three-choice modals at 1440 and 390,
+the disabled coding-agent path, all four resource-specific unsent Chat drafts,
+all three existing manual editors, and the MCP import destination. The four
+modal surfaces are also permanent nominal lab screens, so `lab:shots` keeps
+their fixtures and pixels visible.
 
 The mobile organisation switcher exposed a separate surface bug during this
 pass. Opened from the sidebar, it retained the desktop right-opening, two-column

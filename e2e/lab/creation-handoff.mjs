@@ -18,15 +18,17 @@ const editorDestinations = [
   ["/skills?create=skill", "/skills/new"],
   ["/integrations?create=integration", "/integrations/new"],
 ];
-const chatOperations = [
-  ["/agents?create=agent", "createAgent"],
-  ["/skills?create=skill", "createSkill"],
-  ["/integrations?create=integration", "createIntegrationPackage"],
-  ["/mcp-servers?create=mcp-server", "get_runtime_capabilities"],
+const chatDrafts = [
+  ["/agents?create=agent", "nouvel agent Appstrate"],
+  ["/skills?create=skill", "nouveau skill Appstrate"],
+  ["/integrations?create=integration", "nouvelle intégration Appstrate"],
+  ["/mcp-servers?create=mcp-server", "nouveau serveur MCP Appstrate"],
 ];
 
 async function withPage(width, run) {
-  const context = await browser.newContext({ viewport: { width, height: 1000 } });
+  const context = await browser.newContext({
+    viewport: { width, height: 1000 },
+  });
   await context.addInitScript(() => localStorage.setItem("appstrate-lab-scenario", "nominal"));
   const page = await context.newPage();
   try {
@@ -43,7 +45,8 @@ for (const width of [1440, 390]) {
       const chooser = page.locator(`[data-creation-chooser="${resource}"]`);
       await chooser.waitFor({ state: "visible" });
       assert.equal(await chooser.locator("[data-creation-method]").count(), 3);
-      assert.equal(await chooser.locator("[data-creation-method]:disabled").count(), 0);
+      assert.equal(await chooser.locator("[data-creation-method]:disabled").count(), 1);
+      assert.equal(await chooser.locator('[data-creation-method="coding-agent"]').isDisabled(), true);
       const overflow = await chooser.evaluate(() => ({
         viewport: document.documentElement.scrollWidth - document.documentElement.clientWidth,
         dialog: (() => {
@@ -56,18 +59,7 @@ for (const width of [1440, 390]) {
     }
   });
 }
-console.log("  four enabled creation handoffs at 1440 / 390: ok");
-
-await withPage(1440, async (page) => {
-  await page.goto(`${BASE}/agents?create=agent`, { waitUntil: "domcontentloaded" });
-  await page.locator('[data-creation-method="coding-agent"]').click();
-  const prompt = page.getByTestId("creation-coding-prompt");
-  await prompt.waitFor({ state: "visible" });
-  assert.match((await prompt.textContent()) ?? "", /createAgent/);
-  await page.getByRole("tab", { name: /Connecter le MCP|Connect MCP/ }).click();
-  await page.getByText("claude mcp add", { exact: false }).waitFor({ state: "visible" });
-});
-console.log("  coding-agent prompt and canonical MCP connection instructions: ok");
+console.log("  four creation handoffs with coding agent gated at 1440 / 390: ok");
 
 await withPage(1440, async (page) => {
   let chatPosts = 0;
@@ -76,7 +68,7 @@ await withPage(1440, async (page) => {
       chatPosts += 1;
     }
   });
-  for (const [path, operation] of chatOperations) {
+  for (const [path, draft] of chatDrafts) {
     await page.goto(`${BASE}${path}`, { waitUntil: "domcontentloaded" });
     await page.locator('[data-creation-method="chat"]').click();
     await page.waitForURL("**/chat");
@@ -87,8 +79,8 @@ await withPage(1440, async (page) => {
         (element) => element.placeholder === "Message Appstrate…",
       );
       return Boolean(input?.value.includes(expected));
-    }, operation);
-    assert.match(await composer.inputValue(), new RegExp(operation));
+    }, draft);
+    assert.match(await composer.inputValue(), new RegExp(draft));
   }
   assert.equal(chatPosts, 0);
 });

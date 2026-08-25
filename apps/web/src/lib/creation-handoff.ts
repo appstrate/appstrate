@@ -1,30 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { operations } from "../api/schema";
-
 export type CreationResource = "agent" | "skill" | "integration" | "mcp-server";
-export type CreationAudience = "chat" | "coding-agent";
 export type CreationPromptTranslate = (key: string, values?: Record<string, string>) => string;
 
 const CREATION_QUERY_KEY = "create";
 
-type OperationId = keyof operations;
-
-const OPERATION_IDS: Record<Exclude<CreationResource, "mcp-server">, readonly OperationId[]> = {
-  agent: ["createAgent", "updateAgent", "createAgentVersion"],
-  skill: ["createSkill", "updateSkill", "createSkillVersion"],
-  integration: [
-    "createIntegrationPackage",
-    "updateIntegrationPackage",
-    "createIntegrationPackageVersion",
-  ],
-};
-
-const PROMPT_INTRO_KEYS: Record<CreationResource, string> = {
-  agent: "creation.prompt.intro.agent",
-  skill: "creation.prompt.intro.skill",
-  integration: "creation.prompt.intro.integration",
-  "mcp-server": "creation.prompt.intro.mcpServer",
+const CHAT_DRAFT_KEYS: Record<CreationResource, string> = {
+  agent: "creation.chat.draft.agent",
+  skill: "creation.chat.draft.skill",
+  integration: "creation.chat.draft.integration",
+  "mcp-server": "creation.chat.draft.mcpServer",
 };
 
 export function creationResourceFromSearch(search: string): CreationResource | null {
@@ -52,28 +37,9 @@ export function readChatComposerDraft(state: unknown): string | undefined {
   return typeof draft === "string" && draft.trim() ? draft : undefined;
 }
 
-function packageWorkflow(resource: Exclude<CreationResource, "mcp-server">): string {
-  return OPERATION_IDS[resource].map((operation) => `\`${operation}\``).join(", ");
-}
-
-export function buildCreationPrompt(
+export function buildChatCreationDraft(
   resource: CreationResource,
-  audience: CreationAudience,
   t: CreationPromptTranslate,
 ): string {
-  const workflow =
-    resource === "mcp-server"
-      ? t("creation.prompt.mcpWorkflow")
-      : t("creation.prompt.packageWorkflow", { operations: packageWorkflow(resource) });
-
-  return [
-    t(PROMPT_INTRO_KEYS[resource]),
-    t("creation.prompt.questions"),
-    t(
-      audience === "coding-agent" ? "creation.prompt.codingContext" : "creation.prompt.chatContext",
-    ),
-    t("creation.prompt.discovery"),
-    workflow,
-    t("creation.prompt.ending"),
-  ].join("\n\n");
+  return t(CHAT_DRAFT_KEYS[resource]);
 }

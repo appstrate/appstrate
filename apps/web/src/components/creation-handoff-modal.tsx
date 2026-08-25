@@ -1,18 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, Bot, MessageSquareText, PencilLine } from "lucide-react";
+import { Bot, MessageSquareText, PencilLine } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
-import { buildMcpClientConfig } from "../lib/mcp-client-config";
-import { buildCreationPrompt, type CreationResource } from "../lib/creation-handoff";
+import { buildChatCreationDraft, type CreationResource } from "../lib/creation-handoff";
 import { useAppConfig } from "../hooks/use-app-config";
-import { useOrg } from "../hooks/use-org";
-import { CopyBlock } from "./copy-block";
 import { Modal } from "./modal";
-import { McpClientConnect } from "./org-settings/mcp-client-connect";
 
 interface CreationHandoffModalProps {
   resource: CreationResource;
@@ -36,57 +30,11 @@ export function CreationHandoffModal({
 }: CreationHandoffModalProps) {
   const { t } = useTranslation("settings");
   const { features } = useAppConfig();
-  const { currentOrg } = useOrg();
-  const [codingHandoff, setCodingHandoff] = useState(false);
   const resourceName = t(RESOURCE_KEYS[resource]);
   const translatePrompt = (key: string, values?: Record<string, string>) => t(key, values);
-  const codingPrompt = buildCreationPrompt(resource, "coding-agent", translatePrompt);
-  const chatPrompt = buildCreationPrompt(resource, "chat", translatePrompt);
+  const chatPrompt = buildChatCreationDraft(resource, translatePrompt);
   const manualIsImport = resource === "mcp-server";
   const chatAvailable = Boolean(features.chat);
-  const codingAgentAvailable = Boolean(features.mcp);
-
-  if (codingHandoff) {
-    const serverName = currentOrg ? `appstrate-${currentOrg.slug}` : "appstrate";
-    const serverUrl = currentOrg
-      ? `${window.location.origin}/api/mcp/o/${currentOrg.id}`
-      : window.location.origin;
-    const connection = buildMcpClientConfig(serverName, serverUrl);
-
-    return (
-      <Modal
-        open
-        onClose={onClose}
-        title={t("creation.coding.title", { resource: resourceName })}
-        className="sm:max-w-2xl"
-      >
-        <Tabs defaultValue="prompt">
-          <TabsList>
-            <TabsTrigger value="prompt">{t("creation.coding.promptTab")}</TabsTrigger>
-            <TabsTrigger value="connection">{t("creation.coding.connectionTab")}</TabsTrigger>
-          </TabsList>
-          <TabsContent value="prompt" className="mt-4 space-y-3">
-            <p className="text-muted-foreground text-sm">{t("creation.coding.promptHint")}</p>
-            <CopyBlock value={codingPrompt} multiline testId="creation-coding-prompt" />
-          </TabsContent>
-          <TabsContent value="connection" className="mt-4 max-h-[60vh] overflow-y-auto pr-1">
-            <p className="text-muted-foreground mb-4 text-sm">
-              {t("creation.coding.connectionHint")}
-            </p>
-            {currentOrg ? (
-              <McpClientConnect serverName={connection.serverName} url={connection.url} />
-            ) : (
-              <p className="text-muted-foreground text-sm">{t("creation.coding.noOrg")}</p>
-            )}
-          </TabsContent>
-        </Tabs>
-        <Button type="button" variant="ghost" size="sm" onClick={() => setCodingHandoff(false)}>
-          <ArrowLeft />
-          {t("creation.back")}
-        </Button>
-      </Modal>
-    );
-  }
 
   const methods = [
     {
@@ -113,13 +61,9 @@ export function CreationHandoffModal({
       id: "coding-agent",
       icon: Bot,
       title: t("creation.codingAgent.title"),
-      description: t(
-        codingAgentAvailable
-          ? "creation.codingAgent.description"
-          : "creation.codingAgent.unavailableDescription",
-      ),
-      onClick: () => setCodingHandoff(true),
-      disabled: !codingAgentAvailable,
+      description: t("creation.codingAgent.unavailableDescription"),
+      onClick: undefined,
+      disabled: true,
     },
   ];
 

@@ -4,7 +4,7 @@ import { describe, expect, it } from "bun:test";
 import settingsEn from "../../locales/en/settings.json";
 import settingsFr from "../../locales/fr/settings.json";
 import {
-  buildCreationPrompt,
+  buildChatCreationDraft,
   chatDraftNavigationState,
   creationResourceFromSearch,
   creationSearch,
@@ -13,11 +13,15 @@ import {
 } from "../creation-handoff.ts";
 
 const resources: CreationResource[] = ["agent", "skill", "integration", "mcp-server"];
-const frenchIntros: Record<CreationResource, string> = {
-  agent: "Je veux créer un nouvel agent Appstrate.",
-  skill: "Je veux créer un nouveau skill Appstrate.",
-  integration: "Je veux créer une nouvelle intégration Appstrate.",
-  "mcp-server": "Je veux créer un nouveau serveur MCP Appstrate.",
+const frenchChatDrafts: Record<CreationResource, string> = {
+  agent:
+    "Aide-moi à créer un nouvel agent Appstrate. Commence par me poser les questions nécessaires.",
+  skill:
+    "Aide-moi à créer un nouveau skill Appstrate. Commence par me poser les questions nécessaires.",
+  integration:
+    "Aide-moi à créer une nouvelle intégration Appstrate. Commence par me poser les questions nécessaires.",
+  "mcp-server":
+    "Aide-moi à créer un nouveau serveur MCP Appstrate. Commence par me poser les questions nécessaires.",
 };
 const dictionaries = { en: settingsEn, fr: settingsFr } as const;
 
@@ -43,41 +47,8 @@ describe("creation handoff", () => {
     expect(creationResourceFromSearch("?create=unknown")).toBeNull();
   });
 
-  it.each(resources)("builds a specific Chat prompt for %s", (resource) => {
-    const prompt = buildCreationPrompt(resource, "chat", translator("fr"));
-    expect(prompt).toStartWith(frenchIntros[resource]);
-    expect(prompt).toContain("Chat Appstrate");
-    expect(prompt).toContain("avant toute mutation");
-    expect(prompt).toContain("Ne publie ou n’installe");
-  });
-
-  it("names only real package operationIds", () => {
-    expect(buildCreationPrompt("agent", "chat", translator("en"))).toContain("`createAgent`");
-    expect(buildCreationPrompt("skill", "chat", translator("en"))).toContain("`createSkill`");
-    expect(buildCreationPrompt("integration", "chat", translator("en"))).toContain(
-      "`createIntegrationPackage`",
-    );
-  });
-
-  it("uses the real document-backed MCP server authoring workflow", () => {
-    const prompt = buildCreationPrompt("mcp-server", "chat", translator("en"));
-    for (const tool of [
-      "get_runtime_capabilities",
-      "run_and_wait",
-      "publish_document",
-      "validate_package_document",
-      "import_package_document",
-    ]) {
-      expect(prompt).toContain(`\`${tool}\``);
-    }
-    expect(prompt).toContain("valid: true");
-    expect(prompt).toContain("importable: true");
-  });
-
-  it("hands a coding agent back to the canonical MCP access instructions", () => {
-    const prompt = buildCreationPrompt("agent", "coding-agent", translator("fr"));
-    expect(prompt).toContain("Paramètres de l’organisation > Accès MCP");
-    expect(prompt).toContain("Ne reconstruis jamais l’URL ni la commande");
+  it.each(resources)("builds a short, specific Chat draft for %s", (resource) => {
+    expect(buildChatCreationDraft(resource, translator("fr"))).toBe(frenchChatDrafts[resource]);
   });
 
   it("accepts only a non-empty composer draft from router state", () => {
