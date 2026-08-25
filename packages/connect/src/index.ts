@@ -105,8 +105,6 @@ export type { IntegrationOAuthCallbackResult } from "./integration-oauth.ts";
 // dynamic client registration). The apps/api orchestrator chains these to
 // self-register an OAuth client when an integration opts into dynamic
 // registration and no client is pre-registered.
-// Only the orchestrating entry point crosses the boundary; the probe builder
-// and the WWW-Authenticate parser are its internals.
 // Only the two orchestrating entry points cross the boundary; callers build
 // the argument inline and read the result via inference, so neither module's
 // input/output types are re-exported here.

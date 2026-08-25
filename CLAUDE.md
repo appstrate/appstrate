@@ -71,8 +71,9 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
      |-- Login/Signup --------------->|-- Better Auth (cookie session)
      |-- / (Agent List) ------------->|-- GET /api/agents
      |-- PUT .../input-settings ----->|-- schema.ts (AJV) → services/state/ (Drizzle)
-     |-- POST /api/integrations/ ---->|-- routes/integrations.ts → OAuth2 flow / API key
-     |      connect/{start,submit}    |     storage
+     |-- GET /api/integrations/ ----->|-- routes/integrations.ts → OAuth2 flow / API key
+     |      connect/start (browser),  |     storage
+     |      POST .../connect/submit   |
      |-- POST /api/agents/{scope}/ -->|-- validate → create run → executeAgentInBackground()
      |      {name}/run                |
      |<-- SSE (replay + live) --------|-- subscribe to logs via pub/sub
@@ -159,22 +160,25 @@ Tier 0 (zero-install) requires only Bun.
   with no reader, a file nothing reaches, or a declared dependency nothing imports. `eslint`'s
   `no-unused-vars` cannot see any of that — it only sees locals. Config and the reasoning behind
   every entry/ignore: `knip.config.ts`. An entry must say _what reaches the file_; an ignore must
-  say _why knip is structurally blind_. Public exports of the **published** packages are out of
-  scope by design — their readers live out of tree — and exactly two scoped packages here have ever
-  been published: `@appstrate/core` and `@appstrate/afps-shared`, the only two with a publish
-  workflow and a release tag. `@appstrate/afps-runtime` carries `publishConfig` but is **not**
-  published (no workflow, no tag, a `0.0.0` npm placeholder) and stays private by decision;
-  `@appstrate/runner-pi` and the `@appstrate/module-*` packages are absent from npm entirely;
-  `@appstrate/ui` is the inverse case — `"private": true` here yet 1.0.1 sits on npm from before
-  that flag, and is treated as private. Verify with `npm view <pkg> versions`, never with the
-  manifest's `publishConfig`. knip derives NO entry from a package manifest and a workspace
-  `entry` replaces even its filename defaults, so a workspace that declares one must re-declare
-  every `exports`/`bin`/`main` target or its whole subtree reads as dead — the cause of a ~161-finding
-  false red fixed on 2026-08-23. That re-declaration is now derived by `manifestEntries()` in
-  `knip.config.ts`, so a manifest edit cannot silently desynchronise from it; what stays hand-written
-  is the half no manifest implies (Docker CMDs, fixtures, operator scripts). Never un-export a symbol
-  to quiet this gate, and add an `ignore*` only where knip is structurally blind, with the
-  justification `knip.config.ts`'s rule 2 demands — never to make a finding go away.
+  say _why the finding cannot be acted on_. Public exports of the **published** packages are out of
+  scope by design — their readers live out of tree — and exactly two scoped packages here are
+  published on an ongoing basis: `@appstrate/core` and `@appstrate/afps-shared`, the only two with
+  a publish workflow (`.github/workflows/publish-core.yml`, `publish-afps-shared.yml`).
+  `@appstrate/afps-runtime` carries `publishConfig` but is **not** published (no workflow, no tag,
+  a `0.0.0` npm placeholder) and stays private by decision; `@appstrate/runner-pi` and the
+  `@appstrate/module-*` packages are absent from npm entirely; `@appstrate/ui` is the inverse case
+  — `"private": true` here, yet `ui@1.0.0` and `ui@1.0.1` tags exist and 1.0.1 sits on npm, both
+  left over from before that flag. There is no `publish-ui.yml`, nothing republishes it, and it is
+  treated as private. So a release tag alone proves nothing — the live signal is the workflow, and
+  the ground truth is `npm view <pkg> versions`, never the manifest's `publishConfig`. knip derives
+  NO entry from a package manifest and a workspace `entry` replaces even its filename defaults, so
+  a workspace that declares one must re-declare every `exports`/`bin`/`main` target or its whole
+  subtree reads as dead — the cause of a ~161-finding false red fixed on 2026-08-23. That
+  re-declaration is now derived by `manifestEntries()` in `knip.config.ts`, so a manifest edit
+  cannot silently desynchronise from it; what stays hand-written is the half no manifest implies
+  (Docker CMDs, fixtures, operator scripts). Never un-export a symbol to quiet this gate, and add
+  an `ignore*` only where knip is structurally blind or the code is vendored in whole, with the
+  justification `knip.config.ts` demands at the call site — never to make a finding go away.
   Full detail and the other false green/red signals: `AGENTS.md` → **Quality Gate — and the signals
   it lies with**.
 - **Tests**: `bun test` from root runs all packages in one process. See **Testing** below.

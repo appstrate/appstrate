@@ -12,9 +12,8 @@
  *
  * Originally written inline in `routes/schedules-body-validation.test.ts`;
  * lifted here so `routes/runs-body-validation.test.ts` — the sibling covering
- * the other three launch surfaces — asserts the same way. That schedule test
- * still carries its own copy: it is outside the change that lifted this, and
- * folding it in is a mechanical follow-up, not a behavioural one.
+ * the other three launch surfaces — asserts the same way. Both launch-surface
+ * suites now import it, so the four surfaces refuse a body under one assertion.
  */
 
 import { expect } from "bun:test";

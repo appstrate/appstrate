@@ -349,14 +349,34 @@ function isPositiveIntegerEnvValue(value: string): boolean {
  * kill the sidecar process and fail every run; dropping it here keeps runs alive on the
  * compiled default.
  *
- * `SIDECAR_MAX_REQUEST_BODY_BYTES` is the exception, and this filter is NOT what
- * protects it any more. Its sole parser now lives in `@appstrate/afps-runtime/resolvers`
- * (`http-call-core.ts`), which THIS process evaluates at module init — verified: both
- * callers of this function, the API host and `modules/firecracker/runner/daemon.ts`,
- * fail to boot on a malformed value long before they get here, so the warn-and-drop
- * below is only ever reached for that key with a value that already parsed. Deliberate,
- * not an oversight: `docs/ENV.md` promises loud-fail at boot on an invalid value, and a
- * cap the operator believes they raised and did not is worse than a refusal to start.
+ * `SIDECAR_MAX_REQUEST_BODY_BYTES` is the exception, and WHICH of the two host
+ * processes calling this function is doing so decides whether the filter still matters
+ * for it. Its sole parser lives in `@appstrate/afps-runtime/resolvers`
+ * (`http-call-core.ts`) at module scope — `MAX_REQUEST_BODY_SIZE = readRequestBodyCapEnv()`
+ * throws the moment that module is evaluated, on a malformed value or one over
+ * `ABSOLUTE_BODY_CEILING`. Whether it protects a given process is therefore purely a
+ * question of whether that module is in the process's graph, and the two callers differ.
+ *
+ * The API host has it unconditionally: `apps/api/src/index.ts` imports
+ * `routes/credential-proxy.ts`, which statically imports `MAX_STREAMED_BODY_SIZE` from
+ * that same resolvers barrel. So the host fails to boot on a bad value long before it
+ * reaches this function, and the warn-and-drop below is unreachable for that key there.
+ * Deliberate, not an oversight: `docs/ENV.md` promises loud-fail at boot on an invalid
+ * value, and a cap the operator believes they raised and did not is worse than a
+ * refusal to start.
+ *
+ * `modules/firecracker/runner/daemon.ts` — the other caller, a SEPARATE process on the
+ * KVM host, reaching this function via `modules/firecracker/orchestrator.ts` — does NOT.
+ * Bundling the daemon entry point with `bun build --target=bun` yields a graph
+ * containing `pickOperatorSidecarEnv` and ZERO occurrences of either
+ * `readRequestBodyCapEnv` throw message: the strict parser is simply not reachable from
+ * it. On a KVM host with a malformed override the daemon boots fine, and the
+ * warn-and-drop below IS reached for this key with a value nothing has parsed.
+ *
+ * So do NOT delete the drop for this key as redundant — it is redundant on the API host
+ * only. On the daemon path it is the last thing standing between a stale `=0` and the
+ * sidecar container, whose graph DOES contain the strict parser and which would throw at
+ * boot, failing every firecracker run on that host.
  *
  * Either way this is not the whole check — a value passing here can still exceed a
  * per-key `ABSOLUTE_BODY_CEILING` and throw in the sidecar.

@@ -135,13 +135,29 @@ describe("POST /api/agents/:scope/:name/run — preflight reads the PINNED integ
       body: JSON.stringify({}),
     });
 
+    const body = (await res.json()) as ProblemDetails;
+
+    // POSITIVE ANCHOR FIRST. The three assertions below are all negative, and a
+    // negative assertion cannot tell "preflight passed" apart from "the request
+    // never got there": if `seedAgent` / `installPackage` / `authHeaders` ever
+    // drift such that the route answers 401 or 404 BEFORE `resolveRunPreflight`
+    // runs, the body carries no `code` and no `errors`, the status is not 412,
+    // and all three pass over a suite that exercised nothing.
+    //
+    // `model_not_configured` is raised by `prepareAndExecuteRun`
+    // (`services/run-pipeline.ts`) — the org has no LLM model and this fixture
+    // deliberately does not give it one. The route calls `resolveRunPreflight`
+    // BEFORE `prepareAndExecuteRun` (`routes/runs.ts`), so seeing this code is
+    // the proof that preflight ran and let the launch through. It is asserted
+    // as evidence of reaching that point, NOT because this suite owns the
+    // kickoff — the readiness verdict is what it owns.
+    expect(res.status).toBe(400);
+    expect(body.code).toBe("model_not_configured");
+
     // 412 is reserved exclusively for the missing_integration_connection
     // envelope (same reasoning as the must_choose retry assertion in
     // runs-412-missing-connection.test.ts), so `not 412` directly proves the
-    // preflight judged the pinned manifest. The launch dies further downstream
-    // on model configuration (400) — that is fine and deliberately not asserted
-    // on: this suite owns the readiness verdict, not the whole kickoff.
-    const body = (await res.json()) as ProblemDetails;
+    // preflight judged the pinned manifest.
     expect(res.status).not.toBe(412);
     expect(body.code).not.toBe("missing_integration_connection");
     // And nothing anywhere in the response blames this integration — the

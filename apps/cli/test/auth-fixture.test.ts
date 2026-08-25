@@ -26,6 +26,13 @@ import {
   useTempConfigHome,
 } from "./helpers/auth-fixture.ts";
 
+/**
+ * Profile name for the `restore()` probe below. Deliberately not a name any
+ * real login would produce: the probe's post-restore read runs against the
+ * developer's ACTUAL keyring, and must find nothing there.
+ */
+const PROBE_PROFILE = "appstrate-fixture-restore-probe";
+
 const TOKENS = {
   accessToken: "tok-isolation",
   expiresAt: Date.now() + 15 * 60 * 1000,
@@ -54,15 +61,58 @@ describe("installFakeKeyring", () => {
     first.restore();
   });
 
-  it("restore() unwires the fake so later suites are not left holding it", () => {
+  it("restore() unwires the fake so later suites are not left holding it", async () => {
+    // Observing the unwiring means asking `keyring.ts` a question only the fake
+    // can answer, and then showing it stops answering. Two shapes were tried and
+    // rejected first:
+    //
+    //  - comparing `install.store` identities across two installs, which is what
+    //    this test used to do. It proves nothing: `installFakeKeyring()`
+    //    allocates a fresh `Map` on every call, so the two stores are distinct
+    //    whether or not `restore()` did anything at all. Stubbing `restore()` to
+    //    an empty function left that version green while all fifteen suites
+    //    calling it in `afterEach` would have leaked a live fake to whatever ran
+    //    next in the same `bun test` process;
+    //  - reading `_keyringFactory` back from `keyring.ts`, which has no accessor
+    //    for it — and adding one to production source to satisfy a test is the
+    //    wrong trade when the production read path already exposes the answer.
+    //
+    // So probe through `loadTokens` on a profile name no real credential store
+    // can carry. While the fake is wired the probe finds the seeded tokens; once
+    // it is unwired the read reaches the real `@napi-rs/keyring` (no entry for
+    // this profile) and then the file fallback (a temp XDG dir with no
+    // `appstrate/` subtree), so it must answer null. Reads only — a WRITE after
+    // `restore()` would land in the developer's Keychain, which is the reason
+    // the previous shape of this test asserted on nothing.
+    const home = useTempConfigHome("appstrate-cli-fixture-restore-");
+    await home.setup();
+    // A keyring that is installed but not serving (locked Keychain on an
+    // SSH-attached macOS, frozen gnome-keyring) makes the post-restore read
+    // THROW via `refuseBrokenKeyring` instead of answering null. Accepting the
+    // plaintext file fallback for the duration of the probe keeps this test
+    // about `restore()` rather than about the host's daemon; the temp XDG dir
+    // holds no credentials file, so the fallback still answers null.
+    const plaintextBefore = process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS;
+    process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS = "1";
     const install = installFakeKeyring();
-    install.restore();
-    // `saveTokens` now runs against the real `@napi-rs/keyring` again, so we
-    // only assert the handle identity changed — writing here would touch the
-    // developer's Keychain.
-    const second = installFakeKeyring();
-    expect(second.store).not.toBe(install.store);
-    second.restore();
+    try {
+      await saveTokens(PROBE_PROFILE, TOKENS);
+      expect((await loadTokens(PROBE_PROFILE))?.accessToken).toBe("tok-isolation");
+
+      install.restore();
+
+      // The fake no longer serves `keyring.ts`...
+      expect(await loadTokens(PROBE_PROFILE)).toBeNull();
+      // ...even though the store still holds the value. `restore()` unwires the
+      // fake, it does not clear it — that distinction is what makes the null
+      // above a statement about the wiring and not about the data.
+      expect(install.store.get(PROBE_PROFILE)).toContain("tok-isolation");
+    } finally {
+      install.restore();
+      if (plaintextBefore === undefined) delete process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS;
+      else process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS = plaintextBefore;
+      await home.teardown();
+    }
   });
 });
 

@@ -230,15 +230,19 @@ them, it only names them in docblocks.
 - **`recordFileCreated`, `recordFileDeleted`, `recordFilePartialPublication`,
   `recordFileStorageLimitRejection`** (`./telemetry`) — the file-lifecycle
   counters behind `appstrate.files.created` / `.deleted` /
-  `.partial_publications` / `.storage_limit_rejections`. Each one is published
-  because it must be called from exactly ONE seam and that seam is the caller's,
-  not core's: `commitFileRow` for a create (so a deduped agent-output republish,
-  which never commits, is correctly not counted), `assertWithinOrgQuota` for a
-  rejection (it fires once per logical refusal — the pre-flight reject OR the
-  `FOR UPDATE` re-check, never both), and the finalize CAS winner for a partial
-  publication. A counter incremented from two places reports a number nobody can
-  interpret, which is why the seam is part of the contract and is documented on
-  each function.
+  `.partial_publications` / `.storage_limit_rejections`. They are published
+  because the seam that calls each one is the caller's, not core's, which makes
+  that seam part of the contract — so it is documented on every function.
+  Three of the four are single-seam EVENT counters, where a second call site
+  would report a number nobody can interpret: `commitFileRow` for a create (so a
+  deduped agent-output republish, which never commits, is correctly not
+  counted), `assertWithinOrgQuota` for a rejection (it fires once per logical
+  refusal — the pre-flight reject OR the `FOR UPDATE` re-check, never both), and
+  the finalize CAS winner for a partial publication. `recordFileDeleted` is
+  deliberately the exception: it counts ROWS removed from the `files` table
+  rather than events, so every row-removing path calls it — explicit delete,
+  container-teardown detach-or-delete, and the retention GC sweep — and the sum
+  stays interpretable. Its docblock names all three.
 
 - **`CONTEXT_FREE_FILENAMES_PHRASE`** (`./naming`) — the six context-free
   deliverable filenames (`report.md`, `summary.md`, …, `file.md`) rendered as a

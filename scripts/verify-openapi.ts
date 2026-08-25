@@ -1267,22 +1267,28 @@ for (const m of indexSrc.matchAll(
 // 4b. Route files referenced by mounts — parse each factory body or default body
 //     and combine with the mount prefix.
 //
-// Widening this set is not a silent coverage hole: a skipped file's endpoints
-// drop out of `codeEndpoints`, and §5b (Spec ⊆ Code) then reports every path
-// the spec documents for that file as "registered by no router" and fails the
-// run. This used to be paired with an `ALLOWED_SKIP_FILES` meta-guard holding a
-// byte-identical copy of the two entries below, 25 lines away — it fired only
-// when someone edited one literal and not its twin in the same file, which is
-// one keystroke of diligence, not a barrier. Verified before removing it:
-// adding `routes/api-keys` here makes §5b report its four documented endpoints
-// and exit 1 on its own.
+// A whole-file skip removes every route in that file from `codeEndpoints`, so
+// §5 (Code ⊆ Spec) cannot see them. §5b (Spec ⊆ Code) only half-covers that: it
+// reports a skipped file's endpoints as "registered by no router" if the spec
+// ALREADY documents them, which is the case for a file being newly skipped. It
+// reports NOTHING for a file whose endpoints were never documented — the spec
+// side has nothing to iterate. The already-skipped
+// `modules/firecracker/runner/server` demonstrates the shape: 13 routes, none
+// in the spec, and this gate is silent about all of them (there, deliberately —
+// see below).
+//
+// So widening this set IS a silent coverage hole for a new file, and the size
+// assertion under it is the barrier. It is one literal rather than the
+// `ALLOWED_SKIP_FILES` twin-set it replaces — that duplicate went stale under a
+// rename without failing, whereas a count cannot disagree with itself.
 const SKIP_FILES = new Set<string>([
   // Routes registered with a COMPUTED path (`router.post(llmProxyUrlPath(shape),
   // …)` — a call, not a string/template literal). The path can't be captured
   // statically, so the emitted endpoints are covered by SPEC_ONLY_ALLOWLIST in
   // §5b. (This used to describe `router.post(entry.urlPath, …)`, a bare
   // identifier read off a local config array; that array is gone. Before that
-  // it read "covered by check #1", the hand-typed endpoint list §5b replaced.) (packages.ts is NOT skipped: its template-literal
+  // it read "covered by check #1", the hand-typed endpoint list §5b replaced.)
+  // (packages.ts is NOT skipped: its template-literal
   // `${path}` routes are now expanded by resolveTemplatedPath against the
   // in-file ROUTE_CONFIGS `path:` literals and verified against the spec like
   // any literal route; an unresolvable `${…}` fails the run.)
@@ -1295,6 +1301,27 @@ const SKIP_FILES = new Set<string>([
   // unit tests instead.
   "modules/firecracker/runner/server",
 ]);
+
+// The barrier. Both entries above are load-bearing and neither can be derived,
+// so the only honest assertion is that nobody added a third without reading the
+// paragraph above. Bump this deliberately, in the same commit as the entry, with
+// a comment saying why that file's routes may not be checked against the spec.
+const SANCTIONED_SKIP_COUNT = 2;
+if (SKIP_FILES.size !== SANCTIONED_SKIP_COUNT) {
+  exitCode = 1;
+  console.log(`\n  4b. SKIP_FILES guard`);
+  console.log(`  --------------------`);
+  console.log(
+    `  ERROR  SKIP_FILES holds ${SKIP_FILES.size} entries, expected ${SANCTIONED_SKIP_COUNT}: ` +
+      `${[...SKIP_FILES].join(", ")}`,
+  );
+  console.log(
+    `\n  A whole-file skip hides every route in that file from the Code ⊆ Spec check, ` +
+      `and §5b cannot report what the spec never documented. Verify the file's ` +
+      `literal-path routes individually, or — if a skip is genuinely unavoidable — ` +
+      `raise SANCTIONED_SKIP_COUNT here with a justifying comment so the decision is reviewed.`,
+  );
+}
 
 const routeFileCache = new Map<string, string>();
 function readRouteFile(relPath: string): string {

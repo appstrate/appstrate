@@ -296,15 +296,24 @@ hand-written otherwise is the other half: the entries no manifest implies
 correct entry list, it is either real dead code or a symbol exported with no
 reader at all — fix it at the source, or report it.
 
-**An `ignore*` is not forbidden, but it is not a way out either.** It is
-reserved for a false positive knip _structurally cannot see_ — a dynamic
-import, an npm contract, a wire format — and every one in the config carries
-that reason at its call site (`knip.config.ts` rule 2). The live carve-outs are
-`ignoreExportsUsedInFile`, `ignoreIssues`, `ignoreBinaries` and three
-`ignoreDependencies` blocks; read their prose before adding a fourth. They are
-deliberately NOT re-listed here — a second copy of that list would drift from
-the config, and the config is where the justification has to live anyway. What
-is forbidden is the other use: silencing a finding you have not explained.
+**An `ignore*` is not forbidden, but it is not a way out either.** Two shapes
+qualify, and nothing else. The first is a false positive knip _structurally
+cannot see_: a dynamic import, a binary invoked through `npx` or the shell, an
+optional peer behind a runtime feature check, a reader inside the declaring
+file itself, an npm contract, a wire format. The second is rarer and admits the
+finding is TRUE — the export really has no reader today — but the code is
+vendored in whole from an upstream generator, so pruning it buys nothing and
+fights the next vendor diff; `packages/ui`'s shadcn/ui families are the only
+instance, and even there only the `exports` issue is suppressed, never a
+component file nothing imports. Either way the reason travels with the entry,
+written at its call site in `knip.config.ts` — that file's rule 2 states the
+first shape; the second is argued at the `ignoreIssues` entry itself. The live
+carve-outs are `ignoreExportsUsedInFile`, `ignoreIssues`, `ignoreBinaries` and
+three `ignoreDependencies` blocks; read their prose before adding a fourth.
+They are deliberately NOT re-listed here — a second copy of that list would
+drift from the config, and the config is where the justification has to live
+anyway. What is forbidden is the other use: silencing a finding you have not
+explained.
 
 An earlier version of this section blamed `git worktree`, on the strength of one
 clone that came back clean. That was wrong. Measured and refuted since, each

@@ -39,11 +39,6 @@ function withByteCap(maxBytes: number) {
   };
 }
 
-/** `runs.metadata` — opaque platform-written payload (e.g. `degraded_integrations`). */
-export const runMetadataSchema = z
-  .record(z.string(), jsonValueSchema)
-  .superRefine(withByteCap(8 * KB));
-
 /** `package_schedules.input` — JSON input replayed into every triggered run. */
 export const scheduleInputSchema = z
   .record(z.string(), jsonValueSchema)

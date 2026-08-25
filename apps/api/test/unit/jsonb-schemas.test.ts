@@ -2,7 +2,6 @@
 
 import { describe, it, expect } from "bun:test";
 import {
-  runMetadataSchema,
   runLogDataSchema,
   packagePersistenceContentSchema,
   scheduleInputSchema,
@@ -103,12 +102,6 @@ describe("inputSettingsSchema (16 KB cap)", () => {
       false,
     );
     expect(inputSettingsSchema.safeParse({ values: {} }).success).toBe(false);
-  });
-});
-
-describe("runMetadataSchema (regression — 8 KB cap)", () => {
-  it("rejects payloads larger than 8 KB", () => {
-    expect(runMetadataSchema.safeParse(payloadLargerThan(8 * KB)).success).toBe(false);
   });
 });
 

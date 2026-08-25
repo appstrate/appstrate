@@ -264,8 +264,6 @@ const config: KnipConfig = {
    * them: `playwright` (e2e job + `test:e2e` script), `which`/`mktemp`
    * (POSIX utilities called from scripts and one test).
    */
-  ignoreExportsUsedInFile: { interface: true },
-
   ignoreBinaries: ["playwright", "which", "mktemp"],
 
   /**
