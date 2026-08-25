@@ -2263,6 +2263,8 @@ warnings.
 
 **Creation handoff, 24 August.** The integration-only chooser is now one shared,
 addressable creation modal for Agents, Skills, Integrations and MCP Servers.
+Its visible title is a complete localized deed (`Create a new agent`, `Créer une
+nouvelle intégration`), not the grammatical fragment `Create: resource`.
 The collection's `Actions > Create` deed pushes `?create=<resource>`; Back closes
 it, while its close control removes only that key and preserves the rest of the
 list URL. The trigger, the addressable modal and every handoff share the same

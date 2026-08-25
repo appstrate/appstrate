@@ -15,11 +15,11 @@ interface CreationHandoffModalProps {
   onChat: (prompt: string) => void;
 }
 
-const RESOURCE_KEYS: Record<CreationResource, string> = {
-  agent: "creation.resource.agent",
-  skill: "creation.resource.skill",
-  integration: "creation.resource.integration",
-  "mcp-server": "creation.resource.mcpServer",
+const TITLE_KEYS: Record<CreationResource, string> = {
+  agent: "creation.title.agent",
+  skill: "creation.title.skill",
+  integration: "creation.title.integration",
+  "mcp-server": "creation.title.mcpServer",
 };
 
 export function CreationHandoffModal({
@@ -30,7 +30,6 @@ export function CreationHandoffModal({
 }: CreationHandoffModalProps) {
   const { t } = useTranslation("settings");
   const { features } = useAppConfig();
-  const resourceName = t(RESOURCE_KEYS[resource]);
   const translatePrompt = (key: string, values?: Record<string, string>) => t(key, values);
   const chatPrompt = buildChatCreationDraft(resource, translatePrompt);
   const manualIsImport = resource === "mcp-server";
@@ -68,12 +67,7 @@ export function CreationHandoffModal({
   ];
 
   return (
-    <Modal
-      open
-      onClose={onClose}
-      title={t("creation.title", { resource: resourceName })}
-      className="sm:max-w-xl"
-    >
+    <Modal open onClose={onClose} title={t(TITLE_KEYS[resource])} className="sm:max-w-xl">
       <div className="space-y-2" data-creation-chooser={resource}>
         {methods.map(({ id, icon: Icon, title, description, onClick, disabled }) => (
           <Button
