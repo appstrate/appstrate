@@ -2188,7 +2188,7 @@ export function createPackagesRouter() {
 
   // POST /api/packages/import-github — import a package from a GitHub URL
   router.post("/import-github", rateLimit(10), requirePermission("agents", "write"), async (c) => {
-    const data = await readJsonBody(c, githubImportSchema, "url");
+    const data = await readJsonBody(c, githubImportSchema, { param: "url" });
 
     let zipBytes: Uint8Array;
     try {

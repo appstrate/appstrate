@@ -29,10 +29,7 @@ import type { Context } from "hono";
 import type { z } from "zod";
 import { invalidRequest, parseBody } from "@appstrate/core/api-errors";
 
-/**
- * Options for {@link readJsonBody}. Passing a bare string is shorthand for
- * `{ param }` (kept for the existing positional callers).
- */
+/** Options for {@link readJsonBody}. */
 interface ReadJsonBodyOptions {
   /** Field-path prefix forwarded to `parseBody` for nested error reporting. */
   param?: string;
@@ -43,17 +40,13 @@ interface ReadJsonBodyOptions {
 /**
  * Read + validate a JSON request body. Throws `invalidRequest` (400) on
  * unparseable JSON and `validationFailed` (400) on schema mismatch.
- *
- * @param opts either a field-path prefix (string, shorthand for `{ param }`)
- *   or a {@link ReadJsonBodyOptions} object.
  */
 export async function readJsonBody<T extends z.ZodType>(
   c: Context,
   schema: T,
-  opts?: string | ReadJsonBodyOptions,
+  opts: ReadJsonBodyOptions = {},
 ): Promise<z.output<T>> {
-  const { param, allowEmpty }: ReadJsonBodyOptions =
-    typeof opts === "string" ? { param: opts } : (opts ?? {});
+  const { param, allowEmpty } = opts;
 
   let raw: unknown;
   if (allowEmpty) {

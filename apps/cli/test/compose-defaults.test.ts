@@ -50,6 +50,70 @@ describe("extractComposeDefaults", () => {
     expect(extractComposeDefaults(content)).toHaveLength(1);
     expect(extractComposeDefaults(content)).toHaveLength(1);
   });
+
+  it("tags an interpolated occurrence as the interpolation form", () => {
+    const matches = extractComposeDefaults("      - MODULES=${MODULES:-a,b}");
+    expect(matches[0]).toMatchObject({ form: "interpolation", yamlDefault: "a,b" });
+  });
+
+  it("captures a literal mapping assignment", () => {
+    const matches = extractComposeDefaults(["    environment:", "      MODULES: a,b"].join("\n"));
+    expect(matches).toHaveLength(1);
+    expect(matches[0]).toMatchObject({
+      line: 2,
+      varName: "MODULES",
+      yamlDefault: "a,b",
+      form: "literal",
+      raw: "      MODULES: a,b",
+    });
+  });
+
+  it("captures a literal sequence assignment", () => {
+    const matches = extractComposeDefaults("      - MODULES=a,b");
+    expect(matches).toHaveLength(1);
+    expect(matches[0]).toMatchObject({ varName: "MODULES", yamlDefault: "a,b", form: "literal" });
+  });
+
+  it("unquotes a literal value before reporting it", () => {
+    // `"[]"` and `[]` are the same value to compose; only one of them
+    // would ever compare equal to the code default if quotes survived.
+    expect(extractComposeDefaults('      SYSTEM_PROXIES: "[]"')[0]).toMatchObject({
+      yamlDefault: "[]",
+    });
+    expect(extractComposeDefaults("      SYSTEM_PROXIES: []")[0]).toMatchObject({
+      yamlDefault: "[]",
+    });
+    expect(extractComposeDefaults("      SYSTEM_PROXIES: '[]'")[0]).toMatchObject({
+      yamlDefault: "[]",
+    });
+  });
+
+  it("drops a trailing YAML comment from an unquoted literal", () => {
+    expect(extractComposeDefaults("      LOG_LEVEL: info # noisy in CI")[0]).toMatchObject({
+      yamlDefault: "info",
+    });
+  });
+
+  it("does not read a line that carries an interpolation as a literal too", () => {
+    // Otherwise this one line reports twice, under two different values.
+    const matches = extractComposeDefaults("      - MODULES=${MODULES:-a,b}");
+    expect(matches).toHaveLength(1);
+    expect(matches.map((m) => m.form)).toEqual(["interpolation"]);
+  });
+
+  it("ignores a bare passthrough, with or without an indirection", () => {
+    // `MODULES:` is YAML null and `${OTHER}` has no `:-` — neither pins
+    // a value, so neither is this gate's business.
+    expect(extractComposeDefaults("      MODULES:")).toEqual([]);
+    expect(extractComposeDefaults("      MODULES: ${OTHER}")).toEqual([]);
+    expect(extractComposeDefaults("      - MODULES")).toEqual([]);
+  });
+
+  it("ignores a top-level document key", () => {
+    // A compose env key is always nested; an unindented `NAME: value` is
+    // something else entirely.
+    expect(extractComposeDefaults("MODULES: a,b")).toEqual([]);
+  });
 });
 
 describe("analyzeComposeDefaults", () => {
@@ -93,6 +157,65 @@ describe("analyzeComposeDefaults", () => {
       varName: "RUN_ADAPTER",
       yamlDefault: "process",
       expectedYamlDefault: ALLOWLIST.RUN_ADAPTER!.yamlDefault,
+    });
+  });
+
+  it("flags a literal that mirrors the code default (mapping form)", () => {
+    // The health-e2e regression: pinned as a plain scalar, invisible to
+    // the interpolation-only extractor for a whole release.
+    const content = ["    environment:", `      MODULES: ${MODULES_DEFAULT}`].join("\n");
+    const findings = analyzeComposeDefaults(content);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      kind: "duplicate",
+      varName: "MODULES",
+      yamlDefault: MODULES_DEFAULT,
+      codeDefault: MODULES_DEFAULT,
+      form: "literal",
+      line: 2,
+    });
+  });
+
+  it("flags a literal that mirrors the code default (sequence form)", () => {
+    const findings = analyzeComposeDefaults(`      - MODULES=${MODULES_DEFAULT}`);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ kind: "duplicate", form: "literal" });
+  });
+
+  it("flags a quoted literal that mirrors an unquoted code default", () => {
+    // SYSTEM_PROXIES' code default is the string "[]"; YAML lets it be
+    // written three ways and all three are the same duplication.
+    for (const written of ['"[]"', "'[]'", "[]"]) {
+      const findings = analyzeComposeDefaults(`      SYSTEM_PROXIES: ${written}`);
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({ varName: "SYSTEM_PROXIES", kind: "duplicate" });
+    }
+  });
+
+  it("ignores a literal that deliberately differs from the code default", () => {
+    // A test compose pinning `LOG_LEVEL: warn` against an `info` default
+    // is an intentional override, not the #513 bug. The gate says
+    // "this equals the code default, delete it" — never "this exists".
+    expect(CODE_DEFAULTS.LOG_LEVEL).toBe("info");
+    expect(analyzeComposeDefaults("      LOG_LEVEL: warn")).toEqual([]);
+    expect(analyzeComposeDefaults("      - LOG_LEVEL=debug")).toEqual([]);
+  });
+
+  it("does not flag an allowlisted var pinned at its sanctioned literal", () => {
+    // PORT is allowlisted at "3000" because it mirrors the `ports:` mapping.
+    expect(ALLOWLIST.PORT!.yamlDefault).toBe("3000");
+    expect(analyzeComposeDefaults("      - PORT=3000")).toEqual([]);
+    expect(analyzeComposeDefaults("      PORT: 3000")).toEqual([]);
+  });
+
+  it("reports allowlist drift on a literal too, tagged as such", () => {
+    const findings = analyzeComposeDefaults("      RUN_ADAPTER: process");
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      kind: "allowlist-drift",
+      varName: "RUN_ADAPTER",
+      yamlDefault: "process",
+      form: "literal",
     });
   });
 
@@ -170,6 +293,20 @@ describe("rewriteStaleComposeDefaults", () => {
     expect(result.newContent).toBe(content);
     expect(result.refused).toHaveLength(1);
     expect(result.refused[0]).toMatchObject({ line: 1, varName: "MODULES" });
+  });
+
+  it("refuses a pinned literal, and says the repair is a deletion", () => {
+    // A literal has no `=${VAR:-default}` tail to shorten away: the fix
+    // is to remove the line entirely, and deleting an operator's line is
+    // not something this rewriter guesses at.
+    const content = `      MODULES: ${MODULES_DEFAULT}`;
+    const result = rewriteStaleComposeDefaults(content);
+    expect(result.changed).toBe(false);
+    expect(result.newContent).toBe(content);
+    expect(result.applied).toEqual([]);
+    expect(result.refused).toHaveLength(1);
+    expect(result.refused[0]).toMatchObject({ line: 1, varName: "MODULES" });
+    expect(result.refused[0]!.reason).toContain("DELETE");
   });
 
   it("leaves allowlist-drift lines untouched (not the #513 class)", () => {

@@ -35,6 +35,16 @@
  * Between releases the baseline stays put and this test measures the whole
  * unreleased delta, which is exactly what the `[Unreleased]` section must
  * describe.
+ *
+ * ## Both directions of that delta
+ *
+ * `baseline \ current` is a REMOVAL — the thing that breaks a consumer at
+ * upgrade time, and the obvious half to guard. `current \ baseline` is an
+ * ADDITION, and it is guarded here for a less obvious reason: publishing a name
+ * is a semver commitment. From the moment it reaches npm, removing or renaming
+ * it is a major, and consumers may already be importing it. An addition nobody
+ * wrote down is therefore a promise nobody decided to make — which is how ten
+ * of them shipped in `8.0.0`, including `CONTEXT_FREE_FILENAMES_PHRASE`.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -76,6 +86,35 @@ describe("@appstrate/core published export surface", () => {
         `consumers read that section to find out what broke.\n` +
         `  ${undocumented.join("\n  ")}\n\n` +
         `A rename counts as documented when the entry names the OLD symbol too.`,
+    ).toEqual([]);
+  });
+
+  it("names every added export in the CHANGELOG's [Unreleased] section", async () => {
+    const baseline = JSON.parse(
+      await readFile(join(PKG, "test/published-export-baseline.json"), "utf8"),
+    ) as { version: string; exports: string[] };
+    const current = await exportedNames(join(PKG, "src"));
+    const unreleased = await unreleasedSection();
+
+    // Same positive controls as the removals case, and for the same reason.
+    expect(baseline.exports.length).toBeGreaterThan(100);
+    expect(Object.keys(current).length).toBeGreaterThan(100);
+
+    // Computed through the SAME `exportedNames` helper the baseline was built
+    // with, so "export" means one thing in both sets and the difference is a
+    // real delta rather than two definitions disagreeing.
+    const published = new Set(baseline.exports);
+    const added = Object.keys(current).filter((name) => !published.has(name));
+    const undocumented = added.filter((name) => !unreleased.includes(name)).sort();
+
+    expect(
+      undocumented,
+      `These exports are new since the published ${baseline.version}, but the ` +
+        `CHANGELOG's [Unreleased] section never names them. Publishing a name is a ` +
+        `semver commitment: once it is on npm, taking it back is a major.\n` +
+        `  ${undocumented.join("\n  ")}\n\n` +
+        `Naming it anywhere in the section counts — a bullet of its own is not required ` +
+        `when it belongs to a module the section already describes.`,
     ).toEqual([]);
   });
 

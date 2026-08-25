@@ -22,23 +22,57 @@ import { join } from "node:path";
 import {
   analyzeComposeDefaults,
   SCHEMA_SOURCE,
+  type ComposeDefaultForm,
   type ComposeFinding,
 } from "../apps/cli/src/lib/compose-defaults.ts";
 
 const REPO_ROOT = join(import.meta.dir, "..");
 
-const COMPOSE_FILES = [
-  // The two files that ship at the repo root: `bun run docker:prod` runs the
-  // first and `bun run docker:dev` the second, so they are the compose files
-  // most likely to drift from the schema — and the ones this gate used to
-  // skip entirely while scanning only the examples.
-  "docker-compose.yml",
-  "docker-compose.dev.yml",
-  "examples/self-hosting/docker-compose.yml",
-  "examples/self-hosting/docker-compose.tier1.yml",
-  "examples/self-hosting/docker-compose.tier2.yml",
-  "examples/self-hosting/docker-compose.tier3.yml",
-];
+/**
+ * Every tracked compose file, discovered — not enumerated.
+ *
+ * A hardcoded list only covers the files someone remembered to add, and this
+ * one twice did not: it scanned the four `examples/self-hosting/` files while
+ * skipping both root ones, then both root ones while skipping the two under
+ * `test/setup/`. Discovery removes the remembering step — a NEW compose file
+ * is covered the day it is committed, which is the property the list could
+ * never have.
+ *
+ * `git ls-files` is deliberately the source of truth for "tracked": the
+ * untracked, local-only `docker-compose.override.yml` is a developer's own
+ * machine and is not this gate's business, and it stays out for free.
+ */
+function trackedComposeFiles(): string[] {
+  const result = Bun.spawnSync({
+    cmd: ["git", "ls-files", "-z", "--", "*docker-compose*.yml", "*docker-compose*.yaml"],
+    cwd: REPO_ROOT,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `git ls-files failed (exit ${result.exitCode}): ${result.stderr.toString().trim()}`,
+    );
+  }
+  const files = result.stdout.toString().split("\0").filter(Boolean).sort();
+  if (files.length === 0) {
+    throw new Error("git ls-files matched no compose file — the gate would pass vacuously.");
+  }
+  return files;
+}
+
+const COMPOSE_FILES = trackedComposeFiles();
+
+/**
+ * The repair differs by shape, and printing one instruction for both would
+ * send half the readers to the wrong edit: an interpolation still lets the
+ * host environment win and is fixed by dropping the `=${VAR:-default}` tail,
+ * while a literal pins the value outright and has to go away entirely.
+ */
+const REPAIR: Record<ComposeDefaultForm, string> = {
+  interpolation: "fix: drop the `=${VAR:-default}` tail, leaving a bare passthrough entry.",
+  literal: "fix: delete the line — the value is PINNED, so the schema default never applies.",
+};
 
 /** A finding tagged with the file it came from (the lib is per-content). */
 type FileFinding = ComposeFinding & { file: string };
@@ -84,6 +118,7 @@ function main(): number {
       console.error(
         `    \x1b[33m[duplicates code default]\x1b[0m in ${SCHEMA_SOURCE} (${f.varName}: ${JSON.stringify(f.codeDefault)})`,
       );
+      console.error(`    ${REPAIR[f.form]}`);
     }
     console.error("");
   }

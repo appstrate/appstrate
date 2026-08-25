@@ -190,7 +190,11 @@ them, it only names them in docblocks.
   `scheduleValues` would leave the CLI carrying a field it can never fill. The
   refusal is injected (`lockedFieldError`) so each host keeps its own error
   surface — `ApiError(400, "locked_input_field")` on the platform, a CLI error
-  type locally — without re-deriving the rule.
+  type locally — without re-deriving the rule. The shape of all that is public
+  too: `InputLayers` (one run's layers in precedence order), `InputOverlay` and
+  `InputOverlayOrigin` (a layered source and the words the refusal quotes back —
+  "schedule input" or "input"), and `LockedFieldErrorFactory` (the host-supplied
+  error constructor).
 - **`compileCached`, `MAX_CACHED_VALIDATORS`** (`./schema-validation`) — the
   module's compiled-validator cache, exported so `apps/api`'s three server-only
   validators compile through it instead of standing up a second Ajv instance.
@@ -203,7 +207,8 @@ them, it only names them in docblocks.
   manifest may carry, and the one helper every read path funnels stored ids
   through. It drops ids the platform does not know, collapses duplicates,
   preserves the author's order, and — the part that matters — REPORTS every
-  drop to its caller rather than swallowing it.
+  drop to its caller rather than swallowing it, through the published
+  `CanonicalizedRuntimeToolIds` result type.
 
   An alias table (`LEGACY_RUNTIME_TOOL_ALIASES` and friends, mapping the
   retired `publish_document` forward to `publish_file`) was drafted for this
@@ -221,6 +226,27 @@ them, it only names them in docblocks.
   same-tag-two-builds check reads. Types: `ParsedImageRef`, `RuntimeImageTrio`,
   `RuntimeImageMember`, `RuntimeImageTagMismatch`. `packages/env` composes the
   operator wording; the rule and both its carve-outs live here.
+
+- **`recordFileCreated`, `recordFileDeleted`, `recordFilePartialPublication`,
+  `recordFileStorageLimitRejection`** (`./telemetry`) — the file-lifecycle
+  counters behind `appstrate.files.created` / `.deleted` /
+  `.partial_publications` / `.storage_limit_rejections`. Each one is published
+  because it must be called from exactly ONE seam and that seam is the caller's,
+  not core's: `commitFileRow` for a create (so a deduped agent-output republish,
+  which never commits, is correctly not counted), `assertWithinOrgQuota` for a
+  rejection (it fires once per logical refusal — the pre-flight reject OR the
+  `FOR UPDATE` re-check, never both), and the finalize CAS winner for a partial
+  publication. A counter incremented from two places reports a number nobody can
+  interpret, which is why the seam is part of the contract and is documented on
+  each function.
+
+- **`CONTEXT_FREE_FILENAMES_PHRASE`** (`./naming`) — the six context-free
+  deliverable filenames (`report.md`, `summary.md`, …, `file.md`) rendered as a
+  prompt sentence fragment, to interpolate after "never use context-free names
+  such as ". Published so every prompt-assembling runtime discourages the same
+  six: the list and its rendering are one fact, and a second hand-written copy
+  is how one runtime keeps steering models toward a name #1177's vocabulary
+  made attractive. It supplies no trailing punctuation.
 
 ### Changed
 

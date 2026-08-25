@@ -101,7 +101,7 @@ export function toRows<T = Record<string, unknown>>(result: unknown): T[] {
   return [];
 }
 
-export function getListenClient(): ListenClient {
+function getListenClient(): ListenClient {
   return _listenClient!;
 }
 

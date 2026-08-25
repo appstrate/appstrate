@@ -1,17 +1,51 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  // `envMode` is unset, so turbo runs strict: a task's environment is ONLY
+  // what is listed here (plus its own `env`). A variable an operator exports
+  // and turbo does not forward does not fail — it silently reads as unset, and
+  // the task behaves as if the operator had typed nothing. Two classes live
+  // here, and both are load-bearing:
+  //
+  //   - boot secrets, for the `dev` task (`apps/api` runs the real server, so
+  //     it does a real `getEnv()`), and `MODULE_CONTRACT_ENFORCE`, the boot
+  //     policy `apps/api/src/lib/modules/module-loader.ts` reads the same way;
+  //   - the `warn|fail|off` knobs of the root `verify:*` scripts, documented in
+  //     their own headers as the supported override. Without a passthrough,
+  //     `MODULE_ISOLATION_POLICY=warn bun run check` did exactly nothing —
+  //     turbo dropped the variable and the script kept its `fail` default.
+  //
+  // `CONSUMER_DRIFT_POLICY` is deliberately absent: `check-consumer-versions.ts`
+  // runs from `publish-core.yml` directly, never through a turbo task.
   "globalPassThroughEnv": [
     "BETTER_AUTH_SECRET",
     "CONNECTION_ENCRYPTION_KEY",
     "CONNECT_SESSION_SECRET",
     "UPLOAD_SIGNING_SECRET",
     "RUN_TOKEN_SECRET",
-    "MODULE_CONTRACT_ENFORCE"
+    "MODULE_CONTRACT_ENFORCE",
+    "MODULE_ISOLATION_POLICY",
+    "MODULE_CONTRACT_POLICY"
   ],
   "tasks": {
+    // Two workspaces define `build`, and neither one builds only `src/**`:
+    // `apps/web` runs `vite build`, which reads `index.html`, `vite.config.ts`
+    // and `public/**`, and `apps/cli` runs `bun scripts/build.ts`. None of
+    // those was an input, so editing the Vite config replayed a cached build
+    // and left `dist/` stale — and `Dockerfile` runs `bun run build`, so the
+    // stale `dist/` is what ships. Same rule as `typecheck` below: the inputs
+    // must be what the command READS, not what the package is "about". Globs
+    // that match nothing in a given workspace cost nothing.
     "build": {
       "dependsOn": ["^build"],
-      "inputs": ["src/**", "package.json", "tsconfig.json"],
+      "inputs": [
+        "src/**",
+        "scripts/**",
+        "public/**",
+        "index.html",
+        "vite.config.ts",
+        "package.json",
+        "tsconfig.json"
+      ],
       "outputs": ["dist/**"]
     },
     "dev": {
@@ -22,10 +56,12 @@
     // Same defect `//#typecheck:scripts` documents below, one scope up: the
     // inputs must be what tsc COMPILES, not what the package is "about". Every
     // workspace script is `tsc --noEmit`, so the program is its tsconfig's
-    // `include` — and seven workspaces reach past `src/`: apps/api declares no
-    // `include` at all (so tsc takes the whole directory, test/ included),
-    // apps/cli and packages/core add `test` + `scripts`, and afps-runtime,
-    // afps-shared, mcp-transport and runner-pi add `test`.
+    // `include`, and workspaces reach past `src/` in every direction: apps/api
+    // declares no `include` at all (so tsc takes the whole directory, test/
+    // included), apps/cli and packages/core add `test` + `scripts`,
+    // afps-runtime / afps-shared / mcp-transport / runner-pi add `test`, and
+    // e2e compiles `**/*.ts` out of `tests/`, `fixtures/`, `helpers/`,
+    // `pages/` and a root `playwright.config.ts`.
     //
     // Listing only `src/**` therefore let this task replay a cached PASS over
     // code it never compiled: a type error introduced in apps/api/test/**
@@ -33,6 +69,24 @@
     // test` does not close it either — bun executes tests without typechecking
     // them. Over-broad inputs cost one extra invalidation; under-broad inputs
     // are a silent green.
+    //
+    // `**/*.ts{,x}` is here so this list stops being a roster somebody has to
+    // remember to extend. The enumeration above WAS the roster, and it failed
+    // the first time it was tested: `e2e` got a `tsconfig.json` and a
+    // `typecheck` script, nobody widened these inputs, and the task landed on
+    // two inputs — `tsconfig.json` and `package.json` — so editing a spec left
+    // its hash untouched and turbo replayed a stale green forever. A glob that
+    // is a superset of any possible tsconfig `include` cannot rot that way.
+    // The named directory globs stay for the non-TS assets a program can pull
+    // in (JSON under `resolveJsonModule`, fixtures); they are no longer what
+    // makes the TS itself visible.
+    //
+    // Not every workspace is served from here: `runtime-pi` and
+    // `runtime-pi/sidecar` keep their own `turbo.json` overriding this task,
+    // because runtime-pi's tsconfig EXCLUDES the nested sidecar workspace and
+    // that negation (`!sidecar/**`) cannot be expressed in a shared list.
+    // Reach for a package-level override only when you need that kind of
+    // subtraction — otherwise widen this list.
     //
     // Probe when changing it: `turbo run typecheck --dry=json`, EDIT
     // apps/api/test/unit/rate-limit.test.ts (append a line — turbo hashes
@@ -44,6 +98,8 @@
         "src/**",
         "test/**",
         "scripts/**",
+        "**/*.ts",
+        "**/*.tsx",
         "tsconfig.json",
         "tsconfig.*.json",
         "package.json"
@@ -71,28 +127,13 @@
         "package.json"
       ]
     },
-    // Mirrors the glob list in the root `format:check` script. Same rule as
-    // `//#lint` above: an input list narrower than what prettier is asked to
-    // check turns a real drift into a cached pass.
-    "//#format:check": {
-      "inputs": [
-        "apps/*/src/**",
-        "apps/*/test/**",
-        "apps/*/scripts/**",
-        "packages/*/src/**",
-        "packages/*/test/**",
-        "packages/*/scripts/**",
-        "runtime-pi/**/*.ts",
-        "e2e/**/*.ts",
-        "scripts/**/*.ts",
-        "test/**/*.ts",
-        "*.ts",
-        "*.mjs",
-        ".prettierrc",
-        ".prettierignore",
-        "package.json"
-      ]
-    },
+    // No `inputs` on purpose. The root `format:check` script is now a bare
+    // `prettier --check .`, whose scope is "every file in the repo minus
+    // `.gitignore` + `.prettierignore`" — and that is exactly turbo's default
+    // for a task on the `//` package. Any explicit list here could only be
+    // narrower than what prettier checks, which is the failure mode this
+    // comment used to warn about: a real drift replayed as a cached pass.
+    "//#format:check": {},
     "//#verify:openapi": {
       "cache": false
     },
@@ -105,8 +146,35 @@
     "//#verify:api-types": {
       "cache": false
     },
+    // The one cached `verify:*` task — every other is `cache: false`, so this
+    // is the only one where a stale replay is possible at all. Same defect as
+    // `typecheck` and `//#typecheck:scripts`: `type-coverage --project
+    // apps/web/tsconfig.json` measures the PROGRAM, and the workspace packages
+    // `apps/web` imports are TypeScript source with no build step, so they are
+    // in it. Measured contributor distribution at the time of writing: 705
+    // `any` sites under `apps/web/src`, then 102 under `packages/core/src`, 55
+    // under `packages/ui/src`, 53 under `packages/module-chat/src`, 9 under
+    // `packages/afps-shared/src`. Listing only `apps/web/src/**` therefore let
+    // an `any` introduced in `packages/core/src` drop the figure below the
+    // `--at-least 98` floor while turbo replayed a cached PASS. `package.json`
+    // is listed for symmetry with every other task here — the floor lives in
+    // the script it holds; turbo already folds the root manifest into a `//`
+    // task's hash on its own, so that entry documents rather than fixes.
+    //
+    // Probe when changing it: `turbo run '//#verify:type-coverage' --dry=json`,
+    // EDIT packages/core/src/naming.ts (append a line — turbo hashes content,
+    // so `touch` moves nothing and reads as a false negative), run again — the
+    // hash must move.
     "//#verify:type-coverage": {
-      "inputs": ["apps/web/src/**", "apps/web/tsconfig.json", "tsconfig.base.json"]
+      "inputs": [
+        "apps/web/src/**",
+        "apps/web/tsconfig.json",
+        "packages/*/src/**",
+        "packages/*/package.json",
+        "packages/*/tsconfig.json",
+        "tsconfig.base.json",
+        "package.json"
+      ]
     },
     "//#build:system-packages:check": {
       "cache": false

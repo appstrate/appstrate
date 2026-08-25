@@ -24,12 +24,12 @@ function uid() {
 /** A browser context carrying only the given Better Auth session cookie. */
 async function contextWithCookie(browser: Browser, cookie: string) {
   const context = await browser.newContext();
-  const match = cookie.match(/better-auth\.session_token=([^;]+)/);
-  if (match) {
+  const sessionToken = cookie.match(/better-auth\.session_token=([^;]+)/)?.[1];
+  if (sessionToken) {
     await context.addCookies([
       {
         name: "better-auth.session_token",
-        value: match[1],
+        value: sessionToken,
         domain: "localhost",
         path: "/",
       },

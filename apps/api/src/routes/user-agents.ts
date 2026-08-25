@@ -75,7 +75,7 @@ export function createUserAgentsRouter() {
       const agent = c.get("package");
       const packageId = agent.id;
 
-      const data = await readJsonBody(c, updateSkillsSchema, "skillIds");
+      const data = await readJsonBody(c, updateSkillsSchema, { param: "skillIds" });
       const { skillIds } = data;
 
       const invalidIds = skillIds.filter((id) => !scopedNameRegex.test(id));

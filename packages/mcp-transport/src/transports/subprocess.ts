@@ -107,7 +107,7 @@ class RateLimiter {
   }
 }
 
-export class SubprocessTransportError extends Error {
+class SubprocessTransportError extends Error {
   override readonly name = "SubprocessTransportError";
 }
 

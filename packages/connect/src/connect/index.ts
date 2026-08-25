@@ -5,7 +5,7 @@
 // orchestration layer (apps/api) and the sidecar executor.
 
 export type { CredentialBundle } from "./types.ts";
-export { runLogin, LoginError } from "./login-engine.ts";
+export { runLogin } from "./login-engine.ts";
 // Only `LoginConfig` is consumed across the package boundary (apps/api's
 // login-strategy passes a manifest's `connect` block as `LoginConfig`). The
 // engine's granular sub-types (LoginRequestSpec/Request/Extractor/Limits/Context/

@@ -52,7 +52,6 @@ import type { SchemaFormContext } from "./context.ts";
 export type { SchemaWrapper } from "@appstrate/core/form";
 export type { FileWidgetLabels } from "./file-widget.tsx";
 export type { UploadFn } from "./upload-client.ts";
-export type { SchemaFormContext } from "./context.ts";
 
 const widgets = {
   file: FileWidget,

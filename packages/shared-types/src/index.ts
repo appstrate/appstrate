@@ -25,7 +25,6 @@ export type {
   IntegrationAuthType,
   IntegrationCandidate,
   IntegrationConnection,
-  IntegrationDetail,
   IntegrationManifestAuth,
   IntegrationManifestView,
   IntegrationOAuthClient,
@@ -36,11 +35,10 @@ export type {
   IntegrationToolCatalogEntry,
 } from "./integrations.ts";
 
-export type { UserProfile, RunLog } from "@appstrate/db/schema";
+export type { UserProfile } from "@appstrate/db/schema";
 import type { PackageType } from "@appstrate/core/validation";
 export type { PackageType };
 
-export type { Run } from "@appstrate/db/schema";
 export type { RunArtifactsSummary } from "@appstrate/db/schema";
 import type { RunArtifactsSummary } from "@appstrate/db/schema";
 
@@ -298,20 +296,10 @@ export interface ResourceEntry {
 // drizzle-orm plus all 18 schema files (table + column names included) to
 // the browser. `run-status.ts` is import-free and is what `runStatusEnum`
 // itself derives from, so there is still exactly one list of statuses.
-export {
-  TERMINAL_RUN_STATUSES,
-  TERMINAL_RUN_EVENT_TYPES,
-  terminalRunStatusValues,
-  ACTIVE_RUN_STATUSES,
-  runStatusValues,
-} from "@appstrate/db/run-status";
+export { TERMINAL_RUN_STATUSES, ACTIVE_RUN_STATUSES } from "@appstrate/db/run-status";
 export type { RunStatus, TerminalRunStatus } from "@appstrate/db/run-status";
 
 // --- Schedule Types ---
-
-// `package_schedules` is a legacy DB name — the Drizzle export is `schedules`.
-import type { Schedule } from "@appstrate/db/schema";
-export type { Schedule };
 
 /**
  * Wire-shape Schedule DTO — snake_case fields exposed to the API consumer.
@@ -376,6 +364,19 @@ export type { OrgRole };
 import type { orgSettingsSchema } from "@appstrate/core/permissions";
 export type OrgSettings = z.infer<typeof orgSettingsSchema>;
 
+/**
+ * Mirrored by an OpenAPI response schema, and reached only by name.
+ *
+ * `verify:openapi` step #7 walks `responseTypeRegistry` in
+ * `apps/api/src/openapi/response-type-registry.ts`, where the link is the
+ * *string* `sharedTypeName: "OrganizationMember"`, and resolves it through the TypeScript
+ * Compiler API (`scripts/lib/ts-interface-required-keys.ts`, which throws
+ * `"… is not exported from @appstrate/shared-types"` when the name stops being
+ * exported). No import statement exists for the dead-code gate to follow, which
+ * is why this and its siblings carry `@openapiMirror` — see `knip.config.ts`.
+ *
+ * @openapiMirror
+ */
 export interface OrganizationMember {
   orgId: string;
   userId: string;
@@ -385,6 +386,11 @@ export interface OrganizationMember {
   email?: string;
 }
 
+/** Mirrored by an OpenAPI response schema and reached only by name — see
+ * `OrganizationMember` above and `knip.config.ts`.
+ *
+ * @openapiMirror
+ */
 export interface OrganizationWithRole {
   id: string;
   name: string;
@@ -393,6 +399,11 @@ export interface OrganizationWithRole {
   role: OrgRole;
 }
 
+/** Mirrored by an OpenAPI response schema and reached only by name — see
+ * `OrganizationMember` above and `knip.config.ts`.
+ *
+ * @openapiMirror
+ */
 export interface OrgInvitation {
   id: string;
   email: string;
@@ -890,6 +901,11 @@ export interface ApiKeyInfo {
 
 // --- Application Types ---
 
+/** Mirrored by an OpenAPI response schema and reached only by name — see
+ * `OrganizationMember` above and `knip.config.ts`.
+ *
+ * @openapiMirror
+ */
 export interface ApplicationInfo {
   id: string;
   name: string;
@@ -900,6 +916,11 @@ export interface ApplicationInfo {
   updatedAt: string;
 }
 
+/** Mirrored by an OpenAPI response schema and reached only by name — see
+ * `OrganizationMember` above and `knip.config.ts`.
+ *
+ * @openapiMirror
+ */
 export interface InstalledPackage {
   packageId: string;
   generationConfig: ModelGenerationSettings | null;
@@ -990,7 +1011,5 @@ export type {
   RunUpdateEvent,
   RunLogEvent,
   RunMetricEvent,
-  ConnectionUpdateEvent,
-  ChatSessionUpdateEvent,
   RealtimeEvent,
 } from "./realtime-events.ts";

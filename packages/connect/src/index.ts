@@ -10,7 +10,6 @@ export {
   decryptCredentials,
   encryptCredentialEnvelope,
 } from "./encryption.ts";
-export type { CredentialEnvelope } from "./encryption.ts";
 
 // OAuth2 token-exchange error type (shared by token-exchange.ts + integration OAuth)
 export { OAuthCallbackError } from "./oauth.ts";
@@ -24,24 +23,27 @@ export { oauthEgressFetch, isAllowedInternalIdpHost, SsrfBlockedError } from "./
 export { RefreshError, performRefreshTokenExchange } from "./token-refresh.ts";
 export type { RefreshExchangeResult } from "./token-refresh.ts";
 
-// Token-endpoint helpers that cross the package boundary. The request builders
-// and the error classifier stay internal — `token-exchange.ts` / `token-refresh.ts`
-// are the only callers and they import the concrete module.
-export { parseTokenResponse, ClientAuthInvariantError } from "./token-utils.ts";
+// The one token-endpoint symbol that crosses the package boundary: apps/api's
+// integration refresh classifies on it. `parseTokenResponse`, the request
+// builders and the error classifier stay internal — `token-exchange.ts` /
+// `token-refresh.ts` are the only callers and they import the concrete module.
+export { ClientAuthInvariantError } from "./token-utils.ts";
 
-// Credential-proxy primitives (shared between the /api/credential-proxy/proxy
-// route and the in-container sidecar to prevent silent drift).
+// Credential-proxy primitives, in the shape the /api/credential-proxy/proxy
+// route's service layer consumes them. The in-container sidecar runs the same
+// primitives but imports `@appstrate/connect/proxy-primitives` directly, so
+// its binary does not pull this barrel's credentials module (transitively
+// `@appstrate/db`) — see `runtime-pi/sidecar/helpers.ts`. Only what a barrel
+// consumer actually imports is re-exported here; the sidecar-only half
+// (`HOP_BY_HOP_HEADERS`, `filterHeaders`, `applyInjectedCredentialHeader`,
+// `normalizeAuthSchemeTemplates`) and the in-package-only
+// `buildInjectedCredentialHeader` are reached through the subpath.
 export {
   substituteVars,
   findUnresolvedPlaceholders,
   matchesAuthorizedUriSpec,
-  HOP_BY_HOP_HEADERS,
-  filterHeaders,
-  buildInjectedCredentialHeader,
-  applyInjectedCredentialHeader,
   applyInjectedCredentialHeaderToHeaders,
   normalizeAuthSchemeTemplate,
-  normalizeAuthSchemeTemplates,
 } from "./proxy-primitives.ts";
 export type { ProxyCredentialsPayload } from "./proxy-primitives.ts";
 
@@ -61,23 +63,13 @@ export type {
   IntegrationCredentialsWire,
 } from "./integration-credentials.ts";
 
-// CA cert planner for the HTTPS credential proxy (§5.4.1).
+// CA cert planner for the HTTPS credential proxy (§5.4.1). Its types are
+// reached through `@appstrate/connect/proxy-ca-planner` (the sidecar's MITM
+// listener names `CaBundle`); nothing imports them from this barrel.
 export { planCaBundle } from "./proxy-ca-planner.ts";
-export type {
-  CaBundle,
-  CaGenerationOutput,
-  CaGenerationRequest,
-  CertGenerator,
-  PlanCaBundleOptions,
-} from "./proxy-ca-planner.ts";
 
 // Shared OAuth token-refresh request shape (consumed by integration-side refresh too).
 export type { RefreshContext } from "./token-refresh.ts";
-
-// Pure MITM action planner — drives the per-integration HTTPS proxy
-// listener (§4.1.4 strip/inject/retry logic).
-export { planMitmAction } from "./integration-mitm-planner.ts";
-export type { MitmRequestContext } from "./integration-mitm-planner.ts";
 
 // Connect-session tokens — short-lived HMAC capability tokens that gate the
 // unified hosted-connect-portal flow (issue #769). Stateless mint/verify;
@@ -98,7 +90,6 @@ export {
   buildDiscoveryProbes,
   discoveryIssuerMatches,
 } from "./oauth-discovery.ts";
-export type { OAuthEndpointResolution, ResolveOAuthEndpointsInput } from "./oauth-discovery.ts";
 
 // OAuth2 user-facing connect flow for integration auths (used by the
 // marketplace UI; parameterised by manifest endpoints + admin-registered
@@ -116,10 +107,8 @@ export type { IntegrationOAuthCallbackResult } from "./integration-oauth.ts";
 // registration and no client is pre-registered.
 // Only the orchestrating entry point crosses the boundary; the probe builder
 // and the WWW-Authenticate parser are its internals.
+// Only the two orchestrating entry points cross the boundary; callers build
+// the argument inline and read the result via inference, so neither module's
+// input/output types are re-exported here.
 export { discoverProtectedResourceMetadata } from "./mcp-oauth-discovery.ts";
-export type {
-  ProtectedResourceMetadata,
-  DiscoverProtectedResourceInput,
-} from "./mcp-oauth-discovery.ts";
 export { registerDynamicClient, DynamicClientRegistrationError } from "./dcr.ts";
-export type { RegisterDynamicClientInput, DynamicClientRegistration } from "./dcr.ts";
