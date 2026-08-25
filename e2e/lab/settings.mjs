@@ -198,6 +198,14 @@ await withPage(async (page) => {
     "active",
   );
 
+  await page.goto(`${BASE}/org-settings/members`);
+  await settle(page);
+  const desktopSettings = page
+    .locator('[data-sidebar="footer"]')
+    .getByRole("button", { name: "Paramètres" });
+  assert.equal(await desktopSettings.isVisible(), true);
+  assert.equal(await desktopSettings.getAttribute("data-active"), "true");
+
   await page.setViewportSize({ width: 390, height: 1000 });
   await page.goto(`${BASE}/org-settings/members`);
   await settle(page);

@@ -2364,10 +2364,11 @@ hole; their rendered pixels were inspected as well as their DOM.
 warnings.
 
 **The switcher no longer owns destinations, 24 August.** Its bottom Settings
-and Library footer was removed. Settings already has a selected destination in
-the global mobile drawer, and the gears on the current organisation and
-workspace rows remain the contextual shortcuts. Repeating those destinations
-in the switcher made its context-changing job less legible.
+and Library footer was removed. Settings has a permanent selected destination
+at the bottom of the global sidebar at every breakpoint, and the gears on the
+current organisation and workspace rows remain the contextual shortcuts.
+Repeating those destinations in the switcher made its context-changing job less
+legible.
 
 The package Library is now an admin-only Organisation settings destination at
 `/org-settings/library`; `/library` redirects there for old bookmarks. The
@@ -2383,8 +2384,9 @@ the only settings navigation in its viewport.
 
 **Settings navigation reconciliation, 24 August.** The combined branch already
 contains the last reviewed navigation rather than one of the earlier
-prototypes. On mobile, Settings is the selected destination at the bottom of
-the global drawer, above the account boundary; selecting it again closes that
+prototypes. Settings is the permanent destination at the bottom of the global
+sidebar at every breakpoint, above the account boundary. It becomes selected
+while either settings scope is open; on mobile, selecting it again closes the
 drawer. The global two-line header and breadcrumb remain sticky. Inside
 Settings, the one `Menu` trigger opens a full-surface navigation drawer with
 the complete Organisation section and its selector followed by the complete
@@ -2392,7 +2394,8 @@ Workspace section and its selector. A destination closes that drawer; either
 context selector leaves it open. Desktop and tablet retain the two-section
 rail. The rejected double compact dropdown and the older two framed mobile
 groups are not missing work to merge. `lab:settings` exercises this whole
-contract, including the organisation switcher's mobile viewport fit.
+contract, including the permanent desktop destination and the organisation
+switcher's mobile viewport fit.
 
 **A hidden settings fact is an inaccessible fact, 24 August.** The tiered table
 grammar was designed to protect identity and Actions from being crushed, but

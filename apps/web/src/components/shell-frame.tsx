@@ -70,12 +70,11 @@ export function ShellSidebar({
         <ProductTabs />
       </div>
       <SidebarContent className={cn("gap-0", contentClassName)}>{children}</SidebarContent>
-      {/* Settings is a destination in the global mobile drawer, not only an
-          action hidden inside the context switcher. It sits above the user
-          boundary so the drawer can represent the settings overlay as the
-          active global destination. */}
+      {/* Settings is a permanent global destination, not only an action hidden
+          inside the context switcher. It sits above the user boundary and
+          represents the settings overlay as the active destination. */}
       <SidebarFooter className="gap-0 p-0">
-        <SidebarMenu className="px-2 pb-2 md:hidden">
+        <SidebarMenu className="px-2 pb-2">
           <SidebarMenuItem>
             <SidebarMenuButton asChild isActive={settingsActive} tooltip={t("nav.settings")}>
               {settingsActive ? (
