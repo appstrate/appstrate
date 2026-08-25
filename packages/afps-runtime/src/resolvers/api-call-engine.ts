@@ -71,8 +71,10 @@ export function matchesAuthorizedUri(url: string, patterns: string[]): boolean {
  * Strip userinfo (`user:pass@`) and fragment (`#…`) from a URL. Mirrors
  * WHATWG Fetch `Response.url` sanitisation. Used on every redirect hop
  * before policy checks / re-fetch (block attacker-injected basic-auth,
- * keep the allowlist matcher host-based). Returns `undefined` on parse
- * failure so callers can skip the hop.
+ * keep the allowlist matcher host-based). Returns `undefined` when the
+ * input does not parse as a URL — its one caller resolves the `Location`
+ * through `new URL()` first, so that arm is defensive and falls back to
+ * the unstripped string rather than dropping the hop.
  */
 export function stripUserInfoAndFragment(url: string): string | undefined {
   try {

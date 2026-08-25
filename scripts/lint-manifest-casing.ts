@@ -30,10 +30,11 @@
  * ─── The three filters ───────────────────────────────────────────────
  *
  *  1. **Writer shape**: the key must appear as `<key>:` (object literal
- *     property) or `<obj>.<key> =` (manifest assignment) where `<obj>` is one
- *     of `manifest`, `finalManifest`, `m`, `payload`, `patch`, `wrapper`, or
- *     `output`. This catches the exact leak shape (`finalManifest.displayName
- *     = …`) without dragging in DB queries or React `Foo.displayName = "Foo"`.
+ *     property, on its own line or wrapped by prettier onto the next) or
+ *     `<obj>.<key> =` (manifest assignment) where `<obj>` is one of `manifest`,
+ *     `finalManifest`, `m`, `payload`, `patch`, `wrapper`, or `output`. This
+ *     catches the exact leak shape (`finalManifest.displayName = …`) without
+ *     dragging in DB queries or React `Foo.displayName = "Foo"`.
  *
  *  2. **Per-line exemptions**: `// canonical-casing-exempt`, `// back-compat`,
  *     the cleanup pattern (`<key>: undefined` / `delete m.<key>`), and read
@@ -119,8 +120,8 @@ type BannedKey = (typeof BANNED_KEYS)[number];
  *
  * The five groups below are a measurement, not a judgement call: they are the
  * complete residue of running this gate over all tracked sources with only the
- * writer-shape and per-line filters (122 hits in 56 files at the time of
- * writing). Every one of them is camelCase that `docs/CASING_CONVENTIONS.md`
+ * writer-shape and per-line filters (124 hits in 57 files, re-measured
+ * 2026-08-25 with `excludedBy` stubbed to return nothing). Every one of them is camelCase that `docs/CASING_CONVENTIONS.md`
  * positively requires — not AFPS manifest keys wearing the wrong casing.
  */
 interface ExcludedScope {
@@ -161,6 +162,12 @@ const EXCLUDED_SCOPES: readonly ExcludedScope[] = [
     keys: ["displayName"],
     reason: PROFILE_DISPLAY_NAME,
   },
+  // Better Auth's `databaseHooks.user.create.after` seeds the profile row:
+  // `displayName: user.name || user.email`. It was invisible until the
+  // writer-shape regex stopped excusing every value that begins with `u` —
+  // `user.name` did — so this entry is the one pre-existing occurrence that fix
+  // surfaced, and it is the same Group 1 case as the rest.
+  { path: "packages/db/src/auth.ts", keys: ["displayName"], reason: PROFILE_DISPLAY_NAME },
   { path: "apps/api/src/services/profile.ts", keys: ["displayName"], reason: PROFILE_DISPLAY_NAME },
   { path: "apps/api/src/routes/profile.ts", keys: ["displayName"], reason: PROFILE_DISPLAY_NAME },
   {
@@ -220,7 +227,25 @@ const EXCLUDED_SCOPES: readonly ExcludedScope[] = [
   { path: "apps/cli/src/commands/whoami.ts", keys: ["displayName"], reason: PROFILE_DISPLAY_NAME },
 
   // ── Group 2: module + model-provider descriptors ──
-  { path: "apps/api/src/modules/", keys: ["displayName", "iconUrl"], reason: MODULE_DESCRIPTOR },
+  // `apps/api/src/modules/core-providers/index.ts` and NOT the directory it
+  // sits in. The entry here used to read `apps/api/src/modules/` — a whole
+  // subtree spanning five built-in modules — which is exactly the file-scoped
+  // shape rule 1 above forbids, and it swallowed the leak this gate is named
+  // after: injecting `finalManifest.displayName = …` into
+  // `apps/api/src/modules/mcp/index.ts` gave `exit=0`, while the same line in
+  // `apps/api/src/services/system-packages.ts` gave `exit=1`.
+  //
+  // The narrowing costs nothing, because the subtree was never carrying five
+  // modules' worth of camelCase: with the directory entry removed, all 30 hits
+  // under `apps/api/src/modules/` came from this ONE file (the 14
+  // `ModelProviderDescriptor` literals), and `mcp`, `oidc`, `webhooks` and
+  // `firecracker` contain zero occurrences of either key. A directory was
+  // being excluded for a file.
+  {
+    path: "apps/api/src/modules/core-providers/index.ts",
+    keys: ["displayName", "iconUrl"],
+    reason: MODULE_DESCRIPTOR,
+  },
   {
     path: "packages/module-claude-code/src/index.ts",
     keys: ["displayName", "iconUrl"],
@@ -265,6 +290,11 @@ const EXCLUDED_SCOPES: readonly ExcludedScope[] = [
     keys: ["displayName", "iconUrl"],
     reason: WIRE_DTO,
   },
+  // GENERATED file (scripts/generate-api-types.ts, from the OpenAPI spec), so
+  // this entry is a tripwire on the spec rather than on hand-written code: the
+  // day `icon_url` stops being spelled `iconUrl` in a response schema, the
+  // regenerated client stops producing the hit and `deadExclusions` reports
+  // this line. Delete it then — do not edit the generated file.
   { path: "apps/web/src/api/schema.d.ts", keys: ["iconUrl"], reason: WIRE_DTO },
   { path: "apps/web/src/components/editor-shell.tsx", keys: ["displayName"], reason: WIRE_DTO },
   { path: "apps/web/src/components/schedule-form.tsx", keys: ["displayName"], reason: WIRE_DTO },
@@ -374,21 +404,50 @@ interface Hit {
   key: string;
 }
 
-// Writer-shape regex for a banned key. Matches either:
+// Writer-shape regexes for a banned key. Matches either:
 //   1. Object literal property:  `<key>: <something-not-undefined>`
-//      (the M8 cleanup `<key>: undefined` is filtered by lineIsExempt above.)
 //   2. Manifest field assignment: `<obj>.<key> = <value>` where <obj> is one
 //      of manifest, finalManifest, m, payload, patch, wrapper, output, draft,
 //      entry, manif, item.
-function buildWriterShapeRegex(key: string): RegExp {
+//
+// Two defects measured in the form this replaces, both against
+// `apps/api/src/services/system-packages.ts` (a file no exclusion covers) with
+// the control `displayName: "x"` reported on the same run:
+//
+//   - `[^u\s]` was a cheap stand-in for "not `undefined`", so it also excused
+//     EVERY value beginning with `u`. `displayName: userName` — an ordinary
+//     write of a variable — got `exit=0`. It is a negative lookahead now, which
+//     costs nothing and means exactly what it says.
+//   - a prettier-wrapped property (`displayName:` on one line, the value on the
+//     next) matched nothing, because `\s*` cannot cross a line in a per-line
+//     scan. `displayName:\n  someVeryLongExpression,` got `exit=0` too. Hence
+//     `wrapped` below, which the caller pairs with the following line.
+//
+// `wrapped` is a SEPARATE anchored pattern rather than a two-line window fed to
+// the same regex, on purpose: a window would also match a key that lives wholly
+// on the second line, and that line's own window would match it again — one
+// leak reported twice, at two line numbers. Requiring `<key>:` to be the last
+// thing on the line matches the wrap and only the wrap.
+interface WriterShape {
+  /** The whole write is on one line. */
+  same: RegExp;
+  /** `<key>:` ends the line; the value is on the next one. */
+  wrapped: RegExp;
+}
+
+function buildWriterShapeRegex(key: string): WriterShape {
   // Object-literal: `<key>:` not preceded by an alphanumeric (so we don't
   // match `someOtherDisplayName:`).
   // Assignment: `<obj>.<key> =` (not ==, not =>).
   const objNames = "(manifest|finalManifest|m|payload|patch|wrapper|output|draft|entry|manif|item)";
-  return new RegExp(
-    `(?:(?:^|[^A-Za-z0-9_$])${key}\\s*:\\s*[^u\\s])|` + // `<key>: value` (excludes `undefined` cheaply via [^u])
-      `(?:\\b${objNames}(?:\\.[A-Za-z0-9_$]+)*\\.${key}\\s*=(?!=|>))`,
-  );
+  const property = `(?:^|[^A-Za-z0-9_$])${key}\\s*:\\s*`;
+  return {
+    same: new RegExp(
+      `(?:${property}(?!undefined\\b)\\S)|` +
+        `(?:\\b${objNames}(?:\\.[A-Za-z0-9_$]+)*\\.${key}\\s*=(?!=|>))`,
+    ),
+    wrapped: new RegExp(`${property}$`),
+  };
 }
 
 /**
@@ -418,11 +477,21 @@ function scan(): { hits: Hit[]; suppressed: Set<string>; scanned: number } {
     const lines = content.split("\n");
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i] ?? "";
+      const next = lines[i + 1] ?? "";
       const trimmed = line.trimStart();
       if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")) continue;
       if (lineIsExempt(line)) continue;
       for (const { key, re } of keyPatterns) {
-        if (!re.test(line)) continue;
+        // The wrap case reads the NEXT line for two things: the per-line
+        // exemptions (a `// canonical-casing-exempt` sits with the value, not
+        // with the orphaned `key:`) and the `undefined` cleanup shape, which a
+        // wrap spells `key:\n  undefined`.
+        const isWrappedWrite =
+          re.wrapped.test(line) &&
+          next.trim() !== "" &&
+          !/^\s*undefined\b/.test(next) &&
+          !lineIsExempt(next);
+        if (!re.same.test(line) && !isWrappedWrite) continue;
         const scope = excludedBy(rel, key);
         if (scope) {
           suppressed.add(`${scope.path}::${key}`);
@@ -445,14 +514,17 @@ function scan(): { hits: Hit[]; suppressed: Set<string>; scanned: number } {
  * at least one real hit collapses both cases into one check — a deleted path
  * suppresses nothing, and so does a cleaned-up one.
  */
-function assertExclusionsAreLive(suppressed: Set<string>): void {
+function deadExclusions(suppressed: Set<string>): string[] {
   const dead: string[] = [];
   for (const scope of EXCLUDED_SCOPES) {
     for (const key of scope.keys) {
       if (!suppressed.has(`${scope.path}::${key}`)) dead.push(`${scope.path}  [${key}]`);
     }
   }
-  if (dead.length === 0) return;
+  return dead;
+}
+
+function reportDeadExclusions(dead: string[]): void {
   console.error(
     `[lint-manifest-casing] FAIL — ${dead.length} EXCLUDED_SCOPES entr(y|ies) suppress nothing:\n` +
       dead.map((d) => `  - ${d}`).join("\n") +
@@ -460,20 +532,9 @@ function assertExclusionsAreLive(suppressed: Set<string>): void {
       "matches nothing today will silently cover whatever appears at that path tomorrow —\n" +
       "delete the entry, or repoint it.\n",
   );
-  process.exit(1);
 }
 
-function main(): void {
-  const { hits, suppressed, scanned } = scan();
-  assertExclusionsAreLive(suppressed);
-
-  if (hits.length === 0) {
-    console.log(
-      `[lint-manifest-casing] OK — no legacy camelCase manifest-key writer contexts found ` +
-        `(${scanned} tracked source files scanned, ${EXCLUDED_SCOPES.length} documented exclusions).`,
-    );
-    process.exit(0);
-  }
+function reportHits(hits: Hit[]): void {
   console.error(
     `[lint-manifest-casing] FAIL — ${hits.length} suspect line(s) emit legacy camelCase manifest keys.\n`,
   );
@@ -488,6 +549,33 @@ function main(): void {
   for (const h of hits) {
     console.error(`  ${h.file}:${h.line}  [${h.key}]  ${h.text}`);
   }
+}
+
+/**
+ * Both failure classes are reported, then the process exits ONCE.
+ *
+ * The dead-exclusion check used to `process.exit(1)` from inside itself, before
+ * a single hit had been printed. So the run that most needs the hit list — a
+ * refactor that both cleaned up one camelCase surface and introduced a leak
+ * somewhere else — showed only the stale entry, and the leak surfaced on the
+ * NEXT run, after somebody had already edited this file. The two classes are
+ * independent findings about the same scan; neither is a precondition for
+ * printing the other.
+ */
+function main(): void {
+  const { hits, suppressed, scanned } = scan();
+  const dead = deadExclusions(suppressed);
+
+  if (dead.length === 0 && hits.length === 0) {
+    console.log(
+      `[lint-manifest-casing] OK — no legacy camelCase manifest-key writer contexts found ` +
+        `(${scanned} tracked source files scanned, ${EXCLUDED_SCOPES.length} documented exclusions).`,
+    );
+    process.exit(0);
+  }
+
+  if (dead.length > 0) reportDeadExclusions(dead);
+  if (hits.length > 0) reportHits(hits);
   process.exit(1);
 }
 

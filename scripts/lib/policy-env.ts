@@ -28,6 +28,25 @@
 
 const POLICIES = ["warn", "fail", "off"] as const;
 
+/**
+ * Is this process running under CI?
+ *
+ * `if (process.env["CI"])` was JS truthiness on a string, so `CI=false` — which
+ * some runners export precisely to say "not CI", and which a developer can
+ * export locally for the same reason — read as CI and pinned the policy to
+ * `fail`. Every other boolean env var in this repo goes through `boolEnv` in
+ * `packages/env/src/index.ts`, whose rule is `s.toLowerCase() === "true" || s
+ * === "1"`; that rule is restated here rather than imported because `env` does
+ * not export the helper, and because a gate script must not need the platform's
+ * env schema to boot. If `boolEnv` ever changes, change this with it.
+ *
+ * Unset stays false, which is the same answer truthiness gave.
+ */
+function isCi(): boolean {
+  const raw = process.env["CI"];
+  return raw !== undefined && (raw.toLowerCase() === "true" || raw === "1");
+}
+
 type GatePolicy = (typeof POLICIES)[number];
 
 function isGatePolicy(value: string): value is GatePolicy {
@@ -67,8 +86,9 @@ export function readGatePolicy(name: string): GatePolicy {
   }
 
   // Ignored under CI on purpose — see the doc comment above for the probe that
-  // shows turbo really does forward `CI` into this task.
-  if (process.env["CI"]) return "fail";
+  // shows turbo really does forward `CI` into this task, and `isCi` for why
+  // this is not a truthiness check on the raw string.
+  if (isCi()) return "fail";
 
   return raw ?? "fail";
 }

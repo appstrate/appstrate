@@ -31,6 +31,13 @@ import {
 const REPO_ROOT = join(import.meta.dir, "..");
 
 /**
+ * The Zod combinators that make a variable's value come from the schema rather
+ * than from the environment. Used for BOTH halves of the scan — a key's own
+ * block and a helper's body — so the two can never recognise different sets.
+ */
+const DEFAULTING = /\.(?:default|catch|prefault)\(/;
+
+/**
  * The variable names `packages/env/src/index.ts` gives a default to, read out
  * of the schema source.
  *
@@ -53,26 +60,62 @@ const REPO_ROOT = join(import.meta.dir, "..");
  * A gate whose coverage is a list somebody has to remember to extend reports on
  * what it remembers, not on what is there.
  *
- * Two shapes count as a default:
+ * Three shapes count as a default:
  *   - a literal `.default(...)` in the key's own block;
+ *   - `.catch(...)` / `.prefault(...)` — Zod's other two "produce this value
+ *     instead of failing / instead of `undefined`" combinators. From compose's
+ *     point of view they are indistinguishable from `.default()`: the schema
+ *     supplies the value, so a YAML line pinning the same one is the same #513
+ *     duplication. Neither appears in the schema today (measured 2026-08-25:
+ *     zero occurrences); they are here so that the day one does, the gate does
+ *     not silently stop seeing that variable;
  *   - a call to a schema helper that applies one internally (`jsonEnv("[]")`,
  *     `boolEnv("false")`). Those helpers are DISCOVERED, not listed: a
- *     top-level `const` declared above the schema whose body contains
- *     `.default(` is one. 16 of the table's entries are helper-wrapped, so a
+ *     top-level declaration above the schema whose body contains one of the
+ *     three markers is one. 16 of the table's entries are helper-wrapped, so a
  *     literal-only scan would have under-reported by 16 and quietly restored a
- *     smaller version of the same hole.
+ *     smaller version of the same hole. Both declaration forms are scanned —
+ *     `const helper = …` and `function helper(…) { … }`. The schema uses only
+ *     the arrow-const form today; the `function` form was invisible before, and
+ *     "the extractor works as long as nobody uses a function declaration" is
+ *     not a property worth depending on.
  *
- * `assertExtractorStillWorks` below is what keeps this honest as the schema's
- * style evolves — see its own comment.
+ * ─── What this deliberately does NOT see ─────────────────────────────
+ *
+ * A default supplied inside a transform — `.transform((v) => v ?? "512")`, or
+ * any other expression that materialises a value at parse time. Recognising it
+ * needs the transform body evaluated, or at minimum a real TS parse plus a
+ * data-flow judgement about which returns are defaults; there is no cheap
+ * textual rule, and a guessed one would report on shapes it does not
+ * understand. So: a variable defaulted only that way is NOT reported as
+ * defaulted, and a compose file pinning its value passes this gate. That is a
+ * known hole, not a covered case.
+ *
+ * `assertExtractorStillWorks` below narrows the risk but does not close it —
+ * see its own comment for exactly what it can and cannot catch.
  */
 export function readSchemaDefaults(): { keys: Set<string>; defaulted: Set<string> } {
-  const source = readFileSync(join(REPO_ROOT, SCHEMA_SOURCE), "utf-8");
+  return extractSchemaDefaults(readFileSync(join(REPO_ROOT, SCHEMA_SOURCE), "utf-8"));
+}
+
+/**
+ * The extraction itself — schema TEXT in, key sets out.
+ *
+ * Pure, for the same reason `findTableGaps` is: `scripts/test/` can hold a
+ * synthetic schema against it and assert each defaulting form is recognised,
+ * without the assertion depending on how `packages/env/src/index.ts` happens to
+ * be written today.
+ */
+export function extractSchemaDefaults(source: string): {
+  keys: Set<string>;
+  defaulted: Set<string>;
+} {
   const lines = source.split("\n");
 
   // Where the schema object starts — helper declarations are the top-level
-  // `const`s BEFORE it. (`envSchema` itself contains `.default(` too and would
-  // otherwise be collected; it is never called from a key block, so this is
-  // tidiness rather than a fix.)
+  // declarations BEFORE it. (`envSchema` itself contains `.default(` too and
+  // would otherwise be collected; it is never called from a key block, so this
+  // is tidiness rather than a fix.)
   const schemaStart = lines.findIndex((l) => l.startsWith("const envSchema"));
   if (schemaStart === -1) {
     throw new Error(`${SCHEMA_SOURCE}: no \`const envSchema\` — the extractor below cannot work.`);
@@ -80,16 +123,25 @@ export function readSchemaDefaults(): { keys: Set<string>; defaulted: Set<string
 
   const defaultingHelpers = new Set<string>();
   for (let i = 0; i < schemaStart; i++) {
-    const decl = /^const ([A-Za-z_$][\w$]*)\s*=/.exec(lines[i] ?? "");
-    if (!decl?.[1]) continue;
-    const body: string[] = [];
+    const decl = /^(?:export\s+)?(const|function)\s+([A-Za-z_$][\w$]*)/.exec(lines[i] ?? "");
+    const kind = decl?.[1];
+    const name = decl?.[2];
+    if (!kind || !name) continue;
+    const body: string[] = [lines[i] ?? ""];
     for (let j = i + 1; j < schemaStart; j++) {
       const l = lines[j] ?? "";
-      // A top-level (column-0) non-blank line ends the declaration.
-      if (l.trim() !== "" && /^\S/.test(l)) break;
-      body.push(l);
+      if (kind === "function") {
+        // A function's body legitimately contains column-0 lines (its own
+        // closing brace), so it ends at that brace instead.
+        body.push(l);
+        if (/^\}/.test(l)) break;
+      } else {
+        // A top-level (column-0) non-blank line ends a `const` declaration.
+        if (l.trim() !== "" && /^\S/.test(l)) break;
+        body.push(l);
+      }
     }
-    if (body.join("\n").includes(".default(")) defaultingHelpers.add(decl[1]);
+    if (DEFAULTING.test(body.join("\n"))) defaultingHelpers.add(name);
   }
 
   // Schema keys sit at exactly 4-space indent inside `z.object({ … })` — the
@@ -105,7 +157,7 @@ export function readSchemaDefaults(): { keys: Set<string>; defaulted: Set<string
   const flush = (): void => {
     if (current !== null) {
       const text = block.join("\n");
-      if (text.includes(".default(") || (defaultingHelpers.size > 0 && helperCall.test(text))) {
+      if (DEFAULTING.test(text) || (defaultingHelpers.size > 0 && helperCall.test(text))) {
         defaulted.add(current);
       }
     }
@@ -147,6 +199,27 @@ export function readSchemaDefaults(): { keys: Set<string>; defaulted: Set<string
  * `process.env` by the sidecar and by `@appstrate/module-observability`, which
  * is why `docs/ENV.md` documents them separately. The table covers them so
  * compose cannot mirror them either.
+ *
+ * ─── The half this cannot check ──────────────────────────────────────
+ *
+ * Its evidence is `CODE_DEFAULTS ∩ schema keys` — variables somebody has
+ * already written down twice. So it detects a style change under an EXISTING
+ * table entry, and nothing else. A brand-new variable introduced in a form the
+ * extractor does not know (the `.transform((v) => v ?? …)` hole above) is
+ * absent from the table by construction, contributes no intersection member,
+ * and passes here in silence — which is precisely the "new variable in a new
+ * form" case. Do not read a green run as coverage of that. The tests in
+ * `scripts/test/verify-compose-defaults.test.ts` hold the recognised forms
+ * against a synthetic schema, which is where a new form gets its assertion.
+ *
+ * Measured on today's schema (2026-08-25): 99 keys, 67 detected as defaulted.
+ * The 32 remaining were re-read one by one — 30 contain no occurrence of
+ * `default` / `catch` / `prefault` / `??` / `transform` at all, and the two
+ * that trip a text search do not default: `GIT_SHA` matches only a trailing
+ * comment about `TRUST_PROXY`, and `PLATFORM_API_URL`'s
+ * `.transform((v) => (v === "" ? undefined : v))` produces `undefined`, not a
+ * value. So on this schema the extractor is exact; the hole above is
+ * forward-looking.
  */
 export function assertExtractorStillWorks(keys: Set<string>, defaulted: Set<string>): void {
   const undetected = Object.keys(CODE_DEFAULTS)

@@ -1190,8 +1190,8 @@ const indexSrc = readFileSync(indexPath, "utf8");
 // matched NEITHER pattern (the named one needs `import {` immediately, the
 // default one needed `<ident> from`), so `healthRouter` resolved to no file and
 // `app.route("/", healthRouter)` was dropped — every route health.ts declares
-// was invisible to §5. It dropped in silence until the mount resolver below
-// started throwing; that is the whole reason it now throws.
+// was invisible to §5. It dropped in SILENCE; the mount resolver below now
+// fails closed on an unresolved mount instead, which is how that was found.
 const importToFile = new Map<string, string>(); // identifier → relative file path
 for (const m of indexSrc.matchAll(
   /import\s+(?:\w+\s*,\s*)?\{([^}]+)\}\s+from\s+["']\.\/(routes\/[^"']+?)(?:\.ts)?["']/g,
@@ -1223,6 +1223,16 @@ for (const m of indexSrc.matchAll(/(?:const|let)\s+(\w+)\s*=\s*(\w+)\s*\(\s*\)/g
 //    - `fooRouter`                   → variable bound to either `createFooRouter()` or default import
 type Mount = { prefix: string; file: string; factory: string | "__default__" };
 const mounts: Mount[] = [];
+// Mounts whose expression resolves to no route file. COLLECTED, not thrown:
+// this used to `throw`, which left the process with a raw uncaught stack trace
+// — no section header, no `SOME CHECKS FAILED` summary, and none of the other
+// sections' findings, because the throw happened at import time before §5 had
+// printed anything. A legitimate mount the resolver has not been taught (an
+// inline `const sub = new Hono(); app.route("/x", sub)` — none exists in
+// index.ts today, `new Hono` appears once, for `app` itself) would have looked
+// like a crashed tool rather than a gate saying no. It still fails closed; it
+// now fails closed the way every other section does, in §5 below.
+const unresolvedMounts: { prefix: string; expr: string; ident: string }[] = [];
 // Matches both `app.route("/p", fooRouter)` and `app.route("/p", createFooRouter())`.
 // The expression group accepts an identifier optionally followed by `()` — this is
 // narrow enough to capture the trailing `)` of the factory call as part of the
@@ -1261,12 +1271,8 @@ for (const m of indexSrc.matchAll(
     // whole-mount hole `readRouteFile` had, one step earlier. There is no honest
     // fallback: without the file this gate cannot know what `/api/x` serves, so
     // it must not report on it.
-    throw new Error(
-      `verify-openapi: app.route("${prefix}", ${exprRaw}) — cannot resolve "${ident}" to a ` +
-        `route file from index.ts's imports. Every route mounted at "${prefix}" would be ` +
-        `invisible to the Code ⊆ Spec check. If the mount is legitimate, teach the resolver ` +
-        `its shape (see the three forms documented above); do not leave it unresolved.`,
-    );
+    unresolvedMounts.push({ prefix, expr: exprRaw, ident });
+    continue;
   }
   mounts.push({ prefix, file, factory });
 }
@@ -1547,6 +1553,26 @@ if (orphans.length === 0) {
   console.log(
     `\n  Either document the endpoint in apps/api/src/openapi/paths/, or add a ` +
       `justified entry to CODE_TO_SPEC_ALLOWLIST in this file.`,
+  );
+}
+
+// Fail closed on any MOUNT the resolver couldn't resolve to a route file —
+// every endpoint that router declares vanishes from `codeEndpoints` with it.
+// Same policy as the templated-route block below, reported the same way.
+if (unresolvedMounts.length > 0) {
+  exitCode = 1;
+  console.log(
+    `\n  Mounts the resolver could not resolve to a route file (${unresolvedMounts.length}):`,
+  );
+  for (const m of unresolvedMounts) {
+    console.log(`    - app.route("${m.prefix}", ${m.expr})  — unknown identifier "${m.ident}"`);
+  }
+  console.log(
+    `\n  Every route mounted at those prefixes is invisible to the Code ⊆ Spec check. ` +
+      `Import the router from a \`./routes/<file>\` module in apps/api/src/index.ts (named, ` +
+      `default or mixed import, optionally through a \`const x = createXRouter()\` alias — the ` +
+      `three forms documented above), or teach the resolver the new shape. Do not leave a ` +
+      `mount unresolved.`,
   );
 }
 

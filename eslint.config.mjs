@@ -39,9 +39,20 @@ const API_BARREL_BAN = {
 // problem — widening one and not the other is a silent asymmetry. One constant,
 // no drift.
 //
-// `//#lint`'s turbo `inputs` mirror this so the CACHE KEY matches the real
-// scope; a file eslint covers but turbo does not hash gets its findings once
-// and then replayed away forever.
+// A superset of the working tree is NOT a superset the gate can run on,
+// though, and that is the other half of this change: a `files` glob is matched
+// against whatever `eslint <path>` walks, so `eslint .` under this config also
+// picks up untracked, non-gitignored scratch files. Measured: an untracked
+// `zz-probe/p.ts` holding `export const a: any = 1;` failed `bun run lint` →
+// `bun run check` → `.husky/pre-push`. So the entrypoint is now
+// `scripts/lint.ts`, which hands eslint the `git ls-files` list — the same
+// tracked-content rule `scripts/lint-manifest-casing.ts` and
+// `scripts/verify-compose-defaults.ts` already state. This file stays a
+// superset; the script decides which files it is applied to.
+//
+// `//#lint`'s turbo `inputs` mirror that scope so the CACHE KEY matches it;
+// a file eslint covers but turbo does not hash gets its findings once and then
+// replayed away forever.
 const ALL_TS = ["**/*.{ts,tsx}"];
 
 // Zod 4 string-format bans (single source of truth). Declared here because the
@@ -236,8 +247,11 @@ export default tseslint.config(
     //     as `//#lint` inputs while eslint answered "File ignored because no
     //     matching configuration was supplied" for every one of them: the gate
     //     was honest in intent and inert in fact.
-    //   - `*.ts` (no slash) matches root-level files only, so this does not
-    //     silently pull in arbitrary nested config files.
+    //   - `ALL_TS` deliberately DOES pull in nested config files —
+    //     `apps/web/vite.config.ts`, `packages/db/drizzle.config.ts` and the
+    //     rest are the files this widening exists for. What keeps that from
+    //     also meaning "somebody's untracked scratch file" is the entrypoint,
+    //     not this glob: `scripts/lint.ts` runs eslint over `git ls-files`.
     // Note on `console.*`: `no-console` is NOT set here. It is enabled in its
     // own block below, over application source only — deliberately not over
     // `scripts/**` or `**/test/**`, which this block does cover. See that block

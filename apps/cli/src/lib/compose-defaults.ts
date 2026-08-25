@@ -360,8 +360,9 @@ export function analyzeComposeDefaults(content: string): ComposeFinding[] {
     // Not in the table → nothing to compare against, so no finding here. This
     // skip is the gate's blind spot, and it is covered one level up:
     // `verify-compose-defaults.ts` fails when the skipped variable turns out to
-    // carry a `.default()` in the schema. Do not "fix" it by guessing a default
-    // — this function is pure and value-comparing; the missing entry is.
+    // carry a schema default. Do not "fix" it by guessing a default — this
+    // function is pure and value-comparing, and the missing table entry is
+    // itself the finding, reported there as Class 3.
     if (codeDefault === undefined) continue;
 
     const allowed = ALLOWLIST[match.varName];

@@ -7298,6 +7298,15 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            /** @description Agent not found, or the agent has no published version (`no_published_version`). A schedule with no `version_override` fires the PUBLISHED manifest, so a never-published agent is refused here rather than 404ing on every tick; pin the working copy with `version_override: "draft"` to schedule it anyway. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             429: components["responses"]["RateLimited"];
         };
     };

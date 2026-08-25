@@ -143,13 +143,13 @@
         "package.json"
       ]
     },
-    // `lint` is a bare `eslint .`, so its true scope is whatever
-    // eslint.config.mjs matches — these inputs only decide when turbo REPLAYS
-    // it. They must therefore track that config, not the other way round:
-    // a zone eslint newly covers but this list omits is a zone whose findings
-    // arrive once and are then cached away.
+    // `lint` runs `scripts/lint.ts`, which hands eslint every TRACKED
+    // `.ts/.tsx/.js/.jsx/.mjs/.cjs` file. These inputs only decide when turbo
+    // REPLAYS it, so they must track that scope, not the other way round: a
+    // zone eslint covers but this list omits is a zone whose findings arrive
+    // once and are then cached away.
     //
-    // Which is why this is now the same shape as the config's own `ALL_TS`
+    // Which is why this is a superset shaped like the script's own glob list
     // rather than a parallel directory roster. The roster this replaces
     // (`apps/*/src/**`, `packages/*/test/**`, …) had already fallen behind: it
     // did not reach `apps/web/vite.config.ts`, `packages/db/drizzle.config.ts`,
@@ -160,12 +160,28 @@
     // hit forever. Two supersets that cannot drift beats two rosters that
     // agreed by accident.
     //
-    // turbo hashes only non-ignored files, so `**` costs nothing for
-    // `node_modules` / `dist` — they are gitignored and never enter the hash.
-    // `eslint.config.mjs` is the sole tracked non-TS file eslint reads, and it
-    // is the config itself: a rule change must invalidate every verdict.
+    // The two negations are NOT decoration, and the comment they replace
+    // claimed the opposite ("turbo hashes only non-ignored files, so `**` costs
+    // nothing for `node_modules` / `dist`"). Measured 2026-08-25 on this
+    // machine with a bare `**/*.{ts,tsx}`: creating `node_modules/.zzprobe/a.ts`
+    // moved this task's hash `8be6968e1f982bc5` → `820658372368758f`. A
+    // gitignored file DID enter the hash, so every `bun install` busted the
+    // lint cache. With the negations in place the same probe leaves the hash
+    // unmoved (`bfccf7e59fedff90` both times). Do not restore the claim
+    // without re-running that probe.
+    //
+    // No `eslint.config.mjs` entry: `.mjs` is in the glob, so the config file
+    // is already hashed — a rule change invalidates every verdict, derived
+    // rather than restated. `package.json` is not matched by the glob and holds
+    // the `lint` script itself, so it stays listed. `scripts/lint.ts`, which
+    // now defines the scope, is matched by the glob like any other `.ts`.
     "//#lint": {
-      "inputs": ["**/*.{ts,tsx}", "eslint.config.mjs", "package.json"]
+      "inputs": [
+        "**/*.{ts,tsx,js,jsx,mjs,cjs}",
+        "!**/node_modules/**",
+        "!**/dist/**",
+        "package.json"
+      ]
     },
     // No `inputs` on purpose. The root `format:check` script is now a bare
     // `prettier --check .`, whose scope is "every file in the repo minus
@@ -220,10 +236,18 @@
     //
     // The floor moved with it: `--at-least 98` was set against that inflated
     // figure and had never measured anything, so re-using it would have kept
-    // ~1 000 identifiers of dead slack. It is now 99, against a true 99.04%.
-    // That is ~40 identifiers of headroom on purpose — when it trips, type the
-    // `any` that tripped it. Do not lower the floor; the whole point of this
-    // pass was that a floor nobody re-derived is not a floor.
+    // ~1 000 identifiers of dead slack. It is now 99.
+    //
+    // How much slack that leaves, re-measured 2026-08-25 rather than estimated:
+    // `bunx type-coverage --project apps/web/tsconfig.json --strict
+    // --ignore-files "apps/web/src/api/schema.d.ts"` reports 95899/96819 =
+    // 99.0498%. `--at-least 99` trips at 95851 typed identifiers, so the
+    // headroom is 48 — the number of currently-typed identifiers that could
+    // turn into `any` before this gate says no. (The comment this replaces said
+    // "~40", which was a guess; the figure also moves with the denominator, so
+    // re-run the command rather than trusting this line.) When it trips, type
+    // the `any` that tripped it. Do not lower the floor; the whole point of
+    // this pass was that a floor nobody re-derived is not a floor.
     "//#verify:type-coverage": {
       "inputs": [
         "apps/web/src/**",
