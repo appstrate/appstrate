@@ -50,6 +50,8 @@ import { runLogDataSchema } from "../../lib/jsonb-schemas.ts";
 import { ApiError, conflict } from "../../lib/errors.ts";
 import { getPlatformRunLimits } from "../run-limits.ts";
 import { detachOrDeleteContainedFiles } from "../files.ts";
+import { enqueueStorageDeletion } from "../storage-deletion.ts";
+import { runWorkspaceDeletionJobs } from "../run-workspace-storage.ts";
 import { normalizeScope } from "@appstrate/core/naming";
 import type { LlmUsageLedgerRow, ModelCost } from "@appstrate/core/module";
 import type { AppScope, OrgScope } from "../../lib/scope.ts";
@@ -1163,7 +1165,16 @@ export async function recordBootHeartbeat(runId: string): Promise<BootHeartbeatO
   return "guest-active";
 }
 
-export async function getRunningRunsForPackage(
+/**
+ * Count a package's active (pending/running) runs through `handle`.
+ *
+ * `handle` is what separates the two callers: {@link getRunningRunsForPackage}
+ * reads with the base client (its own snapshot, no locks), while
+ * {@link deletePackageRuns} passes its open transaction so the count is taken
+ * under the run-admission advisory lock and sees what that lock is holding back.
+ */
+async function countActiveRunsForPackage(
+  handle: Db | DbTx,
   scope: AppScope,
   packageId: string,
   actor?: Actor,
@@ -1172,19 +1183,26 @@ export async function getRunningRunsForPackage(
     eq(runs.packageId, packageId),
     eq(runs.orgId, scope.orgId),
     inArray(runs.status, [...activeRunStatusValues]),
+    eq(runs.applicationId, scope.applicationId),
   ];
-
-  conditions.push(eq(runs.applicationId, scope.applicationId));
 
   if (actor) {
     conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
   }
 
-  const [row] = await db
+  const [row] = await handle
     .select({ count: count() })
     .from(runs)
     .where(and(...conditions));
   return row?.count ?? 0;
+}
+
+export async function getRunningRunsForPackage(
+  scope: AppScope,
+  packageId: string,
+  actor?: Actor,
+): Promise<number> {
+  return countActiveRunsForPackage(db, scope, packageId, actor);
 }
 
 /**
@@ -1252,11 +1270,17 @@ export async function getRun(scope: AppScope, id: string) {
   return row ?? null;
 }
 
+/**
+ * Delete every run of `packageId` in `scope`, with their files and workspace
+ * objects. Throws `conflict("run_in_progress")` when the package still has an
+ * active run — checked INSIDE the transaction, under the per-org run-admission
+ * advisory lock, so a run admitted concurrently cannot be deleted mid-flight.
+ */
 export async function deletePackageRuns(scope: AppScope, packageId: string): Promise<number> {
   // Enumeration, files teardown and the runs delete are ONE transaction,
-  // opened by locking the org row — the same serialization point every file
-  // write takes (`createFileFromStream`) and the same org-first order the
-  // organization / application / end-user cascades use.
+  // opened by taking the run-admission lock and then the org row — the same
+  // serialization point every file write takes (`createFileFromStream`) and the
+  // same org-first order the organization / application / end-user cascades use.
   //
   // Splitting it (teardown, commit, delete) left a window in which a file
   // published by a still-live sidecar — or by an at-least-once retry of the
@@ -1268,12 +1292,34 @@ export async function deletePackageRuns(scope: AppScope, packageId: string): Pro
   // it commits after and its FK insert fails against the deleted run, dropping
   // its own object.
   return db.transaction(async (tx) => {
+    // FIRST statement: serialize against run admission, exactly as
+    // `deleteOrganization` does (`createRun` takes this same per-org lock
+    // before its count + INSERT). Without it the route's pre-check was the
+    // only guard, and it is not transactional: a launch spends ~1.75s of
+    // pipeline work before `createRun` inserts, so a delete arriving in that
+    // window counts 0 running, then the INSERT commits, then this transaction's
+    // SELECT sees the row and deletes it — the container keeps running with
+    // live credentials against a run id that no longer exists. Acquiring it
+    // before the org row keeps one lock order across both delete paths.
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext(${orgRunConcurrencyLockKey(scope.orgId)})::bigint)`,
+    );
+
     await tx
       .select({ id: organizations.id })
       .from(organizations)
       .where(eq(organizations.id, scope.orgId))
       .for("update")
       .limit(1);
+
+    // Now that admission is held, "no active runs" is a fact for the rest of
+    // this transaction rather than a stale reading. This is the ONLY check —
+    // the route no longer pre-checks, because a non-transactional count that
+    // the real guard has to repeat anyway is just a second place to drift.
+    const active = await countActiveRunsForPackage(tx, scope, packageId);
+    if (active > 0) {
+      throw conflict("run_in_progress", `${active} run(s) still running`);
+    }
 
     // Lock the parent package before enumerating its runs — same guard as the
     // application / end-user cascades, so a concurrent package delete cannot
@@ -1303,9 +1349,22 @@ export async function deletePackageRuns(scope: AppScope, packageId: string): Pro
     // amputating a rerun's inputs.
     await detachOrDeleteContainedFiles({ runIds, orgId: scope.orgId }, tx);
 
-    // Scoped to the SELECTed ids — not the package predicate — so a run created
-    // concurrently after the SELECT is left for the next delete call instead of
-    // being deleted without its files going through detach-or-delete.
+    // The workspace objects (bundle + manifest) are owned by the run row and
+    // by nothing else, so once these rows go they are referenced by no
+    // surviving row and no sweep can ever find them. Enqueue their deletion in
+    // the SAME transaction — the outbox contract every other run-deleting path
+    // already honours (`deleteApplication`, `deleteOrganization`); this one
+    // simply never did, and leaked a bundle + input files per deleted run.
+    await enqueueStorageDeletion(
+      tx,
+      runIds.flatMap((id) => runWorkspaceDeletionJobs(id, "package_runs_deleted")),
+    );
+
+    // Scoped to the SELECTed ids, not the package predicate: whatever the
+    // enumeration missed is not deleted here, so nothing can be removed without
+    // its files having gone through detach-or-delete. Admission is held above,
+    // so a run cannot appear between the SELECT and this DELETE — the scoping
+    // is what makes that independent of the lock rather than reliant on it.
     const deleted = await tx
       .delete(runs)
       .where(inArray(runs.id, runIds))

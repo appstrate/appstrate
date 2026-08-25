@@ -16,6 +16,12 @@
  *      row; if the token is now fresh enough, return it without burning the
  *      (possibly just-rotated) `refresh_token`.
  *
+ * Step 3's *freshness* half is conditional on {@link DedupedRefreshOptions.force}:
+ * a caller recovering from an upstream 401 KNOWS the stored token is bad, and
+ * "expires in 50 minutes" is not evidence to the contrary. The re-read itself
+ * still happens either way — it is what lets the exchange spend the freshest
+ * `refresh_token` rather than double-spending a rotated one.
+ *
  * This helper owns the singleflight Map + `withRedisLock` + the re-read
  * short-circuit + `finally` cleanup. Each caller supplies its own row-read +
  * freshness predicate (`reReadFreshness`) and the actual upstream exchange
@@ -35,10 +41,20 @@ interface DedupedRefreshOptions<T> {
   /** Label for the lock's timeout-warning log line. */
   lockLabel: string;
   /**
+   * The caller has POSITIVE evidence the stored token is unusable (it is
+   * recovering from an upstream 401), so the freshness short-circuit must not
+   * hand that token back. Forwarded to {@link reReadFreshness} rather than
+   * skipping the callback: the re-read has a second job (picking up a peer's
+   * just-rotated `refresh_token`) that a forced refresh needs even more.
+   */
+  force?: boolean;
+  /**
    * Re-read the stored row under the lock and return a fresh-enough value to
    * short-circuit the refresh, or `null` when a real refresh is still needed.
+   * MUST return `null` when `force` is set — the expiry-based short-circuit is
+   * exactly what the caller is overriding — while still performing the read.
    */
-  reReadFreshness: () => Promise<T | null>;
+  reReadFreshness: (opts: { force: boolean }) => Promise<T | null>;
   /** Perform the actual upstream token exchange + write-back. */
   doRefresh: () => Promise<T>;
 }
@@ -52,6 +68,12 @@ const inflightRefreshes = new Map<string, Promise<unknown>>();
  *
  * The singleflight map is keyed by `key`; concurrent callers with the same
  * key share the same in-flight promise. The entry is deleted in `finally`.
+ *
+ * `force` is deliberately NOT part of the key: a forced caller that joins an
+ * in-flight proactive refresh still gets a token strictly newer than the one
+ * that 401'd it — either the exchange that flight performed, or the peer-written
+ * token its re-read found. Splitting the key would only add a redundant second
+ * exchange behind the same lock.
  */
 export function dedupedRefresh<T>(key: string, opts: DedupedRefreshOptions<T>): Promise<T> {
   const cached = inflightRefreshes.get(key) as Promise<T> | undefined;
@@ -67,8 +89,10 @@ export function dedupedRefresh<T>(key: string, opts: DedupedRefreshOptions<T>): 
     async () => {
       // A peer instance may have refreshed while we waited for the lock. If
       // the stored token is now comfortably unexpired, return it without
-      // burning the (possibly just-rotated) refresh_token.
-      const fresh = await opts.reReadFreshness();
+      // burning the (possibly just-rotated) refresh_token — unless the caller
+      // forced this refresh, in which case remaining lifetime says nothing
+      // about whether the token still works.
+      const fresh = await opts.reReadFreshness({ force: opts.force === true });
       if (fresh !== null) return fresh;
       return opts.doRefresh();
     },

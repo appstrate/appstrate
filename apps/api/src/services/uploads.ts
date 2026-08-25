@@ -26,7 +26,7 @@
  *    for re-consume + GC worker removes both kinds of leftovers
  */
 
-import { and, eq, lt, gt, isNull, isNotNull, inArray, or, sql, type SQL } from "drizzle-orm";
+import { and, eq, gt, isNull, isNotNull, inArray, not, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { uploads, organizations } from "@appstrate/db/schema";
 import {
@@ -103,6 +103,32 @@ function isWithinReuseWindow(consumedAt: Date): boolean {
  * guaranteed to have finished before the sweep can remove its object.
  */
 const CONSUME_GRACE_MS = 60 * 60 * 1000;
+
+/**
+ * Rows whose storage object is still on disk: the exact complement of what
+ * {@link cleanupExpiredUploads} deletes, expressed once so the admission gates
+ * and the sweep cannot disagree about it.
+ *
+ *   - never consumed and not past its PUT expiry — staged, awaiting bytes;
+ *   - consumed, but inside the reuse window (+ the consume grace) the sweep
+ *     honours before it may drop the object.
+ *
+ * The second branch is why this exists. Both create-time gates used to count
+ * `consumed_at IS NULL` alone, so the instant an upload was attached its bytes
+ * left every ceiling while sitting on disk for another ~25h — stage 2 GiB,
+ * consume it, delete the materialised files, and the org is back to a clean
+ * slate against every quota with 2 GiB unaccounted, repeatable every few
+ * minutes. `ORG_STORAGE_QUOTA_BYTES` never covered this bucket either: it is
+ * checked against `organizations.files_bytes_used`, which the `files` table
+ * alone maintains.
+ */
+function retainedUploadCondition(now: Date): SQL {
+  const consumedCutoff = new Date(now.getTime() - consumedRetentionMs() - CONSUME_GRACE_MS);
+  return or(
+    and(isNull(uploads.consumedAt), gt(uploads.expiresAt, now)),
+    and(isNotNull(uploads.consumedAt), gt(uploads.consumedAt, consumedCutoff)),
+  )!;
+}
 
 /** Returned to the client from POST /api/uploads. */
 interface CreateUploadResponse {
@@ -247,8 +273,10 @@ export async function createUpload(params: CreateUploadParams): Promise<CreateUp
   // Staging budget, computed from the live upload rows (no separate counter) and
   // enforced under the org row's FOR UPDATE lock so two concurrent creates for
   // the same org cannot both pass a stale sum. The lock scope is kept tight —
-  // the aggregates + insert only. Consumed / expired uploads are excluded, so
-  // they free budget the instant they leave the active set.
+  // the aggregates + insert only. Budget is freed at the moment the bytes
+  // actually leave the bucket — see `retainedUploadCondition`, not
+  // `consumed_at IS NULL`: a consumed upload keeps its object for the reuse
+  // window and must keep costing its owner until the sweep can reclaim it.
   await db.transaction(async (tx) => {
     // Lock the org row (same lock the durable files quota takes) to
     // serialise this org's concurrent creates.
@@ -262,7 +290,7 @@ export async function createUpload(params: CreateUploadParams): Promise<CreateUp
     const env = getEnv();
     const now = new Date();
 
-    // Per-actor active-upload count. Skipped when no principal is attributed
+    // Per-actor retained-upload count. Skipped when no principal is attributed
     // (no actor to bound). `createdBy` / `endUserId` are mutually exclusive.
     if (createdBy !== null || endUserId !== null) {
       const actorFilter =
@@ -270,7 +298,7 @@ export async function createUpload(params: CreateUploadParams): Promise<CreateUp
       const [activeForActor] = await tx
         .select({ count: sql<number>`count(*)::int` })
         .from(uploads)
-        .where(and(actorFilter, isNull(uploads.consumedAt), gt(uploads.expiresAt, now)));
+        .where(and(actorFilter, retainedUploadCondition(now)));
       if ((activeForActor?.count ?? 0) >= env.UPLOAD_MAX_ACTIVE_PER_ACTOR) {
         throw uploadStagingLimitExceeded(
           `Too many active staged uploads (max ${env.UPLOAD_MAX_ACTIVE_PER_ACTOR}); ` +
@@ -279,17 +307,11 @@ export async function createUpload(params: CreateUploadParams): Promise<CreateUp
       }
     }
 
-    // Per-org active declared-bytes sum + this upload's declared size.
+    // Per-org retained declared-bytes sum + this upload's declared size.
     const [activeForOrg] = await tx
       .select({ total: sql<string>`coalesce(sum(${uploads.size}), 0)` })
       .from(uploads)
-      .where(
-        and(
-          eq(uploads.orgId, params.orgId),
-          isNull(uploads.consumedAt),
-          gt(uploads.expiresAt, now),
-        ),
-      );
+      .where(and(eq(uploads.orgId, params.orgId), retainedUploadCondition(now)));
     const stagedTotal = Number(activeForOrg?.total ?? 0);
     if (stagedTotal + params.size > env.UPLOAD_STAGING_MAX_BYTES_PER_ORG) {
       throw storageLimitExceeded(
@@ -776,16 +798,13 @@ export async function cleanupExpiredUploads(): Promise<number> {
   while (true) {
     const removed = await db.transaction(async (tx) => {
       const now = new Date();
-      const consumedCutoff = new Date(now.getTime() - consumedRetentionMs() - CONSUME_GRACE_MS);
+      // Everything NOT retained — the negation of the predicate the admission
+      // gates count, so "the bytes still cost the org" and "the sweep may not
+      // touch them yet" are one statement rather than two that can drift.
       const expired = await tx
         .select({ id: uploads.id, storageKey: uploads.storageKey })
         .from(uploads)
-        .where(
-          or(
-            and(lt(uploads.expiresAt, now), isNull(uploads.consumedAt)),
-            and(isNotNull(uploads.consumedAt), lt(uploads.consumedAt, consumedCutoff)),
-          ),
-        )
+        .where(not(retainedUploadCondition(now)))
         .limit(500)
         .for("update", { skipLocked: true });
       if (expired.length === 0) return 0;
