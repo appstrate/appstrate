@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   assertExtractorStillWorks,
@@ -288,5 +288,131 @@ describe("assertExtractorStillWorks — vacuity floor", () => {
       { line: 4, varName: "WORKSPACE_TMPFS_SIZE_MB", yamlDefault: "512" },
     ]);
     expect(findTableGaps(compose, broken.defaulted)).toEqual([]);
+  });
+});
+
+/**
+ * Total collapse was the only mutation the floor could see, and it was also the
+ * only one anybody had measured. PARTIAL collapse is the likelier shape — the
+ * "object split into spread groups" refactor the gate's own failure text names
+ * moves SOME keys out, not all of them — and a floor on the raw key count let
+ * it through by a mile.
+ *
+ * Measured 2026-08-25 against the real schema: giving the first 44 key blocks
+ * one extra level of indent gives 55 keys / 34 defaults instead of 99 / 67.
+ * 33 defaults gone, `keys.size` still comfortably over the old floor of 50, the
+ * self-check silent, a real table-gap finding gone with them, and the green tick
+ * printed. The companion `undetected` check cannot cover for it either: it
+ * filters on `keys.has(name)`, so every key the extractor loses leaves that
+ * check quieter rather than louder.
+ *
+ * So the floor sits on `CODE_DEFAULTS ∩ keys` — a set that degrades one
+ * variable at a time — and this is the case that proves the difference.
+ */
+describe("assertExtractorStillWorks — partial degradation", () => {
+  const SCHEMA = readFileSync(join(import.meta.dir, "..", "..", SCHEMA_SOURCE), "utf-8");
+
+  /** One extra indent level on the first `count` key blocks, leaving the rest. */
+  function degradeFirstKeys(source: string, count: number): string {
+    const lines = source.split("\n");
+    const keyLines: number[] = [];
+    lines.forEach((line, i) => {
+      if (/^ {4}[A-Z][A-Z0-9_]*:/.test(line)) keyLines.push(i);
+    });
+    if (keyLines.length <= count) {
+      throw new Error(`schema has ${keyLines.length} keys — too few to degrade only ${count}.`);
+    }
+    const boundary = keyLines[count] ?? lines.length;
+    return lines.map((l, i) => (i < boundary && /^ {4}/.test(l) ? `  ${l}` : l)).join("\n");
+  }
+
+  it("throws when half the keys stop matching the anchor", () => {
+    const { keys, defaulted } = extractSchemaDefaults(degradeFirstKeys(SCHEMA, 44));
+
+    // The mutation landed AND stayed well clear of a raw-count floor: this is
+    // the exact state the previous `keys.size < 50` check waved through.
+    expect(keys.size).toBe(55);
+    expect(defaulted.size).toBe(34);
+    expect(keys.size).toBeGreaterThan(50);
+
+    expect(() => assertExtractorStillWorks(keys, defaulted)).toThrow(/below the floor/);
+  });
+
+  it("loses real table-gap findings in exactly that state", () => {
+    // The half that proves the floor is worth having. `CONNECT_SESSION_TTL_MS`
+    // is one of the 14 schema-defaulted variables `CODE_DEFAULTS` does not
+    // name, which is precisely what makes a compose line pinning it a Class-3
+    // finding — and it sits in the degraded region.
+    const compose = `services:
+  api:
+    environment:
+      - CONNECT_SESSION_TTL_MS=\${CONNECT_SESSION_TTL_MS:-3600000}
+`;
+    const real = extractSchemaDefaults(SCHEMA);
+    const degraded = extractSchemaDefaults(degradeFirstKeys(SCHEMA, 44));
+    expect(findTableGaps(compose, real.defaulted)).toEqual([
+      { line: 4, varName: "CONNECT_SESSION_TTL_MS", yamlDefault: "3600000" },
+    ]);
+    expect(findTableGaps(compose, degraded.defaulted)).toEqual([]);
+  });
+
+  it("still accepts the real schema, so the floor has headroom", () => {
+    const { keys, defaulted } = extractSchemaDefaults(SCHEMA);
+    const covered = Object.keys(CODE_DEFAULTS).filter((name) => keys.has(name));
+    // 53 of 58 at the time of writing; the 5 outside are read from process.env
+    // by the sidecar and module-observability and are not schema keys at all.
+    expect(covered.length).toBeGreaterThanOrEqual(45);
+    expect(() => assertExtractorStillWorks(keys, defaulted)).not.toThrow();
+  });
+});
+
+/**
+ * The gate as a PROCESS, against the failure the shared `git ls-files` helper
+ * introduced: a tracked compose file missing from the working tree.
+ *
+ * Measured before the fix — `rm docker-compose.yml`, the root file this gate
+ * exists for, then `bun scripts/verify-compose-defaults.ts`:
+ *
+ *     ✓ verify-compose-defaults: no duplicated env defaults across 8 compose files …
+ *     EXIT=0
+ *
+ * The gate passed without reading it. The only trace anywhere was `9` becoming
+ * `8` in a success line, which nobody diffs. The file is moved aside and
+ * restored in a `finally`; it is a tracked file, so do not run this suite in
+ * parallel with anything that reads the root compose file.
+ */
+describe("verify-compose-defaults as a process", () => {
+  const REPO_ROOT = join(import.meta.dir, "..", "..");
+  const COMPOSE = join(REPO_ROOT, "docker-compose.yml");
+
+  function runGate(): { code: number; output: string } {
+    const run = Bun.spawnSync({
+      cmd: ["bun", "scripts/verify-compose-defaults.ts"],
+      cwd: REPO_ROOT,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    return { code: run.exitCode ?? 1, output: run.stdout.toString() + run.stderr.toString() };
+  }
+
+  it("passes over the real repo", () => {
+    const { code, output } = runGate();
+    expect(code).toBe(0);
+    expect(output).toContain("no duplicated env defaults");
+  });
+
+  it("fails when a tracked compose file is missing from the worktree", () => {
+    const original = readFileSync(COMPOSE, "utf-8");
+    try {
+      rmSync(COMPOSE);
+      const { code, output } = runGate();
+      expect(code).not.toBe(0);
+      expect(output).toContain("docker-compose.yml");
+      expect(output).toMatch(/working tree does not have/);
+      // And specifically NOT the cheerful past tense over a smaller set.
+      expect(output).not.toContain("no duplicated env defaults");
+    } finally {
+      writeFileSync(COMPOSE, original);
+    }
   });
 });

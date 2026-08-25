@@ -95,6 +95,27 @@
     // stale `dist/` is what ships. Same rule as `typecheck` below: the inputs
     // must be what the command READS, not what the package is "about". Globs
     // that match nothing in a given workspace cost nothing.
+    //
+    // What these inputs deliberately do NOT list is the workspace dependencies
+    // `apps/web` and `apps/cli` bundle (`@appstrate/ui`, `@appstrate/core`,
+    // `@appstrate/module-chat`, `@appstrate/shared-types`, …), because
+    // `dependsOn: ["^build"]` already carries them — including for the packages
+    // that define NO `build` script. Turbo 2.10.8 still creates the task
+    // (`--dry=json` shows it with `"command": "<NONEXISTENT>"`), still hashes it
+    // over these same inputs resolved in that workspace, and still folds that
+    // hash into every dependent. Measured 2026-08-25, appending a comment line
+    // to the tracked `packages/ui/src/cn.ts`:
+    //
+    //     @appstrate/ui#build   21a3bd95da74576f → 8010b51e44ec9a69
+    //     @appstrate/module-chat#build  218c98d62632f25a → 24043277209b5ba9
+    //     @appstrate/web#build  6b772a1f1ff38d2c → 157c3743d72bfe52
+    //
+    // and every package's exported entrypoint lives under `src/` (checked
+    // against each `exports` map), so `src/**` here covers what the bundler
+    // reads. Do NOT add a `"$TURBO_ROOT$/packages/*/src/**"` glob on top: it
+    // would make EVERY build task depend on EVERY package's sources, so one
+    // package edit busts all of them, buying nothing. Re-run the probe above
+    // before believing otherwise — `touch` moves no hash, turbo hashes content.
     "build": {
       "dependsOn": ["^build"],
       "inputs": [
@@ -152,6 +173,19 @@
     // apps/api/test/unit/rate-limit.test.ts (append a line — turbo hashes
     // content, so `touch` moves nothing and reads as a false negative), run
     // again — the hash must move.
+    //
+    // `!**/node_modules/**` for the same measured reason `//#lint` carries it,
+    // and until now this task and that one stated contradictory beliefs about
+    // the same hasher in the same file. Turbo does NOT skip gitignored files:
+    // measured 2026-08-25, creating `apps/api/node_modules/.zzprobe/a.ts` moved
+    // `@appstrate/api#typecheck` from `c22a75e9c2187f82` to `9b24b8cff0c07ef5`
+    // — so `**/*.ts` reached into `node_modules` and every `bun install` busted
+    // all 21 typecheck caches. That is cost rather than a false green (a busted
+    // cache re-runs tsc), which is why it survived this long; it is still 21
+    // needless tsc runs per install. `!**/dist/**` is deliberately NOT added:
+    // `apps/cli` emits `dist/` and nothing typechecks it, but a package that
+    // ships hand-written `.d.ts` under `dist/` would be silently dropped from
+    // its own program's hash, and no such measurement has been made.
     "typecheck": {
       "dependsOn": ["^typecheck"],
       "inputs": [
@@ -160,6 +194,7 @@
         "scripts/**",
         "**/*.ts",
         "**/*.tsx",
+        "!**/node_modules/**",
         "tsconfig.json",
         "tsconfig.*.json",
         "package.json"
@@ -217,13 +252,26 @@
     // file in its own `inputs` for the same reason. `tsconfig.base.json`, which
     // that tsconfig extends, and `bun.lock`, which decides which eslint plugin
     // code runs, are both in `globalDependencies`.
+    // `apps/web/src/**/*.json` is the other half of the same
+    // `apps/web/tsconfig.json` story. That tsconfig sets `resolveJsonModule`,
+    // and 8 files under `apps/web/src` import `../../locales/<lng>/<ns>.json`,
+    // so those JSON files are MEMBERS of the type-aware program the
+    // `no-unnecessary-type-assertion` block runs over — while no glob above
+    // reaches a `.json`. Measured 2026-08-25: adding a key to
+    // `apps/web/src/locales/fr/agents.json` left this task's hash at
+    // `02fd25ac952d7956`, unmoved, so the one type-aware rule in the config
+    // replayed its cached verdict over a program whose contents had changed.
+    // Scoped to `apps/web/src` rather than `**/*.json` on purpose: a repo-wide
+    // JSON glob would put every `package.json`, every fixture and every
+    // generated artefact in the lint cache key.
     "//#lint": {
       "inputs": [
         "**/*.{ts,tsx,js,jsx,mjs,cjs}",
         "!**/node_modules/**",
         "!**/dist/**",
         "package.json",
-        "apps/web/tsconfig.json"
+        "apps/web/tsconfig.json",
+        "apps/web/src/**/*.json"
       ]
     },
     // No `inputs` on purpose. The root `format:check` script is now a bare

@@ -305,7 +305,18 @@ export default tseslint.config(
     extends: [js.configs.recommended],
     files: ALL_JS,
     languageOptions: {
-      ecmaVersion: 2020,
+      // `"latest"`, not a pinned year. The value here was copied from the TS
+      // block above, where it is inert — `@typescript-eslint/parser` ignores
+      // `ecmaVersion` and parses whatever TypeScript accepts. Espree does not:
+      // it uses this to decide the DIALECT, so a pinned `2020` reported valid
+      // modern JavaScript as broken syntax. Measured 2026-08-25 by appending
+      // `let zzA; zzA ??= 2;` to this very file:
+      // `665:7  error  Parsing error: Unexpected token =`. Logical assignment
+      // (ES2021), class fields (ES2022) and top-level await would each fail the
+      // gate here with a syntax error rather than a rule finding. `"latest"`
+      // tracks the espree the repo has installed, which is the same thing bun
+      // and every runtime in this repo already accept.
+      ecmaVersion: "latest",
       globals: globals.node,
       parserOptions: { ecmaFeatures: { jsx: true } },
     },

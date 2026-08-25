@@ -436,12 +436,16 @@ function scan(): { hits: Hit[]; suppressed: Set<string>; scanned: number } {
   let scanned = 0;
   const keyPatterns = BANNED_KEYS.map((k) => ({ key: k, re: buildWriterShapeRegex(k) }));
 
-  // `trackedFiles` already dropped the index entries whose file is gone from
-  // the working tree (a `git rm` not yet committed, a refactor in flight), so
-  // this read is plain: any failure here IS a broken checkout and must not be
-  // swallowed — that is the class of silent skip this gate was rewritten to
-  // remove.
-  for (const rel of trackedFiles(SOURCE_GLOBS, "source file")) {
+  // `"skip"` asks `trackedFiles` to drop the index entries whose file is gone
+  // from the working tree (a `git rm` not yet committed, a refactor in flight),
+  // which is this gate's own former `ENOENT` catch stated once instead of
+  // inline. It is a choice, not a default — the compose gate next door asks for
+  // `"fail"` because its list is its coverage, whereas a source file in flight
+  // is simply not a casing finding. What the skip does NOT do is let the gate
+  // go quiet: an empty result still throws, so `OK — 0 files scanned` is not
+  // reachable. Past the call the read is plain: any failure here IS a broken
+  // checkout and must not be swallowed.
+  for (const rel of trackedFiles(SOURCE_GLOBS, "source file", "skip")) {
     if (isTestFile(rel)) continue;
     const content = readFileSync(join(REPO_ROOT, rel), "utf8");
     scanned++;

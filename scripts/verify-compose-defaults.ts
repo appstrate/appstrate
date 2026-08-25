@@ -187,8 +187,8 @@ export function extractSchemaDefaults(source: string): {
 }
 
 /**
- * The vacuity floor: fewer schema keys than this and the extractor is not
- * under-reporting, it has stopped working.
+ * The vacuity floor — under the extractor's OVERLAP WITH `CODE_DEFAULTS`, not
+ * under its raw key count.
  *
  * Every other failure mode of this file is fail-CLOSED — renaming `envSchema`
  * throws, moving a helper below the schema throws — but the ONE that mattered
@@ -202,11 +202,38 @@ export function extractSchemaDefaults(source: string): {
  * threw? false`, and a compose line pinning `WORKSPACE_TMPFS_SIZE_MB=512` —
  * a real finding on the real schema — came back as `[]`.
  *
- * 50 against a measured 99 keys / 67 defaults: low enough that ordinary churn
- * (a batch of variables retired) never trips it, high enough that no plausible
- * partial match of a broken anchor survives it.
+ * ─── Why the raw count could not do this job ─────────────────────────
+ *
+ * A floor of 50 on `keys.size` against 99 keys only ever caught total
+ * collapse — the 0-key case above, which is the one mutation anybody had
+ * measured. PARTIAL collapse is the likelier shape and it slid straight
+ * through: giving the first 44 key blocks one extra level of indent (the
+ * "object was split into spread groups" refactor this file's own failure text
+ * names) yielded keys/defaulted of 55/34 instead of 99/67. 33 defaults gone,
+ * still above 50, `assertExtractorStillWorks` silent, a REAL table-gap finding
+ * on a real compose file gone with them, and the green tick printed.
+ *
+ * The companion check below cannot cover for it, by construction: it filters on
+ * `keys.has(n)`, so a key the extractor LOST is excluded before it can be
+ * counted as undetected. Losing keys makes that check quieter, not louder.
+ *
+ * So the floor moves onto `CODE_DEFAULTS ∩ keys`. `CODE_DEFAULTS` is this
+ * repo's independent, hand-maintained statement of which variables the schema
+ * defaults, so the intersection degrades one variable at a time as the
+ * extractor loses ground, instead of holding steady until half the schema is
+ * gone. Measured 2026-08-25: 58 table entries, 53 of them schema keys. The
+ * other 5 — `OTEL_ENABLED`, `OTEL_SERVICE_NAME`, `OTEL_TRUST_INCOMING_TRACE`,
+ * `SIDECAR_MAX_REQUEST_BODY_BYTES`, `SIDECAR_MAX_MCP_ENVELOPE_BYTES` — are read
+ * straight from `process.env` outside the schema and legitimately never appear
+ * in `keys`.
+ *
+ * 45 against a measured 53 is a FLOOR, not a pin: retiring a handful of table
+ * entries never trips it, while the 44-block mutation above (which leaves 30 of
+ * the 53) does. Re-measure with
+ * `Object.keys(CODE_DEFAULTS).filter((n) => keys.has(n)).length`; raise it only
+ * after re-measuring, and never lower it to make a red gate green.
  */
-const MIN_SCHEMA_KEYS = 50;
+const MIN_TABLE_KEYS_FOUND = 45;
 
 /**
  * Self-check on the extractor above, run before its output is trusted.
@@ -251,14 +278,19 @@ const MIN_SCHEMA_KEYS = 50;
  * forward-looking.
  */
 export function assertExtractorStillWorks(keys: Set<string>, defaulted: Set<string>): void {
-  if (keys.size < MIN_SCHEMA_KEYS) {
+  const tableKeysFound = Object.keys(CODE_DEFAULTS).filter((name) => keys.has(name));
+  if (tableKeysFound.length < MIN_TABLE_KEYS_FOUND) {
     throw new Error(
-      `verify-compose-defaults: the ${SCHEMA_SOURCE} key extractor found only ${keys.size} ` +
-        `variable(s), below the floor of ${MIN_SCHEMA_KEYS} (99 at the time of writing). ` +
+      `verify-compose-defaults: the ${SCHEMA_SOURCE} key extractor found only ` +
+        `${tableKeysFound.length} of the ${Object.keys(CODE_DEFAULTS).length} variables ` +
+        `CODE_DEFAULTS names (${keys.size} schema key(s) in total), below the floor of ` +
+        `${MIN_TABLE_KEYS_FOUND} — 53 of 58 at the time of writing. ` +
         `The most likely cause is that the key anchor — a name at EXACTLY four spaces of indent, ` +
-        `inside \`const envSchema\`'s \`z.object({ … })\` — no longer matches: the object was split ` +
-        `into spread groups, or \`z\\n  .object({\` was collapsed to \`z.object({\`, moving every ` +
-        `key one level out. Fix the anchor in extractSchemaDefaults; do NOT lower this floor.`,
+        `inside \`const envSchema\`'s \`z.object({ … })\` — no longer matches for some or all ` +
+        `keys: the object was split into spread groups, or \`z\\n  .object({\` was collapsed to ` +
+        `\`z.object({\`, moving keys one level out. Every key lost here is a compose line nothing ` +
+        `compares, reported as a green tick. Fix the anchor in extractSchemaDefaults; do NOT ` +
+        `lower this floor.`,
     );
   }
 
@@ -289,8 +321,17 @@ export function assertExtractorStillWorks(keys: Set<string>, defaulted: Set<stri
  * filesystem — the untracked, local-only `docker-compose.override.yml` is a
  * developer's own machine and not this gate's business) lives in
  * `scripts/lib/tracked-files.ts`, shared with the two sibling gates.
+ *
+ * `"fail"`, not `"skip"`, and that is the whole point of the argument being
+ * required. This gate's file list IS its coverage: every file it does not read
+ * is a compose file whose defaults nothing compared. Measured with the silent
+ * skip in place, `rm docker-compose.yml` — the root file this gate exists for —
+ * gave `✓ … across 8 compose files` and exit 0, the drop from 9 to 8 being the
+ * only evidence anywhere that the gate had stopped looking. Under `"fail"` the
+ * same deletion names the file and exits non-zero. `lint.ts` and
+ * `lint-manifest-casing.ts` take the other answer, for their own stated reason.
  */
-const COMPOSE_FILES = trackedFiles(COMPOSE_GLOBS, "compose file");
+const COMPOSE_FILES = trackedFiles(COMPOSE_GLOBS, "compose file", "fail");
 
 /**
  * The repair differs by shape, and printing one instruction for both would
