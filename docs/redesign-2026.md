@@ -2500,6 +2500,13 @@ API Keys now treats Documentation API as a page deed rather than detached body
 content. It lives in Actions beside key creation, carries the external-link
 icon, and keeps the existing new-tab contract.
 
+`bun run lab:corrections` is the focused review guard for this pass. It pins the
+four localized creation headings, the personal-preference fixtures and field
+surface, Library horizontal access, MCP tablet containment, both End-User edit
+return paths, the settings toolbar search colour and the API documentation
+action. It is intentionally smaller than the full screenshot and repository
+gates so visual review can happen before final integration checks.
+
 **12. Accessibility, which nothing here has ever checked.** The branch
 re-declares ARIA roles on the table because this file demands it, and that is
 the whole of it: not one contrast ratio, keyboard path or touch target has ever
