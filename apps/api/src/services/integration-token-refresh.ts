@@ -76,7 +76,7 @@ interface IntegrationRefreshResult {
  * anything, so an operator reading "revoked" would go hunting upstream for a
  * revocation that never happened. `reason` is surfaced verbatim in the 410.
  */
-export class UnrefreshableConnectionError extends Error {
+class UnrefreshableConnectionError extends Error {
   constructor(readonly reason: string) {
     super(reason);
     this.name = "UnrefreshableConnectionError";
