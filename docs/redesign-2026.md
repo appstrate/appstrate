@@ -2507,6 +2507,33 @@ return paths, the settings toolbar search colour and the API documentation
 action. It is intentionally smaller than the full screenshot and repository
 gates so visual review can happen before final integration checks.
 
+**Agent detail establishes the installed-Agent boundary, 25 August.** The
+Agent now opens on Overview and exposes exactly Overview, Runs, Configuration,
+Memory and AFPS Bundle. Connections and linked Schedules moved into
+Configuration; files, dependencies, schemas and versions live under AFPS
+Bundle. The former API, About, standalone Connections, standalone Schedules,
+Versions and Diff destinations are no longer part of the Agent's primary
+navigation.
+
+Overview is dominated by one installation map with three labelled boundaries:
+Appstrate Configuration, portable AFPS Bundle and Appstrate Memory. The
+desktop composition keeps configuration on the left, the input-to-Agent-to-
+output flow in the centre, declared capabilities on the right and persistent
+memory below. At 375px the graph becomes a structured list that names the
+relations instead of shrinking a canvas. Full screen remains an explicit map
+action. The map uses only existing Agent, model, proxy, schedule, connection
+and persistence reads. It does not port the older `agent-map` endpoint or add a
+database object: a missing production fact renders as Unknown, while typed Lab
+fixtures provide the varied complete installation needed for visual review.
+
+The Lab Agent now carries a real input and output schema, prompt, recorded input
+values, model and proxy resolution, linked schedule, connection candidates,
+Pins, Notes and bundle files. The generated AgentDetail schema still types JSON
+Schema and configuration maps as `Record<string, never>`; the fixture keeps its
+endpoint-level `Json200` contract and confines the generated mismatch to the
+two schema values and recorded-value map rather than weakening the whole
+fixture.
+
 **12. Accessibility, which nothing here has ever checked.** The branch
 re-declares ARIA roles on the table because this file demands it, and that is
 the whole of it: not one contrast ratio, keyboard path or touch target has ever

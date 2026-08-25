@@ -16,7 +16,6 @@ import {
 } from "../hooks/use-packages";
 import type { AgentDetail, OrgPackageItemDetail, PackageType } from "@appstrate/shared-types";
 import type { JSONSchemaObject } from "@appstrate/core/form";
-import { usePermissions } from "../hooks/use-permissions";
 import { usePackageInstallState, useTogglePackageInstall } from "../hooks/use-library";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import { EmptyState, LoadingState } from "../components/page-states";
@@ -41,29 +40,22 @@ import { CreateVersionModal } from "../components/create-version-modal";
 import { ForkPackageModal } from "../components/fork-package-modal";
 // Agent-specific components
 import { AgentActions } from "../components/package-detail/agent-actions";
-import {
-  AgentRunsTab,
-  AgentSchedulesTab,
-  AgentMemoryTab,
-  AgentApiTab,
-} from "../components/package-detail/agent-tabs";
-import { AgentConnectionsSection } from "../components/package-detail/agent-connections-section";
-import { AgentConfigurationTab } from "../components/package-detail/agent-configuration-tab";
+import { AgentRunsTab, AgentMemoryTab } from "../components/package-detail/agent-tabs";
+import { AgentOverviewTab } from "../components/agent-detail/agent-overview-tab";
+import { AgentConfigurationView } from "../components/agent-detail/agent-configuration-view";
+import { AgentBundleTab } from "../components/agent-detail/agent-bundle-tab";
 import { RunAgentButton } from "../components/run-agent-button";
 import { PackageCard } from "../components/package-card";
 import { useAgentReadiness } from "../hooks/use-agent-readiness";
 import { useAgentIntegrationsReadiness } from "../hooks/use-agent-integrations-readiness";
 import { useModels, useAgentModel } from "../hooks/use-models";
-import { useProxies } from "../hooks/use-proxies";
 
 type DetailTab =
   | "overview"
-  | "connections"
   | "runs"
   | "configuration"
-  | "schedules"
   | "memory"
-  | "api"
+  | "bundle"
   | "versions"
   | "diff"
   | "content"
@@ -148,15 +140,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     version: versionParam,
   } = useParams<{ scope: string; name: string; version?: string }>();
   const packageId = `${scope}/${name}`;
-  const { isAdmin } = usePermissions();
   const isVersionView = !!versionParam;
 
   // ── Data loading (unified) ──
   const { data: detail, isLoading, error } = usePackageDetail(type, packageId);
-
-  // Configuration tab data (must be before early returns — hooks rule)
-  const { data: orgProxies } = useProxies();
-  const { data: orgModels } = useModels();
 
   // Agents list for "Used by" tab enrichment
   const { data: allAgents } = useAgents();
@@ -212,12 +199,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // ── State ──
   const allValidTabs: DetailTab[] = [
     "overview",
-    "connections",
     "runs",
     "configuration",
-    "schedules",
     "memory",
-    "api",
+    "bundle",
     "versions",
     "diff",
     "content",
@@ -228,8 +213,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const hasDraftConfigSchema = !!(
     draftConfigSchema?.properties && Object.keys(draftConfigSchema.properties).length > 0
   );
-  const hasModelsAvailable = !!orgModels && orgModels.length > 0;
-  const hasProxiesAvailable = !!orgProxies && orgProxies.length > 0;
   const hasMissingRequiredConfig =
     type === "agent" &&
     hasDraftConfigSchema &&
@@ -237,7 +220,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       const val = agentDetail?.config?.current?.[key];
       return val === undefined || val === null || val === "";
     });
-  // Agents open on their runs. Every other type opens where its SUBSTANCE
+  // Agents open on their installation overview. Every other type opens where its SUBSTANCE
   // lives, which `lib/package-files.ts` already encodes and which does not
   // depend on how much metadata the author happened to fill in: a skill IS its
   // SKILL.md (`source: "content"`) → open the files; an mcp-server IS its
@@ -247,7 +230,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // still wins in `useTabWithHash`.
   const defaultTab: DetailTab =
     type === "agent"
-      ? "runs"
+      ? "overview"
       : primaryDisplayFile(type).source === "content"
         ? "content"
         : "overview";
@@ -293,15 +276,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const effectiveConfigSchema = isHistoricalVersion
     ? (versionConfigSchema ?? EMPTY_CONFIG_SCHEMA)
     : agentDetail?.config?.schema;
-  const hasEffectiveConfigSchema = !!(
-    effectiveConfigSchema?.properties && Object.keys(effectiveConfigSchema.properties).length > 0
-  );
-  // Override showConfigTab for historical versions with their own config schema
-  const effectiveShowConfigTab =
-    isAdmin &&
-    type === "agent" &&
-    (hasEffectiveConfigSchema || hasModelsAvailable || hasProxiesAvailable);
-
   const downloadVersion = (isHistoricalVersion ? versionDetail?.version : version) ?? undefined;
 
   // ── Unified detail for SharedHeader ──
@@ -334,16 +308,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   };
 
   const agentTabs: Array<{ id: DetailTab; label: string }> = [
+    { id: "overview", label: t("detail.tabOverview") },
     { id: "runs", label: t("detail.tabRuns") },
-    { id: "connections", label: t("detail.tabConnections") },
-    ...(effectiveShowConfigTab
-      ? [{ id: "configuration" as DetailTab, label: t("detail.tabConfiguration") }]
-      : []),
-    { id: "schedules", label: t("detail.tabSchedules") },
+    { id: "configuration", label: t("detail.tabConfiguration") },
     { id: "memory", label: t("detail.tabMemory") },
-    { id: "api", label: t("detail.tabApi") },
-    overviewTab,
-    filesTab,
+    { id: "bundle", label: t("detail.tabBundle") },
   ];
 
   const pkgTabs: Array<{ id: DetailTab; label: string }> = [
@@ -353,12 +322,15 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   ];
 
   // Shared tabs appended to all package types
-  const sharedTabs: Array<{ id: DetailTab; label: string }> = [
-    ...(!isBuiltIn ? [{ id: "versions" as DetailTab, label: t("version.archives") }] : []),
-    ...(hasArchivableChanges && !isVersionView
-      ? [{ id: "diff" as DetailTab, label: t("version.diff") }]
-      : []),
-  ];
+  const sharedTabs: Array<{ id: DetailTab; label: string }> =
+    type === "agent"
+      ? []
+      : [
+          ...(!isBuiltIn ? [{ id: "versions" as DetailTab, label: t("version.archives") }] : []),
+          ...(hasArchivableChanges && !isVersionView
+            ? [{ id: "diff" as DetailTab, label: t("version.diff") }]
+            : []),
+        ];
 
   const tabDefs = [...(type === "agent" ? agentTabs : pkgTabs), ...sharedTabs];
 
@@ -500,15 +472,16 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       </Tabs>
 
       {/* Tab content */}
-      {type === "agent" && tab === "configuration" && (
-        <AgentConfigurationTab
+      {type === "agent" && tab === "overview" && agentDetail && (
+        <AgentOverviewTab packageId={packageId} detail={agentDetail} />
+      )}
+      {type === "agent" && tab === "configuration" && agentDetail && (
+        <AgentConfigurationView
           packageId={packageId}
+          detail={agentDetail}
           configSchemaOverride={isHistoricalVersion ? effectiveConfigSchema : undefined}
           isHistorical={isHistoricalVersion}
         />
-      )}
-      {type === "agent" && tab === "connections" && agentDetail && (
-        <AgentConnectionsSection packageId={packageId} detail={agentDetail} />
       )}
       {type === "agent" && tab === "runs" && (
         <AgentRunsTab
@@ -517,13 +490,21 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           configSchemaOverride={isHistoricalVersion ? effectiveConfigSchema : undefined}
         />
       )}
-      {type === "agent" && tab === "schedules" && <AgentSchedulesTab packageId={packageId} />}
       {type === "agent" && tab === "memory" && <AgentMemoryTab packageId={packageId} />}
-      {type === "agent" && tab === "api" && <AgentApiTab packageId={packageId} />}
+      {type === "agent" && tab === "bundle" && agentDetail && (
+        <AgentBundleTab
+          packageId={packageId}
+          detail={agentDetail}
+          version={versionLabel}
+          isOwned={isOwned}
+        />
+      )}
 
       {/* Both follow the version being viewed: the explorer through
           `versionLabel`, the overview through the manifest picked above. */}
-      {tab === "overview" && <ManifestOverview manifest={effectiveManifest} type={type} />}
+      {type !== "agent" && tab === "overview" && (
+        <ManifestOverview manifest={effectiveManifest} type={type} />
+      )}
 
       {tab === "content" && (
         <FileExplorer packageId={packageId} type={type} version={versionLabel} />

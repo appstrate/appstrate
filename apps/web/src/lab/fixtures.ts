@@ -984,6 +984,23 @@ export const qboMcpServerFiles: Json200<"/api/packages/{scope}/{name}/files", "g
   mcpServerFileIndex();
 
 export const packageFileIndexes: Record<string, PackageFileIndex> = {
+  "@tractr/compta-trimestrielle": {
+    entries: [
+      {
+        path: "manifest.json",
+        size: 1_842,
+        media_kind: "text",
+        inline: '{"name":"@tractr/compta-trimestrielle","version":"1.4.0","type":"agent"}\n',
+      },
+      {
+        path: "prompt.md",
+        size: 4_812,
+        media_kind: "text",
+        inline:
+          "# Rôle\n\nPréparer la comptabilité trimestrielle sans inventer les pièces manquantes.\n",
+      },
+    ],
+  },
   [comptaReferencesSkillDetail.id]: comptaReferencesSkillFiles,
   [triageSentimentSkillDetail.id]: triageSentimentSkillFiles,
   [wikiBrainSkillDetail.id]: wikiBrainSkillFiles,
@@ -1228,7 +1245,81 @@ export const agentDetail: Json200<"/api/packages/agents/{scope}/{name}", "get"> 
   version: "1.4.0",
   updatedAt: ago(3_000),
   lock_version: 12,
-  config: { schema: {}, current: {} },
+  prompt:
+    "Prépare la comptabilité trimestrielle. Classe les transactions, rapproche les pièces et publie un récapitulatif vérifiable.",
+  manifest: {
+    name: "@tractr/compta-trimestrielle",
+    version: "1.4.0",
+    type: "agent",
+    display_name: "Compta trimestrielle",
+    description: "Prépare et classe les transactions du trimestre.",
+    author: "Tractr",
+    schema_version: "0.6",
+    dependencies: {
+      skills: { "@tractr/compta-references": "1.4.0" },
+      mcp_servers: { "@appstrate/gdrive-mcp": "2.1.0" },
+      integrations: { "@appstrate/google-drive": "2.1.0" },
+    },
+    integrations_configuration: {
+      "@appstrate/google-drive": { tools: ["drive_search", "drive_upload"] },
+    },
+    input: {
+      schema: {
+        type: "object",
+        properties: {
+          fiscal_year: { type: "string", title: "Année fiscale" },
+          drive_folder: { type: "string", title: "Dossier Drive" },
+          language: { type: "string", enum: ["fr", "en"] },
+          report_format: { type: "string", enum: ["xlsx", "markdown"] },
+        },
+        required: ["fiscal_year", "drive_folder", "report_format"],
+      },
+      property_order: ["fiscal_year", "drive_folder", "language", "report_format"],
+    },
+    output: {
+      schema: {
+        type: "object",
+        properties: {
+          transactions_processed: { type: "integer" },
+          missing_documents: { type: "integer" },
+          status: { type: "string" },
+        },
+      },
+    },
+    runtime_tools: ["output", "log", "note", "pin", "publish_document"],
+  },
+  input: {
+    schema: {
+      type: "object",
+      properties: {
+        fiscal_year: { type: "string", title: "Année fiscale" },
+        drive_folder: { type: "string", title: "Dossier Drive" },
+        language: { type: "string", enum: ["fr", "en"] },
+        report_format: { type: "string", enum: ["xlsx", "markdown"] },
+      },
+      required: ["fiscal_year", "drive_folder", "report_format"],
+    } as never,
+    property_order: ["fiscal_year", "drive_folder", "language", "report_format"],
+  },
+  output: {
+    schema: {
+      type: "object",
+      properties: {
+        transactions_processed: { type: "integer" },
+        missing_documents: { type: "integer" },
+        status: { type: "string" },
+      },
+    } as never,
+  },
+  config: {
+    schema: {},
+    current: {
+      fiscal_year: "2025-2026",
+      drive_folder: "TRACTR / Finances / 2026-Q2",
+      language: "fr",
+      report_format: "xlsx",
+    } as never,
+  },
   dependencies: {
     skills: [{ id: "@tractr/compta-references", version: "1.4.0" }],
     mcp_servers: [{ id: "@appstrate/gdrive-mcp", version: "2.1.0" }],
@@ -1440,8 +1531,12 @@ export const agentLatestVersion: components["schemas"]["PackageVersionDetail"] =
 
 /** The agent's model override: none, so the org default decides. */
 export const agentModel: Json200<"/api/agents/{scope}/{name}/model", "get"> = {
-  modelId: null,
-  generation: null,
+  modelId: "mdl_sonnet",
+  generation: { reasoningLevel: "high" },
+};
+
+export const agentProxy: Json200<"/api/agents/{scope}/{name}/proxy", "get"> = {
+  proxyId: "prx_eu",
 };
 
 /* -------------------------------------------------------------------------- */

@@ -552,6 +552,24 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   },
   {
     method: "GET",
+    pattern: /^\/api\/agents\/[^/]+\/[^/]+\/proxy$/,
+    handler: () => ({ status: 200, body: f.agentProxy }),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/agents\/[^/]+\/[^/]+\/schedules$/,
+    handler: (_url, scenario) => {
+      const rows = f.schedules.data.filter(
+        (schedule) => schedule.packageId === "@tractr/compta-trimestrielle",
+      );
+      return {
+        status: 200,
+        body: { ...f.schedules, data: list(rows, scenario) },
+      };
+    },
+  },
+  {
+    method: "GET",
     pattern: /^\/api\/agents\/[^/]+\/[^/]+\/runs$/,
     handler: (url, s) => {
       const all = list(f.runs, s, f.heavyRuns);
