@@ -306,15 +306,15 @@ function ColumnsMenu({
 }
 
 /**
- * Cards or table, for every level-one collection (`view-toggle`). shadcn's
+ * Table or cards, for every level-one collection (`view-toggle`). shadcn's
  * slot at this end of the row holds column visibility; ours holds the same
  * kind of thing — how the list is drawn, not what it contains.
  */
 function ViewToggle({ view, onChange }: { view: ListView; onChange: (view: ListView) => void }) {
   const { t } = useTranslation("common");
   const options: Array<{ id: ListView; icon: typeof Rows3; label: string }> = [
-    { id: "cards", icon: LayoutGrid, label: t("toolbar.viewCards") },
     { id: "table", icon: Rows3, label: t("toolbar.viewTable") },
+    { id: "cards", icon: LayoutGrid, label: t("toolbar.viewCards") },
   ];
 
   return (

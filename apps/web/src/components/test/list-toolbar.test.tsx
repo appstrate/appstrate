@@ -191,6 +191,13 @@ describe("the view toggle", () => {
     expect(html).toContain('aria-label="Vue cartes" aria-pressed="false"');
   });
 
+  it("puts the table view before the card view", () => {
+    const html = render(<ListToolbar filters={filters()} view="table" onViewChange={() => {}} />);
+    expect(html.indexOf('aria-label="Vue tableau"')).toBeLessThan(
+      html.indexOf('aria-label="Vue cartes"'),
+    );
+  });
+
   it("keeps search and utilities left, and the representation at the far right", () => {
     const html = render(
       <ListToolbar

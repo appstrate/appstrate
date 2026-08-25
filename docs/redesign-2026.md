@@ -2218,12 +2218,14 @@ inherit the settings treatment despite sitting on a new dialog surface.
 The accepted collection apparatus is now the default `ListToolbar`, rather
 than a query-string prototype. Search and the table utilities sit together at
 the left, Filter and Columns are icon controls, and the view switch stays at
-the far right. On a phone Search becomes an icon that reveals a full-width
-field on the next line. The catalogue's toolbar deliberately opts into the
-semantic `panel` placement, preserving its already-reviewed always-visible
-mobile search instead of accidentally inheriting page chrome. Agents, Skills
-and MCP Servers now default to Table like Documents, Runs, Schedules and
-Integrations; an explicitly saved user preference still wins.
+the far right. Within every Table / Cards switch, Table is the first option on
+the left and Cards is second on the right. On a phone Search becomes an icon
+that reveals a full-width field on the next line. The catalogue's toolbar
+deliberately opts into the semantic `panel` placement, preserving its
+already-reviewed always-visible mobile search instead of accidentally
+inheriting page chrome. Agents, Skills and MCP Servers now default to Table
+like Documents, Runs, Schedules and Integrations; an explicitly saved user
+preference still wins.
 
 Real page actions moved from the apparatus to title height. Level-one package,
 run and schedule actions are owned by `PageHeader`; settings already owns its
