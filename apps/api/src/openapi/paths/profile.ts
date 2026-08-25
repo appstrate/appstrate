@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 
 export const profilePaths = {
@@ -93,7 +94,11 @@ export const profilePaths = {
               type: "object",
               required: ["newPassword"],
               properties: {
-                newPassword: { type: "string", minLength: 8, maxLength: 128 },
+                newPassword: {
+                  type: "string",
+                  minLength: MIN_PASSWORD_LENGTH,
+                  maxLength: MAX_PASSWORD_LENGTH,
+                },
               },
             },
           },

@@ -119,11 +119,17 @@ interface ApiCallSuccess {
    * URL the response was eventually served from after any redirect
    * follow. Equals the resolved target URL when no redirect happened.
    *
-   * Internal to this module: it drives the redirect follower and the
-   * 401-retry replay. It is NOT projected onto the agent-visible
-   * `_meta` — that projection existed for #471 but nothing ever read
-   * it (`mcp-forward.ts` drops `_meta` wholesale), so it was removed
-   * rather than left as a documented capability with no consumer.
+   * Load-bearing INSIDE this module and nowhere else: the redirect
+   * follower terminates on it, the 401 replay re-issues against it, and
+   * the diagnostic envelope reports it as `host` (redacted) plus the
+   * `redirected` boolean.
+   *
+   * It is NOT projected onto the agent-visible `_meta`. That projection
+   * existed for #471 and was removed with `UpstreamMeta.finalUrl`; the
+   * agent-side parser (`runtime-pi/mcp/upstream-meta.ts` — alive, and
+   * required on every `api_call`) reads `{ status, headers }` only. An
+   * agent that needs the next hop reads `headers.location`, which IS on
+   * `UPSTREAM_HEADER_ALLOWLIST`.
    */
   finalUrl: string;
   /**
@@ -662,8 +668,12 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       // redirect — WHATWG fetch strips `Authorization` cross-origin but
       // NOT custom headers like `X-Api-Key`, the usual injection target.
       // Returning the 30x unfollowed keeps the credential on the initial
-      // (allowlist-checked) origin only; the caller re-issues against the
-      // surfaced `finalUrl` if it wants to follow.
+      // (allowlist-checked) origin only. The agent is not stranded: `location`
+      // is on `UPSTREAM_HEADER_ALLOWLIST`
+      // (`packages/mcp-transport/src/upstream-meta.ts`), so the 30x ships its
+      // next hop on `_meta.headers.location` and the caller re-issues against
+      // that if it wants to follow. `finalUrl` below is NOT that channel — it
+      // never leaves this module.
       init.duplex = "half";
       init.redirect = "manual";
       const response = await fetchFn(resolvedUrl, init);

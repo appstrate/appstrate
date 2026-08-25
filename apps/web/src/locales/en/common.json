@@ -100,7 +100,7 @@
   "claim.nameLabel": "Full name",
   "claim.emailLabel": "Email address",
   "claim.passwordLabel": "Password",
-  "claim.passwordHelp": "Minimum 8 characters.",
+  "claim.passwordHelp": "Minimum {{min}} characters.",
   "claim.submit": "Claim instance",
   "claim.submitting": "Creating account…",
   "claim.docs": "Docs: examples/self-hosting/AUTH_MODES.md"

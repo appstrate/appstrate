@@ -203,6 +203,37 @@ export const responses = {
       },
     },
   },
+  /**
+   * The 404 BOTH schedule writes answer when the target agent has no published
+   * version — shared rather than restated, because both routes resolve the
+   * manifest the schedule will FIRE (`assertScheduleTargetValid`) and both
+   * therefore refuse the same agent for the same reason.
+   *
+   * It was written out inline on `POST` only, so `PUT` declared the generic
+   * `NotFound` while returning this — and the test that was supposed to catch
+   * that read the create operation alone and reported green. One component,
+   * `$ref`'d twice, is what makes the two operations unable to drift.
+   */
+  NoPublishedVersion: {
+    description:
+      "Agent not found, or the agent has no published version (`no_published_version`). A " +
+      "schedule with no `version_override` fires the PUBLISHED manifest, so a never-published " +
+      "agent is refused at the write rather than 404ing on every tick; pin the working copy " +
+      'with `version_override: "draft"` to schedule it anyway.',
+    content: {
+      "application/problem+json": {
+        schema: { $ref: "#/components/schemas/ProblemDetail" },
+        example: {
+          type: "https://docs.appstrate.dev/errors/not-found",
+          title: "Not Found",
+          status: 404,
+          detail: "Agent '@acme/reporter' has no published version",
+          code: "no_published_version",
+          requestId: "req_abc123",
+        },
+      },
+    },
+  },
   IdempotencyConflict: {
     description: "Same Idempotency-Key used with a different request body",
     headers: REQUEST_ID_ONLY_HEADERS,

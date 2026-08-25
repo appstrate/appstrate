@@ -75,6 +75,10 @@ export interface RuntimePiEnvOptions {
   outputSchema?: unknown;
   /** Forward-proxy URL. When set, HTTP(S)_PROXY + NO_PROXY are emitted. */
   forwardProxyUrl?: string;
+  /** Turn off the Pi SDK's retry loop (default on, `maxRetries: 4`) when wiring an external one. */
+  disableModelRetry?: boolean;
+  /** Turn off the Pi SDK's auto-compaction (default on) when driving history externally. */
+  disableModelCompaction?: boolean;
   /** Hosts excluded from the proxy. Required with {@link forwardProxyUrl} on a sidecar run. */
   noProxy?: string;
   sink?: {
@@ -241,6 +245,23 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
     env.https_proxy = opts.forwardProxyUrl;
     env.NO_PROXY = noProxy;
     env.no_proxy = noProxy;
+  }
+
+  // The ONLY writer of the flag `pi-runner.ts` reads to turn the SDK retry loop
+  // off. Emitted rather than dropped because the sidecar's aliased `/llm` path
+  // now runs its own retry pass (`ALIAS_UPSTREAM_MAX_RETRIES`): stacking is a
+  // real configuration, so the way out of it has to stay reachable. A read with
+  // no writer is worse than either end — the reader looks configurable and is not.
+  if (opts.disableModelRetry) {
+    env.MODEL_RETRY_ENABLED = "false";
+  }
+
+  // Same shape, same reason, for the other Pi SDK loop `pi-runner.ts` reads
+  // out of `process.env`. It described itself as mirroring `MODEL_RETRY_ENABLED`
+  // while having no writer at all — so the claim was true of the pattern and
+  // false of the plumbing. This is that writer.
+  if (opts.disableModelCompaction) {
+    env.MODEL_COMPACTION_ENABLED = "false";
   }
 
   if (opts.sink) {

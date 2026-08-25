@@ -18,9 +18,17 @@
  * The channel name, the message type and the payload used to be private
  * constants in three packages held together by "must match" comments, and the
  * two senders had already drifted on the one thing that matters: one scoped its
- * `postMessage` to the platform origin, the other posted to `"*"`. Everything
- * the four surfaces must agree on now lives here, so agreement is a compile
- * dependency rather than a comment.
+ * `postMessage` to the platform origin, the other posted to `"*"`.
+ *
+ * What the four surfaces must agree on lives here: the wire names, the payload,
+ * the origin policy for both directions ({@link integrationConnectOrigin},
+ * {@link isIntegrationConnectMessage}) AND the correlation rule that decides
+ * which waiting surface a given completion is for
+ * ({@link completionMatches}, {@link acceptsCompletionMessage}). The
+ * correlation was the half left behind the first time: it lived in the chat
+ * module, so the dashboard popup could not import it and re-implemented the
+ * gate without any correlation at all. A rule that only one of four surfaces
+ * can reach is not centralised.
  */
 
 /** `BroadcastChannel` name every connect surface publishes and subscribes on. */
@@ -131,4 +139,66 @@ export function isIntegrationConnectMessage<T extends { origin: string; data: un
     event.origin === self &&
     isIntegrationConnectCompletion(event.data)
   );
+}
+
+/**
+ * Whether a completion is addressed to the surface identified by
+ * `{ state, packageId }`.
+ *
+ * CORRELATION IS PART OF THE HANDSHAKE, not a chat-module detail. Both carriers
+ * fan out: a `BroadcastChannel` publish reaches every listener on the origin and
+ * a `postMessage` reaches every listener on the receiving window, so *which*
+ * completion a waiting surface just saw is a question every surface has to ask,
+ * and it has to get the same answer. It lived in `module-chat` for a while, out
+ * of reach of the SPA's connect popup, which therefore re-implemented the gate
+ * as "is it a completion and is `ok` true" — with the `packageId` it was waiting
+ * on sitting three lines up, unused.
+ *
+ *  - `state` — exact when both sides carry one. The hosted-connect offer
+ *    (`connect_url`) carries NO state (its OAuth state is minted later, at
+ *    /connect/start click time), so surfaces from that flow cannot rely on it.
+ *  - `packageId` — the package-level filter, mirroring the SSE
+ *    `connection_update` backstop so all three completion signals share the same
+ *    semantics. Without it, one Gmail connect flipped an unrelated card
+ *    "connected" and double-resumed the conversation (forked thread).
+ *
+ * Completions carrying neither (context-less error pages such as "Missing
+ * connect token") stay accepted: they only surface an error, never an append.
+ * Absence on the WAITING side is equally permissive — a surface that knows
+ * neither identifier is not narrowing anything.
+ */
+export function completionMatches(
+  detail: unknown,
+  target: { state?: string; packageId?: string },
+): detail is IntegrationConnectCompletion {
+  if (!isIntegrationConnectCompletion(detail)) return false;
+  if (target.state && detail.state && detail.state !== target.state) return false;
+  if (target.packageId && detail.packageId && detail.packageId !== target.packageId) return false;
+  return true;
+}
+
+/**
+ * Whether a `message` event may be acted on as a completion for
+ * `{ state, packageId }` — the origin check and the correlation, in the order
+ * that matters.
+ *
+ * The origin comes first: a listener that reads `event.data` without validating
+ * `event.origin` has no authentication at all, and RFC 10017 §6.3.3.3 makes
+ * validating it a MUST. An accepted forgery drives the waiting surface into its
+ * "connected" state — appending a resume turn the user never earned, telling the
+ * model an integration is usable when it is not. Every completion is sent by a
+ * page the platform serves, so `selfOrigin` (`window.location.origin`) is the
+ * only acceptable sender.
+ *
+ * `BroadcastChannel` deliveries are same-origin by spec and have no origin to
+ * check, so those listeners call {@link completionMatches} directly. That is the
+ * only difference between the two carriers — the correlation is identical.
+ */
+export function acceptsCompletionMessage(
+  event: { origin: string; data: unknown },
+  selfOrigin: string,
+  target: { state?: string; packageId?: string },
+): boolean {
+  if (!isIntegrationConnectMessage(event, selfOrigin)) return false;
+  return completionMatches(event.data, target);
 }

@@ -303,9 +303,15 @@ const KEEP_RECENT_FRACTION = 0.1;
  * | `keepRecentTokens` | `max(20000, 10% × contextWindow)`      | Preserves the ratio across model sizes: 20k on Claude 200k, ~100k on GPT-4.1 1M, ~200k on Gemini 2M. The floor stops small windows from over-compacting away recent context.    |
  *
  * Operators can disable compaction entirely with
- * `MODEL_COMPACTION_ENABLED=false` (mirrors the existing
- * `MODEL_RETRY_ENABLED` pattern) — useful when stacking external
- * compaction middleware. See appstrate#445.
+ * `MODEL_COMPACTION_ENABLED=false`, read from this process's env. Two things
+ * put it there and nothing else does: for a platform-launched run,
+ * `buildRuntimePiEnv`'s `disableModelCompaction` option is the only writer of
+ * the key (`packages/runner-pi/src/container-env.ts`); an embedder driving
+ * `PiRunner` in its own process sets the variable directly. Same plumbing as
+ * `MODEL_RETRY_ENABLED` — which this comment used to claim it mirrored while
+ * the key had no writer at all, so the claim held for the pattern and not for
+ * the wiring. Useful when stacking external compaction middleware. See
+ * appstrate#445.
  *
  * Returns TWO members, and the split is load-bearing. `compaction` is exactly
  * the Pi SDK's `CompactionSettings` and is what gets handed to it. `contextWindow`
@@ -716,9 +722,17 @@ export class PiRunner {
         // `server_error`, which the Codex/Responses adapter surfaces as a
         // failed turn. 4 attempts (was 2) rides out the short upstream
         // blips that 2 retries occasionally exhausted, before the agent
-        // loop has to self-recover. Operators can opt out by setting
-        // `MODEL_RETRY_ENABLED=false` on the runtime env when stacking
-        // external retry middleware.
+        // loop has to self-recover.
+        //
+        // The opt-out is `MODEL_RETRY_ENABLED=false` in THIS process's env.
+        // Two things put it there, and nothing else does: for a
+        // platform-launched run, `buildRuntimePiEnv`'s `disableModelRetry`
+        // option is the only writer of the key
+        // (`packages/runner-pi/src/container-env.ts`); an embedder driving
+        // `PiRunner` in its own process sets the variable directly. Worth
+        // reaching for when an outer layer already retries — the sidecar's
+        // aliased `/llm` path does, `ALIAS_UPSTREAM_MAX_RETRIES` attempts
+        // per call, which multiplies with this one rather than replacing it.
         retry:
           process.env.MODEL_RETRY_ENABLED === "false"
             ? { enabled: false }

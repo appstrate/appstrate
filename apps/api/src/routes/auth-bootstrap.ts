@@ -59,15 +59,17 @@ import {
   verifyBootstrapToken,
 } from "../lib/bootstrap-token.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
+import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
 import { triggerPostBootstrapOrg } from "../lib/post-bootstrap-hook.ts";
 
 export const redeemSchema = z.object({
   token: z.string().min(1).max(128),
   email: z.email().toLowerCase().trim(),
   name: z.string().min(1).max(120).trim(),
-  // Minimum shared with Better Auth's own config; the 256 cap is local.
-  password: z.string().min(MIN_PASSWORD_LENGTH).max(256),
+  // Both bounds shared with Better Auth's own config. The cap used to be a
+  // local 256, above the 128 Better Auth actually enforced, so a 200-character
+  // password cleared this schema and died downstream as a raw APIError.
+  password: z.string().min(MIN_PASSWORD_LENGTH).max(MAX_PASSWORD_LENGTH),
 });
 
 // Stable bigint key for the cluster-wide advisory lock. Picked outside

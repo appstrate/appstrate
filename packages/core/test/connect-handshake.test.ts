@@ -14,10 +14,13 @@ import { describe, it, expect } from "bun:test";
 import {
   INTEGRATION_CONNECT_CHANNEL,
   INTEGRATION_CONNECT_MESSAGE_TYPE,
+  acceptsCompletionMessage,
   buildIntegrationConnectCompletion,
+  completionMatches,
   integrationConnectOrigin,
   isIntegrationConnectCompletion,
   isIntegrationConnectMessage,
+  type IntegrationConnectCompletion,
 } from "../src/connect-handshake.ts";
 
 const SELF = "https://app.appstrate.dev";
@@ -138,5 +141,89 @@ describe("isIntegrationConnectMessage", () => {
   it("refuses an opaque sender against a real receiver origin", () => {
     expect(isIntegrationConnectMessage({ origin: "null", data }, SELF)).toBe(false);
     expect(isIntegrationConnectMessage({ origin: "null", data }, `${SELF}/connect`)).toBe(false);
+  });
+});
+
+/**
+ * Correlation — WHICH waiting surface a completion is for.
+ *
+ * These cases lived in `packages/module-chat` while the predicates did, and the
+ * dashboard connect popup could not import either, so it re-implemented the
+ * gate with no correlation at all: any successful completion, for any package,
+ * settled its promise. Both live here now because both carriers of this
+ * handshake fan out, so every surface has to answer the same question the same
+ * way.
+ */
+function detail(
+  overrides: Partial<IntegrationConnectCompletion> = {},
+): IntegrationConnectCompletion {
+  return { type: INTEGRATION_CONNECT_MESSAGE_TYPE, ok: true, ...overrides };
+}
+
+describe("completionMatches", () => {
+  it("rejects a foreign message type", () => {
+    expect(completionMatches(detail({ type: "other" }), {})).toBe(false);
+    expect(completionMatches(undefined, {})).toBe(false);
+  });
+
+  it("matches on exact state when both sides carry one", () => {
+    const target = { state: "s1" };
+    expect(completionMatches(detail({ state: "s1" }), target)).toBe(true);
+    expect(completionMatches(detail({ state: "s2" }), target)).toBe(false);
+  });
+
+  it("rejects a completion for another package (the cross-card resume bug)", () => {
+    // Regression: the hosted-connect offer (`connect_url`) has no state, so a
+    // stateless surface must still ignore a completion addressed to a different
+    // package — connecting @appstrate/gmail must not resume the
+    // @appstrate/gmail-mcp card, nor settle a popup opened for it.
+    const target = { packageId: "@appstrate/gmail-mcp" };
+    expect(completionMatches(detail({ packageId: "@appstrate/gmail" }), target)).toBe(false);
+    expect(completionMatches(detail({ packageId: "@appstrate/gmail-mcp" }), target)).toBe(true);
+  });
+
+  it("accepts a context-less completion (error pages emit no state/packageId)", () => {
+    const target = { packageId: "@appstrate/gmail" };
+    expect(completionMatches(detail({ ok: false, error: "Missing connect token" }), target)).toBe(
+      true,
+    );
+  });
+
+  it("accepts a package-addressed completion on a surface that lacks a packageId", () => {
+    expect(completionMatches(detail({ packageId: "@appstrate/gmail" }), {})).toBe(true);
+  });
+});
+
+describe("acceptsCompletionMessage", () => {
+  // The listener checked the payload and never `event.origin`, which is a
+  // MUST-level failure (RFC 10017 §6.3.3.3): every completion is sent by a page
+  // the platform serves, so any other origin is a forgery. An accepted forgery
+  // flips the surface to "connected" — in chat it appends a resume turn, telling
+  // the model an integration is usable when it is not.
+  const SELF = "https://app.appstrate.dev";
+  const TARGET = { packageId: "@appstrate/gmail" };
+
+  it("rejects a well-formed completion from a foreign origin", () => {
+    const forged = { origin: "https://evil.example", data: detail(TARGET) };
+    expect(acceptsCompletionMessage(forged, SELF, TARGET)).toBe(false);
+  });
+
+  it("accepts the same completion from the page's own origin", () => {
+    // Positive control: the rejection above must come from the origin, not from
+    // a payload this gate would have refused anyway.
+    const genuine = { origin: SELF, data: detail(TARGET) };
+    expect(acceptsCompletionMessage(genuine, SELF, TARGET)).toBe(true);
+  });
+
+  it("still applies the payload correlation on a same-origin message", () => {
+    const other = { origin: SELF, data: detail({ packageId: "@appstrate/gmail-mcp" }) };
+    expect(acceptsCompletionMessage(other, SELF, TARGET)).toBe(false);
+  });
+
+  it("rejects everything when the page's own origin is opaque", () => {
+    // A sandboxed document reports the literal string "null", which is not a
+    // parseable origin — fail closed rather than throw out of the listener.
+    const genuine = { origin: SELF, data: detail(TARGET) };
+    expect(acceptsCompletionMessage(genuine, "null", TARGET)).toBe(false);
   });
 });

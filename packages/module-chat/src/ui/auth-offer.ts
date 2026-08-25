@@ -13,11 +13,7 @@
  * Kept React-free so it can be unit-tested without a DOM.
  */
 
-import {
-  INTEGRATION_CONNECT_MESSAGE_TYPE,
-  isIntegrationConnectMessage,
-  type IntegrationConnectCompletion,
-} from "@appstrate/core/connect-handshake";
+import type { IntegrationConnectCompletion } from "@appstrate/core/connect-handshake";
 import { readConnectOffer } from "../connect-offer.ts";
 
 interface AuthOffer {
@@ -29,30 +25,19 @@ interface AuthOffer {
 export type CompletionDetail = IntegrationConnectCompletion;
 
 /**
- * Whether a completion broadcast is addressed to the card identified by
- * `{ state, packageId }`. BroadcastChannel/postMessage signals fan out to every
- * mounted card, so correlation lives here:
+ * The completion CORRELATION rule — which waiting surface a given completion is
+ * addressed to, and the origin check in front of it on the `postMessage`
+ * carrier — is `@appstrate/core/connect-handshake`, not this file. Re-exported
+ * here because the cards import it from here.
  *
- *  - `state` — exact when both sides carry one. The hosted-connect offer
- *    (`connect_url`) carries NO state (its OAuth state is minted later, at
- *    /connect/start click time), so cards from that flow can't rely on it.
- *  - `packageId` — the package-level filter, mirroring the SSE
- *    `connection_update` backstop so all three completion signals share the
- *    same semantics. Without it, one Gmail connect flipped an unrelated card
- *    "connected" and double-resumed the conversation (forked thread).
- *
- * Completions without a packageId (context-less error pages such as "Missing
- * connect token") stay accepted: they only surface an error, never an append.
+ * It used to be declared here, and that was the half of the handshake left
+ * behind when the rest was centralised: living in this module put it out of
+ * reach of the SPA's connect popup, which re-implemented the gate as "is it a
+ * completion and is `ok` true" — no state, no packageId, with the packageId it
+ * was waiting on three lines up. A rule only one of four surfaces can import is
+ * not a single source of truth.
  */
-export function completionMatches(
-  detail: CompletionDetail | undefined,
-  card: { state?: string; packageId?: string },
-): boolean {
-  if (!detail || detail.type !== INTEGRATION_CONNECT_MESSAGE_TYPE) return false;
-  if (card.state && detail.state && detail.state !== card.state) return false;
-  if (card.packageId && detail.packageId && detail.packageId !== card.packageId) return false;
-  return true;
-}
+export { acceptsCompletionMessage, completionMatches } from "@appstrate/core/connect-handshake";
 
 /**
  * One resume append per (package, completion) across every card in this tab.
@@ -121,30 +106,6 @@ export function parseResume(text: string): ResumeMeta | null {
     // Older resume messages had no meta payload — treat as a bare notice.
   }
   return { packageId: "" };
-}
-
-/**
- * The card's full gate for a `message` event: the origin FIRST, then the
- * payload correlation above.
- *
- * The listener used to call `completionMatches` on `event.data` alone and never
- * looked at `event.origin`, so any page that could reach the chat window could
- * forge a completion and drive the card into its "connected" state — appending
- * a resume turn the user never earned. RFC 10017 §6.3.3.3 makes validating the
- * origin of an inbound `postMessage` a MUST. The completion is always sent by a
- * page the platform serves, so `selfOrigin` (`window.location.origin`) is the
- * only acceptable sender.
- *
- * `BroadcastChannel` deliveries are same-origin by spec and stay on
- * {@link completionMatches}, which has no origin to check.
- */
-export function acceptsCompletionMessage(
-  event: { origin: string; data: unknown },
-  selfOrigin: string,
-  card: { state?: string; packageId?: string },
-): boolean {
-  if (!isIntegrationConnectMessage(event, selfOrigin)) return false;
-  return completionMatches(event.data, card);
 }
 
 export function extractAuthOffer(result: unknown): AuthOffer | null {

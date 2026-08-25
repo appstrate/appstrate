@@ -217,8 +217,9 @@ export function OAuthConnectCard({
         // Same-origin by spec, so there is no origin to validate here.
         bc = new BroadcastChannel(INTEGRATION_CONNECT_CHANNEL);
         bc.onmessage = (ev) => {
-          const d = ev.data as CompletionDetail | undefined;
-          if (completionMatches(d, card)) resume(d!);
+          // `completionMatches` is a type guard, so the raw `data` narrows here.
+          const d: unknown = ev.data;
+          if (completionMatches(d, card)) resume(d);
         };
       } catch {
         bc = null;

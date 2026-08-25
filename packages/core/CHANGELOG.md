@@ -50,7 +50,8 @@ additionalProperties: false}` and `{allOf: [{required: [...]}]}` were all
 - **`./connect-handshake`** — `INTEGRATION_CONNECT_CHANNEL`,
   `INTEGRATION_CONNECT_MESSAGE_TYPE`, `IntegrationConnectCompletion`,
   `buildIntegrationConnectCompletion`, `integrationConnectOrigin`,
-  `isIntegrationConnectCompletion` and `isIntegrationConnectMessage`. The
+  `isIntegrationConnectCompletion`, `isIntegrationConnectMessage`,
+  `completionMatches` and `acceptsCompletionMessage`. The
   completion handshake an integration-connect flow uses to tell the surface
   that started it that the connection landed — the `BroadcastChannel` name, the
   `postMessage` type, the payload, and the origin policy for both directions.
@@ -61,6 +62,19 @@ additionalProperties: false}` and `{allOf: [{required: [...]}]}` were all
   modules that render their own connect surface should read the constants from
   here rather than re-declaring them, and MUST validate `event.origin` with
   `isIntegrationConnectMessage` before acting on a `message` event.
+
+  `completionMatches` (which waiting surface a completion is addressed to, by
+  `state` and `packageId`) and `acceptsCompletionMessage` (that correlation
+  behind the origin check, for the `postMessage` carrier) are part of the same
+  contract and were added in the same unreleased window. They were briefly
+  declared inside `@appstrate/module-chat` instead, where the dashboard's own
+  connect popup could not import them — so it re-implemented the gate with no
+  correlation at all and any successful completion, for any integration,
+  settled it. Both carriers fan out (`BroadcastChannel` to every listener on
+  the origin, `postMessage` to every listener on the window), so a surface that
+  waits on a specific integration MUST correlate. `completionMatches` is a type
+  guard narrowing `unknown` to `IntegrationConnectCompletion`, so it can be
+  applied directly to a raw `event.data`.
 
 ### Changed
 

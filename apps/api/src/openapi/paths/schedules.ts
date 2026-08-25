@@ -192,7 +192,7 @@ export const schedulesPaths = {
         },
         "400": {
           description:
-            "Validation error. Possible causes: missing/invalid cron expression, invalid input, or agent has file inputs (cannot be scheduled).",
+            "Validation error. Possible causes: missing/invalid cron expression, a timezone `cron-parser` cannot schedule against (`timezone`), invalid input, or agent has file inputs (cannot be scheduled).",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -201,15 +201,10 @@ export const schedulesPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": {
-          description:
-            'Agent not found, or the agent has no published version (`no_published_version`). A schedule with no `version_override` fires the PUBLISHED manifest, so a never-published agent is refused here rather than 404ing on every tick; pin the working copy with `version_override: "draft"` to schedule it anyway.',
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
-        },
+        // Shared with `PUT /api/schedules/{id}`: both writes resolve the
+        // manifest the schedule will FIRE, so both refuse a never-published
+        // agent with `no_published_version`.
+        "404": { $ref: "#/components/responses/NoPublishedVersion" },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -346,7 +341,7 @@ export const schedulesPaths = {
         },
         "400": {
           description:
-            "Validation error. Possible causes: missing/invalid cron expression or invalid input.",
+            "Validation error. Possible causes: missing/invalid cron expression, a timezone `cron-parser` cannot schedule against (`timezone`), or invalid input.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -355,7 +350,11 @@ export const schedulesPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
+        // NOT the generic NotFound: this route runs the same
+        // `assertScheduleTargetValid` the create route does, so a patch that
+        // repoints or revalidates a schedule onto a never-published agent gets
+        // `no_published_version` here too.
+        "404": { $ref: "#/components/responses/NoPublishedVersion" },
       },
     },
     delete: {

@@ -21,6 +21,7 @@ import {
 import { publishAndInstall, seedDivergedAgent } from "../../helpers/schedule-fixtures.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { schedulesPaths } from "../../../src/openapi/paths/schedules.ts";
+import { responses } from "../../../src/openapi/responses.ts";
 
 const app = getTestApp();
 
@@ -922,13 +923,42 @@ describe("Schedules API", () => {
       expect(pinned.status).toBe(201);
     });
 
-    it("declares that 404 in the OpenAPI spec", () => {
-      // The spec is the published contract for this endpoint; a status only the
-      // implementation knows about is a client that cannot handle it.
-      const post = (schedulesPaths as Record<string, any>)["/api/agents/{scope}/{name}/schedules"]
-        .post;
-      expect(Object.keys(post.responses)).toContain("404");
-      expect(post.responses["404"].description).toContain("no_published_version");
+    it("declares that 404 in the OpenAPI spec — on BOTH write operations", () => {
+      // The spec is the published contract for these endpoints; a status only
+      // the implementation knows about is a client that cannot handle it.
+      //
+      // Iterated, not hard-coded to the create path. The gate applies to both
+      // writes (`assertScheduleTargetValid` runs on POST and PUT alike), and the
+      // first version of this test read `.post` alone — so `PUT` kept declaring
+      // the generic `NotFound` while answering `no_published_version`, and this
+      // test reported green over exactly the gap it was written to close.
+      const paths = schedulesPaths as Record<string, any>;
+      const writes: Array<[string, any]> = [
+        [
+          "POST /api/agents/{scope}/{name}/schedules",
+          paths["/api/agents/{scope}/{name}/schedules"].post,
+        ],
+        ["PUT /api/schedules/{id}", paths["/api/schedules/{id}"].put],
+      ];
+
+      // Positive control: two operations, both real. A typo in either key would
+      // otherwise make this loop assert nothing.
+      expect(writes.every(([, op]) => op !== undefined)).toBe(true);
+
+      for (const [label, op] of writes) {
+        expect(Object.keys(op.responses), label).toContain("404");
+        // The SAME component on both, which is what stops them drifting apart
+        // again: an inline description on one is a second source of truth.
+        expect(op.responses["404"], label).toEqual({
+          $ref: "#/components/responses/NoPublishedVersion",
+        });
+        // …and the cause the invalid-timezone refusal answers with, which POST
+        // never declared either.
+        expect(op.responses["400"].description, label).toContain("timezone");
+      }
+
+      // The component the two `$ref`s resolve to actually names the code.
+      expect(responses.NoPublishedVersion.description).toContain("no_published_version");
     });
 
     it("applies the same manifest choice on PUT", async () => {

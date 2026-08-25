@@ -1163,13 +1163,20 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
   });
 });
 
-describe("executeApiCall — finalUrl exposure (#471)", () => {
+describe("executeApiCall — finalUrl: redirect terminus and 401 replay target", () => {
   /**
-   * Agents driving redirect-chain flows (OAuth Authorization Code,
-   * CAS `?ticket=…`, magic-link redemption) need to read the URL the
-   * sidecar's redirect follower terminated on. `_meta.headers.location`
-   * is the *next hop* on non-terminal 30x — undefined on the terminal
-   * 200/4xx. `result.finalUrl` plugs that gap.
+   * `finalUrl` is INTERNAL to the credential proxy. It is where the
+   * redirect follower stopped, what the 401 replay re-issues against, and
+   * what the diagnostic envelope reports as `host` / `redirected`. These
+   * cases pin that terminus across the four paths that can produce it: no
+   * redirect, a followed chain, a chain that dies without a `location`,
+   * and the streaming (`redirect: "manual"`) path.
+   *
+   * It is NOT an agent-visible field. The `_meta` projection this describe
+   * was originally written for (#471) is gone along with
+   * `UpstreamMeta.finalUrl`; an agent following a redirect chain reads
+   * `_meta.headers.location`, which is on `UPSTREAM_HEADER_ALLOWLIST`.
+   * Nothing here asserts anything about `_meta` — that is the point.
    */
   it("returns the resolved target URL when no redirect happens", async () => {
     const deps = makeDeps();
