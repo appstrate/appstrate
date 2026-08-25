@@ -10,7 +10,7 @@
  *
  * Merge order (highest priority first):
  *   1. Explicit CLI flags (--model / --proxy / @spec)
- *   2. Environment variables (APPSTRATE_MODEL / APPSTRATE_PROXY)
+ *   2. Environment variables (APPSTRATE_MODEL_ID / APPSTRATE_PROXY)
  *   3. `run-config` payload returned by the API
  *   4. Built-in defaults (none for these fields)
  *
@@ -106,7 +106,7 @@ interface MergeRunConfigInputs {
   flagProxy?: string;
   /** Whether the user explicitly passed `@spec` in the package id. */
   hasExplicitSpec: boolean;
-  /** APPSTRATE_MODEL env var. */
+  /** APPSTRATE_MODEL_ID env var. */
   envModel?: string;
   /** APPSTRATE_PROXY env var. */
   envProxy?: string;

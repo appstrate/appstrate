@@ -185,7 +185,7 @@ async function collectUiChunks(
   return chunks;
 }
 
-describe("handleChatStream engine routing", () => {
+describe("handleChatStream", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -269,10 +269,10 @@ describe("handleChatStream engine routing", () => {
 
     expect(res.status).toBe(401);
     expect(res.headers.get("content-type") ?? "").toContain("application/problem+json");
-    const body = (await res.json()) as { code?: string; needsReconnection?: boolean };
-    // The client keys the reconnect prompt off these two fields.
+    const body = (await res.json()) as { code?: string };
+    // The problem `code` is the whole client contract: `refusalCode()`
+    // (`src/turn-error.ts`) reads `status` + `code`, and nothing else.
     expect(body.code).toBe("needs_reconnection");
-    expect(body.needsReconnection).toBe(true);
 
     // No session would 401 upstream, and nothing was written.
     expect(calls).toEqual([]);

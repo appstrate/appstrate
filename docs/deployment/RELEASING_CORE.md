@@ -26,7 +26,8 @@ whoever retires, archives or absorbs a product, not whoever cuts a release.
 ## 1. Before you tag
 
 **Release the leaf first if its range moved.** Core depends on
-`@appstrate/afps-shared` by caret range (`^0.3.1` today). A bumped range must
+`@appstrate/afps-shared` by caret range (`^0.5.0` today — read
+`packages/core/package.json`, not this line). A bumped range must
 reach npm **before** the core release that references it, or installing
 `@appstrate/core` cannot resolve it. The workflow's
 `scripts/verify-package-resolves.ts` step packs the tarball and typechecks every
@@ -58,6 +59,20 @@ This is not optional politeness. **The carve-out is scoped to `X.0.0` alone** �
 the very next core release (`X.0.1`, `X.1.0`, anything non-major) fails hard on
 a consumer still pinned to `^(X-1)`. That is what keeps the gate's teeth: an
 unbumped consumer does not stay quiet, it blocks the next publish.
+
+### Work parked for "the next core major" needs an owner and a trigger
+
+A breaking change that is right to keep out of an unrelated PR gets parked until
+the next major. The gate above does not track those, and nothing else does
+either — so a park written as "next core major" is a park with no owner and no
+trigger, and it misses its window.
+
+Measured: `resolveSubscriptionChatModel` / `SubscriptionChatResolution` were
+parked on exactly those terms during the post-Pi-unification cleanup. The 7.0.0
+major then arrived and passed **without** the rename, which cost a second major
+(8.0.0) to carry work that had been ready the whole time. When you park a
+breaking change, name the release that will carry it and the person who will
+notice — in an issue, not in a plan document.
 
 ## 4. Refresh the published-export baseline
 

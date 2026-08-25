@@ -467,6 +467,18 @@ const canonicalRunsPaths = {
               },
               additionalProperties: false,
             },
+            // `input` is caller-defined JSON — nothing parses it, so this
+            // example is pure documentation and is held to a documentation
+            // standard: keep it clear of the platform's id vocabulary. It used
+            // to read `{ docId: "doc_123" }`, teaching the retired file-id
+            // prefix that migration `0044_finish_file_rename` rewrote and that
+            // `FILE_ID_RE` (`@appstrate/core/file-uri`) no longer accepts.
+            //
+            // Editing it obliges you to run `bun run openapi:baseline` AND
+            // `bun run generate:api`. `detect:breaking` will NOT tell you if
+            // you forget: it does not diff `example` values at all. The gate
+            // that binds this file is `verify:api-types`, via the copy of the
+            // example embedded in `apps/web/src/api/schema.d.ts`.
             example: {
               manifest: {
                 $schema: "https://schemas.afps.dev/v0/agent.schema.json",
@@ -478,7 +490,7 @@ const canonicalRunsPaths = {
                 dependencies: {},
               },
               prompt: "Summarize the attached file in three bullet points.",
-              input: { docId: "doc_123" },
+              input: { audience: "engineering" },
             },
           },
         },
@@ -510,7 +522,7 @@ const canonicalRunsPaths = {
                 applicationId: "app_m4n5o6p7",
                 scheduleId: null,
                 status: "pending",
-                input: { docId: "doc_123" },
+                input: { audience: "engineering" },
                 result: null,
                 artifacts: null,
                 checkpoint: {},

@@ -277,17 +277,34 @@ declared one had silently lost its real entry points, and each loss cascaded:
 `packages/afps-runtime/bin/afps.ts` unreachable makes its whole `src/**` look
 dead, which was most of the 161.
 
-**The rule when you touch `knip.config.ts`:** if a workspace declares `entry`,
-open its `package.json` and re-declare every `exports` target, every `bin`
-target, and `main`/`module` if present. Those files are reached by npm consumers
-and by the `MODULES` loader resolving a specifier — neither of which knip can
-see. Do not collapse them into a broad glob such as `src/*.ts!`: that is wider
-than the real export map and would hide a genuinely dead root-level file.
+**The rule when you touch `knip.config.ts`:** a workspace that declares `entry`
+must carry every `exports` target, every `bin` target, and `main`/`module` if
+present. Those files are reached by npm consumers and by the `MODULES` loader
+resolving a specifier — neither of which knip can see. This half is no longer
+written by hand: `manifestEntries(workspace)` reads the `package.json` and
+derives it, so a manifest edit cannot silently desynchronise from the config.
+Call it, do not transcribe its output, and do not collapse it into a broad glob
+such as `src/*.ts!` — that is wider than the real export map and would hide a
+genuinely dead root-level file. The one workspace it cannot serve is `apps/cli`,
+whose `bin` points at a `dist/` build artifact absent from a clean checkout;
+its entries are hand-written and say so at the call site. What stays
+hand-written otherwise is the other half: the entries no manifest implies
+(Docker CMDs, glob-discovered fixtures, operator scripts), each still owing the
+"what reaches it" justification.
 
-**Never un-export a symbol, and never add an `ignore*`, to make this gate quiet.**
-The published packages' public exports have readers out of tree. If a finding
-survives a correct entry list, it is either real dead code or a symbol exported
-with no reader at all — fix it at the source, or report it.
+**Never un-export a symbol to make this gate quiet.** If a finding survives a
+correct entry list, it is either real dead code or a symbol exported with no
+reader at all — fix it at the source, or report it.
+
+**An `ignore*` is not forbidden, but it is not a way out either.** It is
+reserved for a false positive knip _structurally cannot see_ — a dynamic
+import, an npm contract, a wire format — and every one in the config carries
+that reason at its call site (`knip.config.ts` rule 2). The live carve-outs are
+`ignoreExportsUsedInFile`, `ignoreIssues`, `ignoreBinaries` and three
+`ignoreDependencies` blocks; read their prose before adding a fourth. They are
+deliberately NOT re-listed here — a second copy of that list would drift from
+the config, and the config is where the justification has to live anyway. What
+is forbidden is the other use: silencing a finding you have not explained.
 
 An earlier version of this section blamed `git worktree`, on the strength of one
 clone that came back clean. That was wrong. Measured and refuted since, each

@@ -5,18 +5,36 @@
  *
  * There are four: `POST /api/agents/{scope}/{name}/run`, `POST /api/runs/inline`
  * (+ `/inline/validate`), `POST /api/runs/remote`, and schedule create/update.
- * They deliberately validate the same two maps the same way, and until this
- * module existed they said so in comments instead of in code — `runs.ts` noted
- * `.min(1)` was set "for the same reason it is set on the inline schema below",
- * `schedules.ts` noted it was "for the same reason the run route sets it" and
- * that a second `dependency_overrides` predicate "would be a second opinion",
- * and then wrote one anyway. Three copies of the value rule and two byte-identical
- * refinement messages is how the surfaces stop agreeing.
+ * They do NOT all accept both maps — see the breakdown below. What this module
+ * is for is that the surfaces which DO accept a given map import its rule from
+ * here rather than restating it.
+ * Until it existed the rules lived in comments instead of in code: `runs.ts`
+ * noted `.min(1)` was set "for the same reason it is set on the inline schema
+ * below", `schedules.ts` noted it was "for the same reason the run route sets
+ * it" and that a second `dependency_overrides` predicate "would be a second
+ * opinion", and then wrote one anyway. Three copies of the value rule and two
+ * byte-identical refinement messages is how the surfaces stop agreeing.
  *
- * The value-level `dependency_overrides` gate in `input-parser.ts` is NOT a
- * fourth copy and stays where it is: it names the offending KEY and fills the
- * RFC 9457 `param`, which a Zod refinement over the whole map cannot do. It is
- * a better message on the path that can produce it, not a second opinion.
+ * What each surface actually declares, and why the split is correct:
+ *
+ *   - `connection_overrides` — agent run, inline (+ validate) and schedules all
+ *     take {@link connectionOverridesSchema}. The remote surface declares none,
+ *     and `run-creation.ts` relies on that: it passes `runOverrides: null` to
+ *     the connection cascade and stamps `connectionOverrides: null` on the row,
+ *     so the readiness pass and the snapshot resolve the identical cascade.
+ *     Accepting the field here without threading it would break that equality.
+ *   - `dependency_overrides` — the remote surface and schedules take
+ *     {@link dependencyOverridesSchema}. Inline declares it not at all: it was
+ *     accepted and then silently dropped, so since #1187 `.strict()` turns it
+ *     into a 400. The agent-run route declares it as a bare
+ *     `z.record(z.string(), z.string())` on purpose and defers the VALUE gate
+ *     to `input-parser.ts`, which is the only layer that can name the offending
+ *     KEY and fill the RFC 9457 `param`. Adopting the shared schema there would
+ *     replace a message that points at the bad entry with one that points at
+ *     the whole map — a worse error, not a tighter one.
+ *
+ * So the `input-parser.ts` gate is not a fourth copy of the value rule: it is
+ * that rule's only owner on the one path that can afford a better message.
  */
 
 import { z } from "zod";

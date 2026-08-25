@@ -643,7 +643,7 @@ export async function parseRequestInput(
     // uploads). An `appfile://` reference points at an already-durable file
     // (a prior materialized upload or an agent output); it is streamed into the
     // run workspace like an upload but never re-materialized.
-    const docRefs = refs
+    const fileRefs = refs
       .filter((ref) => ref.kind === "file")
       .map((ref) => {
         const id = parseFileUri(ref.uri);
@@ -655,7 +655,7 @@ export async function parseRequestInput(
     // is brand-new, so it is never any of these docs' own container. Persisted as
     // `file_links` atomically with `createRun`, protecting the doc from its
     // producer's deletion. The ACL check below still gates the run itself.
-    consumedFileIds = docRefs.map(({ id }) => id);
+    consumedFileIds = fileRefs.map(({ id }) => id);
 
     // Decode inline data: URIs up front — the per-file cap is enforced inside
     // parseDataUri (pre-decode on the base64 length, post-decode on the bytes),
@@ -684,16 +684,16 @@ export async function parseRequestInput(
     // File object names — set once uploads are streamed, used to roll the
     // run workspace back if anything below the stream fails. Empty until we
     // stream, so a pre-stream failure (bad URI, cap, peek) rolls back nothing.
-    let docNames: string[] = [];
+    let fileNames: string[] = [];
     try {
-      if (resolved.length > 0 || inline.length > 0 || docRefs.length > 0) {
+      if (resolved.length > 0 || inline.length > 0 || fileRefs.length > 0) {
         // Bound the NUMBER of input files a single run may carry (uploads +
         // inline + appfile:// refs) — the byte caps below do not bound the
         // COUNT (thousands of tiny files). Rejected before any streaming.
-        const totalInputDocs = resolved.length + inline.length + docRefs.length;
-        if (totalInputDocs > getEnv().RUN_MAX_FILES) {
+        const totalInputFiles = resolved.length + inline.length + fileRefs.length;
+        if (totalInputFiles > getEnv().RUN_MAX_FILES) {
           throw fileCountExceeded(
-            `A run may carry at most ${getEnv().RUN_MAX_FILES} input files (got ${totalInputDocs})`,
+            `A run may carry at most ${getEnv().RUN_MAX_FILES} input files (got ${totalInputFiles})`,
           );
         }
 
@@ -709,9 +709,9 @@ export async function parseRequestInput(
         // the run-triggering actor must be able to read the file, else it is
         // indistinguishable from missing (404 — covers cross-org and cross-app).
         const resolvedDocs =
-          docRefs.length > 0
+          fileRefs.length > 0
             ? await Promise.all(
-                docRefs.map(async ({ ref, id }) => {
+                fileRefs.map(async ({ ref, id }) => {
                   const doc = await getFileForActor({ orgId, applicationId }, actor, id);
                   // Cross-actor ACL (S2): resolving a run is org-wide-visible to
                   // members, but a `user_upload` is creator-only content — a
@@ -815,7 +815,7 @@ export async function parseRequestInput(
         // Storage keys for rollback — the workspace names are the on-disk /
         // object-store segments (`{runId}/files/<workspaceName>` — see
         // `runWorkspaceFileKey`, whose `files/` segment is storage layout, not vocabulary).
-        docNames = workspaceNames;
+        fileNames = workspaceNames;
 
         // Stream each upload straight from the uploads bucket into the run
         // workspace — validating size + MIME on the fly — so the platform never
@@ -976,7 +976,7 @@ export async function parseRequestInput(
       // files. A failure here still rolls back any streamed files.
       assertInputValid(input, inputSchema);
     } catch (err) {
-      if (docNames.length > 0) await deleteRunFiles(runId, docNames);
+      if (fileNames.length > 0) await deleteRunFiles(runId, fileNames);
       throw err;
     }
   }

@@ -60,7 +60,6 @@ function subscriptionReconnectResponse(): Response {
       status: 401,
       detail: "The selected model's subscription credential expired or was revoked.",
       code: "needs_reconnection",
-      needsReconnection: true,
     }),
     { status: 401, headers: { "content-type": "application/problem+json" } },
   );
@@ -199,8 +198,15 @@ export async function handleChatStream(
   const origin = selfOrigin();
   const headers = forwardedHeaders(c);
   // Single platform-call seam: re-enter the platform app in-process (or loopback
-  // fetch when not wired) for every read the turn makes (/api/models,
-  // /api/applications, /api/me/context, the llm-proxy). Auth + RBAC run each hop.
+  // fetch when not wired) for every PLATFORM read the turn makes (/api/models,
+  // /api/applications, and the MCP hops; `/api/me/context` dispatches directly).
+  // Auth + RBAC run each hop.
+  //
+  // Inference is the exception and does NOT ride this seam: the proxy binding
+  // hands pi-ai a `baseUrl` string built from `origin`, and pi-ai opens a real
+  // loopback socket to it. That is why `CHAT_SELF_ORIGIN` must actually resolve
+  // on this host, and why the binding needs a bearer *minter* (see below) rather
+  // than a header captured once.
   const platformFetch: typeof fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
     deps.dispatch(new Request(input, init))) as typeof fetch;
 

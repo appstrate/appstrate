@@ -12,6 +12,14 @@ major, and one is deliberately kept out so its effect stays measurable. This
 document records which is which, and why — so the ones left out are not
 re-discovered as oversights.
 
+> **Status (2026-08-25).** Items 1, 2, 4 and 5 are done; item 1's remaining half
+> is an operations task recorded in `docs/ENV.md` under `CHAT_PI_MAX_CONCURRENCY`,
+> not a code change. **Item 3 is still open** — the `public-origin` flag is
+> unscoped in `.codecov.yml` and the job still instruments the whole boot path.
+> Section 3 below is why this file is kept: it carries the measurements, and the
+> refutation of the obvious-looking `flags.public-origin.paths` remedy, which
+> exist nowhere else. Delete this file when item 3 lands, not before.
+
 ## Scope decision
 
 | #   | Item                                                 | This PR             | Why                                                                                                                                                                                                                                                                                 |
@@ -31,10 +39,10 @@ re-discovered as oversights.
 > `ChatModelResolution` and `resolveSubscriptionChatModel` → `resolveChatModel`,
 > carried by the 8.0.0 major that the Cloud boot-gate fix required anyway.
 >
-> Worth recording, because "park it for the next core major" nearly cost a
-> second release: the 7.0.0 major arrived and passed WITHOUT the rename. A park
-> that names no owner and no trigger is a park that misses its window. The
-> reasoning below still stands as the reason it was not done _here_.
+> The lesson that park taught — a park naming no owner and no trigger misses
+> its window — now lives where whoever cuts a core release will read it:
+> `docs/deployment/RELEASING_CORE.md` § _Work parked for "the next core major"_.
+> The reasoning below still stands as the reason it was not done _here_.
 
 `isFinalChatStep` is provably dead (`packages/core/src/chat-turn-metadata.ts`;
 its only caller was the deleted AI SDK step loop), and

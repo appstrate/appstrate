@@ -70,9 +70,11 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
      |                                |
      |-- Login/Signup --------------->|-- Better Auth (cookie session)
      |-- / (Agent List) ------------->|-- GET /api/agents
-     |-- PUT .../input-settings ----->|-- schema.ts (AJV) → state.ts (Drizzle)
-     |-- POST .../connect/:prov ----->|-- connect route → OAuth2 flow / API key storage
-     |-- POST /api/agents/:id/run --->|-- validate → create run → executeAgentInBackground()
+     |-- PUT .../input-settings ----->|-- schema.ts (AJV) → services/state/ (Drizzle)
+     |-- POST /api/integrations/ ---->|-- routes/integrations.ts → OAuth2 flow / API key
+     |      connect/{start,submit}    |     storage
+     |-- POST /api/agents/{scope}/ -->|-- validate → create run → executeAgentInBackground()
+     |      {name}/run                |
      |<-- SSE (replay + live) --------|-- subscribe to logs via pub/sub
      |   Realtime (LISTEN/NOTIFY) ----|-- pg_notify on runs + run_logs → patches React Query cache
      |   Scheduler (BullMQ + Redis) --|-- distributed cron, exactly-once, same execute path
@@ -146,21 +148,33 @@ Tier 0 (zero-install) requires only Bun.
 - **New API route**: route file in `routes/` + OpenAPI path file in `openapi/paths/` + wire in `index.ts`. Run `bun run verify:openapi`, then `bun run generate:api` to refresh the SPA's generated types (`verify:api-types` in `check` fails otherwise). Every 2xx JSON response must declare a schema (verify-openapi step 6).
 - **DB migration (core)**: edit `packages/db/src/schema.ts` → `bun run db:generate` (needs `DATABASE_URL` for drizzle-kit). Applied automatically at boot (PGlite + PostgreSQL) — no manual `db:migrate`.
 - **Module tables**: there are none separately — a module's tables live in the core schema (`packages/db/src/schema/<domain>.ts`) and migrate with core. No per-module migration step.
-- **Quality gate**: `bun run check` — 15 tasks, not 2: `turbo typecheck lint format:check` plus
+- **Quality gate**: `bun run check` — 15 task names, not 2: `turbo typecheck lint format:check` plus
   `verify:openapi`, `verify:api-types`, `verify:type-coverage`, `verify:compose-defaults`,
   `detect:breaking`, `build:system-packages:check`, `lint:manifest-casing`, `conformance:check`,
   `verify:module-isolation`, `typecheck:scripts`, `verify:module-contract`, `verify:dead-code`.
+  turbo fans those out to **35** actual tasks (`typecheck` alone runs in 21 workspaces) — count them
+  with `bunx turbo <the 15 names> --dry=json`, never by reading this line.
   There is no `turbo check` task — the root script drives turbo directly.
 - **Dead code**: `verify:dead-code` runs knip over every workspace and fails on an exported symbol
   with no reader, a file nothing reaches, or a declared dependency nothing imports. `eslint`'s
   `no-unused-vars` cannot see any of that — it only sees locals. Config and the reasoning behind
   every entry/ignore: `knip.config.ts`. An entry must say _what reaches the file_; an ignore must
-  say _why knip is structurally blind_. Public exports of the **published** packages
-  (`@appstrate/core`, `@appstrate/afps-runtime`, `@appstrate/module-*`) are out of scope by design —
-  their readers live out of tree. knip derives NO entry from a package manifest and a workspace
+  say _why knip is structurally blind_. Public exports of the **published** packages are out of
+  scope by design — their readers live out of tree — and exactly two scoped packages here have ever
+  been published: `@appstrate/core` and `@appstrate/afps-shared`, the only two with a publish
+  workflow and a release tag. `@appstrate/afps-runtime` carries `publishConfig` but is **not**
+  published (no workflow, no tag, a `0.0.0` npm placeholder) and stays private by decision;
+  `@appstrate/runner-pi` and the `@appstrate/module-*` packages are absent from npm entirely;
+  `@appstrate/ui` is the inverse case — `"private": true` here yet 1.0.1 sits on npm from before
+  that flag, and is treated as private. Verify with `npm view <pkg> versions`, never with the
+  manifest's `publishConfig`. knip derives NO entry from a package manifest and a workspace
   `entry` replaces even its filename defaults, so a workspace that declares one must re-declare
   every `exports`/`bin`/`main` target or its whole subtree reads as dead — the cause of a ~161-finding
-  false red fixed on 2026-08-23. Never un-export a symbol or add an `ignore*` to quiet this gate.
+  false red fixed on 2026-08-23. That re-declaration is now derived by `manifestEntries()` in
+  `knip.config.ts`, so a manifest edit cannot silently desynchronise from it; what stays hand-written
+  is the half no manifest implies (Docker CMDs, fixtures, operator scripts). Never un-export a symbol
+  to quiet this gate, and add an `ignore*` only where knip is structurally blind, with the
+  justification `knip.config.ts`'s rule 2 demands — never to make a finding go away.
   Full detail and the other false green/red signals: `AGENTS.md` → **Quality Gate — and the signals
   it lies with**.
 - **Tests**: `bun test` from root runs all packages in one process. See **Testing** below.
@@ -207,7 +221,7 @@ Required vars (boot fails without them):
 | `RUN_TOKEN_SECRET`          | HMAC secret for run bearer tokens (≥16 chars), rotates independently            |
 | `CONNECT_SESSION_SECRET`    | HMAC secret for hosted-connect-portal tokens (≥16 chars), rotates independently |
 
-Most-touched optional vars: `MODULES` (default `oidc,webhooks,mcp,core-providers,@appstrate/module-chat` — subscription modules `@appstrate/module-codex` + `@appstrate/module-claude-code` are opt-in), `DATABASE_URL`, `REDIS_URL`, `S3_BUCKET`, `RUN_ADAPTER` (default `process`; `docker` for containers), `APP_URL`, `TRUSTED_ORIGINS`, `TRUST_PROXY`. See `docs/ENV.md` for all ~75 vars with defaults and full notes.
+Most-touched optional vars: `MODULES` (default `oidc,webhooks,mcp,core-providers,@appstrate/module-chat` — subscription modules `@appstrate/module-codex` + `@appstrate/module-claude-code` are opt-in), `DATABASE_URL`, `REDIS_URL`, `S3_BUCKET`, `RUN_ADAPTER` (default `process`; `docker` for containers), `APP_URL`, `TRUSTED_ORIGINS`, `TRUST_PROXY`. See `docs/ENV.md` for all 115 documented vars with defaults and full notes (97 of them live in the `@appstrate/env` Zod schema; the rest are read directly by modules, the sidecar or the runtime image).
 
 ## Agent & Extension Gotchas
 
@@ -221,7 +235,7 @@ Most-touched optional vars: `MODULES` (default `oidc,webhooks,mcp,core-providers
 - **Proxy system**: org-level CRUD `/api/proxies` (admin). System proxies from `SYSTEM_PROXIES` env at boot. Agent override `GET/PUT /api/agents/:id/proxy`. Cascade: agent → org default → `PROXY_URL`.
 - **Application-scoped input defaults**: an agent's stored input values and its per-field locks live together in one jsonb column, `application_packages.input_settings` (`{ values, locked }`), per-application. Its single write path is `PUT /api/agents/{scope}/{name}/input-settings`; on the wire the pair is `{ values, locked_fields }`. `package_persistence` (memory archive + pinned slots) also app-scoped, row-partitioned by `(actor_type, actor_id)` (members + end-users never read each other's state).
 - **Run lifecycle**: `pending` → `running` → `success` | `failed` | `timeout` | `cancelled`. Transitions via `updateRun()` in `services/state/runs.ts`. `pg_notify` on every change → SSE. Concurrent runs per agent supported (`run-tracker.ts`).
-- **Enriched run responses**: `listRunsWithFilter`/`getRunFull` LEFT JOIN to add `user_name`, `end_user_name`, `api_key_name`, `schedule_name`. `EnrichedRun` (`@appstrate/shared-types`) extends `Run` with these. Frontend reads names directly — no separate lookups.
+- **Enriched run responses**: `listRunsWithFilter`/`getRunFull` LEFT JOIN to add `user_name`, `end_user_name`, `api_key_name`, `schedule_name`. `EnrichedRun` (`@appstrate/shared-types`) is `RunWireDto` plus these. Frontend reads names directly — no separate lookups.
 - **Run trigger tracking**: `runs.apiKeyId` (FK → `api_keys.id`, ON DELETE SET NULL) records triggering key. With `userId`/`endUserId`/`scheduleId` → full trigger attribution.
 
 ## Operational Notes & Known Limitations

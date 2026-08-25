@@ -69,7 +69,7 @@ export function pickModel(models: OrgModel[], modelId?: string): OrgModel {
   const usable = models.filter((m) => m.enabled !== false && CHAT_USABLE_FAMILIES.has(m.apiShape));
   if (usable.length === 0 && models.some((m) => m.enabled !== false)) {
     throw invalidRequest(
-      "Aucun modèle utilisable par le chat n'est configuré. Connectez un modèle par clé API (Anthropic, OpenAI, Mistral) ou un abonnement Claude Code dans Settings → Models.",
+      "No chat-usable model is configured. Connect an API-key model (Anthropic, OpenAI, Mistral) or a Claude Code subscription in Settings → Models.",
     );
   }
   // Liveness is the second gate, on top of enabled + chat-usable family:
@@ -90,7 +90,7 @@ export function pickModel(models: OrgModel[], modelId?: string): OrgModel {
       : usable.length > 0;
     if (dead) {
       throw invalidRequest(
-        "Le modèle sélectionné ne peut plus servir l'inférence : sa connexion doit être rétablie dans Settings → Models.",
+        "The selected model can no longer serve inference: its connection must be re-established in Settings → Models.",
       );
     }
     throw invalidRequest(

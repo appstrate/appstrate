@@ -12,9 +12,8 @@ const t = (key: string) => key;
  * `turnErrorState` reads an assistant-ui message. A message with no bound
  * source message falls back to itself, so a plain literal reaches the persisted
  * path — provided it carries what `turnMetadataFromMessage` requires to accept
- * the envelope at all: `metadata.appstrate.turn` with a known engine and the
- * three step counters. `turn()` supplies those so each test states only the
- * error fields it is about.
+ * the envelope at all: `metadata.appstrate.turn` with the three step counters.
+ * `turn()` supplies those so each test states only the error fields it is about.
  */
 const message = (m: Record<string, unknown>) => m as never;
 

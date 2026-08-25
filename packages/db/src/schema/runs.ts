@@ -109,7 +109,7 @@ export const runs = pgTable(
     status: runStatusEnum("status").notNull().default("pending"),
     input: jsonb("input"),
     result: jsonb("result").$type<RunResultPayload>(),
-    // Terminal summary of the end-of-run `outputs/` sweep (#documents-hardening):
+    // Terminal summary of the end-of-run `outputs/` sweep (files-hardening):
     // how many deliverables the container published and which were LOST. NULL
     // until finalize writes it, and NULL forever for older containers that do
     // not report the summary. A `status: "partial"` value coexists with a

@@ -687,6 +687,10 @@ describe("Schedules API", () => {
         headers: authHeaders(ctx),
       });
       expect(res.status).toBe(404);
+      // Pinned text: the read and write routes share one 404 through
+      // `loadScheduleOr404`, and this is the wording all three answer.
+      const body = (await res.json()) as { detail: string };
+      expect(body.detail).toBe("Schedule 'sched_nonexistent' not found");
     });
 
     it("returns 404 for schedule belonging to another org", async () => {

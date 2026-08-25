@@ -26,7 +26,7 @@ import {
   recordChatUsage,
   resolveChatModel,
   checkUsageAllowed,
-} from "../../services/chat-subscription.ts";
+} from "../../services/chat-platform-services.ts";
 import {
   resolveChatAttachment,
   detachOrDeleteContainedFiles,

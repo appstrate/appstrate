@@ -142,11 +142,15 @@ interface BuildPlatformMcpToolsOptions {
   /** Turn deadline + step counter — bounds run_and_wait and feeds the budget note. */
   turnBudget: PiTurnBudget;
   /**
-   * Transport for the MCP handshake. Production passes the platform's in-process
-   * dispatch, so `initialize` / `notifications/initialized` / `tools/list` re-enter
-   * the Hono app directly instead of opening three real loopback TCP connections
-   * to this same process. Auth and RBAC still run on every hop — `dispatch` goes
-   * through the full pipeline — so this trades sockets for latency, not safety.
+   * Transport for every platform hop the tool layer makes. Production passes the
+   * platform's in-process dispatch, so the MCP handshake (`initialize` /
+   * `notifications/initialized` / `tools/list`) AND each `run_and_wait`'s launch
+   * POST + poll loop re-enter the Hono app directly instead of opening real
+   * loopback TCP connections to this same process. `run_and_wait` is the heavier
+   * half by far — the handshake is three hops per turn, a single run is one
+   * launch plus a poll per ~55 s of wait. Auth and RBAC still run on every hop —
+   * `dispatch` goes through the full pipeline — so this trades sockets for
+   * latency, not safety.
    *
    * Omitted (tests, and any caller without a dispatcher) → global `fetch`, i.e.
    * the previous behaviour.
@@ -209,6 +213,9 @@ export async function buildPlatformMcpTools(
       ? makeRunAndWaitExtension(tool, {
           origin: runOrigin,
           headers: opts.headers,
+          // Same seam as the handshake above, and this is the tool that needs
+          // it most: every `run_and_wait` is a launch POST plus a poll loop.
+          fetch: opts.fetch ?? fetch,
           writeChunk: opts.writeChunk,
           signal: opts.signal,
           turnBudget: opts.turnBudget,
@@ -271,6 +278,8 @@ function makeRunAndWaitExtension(
   ctx: {
     origin: string;
     headers: Record<string, string>;
+    /** Transport for the launch POST and the poll loop — see the option above. */
+    fetch: typeof fetch;
     writeChunk: (chunk: UIMessageChunk) => void;
     signal: AbortSignal;
     turnBudget: PiTurnBudget;
@@ -294,7 +303,7 @@ function makeRunAndWaitExtension(
         for await (const step of runAndWaitStepsWithinTurnBudget(params, {
           origin: ctx.origin,
           headers: ctx.headers,
-          fetch,
+          fetch: ctx.fetch,
           signal: execSignal ?? ctx.signal,
           budget: {
             turnDeadlineAt: ctx.turnBudget.deadlineAt,

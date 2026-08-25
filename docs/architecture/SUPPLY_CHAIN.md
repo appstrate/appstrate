@@ -35,12 +35,12 @@ the API process.
 
 The entire import surface, after this hardening, is **four barrel files**:
 
-| Package                | Barrel                             | Symbols consumed                                                                                                                                                                                                                                                                                                                                                           |
-| ---------------------- | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@appstrate/runner-pi` | `packages/runner-pi/src/pi-sdk.ts` | `Type`, `streamSimple`, `getBuiltinProviders` (values), plus `createAgentSession`, `DefaultResourceLoader`, `SessionManager`, `SettingsManager` through the `loadPiCodingAgentSdk()` dynamic loader; `ExtensionAPI`, `ExtensionFactory`, `ModelRuntime`, `Api`, `KnownApi`, `Model`, `Transport`, `Message`, `AgentSessionEvent`, `AssistantMessageEvent`, `Usage` (types) |
-| `runtime-pi` (image)   | `runtime-pi/pi-sdk.ts`             | `Type`, `streamSimple` (values); `ExtensionAPI`, `ExtensionFactory`, `Api`, `Model` (types)                                                                                                                                                                                                                                                                                |
-| `runtime-pi` (sidecar) | `runtime-pi/sidecar/pi-sdk.ts`     | `streamSimple` from the five `pi-ai/api/*` protocol entrypoints (values, wrapped as `streamBacking`); `Api`, `AssistantMessage`, `AssistantMessageEvent`, `AssistantMessageEventStream`, `Context`, `Model`, `SimpleStreamOptions`, `ThinkingLevel`, `ToolCall`, `Usage`, `PiMessagesEvent` (types)                                                                        |
-| `@appstrate/cli`       | `apps/cli/src/lib/pi-sdk.ts`       | `Api`, `Model` (types)                                                                                                                                                                                                                                                                                                                                                     |
+| Package                | Barrel                             | Symbols consumed                                                                                                                                                                                                                                                                                                                   |
+| ---------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@appstrate/runner-pi` | `packages/runner-pi/src/pi-sdk.ts` | `Type` (value), plus `createAgentSession`, `DefaultResourceLoader`, `SessionManager`, `SettingsManager` through the `loadPiCodingAgentSdk()` dynamic loader; `ExtensionAPI`, `ExtensionFactory`, `ModelRuntime`, `Api`, `KnownApi`, `Model`, `Transport`, `Message`, `AgentSessionEvent`, `AssistantMessageEvent`, `Usage` (types) |
+| `runtime-pi` (image)   | `runtime-pi/pi-sdk.ts`             | `Type` (value); `ExtensionAPI`, `ExtensionFactory`, `Api`, `Model` (types)                                                                                                                                                                                                                                                         |
+| `runtime-pi` (sidecar) | `runtime-pi/sidecar/pi-sdk.ts`     | `streamSimple` from the five `pi-ai/api/*` protocol entrypoints (values, wrapped as `streamBacking`); `Api`, `AssistantMessage`, `AssistantMessageEvent`, `AssistantMessageEventStream`, `Context`, `Model`, `SimpleStreamOptions`, `ThinkingLevel`, `ToolCall`, `Usage`, `PiMessagesEvent` (types)                                |
+| `@appstrate/cli`       | `apps/cli/src/lib/pi-sdk.ts`       | `Api`, `Model` (types)                                                                                                                                                                                                                                                                                                             |
 
 Every other module imports these symbols from its package-local barrel, never
 from the SDK directly.
@@ -63,9 +63,10 @@ single-vendor dependency:
 grep -rn '"@earendil-works/pi-' --include=package.json . | grep -v node_modules
 ```
 
-The manifests carrying the pin: `package.json` (root), `apps/api`,
-`apps/cli`, `runtime-pi`, `packages/runner-pi` (deps + peer + dev),
-`packages/afps-runtime` (peer + dev). Combined with the committed `bun.lock`
+The seven manifests carrying the pin: `package.json` (root), `apps/api`,
+`apps/cli`, `runtime-pi`, `runtime-pi/sidecar`, `packages/runner-pi`
+(peer + dev), `packages/afps-runtime` (peer, optional). Combined with the
+committed `bun.lock`
 (integrity hashes), this blocks **silent minor/patch bumps** of a single-author
 dependency — every version change is an explicit, reviewable diff.
 

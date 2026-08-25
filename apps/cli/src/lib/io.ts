@@ -14,18 +14,22 @@
  *
  * **How far it actually reaches.** A command takes it as a trailing
  * `io: CommandIO = DEFAULT_IO` parameter (`commands/org.ts` is the reference
- * shape), and the `lib/ui.ts` wrappers each forward one. Thirteen of the
- * seventeen command modules do; four deliberately do not, and the seam is not
+ * shape), and the `lib/ui.ts` wrappers each forward one. Twelve of the sixteen
+ * modules in `commands/*.ts` do; four deliberately do not, and the seam is not
  * a claim about them:
  *
- *   - `commands/run.ts` + `commands/run/*` own a *different* output
- *     architecture. `attachStdoutBridge` reassigns the process-global
+ *   - `commands/run.ts` owns a *different* output architecture.
+ *     `attachStdoutBridge` reassigns the process-global
  *     `process.stdout.write` on purpose — that is how canonical tool events
  *     emitted as JSON lines get aspirated — and the sinks take explicit
  *     `writeStdout` / `writeStderr` writers so their own emissions can bypass
  *     that interceptor via the bridge's `writeRaw` (see the docstring in
  *     `commands/run/sink.ts`). A `CommandIO` layered on top would be a second
- *     seam over the same bytes, not a unification.
+ *     seam over the same bytes, not a unification. Its `commands/run/*`
+ *     helpers are not covered by that reasoning one way or the other:
+ *     `run/input.ts` takes an optional `io?: CommandIO` because
+ *     `validateLocalInput` exits the process and a test asserting that needs
+ *     its own sink.
  *   - `commands/runner.ts` and `commands/lifecycle.ts` are host-level
  *     installers whose user-visible output already goes through `lib/ui.ts`;
  *     nothing injects a sink into them today, so they are reachable the day a

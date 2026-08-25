@@ -212,7 +212,7 @@ jobs:
 
   runtime-e2e:
     name: Runtime container e2e
-    # The runtime-pi document-provisioning spin only reproduces in the BUNDLED
+    # The runtime-pi file-provisioning spin only reproduces in the BUNDLED
     # image, so `runtime-pi/test/provision-container.e2e.test.ts` needs the real
     # `appstrate-pi` image built — which the fast `unit` job does not do (it
     # would blow the 5-min budget), so that test SKIPS there. This job builds

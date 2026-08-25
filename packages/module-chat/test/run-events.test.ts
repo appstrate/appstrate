@@ -576,10 +576,26 @@ describe("shouldRaiseSweepDone", () => {
 /**
  * The two guards that survive as source-text greps. There is NO DOM harness in
  * this repo (no jsdom, no happy-dom, no testing-library), so `useRunLogStream`
- * cannot be instantiated and these two facts have no other observer. Every
- * POSITIVE assertion this block used to carry is gone: asserting that a source
- * file contains `await readProducedFiles();` passed for the defect above and
- * failed on a rename — the opposite of coverage.
+ * cannot be instantiated and these two facts have no other observer.
+ *
+ * Two different rules apply below, because the two cases are not the same kind
+ * of assertion.
+ *
+ * A NEGATIVE grep ("this string is absent") is the honest one, and it is all
+ * the first case uses: it fails on the thing coming back and cannot pass by
+ * luck of formatting.
+ *
+ * A POSITIVE grep is admissible only when it claims REACHABILITY and nothing
+ * more, with the invariant itself asserted directly beside it — which is the
+ * exact shape of the second case: the `toContain` says only "the hook calls the
+ * shared path builder", and what that builder must produce is then asserted on
+ * its own return value, two lines down. Positives that tried to carry the
+ * invariant themselves are gone, in both the species this suite has seen (see
+ * the `autoPresentFile` block above, where both were demonstrated): one pinned a
+ * whole unwrapped call expression and failed on a prettier rewrap, while a call
+ * whose result was discarded would have passed it; the other was already
+ * satisfied by an unrelated identifier in the same file, so the defect it
+ * existed to catch left the suite green.
  */
 describe("useRunLogStream source guards", () => {
   const hook = readFileSync(

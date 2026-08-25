@@ -64,6 +64,20 @@ function scheduleInputInvalid(errors: { field: string; message: string }[]): Api
   );
 }
 
+/**
+ * Load a schedule in the caller's scope, or 404 with the message the three
+ * `/schedules/:id` routes have always answered. `viewer` is passed only by the
+ * read route, whose visibility narrows to the actor's own schedules; the write
+ * routes are admin-scoped and deliberately look up the whole application.
+ */
+async function loadScheduleOr404(id: string, scope: AppScope, viewer?: Actor) {
+  const schedule = await getSchedule(id, scope, viewer);
+  if (!schedule) {
+    throw notFound(`Schedule '${id}' not found`);
+  }
+  return schedule;
+}
+
 // #738: schedule execution identity, chosen by an admin from the form.
 // XOR — exactly one of user_id / end_user_id. Omitted at create → defaults to
 // the caller (`getActor`). Omitted at update → actor left untouched. The actor
@@ -297,10 +311,7 @@ export function createSchedulesRouter() {
   // GET /api/schedules/:id — get a single schedule
   router.get("/schedules/:id", requirePermission("schedules", "read"), async (c) => {
     const id = c.req.param("id")!;
-    const schedule = await getSchedule(id, getAppScope(c), getActor(c));
-    if (!schedule) {
-      throw notFound(`Schedule '${id}' not found`);
-    }
+    const schedule = await loadScheduleOr404(id, getAppScope(c), getActor(c));
     return c.json(schedule);
   });
 
@@ -308,10 +319,7 @@ export function createSchedulesRouter() {
   router.put("/schedules/:id", requirePermission("schedules", "write"), async (c) => {
     const id = c.req.param("id")!;
     const scope = getAppScope(c);
-    const existing = await getSchedule(id, scope);
-    if (!existing) {
-      throw notFound(`Schedule '${id}' not found`);
-    }
+    const existing = await loadScheduleOr404(id, scope);
 
     const data = await readJsonBody(c, updateScheduleSchema);
 
@@ -462,10 +470,7 @@ export function createSchedulesRouter() {
   router.delete("/schedules/:id", requirePermission("schedules", "delete"), async (c) => {
     const id = c.req.param("id")!;
     const scope = getAppScope(c);
-    const existing = await getSchedule(id, scope);
-    if (!existing) {
-      throw notFound(`Schedule '${id}' not found`);
-    }
+    await loadScheduleOr404(id, scope);
     await deleteSchedule(scope, id);
     await recordAuditFromContext(c, {
       action: "schedule.deleted",

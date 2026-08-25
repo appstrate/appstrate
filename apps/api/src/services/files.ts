@@ -1214,16 +1214,16 @@ const fileSelect = {
 export async function getFileForActor(
   scope: AppScope,
   actor: Actor,
-  docId: string,
+  fileId: string,
   permissions: ReadonlySet<string> = new Set(),
 ): Promise<ResolvedFile | null> {
-  if (!FILE_ID_RE.test(docId)) return null;
+  if (!FILE_ID_RE.test(fileId)) return null;
   const [row] = await db
     .select(fileSelect)
     .from(files)
     .where(
       and(
-        eq(files.id, docId),
+        eq(files.id, fileId),
         eq(files.orgId, scope.orgId),
         eq(files.applicationId, scope.applicationId),
       ),
@@ -1281,12 +1281,12 @@ export async function getFileForActor(
  * token whose tenant does not match the stored row resolves to null (→ 404).
  * Returns null for a malformed id or a miss.
  */
-export async function loadFileForPreview(orgId: string, docId: string): Promise<FileRow | null> {
-  if (!FILE_ID_RE.test(docId)) return null;
+export async function loadFileForPreview(orgId: string, fileId: string): Promise<FileRow | null> {
+  if (!FILE_ID_RE.test(fileId)) return null;
   const [row] = await db
     .select(fileSelect)
     .from(files)
-    .where(and(eq(files.id, docId), eq(files.orgId, orgId)))
+    .where(and(eq(files.id, fileId), eq(files.orgId, orgId)))
     .limit(1);
   return (row as FileRow) ?? null;
 }
@@ -1311,10 +1311,10 @@ export async function resolveChatAttachment(
   const actor: Actor = { type: "user", id: request.userId };
 
   if (isFileUri(request.uri)) {
-    const docId = parseFileUri(request.uri);
-    if (!docId) throw invalidRequest(`Malformed file URI '${request.uri}'`);
-    const resolved = await getFileForActor(scope, actor, docId);
-    if (!resolved) throw notFound(`File '${docId}' not found`);
+    const fileId = parseFileUri(request.uri);
+    if (!fileId) throw invalidRequest(`Malformed file URI '${request.uri}'`);
+    const resolved = await getFileForActor(scope, actor, fileId);
+    if (!resolved) throw notFound(`File '${fileId}' not found`);
     const { row } = resolved;
     return { uri: fileUri(row.id), name: row.name, mime: row.mime, size: row.size };
   }
@@ -1682,7 +1682,7 @@ export async function detachOrDeleteContainedFiles(
  * `files` lock while waiting on an org lock that an org/application cascade
  * (which locks org → files) already holds, and Postgres kills one of the two.
  */
-export async function deleteFile(scope: AppScope, docId: string): Promise<void> {
+export async function deleteFile(scope: AppScope, fileId: string): Promise<void> {
   await db.transaction(async (tx) => {
     await tx
       .select({ id: organizations.id })
@@ -1696,19 +1696,19 @@ export async function deleteFile(scope: AppScope, docId: string): Promise<void> 
       .from(files)
       .where(
         and(
-          eq(files.id, docId),
+          eq(files.id, fileId),
           eq(files.orgId, scope.orgId),
           eq(files.applicationId, scope.applicationId),
         ),
       )
       .limit(1)
       .for("update");
-    if (!row) throw notFound(`File '${docId}' not found`);
+    if (!row) throw notFound(`File '${fileId}' not found`);
 
     const [liveLink] = await tx
       .select({ fileId: fileLinks.fileId })
       .from(fileLinks)
-      .where(eq(fileLinks.fileId, docId))
+      .where(eq(fileLinks.fileId, fileId))
       .limit(1);
     if (liveLink) {
       throw conflict(
@@ -1721,13 +1721,13 @@ export async function deleteFile(scope: AppScope, docId: string): Promise<void> 
       .delete(files)
       .where(
         and(
-          eq(files.id, docId),
+          eq(files.id, fileId),
           eq(files.orgId, scope.orgId),
           eq(files.applicationId, scope.applicationId),
         ),
       )
       .returning({ size: files.size });
-    if (deleted.length === 0) throw notFound(`File '${docId}' not found`);
+    if (deleted.length === 0) throw notFound(`File '${fileId}' not found`);
     await decrementOrgFileBytes(tx, scope.orgId, deleted[0]!.size);
 
     const job = storageKeyToDeletionJob(row.storageKey, "file_deleted");
@@ -1746,19 +1746,19 @@ export async function deleteFile(scope: AppScope, docId: string): Promise<void> 
  * Org+app scoped; authorization (creator OR `files:delete`) is enforced by
  * the caller (same rule as delete). Returns the updated row.
  */
-export async function clearFileExpiry(scope: AppScope, docId: string): Promise<FileRow> {
+export async function clearFileExpiry(scope: AppScope, fileId: string): Promise<FileRow> {
   const [row] = await db
     .update(files)
     .set({ expiresAt: null })
     .where(
       and(
-        eq(files.id, docId),
+        eq(files.id, fileId),
         eq(files.orgId, scope.orgId),
         eq(files.applicationId, scope.applicationId),
       ),
     )
     .returning(fileSelect);
-  if (!row) throw notFound(`File '${docId}' not found`);
+  if (!row) throw notFound(`File '${fileId}' not found`);
   return row as FileRow;
 }
 
