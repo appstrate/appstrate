@@ -73,15 +73,40 @@
 -- to COMMIT and drizzle commits the batch as a whole, so that write block lasts
 -- the rest of the batch, not just this build.
 --
--- Fenced with `SET LOCAL lock_timeout = '3s'`, reset to DEFAULT after — same
+-- ═══ THE TWO FENCES ═══
+--
+-- `lock_timeout` alone is not "the fence", whatever an earlier revision of this
+-- header called it. It bounds ACQUISITION — how long the build waits for SHARE
+-- on `notifications` — so a build that takes its lock in a millisecond and then
+-- scans and sorts for twenty minutes never trips it. That is the confusion 0047
+-- spends six lines debunking, and it matters here more than in most files:
+-- `notifications` is a fan-out table with NO retention policy, so the size of
+-- the scan is whatever history has accumulated.
+--
+-- So there are two, both `SET LOCAL`, both reset to DEFAULT after — same
 -- instrument as 0039/0041/0047-0049; see 0039's header for `SET LOCAL` rather
--- than `SET`. On expiry the statement errors and aborts the single transaction
--- wrapping the batch: `migrate` throws, boot fails, the deploy fails its health
--- gate. Right trade for a non-urgent index (fail fast, retry), but a failed
--- deploy, not a silent skip.
+-- than `SET`:
+--
+--   lock_timeout      = '3s'    bounds ACQUISITION
+--   statement_timeout = '60s'   bounds EXECUTION
+--
+-- 60s is 0047's budget. One btree build over four equality columns with no
+-- `created_at` tail is a scan plus a sort; a minute is generous for any
+-- `notifications` anyone has reasoned about, and a build that exceeds it means
+-- the table is far past that size — in which case blocking the fan-out write
+-- path for the rest of the batch is not a trade worth making silently, and the
+-- deploy should stop.
+--
+-- Neither fence bounds the HOLD; only COMMIT does, and the batch commits as a
+-- whole. On expiry of either, the statement errors and aborts the single
+-- transaction wrapping the batch: `migrate` throws, boot fails, the deploy
+-- fails its health gate. Right trade for a non-urgent index (fail fast, retry),
+-- but a failed deploy, not a silent skip.
 --
 -- `IF NOT EXISTS` so a partially-applied environment converges — an index that
 -- is already present IS the intended end state (same reasoning as 0041).
 SET LOCAL lock_timeout = '3s';--> statement-breakpoint
+SET LOCAL statement_timeout = '60s';--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_notifications_recipient" ON "notifications" USING btree ("org_id","recipient_type","recipient_id","application_id");--> statement-breakpoint
+SET LOCAL statement_timeout = DEFAULT;--> statement-breakpoint
 SET LOCAL lock_timeout = DEFAULT;

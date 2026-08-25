@@ -113,12 +113,56 @@
 -- (append-only, no retention sweep); `uploads` is GC'd and small.
 --
 -- Locks are held to COMMIT and drizzle commits the whole batch at once, so
--- every table here stays locked until the last migration in the batch commits.
--- Fenced with `SET LOCAL lock_timeout = '3s'`, reset to DEFAULT after — same
+-- every table here stays locked until the last migration in the batch commits —
+-- and the tables 0048 and 0049 locked earlier (`"user"`, `runs`,
+-- `organizations`, `api_keys`, `applications`) are still ACCESS EXCLUSIVE while
+-- these statements run, which is what makes their duration everyone's problem
+-- and not just this file's.
+--
+-- ═══ THE TWO FENCES ═══
+--
+-- `lock_timeout` alone is not "the fence", whatever an earlier revision of this
+-- header called it. It bounds ACQUISITION — how long a statement waits for a
+-- lock it cannot get — so a table rewrite that acquires ACCESS EXCLUSIVE in a
+-- millisecond and then runs for half an hour never trips it. That is the
+-- confusion 0047 spends six lines debunking, and this file has the batch's
+-- single most expensive statement in it.
+--
+-- So there are two, both `SET LOCAL`, both reset to DEFAULT after — same
 -- instrument as 0039/0041/0047-0050; see 0039's header for `SET LOCAL` rather
--- than `SET`. On expiry the statement errors and aborts the single transaction
--- wrapping the batch: `migrate` throws, boot fails, the deploy fails its health
--- gate. Right trade (fail fast, retry), but a failed deploy, not a silent skip.
+-- than `SET`:
+--
+--   lock_timeout      = '3s'     bounds ACQUISITION
+--   statement_timeout = '300s'   bounds EXECUTION
+--
+-- WHY 300s AND NOT 0047's 60s. The binding statement is
+-- `ALTER TABLE "uploads" ALTER COLUMN "size" SET DATA TYPE bigint`. int4 and
+-- int8 are different widths, so this is a FULL TABLE REWRITE — every tuple
+-- copied into a new heap and every index on `uploads` rebuilt — and it is the
+-- only rewrite in this file. 0047 can afford 60s for its rewrites because it
+-- states an explicit pre-flight gate to go with them (1 GiB of total relation
+-- size on any table it converts: above that, do not ship). This file states no
+-- such threshold for `uploads`, so a one-minute cap would be a number with
+-- nothing behind it — tight enough to fail a deploy on a table that is merely
+-- bigger than someone guessed. 300s is the honest version: wide enough that a
+-- normally-sized `uploads` (GC'd, capped at 100 MiB per row's worth of payload
+-- elsewhere) cannot trip it, narrow enough that an unbounded hold on the whole
+-- batch becomes a failed deploy in five minutes rather than an outage.
+--
+-- The same 300s necessarily covers the three CHECK validations and the
+-- `SET NOT NULL` promotion, which are scans rather than rewrites — so their
+-- fence is looser than 0047's. That loosening is bounded by 0047 itself: it
+-- REWRITES `webhook_deliveries`, the largest table either file touches, under a
+-- 60s cap earlier in the SAME batch, and a rewrite is strictly more work than
+-- the sequential scan a CHECK costs on the same rows. If `webhook_deliveries`
+-- fits 0047's budget, its CHECK here is nowhere near this one; if it does not,
+-- the deploy already failed two migrations ago.
+--
+-- Neither fence bounds the HOLD; only COMMIT does. Both budgets are per
+-- STATEMENT, not per file. On expiry of either, the statement errors and aborts
+-- the single transaction wrapping the batch: `migrate` throws, boot fails, the
+-- deploy fails its health gate. Right trade (fail fast, retry), but a failed
+-- deploy, not a silent skip.
 --
 -- FIVE of the seven statements below carry a guard: a `pg_constraint` lookup
 -- for each of the three CHECKs, `pg_attribute.attnotnull` for the NOT NULL
@@ -138,6 +182,7 @@
 -- file runs exactly once. Converging on replay is a property of THIS migration,
 -- not of the deploy it rides in.
 SET LOCAL lock_timeout = '3s';--> statement-breakpoint
+SET LOCAL statement_timeout = '300s';--> statement-breakpoint
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -185,4 +230,5 @@ BEGIN
 END $$;--> statement-breakpoint
 ALTER TABLE "package_schedules" ALTER COLUMN "timezone" SET DEFAULT 'UTC';--> statement-breakpoint
 ALTER TABLE "uploads" ALTER COLUMN "size" SET DATA TYPE bigint;--> statement-breakpoint
+SET LOCAL statement_timeout = DEFAULT;--> statement-breakpoint
 SET LOCAL lock_timeout = DEFAULT;

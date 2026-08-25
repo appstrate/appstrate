@@ -75,9 +75,24 @@
 --   WHERE d.refobjid = 'public.credential_proxy_usage'::regclass
 --     AND dv.relname <> 'credential_proxy_usage';
 --
+--   -- 4. THE BLAST RADIUS. Query 3 enumerates the INBOUND foreign keys — who
+--   --    points AT this table — and that is the gate. This one enumerates the
+--   --    OUTBOUND ones, which is a different question and the one LOCK AND
+--   --    COST below turns on: every table listed here is taken ACCESS
+--   --    EXCLUSIVE by the DROP, because dropping a foreign key has to remove
+--   --    the action triggers it installed on the REFERENCED side. Without this
+--   --    query the pre-flight surfaces none of that.
+--   SELECT con.conname, con.confrelid::regclass AS referenced_table_locked
+--   FROM pg_constraint con
+--   WHERE con.conrelid = 'public.credential_proxy_usage'::regclass
+--     AND con.contype = 'f'
+--   ORDER BY 2;
+--
 -- If query 1 returns no row the table is already gone and `IF EXISTS` makes
 -- this a no-op; if 3 returns anything, STOP — something out of tree depends on
--- it and this migration must not ship.
+-- it and this migration must not ship. Query 4 should return the five rows
+-- named below; a sixth means an out-of-tree foreign key was added and the lock
+-- set this header states is incomplete for that database.
 --
 -- ═══ NO `CASCADE`, DELIBERATELY ═══
 --
@@ -94,19 +109,63 @@
 --
 -- ═══ LOCK AND COST ═══
 --
--- `DROP TABLE` takes ACCESS EXCLUSIVE on `credential_proxy_usage` only. It
--- takes NO lock on `organizations` / `api_keys` / `user` / `runs` /
--- `applications` — those are the REFERENCED sides, and dropping the referencing
--- table only removes catalog rows pointing at them. So the blast radius is one
--- table that nothing reads.
+-- `DROP TABLE` takes ACCESS EXCLUSIVE on `credential_proxy_usage` — AND on
+-- every table its five outbound foreign keys REFERENCE. That is the half worth
+-- reading twice, because the intuitive answer is the opposite one, and an
+-- earlier revision of this header asserted the opposite one outright: that the
+-- referenced sides take NO lock, so "the blast radius is one table that nothing
+-- reads". That was false, and for an operator planning a deploy window it was
+-- false in the dangerous direction.
 --
--- Held to COMMIT like everything else in the batch (drizzle wraps all pending
--- migrations in ONE `session.transaction(...)`), and fenced with
--- `SET LOCAL lock_timeout = '3s'` reset to DEFAULT after — same instrument as
--- 0039/0041/0047/0048; see 0039's header for `SET LOCAL` rather than `SET`. On
--- expiry the statement errors and aborts that single transaction: `migrate`
--- throws, boot fails, the deploy fails its health gate. Right trade (fail fast,
--- retry), but a failed deploy, not a silent skip.
+-- A foreign key is implemented as triggers on BOTH sides: the check triggers
+-- sit on the referencing table, and the ON DELETE / ON UPDATE action triggers
+-- sit on the REFERENCED one. Dropping the constraint therefore has to drop
+-- triggers on the referenced side too, and Postgres's `RemoveConstraintById`
+-- (`src/backend/catalog/pg_constraint.c`) opens the referenced relation with
+-- `AccessExclusiveLock`, under the source comment "Must match lock taken by
+-- RemoveTriggerById". Trigger CREATION was relaxed to SHARE ROW EXCLUSIVE in
+-- 9.5; trigger REMOVAL never was. The referenced side is locked at the
+-- strongest mode there is, exactly as if it were being rewritten.
+--
+-- The five, confirmed against `meta/0048_snapshot.json` (and re-confirmable on
+-- the target with pre-flight query 4 above):
+--
+--   credential_proxy_usage.org_id         -> organizations
+--   credential_proxy_usage.api_key_id     -> api_keys
+--   credential_proxy_usage.user_id        -> "user"
+--   credential_proxy_usage.run_id         -> runs
+--   credential_proxy_usage.application_id -> applications
+--
+-- `organizations`, `api_keys`, `"user"`, `runs` and `applications` are the
+-- busiest tables in the schema — `"user"` and `api_keys` are on the
+-- authentication path of essentially every request, `runs` and `organizations`
+-- on nearly every read. ACCESS EXCLUSIVE conflicts with every lock mode,
+-- readers included, and each request queues AHEAD of everything behind it on
+-- that table.
+--
+-- AND THE LOCKS ARE HELD TO BATCH COMMIT, not released when this statement
+-- finishes: drizzle's pg dialect wraps every pending migration in ONE
+-- `session.transaction(...)`. So all five stay ACCESS EXCLUSIVE through the
+-- entire tail of the batch — 0050's index build on `notifications`, 0051's
+-- CHECK scan of `webhook_deliveries` plus its `package_schedules` promotion and
+-- its full `uploads` rewrite, and 0052's index build on `chat_messages`. The
+-- outage on `"user"` / `runs` / `organizations` / `api_keys` / `applications`
+-- is the SUM of everything after this line, not the duration of the DROP.
+--
+-- 0048 has already taken ACCESS EXCLUSIVE on `"user"` for the same
+-- trigger-removal reason and still holds it, so on that one table this file
+-- adds nothing. The other four are this file's own contribution to the hold.
+--
+-- Fenced with `SET LOCAL lock_timeout = '3s'`, reset to DEFAULT after — same
+-- instrument as 0039/0041/0047/0048; see 0039's header for `SET LOCAL` rather
+-- than `SET`. That fence bounds ACQUISITION only — how long the DROP waits for
+-- the six locks — not execution; no `statement_timeout` sits beside it here
+-- (unlike 0047/0048/0050-0052) because `DROP TABLE` is a catalog delete plus an
+-- unlink, with no scan, no sort and no rewrite, so there is no unbounded
+-- execution for one to bound. On expiry the statement errors and aborts that
+-- single transaction: `migrate` throws, boot fails, the deploy fails its health
+-- gate. Right trade (fail fast, retry), but a failed deploy, not a silent
+-- skip.
 --
 -- ═══ FORWARD-ONLY, AND THE DATA IS NOT COMING BACK ═══
 --

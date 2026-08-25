@@ -53,15 +53,37 @@
 -- COMMIT and drizzle commits the batch as a whole, so that write block lasts
 -- the rest of the batch, not just this build.
 --
--- Fenced with `SET LOCAL lock_timeout = '3s'`, reset to DEFAULT after — same
+-- ═══ THE TWO FENCES ═══
+--
+-- `lock_timeout` alone is not "the fence", whatever an earlier revision of this
+-- header called it. It bounds ACQUISITION — how long the build waits for SHARE
+-- on `chat_messages` — so a build that takes its lock in a millisecond and then
+-- scans and sorts for twenty minutes never trips it: the confusion 0047 spends
+-- six lines debunking. `chat_messages` has no retention policy either, so the
+-- scan is as large as the accumulated chat history.
+--
+-- So there are two, both `SET LOCAL`, both reset to DEFAULT after — same
 -- instrument as 0039/0041/0047-0051; see 0039's header for `SET LOCAL` rather
--- than `SET`. On expiry the statement errors and aborts the single transaction
--- wrapping the batch: `migrate` throws, boot fails, the deploy fails its health
--- gate. Right trade for a non-urgent index (fail fast, retry), but a failed
--- deploy, not a silent skip.
+-- than `SET`:
+--
+--   lock_timeout      = '3s'    bounds ACQUISITION
+--   statement_timeout = '60s'   bounds EXECUTION
+--
+-- 60s is 0047's budget, and one two-column btree build is the cheapest work in
+-- the batch. A build that exceeds a minute means `chat_messages` is far past
+-- the size this index was reasoned about at, and blocking message writes for
+-- the rest of the batch stops being a trade worth making silently.
+--
+-- Neither fence bounds the HOLD; only COMMIT does, and the batch commits as a
+-- whole. On expiry of either, the statement errors and aborts the single
+-- transaction wrapping the batch: `migrate` throws, boot fails, the deploy
+-- fails its health gate. Right trade for a non-urgent index (fail fast, retry),
+-- but a failed deploy, not a silent skip.
 --
 -- `IF NOT EXISTS` so a partially-applied environment converges — an index that
 -- is already present IS the intended end state (same reasoning as 0041).
 SET LOCAL lock_timeout = '3s';--> statement-breakpoint
+SET LOCAL statement_timeout = '60s';--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_chat_messages_session_seq" ON "chat_messages" USING btree ("session_id","seq");--> statement-breakpoint
+SET LOCAL statement_timeout = DEFAULT;--> statement-breakpoint
 SET LOCAL lock_timeout = DEFAULT;

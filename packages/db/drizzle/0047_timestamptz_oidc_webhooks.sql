@@ -88,15 +88,55 @@
 -- not render `now()` in UTC AND at least one of the eleven tables holding a
 -- `DEFAULT now()` column already has rows.
 --
--- It measures the property directly — `now()::timestamp - (now() AT TIME ZONE
--- 'UTC')` — rather than matching the GUC's NAME against a list, because the
--- name is not a reliable spelling of the offset. PGlite (tiers 0-1) derives its
--- `TimeZone` from the host and reports it as a fixed offset zone: `Etc/GMT0`
--- for a UTC host, `Etc/GMT-1` for `Europe/Paris`, `Etc/GMT-9` for
--- `Asia/Tokyo`, `Etc/GMT+5` for `America/New_York` (measured, PGlite 0.5.4). An
--- allowlist of `('UTC','Etc/UTC')` would therefore reject every PGlite install
--- including the correctly-configured ones; the offset test accepts `Etc/GMT0`
--- and rejects the other three.
+-- It measures the property directly — the offset between a wall clock rendered
+-- in the session's `TimeZone` and the same instant rendered in UTC — rather
+-- than matching the GUC's NAME against a list, because the name is not a
+-- reliable spelling of the offset. PGlite (tiers 0-1) derives its `TimeZone`
+-- from the host and reports it as a fixed offset zone: `Etc/GMT0` for a UTC
+-- host, `Etc/GMT-1` for `Europe/Paris`, `Etc/GMT-9` for `Asia/Tokyo`,
+-- `Etc/GMT+5` for `America/New_York` (measured, PGlite 0.5.4). An allowlist of
+-- `('UTC','Etc/UTC')` would therefore reject every PGlite install including the
+-- correctly-configured ones; the offset test accepts `Etc/GMT0` and rejects the
+-- other three.
+--
+-- IT PROBES TWO INSTANTS OF THE CURRENT YEAR, AND BOTH HALVES OF THAT SENTENCE
+-- ARE LOAD-BEARING. A zone's offset is a function of two variables — WHERE in
+-- the year you look, and WHICH year's rules you look under — and getting either
+-- one wrong turns the guard into a coin flip that reads as a pass.
+--
+-- THE SEASONAL AXIS. Reading the offset at `now()` — the shape this guard
+-- shipped with — makes the verdict depend on the CALENDAR rather than on the
+-- zone. `Europe/London`,
+-- `Europe/Dublin`, `Europe/Lisbon` and `Atlantic/Canary` sit at +00:00 from
+-- late October to late March and +01:00 the rest of the year. A deploy in
+-- January measures `00:00:00`, returns early, and lets all 30 conversions run
+-- with the guard having asserted NOTHING — while the rows written during BST,
+-- stored an hour ahead of UTC, are re-read as UTC and moved permanently late,
+-- with nothing left to reconstruct them from. The mirror case is a spurious
+-- refusal: the same server in July measures `01:00:00` and refuses a database
+-- where every row is fine. Same server, same data, opposite verdict decided by
+-- the month.
+--
+-- THE HISTORICAL AXIS, which is the same defect reached through a different
+-- door. Probing two seasons closes the first one — but only for the year the
+-- probes are pinned to. `AT TIME ZONE` resolves against the zone's rules AS OF
+-- THE INSTANT PROBED, so a probe hardcoded to, say, year 2000 asks what the
+-- zone did in 2000, which is not what it does at deploy time. Zones are
+-- political and they change: `Africa/Casablanca` was UTC+0 year-round until
+-- 2008, ran seasonal DST through the 2010s, and has been permanently UTC+1
+-- since 2018. Probed at 2000 it reads 00:00:00 on BOTH sides, returns early,
+-- and lets all 30 conversions run on a server that is an hour off today —
+-- character for character the same silent corruption, just reached from the
+-- other axis. (Measured in PGlite: Casablanca reads 00:00:00/00:00:00 at year
+-- 2000 and 01:00:00/01:00:00 at the current year.)
+--
+-- So the guard derives the probe YEAR from `now()` and builds a mid-WINTER and
+-- a mid-SUMMER instant inside it, returning early only if BOTH read zero. What
+-- comes from the clock is the year to ask about; the offset itself is never
+-- read at `now()`. A zone that observes DST fails closed all year round instead
+-- of flipping, a zone whose rules changed is judged on its CURRENT rules, and a
+-- genuinely fixed zero-offset zone (`UTC`, `Etc/UTC`, PGlite's `Etc/GMT0`)
+-- reads zero at both probes in every year and passes.
 --
 -- The row condition is what keeps the guard from being a blanket ban on non-UTC
 -- development machines. A fresh install replays 0000-0052 in one batch with
@@ -110,7 +150,10 @@
 -- shift of stored instants into a failed deploy that names the offset and the
 -- populated tables: the same trade the `lock_timeout` fence already makes below.
 --
--- WHAT IT DOES NOT PROVE. It reads the offset NOW; the rows were written THEN.
+-- WHAT IT DOES NOT PROVE. It reads the zone as configured NOW; the rows were
+-- written under whatever zone was configured THEN. Probing two instants closes
+-- the calendar hole, not this one — no expression can recover a write-time
+-- offset the schema never recorded.
 -- A server since switched to UTC passes the guard while its older
 -- `DEFAULT now()` rows stay skewed, and setting `TimeZone` to UTC in response
 -- to the error silences the check without correcting one row. The error message
@@ -200,10 +243,14 @@
 --
 -- `packages/db/test/migration-0047-utc-guard.test.ts` extracts the guard block
 -- from THIS file and replays it against a throwaway in-memory PGlite under
--- three conditions — zero offset with rows present, non-zero offset with the
--- tables empty, and non-zero offset with a row present — asserting no-op,
--- no-op, raise. It reads the shipped text rather than a copy of it, so the
--- guard cannot be weakened here and stay green there.
+-- seven conditions — zero offset with rows present, non-zero offset with the
+-- tables empty, non-zero offset with a row present, `Europe/London` (the
+-- seasonal hole, where a one-instant probe reads zero all winter) both empty
+-- and populated, `Africa/Casablanca` (the historical hole, where a probe pinned
+-- to year 2000 reads zero on both sides) populated, and `Etc/GMT0` populated as
+-- the control that neither correction became a blanket ban. It reads the
+-- shipped text rather than a copy of it, so the guard cannot be weakened here
+-- and stay green there.
 --
 -- No index, primary key or check constraint references any of these 30 columns
 -- (verified against `meta/0046_snapshot.json`), and the schema declares no
@@ -213,18 +260,42 @@ SET LOCAL statement_timeout = '60s';--> statement-breakpoint
 DO $$
 DECLARE
   server_tz text := current_setting('TimeZone');
-  rendered_offset interval := now()::timestamp - (now() AT TIME ZONE 'UTC');
+  -- Two probes, one per side of the DST year, in the year the deploy is
+  -- happening. Both axes matter and both have bitten this guard:
+  --
+  --   SEASONAL — probing a single instant (`now()`) reads 00:00:00 on
+  --   Europe/London every winter and 01:00:00 every summer, so the verdict
+  --   would depend on the deploy DATE rather than on the zone.
+  --
+  --   HISTORICAL — pinning the probes to a hardcoded year reads that year's
+  --   RULES, not today's. Africa/Casablanca was UTC+0 year-round until 2008 and
+  --   has been permanently UTC+1 since 2018: probed at year 2000 it reads zero
+  --   on both sides and waves the conversion through on a server that is an
+  --   hour off today.
+  --
+  -- Hence `extract(year from now())` — the YEAR comes from the clock, the
+  -- OFFSET never does. Both must be zero for `AT TIME ZONE 'UTC'` to be correct
+  -- for the `DEFAULT now()` population.
+  probe_year int := extract(year from now())::int;
+  winter_probe timestamptz := make_timestamptz(probe_year, 1, 15, 12, 0, 0, 'UTC');
+  summer_probe timestamptz := make_timestamptz(probe_year, 7, 15, 12, 0, 0, 'UTC');
+  winter_offset interval :=
+    (winter_probe AT TIME ZONE server_tz) - (winter_probe AT TIME ZONE 'UTC');
+  summer_offset interval :=
+    (summer_probe AT TIME ZONE server_tz) - (summer_probe AT TIME ZONE 'UTC');
   candidate text;
   has_rows boolean;
   populated text[] := ARRAY[]::text[];
 BEGIN
-  -- Zero offset: `now()::timestamp` already renders in UTC, so the `USING`
-  -- clause below is correct for BOTH writer populations. Nothing to check.
-  IF rendered_offset = interval '0' THEN
+  -- Zero on BOTH sides of the DST year: the zone is a genuine fixed UTC, so
+  -- `now()::timestamp` always rendered in UTC and the `USING` clause below is
+  -- correct for BOTH writer populations. Nothing to check.
+  IF winter_offset = interval '0' AND summer_offset = interval '0' THEN
     RETURN;
   END IF;
 
-  -- Non-zero offset. Only rows already written through it can be moved, so the
+  -- Non-zero on at least one side. Only rows already written through such an
+  -- offset can be moved, so the
   -- eleven tables carrying a `DEFAULT now()` column decide whether this is a
   -- real hazard or an empty fresh install.
   FOREACH candidate IN ARRAY ARRAY[
@@ -243,14 +314,17 @@ BEGIN
   END IF;
 
   RAISE EXCEPTION
-    'migration 0047 refuses to convert: server TimeZone is %, so now() renders % away from UTC, and these tables already hold rows: %',
-    server_tz, rendered_offset, array_to_string(populated, ', ')
+    'migration 0047 refuses to convert: server TimeZone is %, which in % renders now() % from UTC in winter and % in summer, and these tables already hold rows: %',
+    server_tz, probe_year, winter_offset, summer_offset, array_to_string(populated, ', ')
     USING
       DETAIL =
         'The 17 DEFAULT now() columns this migration converts were written through that offset, '
         'so USING ... AT TIME ZONE ''UTC'' would shift those instants by it, irreversibly.',
       HINT =
         'postgres:16-alpine runs UTC; a non-UTC reading means it was configured that way. '
+        'A zone that is UTC for only part of the year (Europe/London, Europe/Dublin, '
+        'Europe/Lisbon, Atlantic/Canary) is refused all year round on purpose: its DEFAULT '
+        'now() rows are skewed for the other half, whichever half the deploy lands in. '
         'Recreate the database if this data is disposable (a local PGlite or dev database), '
         'or correct the affected rows before re-running. Switching TimeZone to UTC now only '
         'silences this check - it does not move a single stored row back.';
