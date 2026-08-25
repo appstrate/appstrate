@@ -99,10 +99,12 @@
 -- correctly-configured ones; the offset test accepts `Etc/GMT0` and rejects the
 -- other three.
 --
--- IT PROBES TWO INSTANTS OF THE CURRENT YEAR, AND BOTH HALVES OF THAT SENTENCE
--- ARE LOAD-BEARING. A zone's offset is a function of two variables — WHERE in
--- the year you look, and WHICH year's rules you look under — and getting either
--- one wrong turns the guard into a coin flip that reads as a pass.
+-- IT PROBES TWO INSTANTS OF THE CURRENT YEAR, THROUGH THE WRITER'S OWN CAST,
+-- AND ALL THREE OF THOSE CLAUSES ARE LOAD-BEARING. The number the guard needs
+-- is a function of three variables — WHERE in the year you look, WHICH year's
+-- rules you look under, and HOW you name the zone back to Postgres — and
+-- getting any one of them wrong turns the guard into a coin flip that reads as
+-- a pass. All three have bitten this block.
 --
 -- THE SEASONAL AXIS. Reading the offset at `now()` — the shape this guard
 -- shipped with — makes the verdict depend on the CALENDAR rather than on the
@@ -130,13 +132,39 @@
 -- other axis. (Measured in PGlite: Casablanca reads 00:00:00/00:00:00 at year
 -- 2000 and 01:00:00/01:00:00 at the current year.)
 --
+-- THE RESOLUTION AXIS, which is not about instants at all, and is why closing
+-- the first two was not enough. `x AT TIME ZONE <text>` resolves the string
+-- against `pg_timezone_abbrevs` FIRST and only falls through to
+-- `pg_timezone_names`; the `TimeZone` GUC — and therefore `now()::timestamp`,
+-- which is what `DEFAULT now()` actually executes — resolves against
+-- `pg_timezone_names` ONLY. For a string that lives in both tables under
+-- different rules the two answers differ, so a guard that hands
+-- `current_setting('TimeZone')` back to Postgres AS A STRING measures an
+-- object that never rendered a single row.
+--
+-- `WET` is that string: a fixed +00:00 ABBREVIATION, but a +00:00/+01:00
+-- seasonal ZONE NAME whose rules are identical to `Europe/Lisbon` — which the
+-- HINT below already names by hand. Read through the zone-name string both
+-- probes return 00:00:00, the guard returns early, and all 30 conversions run
+-- on a server that rendered `now()::timestamp` at UTC+1 from late March to late
+-- October. Swept across all 598 rows of `pg_timezone_names` in PGlite, `WET`
+-- was the ONLY zone that passed while being unsafe — one silent, total
+-- corruption of precisely the rows this guard exists to protect.
+--
 -- So the guard derives the probe YEAR from `now()` and builds a mid-WINTER and
 -- a mid-SUMMER instant inside it, returning early only if BOTH read zero. What
 -- comes from the clock is the year to ask about; the offset itself is never
 -- read at `now()`. A zone that observes DST fails closed all year round instead
 -- of flipping, a zone whose rules changed is judged on its CURRENT rules, and a
 -- genuinely fixed zero-offset zone (`UTC`, `Etc/UTC`, PGlite's `Etc/GMT0`)
--- reads zero at both probes in every year and passes.
+-- reads zero at both probes in every year and passes. And each probe is
+-- rendered with `::timestamp` — the exact cast `DEFAULT now()` performs, which
+-- goes through the GUC — rather than through `AT TIME ZONE
+-- current_setting('TimeZone')`, so the guard measures the object that wrote the
+-- rows instead of an abbreviation that merely shares its spelling. Swept over
+-- all 598 settable zones that form is exact: zero unsafe passes and zero
+-- spurious refusals against what a real `DEFAULT now()` column actually stores
+-- (which the cast path reproduces in 598/598 zones).
 --
 -- The row condition is what keeps the guard from being a blanket ban on non-UTC
 -- development machines. A fresh install replays 0000-0052 in one batch with
@@ -259,9 +287,13 @@ SET LOCAL lock_timeout = '3s';--> statement-breakpoint
 SET LOCAL statement_timeout = '60s';--> statement-breakpoint
 DO $$
 DECLARE
+  -- REPORTED, never computed with: feeding this string back to Postgres is
+  -- itself one of the three ways to misread the offset. See the RESOLUTION
+  -- note below.
   server_tz text := current_setting('TimeZone');
   -- Two probes, one per side of the DST year, in the year the deploy is
-  -- happening. Both axes matter and both have bitten this guard:
+  -- happening, each rendered through the writer's own cast. Three axes matter
+  -- and all three have bitten this guard:
   --
   --   SEASONAL — probing a single instant (`now()`) reads 00:00:00 on
   --   Europe/London every winter and 01:00:00 every summer, so the verdict
@@ -273,16 +305,28 @@ DECLARE
   --   on both sides and waves the conversion through on a server that is an
   --   hour off today.
   --
+  --   RESOLUTION — measuring the offset as `probe AT TIME ZONE server_tz`
+  --   resolves that string against `pg_timezone_abbrevs` FIRST, while the GUC
+  --   that actually rendered the rows resolves against `pg_timezone_names`
+  --   ONLY. `WET` is a fixed +00:00 ABBREVIATION and a seasonal +00:00/+01:00
+  --   ZONE NAME with Europe/Lisbon's rules, so both probes read zero and the
+  --   conversion is waved through on a server that was UTC+1 for seven months
+  --   of the year. Across all 598 rows of `pg_timezone_names`, `WET` was the
+  --   only zone that passed while being unsafe.
+  --
   -- Hence `extract(year from now())` — the YEAR comes from the clock, the
-  -- OFFSET never does. Both must be zero for `AT TIME ZONE 'UTC'` to be correct
-  -- for the `DEFAULT now()` population.
+  -- OFFSET never does — and hence `probe::timestamp`, which is character for
+  -- character the cast `DEFAULT now()` performs on the way into a naive column,
+  -- rather than a second lookup of a string Postgres resolves by different
+  -- rules. Both offsets must be zero for `AT TIME ZONE 'UTC'` to be correct for
+  -- the `DEFAULT now()` population.
   probe_year int := extract(year from now())::int;
   winter_probe timestamptz := make_timestamptz(probe_year, 1, 15, 12, 0, 0, 'UTC');
   summer_probe timestamptz := make_timestamptz(probe_year, 7, 15, 12, 0, 0, 'UTC');
   winter_offset interval :=
-    (winter_probe AT TIME ZONE server_tz) - (winter_probe AT TIME ZONE 'UTC');
+    winter_probe::timestamp - (winter_probe AT TIME ZONE 'UTC');
   summer_offset interval :=
-    (summer_probe AT TIME ZONE server_tz) - (summer_probe AT TIME ZONE 'UTC');
+    summer_probe::timestamp - (summer_probe AT TIME ZONE 'UTC');
   candidate text;
   has_rows boolean;
   populated text[] := ARRAY[]::text[];
@@ -323,8 +367,9 @@ BEGIN
       HINT =
         'postgres:16-alpine runs UTC; a non-UTC reading means it was configured that way. '
         'A zone that is UTC for only part of the year (Europe/London, Europe/Dublin, '
-        'Europe/Lisbon, Atlantic/Canary) is refused all year round on purpose: its DEFAULT '
-        'now() rows are skewed for the other half, whichever half the deploy lands in. '
+        'Europe/Lisbon, Atlantic/Canary, WET) is refused all year round on purpose: its '
+        'DEFAULT now() rows are skewed for the other half, whichever half the deploy lands '
+        'in. '
         'Recreate the database if this data is disposable (a local PGlite or dev database), '
         'or correct the affected rows before re-running. Switching TimeZone to UTC now only '
         'silences this check - it does not move a single stored row back.';
