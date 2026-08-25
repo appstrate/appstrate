@@ -36,6 +36,11 @@ function endTurn(session: ReturnType<typeof createFakeSession>, msg: unknown): v
   session.emit({ type: "message_end" });
 }
 
+/** `data` of the emitted `appstrate.error` event — where the classification lands. */
+function errorEventData(sink: { events: RunEvent[] }): unknown {
+  return sink.events.find((e) => e.type === "appstrate.error")?.data;
+}
+
 describe("SessionBridgeHandle.getTerminalError", () => {
   it("returns undefined for a session with no turns", () => {
     const handle = installSessionBridge(createFakeSession(), createInternalCapture(), RUN_ID);
@@ -55,7 +60,8 @@ describe("SessionBridgeHandle.getTerminalError", () => {
 
   it("returns a RunError when the final assistant turn ended in error", () => {
     const session = createFakeSession();
-    const handle = installSessionBridge(session, createInternalCapture(), RUN_ID);
+    const sink = createInternalCapture();
+    const handle = installSessionBridge(session, sink, RUN_ID);
     endTurn(session, {
       role: "assistant",
       stopReason: "error",
@@ -65,18 +71,19 @@ describe("SessionBridgeHandle.getTerminalError", () => {
     const err = handle.getTerminalError();
     expect(err?.code).toBe("adapter_error");
     expect(err?.message).toBe("Codex error: server_error");
-    // The classification rides alongside the raw text, never instead of it:
-    // the run surface keeps the debug sentence AND now says what class of
-    // failure it was, using the same rules the chat surface classifies with.
+    // The classification rides alongside the raw text, never instead of it —
+    // but on the `appstrate.error` event, the only path that reaches a reader
+    // (`run_logs.data`); the finalize body keeps the debug sentence alone.
     // "Codex error: server_error" names no status and no actionable cause, so
     // the class is `unknown` — which stays retryable: a fresh attempt is the
     // only way to learn anything more about it.
-    expect(err?.context).toEqual({ error_category: "unknown", error_retryable: true });
+    expect(errorEventData(sink)).toEqual({ error_category: "unknown", error_retryable: true });
   });
 
   it("classifies a dead credential as terminal, not as a transient outage", () => {
     const session = createFakeSession();
-    const handle = installSessionBridge(session, createInternalCapture(), RUN_ID);
+    const sink = createInternalCapture();
+    const handle = installSessionBridge(session, sink, RUN_ID);
     endTurn(session, {
       role: "assistant",
       stopReason: "error",
@@ -85,7 +92,7 @@ describe("SessionBridgeHandle.getTerminalError", () => {
     });
     const err = handle.getTerminalError();
     expect(err?.message).toBe("401 Incorrect API key provided: sk-***");
-    expect(err?.context).toEqual({
+    expect(errorEventData(sink)).toEqual({
       error_category: "credential_unavailable",
       error_retryable: false,
     });

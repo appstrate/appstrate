@@ -16,6 +16,8 @@ import {
   llmUpstreamAbort,
   readPositiveIntEnv,
   readRequestBodyBounded,
+  withIdleBound,
+  STREAM_IDLE,
   type SidecarConfig,
   type LlmProxyOauthConfig,
 } from "./helpers.ts";
@@ -56,10 +58,12 @@ export interface AppDeps {
   fetchFn?: typeof fetch; // default: global fetch — injectable for tests
   isReady?: () => boolean; // default: () => true — controls /health
   /**
-   * Inter-chunk idle bound applied to proxied `/llm/*` streams. Defaults to
-   * {@link LLM_STREAM_IDLE_TIMEOUT_MS}; the only reason it is injectable is
-   * that the timeout path is otherwise untestable without a real two-minute
-   * wait. Not an operator knob — no env var reads it.
+   * Inter-chunk idle bound applied to proxied `/llm/*` streams (both the raw
+   * forward and the aliased `pi-messages` re-origination). Defaults to
+   * {@link LLM_STREAM_IDLE_TIMEOUT_MS}, which is where the operator override
+   * (`SIDECAR_LLM_STREAM_IDLE_TIMEOUT_MS`) is read; this injection point exists
+   * only because the timeout path is otherwise untestable without a real
+   * two-minute wait.
    */
   llmStreamIdleTimeoutMs?: number;
   /**
@@ -150,41 +154,6 @@ interface LlmStreamObservation {
   authMode?: "oauth" | "api_key";
 }
 
-/** Resolution marker for {@link withIdleBound} — a value, not a rejection,
- *  so the genuine upstream-error path keeps its own `catch`. */
-const IDLE = Symbol("llm-stream-idle");
-
-/**
- * Bound a PENDING `reader.read()` by an inter-chunk idle deadline.
- *
- * Takes the promise rather than the reader on purpose: the timer must be
- * created at the moment the read starts and cleared the moment it settles, so
- * it measures only the window in which the consumer has asked for a chunk and
- * the upstream has not produced one. That is the whole reason this is called
- * from inside `pull` rather than installed as a stream-level watchdog — see
- * the long comment at the `observed` stream below.
- *
- * Returns {@link IDLE} on expiry (never rejects for it); a genuine upstream
- * read rejection still propagates untouched.
- */
-async function withIdleBound<T>(read: Promise<T>, idleTimeoutMs: number): Promise<T | typeof IDLE> {
-  // If the timer wins the race, `read` is still pending; a later rejection
-  // would land as a process-level unhandled rejection with nobody left to
-  // catch it. Attach a no-op handler now — the value is already discarded.
-  read.catch(() => {});
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      read,
-      new Promise<typeof IDLE>((resolve) => {
-        timer = setTimeout(() => resolve(IDLE), idleTimeoutMs);
-      }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 async function passUpstream(
   upstream: Response,
   observe?: LlmStreamObservation,
@@ -253,20 +222,30 @@ async function passUpstream(
     async pull(controller) {
       try {
         const outcome = await withIdleBound(reader.read(), idleTimeoutMs);
-        if (outcome === IDLE) {
+        if (outcome === STREAM_IDLE) {
           // Four of the ten api shapes this platform maps ignore pi-ai's own
           // `timeoutMs` (google-generative-ai, google-vertex,
           // bedrock-converse-stream, pi-messages), so this proxy is the only
           // provider-agnostic place a stalled stream can be caught. Without it
           // the run just burns its wall-clock budget and dies with no error.
           //
-          // THE WORDING IS LOAD-BEARING: pi-ai classifies a failure as
-          // transient by regex over the error text
-          // (`RETRYABLE_PROVIDER_ERROR_PATTERN` in `dist/utils/retry.js`,
-          // which matches `timed? out` and `timeout`). "timed out" therefore
-          // makes the agent retry the turn; a message like "upstream went
-          // quiet" would be classified as a hard, unretryable provider error
-          // and surface to the user as a mystery. Do not reword.
+          // THIS MESSAGE IS FOR OUR LOG, not for the agent: `controller.error`
+          // on a response body does not cross the HTTP hop. Over a real socket
+          // the in-container client observes a TRUNCATED stream — `{done:true}`
+          // — and the Error is discarded here. (In-process, as the tests drive
+          // it through Hono's `app.request`, it does surface; that is the test
+          // harness, not production.)
+          //
+          // The agent still gets a RETRYABLE failure, from the truncation
+          // rather than from this text: pi-ai's adapters throw on a premature
+          // end — `openai-completions.js` "Stream ended without finish_reason"
+          // (whenever `compat.supportsFinishReason`, its default),
+          // `google-generative-ai.js` "Google stream ended without a finish
+          // reason", `anthropic-messages.js` "Anthropic stream ended before
+          // message_stop" — and those strings match
+          // `RETRYABLE_PROVIDER_ERROR_PATTERN` (`dist/utils/retry.js`:
+          // `ended without`, `stream ended before message_stop`). So the
+          // wording below is free to change; keep it operator-legible.
           const err = new Error(
             `LLM upstream stream timed out: no data received for ${idleTimeoutMs}ms`,
           );
@@ -661,6 +640,9 @@ export function createApp(deps: AppDeps): Hono {
               ? { modelMaxTokens: config.modelMaxTokens }
               : {}),
           },
+          ...(deps.llmStreamIdleTimeoutMs !== undefined
+            ? { llmStreamIdleTimeoutMs: deps.llmStreamIdleTimeoutMs }
+            : {}),
         },
         c.req.raw,
         buffered,

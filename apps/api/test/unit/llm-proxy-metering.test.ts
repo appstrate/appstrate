@@ -143,6 +143,48 @@ describe("tapSseUsage (anthropic-messages)", () => {
     const frames = `event: content_block_delta\ndata: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n`;
     expect(await tapSseUsage(streamFrom([frames]), anthropicMessagesAdapter)).toBeNull();
   });
+
+  it("an idle upstream ends the tap with what it parsed, instead of hanging", async () => {
+    // Without a bound here the tap kept a pending `read()` forever: the ledger
+    // row for a paid 2xx was never written (the module's accounting invariant),
+    // and the tee branch it holds kept the upstream socket pinned.
+    const enc = new TextEncoder();
+    const seed = `event: message_start\ndata: {"type":"message_start","message":{"id":"m","usage":{"input_tokens":11,"output_tokens":1}}}\n\n`;
+    const source = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(enc.encode(seed));
+        // Never closes, never speaks again.
+      },
+    });
+    const usage = await tapSseUsage(source, anthropicMessagesAdapter, 25);
+    expect(usage?.inputTokens).toBe(11);
+  });
+
+  it("idle stall releases BOTH tee branches, so the upstream source is cancelled", async () => {
+    // `tee()` cancels its source only once BOTH branches are cancelled. The
+    // client branch alone was not enough: the metering tap held the other one,
+    // and `guardedFetch` has already detached its timer at the headers — so a
+    // stream that died after its headers landed stayed pinned with no deadline
+    // behind it at all.
+    const enc = new TextEncoder();
+    let cancelled = false;
+    const source = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(enc.encode('data: {"type":"x"}\n\n'));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const [clientBranch, tapBranch] = source.tee();
+    const seen: unknown[] = [];
+    const guarded = guardSseTeardown(clientBranch, (e) => seen.push(e), 25);
+    await Promise.all([tapSseUsage(tapBranch, anthropicMessagesAdapter, 25), readAll(guarded)]);
+    // Both cancels are fired as detached promises; let them settle.
+    await new Promise((r) => setTimeout(r, 10));
+    expect(cancelled).toBe(true);
+    expect(seen).toHaveLength(1);
+  });
 });
 
 async function readAll(stream: ReadableStream<Uint8Array>): Promise<string> {
@@ -257,8 +299,11 @@ describe("guardSseTeardown", () => {
     // wrapped BEFORE the alias-swap `pipeThrough`).
     expect(await readAll(guarded)).toBe("partial");
     expect(seen).toHaveLength(1);
-    // Wording matches pi-ai's RETRYABLE_PROVIDER_ERROR_PATTERN (`timed? out`),
-    // so the stall is classified as transient rather than as a hard error.
+    // The message is a SERVER-SIDE signal only (`onTeardownError` is a logger
+    // call at the real call site, and the client stream closes cleanly), so
+    // this pins that the stall is reported and named — not that the wording
+    // reaches the caller. See the branch in `metering.ts` for what the caller
+    // actually classifies on.
     expect((seen[0] as Error).message).toMatch(/timed out/i);
   });
 

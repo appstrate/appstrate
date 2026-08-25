@@ -1197,10 +1197,6 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
     expect(bridge.getTerminalError()).toEqual({
       code: "adapter_error",
       message: "provider exploded",
-      // Nothing in this text names a class, so `unknown` — which stays
-      // retryable. See `test/model-error-divergence.test.ts` for the contract
-      // that keeps these rules honest against the vendor's own.
-      context: { error_category: "unknown", error_retryable: true },
     });
   });
 
@@ -1224,10 +1220,6 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
     expect(bridge.getTerminalError()).toEqual({
       code: "adapter_error",
       message: "Request was aborted",
-      // Nothing in this text names a class, so `unknown` — which stays
-      // retryable. See `test/model-error-divergence.test.ts` for the contract
-      // that keeps these rules honest against the vendor's own.
-      context: { error_category: "unknown", error_retryable: true },
     });
   });
 });

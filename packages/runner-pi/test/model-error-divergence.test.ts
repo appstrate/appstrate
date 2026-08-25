@@ -1,28 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * NON-DIVERGENCE guard between the two classifiers that judge one model
- * failure.
+ * DRIFT guard over the two classifiers that judge one model failure.
  *
  * The agent SDK's `isRetryableAssistantError` decides whether its own in-turn
  * retry loop tries again. Appstrate's `classifyModelError` decides what the
  * user is told and whether a retry is offered. The two answer different
  * questions — by the time a human reads the error the SDK's loop has already
  * finished, and a user retry starts a NEW turn — which is why the vendor
- * verdict is NOT a runtime input to the platform's classifier.
+ * verdict is NOT a runtime input to the platform's classifier, and why the two
+ * are NOT required to agree. The last corpus entry below is a standing example
+ * of a disagreement that is correct on both sides.
  *
- * But nothing structurally pins them together either: they are two independent
- * pattern lists, in two repos, moving on two release cadences. Without this
- * test a `@earendil-works/pi-ai` bump could move a pattern from one list to the
- * other and no test anywhere would fail — the engine would quietly stop
- * retrying something the UI still advertised as retryable, or keep retrying
- * something the UI had already declared dead. A test is the right pin
- * precisely BECAUSE a runtime handoff is not: it makes the drift loud without
- * letting the vendor's answer to its own question leak into ours.
+ * What this file pins, per corpus entry, is each rule set's answer read side by
+ * side: the vendor's retry verdict and Appstrate's category. Neither is
+ * structurally anchored to the other — two independent pattern lists, in two
+ * repos, moving on two release cadences — so without this test a
+ * `@earendil-works/pi-ai` bump could move a pattern from one list to the other
+ * and no test anywhere would fail. This makes the vendor's move loud at the
+ * moment it lands, so the disagreements we accept stay deliberate instead of
+ * going silent. It does NOT prove the two agree.
  *
- * The corpus is real provider failure text, not synthetic strings, because
- * both classifiers are substring matchers and only real wording exercises the
- * overlaps that actually bite.
+ * The corpus is real provider failure text — plus the one string the platform
+ * manufactures itself — not synthetic strings, because both classifiers are
+ * substring matchers and only real wording exercises the overlaps that actually
+ * bite.
  *
  * IF THIS TEST FAILS, nothing here is wrong — the VENDOR moved. Read the
  * failure message, then reconcile deliberately: either Appstrate's rules in
@@ -31,11 +33,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import {
-  classifyModelError,
-  MODEL_ERROR_RETRYABLE_BY_CATEGORY,
-  type ModelErrorCategory,
-} from "@appstrate/core/model-error";
+import { classifyModelError, type ModelErrorCategory } from "@appstrate/core/model-error";
 // Straight from the vendor, not through `src/pi-sdk.ts`. The barrel's header is
 // explicit that nothing test-only belongs in it — two re-exports were removed
 // from it for exactly that reason — and its `no-restricted-imports` guard never
@@ -110,15 +108,31 @@ const CORPUS: Case[] = [
     category: "invalid_request",
     vendorRetryable: false,
   },
+  {
+    // Not provider text: the sidecar manufactures this for EVERY failure on an
+    // aliased model (`syntheticAliasErrorMessage`, `packages/core/src/model-swap.ts`)
+    // so no provider name leaks to the agent — which means it reaches both
+    // classifiers exactly like real provider text, and belongs in the corpus.
+    name: 'platform-manufactured alias error, no status ("Upstream model error")',
+    message: 'Upstream model error (model "my-alias")',
+    category: "upstream_unavailable",
+    // The two verdicts differ HERE, and both are right: the SDK finds no
+    // retryable pattern in this deliberately neutral prose and stops trying
+    // within the turn, while Appstrate reads "upstream" and offers the user a
+    // fresh attempt — a NEW turn, not the one the SDK gave up on. Adding a
+    // status hint (`, status 503`) flips the vendor to true; the platform's
+    // category is unchanged either way.
+    vendorRetryable: false,
+  },
 ];
 
-describe("model-error classification does not diverge from the agent SDK", () => {
+describe("model-error classification stays pinned against the agent SDK", () => {
   it("has a corpus (positive control — an empty one passes vacuously)", () => {
     expect(CORPUS.length).toBeGreaterThanOrEqual(5);
   });
 
   for (const entry of CORPUS) {
-    it(`agrees on: ${entry.name}`, () => {
+    it(`pins both verdicts for: ${entry.name}`, () => {
       const vendor = vendorRetryable(entry.message);
       expect(
         vendor,
@@ -136,20 +150,6 @@ describe("model-error classification does not diverge from the agent SDK", () =>
         ...(entry.status !== undefined ? { status: entry.status } : {}),
       });
       expect(classified.category).toBe(entry.category);
-
-      // THE invariant. On real provider text the two classifiers reach the same
-      // conclusion about retrying — Appstrate's, read off the category alone,
-      // and the SDK's, read off its own pattern lists. They are not wired
-      // together, so this agreement is a fact about the two rule sets, not a
-      // tautology. A failure means one moved under the other, which is exactly
-      // the silent drift this file exists to make loud.
-      expect(
-        classified.retryable,
-        `Appstrate would ${MODEL_ERROR_RETRYABLE_BY_CATEGORY[entry.category] ? "" : "not "}` +
-          `retry this (category "${entry.category}") while the agent SDK would ` +
-          `${vendor ? "" : "not "}. The two classifiers have drifted apart on real ` +
-          `provider text; one of the two pattern lists must be corrected.`,
-      ).toBe(MODEL_ERROR_RETRYABLE_BY_CATEGORY[entry.category]);
     });
   }
 });

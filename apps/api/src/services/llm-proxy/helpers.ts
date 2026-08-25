@@ -24,6 +24,8 @@
  */
 
 import { parseSseFrames, parseSseJsonData } from "@appstrate/core/sse";
+import { getEnv } from "@appstrate/env";
+import { DEFAULT_LLM_STREAM_IDLE_TIMEOUT_MS } from "@appstrate/connect/proxy-primitives";
 import { invalidRequest } from "../../lib/errors.ts";
 
 /**
@@ -41,12 +43,17 @@ import { invalidRequest } from "../../lib/errors.ts";
  * indefinitely.
  *
  * Deliberately IDENTICAL to the sidecar's `LLM_FIRST_RESPONSE_TIMEOUT_MS`
- * (`runtime-pi/sidecar/helpers.ts`): same concept, same number, so an operator
+ * (`runtime-pi/sidecar/helpers.ts`): same concept, same default, so an operator
  * reading a timeout in one log does not have to ask which proxy produced it.
- * See {@link LLM_STREAM_IDLE_TIMEOUT_MS} for why the two files duplicate
- * rather than share.
+ *
+ * Operator-overridable via `LLM_PROXY_FIRST_RESPONSE_TIMEOUT_MS` (the sidecar's
+ * twin is `SIDECAR_LLM_FIRST_RESPONSE_TIMEOUT_MS`). The "first frame within
+ * seconds" reasoning above describes hosted vendors; an `org_models` row may
+ * point at a self-hosted `baseUrl` (Ollama / llama.cpp / vLLM) whose cold model
+ * load holds the headers for minutes, and self-hosting is a first-class
+ * deployment here — so 60 s is a default, not a law.
  */
-export const LLM_FIRST_RESPONSE_TIMEOUT_MS = 60_000;
+export const LLM_FIRST_RESPONSE_TIMEOUT_MS = getEnv().LLM_PROXY_FIRST_RESPONSE_TIMEOUT_MS ?? 60_000;
 
 /**
  * Bound on how long a NON-STREAMING upstream may take to produce its response
@@ -69,34 +76,21 @@ export const LLM_NON_STREAMING_TIMEOUT_MS = 600_000;
 /**
  * Bound on INTER-CHUNK silence once an SSE response is flowing: how long the
  * upstream may say nothing between two body chunks before the proxy declares
- * the stream dead. Enforced in `guardSseTeardown` (`./metering.ts`), because
- * no fetch-level signal can express "silent for 2 min" without also capping
- * the total duration.
+ * the stream dead. Enforced in `guardSseTeardown` and `tapSseUsage`
+ * (`./metering.ts`) — both tee branches, since releasing only one leaves the
+ * upstream socket pinned — because no fetch-level signal can express "silent
+ * for 2 min" without also capping the total duration.
  *
- * This is the bound that fixes the reported bug. Pi's SDK passes a `timeoutMs`
- * down to its provider adapters, but four of the api shapes this platform maps
- * ignore it entirely (`google-generative-ai`, `google-vertex`,
- * `bedrock-converse-stream`, `pi-messages` — grep `timeoutMs` in
- * `@earendil-works/pi-ai/dist/api/*.js`, they honour only `options.signal`).
- * A stalled Gemini/Vertex/Bedrock stream was bounded by nothing at all on this
- * path. An Appstrate-owned proxy is the only provider-agnostic place that
- * covers all four shapes.
- *
- * 120 s, i.e. looser than the first-response bound: once a provider has
- * started streaming, a long pause is a real (if rare) event — extended
- * thinking and large parallel tool-call payloads routinely buy 15-45 s of
- * silence.
- *
- * DUPLICATED, not shared, with `runtime-pi/sidecar/helpers.ts`. Both packages
- * could import from `@appstrate/core`, but core is published to npm under a
- * consumer-lockstep release gate — adding a subpath export there costs a
- * version bump, a publish and a bump in every out-of-tree consumer, for two
- * integers. The sidecar also deliberately keeps its transport timings local
- * (`LLM_PROXY_TIMEOUT_MS`, `OUTBOUND_TIMEOUT_MS` live in its own `helpers.ts`)
- * because it is boot-latency sensitive. Keep the two definitions in sync by
- * hand; each names the other.
+ * The value and the reasoning behind it live with the shared default
+ * ({@link DEFAULT_LLM_STREAM_IDLE_TIMEOUT_MS} in
+ * `@appstrate/connect/proxy-primitives`), which the sidecar's `/llm/*` forward
+ * reads too — same instrument, one definition. What is local here is the
+ * operator override: `LLM_PROXY_STREAM_IDLE_TIMEOUT_MS`, for the self-hosted
+ * `baseUrl` providers whose inter-chunk gaps a hosted-vendor default does not
+ * describe.
  */
-export const LLM_STREAM_IDLE_TIMEOUT_MS = 120_000;
+export const LLM_STREAM_IDLE_TIMEOUT_MS =
+  getEnv().LLM_PROXY_STREAM_IDLE_TIMEOUT_MS ?? DEFAULT_LLM_STREAM_IDLE_TIMEOUT_MS;
 
 /**
  * Parsed shape of an inbound `/api/llm-proxy/*` request body. Built

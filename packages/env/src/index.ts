@@ -503,6 +503,21 @@ const envSchema = z
      * when cache is off.
      */
     LLM_PROXY_CACHE_MAX_AGE: z.coerce.number().int().nonnegative().default(3600),
+    /**
+     * Operator overrides for the two `/api/llm-proxy/*` upstream deadlines.
+     * Unset → the compiled defaults in
+     * `apps/api/src/services/llm-proxy/helpers.ts` (60 s to the response
+     * HEADERS on a streaming call, 120 s of inter-chunk silence once it flows),
+     * which are sized for hosted vendors. An `org_models` row may instead point
+     * at a self-hosted `baseUrl` (Ollama / llama.cpp / vLLM) whose cold model
+     * load blocks the headers — and sometimes the next chunk — far longer than
+     * that. `optional()` rather than `default()` so the number lives in exactly
+     * one place: the sidecar's twin knobs share the same idle default from
+     * `@appstrate/connect/proxy-primitives`, which cannot be imported here
+     * (that package depends on this one).
+     */
+    LLM_PROXY_FIRST_RESPONSE_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
+    LLM_PROXY_STREAM_IDLE_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
     // Global request body size cap enforced by the Hono `bodyLimit` middleware.
     // Per-route caps (LLM proxy, signed-token upload sink) still apply on top.
     API_BODY_LIMIT_BYTES: z.coerce

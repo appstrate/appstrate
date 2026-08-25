@@ -486,6 +486,11 @@ describe("ALL /llm/* — telemetry", () => {
       const app = createApp(deps);
       const res = await app.request("/llm/v1/messages", { method: "POST" });
 
+      // IN-PROCESS ONLY. Hono's `app.request` hands the same stream object
+      // back, so `controller.error` surfaces here. Over a real socket it does
+      // not: the agent observes a TRUNCATED stream and never sees this text —
+      // which is what pi-ai classifies as retryable. See the branch in
+      // `app.ts`. What this pins is that the stall ENDS the stream.
       await expect(res.text()).rejects.toThrow(/timed out/i);
 
       const idle = warnSpy.mock.calls.find(([msg]) => msg === "llm.stream.idle_timeout");

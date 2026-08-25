@@ -62,6 +62,9 @@ describe("classifyClientTurnError", () => {
     const classified = classifyClientTurnError("private opaque backend details");
     const marker = clientTurnErrorMarker(classified);
     expect(marker).not.toContain("private opaque backend details");
+    // Pinned as a literal, because `toEqual(classified)` alone passes trivially
+    // for any input that produces no `requestId`.
+    expect(clientTurnErrorFromMarker(marker)).toEqual({ category: "unknown", retryable: true });
     // The marker carries the CATEGORY only, and the two paths must still agree:
     // the UI reads a failed turn through whichever arrived first.
     expect(clientTurnErrorFromMarker(marker)).toEqual(classified);

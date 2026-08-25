@@ -1393,9 +1393,10 @@ function isProviderNormalizedAbort(errorMessage: string | undefined): boolean {
  * True when a terminal `aborted` (or provider-normalized abort) turn is the
  * runner's OWN early-stop rather than a failure: the run already produced a
  * successful terminal tool, and `onTerminalTool` aborted the SDK loop to stop
- * paying for turns nobody will read. Extracted so `getTerminalError()` and the
- * sticky upstream recorder apply one definition instead of two copies that can
- * drift apart — they must agree on what is NOT a failure.
+ * paying for turns nobody will read. Extracted so all three readers — the live
+ * `appstrate.error` emit, `getTerminalError()` and the sticky upstream recorder
+ * — apply one definition instead of copies that can drift apart: they must
+ * agree on what is NOT a failure.
  */
 function isRunnerEarlyStopAbort(
   stopReason: string | undefined,
@@ -1635,14 +1636,20 @@ export function installSessionBridge(
         // status stay consistent).
         if (
           isTerminalErrorStop(last.stopReason) &&
-          !(
-            terminalToolCompleted &&
-            (last.stopReason === "aborted" || isProviderNormalizedAbort(last.errorMessage))
-          )
+          !isRunnerEarlyStopAbort(last.stopReason, last.errorMessage, terminalToolCompleted)
         ) {
-          fire(
-            buildError({ runId, timestamp: Date.now() }, terminalErrorMessage(last.errorMessage)),
-          );
+          // The classification rides the event's `data`, which the platform
+          // writes to `run_logs.data` (jsonb) — the same route the watchdog's
+          // `upstream` block takes, and the ONLY one that reaches durable
+          // storage: the finalize body's `RunError` is parsed by a closed
+          // schema and persisted by its `message` alone. Keys are snake_case
+          // because this is data on the wire.
+          const errorMessage = terminalErrorMessage(last.errorMessage);
+          const classified = classifyModelError({ message: errorMessage });
+          fire({
+            ...buildError({ runId, timestamp: Date.now() }, errorMessage),
+            data: { error_category: classified.category, error_retryable: classified.retryable },
+          });
         }
 
         // Full assistant text (for progress display)
@@ -1802,23 +1809,11 @@ export function installSessionBridge(
       // `message` stays the RAW provider text: the run surface is a debugging
       // surface and the operator reading `runs.error` wants the upstream
       // sentence verbatim (the chat surface deliberately does the opposite and
-      // ships only the class). The classification is additive supplementary
-      // data, so a sink matching on `code` or `message` sees nothing new.
-      //
-      // Same rules as the chat turn classifier (`@appstrate/core/model-error`),
-      // so one provider string cannot get two answers depending on which
-      // surface met it. Keys inside `context` are snake_case — it is data on
-      // the wire, riding the `appstrate.error` event's `data` into `run_logs`,
-      // exactly like the watchdog's `upstream` block above.
-      const classified = classifyModelError({ message });
-      return {
-        code: "adapter_error",
-        message,
-        context: {
-          error_category: classified.category,
-          error_retryable: classified.retryable,
-        },
-      };
+      // ships only the class). The CLASSIFICATION of this same turn travels the
+      // `appstrate.error` event emitted above, never this `RunError`: the
+      // finalize body is parsed by a closed schema (`message`/`stack`/`code`),
+      // so a `context` here would be dropped at ingestion and reach no reader.
+      return { code: "adapter_error", message };
     },
     getLastUpstreamError(): { stopReason: string; message: string } | undefined {
       if (lastUpstreamStopReason === undefined) return undefined;

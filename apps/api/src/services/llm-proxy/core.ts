@@ -273,7 +273,10 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     // non-streaming default), and only the streaming shape — which must emit
     // its first SSE frame within seconds — gets the tight 60 s bound.
     // Inter-chunk silence AFTER the headers is a different problem with a
-    // different instrument: see `guardSseTeardown` in `./metering.ts`.
+    // different instrument — the idle bound both `tee()` branches carry in
+    // `./metering.ts` (`guardSseTeardown` on the client branch, `tapSseUsage`
+    // on the metering one), which is what reclaims a stream that dies after
+    // its headers landed.
     upstream = await egressGuardedFetch(
       upstreamUrl,
       {

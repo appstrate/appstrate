@@ -19,6 +19,10 @@ export type { HostResolver } from "@appstrate/core/ssrf";
 // Imported (not just re-exported) because `readPositiveByteEnv` below defaults
 // its `ceiling` parameter to it. See the re-export note further down.
 import { ABSOLUTE_BODY_CEILING } from "@appstrate/afps-runtime/resolvers";
+// Compiled default for the inter-chunk idle bound, shared with the platform LLM
+// gateway. Imported (not just re-exported) because the env override below falls
+// back to it.
+import { DEFAULT_LLM_STREAM_IDLE_TIMEOUT_MS } from "@appstrate/connect/proxy-primitives";
 
 // Accepts both simple IDs (gmail) and scoped IDs (@appstrate/gmail)
 export const INTEGRATION_ID_RE = /^(@[a-z0-9][a-z0-9-]*\/)?[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
@@ -69,32 +73,40 @@ const LLM_PROXY_TIMEOUT_MS = 1_800_000; // 30 minutes (patched from 300_000 — 
  * aborts the BODY too, so leaving this armed would kill every stream at 60 s.
  * {@link llmUpstreamAbort} owns that lifecycle — do not inline
  * `AbortSignal.timeout(LLM_FIRST_RESPONSE_TIMEOUT_MS)` at a call site.
+ *
+ * Operator-overridable via `SIDECAR_LLM_FIRST_RESPONSE_TIMEOUT_MS`. The 60 s
+ * reasoning above holds for hosted vendors; it does not hold for a self-hosted
+ * `baseUrl` provider (Ollama / llama.cpp / vLLM), where a cold model load
+ * routinely blocks the response HEADERS for minutes. Self-hosting is a
+ * first-class deployment of this platform, so the bound is a default and not a
+ * law.
  */
-const LLM_FIRST_RESPONSE_TIMEOUT_MS = 60_000;
+const LLM_FIRST_RESPONSE_TIMEOUT_MS = readPositiveIntEnv(
+  "SIDECAR_LLM_FIRST_RESPONSE_TIMEOUT_MS",
+  60_000,
+  { unit: "ms" },
+);
 
 /**
  * Bound on INTER-CHUNK silence once an LLM stream is flowing: how long the
  * upstream may say nothing between two body chunks before the sidecar declares
- * the stream dead.
+ * the stream dead. Enforced in `passUpstream` (`./app.ts`) and, on the aliased
+ * `pi-messages` path, in `handlePiMessagesRequest` — never as a fetch-level
+ * signal, which cannot express "silent for 2 min" without also capping the
+ * total.
  *
- * This is the bound that actually fixes the reported bug. Pi's SDK passes a
- * `timeoutMs` down to its provider adapters, but four of the api shapes this
- * platform maps ignore it entirely (`google-generative-ai`, `google-vertex`,
- * `bedrock-converse-stream`, `pi-messages` — grep `timeoutMs` in
- * `@earendil-works/pi-ai/dist/api/*.js`, they honour only `options.signal`).
- * A stalled Gemini/Vertex/Bedrock stream was therefore bounded by nothing
- * tighter than the 30 min absolute cap, so a run with a 300 s budget died on
- * its wall-clock watchdog with no error to show the user. Our proxy is the
- * only provider-agnostic place that covers all four shapes.
- *
- * 120 s, i.e. deliberately looser than the first-response bound: once a
- * provider has started streaming, a long pause is a real (if rare) event —
- * extended-thinking blocks and large parallel tool-call payloads routinely
- * buy 15-45 s of silence, and a provider-side retry can stretch that. 120 s
- * is ~3× the worst honest gap while still leaving the shortest run budget
- * (300 s) room to report the failure and for the agent to retry once.
+ * The value and the reasoning behind it live with the shared default
+ * ({@link DEFAULT_LLM_STREAM_IDLE_TIMEOUT_MS} in
+ * `@appstrate/connect/proxy-primitives`), which the platform LLM gateway reads
+ * too. What is local here is the operator override:
+ * `SIDECAR_LLM_STREAM_IDLE_TIMEOUT_MS`, for the self-hosted `baseUrl` providers
+ * whose inter-chunk gaps a hosted-vendor default does not describe.
  */
-export const LLM_STREAM_IDLE_TIMEOUT_MS = 120_000;
+export const LLM_STREAM_IDLE_TIMEOUT_MS = readPositiveIntEnv(
+  "SIDECAR_LLM_STREAM_IDLE_TIMEOUT_MS",
+  DEFAULT_LLM_STREAM_IDLE_TIMEOUT_MS,
+  { unit: "ms" },
+);
 
 /**
  * Abort plumbing for one LLM upstream call: the absolute
@@ -112,10 +124,17 @@ export const LLM_STREAM_IDLE_TIMEOUT_MS = 120_000;
  * detached once the response is returned"); this is the hand-rolled twin for
  * the sidecar's raw `fetch` call sites.
  *
- * The abort reason is worded to match pi-ai's `RETRYABLE_PROVIDER_ERROR_PATTERN`
- * (`dist/utils/retry.js`, which matches `timed? out` / `timeout`) so the agent
- * classifies a dead upstream as a transient failure and retries, instead of
- * surfacing it as an unclassifiable hard error.
+ * The abort reason NEVER reaches the agent: `fetch` rejects with this
+ * DOMException, the `app.all("/llm/*")` handler's `catch` hands it to
+ * `llmFetchErrorResponse` (`./app.ts`), which reads only `err.code` and answers
+ * a generic `502 {"error":"LLM request failed…"}` — the message is dropped. On
+ * the aliased `pi-messages` path it is replaced by `syntheticAliasErrorMessage`
+ * for the same reason. It is worded for OUR logs.
+ *
+ * The retry still happens, by the status code: `502` is itself one of
+ * `RETRYABLE_PROVIDER_ERROR_PATTERN`'s literals
+ * (`@earendil-works/pi-ai/dist/utils/retry.js`), so pi-ai classifies the
+ * refusal as transient and the agent retries the turn.
  */
 export function llmUpstreamAbort(extra?: AbortSignal): {
   signal: AbortSignal;
@@ -336,6 +355,8 @@ export {
   filterHeaders,
   applyInjectedCredentialHeader,
   normalizeAuthSchemeTemplates,
+  withIdleBound,
+  STREAM_IDLE,
 } from "@appstrate/connect/proxy-primitives";
 
 // `matchesAuthorizedUri` (`(url, patterns[])` allowlist check, AFPS spec
