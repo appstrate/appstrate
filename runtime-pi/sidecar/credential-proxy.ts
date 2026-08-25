@@ -119,17 +119,24 @@ interface ApiCallSuccess {
    * URL the response was eventually served from after any redirect
    * follow. Equals the resolved target URL when no redirect happened.
    *
-   * Load-bearing INSIDE this module and nowhere else: the redirect
-   * follower terminates on it, the 401 replay re-issues against it, and
-   * the diagnostic envelope reports it as `host` (redacted) plus the
-   * `redirected` boolean.
+   * An OUTPUT, never an input. `doUpstreamRequest` closes over the
+   * resolved target URL and issues against THAT on both branches — its
+   * only parameter is the credential set — so the 401 replay re-issues
+   * against the resolved target and re-follows the chain from scratch,
+   * then overwrites this value with the replay's own terminus.
    *
-   * It is NOT projected onto the agent-visible `_meta`. That projection
-   * existed for #471 and was removed with `UpstreamMeta.finalUrl`; the
-   * agent-side parser (`runtime-pi/mcp/upstream-meta.ts` — alive, and
-   * required on every `api_call`) reads `{ status, headers }` only. An
-   * agent that needs the next hop reads `headers.location`, which IS on
-   * `UPSTREAM_HEADER_ALLOWLIST`.
+   * All three readers live in this module and it has no consumer
+   * outside it: the manual follower returns it as the chain terminus,
+   * and the debug envelope reports it as `host` (redacted) and as
+   * `redirected` (`!== resolvedUrl`).
+   *
+   * It is NOT projected onto `_meta` either. That projection existed for
+   * #471 and was removed with `UpstreamMeta.finalUrl`; the agent-side
+   * parser (`runtime-pi/mcp/upstream-meta.ts` — alive, and required on
+   * `api_upload`, which calls it uncaught; `api_call` wraps it in
+   * `safeStatus`, which falls back to `null`) reads `{ status, headers }`
+   * only. Nothing on `_meta` is agent-visible in any case: see the
+   * `redirect: "manual"` comment in `doUpstreamRequest` below.
    */
   finalUrl: string;
   /**
@@ -668,12 +675,27 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
       // redirect — WHATWG fetch strips `Authorization` cross-origin but
       // NOT custom headers like `X-Api-Key`, the usual injection target.
       // Returning the 30x unfollowed keeps the credential on the initial
-      // (allowlist-checked) origin only. The agent is not stranded: `location`
-      // is on `UPSTREAM_HEADER_ALLOWLIST`
-      // (`packages/mcp-transport/src/upstream-meta.ts`), so the 30x ships its
-      // next hop on `_meta.headers.location` and the caller re-issues against
-      // that if it wants to follow. `finalUrl` below is NOT that channel — it
-      // never leaves this module.
+      // (allowlist-checked) origin only.
+      //
+      // KNOWN LIMITATION, stated rather than papered over: the agent CANNOT
+      // follow that 30x. `location` is on `UPSTREAM_HEADER_ALLOWLIST`
+      // (`packages/mcp-transport/src/upstream-meta.ts`) so it reaches the
+      // runtime on `_meta` — and stops there. `callToolResultToPi` forwards
+      // only `content` blocks to the model, and the response shaper
+      // (`runtime-pi/mcp/api-call-response-resolver.ts`) renders `_meta` down
+      // to `[api_call status=<n>]`, dropping every header. The model sees a
+      // bare 30x and no next hop. A caller that must follow one re-issues with
+      // a BUFFERED body, which takes the manual-follow branch below and walks
+      // the chain server-side under the per-hop URL policy.
+      //
+      // Rendering `location` into that status line would close the gap and is
+      // deliberately NOT done here: a redirect URL is routinely
+      // credential-bearing (an authorize hop's `?code=`, a signed
+      // `?X-Amz-Signature=`), and step 10 below redacts this very URL to a
+      // bare host before it reaches an operator log. Showing the model what we
+      // withhold from a log is a decision to take explicitly, not a side
+      // effect of a comment fix. `finalUrl` below is not a channel to the
+      // agent either — it never leaves this module.
       init.duplex = "half";
       init.redirect = "manual";
       const response = await fetchFn(resolvedUrl, init);

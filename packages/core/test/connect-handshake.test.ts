@@ -172,6 +172,16 @@ describe("completionMatches", () => {
     expect(completionMatches(detail({ state: "s2" }), target)).toBe(false);
   });
 
+  // An OAuth card can mount without a packageId (it comes out of the model's
+  // tool args) while the callback still emits one. The state pair identifies
+  // the flow exactly, so it decides — the package rule below never sees this.
+  it("lets an exact state settle it even when the target has no packageId", () => {
+    const target = { state: "s1" };
+    expect(completionMatches(detail({ state: "s1", packageId: "@appstrate/gmail" }), target)).toBe(
+      true,
+    );
+  });
+
   it("rejects a completion for another package (the cross-card resume bug)", () => {
     // Regression: the hosted-connect offer (`connect_url`) has no state, so a
     // stateless surface must still ignore a completion addressed to a different
@@ -183,14 +193,29 @@ describe("completionMatches", () => {
   });
 
   it("accepts a context-less completion (error pages emit no state/packageId)", () => {
+    // The callback page answers "Missing connect token" / "invalid or expired"
+    // before it has resolved a package, so these carry neither identifier. They
+    // only ever surface an error, never an append — every waiting surface takes
+    // them, identified or not. This is the ONE case the permissive branch is for.
     const target = { packageId: "@appstrate/gmail" };
     expect(completionMatches(detail({ ok: false, error: "Missing connect token" }), target)).toBe(
       true,
     );
+    expect(completionMatches(detail({ ok: false, error: "Missing connect token" }), {})).toBe(true);
   });
 
-  it("accepts a package-addressed completion on a surface that lacks a packageId", () => {
-    expect(completionMatches(detail({ packageId: "@appstrate/gmail" }), {})).toBe(true);
+  it("rejects a package-addressed completion on a surface that identifies nothing", () => {
+    // The permissive direction, and the bug it was: `target.packageId` is
+    // optional and a card can genuinely mount without one, so a predicate that
+    // only narrowed when the TARGET carried an id narrowed nothing here — and
+    // an unidentified card resumed on a foreign integration's completion. An
+    // unidentified surface must fail closed, not accept everything.
+    expect(completionMatches(detail({ packageId: "@appstrate/gmail" }), {})).toBe(false);
+    // …including when it carries a state the completion does not, so the state
+    // rule above cannot settle it either.
+    expect(completionMatches(detail({ packageId: "@appstrate/gmail" }), { state: "s1" })).toBe(
+      false,
+    );
   });
 });
 
@@ -200,7 +225,6 @@ describe("acceptsCompletionMessage", () => {
   // the platform serves, so any other origin is a forgery. An accepted forgery
   // flips the surface to "connected" — in chat it appends a resume turn, telling
   // the model an integration is usable when it is not.
-  const SELF = "https://app.appstrate.dev";
   const TARGET = { packageId: "@appstrate/gmail" };
 
   it("rejects a well-formed completion from a foreign origin", () => {

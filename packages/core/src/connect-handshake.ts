@@ -154,26 +154,46 @@ export function isIntegrationConnectMessage<T extends { origin: string; data: un
  * as "is it a completion and is `ok` true" — with the `packageId` it was waiting
  * on sitting three lines up, unused.
  *
- *  - `state` — exact when both sides carry one. The hosted-connect offer
- *    (`connect_url`) carries NO state (its OAuth state is minted later, at
- *    /connect/start click time), so surfaces from that flow cannot rely on it.
+ * A completion is accepted only when it is POSITIVELY addressed to the target.
+ * Which identifier decides is not a preference, it is what each flow carries:
+ *
+ *  - `state` — the OAuth state is a per-flow nonce, so an equal pair on both
+ *    sides identifies THIS flow and nothing else; it decides on its own. The
+ *    hosted-connect offer (`connect_url`) carries NO state (its OAuth state is
+ *    minted later, at /connect/start click time), so surfaces from that flow
+ *    cannot rely on it and fall through to the next rule.
  *  - `packageId` — the package-level filter, mirroring the SSE
  *    `connection_update` backstop so all three completion signals share the same
  *    semantics. Without it, one Gmail connect flipped an unrelated card
  *    "connected" and double-resumed the conversation (forked thread).
  *
- * Completions carrying neither (context-less error pages such as "Missing
- * connect token") stay accepted: they only surface an error, never an append.
- * Absence on the WAITING side is equally permissive — a surface that knows
- * neither identifier is not narrowing anything.
+ * The narrowing is driven by what the COMPLETION identifies, not by what the
+ * target happens to know. That direction is the whole point: `target.packageId`
+ * is optional in the type and a card really can mount without one
+ * (`oauth-connect-card.tsx` reads it out of the model's tool args), and a
+ * predicate keyed on the target's knowledge narrowed nothing in exactly that
+ * case — so an unidentified card accepted a foreign integration's completion,
+ * which is the bug this rule exists to stop. An unidentified surface now fails
+ * CLOSED.
+ *
+ * The one exception is the case the permissiveness was written for: completions
+ * that identify nothing at all (context-less error pages such as "Missing
+ * connect token", emitted before the flow ever resolved a package) stay accepted
+ * by anyone. They only surface an error, never an append.
  */
 export function completionMatches(
   detail: unknown,
   target: { state?: string; packageId?: string },
 ): detail is IntegrationConnectCompletion {
   if (!isIntegrationConnectCompletion(detail)) return false;
-  if (target.state && detail.state && detail.state !== target.state) return false;
-  if (target.packageId && detail.packageId && detail.packageId !== target.packageId) return false;
+  // Both sides carry a state: an exact match settles it either way. This is
+  // what keeps an OAuth card whose `packageId` never arrived correlating.
+  if (target.state && detail.state) return detail.state === target.state;
+  // No state pairing to decide with. A completion that NAMES its integration is
+  // for a surface waiting on that same one — and a surface that names none is
+  // not it, which is the whole point of the direction.
+  if (detail.packageId) return detail.packageId === target.packageId;
+  // Identifies nothing: the context-less error pages.
   return true;
 }
 

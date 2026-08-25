@@ -204,22 +204,32 @@ export const responses = {
     },
   },
   /**
-   * The 404 BOTH schedule writes answer when the target agent has no published
-   * version — shared rather than restated, because both routes resolve the
-   * manifest the schedule will FIRE (`assertScheduleTargetValid`) and both
-   * therefore refuse the same agent for the same reason.
+   * The 404 shared by both schedule writes.
+   *
+   * It is NOT one cause on both: `POST` resolves the manifest the schedule will
+   * FIRE and 404s a never-published agent (`assertScheduleTargetValid`), while
+   * `PUT` loads the schedule row FIRST (`loadScheduleOr404`) — so an unknown
+   * schedule id is the DOMINANT 404 there, and the publish cause only reaches
+   * `PUT` when the patch carries `input` or `version_override`. The description
+   * therefore names every cause and says which operation each belongs to; the
+   * component is shared so the two operations cannot drift, not because they
+   * refuse for identical reasons.
    *
    * It was written out inline on `POST` only, so `PUT` declared the generic
    * `NotFound` while returning this — and the test that was supposed to catch
-   * that read the create operation alone and reported green. One component,
-   * `$ref`'d twice, is what makes the two operations unable to drift.
+   * that read the create operation alone and reported green. Then the first fix
+   * `$ref`'d POST's wording onto PUT verbatim, which left PUT's own primary 404
+   * (unknown schedule id) undocumented.
    */
   NoPublishedVersion: {
     description:
-      "Agent not found, or the agent has no published version (`no_published_version`). A " +
-      "schedule with no `version_override` fires the PUBLISHED manifest, so a never-published " +
-      "agent is refused at the write rather than 404ing on every tick; pin the working copy " +
-      'with `version_override: "draft"` to schedule it anyway.',
+      "Resource not found. On `PUT /api/schedules/{id}`, most commonly the schedule id itself " +
+      "does not exist (or belongs to another application) — that check runs first. Both writes " +
+      "also answer 404 when the target agent does not exist, or has no published version " +
+      "(`no_published_version`): on `POST` always, on `PUT` when the patch carries `input` or " +
+      "`version_override`. A schedule with no `version_override` fires the PUBLISHED manifest, " +
+      "so a never-published agent is refused at the write rather than 404ing on every tick; pin " +
+      'the working copy with `version_override: "draft"` to schedule it anyway.',
     content: {
       "application/problem+json": {
         schema: { $ref: "#/components/schemas/ProblemDetail" },

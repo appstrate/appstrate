@@ -68,7 +68,10 @@ export const redeemSchema = z.object({
   name: z.string().min(1).max(120).trim(),
   // Both bounds shared with Better Auth's own config. The cap used to be a
   // local 256, above the 128 Better Auth actually enforced, so a 200-character
-  // password cleared this schema and died downstream as a raw APIError.
+  // password cleared this schema and was refused downstream — surfacing as the
+  // catch-all `bootstrap_signup_rejected` 400 below (or `bootstrap_signup_failed`
+  // 500 on the throw branch): RFC 9457 either way, but naming neither the length
+  // nor the bound. The Zod bound turns that into a 400 that does.
   password: z.string().min(MIN_PASSWORD_LENGTH).max(MAX_PASSWORD_LENGTH),
 });
 

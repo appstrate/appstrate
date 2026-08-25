@@ -957,8 +957,14 @@ describe("Schedules API", () => {
         expect(op.responses["400"].description, label).toContain("timezone");
       }
 
-      // The component the two `$ref`s resolve to actually names the code.
+      // The component the two `$ref`s resolve to actually names the code…
       expect(responses.NoPublishedVersion.description).toContain("no_published_version");
+      // …and PUT's OWN dominant 404, which is not the publish cause at all:
+      // `loadScheduleOr404` runs before any manifest resolution, so an unknown
+      // schedule id is what most PUT 404s are. Sharing POST's wording verbatim
+      // left that undocumented — a shared component has to be honest for every
+      // operation that `$ref`s it, not just the one it was written from.
+      expect(responses.NoPublishedVersion.description).toContain("schedule id");
     });
 
     it("applies the same manifest choice on PUT", async () => {

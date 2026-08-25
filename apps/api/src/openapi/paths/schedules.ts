@@ -350,10 +350,12 @@ export const schedulesPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        // NOT the generic NotFound: this route runs the same
-        // `assertScheduleTargetValid` the create route does, so a patch that
-        // repoints or revalidates a schedule onto a never-published agent gets
-        // `no_published_version` here too.
+        // Two causes, both on this one response: `loadScheduleOr404` runs
+        // first (unknown schedule id — the dominant 404 here), and a patch
+        // carrying `input` or `version_override` additionally runs the same
+        // `assertScheduleTargetValid` the create route does, so repointing or
+        // revalidating onto a never-published agent gets `no_published_version`
+        // here too. The shared component's description names both.
         "404": { $ref: "#/components/responses/NoPublishedVersion" },
       },
     },

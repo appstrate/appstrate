@@ -5855,7 +5855,7 @@ export interface components {
                 "application/problem+json": components["schemas"]["ProblemDetail"];
             };
         };
-        /** @description Agent not found, or the agent has no published version (`no_published_version`). A schedule with no `version_override` fires the PUBLISHED manifest, so a never-published agent is refused at the write rather than 404ing on every tick; pin the working copy with `version_override: "draft"` to schedule it anyway. */
+        /** @description Resource not found. On `PUT /api/schedules/{id}`, most commonly the schedule id itself does not exist (or belongs to another application) — that check runs first. Both writes also answer 404 when the target agent does not exist, or has no published version (`no_published_version`): on `POST` always, on `PUT` when the patch carries `input` or `version_override`. A schedule with no `version_override` fires the PUBLISHED manifest, so a never-published agent is refused at the write rather than 404ing on every tick; pin the working copy with `version_override: "draft"` to schedule it anyway. */
         NoPublishedVersion: {
             headers: {
                 [name: string]: unknown;

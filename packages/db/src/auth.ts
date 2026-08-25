@@ -670,7 +670,8 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
       // Auth's own default: left unset, the ceiling the routes' Zod bounds
       // report was a framework default they could not see, and `auth-bootstrap`
       // had already drifted to 256 above it — a 200-character password cleared
-      // its Zod and died here as a raw APIError.
+      // its Zod and was refused here, surfacing to the caller as that route's
+      // generic `bootstrap_signup_rejected` 400, which names no length.
       minPasswordLength: MIN_PASSWORD_LENGTH,
       maxPasswordLength: MAX_PASSWORD_LENGTH,
       requireEmailVerification: smtpEnabled,

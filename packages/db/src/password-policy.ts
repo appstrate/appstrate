@@ -37,10 +37,12 @@
  * It was not, and the same defect class was open on it: `profile` capped at 128,
  * `auth-bootstrap` at 256, `sign-up/email` declared no ceiling at all, and
  * `auth.ts` set no `maxPasswordLength`, so Better Auth's own default (128)
- * governed. A 200-character password passed `auth-bootstrap`'s Zod and was then
- * rejected by Better Auth as a raw `APIError` instead of an RFC 9457 problem.
- * Two endpoints that set the SAME credential cannot disagree about its length —
- * that is a rule about the credential, not a per-endpoint transport bound.
+ * governed. A 200-character password cleared `auth-bootstrap`'s Zod and was then
+ * refused by Better Auth — which the route reports as its catch-all
+ * `bootstrap_signup_rejected` 400 ("Bootstrap signup rejected by auth
+ * provider."), naming neither the length nor the bound it broke. Two endpoints
+ * that set the SAME credential cannot disagree about its length — that is a rule
+ * about the credential, not a per-endpoint transport bound.
  */
 export const MIN_PASSWORD_LENGTH = 8;
 

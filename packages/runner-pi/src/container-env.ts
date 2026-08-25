@@ -75,10 +75,6 @@ export interface RuntimePiEnvOptions {
   outputSchema?: unknown;
   /** Forward-proxy URL. When set, HTTP(S)_PROXY + NO_PROXY are emitted. */
   forwardProxyUrl?: string;
-  /** Turn off the Pi SDK's retry loop (default on, `maxRetries: 4`) when wiring an external one. */
-  disableModelRetry?: boolean;
-  /** Turn off the Pi SDK's auto-compaction (default on) when driving history externally. */
-  disableModelCompaction?: boolean;
   /** Hosts excluded from the proxy. Required with {@link forwardProxyUrl} on a sidecar run. */
   noProxy?: string;
   sink?: {
@@ -247,21 +243,23 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
     env.no_proxy = noProxy;
   }
 
-  // The ONLY writer of the flag `pi-runner.ts` reads to turn the SDK retry loop
-  // off. Emitted rather than dropped because the sidecar's aliased `/llm` path
-  // now runs its own retry pass (`ALIAS_UPSTREAM_MAX_RETRIES`): stacking is a
-  // real configuration, so the way out of it has to stay reachable. A read with
-  // no writer is worse than either end — the reader looks configurable and is not.
-  if (opts.disableModelRetry) {
-    env.MODEL_RETRY_ENABLED = "false";
-  }
-
-  // Same shape, same reason, for the other Pi SDK loop `pi-runner.ts` reads
-  // out of `process.env`. It described itself as mirroring `MODEL_RETRY_ENABLED`
-  // while having no writer at all — so the claim was true of the pattern and
-  // false of the plumbing. This is that writer.
-  if (opts.disableModelCompaction) {
-    env.MODEL_COMPACTION_ENABLED = "false";
+  // The two Pi SDK loops `pi-runner.ts` reads out of the container's env. Both
+  // are forwarded from the API host's own `process.env` — the same mechanism
+  // `TOOL_RESULT_BYTE_LIMIT` uses below — because the host env is the only
+  // surface an operator can actually set. Routing them through a
+  // `RuntimePiEnvOptions` flag instead looks like plumbing and is not: the sole
+  // production caller (`apps/api/src/services/run-launcher/pi.ts`) passes no
+  // such flag, so the knob would be reachable from the test fixture and nowhere
+  // else. A writer with no caller is the same defect as a reader with no writer.
+  //
+  // Worth reaching for when an outer layer already retries: the sidecar's
+  // aliased `/llm` path does, `ALIAS_UPSTREAM_MAX_RETRIES` attempts per call,
+  // which multiplies with the SDK's own loop rather than replacing it.
+  for (const key of ["MODEL_RETRY_ENABLED", "MODEL_COMPACTION_ENABLED"] as const) {
+    const value = process.env[key];
+    if (value !== undefined && value !== "") {
+      env[key] = value;
+    }
   }
 
   if (opts.sink) {

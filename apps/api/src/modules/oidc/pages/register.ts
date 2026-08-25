@@ -8,7 +8,7 @@
  * to continue the OAuth flow.
  */
 
-import { MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
+import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
 import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
 import { renderSocialButtons, renderSocialSignInScript } from "./social-sign-in-script.ts";
@@ -80,6 +80,7 @@ export function renderRegisterPage(props: RegisterPageProps): RawHtml {
         placeholder="Mot de passe (${MIN_PASSWORD_LENGTH} caractères min.)"
         required
         minlength="${MIN_PASSWORD_LENGTH}"
+        maxlength="${MAX_PASSWORD_LENGTH}"
       />
       <button type="submit">Créer mon compte</button>
     </form>

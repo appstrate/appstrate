@@ -25,21 +25,6 @@ interface AuthOffer {
 export type CompletionDetail = IntegrationConnectCompletion;
 
 /**
- * The completion CORRELATION rule — which waiting surface a given completion is
- * addressed to, and the origin check in front of it on the `postMessage`
- * carrier — is `@appstrate/core/connect-handshake`, not this file. Re-exported
- * here because the cards import it from here.
- *
- * It used to be declared here, and that was the half of the handshake left
- * behind when the rest was centralised: living in this module put it out of
- * reach of the SPA's connect popup, which re-implemented the gate as "is it a
- * completion and is `ok` true" — no state, no packageId, with the packageId it
- * was waiting on three lines up. A rule only one of four surfaces can import is
- * not a single source of truth.
- */
-export { acceptsCompletionMessage, completionMatches } from "@appstrate/core/connect-handshake";
-
-/**
  * One resume append per (package, completion) across every card in this tab.
  *
  * A single completion signal reaches ALL mounted cards, so two cards awaiting

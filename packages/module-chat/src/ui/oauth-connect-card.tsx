@@ -34,17 +34,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAui } from "@assistant-ui/react";
 import { AlertTriangleIcon, CheckIcon, Loader2Icon } from "lucide-react";
 import { encodePackageIdPath } from "@appstrate/core/naming";
-import { INTEGRATION_CONNECT_CHANNEL } from "@appstrate/core/connect-handshake";
+// The correlation rule and the origin check in front of it come from core, not
+// from this module: every connect surface applies the same one, and a copy only
+// this module could import is what let the SPA's connect popup ship with no
+// correlation at all.
+import {
+  INTEGRATION_CONNECT_CHANNEL,
+  acceptsCompletionMessage,
+  completionMatches,
+} from "@appstrate/core/connect-handshake";
 import { Button } from "@appstrate/ui/components/button";
 import { useChatHeaders } from "./runtime-context.ts";
-import {
-  acceptsCompletionMessage,
-  claimResume,
-  completionMatches,
-  encodeResume,
-  type CompletionDetail,
-  type ResumeMeta,
-} from "./auth-offer.ts";
+import { claimResume, encodeResume, type CompletionDetail, type ResumeMeta } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
 
 type Phase = "idle" | "pending" | "done" | "connected" | "error";
@@ -198,9 +199,12 @@ export function OAuthConnectCard({
   useEffect(() => {
     if (phase === "done" || phase === "connected") return;
 
-    // Correlation (state AND packageId) lives in `completionMatches` — see its
-    // doc for why packageId is required: the hosted-connect offer carries no
-    // state, so without the package filter every card accepted every completion.
+    // Correlation lives in `completionMatches` — see its doc. Both identifiers
+    // are passed because neither alone covers every flow: the hosted-connect
+    // offer carries no state, and a card whose tool args never produced a
+    // `packageId` has only the state. A card that ends up with neither takes no
+    // package-addressed completion on either carrier — the intended direction,
+    // since it cannot tell its own integration's completion from anyone else's.
     const card = { state, packageId };
     const resume = (d: CompletionDetail) => complete(d.ok !== false, d.error);
 
