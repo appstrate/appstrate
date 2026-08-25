@@ -313,8 +313,12 @@ export type SidecarOperatorEnvKey = (typeof SIDECAR_OPERATOR_ENV_KEYS)[number];
 const logger = createLogger(process.env.LOG_LEVEL ?? "info");
 
 /**
- * The operator keys the sidecar parses as a positive integer, and would throw on.
- * The rest it uses verbatim or already degrades safely on.
+ * The operator keys parsed as a positive integer somewhere on the boot path, and
+ * would throw on. The rest are used verbatim or already degrade safely.
+ *
+ * Four of the five are parsed by the sidecar itself. `SIDECAR_MAX_REQUEST_BODY_BYTES`
+ * is not any more — see {@link pickOperatorSidecarEnv} — but it belongs in the set
+ * all the same: it is still parsed strictly, just earlier and by another module.
  */
 const NUMERIC_SIDECAR_ENV_KEYS = new Set<SidecarOperatorEnvKey>([
   "SIDECAR_MAX_REQUEST_BODY_BYTES",
@@ -337,12 +341,25 @@ function isPositiveIntegerEnvValue(value: string): boolean {
  * Read the operator-tunable env vars from the host's `process.env` into a record
  * to spread into a container env; empty and undefined values are omitted.
  *
- * Omitting MALFORMED numeric values is load-bearing, not defensive: the sidecar
- * parses {@link NUMERIC_SIDECAR_ENV_KEYS} with `readPositiveIntEnv`, which THROWS
- * at module scope on the boot path, inside no `try`. One stale `=0` would kill the
- * sidecar process and fail every run. A value passing here can still exceed the
- * sidecar's per-key `ABSOLUTE_BODY_CEILING` and throw there, so this is not the
- * whole check.
+ * Omitting MALFORMED numeric values is load-bearing, not defensive, for four of the
+ * five {@link NUMERIC_SIDECAR_ENV_KEYS}: `SIDECAR_MAX_MCP_ENVELOPE_BYTES`,
+ * `SIDECAR_API_CALL_CONCURRENCY` and the two token budgets. The sidecar parses those
+ * with `readPositiveIntEnv` (`runtime-pi/sidecar/helpers.ts`), which THROWS at module
+ * scope on the boot path, inside no `try`. One stale `=0` reaching the container would
+ * kill the sidecar process and fail every run; dropping it here keeps runs alive on the
+ * compiled default.
+ *
+ * `SIDECAR_MAX_REQUEST_BODY_BYTES` is the exception, and this filter is NOT what
+ * protects it any more. Its sole parser now lives in `@appstrate/afps-runtime/resolvers`
+ * (`http-call-core.ts`), which THIS process evaluates at module init — verified: both
+ * callers of this function, the API host and `modules/firecracker/runner/daemon.ts`,
+ * fail to boot on a malformed value long before they get here, so the warn-and-drop
+ * below is only ever reached for that key with a value that already parsed. Deliberate,
+ * not an oversight: `docs/ENV.md` promises loud-fail at boot on an invalid value, and a
+ * cap the operator believes they raised and did not is worse than a refusal to start.
+ *
+ * Either way this is not the whole check — a value passing here can still exceed a
+ * per-key `ABSOLUTE_BODY_CEILING` and throw in the sidecar.
  */
 export function pickOperatorSidecarEnv(
   keys: readonly SidecarOperatorEnvKey[] = SIDECAR_OPERATOR_ENV_KEYS,

@@ -50,6 +50,29 @@ export const scheduleInputSchema = z
   .superRefine(withByteCap(16 * KB));
 
 /**
+ * `application_packages.input_settings` — the agent's editor-set input
+ * defaults (`values`) plus the input fields the editor froze (`locked`), as one
+ * document. The wire pairs these as `values` / `locked_fields`; inside the
+ * column the name `input_settings` already supplies the noun, so `locked` is
+ * the member name here.
+ *
+ * Same 16 KB cap as {@link scheduleInputSchema}, the sibling holding the very
+ * same kind of payload — per-field values resolved against the agent's
+ * `input.schema`. Neither member was otherwise bounded: `values` is pruned to
+ * the schema's declared properties at the write route, but a declared string's
+ * LENGTH is not, and `locked` is stored verbatim without being pruned at all.
+ * The column is read on every run launch (`getInstalledPackageSettings`) and on
+ * every agent-detail load, so a bloated row is paid for on the hot path, not
+ * merely at rest.
+ */
+export const inputSettingsSchema = z
+  .object({
+    values: z.record(z.string(), jsonValueSchema),
+    locked: z.array(z.string()),
+  })
+  .superRefine(withByteCap(16 * KB));
+
+/**
  * `runs.result` — terminal payload persisted by `finalizeRun`. Closed shape:
  * `output` (runner-produced structured output) and nothing else. Unknown keys
  * are stripped and the byte cap bounds the row-sized JSONB column.

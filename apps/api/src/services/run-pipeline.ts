@@ -196,13 +196,71 @@ export async function resolveRunPreflight(params: {
   connectionOverrides?: ConnectionOverrides | null;
   scheduleConnectionOverrides?: ConnectionOverrides | null;
   /**
+   * The run's `dependency_overrides` — forwarded so the seeding below resolves
+   * each integration to the SAME version the kickoff will. A run pinned to a
+   * working copy (`{ "@x/y": "draft" }`) must have its readiness judged on that
+   * working copy, not on the published version it is deliberately bypassing.
+   */
+  dependencyOverrides?: Record<string, string> | null;
+  /**
    * Per-call-graph memo for integration manifest fetches — pass the same Map
    * given to `prepareAndExecuteRun` so the readiness pass shares its manifest
-   * loads with the pipeline's snapshot + spawn passes.
+   * loads with the pipeline's snapshot + spawn passes. Omitting it is fine:
+   * one is created below, because the seeding is not optional.
    */
   manifestCache?: IntegrationManifestCache;
 }): Promise<PreflightResult> {
   const { agent, applicationId, orgId, actor, packageSettings } = params;
+
+  // --- Seed the manifest memo with the PINNED integration manifests ---
+  //
+  // Readiness reads every declared integration's manifest three times over
+  // (manifest-health gate, install/enable gate, connection cascade), all
+  // through this memo. Unseeded, `fetchIntegrationManifest` falls through to
+  // `packages.draft_manifest` — so readiness judged manifest health, required
+  // scopes and auth keys against the integration AUTHOR'S LIVE DRAFT, while
+  // the kickoff gates it precedes (run-pipeline Step 2a/2b, run-creation) judge
+  // them against the pinned published version.
+  //
+  // The damaging direction is the false negative: an integration whose pinned
+  // version is perfectly satisfiable was refused because its author had since
+  // tightened their working copy. On the run route that surfaces as a 412
+  // naming scopes the version actually being run does not require. On the
+  // SCHEDULER it is worse — `triggerScheduledRun` turns any ApiError from this
+  // function into `failSchedule(...)`, so a background schedule with no user in
+  // the loop stops firing because someone edited a draft.
+  //
+  // Seeding lives HERE, in the shared preflight, rather than in each caller:
+  // both origins that use this function get it, and there is exactly one
+  // seeding site to keep in step with the kickoff's.
+  //
+  // Deliberately the bare seeder and NOT `freezeRunSpawnDependencies`, even
+  // though that is the pin's single enforcement point for a run. That function
+  // is a GATE: calling it here would move its 422 (unsatisfiable /
+  // never-published pin) and 400 (undeclared override key) ahead of EVERY
+  // readiness check, so an agent whose integration is merely uninstalled,
+  // disabled, or carrying an invalid draft manifest would stop reporting
+  // `integration_not_active` / `integration_invalid_manifest` / `not_connected`
+  // and report an unresolved dependency instead — measured at 9 of the 15 cases
+  // in `runs-412-missing-connection.test.ts`. That is a defensible product
+  // position (those runs cannot succeed either way) but it rewrites the
+  // `missing_integration_connection` envelope the MissingConnectionsModal
+  // consumes, and it would silently convert schedule failures from one cause to
+  // another. `resolveRunIntegrationVersions` has NO throw path: ids it cannot
+  // resolve are left unseeded and keep the pre-existing draft fallback, the
+  // kickoff still raises the 422, and this function's throw behaviour is
+  // byte-for-byte what it was.
+  //
+  // The caller's own Map is seeded when given (never a second one created
+  // behind its back), so the route still shares one memo across preflight,
+  // snapshot and spawn.
+  const manifestCache: IntegrationManifestCache = params.manifestCache ?? new Map();
+  await resolveRunIntegrationVersions({
+    agentManifest: agent.manifest as Record<string, unknown>,
+    orgId,
+    dependencyOverrides: params.dependencyOverrides ?? null,
+    manifestCache,
+  });
 
   await validateAgentReadiness({
     agent,
@@ -213,7 +271,7 @@ export async function resolveRunPreflight(params: {
     ...(params.scheduleConnectionOverrides
       ? { scheduleOverrides: params.scheduleConnectionOverrides }
       : {}),
-    ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
+    manifestCache,
   });
 
   return {

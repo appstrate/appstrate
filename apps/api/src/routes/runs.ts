@@ -295,6 +295,9 @@ export function createRunsRouter() {
         // `prepareAndExecuteRun` all load the same integration manifests;
         // sharing the Map collapses those repeats into one SELECT + Zod
         // parse per integration. Request-scoped: dies with this handler.
+        // `resolveRunPreflight` seeds it with the PINNED manifests before it
+        // reads anything, so the advisory verdict and the kickoff's gates
+        // judge the same versions.
         const manifestCache: IntegrationManifestCache = new Map();
 
         const {
@@ -308,6 +311,9 @@ export function createRunsRouter() {
           actor,
           packageSettings,
           connectionOverrides: connectionOverrides ?? null,
+          // Same overrides handed to `prepareAndExecuteRun` below, so the
+          // preflight seeds the manifests the kickoff will freeze.
+          dependencyOverrides: dependencyOverrides ?? null,
           manifestCache,
         });
 

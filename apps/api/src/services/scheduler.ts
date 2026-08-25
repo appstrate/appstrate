@@ -564,6 +564,12 @@ export async function triggerScheduledRun(
         // pipeline will use a few lines down (matches the "single source
         // of truth" intent of overrides).
         scheduleConnectionOverrides: overrides.connectionOverrides ?? null,
+        // `package_schedules.dependency_overrides` — the same value forwarded
+        // into `prepareAndExecuteRun` below. Without it a schedule pinned to a
+        // working copy would have its readiness judged against the published
+        // version it is deliberately bypassing, and `failSchedule` would stop
+        // the schedule over a disagreement it invented.
+        dependencyOverrides: overrides.dependencyOverrides ?? null,
       });
 
       preflightModelId = preflight.modelId;

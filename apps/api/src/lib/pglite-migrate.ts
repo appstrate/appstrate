@@ -55,8 +55,34 @@ export async function applyCorePGliteMigrations(
     }
 
     const content = await Bun.file(sqlFile).text();
-    await pg.exec(content.replaceAll("--> statement-breakpoint", ""));
-    await pg.query('INSERT INTO "__drizzle_migrations" (hash) VALUES ($1)', [entry.tag]);
+
+    // The body and its tracking row go in ONE transaction, because that is what
+    // the PostgreSQL path already does: drizzle's pg dialect runs the whole
+    // pending batch and the `__drizzle_migrations` inserts inside a single
+    // `session.transaction(...)`. As two separate round trips there is a window
+    // where the DDL commits and the tracking row never lands, and the loop above
+    // keys on the journal TAG alone — so the next boot sees the file as pending
+    // and REPLAYS it. Tier 0 is a shipped deployment mode on personal hardware
+    // (Raspberry Pi, NAS), where an unclean shutdown inside that window is not
+    // theoretical.
+    //
+    // A replay is not a harmless no-op. `0040_config_into_input.sql` wraps every
+    // `application_packages.input_settings` row unconditionally and deliberately
+    // — its header explains why a shape-sniffing guard is unsound — so a second
+    // pass nests each row again into
+    // `{"values":{"values":…,"locked":[]},"locked":[]}`.
+    //
+    // Nothing in the journal forbids a transaction block: no CREATE INDEX
+    // CONCURRENTLY, no VACUUM, no `ALTER TYPE … ADD VALUE`, and every `BEGIN` in
+    // the checked-in SQL is PL/pgSQL inside a `DO $$ … $$` block, not
+    // transaction control. The journal is already written on that assumption —
+    // `0041_restore_squash_indexes.sql` rules CONCURRENTLY out precisely because
+    // the batch runs inside one transaction, and the `SET LOCAL lock_timeout`
+    // fences in 0039/0041 are no-ops outside one.
+    await pg.transaction(async (tx) => {
+      await tx.exec(content.replaceAll("--> statement-breakpoint", ""));
+      await tx.query('INSERT INTO "__drizzle_migrations" (hash) VALUES ($1)', [entry.tag]);
+    });
     count++;
   }
 

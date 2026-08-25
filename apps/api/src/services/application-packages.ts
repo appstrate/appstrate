@@ -13,7 +13,8 @@ import {
   packageVersions,
   packageDistTags,
 } from "@appstrate/db/schema";
-import { notFound, conflict } from "../lib/errors.ts";
+import { notFound, conflict, parseBody } from "../lib/errors.ts";
+import { inputSettingsSchema } from "../lib/jsonb-schemas.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import type { PackageType } from "@appstrate/core/validation";
@@ -623,7 +624,17 @@ export async function updateInstalledPackage(
     versionId: number | null;
     enabled: boolean;
   }> = { updatedAt: new Date() };
-  if (updates.inputSettings !== undefined) set.inputSettings = updates.inputSettings;
+  // `application_packages.input_settings` has exactly ONE write path, and it is
+  // this function — the public input-settings route and every internal caller
+  // both land here. The column's byte cap therefore belongs on THIS side of the
+  // call rather than in the route body schema, which an internal caller would
+  // simply walk past. `parseBody` renders a cap violation as the same RFC-9457
+  // 400 the route would have produced (`errors[0].field === "input_settings"`).
+  const inputSettings =
+    updates.inputSettings === undefined
+      ? undefined
+      : parseBody(inputSettingsSchema, updates.inputSettings, "input_settings");
+  if (inputSettings !== undefined) set.inputSettings = inputSettings;
   if (updates.modelId !== undefined) set.modelId = updates.modelId;
   if (updates.generationConfig !== undefined) set.generationConfig = updates.generationConfig;
   if (updates.proxyId !== undefined) set.proxyId = updates.proxyId;
@@ -664,7 +675,7 @@ export async function updateInstalledPackage(
       .values({
         applicationId: scope.applicationId,
         packageId,
-        ...(updates.inputSettings !== undefined ? { inputSettings: updates.inputSettings } : {}),
+        ...(inputSettings !== undefined ? { inputSettings } : {}),
         ...(updates.modelId !== undefined ? { modelId: updates.modelId } : {}),
         ...(updates.generationConfig !== undefined
           ? { generationConfig: updates.generationConfig }

@@ -57,6 +57,7 @@ export { substituteVars } from "./template-vars.ts";
 
 // Reusable credential-injecting HTTP-call core — tool factory + helpers.
 export {
+  ABSOLUTE_BODY_CEILING,
   ABSOLUTE_MAX_RESPONSE_SIZE,
   defaultInlineLimit,
   MAX_REQUEST_BODY_SIZE,
