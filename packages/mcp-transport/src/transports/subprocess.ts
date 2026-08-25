@@ -8,8 +8,10 @@
  *   - We need explicit control over stderr capture (the transducer
  *     routes it as `log.written` CloudEvents).
  *   - We harden against the documented MCP CVEs: per-line size cap,
- *     per-line rate cap, strict UTF-8, environment scrubbing, abort-on-
- *     cancel, output-rate limits.
+ *     per-line rate cap, strict UTF-8, environment hygiene (see
+ *     {@link SubprocessTransport.buildEnv} — an allowlist on what we
+ *     HAND the child, not a boundary), abort-on-cancel, output-rate
+ *     limits.
  *   - We control spawn options (cgroup-friendly resource limits, env
  *     allowlist, ulimits) without monkey-patching the SDK.
  *
@@ -29,6 +31,12 @@
  *   - gVisor / Firecracker isolation. Those are tenant-policy decisions,
  *     not per-server transport concerns.
  *   - Seccomp profile. Also deployment-side.
+ *   - Credential isolation from the spawned server. The child runs on
+ *     the parent's uid, so it can read the parent's environment and
+ *     memory regardless of what this transport passes it. Confinement
+ *     is the spawner's job (container, microVM + separate uid, or a
+ *     refusal to spawn — see
+ *     `runtime-pi/sidecar/integration-runtime-adapter-process.ts`).
  *
  * These are layered defences applied above this transport, not inside
  * it. The transport handles framing, capture, and lifecycle — the
@@ -61,9 +69,10 @@ export interface SubprocessTransportOptions {
   /**
    * Environment variables to pass through unchanged from the parent
    * process (e.g. `PATH`). Adds to the {@link DEFAULT_ENV_PASSTHROUGH}
-   * set. NEVER includes `RUN_TOKEN`, `PLATFORM_API_URL`, etc. — those
-   * stay out of the subprocess by default and require explicit opt-in
-   * via this list.
+   * set. `RUN_TOKEN`, `PLATFORM_API_URL`, etc. are never handed over
+   * unless a caller explicitly lists them here — which keeps them out
+   * of the child's own env, not out of its reach ({@link
+   * SubprocessTransport.buildEnv} says why).
    */
   envPassthrough?: ReadonlyArray<string>;
   /** Extra env variables to inject — e.g. `NOTION_TOKEN`. */
@@ -151,8 +160,28 @@ export class SubprocessTransport implements Transport {
    * Build the env passed to the subprocess. Starts empty, layers in the
    * passthrough allowlist (only those values actually present on the
    * parent), then merges in `options.env`. Anything outside the
-   * allowlist is dropped — this is the credential isolation invariant
-   * (I3) in concrete form.
+   * allowlist is dropped.
+   *
+   * This is HYGIENE, not an isolation boundary, and the distinction is
+   * load-bearing. The spawned server is a same-uid child: on Linux it
+   * reads the parent's entire environment from `/proc/<ppid>/environ`
+   * in one open(), and a same-uid debugger attach is the equivalent
+   * elsewhere. This comment used to claim the allowlist was "the
+   * credential isolation invariant (I3) in concrete form"; it never
+   * was, and no portable primitive reachable from Bun makes it one:
+   * `Bun.spawn` exposes no `uid`/`gid` option at all (passing one
+   * neither errors nor takes effect), and user namespaces /
+   * `PR_SET_DUMPABLE` / `hidepid` / landlock / seccomp are Linux-only
+   * and unreachable from here. A mitigation that no-ops on the dev
+   * platform would be a false assurance, not a boundary.
+   *
+   * What the allowlist does buy: a var added to the parent's
+   * environment does not silently reach every spawned server, so it
+   * stays out of the child's own `env` dump, its crash reports, and
+   * whatever it forwards upstream. What actually confines a runner is
+   * the layer that spawned it — a container (sidecar docker adapter),
+   * a microVM plus a separate uid (Firecracker), or the process
+   * adapter refusing to spawn without a privilege-dropping wrapper.
    */
   private buildEnv(): Record<string, string> {
     const allow = new Set<string>([

@@ -8,8 +8,20 @@
  * The subprocess inherits the sidecar's network namespace, so the MITM
  * listener stays on 127.0.0.1 and the CA cert lives on shared fs.
  *
- * Used in dev (sidecar running as a Bun subprocess on the host) and in
- * tests. In production the docker adapter takes precedence.
+ * Used in dev (sidecar running as a Bun subprocess on the host), in
+ * tests, and inside the Firecracker guest (the sidecar runs in the
+ * microVM, so its integration runners are guest subprocesses). In
+ * production-on-Docker the docker adapter takes precedence.
+ *
+ * A runner spawned here is a plain child of the sidecar, on the SAME
+ * uid, unless the launching supervisor supplies a privilege-dropping
+ * exec wrapper (`APPSTRATE_RUNNER_EXEC`). Same uid means the runner can
+ * read the sidecar's own environment — on Linux `/proc/<sidecar-pid>/
+ * environ` is one open() away for a same-uid process — which holds the
+ * platform API key, the run bearer token, the proxy URL's basic-auth,
+ * and every connected integration's decrypted credentials. So this
+ * adapter REFUSES to spawn when no wrapper is configured; see
+ * {@link requirePrivilegeDropWrapper}.
  */
 
 import { mkdir, writeFile, chmod, rm } from "node:fs/promises";
@@ -58,6 +70,52 @@ const HOST_INTERPRETER_BY_TYPE: Record<
   // `binary` is a no-op: exec the bundle entry directly.
   binary: { command: "", argsBefore: [] },
 };
+
+/**
+ * Fail-closed gate on the only thing that makes a host subprocess a
+ * boundary: the ability to land the runner on a different uid.
+ *
+ * The Firecracker guest supervisor sets `APPSTRATE_RUNNER_EXEC` to a
+ * setuid wrapper (`spawnAs`, `modules/firecracker/guest/supervisor.ts`),
+ * so runners there execute as a dedicated runner uid and the sidecar's
+ * environ is unreadable to them. Nothing else sets it — host process
+ * mode (the `RUN_ADAPTER=process` default, the zero-install path) has no
+ * portable way to drop privilege from Bun, so the runner would be a
+ * same-uid child that can read every credential the sidecar holds.
+ *
+ * The env allowlist in `SubprocessTransport` does not close that: it
+ * bounds what we HAND the child, not what the child can go and read out
+ * of the parent. The boundary therefore moves to admission — refuse the
+ * spawn — rather than pretending a scrubbed env is isolation.
+ *
+ * Third-party bytes are the reason this is a refusal and not a warning:
+ * a `source.kind: "local"` integration runs code the platform fetched
+ * from a package registry, in the sidecar's own trust domain. Only
+ * `local` integrations spawn at all — `remote` (Streamable HTTP MCP)
+ * and `none` (api_call-only) never reach an adapter, so they are
+ * unaffected by this gate.
+ *
+ * Returns the wrapper path so the caller reads the environment exactly
+ * once — the check and the value it gates can never disagree.
+ */
+function requirePrivilegeDropWrapper(spec: IntegrationSpawnSpec): string {
+  const wrapper = process.env.APPSTRATE_RUNNER_EXEC;
+  if (wrapper) return wrapper;
+  const serverPackageId = spec.manifest.server?.packageId ?? spec.integrationId;
+  throw new Error(
+    `${spec.integrationId}: refusing to spawn its mcp-server "${serverPackageId}" — ` +
+      `source.kind "local" runs third-party code, and this adapter cannot drop privilege ` +
+      `(no APPSTRATE_RUNNER_EXEC wrapper), so the runner would be a same-uid child of the ` +
+      `sidecar and could read the sidecar's environment — platform API key, run token, ` +
+      `proxy credentials, every connected integration's decrypted tokens — straight out ` +
+      `of /proc. Remedies, cheapest first: set INTEGRATION_RUNTIME_ADAPTER=docker to keep ` +
+      `the run itself in process mode while each integration runner gets its own ` +
+      `container; or run under RUN_ADAPTER=docker; or under RUN_ADAPTER=firecracker, ` +
+      `whose guest supervisor execs every runner through a setuid wrapper onto a ` +
+      `dedicated uid. Integrations whose source.kind is "remote" or "none" spawn nothing ` +
+      `and are unaffected.`,
+  );
+}
 
 interface SubprocessPlan {
   command: string;
@@ -219,6 +277,10 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
 
     async spawn(options: SpawnIntegrationOptions): Promise<SpawnedIntegration> {
       const { runId, spec, bundleRoot, egress, workspaceHandle, onStderrLine } = options;
+      // First, before any credential material is rendered: a runner we are
+      // going to refuse must not have `delivery.files` secrets written to
+      // disk on its behalf.
+      const runnerExec = requirePrivilegeDropWrapper(spec);
       const plan = planSubprocess(spec, bundleRoot);
       const procEnv: Record<string, string> = { ...spec.spawnEnv };
       if (egress) {
@@ -271,16 +333,15 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
         createdPaths.push(...paths);
         Object.assign(procEnv, envOverrides);
       }
-      // Privilege-drop wrapper (Firecracker guest): when the supervisor
-      // provides APPSTRATE_RUNNER_EXEC, every runner execs through the
-      // setuid wrapper and lands on the dedicated runner uid instead of
-      // inheriting the sidecar's — the sidecar's environ (credentials)
-      // stays unreadable. Unset in host process mode: runners remain
-      // plain children.
-      const runnerExec = process.env.APPSTRATE_RUNNER_EXEC;
+      // Privilege-drop wrapper (Firecracker guest): the supervisor provides
+      // APPSTRATE_RUNNER_EXEC, so every runner execs through the setuid
+      // wrapper and lands on the dedicated runner uid instead of inheriting
+      // the sidecar's — the sidecar's environ (credentials) stays
+      // unreadable. Resolved at the top of `spawn` by
+      // `requirePrivilegeDropWrapper`, which refused when it is unset.
       const transport = new SubprocessTransport({
-        command: runnerExec ?? plan.command,
-        args: runnerExec ? [plan.command, ...plan.args] : plan.args,
+        command: runnerExec,
+        args: [plan.command, ...plan.args],
         cwd: plan.cwd,
         env: procEnv,
         envPassthrough: ["PATH", "HOME", "NODE_OPTIONS"],

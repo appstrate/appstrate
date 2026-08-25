@@ -22,6 +22,7 @@ import { zipArtifact } from "@appstrate/core/zip";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import { bootIntegrations } from "../integrations-boot.ts";
 import { _setLogSinkForTesting } from "../logger.ts";
+import { installPassthroughRunnerExec } from "./helpers/runner-exec.ts";
 
 /** A shape `scrubSecretMaterial` masks, distinctive enough to grep for. */
 const SECRET = "sk-ant-api03-LEAKED0000000000";
@@ -44,6 +45,11 @@ function localSpec(integrationId: string): IntegrationSpawnSpec {
 async function boot(spec: IntegrationSpawnSpec, fetchFn: typeof fetch) {
   const previous = process.env.INTEGRATION_RUNTIME_ADAPTER;
   process.env.INTEGRATION_RUNTIME_ADAPTER = "process";
+  // The process adapter refuses to spawn a local runner unless a
+  // privilege-drop wrapper is configured (it would otherwise be a same-uid
+  // child of the sidecar). The stderr case below needs a real subprocess, so
+  // stand in the passthrough wrapper for the whole boot.
+  const runnerExec = await installPassthroughRunnerExec();
   try {
     return await bootIntegrations(
       [spec],
@@ -51,6 +57,7 @@ async function boot(spec: IntegrationSpawnSpec, fetchFn: typeof fetch) {
       undefined,
     );
   } finally {
+    await runnerExec.restore();
     if (previous === undefined) delete process.env.INTEGRATION_RUNTIME_ADAPTER;
     else process.env.INTEGRATION_RUNTIME_ADAPTER = previous;
   }
