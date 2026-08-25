@@ -57,6 +57,47 @@ describe("turnErrorState", () => {
     ).toMatchObject({ text: "turn.error.unknown" });
   });
 
+  it("surfaces the cause of a deadline turn that was failing all along", () => {
+    // The deadline notice is a real persisted text part rendered above this
+    // alert, so the user reads BOTH: "this turn hit its time limit" and why it
+    // was going nowhere. Retry follows the cause, not the ceiling.
+    expect(
+      turnErrorState(
+        message(
+          turn({
+            finishReason: "deadline",
+            errorCategory: "upstream_unavailable",
+            errorRetryable: true,
+            requestId: "req_slow1",
+          }),
+        ),
+        t,
+      ),
+    ).toEqual({ text: "turn.error.upstreamUnavailable", retryable: true, requestId: "req_slow1" });
+  });
+
+  it("takes retryable from the cause on a deadline turn, not from the deadline", () => {
+    expect(
+      turnErrorState(
+        message(
+          turn({
+            finishReason: "deadline",
+            errorCategory: "credential_unavailable",
+            errorRetryable: false,
+          }),
+        ),
+        t,
+      ),
+    ).toMatchObject({ text: "turn.error.credentialUnavailable", retryable: false });
+  });
+
+  it("adds no sentence to a deadline turn that carried no cause", () => {
+    // Nothing failed — the turn simply ran out of clock, and the notice already
+    // says so. A generic "generation failed" here would contradict it and read
+    // as a second, different verdict on the same turn.
+    expect(turnErrorState(message(turn({ finishReason: "deadline" })), t)).toBeNull();
+  });
+
   it("localizes an in-stream failure from its marker", () => {
     expect(
       turnErrorState(
