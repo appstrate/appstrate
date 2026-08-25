@@ -397,7 +397,7 @@ export function ListToolbar({
                 value={search.value}
                 onChange={(event) => search.onChange(event.target.value)}
                 placeholder={search.placeholder}
-                className="h-8 w-full max-w-[250px]"
+                className="[[data-slot=dialog-content]_&]:bg-background h-8 w-full max-w-[250px]"
               />
             )}
           </div>
@@ -454,7 +454,7 @@ export function ListToolbar({
             value={search.value}
             onChange={(event) => search.onChange(event.target.value)}
             placeholder={search.placeholder}
-            className="hidden h-8 w-full sm:block sm:max-w-[280px]"
+            className="[[data-slot=dialog-content]_&]:bg-background hidden h-8 w-full sm:block sm:max-w-[280px]"
           />
         )}
 
@@ -517,7 +517,7 @@ export function ListToolbar({
               if (event.key === "Escape") setSearchOpen(false);
             }}
             placeholder={search.placeholder}
-            className="h-8 w-full pr-9"
+            className="[[data-slot=dialog-content]_&]:bg-background h-8 w-full pr-9"
           />
           <Button
             type="button"

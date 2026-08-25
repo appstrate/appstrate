@@ -2488,6 +2488,13 @@ from the list or from detail: Cancel and Save return direct edits to the list,
 while an edit entered from detail returns to detail. A bookmarked edit URL
 defaults safely to the list.
 
+End-Users keeps its collection apparatus inside settings because it is the one
+paginated, potentially high-volume directory there and its search, filters and
+column choices have real behaviour. Small settings tables do not gain inert
+controls merely for visual symmetry. The shared `ListToolbar` search surface is
+now explicitly white inside a dialog, matching the level-one collection search
+instead of inheriting the grey form-input treatment reserved for setting rows.
+
 **12. Accessibility, which nothing here has ever checked.** The branch
 re-declares ARIA roles on the table because this file demands it, and that is
 the whole of it: not one contrast ratio, keyboard path or touch target has ever
