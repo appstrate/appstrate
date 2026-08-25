@@ -346,6 +346,44 @@ export function derivePiCompactionSettings(
   return { compaction: { enabled: true, reserveTokens, keepRecentTokens }, contextWindow };
 }
 
+/**
+ * Two caps on the SAME provider failure string, because the timeout watchdog
+ * puts it on two channels with very different budgets. Kept adjacent, and the
+ * second derived from the first, so the relationship is structural rather than
+ * two unexplained numbers a reader has to reconcile.
+ *
+ * A provider failure string is data we do not control: an HTML error page or a
+ * JSON stack dump runs to hundreds of KiB, so both channels must be bounded.
+ *
+ * - `UPSTREAM_MESSAGE_MAX_CHARS` bounds the ARCHIVAL copy in
+ *   `RunError.context` — the structured channel, documented as bounded ("sinks
+ *   may truncate large payloads"), which lands in a `run_logs.data` jsonb.
+ *   2000 chars is well past any real provider error.
+ * - `UPSTREAM_SUMMARY_MAX_CHARS` bounds the HUMAN copy appended to
+ *   `RunError.message` — a tenth of the archival budget, because that channel
+ *   is ONE line of a log-viewer row and the `runs.error` text column, not an
+ *   archive. The full-length copy always remains in `context.upstream.message`,
+ *   so tightening this loses nothing.
+ */
+const UPSTREAM_MESSAGE_MAX_CHARS = 2000;
+const UPSTREAM_SUMMARY_MAX_CHARS = UPSTREAM_MESSAGE_MAX_CHARS / 10;
+
+/**
+ * Collapse a provider failure string to ONE bounded line for the human
+ * channel. The collapse is not cosmetic: the log viewer renders a row's
+ * message with `whitespace-pre-wrap` (apps/web/src/components/log-viewer.tsx),
+ * so an embedded newline becomes a real line break — a multi-line JSON error
+ * body would turn one log row into forty — and the viewer's copy/export path
+ * joins entries by line, which a multi-line message would desynchronise.
+ * Collapsing runs of whitespace (not just newlines) also strips the indentation
+ * of a pretty-printed JSON body, which is what makes 200 chars enough to carry
+ * the meaningful part. Collapse BEFORE slicing so the cap counts visible
+ * characters rather than indentation.
+ */
+function summarizeUpstreamMessage(message: string): string {
+  return message.replace(/\s+/g, " ").trim().slice(0, UPSTREAM_SUMMARY_MAX_CHARS).trimEnd();
+}
+
 // Compile error if appstrate ever declares an apiShape Pi does not know.
 type _ApiShapeSubsetOfPi = ModelApiShape extends KnownApi ? true : never;
 const _assertApiShapeSubsetOfPi: _ApiShapeSubsetOfPi = true;
@@ -456,10 +494,55 @@ export class PiRunner implements Runner {
           eventSink,
           usage: bridge?.getUsage() ?? { input_tokens: 0, output_tokens: 0 },
           terminalStatus: "timeout",
-          buildError: () => ({
-            code: "timeout",
-            message: `Run timed out after ${timeoutSeconds}s`,
-          }),
+          buildError: () => {
+            // The watchdog knows only that the budget ran out; the BRIDGE
+            // knows why the run was making no headway. Ask it for the last
+            // failed model turn so a run that spent its whole budget on
+            // provider 503s stops finalizing as a bare `timeout` with no
+            // cause the user can act on. Deliberately NOT `getTerminalError()`:
+            // that is the verdict on the FINAL turn and returns undefined for
+            // exactly the shape seen here — a run cut off mid-retry-loop,
+            // whose last turn never settled into a terminal error.
+            const upstream = bridge?.getLastUpstreamError();
+            // The cause has to travel the HUMAN channel too, not just
+            // `context`. `RunError.message` is the only field that reaches
+            // both the `runs.error` text column and the log viewer without a
+            // schema migration — `context` is durable (it rides the
+            // `appstrate.error` event into `run_logs.data`) but nothing on
+            // screen projects an unknown `data` key, so a cause carried only
+            // there leaves the user reading a bare "timed out" exactly as
+            // before. The existing sentence stays as the PREFIX, verbatim:
+            // it is the run's own verdict and readers may match on it, so a
+            // run with no upstream cause produces a byte-identical message.
+            // The wording names the provider explicitly so a non-expert reads
+            // "something upstream broke", not "my agent is buggy".
+            const cause = upstream
+              ? ` — the model provider returned an error during the run: ${summarizeUpstreamMessage(upstream.message)}`
+              : "";
+            return {
+              // Unchanged on purpose: `timeout` is the documented stable
+              // branch key sinks and webhooks match on. The cause is additive
+              // supplementary data, never a new code.
+              code: "timeout",
+              message: `Run timed out after ${timeoutSeconds}s${cause}`,
+              // Omitted ENTIRELY when no turn ever errored — an empty
+              // `context` would read as "we looked upstream and it was fine",
+              // which is not what "we never saw a failed turn" means. Keys
+              // inside `context` are snake_case: this is data on the wire (it
+              // rides the finalize body and the `appstrate.error` event into a
+              // `run_logs.data` jsonb), not a TS-internal shape.
+              ...(upstream
+                ? {
+                    context: {
+                      upstream: {
+                        stop_reason: upstream.stopReason,
+                        message: upstream.message.slice(0, UPSTREAM_MESSAGE_MAX_CHARS),
+                      },
+                    },
+                  }
+                : {}),
+            };
+          },
           stamp: (result) => {
             if (bridge) result.cost = bridge.getCost();
             result.durationMs = Date.now() - runStart;
@@ -1086,6 +1169,21 @@ export interface SessionBridgeHandle {
    * `RunResult.status`.
    */
   getTerminalError(): RunError | undefined;
+  /**
+   * The last assistant turn that FAILED at ANY point in the run — not
+   * necessarily the final one — or `undefined` if none ever did.
+   *
+   * Deliberately distinct from {@link getTerminalError}, and the two answer
+   * different questions. That one is the terminal VERDICT on the FINAL turn:
+   * an errored turn the agent later recovered from is invisible to it, and
+   * must be, because the run went on to succeed. This one survives that
+   * recovery. It exists for the paths that cut the run off BEFORE it can
+   * settle into a verdict — the wall-clock watchdog above all, where the loop
+   * may have burnt the whole budget retrying provider 503s and the turn it
+   * happened to be mid-way through says nothing at all. Without it such a run
+   * finalizes as a bare `timeout` carrying zero cause.
+   */
+  getLastUpstreamError(): { stopReason: string; message: string } | undefined;
 }
 
 /**
@@ -1290,6 +1388,24 @@ function isProviderNormalizedAbort(errorMessage: string | undefined): boolean {
   return normalized === "the operation was aborted" || normalized === "this operation was aborted";
 }
 
+/**
+ * True when a terminal `aborted` (or provider-normalized abort) turn is the
+ * runner's OWN early-stop rather than a failure: the run already produced a
+ * successful terminal tool, and `onTerminalTool` aborted the SDK loop to stop
+ * paying for turns nobody will read. Extracted so `getTerminalError()` and the
+ * sticky upstream recorder apply one definition instead of two copies that can
+ * drift apart — they must agree on what is NOT a failure.
+ */
+function isRunnerEarlyStopAbort(
+  stopReason: string | undefined,
+  errorMessage: string | undefined,
+  terminalToolCompleted: boolean,
+): boolean {
+  return (
+    terminalToolCompleted && (stopReason === "aborted" || isProviderNormalizedAbort(errorMessage))
+  );
+}
+
 interface SessionBridgeOptions {
   /**
    * Tool names whose first successful `tool_execution_end` marks the run
@@ -1361,6 +1477,17 @@ export function installSessionBridge(
   let lastAssistantStopReason: string | undefined;
   let lastAssistantErrorMessage: string | undefined;
 
+  // Last FAILED assistant turn — kept separate from the two fields above on
+  // purpose, not folded into them. Those are overwritten on every
+  // `message_end`, so a single clean turn after an errored one erases the
+  // cause; that is correct for the terminal verdict (the agent recovered, the
+  // run succeeded) and exactly wrong for a run the watchdog cuts short, where
+  // the errored turns ARE the story. These two are written only on a terminal
+  // error stop and never cleared, so `getLastUpstreamError()` can still name
+  // the provider failure after any number of intervening clean turns.
+  let lastUpstreamStopReason: string | undefined;
+  let lastUpstreamErrorMessage: string | undefined;
+
   // Pending fire-and-forget emits. `fire()` dispatches each sink.emit
   // call without awaiting (the Pi SDK callback is synchronous), and
   // pushes the resulting promise here so `drainPending()` can await
@@ -1428,6 +1555,25 @@ export function installSessionBridge(
         // loop settles (mirrors the SDK's own `_lastAssistantMessage`).
         lastAssistantStopReason = last.stopReason;
         lastAssistantErrorMessage = last.errorMessage;
+
+        // Sticky record of the last FAILED turn (see the declaration). Gated
+        // on `isTerminalErrorStop` — the same predicate the live
+        // `appstrate.error` emit and `getTerminalError()` use — so a clean
+        // turn leaves it standing instead of blanking it.
+        // Also skips the runner's own early-stop abort, mirroring
+        // `getTerminalError()`: that turn is a success artefact, and latching
+        // it would make a watchdog firing afterwards (a terminal tool ran, then
+        // the output re-prompt hung) blame a provider that never failed. The
+        // suppression is applied HERE, at latch time, not at read time: a
+        // benign abort must not be recorded, but neither may it ERASE a real
+        // 503 latched earlier in the run — which a read-time guard would do.
+        if (
+          isTerminalErrorStop(last.stopReason) &&
+          !isRunnerEarlyStopAbort(last.stopReason, last.errorMessage, terminalToolCompleted)
+        ) {
+          lastUpstreamStopReason = last.stopReason;
+          lastUpstreamErrorMessage = last.errorMessage;
+        }
 
         // Accumulate this turn's token usage into the run totals.
         const u = last.usage;
@@ -1640,9 +1786,11 @@ export function installSessionBridge(
       // A trailing "aborted" turn AFTER a successful terminal tool is the
       // runner's own early-stop, not a failure.
       if (
-        terminalToolCompleted &&
-        (lastAssistantStopReason === "aborted" ||
-          isProviderNormalizedAbort(lastAssistantErrorMessage))
+        isRunnerEarlyStopAbort(
+          lastAssistantStopReason,
+          lastAssistantErrorMessage,
+          terminalToolCompleted,
+        )
       ) {
         return undefined;
       }
@@ -1650,6 +1798,16 @@ export function installSessionBridge(
         return undefined;
       }
       return { code: "adapter_error", message: terminalErrorMessage(lastAssistantErrorMessage) };
+    },
+    getLastUpstreamError(): { stopReason: string; message: string } | undefined {
+      if (lastUpstreamStopReason === undefined) return undefined;
+      // Same message resolution as the terminal verdict (`terminalErrorMessage`
+      // is shared) so the two can never describe one failed turn with two
+      // different strings.
+      return {
+        stopReason: lastUpstreamStopReason,
+        message: terminalErrorMessage(lastUpstreamErrorMessage),
+      };
     },
     async drainPending(): Promise<void> {
       // Snapshot the current pending set: events fired AFTER drainPending
