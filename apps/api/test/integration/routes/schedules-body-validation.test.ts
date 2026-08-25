@@ -33,9 +33,9 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedSchedule } from "../../helpers/seed.ts";
+import { seedSchedule } from "../../helpers/seed.ts";
 import { expectRejectedField } from "../../helpers/body-validation.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { seedSchedulableAgent } from "../../helpers/schedule-fixtures.ts";
 
 const app = getTestApp();
 
@@ -47,8 +47,16 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "schedbodyorg" });
     agentRef = "@schedbodyorg/sched-body-agent";
-    await seedAgent({ id: agentRef, orgId: ctx.orgId, createdBy: ctx.user.id });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, agentRef);
+    // Published, not merely drafted: both write routes validate against the
+    // manifest the schedule will FIRE, and with no `version_override` that is
+    // the published version — a draft-only agent 404s before any body rule is
+    // reached, which would make every control below vacuous.
+    await seedSchedulableAgent({
+      id: agentRef,
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      userId: ctx.user.id,
+    });
   });
 
   async function post(body: Record<string, unknown>) {
@@ -115,10 +123,14 @@ describe("PUT /api/schedules/:id — body validation", () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "schedputorg" });
     const agentRef = "@schedputorg/sched-put-agent";
-    const agent = await seedAgent({ id: agentRef, orgId: ctx.orgId, createdBy: ctx.user.id });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, agentRef);
+    await seedSchedulableAgent({
+      id: agentRef,
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      userId: ctx.user.id,
+    });
     const schedule = await seedSchedule({
-      packageId: agent.id,
+      packageId: agentRef,
       orgId: ctx.orgId,
       applicationId: ctx.defaultAppId,
       userId: ctx.user.id,

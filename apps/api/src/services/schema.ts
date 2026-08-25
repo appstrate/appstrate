@@ -3,6 +3,7 @@
 import { isFileField, type JSONSchemaObject, type JSONSchema7 } from "@appstrate/core/form";
 import {
   compileCached,
+  isUnconstrainedSchema,
   stripEmptyRequired,
   validateAgainstSchema as validateAgainstSchemaCore,
   type SchemaValidationResult,
@@ -51,8 +52,11 @@ function runValidate(
   data: Record<string, unknown> | undefined,
   schema: JSONSchemaObject,
 ): ValidationResult | { valid: boolean; errors: string[] } {
-  // 1. Empty-schema short circuit
-  if (!schema.properties || Object.keys(schema.properties).length === 0) {
+  // 1. Empty-schema short circuit — `isUnconstrainedSchema` (core), not a
+  //    local `properties` test: a schema constrains plenty without naming a
+  //    property (`required`, `additionalProperties`, `allOf`, `$ref`), and all
+  //    of those used to be waved through here before AJV ran.
+  if (isUnconstrainedSchema(schema)) {
     if (kind === "output") return { valid: true, errors: [] };
     return {
       valid: true,
@@ -70,19 +74,38 @@ function runValidate(
     // `upload://upl_xxx` URIs by the input parser BEFORE this runs; the
     // declared schema still uses `format: uri` + `contentMediaType` which
     // does not match the `upload:` URI scheme under strict format checks.
-    const nonFileProps: Record<string, JSONSchema7> = {};
-    for (const [key, prop] of Object.entries(schema.properties)) {
-      if (!isFileField(prop)) nonFileProps[key] = prop;
+    //
+    // The exclusion RELAXES each file property to `{}` instead of deleting the
+    // key, and the effective schema is a SPREAD of the author's schema rather
+    // than a fresh `{type, properties, required}` object. Both details matter:
+    //
+    //  - rebuilding three keys silently discarded every other keyword the
+    //    author declared — `additionalProperties`, `patternProperties`,
+    //    `allOf`/`oneOf`, `dependentRequired`, `minProperties`, `$defs`/`$ref`
+    //    — so an input the declared schema forbids was accepted;
+    //  - deleting the key would break the keywords that reason about the
+    //    property SET. The parser leaves the resolved `appfile://…` value in
+    //    `input` (see `assertInputValid` in `services/input-parser.ts`), so
+    //    under a declared `additionalProperties: false` an undeclared file key
+    //    would now be rejected as an unexpected extra.
+    //
+    // A required file field is still dropped from `required`, exactly as
+    // before: whether a file was supplied is the upload pipeline's question,
+    // not AJV's.
+    const relaxedProps: Record<string, JSONSchema7> = {};
+    const fileFields = new Set<string>();
+    for (const [key, prop] of Object.entries(schema.properties ?? {})) {
+      if (isFileField(prop)) {
+        fileFields.add(key);
+        relaxedProps[key] = {};
+      } else {
+        relaxedProps[key] = prop;
+      }
     }
-    if (Object.keys(nonFileProps).length === 0) {
-      return { valid: true, errors: [], data: effectiveData };
-    }
-    const nonFileRequired = schema.required?.filter((k) => nonFileProps[k]) ?? [];
-    effectiveSchema = {
-      type: "object",
-      properties: nonFileProps,
-      ...(nonFileRequired.length > 0 ? { required: nonFileRequired } : {}),
-    };
+    const nonFileRequired = schema.required?.filter((k) => !fileFields.has(k)) ?? [];
+    effectiveSchema = { ...schema, properties: relaxedProps };
+    if (nonFileRequired.length > 0) effectiveSchema.required = nonFileRequired;
+    else delete effectiveSchema.required;
     effectiveData = stripEmptyRequired(effectiveData, nonFileRequired);
   } else {
     // output: allow extra fields (state, tokenUsage, etc.)
@@ -132,9 +155,9 @@ export const validateAgainstSchema = validateAgainstSchemaCore;
  * injection silently resolves to an empty value at runtime (the credential
  * header is never injected, yet the run still "succeeds").
  *
- * No-op when the auth declares no schema properties — there is nothing to
- * validate against, and forcing field shape on an undeclared schema would
- * reject legitimately loose `custom` auths.
+ * No-op when the auth declares a schema that constrains nothing — there is
+ * nothing to validate against, and forcing field shape on an undeclared schema
+ * would reject legitimately loose `custom` auths.
  */
 export function validateConnectionCredentials(
   schema: JSONSchemaObject | undefined,
@@ -143,7 +166,10 @@ export function validateConnectionCredentials(
   // honours the manifest schema's `type` declarations regardless.
   credentials: Record<string, unknown>,
 ): ValidationResult {
-  if (!schema?.properties || Object.keys(schema.properties).length === 0) {
+  // Same narrowed predicate as the input/output path: an auth that declares
+  // nothing is legitimately loose, but one that declares `required` (or any
+  // other assertion) without naming a property is NOT — and that used to pass.
+  if (!schema || isUnconstrainedSchema(schema)) {
     return { valid: true, errors: [], data: credentials };
   }
   const required = Array.isArray(schema.required) ? schema.required : [];

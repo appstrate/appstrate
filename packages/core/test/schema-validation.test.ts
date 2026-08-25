@@ -41,6 +41,56 @@ describe("validateAgainstSchema", () => {
   it("short-circuits when the schema declares no properties", () => {
     const empty: JSONSchemaObject = { type: "object", properties: {} };
     expect(validateAgainstSchema({ anything: "goes" }, empty).valid).toBe(true);
+    // …and when it declares no `properties` member at all.
+    expect(
+      validateAgainstSchema({ anything: "goes" }, { type: "object" } as JSONSchemaObject).valid,
+    ).toBe(true);
+  });
+
+  // The short-circuit above used to test `properties` alone, which is a
+  // different question: `properties` says what a NAMED key must look like, and
+  // a schema constrains plenty without naming one. Each case below returned
+  // `valid: true` BEFORE Ajv ran — and `createAjv` uses `strict: false`, so
+  // Ajv would have enforced every one of them.
+  describe("an empty `properties` no longer waives the rest of the schema", () => {
+    const cases: [string, JSONSchemaObject, Record<string, unknown>][] = [
+      [
+        "required",
+        { type: "object", properties: {}, required: ["must_be_here"] } as JSONSchemaObject,
+        {},
+      ],
+      [
+        "additionalProperties: false",
+        { type: "object", properties: {}, additionalProperties: false } as JSONSchemaObject,
+        { anything: 1 },
+      ],
+      [
+        "allOf",
+        { type: "object", allOf: [{ required: ["a"] }] } as unknown as JSONSchemaObject,
+        {},
+      ],
+      [
+        "minProperties",
+        { type: "object", properties: {}, minProperties: 1 } as unknown as JSONSchemaObject,
+        {},
+      ],
+    ];
+
+    for (const [label, schema, data] of cases) {
+      it(`enforces ${label}`, () => {
+        expect(validateAgainstSchema(data, schema).valid).toBe(false);
+      });
+    }
+
+    it("still accepts anything under a schema that constrains nothing (control)", () => {
+      const annotated = {
+        type: "object",
+        title: "Nothing",
+        description: "declares no rule",
+        properties: {},
+      } as unknown as JSONSchemaObject;
+      expect(validateAgainstSchema({ whatever: true }, annotated).valid).toBe(true);
+    });
   });
 
   it("rejects format violations", () => {

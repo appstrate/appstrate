@@ -20,7 +20,7 @@ import {
   updateSchedule,
   deleteSchedule,
 } from "../services/scheduler.ts";
-import { isValidCron } from "../lib/cron.ts";
+import { computeNextRun, isValidCron } from "../lib/cron.ts";
 import { requireAgent } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { ApiError, invalidRequest, notFound, validationFailed } from "../lib/errors.ts";
@@ -32,9 +32,14 @@ import { getAppScope, type AppScope } from "../lib/scope.ts";
 import { getOrgMember } from "../services/organizations.ts";
 import { getEndUser } from "../services/end-users.ts";
 import { assertExplicitModelExists, resolveModel } from "../services/org-models.ts";
-import { getInstalledPackageSettings } from "../services/application-packages.ts";
+import {
+  getInstalledPackageSettings,
+  type InstalledPackageSettings,
+} from "../services/application-packages.ts";
 import { resolveAndValidateScheduleInput } from "../services/input-resolution.ts";
 import { getPackage } from "../services/package-catalog.ts";
+import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
+import type { LoadedPackage } from "../types/index.ts";
 import { asJSONSchemaObject, schemaHasFileFields } from "@appstrate/core/form";
 import { listScheduleRuns } from "../services/state/runs.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
@@ -62,6 +67,90 @@ function scheduleInputInvalid(errors: { field: string; message: string }[]): Api
       message: e.message,
     })),
   );
+}
+
+/**
+ * Refuse a cron/timezone pair the scheduler could never turn into a fire.
+ *
+ * `timezone` used to be a bare `z.string()` next to an `isValidCron`-gated
+ * `cron_expression`, and an unknown zone is silent all the way down:
+ * `CronExpressionParser.parse(expr, { tz })` accepts it and only `.next()`
+ * throws, which `computeNextRun` swallows into `null` (row written with
+ * `next_run_at = NULL`) and BullMQ's `getNextMillis` swallows into `undefined`
+ * (no repeat job registered at all). The API answered `201 { enabled: true }`
+ * for a schedule that would never run — no log line, no failed run, no
+ * `failSchedule`.
+ *
+ * The gate is `computeNextRun` ITSELF rather than a zone allowlist
+ * (`Intl.supportedValuesOf("timeZone")`) or a `new Intl.DateTimeFormat` probe.
+ * An allowlist is a second source of truth that can disagree with the parser
+ * — it already does, on the offset and `Etc/*` forms cron-parser accepts —
+ * whereas this runs the exact function `createSchedule` / `updateSchedule`
+ * call to fill `next_run_at`, over the same `cron-parser` version BullMQ
+ * resolves for `getNextMillis`. Whatever this accepts therefore produces a
+ * real `next_run_at` AND a registered repeat job, by construction.
+ *
+ * The cron check stays separate so a bad expression keeps blaming
+ * `cron_expression`; past it, a `null` can only come from the zone.
+ */
+function assertFirable(cronExpression: string, timezone: string): void {
+  if (!isValidCron(cronExpression)) {
+    throw invalidRequest("Invalid cron expression", "cron_expression");
+  }
+  if (computeNextRun(cronExpression, timezone) === null) {
+    throw invalidRequest(`Invalid timezone '${timezone}'`, "timezone");
+  }
+}
+
+/**
+ * Validate a schedule's stored input against the manifest the schedule will
+ * actually FIRE — not the editor's working copy.
+ *
+ * `getPackage()` returns `packages.draft_manifest`, but the fire path resolves
+ * `version_override` through `resolveAgentRunVersion` (`services/scheduler.ts`),
+ * and with no override that selector means the PUBLISHED version, never the
+ * draft. Validating the draft here judged a definition the schedule will never
+ * execute, and every disagreement between the two became a `201` followed by a
+ * permanent, silent failure at every tick:
+ *
+ *  - a published schema requiring a field the draft dropped → accepted, then
+ *    `failSchedule` on every fire;
+ *  - an agent with NO published version → accepted, then a 404
+ *    `no_published_version` on every fire (while `POST …/run` correctly 404s
+ *    at the call);
+ *  - the file-input refusal below — the whole reason this check exists — read
+ *    a manifest that never runs, so an agent whose PUBLISHED schema has a file
+ *    field was schedulable.
+ *
+ * Resolving first is what `routes/runs.ts` already does for a manual launch;
+ * this is the same order on the surface that keeps its verdict forever.
+ */
+async function assertScheduleTargetValid(args: {
+  agent: LoadedPackage;
+  /** `version_override` as this request leaves it — the selector every fire replays. */
+  versionOverride: string | undefined;
+  packageSettings: InstalledPackageSettings;
+  input: Record<string, unknown> | undefined;
+}): Promise<void> {
+  const { agent: effectiveAgent } = await resolveAgentRunVersion(args.agent, args.versionOverride);
+  const inputSchema = effectiveAgent.manifest.input?.schema;
+
+  if (schemaHasFileFields(inputSchema ? asJSONSchemaObject(inputSchema) : undefined)) {
+    throw invalidRequest("Cannot schedule agents with file inputs");
+  }
+
+  // The author defaults and the editor's stored values sit UNDER the
+  // schedule's own frozen values, so a required field the editor already
+  // answers must not be demanded again here. A schedule value naming a locked
+  // field is refused (400 `locked_input_field`) at this write rather than
+  // silently each tick.
+  const resolution = resolveAndValidateScheduleInput({
+    inputSchema,
+    editorDefaults: args.packageSettings.values,
+    lockedFields: args.packageSettings.locked,
+    input: args.input,
+  });
+  if (resolution.errors) throw scheduleInputInvalid(resolution.errors);
 }
 
 /**
@@ -225,33 +314,18 @@ export function createSchedulesRouter() {
 
       const data = await readJsonBody(c, createScheduleSchema);
 
-      // Block scheduling for agents with file inputs
-      const inputSchema = agent.manifest.input?.schema;
-      if (schemaHasFileFields(inputSchema ? asJSONSchemaObject(inputSchema) : undefined)) {
-        throw invalidRequest("Cannot schedule agents with file inputs");
-      }
-
-      // Validate cron expression
-      if (!isValidCron(data.cron_expression)) {
-        throw invalidRequest("Invalid cron expression", "cron_expression");
-      }
+      // Request-local refusals first — no lookup needed to answer them.
+      assertFirable(data.cron_expression, data.timezone);
 
       const scope = getAppScope(c);
 
-      // Validate what the schedule will actually fire with: the author
-      // defaults and the editor's stored values sit UNDER the schedule's own
-      // frozen values, so a required field the editor already answers must not
-      // be demanded again here. A schedule value naming a locked field is
-      // refused (400 `locked_input_field`) at this write rather than silently
-      // each tick.
       const packageSettings = await getInstalledPackageSettings(scope.applicationId, agent.id);
-      const resolution = resolveAndValidateScheduleInput({
-        inputSchema,
-        editorDefaults: packageSettings.values,
-        lockedFields: packageSettings.locked,
+      await assertScheduleTargetValid({
+        agent,
+        versionOverride: data.version_override,
+        packageSettings,
         input: data.input,
       });
-      if (resolution.errors) throw scheduleInputInvalid(resolution.errors);
 
       // #738: actor defaults to the caller; an admin may override it from the
       // form (validated against this org/app scope).
@@ -323,9 +397,16 @@ export function createSchedulesRouter() {
 
     const data = await readJsonBody(c, updateScheduleSchema);
 
-    // Validate cron expression if provided
-    if (data.cron_expression && !isValidCron(data.cron_expression)) {
-      throw invalidRequest("Invalid cron expression", "cron_expression");
+    // Only when this patch touches either half: an unrelated patch (say
+    // `{enabled:false}`) on a row written before this gate existed must stay
+    // applicable. `updateSchedule` recomputes `next_run_at` from the EFFECTIVE
+    // pair, so that is the pair checked here — same `??` fallbacks, same
+    // "UTC" default.
+    if (data.cron_expression !== undefined || data.timezone !== undefined) {
+      assertFirable(
+        data.cron_expression ?? existing.cron_expression,
+        data.timezone ?? existing.timezone ?? "UTC",
+      );
     }
 
     // The agent's per-application settings — read once and shared by the
@@ -342,19 +423,31 @@ export function createSchedulesRouter() {
     // wrong-typed or incomplete value answered 200 and then died on every
     // subsequent fire, visible only in the schedule's failure record.
     //
+    // Unconditional: `existing.input` is `Record | null` (`toSchedule` maps the
+    // JSONB column through `asRecordOrNull`), never `undefined`, so the guard
+    // this used to carry was always true. And it must run even when `input` is
+    // absent from the patch — the schema, the locks AND `version_override` can
+    // all have moved since the schedule was written, and the last of those is
+    // itself patchable right here.
+    //
     // `data.input ?? existing.input` because a PATCH that omits `input` must
-    // still be checked against the CURRENT schema and locks — both can have
-    // tightened since the schedule was written.
-    if (data.input !== undefined || existing.input !== undefined) {
-      const agentForInput = await getPackage(existing.packageId, scope.orgId);
-      const resolution = resolveAndValidateScheduleInput({
-        inputSchema: agentForInput?.manifest.input?.schema,
-        editorDefaults: packageSettings.values,
-        lockedFields: packageSettings.locked,
-        input: data.input ?? (existing.input as Record<string, unknown> | undefined),
-      });
-      if (resolution.errors) throw scheduleInputInvalid(resolution.errors);
-    }
+    // still be checked against the CURRENT schema and locks.
+    const agentForInput = await getPackage(existing.packageId, scope.orgId);
+    // `package_schedules.package_id` is `ON DELETE CASCADE` and `getPackage`
+    // admits system packages, so this is unreachable in practice — it exists so
+    // the impossible case is a typed 404 rather than a schedule validated
+    // against nothing.
+    if (!agentForInput) throw notFound(`Agent '${existing.packageId}' not found`);
+    await assertScheduleTargetValid({
+      agent: agentForInput,
+      // `null` clears the override, i.e. back to the unified default; omitted
+      // leaves whatever the row already replays.
+      versionOverride:
+        (data.version_override !== undefined ? data.version_override : existing.version_override) ??
+        undefined,
+      packageSettings,
+      input: data.input ?? existing.input ?? undefined,
+    });
 
     // Reject a `model_id_override` that references no real model (no-op when
     // the field isn't part of this patch).

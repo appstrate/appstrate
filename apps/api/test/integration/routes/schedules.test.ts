@@ -18,6 +18,7 @@ import {
   seedOrgModel,
   seedOrgModelProviderOAuth,
 } from "../../helpers/seed.ts";
+import { publishAndInstall, seedDivergedAgent } from "../../helpers/schedule-fixtures.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 
 const app = getTestApp();
@@ -32,6 +33,23 @@ describe("Schedules API", () => {
 
   function agentId(name: string) {
     return `@${ctx.org.slug}/${name}`;
+  }
+
+  /**
+   * Publish a seeded agent's draft and install it — what every schedule
+   * fixture on a WRITE route needs. Both write routes now validate against the
+   * manifest the schedule will fire, which with no `version_override` is the
+   * published one, so a draft-only agent 404s `no_published_version` at the
+   * write instead of at every tick. Read/delete fixtures are unaffected and
+   * deliberately do not publish.
+   */
+  async function publish(id: string) {
+    await publishAndInstall({
+      id,
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      userId: ctx.user.id,
+    });
   }
 
   describe("GET /api/schedules", () => {
@@ -96,7 +114,7 @@ describe("Schedules API", () => {
         },
         draftContent: "Process {{email}}",
       });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+      await publish(fid);
       return agent;
     }
 
@@ -225,7 +243,7 @@ describe("Schedules API", () => {
     it("creates a schedule for an agent", async () => {
       const fid = agentId("cron-agent");
       await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+      await publish(fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
@@ -252,7 +270,7 @@ describe("Schedules API", () => {
     it("rejects invalid cron expression", async () => {
       const fid = agentId("bad-cron");
       await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+      await publish(fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
@@ -268,7 +286,7 @@ describe("Schedules API", () => {
     it("rejects generation settings unsupported by the overridden model", async () => {
       const fid = agentId("unsupported-generation");
       await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+      await publish(fid);
       const credential = await seedOrgModelProviderOAuth({
         orgId: ctx.orgId,
         providerId: "codex",
@@ -310,7 +328,7 @@ describe("Schedules API", () => {
     it("accepts a flat connection_overrides map on create and round-trips it", async () => {
       const fid = agentId("co-create");
       await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+      await publish(fid);
 
       const overrides = { "@runorg/svc": "conn_abc123" };
       const res = await app.request(`/api/agents/${fid}/schedules`, {
@@ -330,7 +348,7 @@ describe("Schedules API", () => {
     it("rejects the legacy nested connection_overrides shape with 400", async () => {
       const fid = agentId("co-nested");
       await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+      await publish(fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
@@ -348,6 +366,7 @@ describe("Schedules API", () => {
     it("updates connection_overrides via PUT and round-trips the flat map", async () => {
       const fid = agentId("co-update");
       const agent = await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await publish(fid);
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
@@ -374,6 +393,7 @@ describe("Schedules API", () => {
     it("updates schedule name and cron", async () => {
       const fid = agentId("upd-agent");
       const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
+      await publish(fid);
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
@@ -401,7 +421,7 @@ describe("Schedules API", () => {
     it("reconciles the generation override when the model changes", async () => {
       const fid = agentId("reconcile-generation");
       const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+      await publish(fid);
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
@@ -434,7 +454,7 @@ describe("Schedules API", () => {
     it("creates a schedule pinned to another org member", async () => {
       const fid = agentId("actor-member");
       await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+      await publish(fid);
       const other = await createTestUser();
       await addOrgMember(ctx.orgId, other.id, "member");
 
@@ -457,7 +477,7 @@ describe("Schedules API", () => {
     it("creates a schedule pinned to an end-user", async () => {
       const fid = agentId("actor-eu");
       await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+      await publish(fid);
       const eu = await seedEndUser({
         orgId: ctx.orgId,
         applicationId: ctx.defaultAppId,
@@ -484,7 +504,7 @@ describe("Schedules API", () => {
     it("defaults the actor to the caller when omitted", async () => {
       const fid = agentId("actor-default");
       await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+      await publish(fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
@@ -500,7 +520,7 @@ describe("Schedules API", () => {
     it("rejects a user_id that is not an org member", async () => {
       const fid = agentId("actor-foreign");
       await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+      await publish(fid);
       const stranger = await createTestUser();
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
@@ -518,7 +538,7 @@ describe("Schedules API", () => {
     it("rejects an unknown end_user_id with 400 (not 404)", async () => {
       const fid = agentId("actor-bad-eu");
       await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+      await publish(fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
@@ -535,7 +555,7 @@ describe("Schedules API", () => {
     it("rejects an empty actor object with 400", async () => {
       const fid = agentId("actor-empty");
       await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+      await publish(fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
@@ -549,6 +569,7 @@ describe("Schedules API", () => {
     it("keeps connection_overrides when the actor is unchanged on update", async () => {
       const fid = agentId("actor-same");
       const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
+      await publish(fid);
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
@@ -574,7 +595,7 @@ describe("Schedules API", () => {
     it("rejects both user_id and end_user_id together", async () => {
       const fid = agentId("actor-both");
       await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+      await publish(fid);
 
       const res = await app.request(`/api/agents/${fid}/schedules`, {
         method: "POST",
@@ -591,6 +612,7 @@ describe("Schedules API", () => {
     it("re-points the actor on update and resets connection_overrides", async () => {
       const fid = agentId("actor-upd");
       const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
+      await publish(fid);
       const other = await createTestUser();
       await addOrgMember(ctx.orgId, other.id, "member");
       const schedule = await seedSchedule({
@@ -617,6 +639,7 @@ describe("Schedules API", () => {
     it("leaves the actor untouched when update omits it", async () => {
       const fid = agentId("actor-keep");
       const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
+      await publish(fid);
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
@@ -766,6 +789,240 @@ describe("Schedules API", () => {
       expect(body.data).toBeArray();
       expect(body.data).toHaveLength(0);
       expect(body.total).toBe(0);
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────
+  // The manifest a schedule is validated against
+  // ───────────────────────────────────────────────────────────────────────
+
+  /**
+   * A schedule fires `resolveAgentRunVersion(agent, version_override)`, and
+   * with no override that means the PUBLISHED version — never the editor's
+   * working copy. `getPackage()` hands the routes `packages.draft_manifest`,
+   * so the write routes used to validate a definition the schedule will never
+   * execute; every disagreement between the two became a 201 followed by a
+   * permanent, silent failure at every tick.
+   *
+   * The fixtures here deliberately make draft and published DISAGREE. Without
+   * that they are byte-identical and the assertions below pass whichever
+   * manifest the route happens to read.
+   */
+  describe("validates against the manifest it will fire, not the draft", () => {
+    const REQUIRES_EMAIL = {
+      type: "object",
+      properties: { email: { type: "string" } },
+      required: ["email"],
+    };
+    const REQUIRES_NOTHING = {
+      type: "object",
+      properties: { note: { type: "string" } },
+    };
+    const FILE_FIELD = {
+      type: "object",
+      properties: {
+        doc: { type: "string", format: "uri", contentMediaType: "application/pdf" },
+      },
+    };
+
+    function manifest(id: string, inputSchema: Record<string, unknown>) {
+      return {
+        name: id,
+        version: "1.0.0",
+        type: "agent",
+        description: "Divergence fixture",
+        input: { schema: inputSchema },
+      };
+    }
+
+    async function diverge(
+      name: string,
+      published: Record<string, unknown>,
+      draft: Record<string, unknown>,
+    ) {
+      const fid = agentId(name);
+      await seedDivergedAgent({
+        id: fid,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        published: manifest(fid, published),
+        draft: manifest(fid, draft),
+      });
+      return fid;
+    }
+
+    function post(fid: string, body: Record<string, unknown>) {
+      return app.request(`/api/agents/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ cron_expression: "0 9 * * *", ...body }),
+      });
+    }
+
+    it("refuses input the PUBLISHED schema rejects, even when the draft accepts it", async () => {
+      const fid = await diverge("pub-strict", REQUIRES_EMAIL, REQUIRES_NOTHING);
+
+      const res = await post(fid, { input: { note: "hi" } });
+
+      // Pre-fix this was 201, and then `failSchedule` on every single tick.
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as any;
+      expect(JSON.stringify(body)).toContain("email");
+    });
+
+    it("accepts input the PUBLISHED schema allows, even when the draft rejects it", async () => {
+      const fid = await diverge("draft-strict", REQUIRES_NOTHING, REQUIRES_EMAIL);
+
+      const res = await post(fid, { input: { note: "hi" } });
+
+      expect(res.status).toBe(201);
+    });
+
+    it("honours version_override when choosing which manifest to validate", async () => {
+      const fid = await diverge("override-draft", REQUIRES_EMAIL, REQUIRES_NOTHING);
+
+      // Pinned to the working copy, which does not require `email`.
+      const pinned = await post(fid, { version_override: "draft", input: { note: "hi" } });
+      expect(pinned.status).toBe(201);
+
+      // …and the same body against the default (published) selector is refused.
+      const inherited = await post(fid, { input: { note: "hi" } });
+      expect(inherited.status).toBe(400);
+    });
+
+    it("refuses an agent whose PUBLISHED schema has a file field", async () => {
+      const fid = await diverge("pub-file", FILE_FIELD, REQUIRES_NOTHING);
+
+      const res = await post(fid, {});
+
+      // The refusal this route exists for, applied to the manifest that runs.
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as any;
+      expect(body.detail).toContain("file inputs");
+    });
+
+    it("404s a never-published agent at the write, exactly as POST …/run does", async () => {
+      const fid = agentId("never-published");
+      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+
+      const res = await post(fid, {});
+
+      // Pre-fix: 201, then a 404 `no_published_version` on every fire — a
+      // schedule that could never run, with the 201 as its only receipt.
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as any;
+      expect(body.code).toBe("no_published_version");
+
+      // …while pinning the working copy explicitly is still legal: the refusal
+      // is about the DEFAULT selector, not about drafts.
+      const pinned = await post(fid, { version_override: "draft" });
+      expect(pinned.status).toBe(201);
+    });
+
+    it("applies the same manifest choice on PUT", async () => {
+      const fid = await diverge("put-pub-strict", REQUIRES_EMAIL, REQUIRES_NOTHING);
+
+      const created = await post(fid, { input: { email: "a@example.com" } });
+      expect(created.status).toBe(201);
+      const scheduleId = ((await created.json()) as any).id as string;
+
+      const res = await app.request(`/api/schedules/${scheduleId}`, {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ input: { note: "hi" } }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(await res.json())).toContain("email");
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────
+  // timezone
+  // ───────────────────────────────────────────────────────────────────────
+
+  /**
+   * An unknown IANA zone is silent all the way down: `CronExpressionParser`
+   * accepts it and only `.next()` throws, which `computeNextRun` swallows into
+   * `null` and BullMQ's `getNextMillis` swallows into `undefined` — so the row
+   * is written with `next_run_at = NULL` and NO repeat job is registered. The
+   * API answered `201 { enabled: true }` for a schedule that could never fire:
+   * no log line, no failed run, no `failSchedule`.
+   */
+  describe("timezone is refused at the write", () => {
+    it("rejects an unknown zone with 400 on create", async () => {
+      const fid = agentId("tz-create");
+      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await publish(fid);
+
+      const res = await app.request(`/api/agents/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ cron_expression: "0 9 * * *", timezone: "Europe/Pariss" }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as any;
+      expect(body.param).toBe("timezone");
+    });
+
+    it("accepts a real zone and actually schedules it (control)", async () => {
+      const fid = agentId("tz-ok");
+      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await publish(fid);
+
+      const res = await app.request(`/api/agents/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ cron_expression: "0 9 * * *", timezone: "Europe/Paris" }),
+      });
+
+      expect(res.status).toBe(201);
+      const body = (await res.json()) as any;
+      // The assertion that separates "accepted" from "will actually fire" —
+      // the rejected zone above is exactly the case that lands a NULL here.
+      expect(body.next_run_at).not.toBeNull();
+    });
+
+    it("rejects an unknown zone with 400 on update", async () => {
+      const fid = agentId("tz-update");
+      const agent = await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await publish(fid);
+      const schedule = await seedSchedule({
+        packageId: agent.id,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        cronExpression: "0 * * * *",
+      });
+
+      const res = await app.request(`/api/schedules/${schedule.id}`, {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ timezone: "Not/AZone" }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as any;
+      expect(body.param).toBe("timezone");
+    });
+
+    it("still blames cron_expression for a bad expression (control)", async () => {
+      const fid = agentId("tz-bad-cron");
+      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await publish(fid);
+
+      const res = await app.request(`/api/agents/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ cron_expression: "not-valid-cron", timezone: "Europe/Paris" }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as any;
+      expect(body.param).toBe("cron_expression");
     });
   });
 

@@ -490,3 +490,97 @@ describe("compiled-validator cache — shared bound", () => {
     expect(validateAgainstSchema({}, distinct(0)).valid).toBe(false);
   });
 });
+
+/**
+ * `runValidate` used to answer two questions with one test — "does this schema
+ * name a property?" standing in for "does this schema constrain anything?" —
+ * and then, past that gate, rebuild the input schema as a bare
+ * `{type, properties, required}`. Both discard rules the author wrote down.
+ *
+ * The verdicts below are the AUTHOR'S schema applied as written; every one of
+ * them was `valid: true` before.
+ */
+describe("the declared schema is applied as written", () => {
+  it("enforces a constraint that names no property (input)", () => {
+    const closed = {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    } as unknown as JSONSchemaObject;
+    expect(validateInput({ surprise: 1 }, closed).valid).toBe(false);
+
+    const requiresUnnamed = {
+      type: "object",
+      properties: {},
+      required: ["must_be_here"],
+    } as unknown as JSONSchemaObject;
+    expect(validateInput({}, requiresUnnamed).valid).toBe(false);
+  });
+
+  it("enforces a constraint that names no property (output)", () => {
+    // `additionalProperties` is deliberately relaxed on the output path, so the
+    // case that proves the short-circuit is `required`.
+    const requiresUnnamed = {
+      type: "object",
+      properties: {},
+      required: ["must_be_here"],
+    } as unknown as JSONSchemaObject;
+    expect(validateOutput({}, requiresUnnamed).valid).toBe(false);
+  });
+
+  it("enforces a constraint that names no property (connection credentials)", () => {
+    const requiresUnnamed = {
+      type: "object",
+      properties: {},
+      required: ["api_key"],
+    } as unknown as JSONSchemaObject;
+    expect(validateConnectionCredentials(requiresUnnamed, {}).valid).toBe(false);
+    // A genuinely loose `custom` auth is still waved through (control).
+    expect(
+      validateConnectionCredentials({ type: "object", properties: {} }, { whatever: 1 }).valid,
+    ).toBe(true);
+  });
+
+  it("keeps the keywords the three-key rebuild dropped from an input schema", () => {
+    const declared = {
+      type: "object",
+      properties: { topic: { type: "string" }, locale: { type: "string" } },
+      required: ["topic"],
+      additionalProperties: false,
+      $defs: { unused: { type: "string" } },
+      dependentRequired: { topic: ["locale"] },
+    } as unknown as JSONSchemaObject;
+
+    // `additionalProperties: false` — an undeclared key is refused.
+    expect(validateInput({ topic: "AI", locale: "fr", extra: 1 }, declared).valid).toBe(false);
+    // `dependentRequired` — `topic` present pulls `locale` in with it.
+    expect(validateInput({ topic: "AI" }, declared).valid).toBe(false);
+    // …and the body that satisfies all of it still passes (control).
+    expect(validateInput({ topic: "AI", locale: "fr" }, declared).valid).toBe(true);
+  });
+
+  it("still ignores a file field's own assertions, and still does not require it", () => {
+    // The file-field exclusion is why the rebuild existed. It must survive: the
+    // parser has already rewritten the value to an `appfile://…` URI that the
+    // declared `format: uri` + `contentMediaType` would reject, and whether a
+    // file was supplied is the upload pipeline's question, not AJV's.
+    const withFile = {
+      type: "object",
+      properties: {
+        topic: { type: "string" },
+        doc: { type: "string", format: "uri", contentMediaType: "application/pdf" },
+      },
+      required: ["topic", "doc"],
+      additionalProperties: false,
+    } as unknown as JSONSchemaObject;
+
+    // Required file field absent → still valid.
+    expect(validateInput({ topic: "AI" }, withFile).valid).toBe(true);
+    // Present as the resolved URI → accepted, and NOT read as an unexpected
+    // extra even though the object is closed (the reason the exclusion relaxes
+    // the property instead of deleting the key).
+    expect(validateInput({ topic: "AI", doc: "appfile://file_abc" }, withFile).valid).toBe(true);
+    // The non-file half of the schema is still enforced.
+    expect(validateInput({ doc: "appfile://file_abc" }, withFile).valid).toBe(false);
+  });
+});

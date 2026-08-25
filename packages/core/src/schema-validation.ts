@@ -91,6 +91,62 @@ export interface SchemaValidationResult {
 }
 
 /**
+ * The keywords a schema may carry and still constrain NOTHING about the value.
+ *
+ * `type` is on the list because every caller of this predicate has already
+ * narrowed its value to a plain object; `properties` is handled separately
+ * below (it is non-constraining only when empty). Everything else here is a
+ * pure annotation — Ajv attaches no assertion to it.
+ *
+ * Deliberately minimal: a keyword missing from this list only means the
+ * validator runs, and running the validator is always the correct answer. A
+ * keyword wrongly ON the list means a constraint is skipped, which is the bug
+ * this predicate exists to end.
+ */
+const NON_CONSTRAINING_KEYWORDS: ReadonlySet<string> = new Set([
+  "type",
+  "title",
+  "description",
+  "$schema",
+  "$comment",
+]);
+
+/**
+ * True when `schema` cannot reject any object — the "this agent declares no
+ * input, so anything goes" case that every validator here short-circuits on.
+ *
+ * The test used to be `!schema.properties || properties is empty`, which is a
+ * different (and much broader) question: `properties` says what a NAMED key
+ * must look like, and a schema constrains plenty without naming one.
+ * `{properties: {}, required: ["x"]}`, `{properties: {}, additionalProperties:
+ * false}` and `{allOf: [{required: ["a"]}]}` were all short-circuited to
+ * `valid: true` before Ajv ever ran — and `createAjv` uses `strict: false`, so
+ * Ajv would have enforced every one of them.
+ *
+ * Exported (rather than repeated) because three validators ask this exact
+ * question — {@link validateAgainstSchema} here, plus `validateInput` /
+ * `validateOutput` and `validateConnectionCredentials` in
+ * `apps/api/src/services/schema.ts` — and the copies are what drifted.
+ */
+export function isUnconstrainedSchema(schema: JSONSchemaObject): boolean {
+  // Runtime shape, not the declared one: schemas reach here through
+  // `asJSONSchemaObject` (an unchecked cast over JSONB / manifest data), so
+  // `properties` may be absent and keywords outside the interface — `allOf`,
+  // `additionalProperties`, `$ref` — may be present.
+  const keywords = schema as unknown as Record<string, unknown>;
+  for (const key of Object.keys(keywords)) {
+    if (NON_CONSTRAINING_KEYWORDS.has(key)) continue;
+    if (key === "properties") {
+      const props = keywords.properties;
+      if (props && typeof props === "object" && Object.keys(props).length > 0) return false;
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+/**
  * AJV with `coerceTypes: true` coerces `null → ""` for string-typed
  * properties, which incorrectly satisfies a `required` check. Strip
  * empty-string and null values for required keys so AJV sees them as
@@ -111,9 +167,11 @@ export function validateAgainstSchema(
   data: Record<string, unknown>,
   schema: JSONSchemaObject,
 ): SchemaValidationResult {
-  // Empty-schema short-circuit — an agent that declares no properties
-  // accepts anything.
-  if (!schema.properties || Object.keys(schema.properties).length === 0) {
+  // Empty-schema short-circuit — an agent that declares nothing accepts
+  // anything. Kept (rather than always compiling) because it is the common
+  // case and it echoes `data` back untouched; narrowed to
+  // {@link isUnconstrainedSchema} so it can no longer swallow a constraint.
+  if (isUnconstrainedSchema(schema)) {
     return { valid: true, errors: [], data };
   }
   const effectiveData = stripEmptyRequired(data, schema.required ?? []);

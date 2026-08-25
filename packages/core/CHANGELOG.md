@@ -122,6 +122,19 @@ them, it only names them in docblocks.
 
 ### Added
 
+- **`isUnconstrainedSchema`** (`./schema-validation`) — "can this schema reject
+  any object at all?", the predicate the validators short-circuit on. Additive;
+  nothing is removed or renamed. It replaces the `!schema.properties ||
+Object.keys(schema.properties).length === 0` test that three validators
+  carried, which answered a DIFFERENT question: `properties` says what a named
+  key must look like, and a schema constrains plenty without naming one.
+  `{properties: {}, required: [...]}`, `{properties: {},
+additionalProperties: false}` and `{allOf: [{required: [...]}]}` were all
+  returned as `valid: true` before Ajv ran — under `strict: false` Ajv would
+  have enforced every one. **Behaviour change**: such a schema is now enforced,
+  so a value that used to pass may now be rejected. A schema carrying nothing
+  but `type` / `title` / `description` / `$schema` / `$comment` (and an empty
+  `properties`) still short-circuits exactly as before.
 - **`./model-error`** — `classifyModelError`, `ModelErrorCategory`,
   `ModelErrorInput`, `ModelErrorClassification` and
   `MODEL_ERROR_RETRYABLE_BY_CATEGORY`. THE rules that turn a raw provider
@@ -264,6 +277,16 @@ them, it only names them in docblocks.
 
 ### Changed
 
+- **`sanitizeFilename` truncates on whole code points** (`./naming`), and
+  `encodeFilenameHeader` / `attachmentDisposition` are now total. The cap was a
+  `slice` over UTF-16 code units, so a name whose 255th unit was the first half
+  of a surrogate pair became a LONE surrogate — a string `encodeURIComponent`
+  throws `URIError` on. That name is durable (`files.name`, part of the
+  `(run_id, sha256, name)` dedup identity), so every later download of the file
+  500'd on both serving branches. The orphaned half is now dropped, and an
+  unpaired surrogate reaching either encoder from any other producer becomes
+  U+FFFD instead of a throw. No signature changes; a well-formed name — emoji
+  and CJK included — encodes byte-identically to before.
 - **`@appstrate/afps-shared` dependency range moved to `^0.5.0`.**
   `@appstrate/core/zip`'s `stripWrapperPrefix` is now a verbatim re-export from
   the new `@appstrate/afps-shared/archive-prefix` — the export, both overloads
