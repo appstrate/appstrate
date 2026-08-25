@@ -13,6 +13,12 @@ import {
 } from "../creation-handoff.ts";
 
 const resources: CreationResource[] = ["agent", "skill", "integration", "mcp-server"];
+const frenchIntros: Record<CreationResource, string> = {
+  agent: "Je veux créer un nouvel agent Appstrate.",
+  skill: "Je veux créer un nouveau skill Appstrate.",
+  integration: "Je veux créer une nouvelle intégration Appstrate.",
+  "mcp-server": "Je veux créer un nouveau serveur MCP Appstrate.",
+};
 const dictionaries = { en: settingsEn, fr: settingsFr } as const;
 
 function translator(locale: keyof typeof dictionaries) {
@@ -39,6 +45,7 @@ describe("creation handoff", () => {
 
   it.each(resources)("builds a specific Chat prompt for %s", (resource) => {
     const prompt = buildCreationPrompt(resource, "chat", translator("fr"));
+    expect(prompt).toStartWith(frenchIntros[resource]);
     expect(prompt).toContain("Chat Appstrate");
     expect(prompt).toContain("avant toute mutation");
     expect(prompt).toContain("Ne publie ou n’installe");

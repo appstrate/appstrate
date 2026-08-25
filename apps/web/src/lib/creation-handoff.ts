@@ -20,11 +20,11 @@ const OPERATION_IDS: Record<Exclude<CreationResource, "mcp-server">, readonly Op
   ],
 };
 
-const PROMPT_RESOURCE_KEYS: Record<CreationResource, string> = {
-  agent: "creation.prompt.resource.agent",
-  skill: "creation.prompt.resource.skill",
-  integration: "creation.prompt.resource.integration",
-  "mcp-server": "creation.prompt.resource.mcpServer",
+const PROMPT_INTRO_KEYS: Record<CreationResource, string> = {
+  agent: "creation.prompt.intro.agent",
+  skill: "creation.prompt.intro.skill",
+  integration: "creation.prompt.intro.integration",
+  "mcp-server": "creation.prompt.intro.mcpServer",
 };
 
 export function creationResourceFromSearch(search: string): CreationResource | null {
@@ -67,7 +67,7 @@ export function buildCreationPrompt(
       : t("creation.prompt.packageWorkflow", { operations: packageWorkflow(resource) });
 
   return [
-    t("creation.prompt.intro", { resource: t(PROMPT_RESOURCE_KEYS[resource]) }),
+    t(PROMPT_INTRO_KEYS[resource]),
     t("creation.prompt.questions"),
     t(
       audience === "coding-agent" ? "creation.prompt.codingContext" : "creation.prompt.chatContext",
