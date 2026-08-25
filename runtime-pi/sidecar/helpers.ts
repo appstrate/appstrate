@@ -43,7 +43,7 @@ export const MAX_RESPONSE_SIZE = 256 * 1024; // 256 KB
 // lives in packages/afps-runtime.
 export const ABSOLUTE_MAX_RESPONSE_SIZE = 32 * 1024 * 1024; // 32 MB — covers PDFs/images/archives, aligned with MAX_MCP_ENVELOPE_SIZE × 2
 export const OUTBOUND_TIMEOUT_MS = 30_000;
-export const LLM_PROXY_TIMEOUT_MS = 1_800_000; // 30 minutes (patched from 300_000 — was killing legitimate long-running agentic runs at exactly 5 min)
+const LLM_PROXY_TIMEOUT_MS = 1_800_000; // 30 minutes (patched from 300_000 — was killing legitimate long-running agentic runs at exactly 5 min)
 
 /**
  * Bound on how long an LLM upstream may take to produce its RESPONSE HEADERS
@@ -70,7 +70,7 @@ export const LLM_PROXY_TIMEOUT_MS = 1_800_000; // 30 minutes (patched from 300_0
  * {@link llmUpstreamAbort} owns that lifecycle — do not inline
  * `AbortSignal.timeout(LLM_FIRST_RESPONSE_TIMEOUT_MS)` at a call site.
  */
-export const LLM_FIRST_RESPONSE_TIMEOUT_MS = 60_000;
+const LLM_FIRST_RESPONSE_TIMEOUT_MS = 60_000;
 
 /**
  * Bound on INTER-CHUNK silence once an LLM stream is flowing: how long the

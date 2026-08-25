@@ -45,6 +45,7 @@ import {
   type ModelReasoningLevel,
 } from "@appstrate/core/model-generation";
 import { deriveResponseReserveTokens } from "@appstrate/core/token-budget";
+import { classifyModelError } from "@appstrate/core/model-error";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
 import {
   buildError,
@@ -1797,7 +1798,27 @@ export function installSessionBridge(
       if (!isTerminalErrorStop(lastAssistantStopReason)) {
         return undefined;
       }
-      return { code: "adapter_error", message: terminalErrorMessage(lastAssistantErrorMessage) };
+      const message = terminalErrorMessage(lastAssistantErrorMessage);
+      // `message` stays the RAW provider text: the run surface is a debugging
+      // surface and the operator reading `runs.error` wants the upstream
+      // sentence verbatim (the chat surface deliberately does the opposite and
+      // ships only the class). The classification is additive supplementary
+      // data, so a sink matching on `code` or `message` sees nothing new.
+      //
+      // Same rules as the chat turn classifier (`@appstrate/core/model-error`),
+      // so one provider string cannot get two answers depending on which
+      // surface met it. Keys inside `context` are snake_case — it is data on
+      // the wire, riding the `appstrate.error` event's `data` into `run_logs`,
+      // exactly like the watchdog's `upstream` block above.
+      const classified = classifyModelError({ message });
+      return {
+        code: "adapter_error",
+        message,
+        context: {
+          error_category: classified.category,
+          error_retryable: classified.retryable,
+        },
+      };
     },
     getLastUpstreamError(): { stopReason: string; message: string } | undefined {
       if (lastUpstreamStopReason === undefined) return undefined;

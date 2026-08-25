@@ -122,6 +122,16 @@ them, it only names them in docblocks.
 
 ### Added
 
+- **`./model-error`** — `classifyModelError`, `ModelErrorCategory`,
+  `ModelErrorInput`, `ModelErrorClassification` and
+  `MODEL_ERROR_RETRYABLE_BY_CATEGORY`. THE rules that turn a raw provider
+  failure string into a provider-neutral verdict, moved out of the chat module
+  so the run surface classifies with the same ones. `ChatTurnErrorCategory`
+  (`./chat-turn-metadata`) is now an alias of `ModelErrorCategory` — same five
+  values, same persisted field, no behaviour change for any input.
+  `retryable` is derived from the category alone, so every path that rebuilds
+  one (live classification, stream marker, persisted turn) reaches the same
+  answer.
 - **Alias-opacity surface** (`./model-swap`, #1202) — `ALIAS_CLIENT_API_SHAPE`,
   `AliasBackingApiShape`, `isAliasBackingShape`, `isAliasClientShape`,
   `isAliasInferenceCall`, `syntheticAliasErrorMessage`, and `ModelSwapBacking`

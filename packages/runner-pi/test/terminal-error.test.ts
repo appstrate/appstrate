@@ -65,6 +65,30 @@ describe("SessionBridgeHandle.getTerminalError", () => {
     const err = handle.getTerminalError();
     expect(err?.code).toBe("adapter_error");
     expect(err?.message).toBe("Codex error: server_error");
+    // The classification rides alongside the raw text, never instead of it:
+    // the run surface keeps the debug sentence AND now says what class of
+    // failure it was, using the same rules the chat surface classifies with.
+    // "Codex error: server_error" names no status and no actionable cause, so
+    // the class is `unknown` — which stays retryable: a fresh attempt is the
+    // only way to learn anything more about it.
+    expect(err?.context).toEqual({ error_category: "unknown", error_retryable: true });
+  });
+
+  it("classifies a dead credential as terminal, not as a transient outage", () => {
+    const session = createFakeSession();
+    const handle = installSessionBridge(session, createInternalCapture(), RUN_ID);
+    endTurn(session, {
+      role: "assistant",
+      stopReason: "error",
+      errorMessage: "401 Incorrect API key provided: sk-***",
+      content: [],
+    });
+    const err = handle.getTerminalError();
+    expect(err?.message).toBe("401 Incorrect API key provided: sk-***");
+    expect(err?.context).toEqual({
+      error_category: "credential_unavailable",
+      error_retryable: false,
+    });
   });
 
   it("returns a RunError on stopReason 'aborted' (provider abort, not user cancel)", () => {
