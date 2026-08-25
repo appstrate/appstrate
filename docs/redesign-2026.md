@@ -2464,6 +2464,22 @@ it is outside the OpenAPI document. All five preference destinations are
 permanent harness screens, so those holes cannot disappear behind an unvisited
 route again.
 
+**The Library matrix keeps every workspace reachable, 25 August.** The raw
+shadcn table already lived inside an overflow container, but `w-full` let the
+browser compress every workspace column into the phone viewport. There was no
+actual overflow to scroll, and labels plus controls were clipped inside narrow
+cells. The matrix now owns an explicit 160px minimum per package or workspace
+column while retaining `min-w-full` on wider screens. At narrow widths the
+existing native horizontal scroller therefore exposes every workspace and its
+checkbox instead of pretending the complete matrix fits.
+
+The same pass fixed the settings panel's intrinsic-width leak. Radix ScrollArea
+uses a table-like sizing wrapper, so one long MCP URL or command could make the
+content pane wider than the dialog before its own horizontal copy scroller had
+a chance to work. The panel content now establishes inline-size containment.
+Measured at 1024, 900, 768 and 390, MCP access stays inside the panel while its
+code values remain independently scrollable and copyable.
+
 **12. Accessibility, which nothing here has ever checked.** The branch
 re-declares ARIA roles on the table because this file demands it, and that is
 the whole of it: not one contrast ratio, keyboard path or touch target has ever

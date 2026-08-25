@@ -158,8 +158,10 @@ function LibraryMatrix({
     );
   }
 
+  const matrixMinWidth = (applications.length + 1) * 160;
+
   return (
-    <Table data-library-matrix>
+    <Table data-library-matrix className="w-max min-w-full" style={{ minWidth: matrixMinWidth }}>
       <TableHeader>
         <TableRow>
           <TableHead className={HEAD}>{t("library.column.package")}</TableHead>

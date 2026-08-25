@@ -55,7 +55,10 @@ export function PanelDialog({
 }: PanelDialogProps) {
   const isMobile = useIsMobile();
   const content = (
-    <div className={cn("p-6", reserveCloseArea && "md:pt-14")}>
+    <div
+      className={cn("w-full max-w-full min-w-0 p-6", reserveCloseArea && "md:pt-14")}
+      style={{ contain: "inline-size" }}
+    >
       {/* `pr-10` clears the dialog's own close button, which is absolutely
           positioned top-right and would otherwise sit on the selector. */}
       {mobileNav && <div className="mb-4 pr-10 md:hidden">{mobileNav}</div>}
