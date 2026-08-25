@@ -20,6 +20,10 @@
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
+// Direct vendor import: `runtime-pi/**/test/**` is exempt from the pi-sdk
+// barrel guard, and asking pi-ai's OWN classifier is the point — a copy of its
+// regex here would pass forever after the upstream one changed.
+import { isRetryableAssistantError } from "@earendil-works/pi-ai";
 import { anthropicThinkingBudgets } from "@appstrate/core/model-generation";
 import type { LlmProxyApiKeyConfig, ModelSwap } from "../helpers.ts";
 import { _setLogSinkForTesting } from "../logger.ts";
@@ -760,7 +764,9 @@ describe("handlePiMessagesRequest", () => {
     const frames = await readFrames(res);
     const error = frames.at(-1) as Extract<PiMessagesEvent, { type: "error" }>;
     expect(error.type).toBe("error");
-    expect(error.errorMessage).toBe('Upstream model error (model "appstrate-medium")');
+    // 502: pi-ai failed this turn without any upstream response reaching the
+    // status probe, which is what "unreachable backing" looks like from here.
+    expect(error.errorMessage).toBe('Upstream model error (model "appstrate-medium", status 502)');
     expect(JSON.stringify(frames)).not.toContain("deepseek");
   });
 
@@ -829,8 +835,12 @@ describe("handlePiMessagesRequest", () => {
     const terminal = frames.at(-1) as Extract<PiMessagesEvent, { type: "error" }>;
     expect(terminal.type).toBe("error");
     // Neutral prose, as on every other alias failure — the stall must not
-    // become the one path that names the backing.
-    expect(terminal.errorMessage).toBe('Upstream model error (model "appstrate-medium")');
+    // become the one path that names the backing. 504 is this hop's own verdict
+    // ("the backing went silent on me"), and it is what makes the container
+    // classify the stall as transient instead of fatal.
+    expect(terminal.errorMessage).toBe(
+      'Upstream model error (model "appstrate-medium", status 504)',
+    );
     expect(JSON.stringify(frames)).not.toContain("deepseek");
 
     const stall = warnings.find(
@@ -888,6 +898,147 @@ describe("handlePiMessagesRequest", () => {
     // idle bound, so any implementation timing the wrong interval would have
     // terminated it with an `error` frame above.
     expect(Date.now() - started).toBeGreaterThan(idleTimeoutMs);
+  });
+});
+
+/**
+ * Transient-failure handling on the ALIAS path, which had lost both halves of
+ * it at once.
+ *
+ * (1) `projectRequestOptions` sent no `maxRetries`, and pi-ai reads an unset
+ * field as ZERO (`options.maxRetries ?? 0`), so the one boundary that can see
+ * the backing's `retry-after` spent no attempt on a `429`.
+ *
+ * (2) The terminal's `errorMessage` was replaced by a status-LESS neutral
+ * string. Pi's only retry gate is `isRetryableAssistantError`, a regex over
+ * exactly that string, so the container's own turn-level budget never fired
+ * either — the identical model on a BYOK credential rode the blip out and the
+ * aliased one failed the run.
+ *
+ * Everything here drives REAL pi-ai (the repo bans `mock.module()`): only the
+ * socket is faked, through `deps.fetchImpl`, so the retry loop, the header
+ * handling and the SDK's own error shaping are the production ones.
+ */
+describe("transient upstream failures", () => {
+  /**
+   * Bun's `typeof fetch` carries a static `preconnect` beside the call
+   * signature; forward the real one so a stub is a faithful drop-in.
+   */
+  function asFetch(
+    fn: (
+      input: Parameters<typeof fetch>[0],
+      init: Parameters<typeof fetch>[1],
+    ) => Promise<Response>,
+  ): typeof fetch {
+    return Object.assign(fn, { preconnect: fetch.preconnect });
+  }
+
+  /**
+   * Answer `statuses` in order (repeating the last), recording each call.
+   * `retry-after-ms: 1` keeps a real backoff sleep sub-millisecond.
+   */
+  function scriptedUpstream(statuses: number[]): { fetch: typeof fetch; calls: () => number } {
+    let call = 0;
+    return {
+      calls: () => call,
+      fetch: asFetch(async () => {
+        const status = statuses[Math.min(call, statuses.length - 1)]!;
+        call += 1;
+        return new Response(
+          JSON.stringify({
+            error: { message: "Overloaded, please slow down", type: "rate_limit" },
+          }),
+          {
+            status,
+            headers: { "content-type": "application/json", "retry-after-ms": "1" },
+          },
+        );
+      }),
+    };
+  }
+
+  async function runAgainst(upstream: typeof fetch): Promise<PiMessagesEvent[]> {
+    const res = handlePiMessagesRequest(
+      { ...depsFor(BACKINGS[0]!), fetchImpl: upstream },
+      new Request("http://sidecar:8080/llm/messages", { method: "POST" }),
+      CLIENT_BODY,
+    );
+    return readFrames(res);
+  }
+
+  it("spends its retry budget on an upstream 429", async () => {
+    // THE NEGATIVE CONTROL. With no `maxRetries` in the projected options this
+    // is exactly ONE call: the run fails and is billed while the container's
+    // deliberately-patient budget sits unused.
+    const upstream = scriptedUpstream([429]);
+    await runAgainst(upstream.fetch);
+    expect(upstream.calls()).toBeGreaterThan(1);
+  });
+
+  it("succeeds on the retry when the blip clears", async () => {
+    // Non-vacuity for the case above: retrying is only worth anything if a
+    // later attempt can actually settle the turn.
+    const upstream = scriptedUpstream([429, 200]);
+    let call = 0;
+    const withStream = asFetch(async (input, init) => {
+      call += 1;
+      if (call === 1) return upstream.fetch(input, init);
+      const sse =
+        `data: {"id":"c1","object":"chat.completion.chunk","model":"deepseek-chat","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}]}\n\n` +
+        `data: {"id":"c1","object":"chat.completion.chunk","model":"deepseek-chat","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":4}}\n\n` +
+        `data: [DONE]\n\n`;
+      return new Response(sse, { status: 200, headers: { "content-type": "text/event-stream" } });
+    });
+
+    const frames = await runAgainst(withStream);
+    expect(call).toBe(2);
+    expect(frames.at(-1)?.type).toBe("done");
+  });
+
+  it("carries the upstream status into the neutral terminal, so pi retries the turn", async () => {
+    const frames = await runAgainst(scriptedUpstream([429]).fetch);
+    const terminal = frames.at(-1) as Extract<PiMessagesEvent, { type: "error" }>;
+    expect(terminal.type).toBe("error");
+    expect(terminal.errorMessage).toBe(
+      'Upstream model error (model "appstrate-medium", status 429)',
+    );
+
+    // Asked of pi-ai's OWN classifier, not of a transcription of its regex —
+    // this assertion has to keep meaning something after a pi upgrade.
+    expect(
+      isRetryableAssistantError({
+        ...partialMessage([]),
+        stopReason: "error",
+        errorMessage: terminal.errorMessage!,
+      }),
+    ).toBe(true);
+  });
+
+  it("control: a 400 stays NON-retryable, so the status is doing the work", async () => {
+    // Without this the assertion above could pass on any neutral string that
+    // happens to match — e.g. if the alias name alone tripped the regex.
+    const frames = await runAgainst(scriptedUpstream([400]).fetch);
+    const terminal = frames.at(-1) as Extract<PiMessagesEvent, { type: "error" }>;
+    expect(terminal.errorMessage).toBe(
+      'Upstream model error (model "appstrate-medium", status 400)',
+    );
+    expect(
+      isRetryableAssistantError({
+        ...partialMessage([]),
+        stopReason: "error",
+        errorMessage: terminal.errorMessage!,
+      }),
+    ).toBe(false);
+  });
+
+  it("still names nothing: the upstream's own error body never reaches the client", async () => {
+    // The status travels; the prose does not. A 429 body is exactly where a
+    // provider writes its rate-limit copy, its model id and its own vocabulary.
+    const frames = await runAgainst(scriptedUpstream([429]).fetch);
+    const serialized = JSON.stringify(frames);
+    expect(serialized).not.toContain("deepseek");
+    expect(serialized).not.toContain("Overloaded, please slow down");
+    expect(serialized).not.toContain("rate_limit");
   });
 });
 

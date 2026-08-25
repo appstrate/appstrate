@@ -196,6 +196,12 @@ export async function buildPlatformMcpTools(
   const client = await createMcpHttpClient(opts.url, {
     clientInfo: { name: "appstrate-chat-pi", version: "1.0" },
     extraHeaders: opts.headers,
+    // The HANDSHAKE, not only the `listTools` below. In production `opts.fetch`
+    // is the platform's in-process dispatch, so `initialize` re-enters the same
+    // process — a DB pool exhausted by concurrent runs or a module hook that
+    // never settles wedges it, and without the signal the turn's stop button
+    // and its deadline are both inert for the SDK's full 60 s request timeout.
+    signal: opts.signal,
     ...(opts.fetch ? { fetch: opts.fetch } : {}),
   });
 

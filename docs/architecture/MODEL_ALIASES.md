@@ -214,12 +214,31 @@ never receives one. Its three surfaces are all locally synthesized: a `404` for
 a non-inference call on the narrowed `/llm/*` surface, a `400` for an unusable
 `pi-messages` body, and the terminal `error` event described above.
 
-Status codes and the retry/backoff headers still flow, so client retry
-behavior is preserved. Non-aliased models keep full verbatim passthrough
-(bodies, headers, hostnames) — the opacity cost applies only to aliases, whose
-contract is precisely that opacity. The trade-off: aliased callers lose
-upstream error detail (e.g. a provider's "max_tokens too large" prose); the
-detail remains in server logs.
+**Retry survives the replacement, but the two boundaries preserve it
+differently — and neither does it by "letting the headers flow".**
+
+- On the **gateway**, the caller still gets an HTTP response: the upstream
+  status is the response's own status, and `retry-after` / `RateLimit*` survive
+  in `LLM_PASSTHROUGH_RESPONSE_HEADERS`. A client's normal retry logic works
+  unchanged.
+- On the **sidecar** nothing flows at all. `pi-messages` is a closed event union
+  with no status line and no header channel, so a container CANNOT be told
+  "429, retry in 12s" — there is no field for it. Retry is preserved in two
+  other ways instead. (1) The sidecar owns the header-driven retry itself: it is
+  the only side that can read `retry-after`, so it runs pi-ai's own bounded
+  provider retry against the backing before reporting anything. (2) What the
+  container is told is the STATUS, carried inside the synthesized message —
+  `Upstream model error (model "appstrate-flash", status 429)`. That is not
+  cosmetic: pi's `isRetryableAssistantError` classifies a failed turn by regex
+  over exactly that string, so a status-less message reads as permanent and the
+  container's turn-level retry budget never fires. See
+  `syntheticAliasErrorMessage` for why disclosing the integer costs no opacity
+  (a status describes the transaction, not the vendor).
+
+Non-aliased models keep full verbatim passthrough (bodies, headers, hostnames)
+— the opacity cost applies only to aliases, whose contract is precisely that
+opacity. The trade-off: aliased callers lose upstream error detail (e.g. a
+provider's "max_tokens too large" prose); the detail remains in server logs.
 
 ## Constraints
 

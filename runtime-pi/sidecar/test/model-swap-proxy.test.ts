@@ -174,9 +174,9 @@ describe("/llm/* re-origination routing (aliased run)", () => {
   }
 
   it("terminates POST /llm/messages instead of proxying it", async () => {
-    // The upstream fetch is what the PROXY path would make. pi-ai does its own
-    // fetch through `globalThis.fetch`, so this stub firing at all would mean
-    // the request took a proxy branch.
+    // The upstream fetch is what the PROXY path would make. The re-origination
+    // hands pi-ai its own transport (a status probe over `globalThis.fetch`),
+    // so this stub firing at all would mean the request took a proxy branch.
     const fetchFn = mock(
       async () => new Response("{}", { status: 200 }),
     ) as unknown as typeof fetch;
@@ -203,8 +203,12 @@ describe("/llm/* re-origination routing (aliased run)", () => {
       .map((chunk) => JSON.parse(chunk.slice("data: ".length)) as Record<string, unknown>);
     expect(frames).toHaveLength(1);
     expect(frames[0]!["type"]).toBe("error");
-    // The neutral envelope — pi-ai's own prose interpolates the provider.
-    expect(frames[0]!["errorMessage"]).toBe('Upstream model error (model "appstrate-medium")');
+    // The neutral envelope — pi-ai's own prose interpolates the provider. The
+    // status is the sidecar's own 502: nothing upstream ever answered, so there
+    // is no backing status to report and "unreachable" is what it was.
+    expect(frames[0]!["errorMessage"]).toBe(
+      'Upstream model error (model "appstrate-medium", status 502)',
+    );
     expect(body).not.toContain("deepseek");
     expect(fetchFn).not.toHaveBeenCalled();
   });

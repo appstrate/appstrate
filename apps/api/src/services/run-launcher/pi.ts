@@ -303,9 +303,12 @@ async function runPlatformContainerImpl(
       });
     } else if (llmApiKey) {
       // API-key flow: the sidecar forwards directly to the upstream
-      // provider. The Pi SDK's native retry (Retry-After honoring +
-      // exponential backoff, `maxRetries: 2`) covers transient 429/5xx —
-      // see `packages/runner-pi/src/pi-runner.ts`.
+      // provider. Transient 429/5xx are absorbed by two budgets, neither of
+      // them this file's and neither restated here (one number, one place):
+      // the container's turn-level retry policy in
+      // `packages/runner-pi/src/pi-runner.ts`, and — for an ALIASED run, whose
+      // container never sees a `retry-after` header — the sidecar's own
+      // provider-level budget in `runtime-pi/sidecar/pi-messages-backend.ts`.
       sidecarLlm = {
         authMode: "api_key",
         baseUrl: llmConfig.baseUrl,

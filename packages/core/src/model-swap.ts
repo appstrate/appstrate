@@ -132,6 +132,23 @@ const ALIAS_UPSTREAM_ERROR_MESSAGE = "Upstream model error";
  * Neutral prose with no protocol envelope: a `pi-messages` `error` event needs a
  * bare string where {@link syntheticAliasErrorBody} needs an HTTP body. pi-ai's own
  * error messages interpolate the provider, so none of them may be forwarded.
+ *
+ * **Pass `status` wherever one is known.** It looks like decoration and is not:
+ * this string is the ONLY channel a caller has left to classify the failure,
+ * because the body it replaced is gone. pi-ai's `isRetryableAssistantError`
+ * (the gate the agent container's retry budget sits behind) is a regex over
+ * exactly this text, and its retryable set is largely the transient status
+ * literals — `429`, `500`, `502`, `503`, `504`. Omit the status and every
+ * aliased failure reads as permanent, so a `429` that the same model on a BYOK
+ * credential rides out fails the run instead.
+ *
+ * Disclosing the integer costs no opacity, which is why the tension resolves
+ * this way rather than by loosening the prose: a status describes the
+ * TRANSACTION, not the backing. All fourteen candidate vendors answer 429 when
+ * throttled and 400 on a bad request, so the number partitions failures by kind
+ * and never by vendor — and `MODEL_ALIASES.md` already publishes status codes
+ * as part of an alias's contract. What stays replaced is the vendor's prose:
+ * model ids, hostnames, provider vocabulary, rate-limit copy.
  */
 export function syntheticAliasErrorMessage(swap: ModelSwap, status?: number): string {
   const statusHint = status ? `, status ${status}` : "";
