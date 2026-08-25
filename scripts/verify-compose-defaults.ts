@@ -27,6 +27,7 @@ import {
   type ComposeDefaultForm,
   type ComposeFinding,
 } from "../apps/cli/src/lib/compose-defaults.ts";
+import { COMPOSE_GLOBS, trackedFiles } from "./lib/tracked-files.ts";
 
 const REPO_ROOT = join(import.meta.dir, "..");
 
@@ -186,7 +187,35 @@ export function extractSchemaDefaults(source: string): {
 }
 
 /**
+ * The vacuity floor: fewer schema keys than this and the extractor is not
+ * under-reporting, it has stopped working.
+ *
+ * Every other failure mode of this file is fail-CLOSED — renaming `envSchema`
+ * throws, moving a helper below the schema throws — but the ONE that mattered
+ * most was fail-open. `KEY = /^ {4}([A-Z][A-Z0-9_]*):/` anchors on exactly four
+ * spaces; when that anchor stops matching, `keys` and `defaulted` are BOTH
+ * empty, `assertExtractorStillWorks` intersects `CODE_DEFAULTS` with an empty
+ * set, finds zero undetected entries, and returns happily. `findTableGaps` then
+ * reports nothing for every file and the gate prints its tick. Demonstrated
+ * 2026-08-25 against the real exported functions, re-indenting the real schema
+ * from 4 spaces to 2: `keys: 0  defaulted: 0`, `assertExtractorStillWorks
+ * threw? false`, and a compose line pinning `WORKSPACE_TMPFS_SIZE_MB=512` —
+ * a real finding on the real schema — came back as `[]`.
+ *
+ * 50 against a measured 99 keys / 67 defaults: low enough that ordinary churn
+ * (a batch of variables retired) never trips it, high enough that no plausible
+ * partial match of a broken anchor survives it.
+ */
+const MIN_SCHEMA_KEYS = 50;
+
+/**
  * Self-check on the extractor above, run before its output is trusted.
+ *
+ * Two independent checks, in the order a reader needs them: first that the
+ * extractor produced a plausible key set at all (`MIN_SCHEMA_KEYS`), then that
+ * every variable `CODE_DEFAULTS` and the schema BOTH name came back as
+ * defaulted. The second is meaningless without the first — an empty key set
+ * satisfies it trivially.
  *
  * The hand-maintained `CODE_DEFAULTS` is an independent statement that a
  * variable HAS a schema default. So every table entry that is also a schema key
@@ -222,6 +251,17 @@ export function extractSchemaDefaults(source: string): {
  * forward-looking.
  */
 export function assertExtractorStillWorks(keys: Set<string>, defaulted: Set<string>): void {
+  if (keys.size < MIN_SCHEMA_KEYS) {
+    throw new Error(
+      `verify-compose-defaults: the ${SCHEMA_SOURCE} key extractor found only ${keys.size} ` +
+        `variable(s), below the floor of ${MIN_SCHEMA_KEYS} (99 at the time of writing). ` +
+        `The most likely cause is that the key anchor — a name at EXACTLY four spaces of indent, ` +
+        `inside \`const envSchema\`'s \`z.object({ … })\` — no longer matches: the object was split ` +
+        `into spread groups, or \`z\\n  .object({\` was collapsed to \`z.object({\`, moving every ` +
+        `key one level out. Fix the anchor in extractSchemaDefaults; do NOT lower this floor.`,
+    );
+  }
+
   const undetected = Object.keys(CODE_DEFAULTS)
     .filter((name) => keys.has(name) && !defaulted.has(name))
     .sort();
@@ -245,30 +285,12 @@ export function assertExtractorStillWorks(keys: Set<string>, defaulted: Set<stri
  * is covered the day it is committed, which is the property the list could
  * never have.
  *
- * `git ls-files` is deliberately the source of truth for "tracked": the
- * untracked, local-only `docker-compose.override.yml` is a developer's own
- * machine and is not this gate's business, and it stays out for free.
+ * The discovery itself (and the reason it reads the git index rather than the
+ * filesystem — the untracked, local-only `docker-compose.override.yml` is a
+ * developer's own machine and not this gate's business) lives in
+ * `scripts/lib/tracked-files.ts`, shared with the two sibling gates.
  */
-function trackedComposeFiles(): string[] {
-  const result = Bun.spawnSync({
-    cmd: ["git", "ls-files", "-z", "--", "*docker-compose*.yml", "*docker-compose*.yaml"],
-    cwd: REPO_ROOT,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  if (result.exitCode !== 0) {
-    throw new Error(
-      `git ls-files failed (exit ${result.exitCode}): ${result.stderr.toString().trim()}`,
-    );
-  }
-  const files = result.stdout.toString().split("\0").filter(Boolean).sort();
-  if (files.length === 0) {
-    throw new Error("git ls-files matched no compose file — the gate would pass vacuously.");
-  }
-  return files;
-}
-
-const COMPOSE_FILES = trackedComposeFiles();
+const COMPOSE_FILES = trackedFiles(COMPOSE_GLOBS, "compose file");
 
 /**
  * The repair differs by shape, and printing one instruction for both would

@@ -55,6 +55,20 @@ const API_BARREL_BAN = {
 // replayed away forever.
 const ALL_TS = ["**/*.{ts,tsx}"];
 
+// The plain-JavaScript half, and it is not hypothetical bookkeeping: measured
+// 2026-08-25, `git ls-files -- '*.js' '*.jsx' '*.mjs' '*.cjs'` returns exactly
+// ONE path — `eslint.config.mjs`, the file that defines every rule this repo
+// gates on — and before the block that uses this glob existed, that file was
+// checked by nothing. `eslint --print-config eslint.config.mjs` reported 358
+// rules, 0 of them enabled, against 451/70 for `apps/api/src/index.ts`.
+//
+// The reason is worth stating because `scripts/lint.ts` used to state the
+// opposite: ESLint's `defaultConfig` gives `.js`/`.mjs`/`.cjs` their globbing
+// and `sourceType`, and ZERO rules. Every rule below is scoped to `ALL_TS`. So
+// "eslint's own defaults cover them" was true about parsing and false about
+// linting, which is the only half a gate cares about.
+const ALL_JS = ["**/*.{js,jsx,mjs,cjs}"];
+
 // Zod 4 string-format bans (single source of truth). Declared here because the
 // CLI and test blocks below re-declare `no-restricted-syntax` for subsets of
 // the same files — flat config replaces (not merges) a rule's options across
@@ -268,6 +282,32 @@ export default tseslint.config(
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
       "preserve-caught-error": "off",
+    },
+  },
+  {
+    // The plain-JS block. See `ALL_JS` above for the measurement that motivates
+    // it: without this object, `eslint.config.mjs` — the source of every rule
+    // in this repo — parsed cleanly under zero rules, so `no-undef`,
+    // `no-unused-vars` and `no-dupe-keys` had nothing to say about the file
+    // that decides what they say about everything else.
+    //
+    // `js.configs.recommended` and nothing more. The TypeScript rules above
+    // cannot apply (no TS parser, and `tseslint.configs.recommended` scopes
+    // itself to TS anyway), and the repo conventions the other blocks enforce
+    // — the `console.*` ban, the Zod 4 form bans, the Pi-SDK import guard —
+    // are all about application source, which is TypeScript here by policy.
+    //
+    // `.jsx` is in the glob although zero tracked files match it today. That is
+    // deliberate: `scripts/lint.ts` hands eslint every tracked `.jsx`, and a
+    // file matched by NO config object is skipped with a warning rather than
+    // linted. Covering the extension means the day one appears it is linted,
+    // not tolerated.
+    extends: [js.configs.recommended],
+    files: ALL_JS,
+    languageOptions: {
+      ecmaVersion: 2020,
+      globals: globals.node,
+      parserOptions: { ecmaFeatures: { jsx: true } },
     },
   },
   {

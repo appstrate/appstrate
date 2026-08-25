@@ -14,13 +14,19 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   assertExtractorStillWorks,
   extractSchemaDefaults,
   findTableGaps,
   readSchemaDefaults,
 } from "../verify-compose-defaults.ts";
-import { analyzeComposeDefaults, CODE_DEFAULTS } from "../../apps/cli/src/lib/compose-defaults.ts";
+import {
+  analyzeComposeDefaults,
+  CODE_DEFAULTS,
+  SCHEMA_SOURCE,
+} from "../../apps/cli/src/lib/compose-defaults.ts";
 
 /**
  * A synthetic variable name, and that is the point.
@@ -227,5 +233,60 @@ ${keyBlocks}
       schema("", `    A_VAR: z.string().optional().transform((v) => v ?? "512"),`),
     );
     expect(defaulted.has("A_VAR")).toBe(false);
+  });
+});
+
+/**
+ * The mutation the self-check could not see: the extractor returning NOTHING.
+ *
+ * Every other way this file can break is fail-closed — rename `envSchema` and
+ * `extractSchemaDefaults` throws; move a helper below the schema and
+ * `assertExtractorStillWorks` throws. Breaking the KEY ANCHOR was fail-OPEN:
+ * `keys` and `defaulted` both come back empty, the intersection with
+ * `CODE_DEFAULTS` is empty, nothing is "undetected", and the gate prints
+ * `✓ … (0 schema defaults known …)` and exits 0 over every compose file.
+ *
+ * The mutation used here is the real one, not a strawman: re-indenting the real
+ * schema from four spaces to two is what splitting `z.object({ … })` into
+ * spread groups, or collapsing `z\n  .object({` to `z.object({`, does to every
+ * key line.
+ */
+describe("assertExtractorStillWorks — vacuity floor", () => {
+  const SCHEMA = readFileSync(join(import.meta.dir, "..", "..", SCHEMA_SOURCE), "utf-8");
+
+  it("throws when the key anchor stops matching", () => {
+    const reindented = SCHEMA.replace(/^ {4}/gm, "  ");
+    const { keys, defaulted } = extractSchemaDefaults(reindented);
+
+    // The mutation landed: this is the state the gate used to accept.
+    expect(keys.size).toBe(0);
+    expect(defaulted.size).toBe(0);
+
+    expect(() => assertExtractorStillWorks(keys, defaulted)).toThrow(/below the floor/);
+  });
+
+  it("is silent on the real schema, which is far above the floor", () => {
+    const { keys, defaulted } = extractSchemaDefaults(SCHEMA);
+    // Not a pinned count — the floor is what is asserted, so this test does not
+    // fail on every unrelated env addition or removal.
+    expect(keys.size).toBeGreaterThanOrEqual(50);
+    expect(() => assertExtractorStillWorks(keys, defaulted)).not.toThrow();
+  });
+
+  it("would have reported a real finding that the empty set hides", () => {
+    // The half that proves the floor is worth having: with the extractor
+    // working, this compose line IS a table gap; with it broken, the same line
+    // reads as clean. "No findings" is what the broken gate said too.
+    const compose = `services:
+  api:
+    environment:
+      - WORKSPACE_TMPFS_SIZE_MB=\${WORKSPACE_TMPFS_SIZE_MB:-512}
+`;
+    const real = extractSchemaDefaults(SCHEMA);
+    const broken = extractSchemaDefaults(SCHEMA.replace(/^ {4}/gm, "  "));
+    expect(findTableGaps(compose, real.defaulted)).toEqual([
+      { line: 4, varName: "WORKSPACE_TMPFS_SIZE_MB", yamlDefault: "512" },
+    ]);
+    expect(findTableGaps(compose, broken.defaulted)).toEqual([]);
   });
 });

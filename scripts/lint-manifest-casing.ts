@@ -18,9 +18,9 @@
  * failure is silent in the direction that matters: a NEW manifest-writing file
  * is not scanned, and the gate prints `OK — (23 scan targets)`. The existence
  * guard added later only caught the opposite case — a listed path that
- * vanished. Its sibling `scripts/verify-compose-defaults.ts` was converted to
- * `git ls-files` discovery for exactly this reason, with the rationale written
- * out there; this is the same move.
+ * vanished. The discovery itself lives in `scripts/lib/tracked-files.ts`,
+ * shared with `scripts/lint.ts` and `scripts/verify-compose-defaults.ts`, which
+ * had each grown their own copy of it.
  *
  * The polarity is the whole point. Under discovery, a new AFPS writer is
  * covered the day it is committed, and the thing that now needs remembering is
@@ -54,33 +54,9 @@
 
 import { readFileSync } from "node:fs";
 import { join, sep } from "node:path";
+import { SOURCE_GLOBS, trackedFiles } from "./lib/tracked-files.ts";
 
 const REPO_ROOT = join(import.meta.dir, "..");
-
-/**
- * Every tracked source file, discovered — not enumerated. Same source of truth
- * as `scripts/verify-compose-defaults.ts`: `git ls-files` means a NEW file is
- * covered the day it is committed, and an untracked scratch file on somebody's
- * machine is not this gate's business.
- */
-function trackedSourceFiles(): string[] {
-  const result = Bun.spawnSync({
-    cmd: ["git", "ls-files", "-z", "--", "*.ts", "*.tsx", "*.js", "*.jsx", "*.mjs", "*.cjs"],
-    cwd: REPO_ROOT,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  if (result.exitCode !== 0) {
-    throw new Error(
-      `git ls-files failed (exit ${result.exitCode}): ${result.stderr.toString().trim()}`,
-    );
-  }
-  const files = result.stdout.toString().split("\0").filter(Boolean).sort();
-  if (files.length === 0) {
-    throw new Error("git ls-files matched no source file — the gate would pass vacuously.");
-  }
-  return files;
-}
 
 // Banned legacy camelCase manifest keys — canonical AFPS form is snake_case.
 const BANNED_KEYS = [
@@ -460,19 +436,14 @@ function scan(): { hits: Hit[]; suppressed: Set<string>; scanned: number } {
   let scanned = 0;
   const keyPatterns = BANNED_KEYS.map((k) => ({ key: k, re: buildWriterShapeRegex(k) }));
 
-  for (const rel of trackedSourceFiles()) {
+  // `trackedFiles` already dropped the index entries whose file is gone from
+  // the working tree (a `git rm` not yet committed, a refactor in flight), so
+  // this read is plain: any failure here IS a broken checkout and must not be
+  // swallowed — that is the class of silent skip this gate was rewritten to
+  // remove.
+  for (const rel of trackedFiles(SOURCE_GLOBS, "source file")) {
     if (isTestFile(rel)) continue;
-    let content: string;
-    try {
-      content = readFileSync(join(REPO_ROOT, rel), "utf8");
-    } catch (err) {
-      // A tracked file deleted in the working tree (a `git rm` not yet
-      // committed, a refactor in flight) has nothing to lint — skip it. Any
-      // OTHER read failure is a broken checkout and must not be swallowed: that
-      // is the class of silent skip this gate was rewritten to remove.
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
-      throw err;
-    }
+    const content = readFileSync(join(REPO_ROOT, rel), "utf8");
     scanned++;
     const lines = content.split("\n");
     for (let i = 0; i < lines.length; i++) {

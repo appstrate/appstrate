@@ -50,10 +50,32 @@
   // local listings stay: harmless, and they document the dependency where the
   // task is defined.
   //
+  // `bun.lock` is the second entry, and it is here rather than on any single
+  // task because EVERY cached task reads `node_modules`: `tsc` resolves the
+  // `.d.ts` of every dependency, `eslint` loads its plugin CODE from there,
+  // `type-coverage` reads the same program `tsc` does, `vite build` bundles it.
+  // A caret-range bump — a new `typescript-eslint` minor, a patched `@types/*` —
+  // changes all of that while touching NO `package.json`, and a lock-only
+  // change was measured replaying `//#lint` from cache: the new rules never
+  // ran, and the gate reported the previous resolution's verdict. Turbo does
+  // derive per-package external-dependency hashes from the lockfile, so this
+  // entry overlaps that for some tasks; the overlap is a redundant
+  // invalidation, and the alternative is a silent stale pass.
+  //
+  // Workspace tasks cannot list it themselves — task `inputs` are
+  // workspace-relative and this is a root file, which is the same reason
+  // `tsconfig.base.json` is here. `.github/workflows/check.yml` hashes it into
+  // the restored-cache key already, which starts a fresh lineage across CI runs
+  // but says nothing about a replay within one; this closes that half.
+  //
+  // Probe when changing it: `turbo run '//#lint' --dry=json`, EDIT `bun.lock`
+  // (turbo hashes content — `touch` moves nothing), run again — the hash must
+  // move.
+  //
   // Probe when changing it: `turbo run typecheck --dry=json`, EDIT
   // tsconfig.base.json (turbo hashes content — `touch` moves nothing and reads
   // as a false negative), run again — every hash must move.
-  "globalDependencies": ["tsconfig.base.json"],
+  "globalDependencies": ["tsconfig.base.json", "bun.lock"],
   "globalPassThroughEnv": [
     "BETTER_AUTH_SECRET",
     "CONNECTION_ENCRYPTION_KEY",
@@ -175,12 +197,33 @@
     // rather than restated. `package.json` is not matched by the glob and holds
     // the `lint` script itself, so it stays listed. `scripts/lint.ts`, which
     // now defines the scope, is matched by the glob like any other `.ts`.
+    //
+    // The glob restates the extension list that lives in TypeScript as
+    // `SOURCE_GLOBS` in `scripts/lib/tracked-files.ts`. That restatement is the
+    // one unavoidable copy — turbo reads JSON and cannot import it — so when
+    // the extension list changes, change it in both places.
+    //
+    // `apps/web/tsconfig.json` is listed because eslint READS it on every run
+    // and no glob above reaches a `.json`: the `no-unnecessary-type-assertion`
+    // block scopes itself to `apps/web/src/**` with `parserOptions.projectService`,
+    // and projectService resolves the nearest tsconfig for those files — that
+    // one, which sets `target`, `lib`, `jsx` and `paths`. Without this entry a
+    // PR editing it left this task's hash unmoved, turbo replayed the cached
+    // logs, and the one type-AWARE rule in the config never re-derived a single
+    // verdict — and `.github/workflows/check.yml` keys the restored
+    // `.turbo/cache` on `bun.lock, eslint.config.mjs, .prettierrc, turbo.json,
+    // tsconfig.base.json`, so via `restore-keys` that stale replay survived
+    // across CI runs too. `//#verify:type-coverage` below already lists the same
+    // file in its own `inputs` for the same reason. `tsconfig.base.json`, which
+    // that tsconfig extends, and `bun.lock`, which decides which eslint plugin
+    // code runs, are both in `globalDependencies`.
     "//#lint": {
       "inputs": [
         "**/*.{ts,tsx,js,jsx,mjs,cjs}",
         "!**/node_modules/**",
         "!**/dist/**",
-        "package.json"
+        "package.json",
+        "apps/web/tsconfig.json"
       ]
     },
     // No `inputs` on purpose. The root `format:check` script is now a bare
