@@ -144,6 +144,7 @@ function DocumentsCollection({
         display={view}
         showPurposeTabs={false}
         tableLabel={t("tableLabel")}
+        tableColumnMode="scroll"
         toolbar={({ columns }) => (
           <ListToolbar
             search={{

@@ -161,6 +161,7 @@ export function PackagesTable({
       rowKey={(item) => item.id}
       rowHref={(item) => packageDetailPath(item.type, item.id)}
       rowLabel={(item) => item.displayName}
+      columnMode="scroll"
       {...state}
     />
   );

@@ -2376,8 +2376,26 @@ desktop content keeps fitting there without an invented scroll. When the real
 container is narrower, the existing Radix `ScrollArea` provides horizontal
 access and its stock transient thumb. The cells are not copied into a second
 mobile renderer, so role selects, row menus and pending states remain the same
-controls rather than divergent duplicates. Collection tables outside settings
-retain the tiered, no-scroll treatment.
+controls rather than divergent duplicates.
+
+**Reader-selected collection columns stay reachable, 25 August.** The first
+settings fix deliberately left level-one collections on their tiered compact
+renderer, but that contradicted the Columns control: a reader could select a
+fact and still have responsive CSS remove it from the DOM. Runs, Documents,
+Schedules, Agents, Skills, MCP Servers and Integrations now use the same honest
+overflow rule for their table view. Every selected column renders at every
+width, the existing Radix `ScrollArea` exposes the full row horizontally, and
+the stock transient thumb appears during interaction. The first identity
+column is required and disabled in the Columns menu; every other selection
+really adds or removes cells from the DOM. Embedded and detail tables retain
+their tiered compact treatment because they do not offer reader-controlled
+column visibility.
+
+Measured at 390, Runs has a 348px viewport over an 884px table and Agents has a
+348px viewport over a 688px table. Moving the scroll reaches the rightmost
+facts without viewport overflow. Toggling a Runs column changes its eight row
+cells to zero and back to eight, proving that the menu controls the rendered
+table rather than an inert preference.
 
 Sticky edge columns were evaluated and deliberately left out of the shared
 rule. Not every settings table ends in Actions (Webhooks ends in Payload), and

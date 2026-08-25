@@ -66,6 +66,8 @@ interface RunListProps {
   countLabel?: (total: number) => React.ReactNode;
   /** Level-one Runs offers both representations; embedded run lists stay tables. */
   view?: ListView;
+  /** Level-one tables preserve every selected column behind horizontal overflow. */
+  tableColumnMode?: "tiered" | "scroll";
 }
 
 export function RunList({
@@ -84,6 +86,7 @@ export function RunList({
   toolbar,
   countLabel,
   view = "table",
+  tableColumnMode = "tiered",
 }: RunListProps) {
   const { t } = useTranslation(["agents"]);
   const agentName = useRunAgentName(fixedAgentName);
@@ -136,6 +139,7 @@ export function RunList({
           isError={isError}
           empty={emptyState}
           banner={page === 0 ? firstPageBanner : undefined}
+          columnMode={tableColumnMode}
         />
       ) : (
         <CardGrid

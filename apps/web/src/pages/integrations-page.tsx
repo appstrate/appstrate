@@ -459,6 +459,7 @@ export function IntegrationsPage() {
         <DataTable
           label={t("integrations.tableLabel")}
           columns={columns}
+          columnMode="scroll"
           rows={shown}
           rowKey={(integration) => integration.id}
           rowHref={(integration) => `/integrations/${integration.id}`}

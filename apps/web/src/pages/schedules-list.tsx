@@ -122,6 +122,7 @@ export function SchedulesListPage() {
         <SchedulesTable
           schedules={shown}
           columns={columns}
+          columnMode="scroll"
           isLoading={isLoading}
           isError={isError}
           // A list nobody filtered and a filter that matched nothing are two

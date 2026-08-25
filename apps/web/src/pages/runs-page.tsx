@@ -113,6 +113,7 @@ export function RunsPage() {
         status={statuses}
         search={search}
         view={view}
+        tableColumnMode="scroll"
         countLabel={(total) => t("runs.count", { count: total })}
         toolbar={({ columns }) => (
           <ListToolbar

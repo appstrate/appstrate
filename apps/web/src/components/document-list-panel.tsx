@@ -54,6 +54,7 @@ export function DocumentListPanel({
   showPurposeTabs = true,
   toolbar,
   tableLabel,
+  tableColumnMode = "tiered",
 }: {
   documents: DocumentDto[];
   isLoading: boolean;
@@ -86,6 +87,8 @@ export function DocumentListPanel({
   /** Apparatus owned by the caller, built from the table's real columns. */
   toolbar?: (context: { columns: ColumnMenuSpec }) => ReactNode;
   tableLabel?: string;
+  /** Level-one collections keep every reader-selected column reachable. */
+  tableColumnMode?: "tiered" | "scroll";
 }) {
   const { t } = useTranslation("documents");
   const download = useDocumentDownload();
@@ -199,6 +202,7 @@ export function DocumentListPanel({
           <DataTable
             label={tableLabel ?? t("tableLabel")}
             columns={columns}
+            columnMode={tableColumnMode}
             rows={documents}
             rowKey={(doc) => doc.id}
             rowHref={(doc) =>

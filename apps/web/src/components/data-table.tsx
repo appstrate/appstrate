@@ -87,6 +87,12 @@ interface DataTableProps<T> extends CollectionState {
   banner?: ReactNode;
   /** Names the table for screen readers; never drawn. */
   label: string;
+  /**
+   * `tiered` keeps the compact collection treatment. `scroll` makes the
+   * reader's selected columns authoritative and preserves every selected fact
+   * behind horizontal overflow when the table becomes narrow.
+   */
+  columnMode?: "tiered" | "scroll";
 }
 
 /**
@@ -99,8 +105,15 @@ export function columnMenu<T>(
   columns: DataColumn<T>[],
   visibility: { hidden: string[]; toggle: (id: string) => void },
 ) {
+  const requiredId = columns.find((column) => !column.tier && column.header)?.id;
   return {
-    options: columns.filter((c) => c.header).map((c) => ({ id: c.id, label: c.header })),
+    options: columns
+      .filter((column) => column.header)
+      .map((column) => ({
+        id: column.id,
+        label: column.header,
+        required: column.id === requiredId,
+      })),
     hidden: visibility.hidden,
     onToggle: visibility.toggle,
   };
@@ -108,7 +121,10 @@ export function columnMenu<T>(
 
 /** What is left once the reader's hidden columns are taken out. */
 export function visibleColumns<T>(columns: DataColumn<T>[], hidden: string[]): DataColumn<T>[] {
-  return columns.filter((c) => !c.header || !hidden.includes(c.id));
+  const requiredId = columns.find((column) => !column.tier && column.header)?.id;
+  return columns.filter(
+    (column) => column.id === requiredId || !column.header || !hidden.includes(column.id),
+  );
 }
 
 const SKELETON_ROWS = 3;
@@ -152,6 +168,7 @@ export function DataTable<T>({
   rowState,
   banner,
   label,
+  columnMode = "tiered",
   ...state
 }: DataTableProps<T>) {
   // The order lives in `collection.ts`, shared with the card grid: a caller
@@ -173,7 +190,9 @@ export function DataTable<T>({
   const linkColumn = columns.findIndex((c) => !c.tier);
 
   const rowGrid =
-    "grid items-center gap-3 px-3 [grid-template-columns:var(--dt-cols)] @xl/table:gap-4 @xl/table:px-4 @xl/table:[grid-template-columns:var(--dt-cols-2)] @4xl/table:[grid-template-columns:var(--dt-cols-3)]";
+    columnMode === "scroll"
+      ? "grid items-center gap-4 px-4 [grid-template-columns:var(--dt-cols-3)]"
+      : "grid items-center gap-3 px-3 [grid-template-columns:var(--dt-cols)] @xl/table:gap-4 @xl/table:px-4 @xl/table:[grid-template-columns:var(--dt-cols-2)] @4xl/table:[grid-template-columns:var(--dt-cols-3)]";
 
   // A failure always draws something, whether or not the caller wrote the
   // sentence — it used to be folded into `empty` at every call site, which is
@@ -201,7 +220,16 @@ export function DataTable<T>({
       )}
     >
       <ScrollArea data-data-table-scroll>
-        <table role="table" aria-label={label} className="block w-full text-sm" style={tracks}>
+        <table
+          role="table"
+          aria-label={label}
+          data-data-table-column-mode={columnMode}
+          className={cn(
+            "block w-full text-sm",
+            columnMode === "scroll" && "min-w-(--dt-full-floor)",
+          )}
+          style={tracks}
+        >
           <thead role="rowgroup" className="block">
             <tr
               role="row"
@@ -217,7 +245,7 @@ export function DataTable<T>({
                   className={cn(
                     "text-muted-foreground min-w-0 truncate text-[0.68rem] font-semibold tracking-[0.05em] uppercase",
                     col.align === "end" ? "text-right" : "text-left",
-                    tierClass(col, "block"),
+                    columnMode === "tiered" && tierClass(col, "block"),
                   )}
                 >
                   {col.header}
@@ -248,7 +276,10 @@ export function DataTable<T>({
                         key={col.id}
                         data-data-table-column={col.id}
                         data-data-table-tier={col.tier}
-                        className={cn("min-w-0", tierClass(col, "block"))}
+                        className={cn(
+                          "min-w-0",
+                          columnMode === "tiered" && tierClass(col, "block"),
+                        )}
                       >
                         <Skeleton className="h-3.5 w-full" />
                       </td>
@@ -277,7 +308,7 @@ export function DataTable<T>({
                           className={cn(
                             "flex min-w-0 items-center gap-1.5",
                             col.align === "end" && "justify-end",
-                            tierClass(col, "flex"),
+                            columnMode === "tiered" && tierClass(col, "flex"),
                           )}
                         >
                           {/* The link belongs to the first cell and covers the row

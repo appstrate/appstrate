@@ -110,7 +110,7 @@ export interface FilterOption {
 
 /** What the "Colonnes" menu needs: what there is, what is hidden, how to flip one. */
 export interface ColumnMenuSpec {
-  options: Array<{ id: string; label: string }>;
+  options: Array<{ id: string; label: string; required?: boolean }>;
   hidden: string[];
   onToggle: (id: string) => void;
 }
@@ -280,7 +280,7 @@ function ColumnsMenu({
           return (
             <DropdownMenuItem
               key={option.id}
-              disabled={isVisible && visibleCount === 1}
+              disabled={option.required || (isVisible && visibleCount === 1)}
               onSelect={(event) => {
                 event.preventDefault();
                 columns.onToggle(option.id);

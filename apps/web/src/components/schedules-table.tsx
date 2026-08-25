@@ -139,6 +139,7 @@ export function SchedulesTable({
   isLoading,
   isError,
   empty,
+  columnMode,
 }: {
   schedules: EnrichedSchedule[];
   /** From {@link useScheduleColumns}, minus whatever the reader hid. */
@@ -146,6 +147,8 @@ export function SchedulesTable({
   isLoading?: boolean;
   isError?: boolean;
   empty?: React.ReactNode;
+  /** Level-one collections keep every reader-selected column reachable. */
+  columnMode?: "tiered" | "scroll";
 }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
 
@@ -153,6 +156,7 @@ export function SchedulesTable({
     <DataTable
       label={t("schedules.tableLabel")}
       columns={columns}
+      columnMode={columnMode}
       rows={schedules}
       isLoading={isLoading}
       isError={isError}
