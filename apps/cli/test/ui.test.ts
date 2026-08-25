@@ -138,10 +138,15 @@ describe("withSpinner", () => {
    * A child process owns the observation: `runIsolated` gives it a piped
    * stdout, which is exactly the non-TTY condition under test, and a buffer no
    * other suite can write to. The second `runIsolated` is the control — the
-   * same start/tick/stop against bare clack, in the same non-TTY child, so a
-   * green assertion cannot come from the escapes having never been there. Both
-   * bodies sleep past one 80ms paint tick; without it clack's first frame
-   * never fires and the control would be vacuously escape-free.
+   * same start/stop against bare clack, in the same non-TTY child, so a green
+   * assertion cannot come from the escapes having never been there.
+   *
+   * Neither body waits for a paint tick, and neither needs one: clack writes
+   * `cursor.hide` from `start()` and `cursor.show` from `stop()`, so the
+   * control's buffer holds `\x1b[` whether or not a frame ever fired. Pausing
+   * for the ~80ms repaint interval would buy nothing and would make the
+   * control — the assertion whose failure reports "the thing we are proving is
+   * broken isn't broken" — a bet on a timer.
    */
   it("emits plain lines, not cursor escapes, when stdout is not a TTY", async () => {
     const [guarded, control] = await Promise.all([
@@ -149,7 +154,7 @@ describe("withSpinner", () => {
         const { withSpinner } = await import(${UI_MODULE});
         await withSpinner(
           "Downloading",
-          async (s) => { s.message("Downloading — 50%"); await Bun.sleep(250); },
+          async (s) => { s.message("Downloading — 50%"); },
           "Downloaded",
         );
       `),
@@ -157,7 +162,6 @@ describe("withSpinner", () => {
         const clack = await import("@clack/prompts");
         const s = clack.spinner();
         s.start("Downloading");
-        await Bun.sleep(250);
         s.stop("Downloaded");
       `),
     ]);
@@ -227,6 +231,8 @@ describe("withSpinner", () => {
     expect(tail).not.toMatch(/[◒◐◓◑]/);
 
     // Control: the same 400ms window, with a spinner deliberately left running.
+    // Five ~80ms repaints fall inside it, so this needs one of five to fire —
+    // not the single tick a window sized to one interval would have bet on.
     const controlTail = control.stdout.split("MARKER")[1] ?? "";
     expect(controlTail).toMatch(/[◒◐◓◑]/);
   });

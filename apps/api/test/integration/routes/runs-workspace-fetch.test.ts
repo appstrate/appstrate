@@ -120,6 +120,14 @@ async function seedRunWithSink(
 }
 
 describe("run-workspace storage round-trip", () => {
+  // Same per-test reset as the two route blocks below. Without it every case
+  // here inherited whatever rows — pending `storage_deletion_jobs` above all —
+  // its predecessors happened to leave, which the last test had to undo by
+  // hand before it could assert on the outbox.
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
   it("uploads, downloads, and deletes the bundle + files + manifest", async () => {
     const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
     await seedWorkspace(runId, {
@@ -179,9 +187,6 @@ describe("run-workspace storage round-trip", () => {
   });
 
   it("enqueues the whole teardown even when reading the manifest fails, and the worker finishes it", async () => {
-    // Own the outbox for this test: the round-trip cases above leave their own
-    // pending jobs behind (this describe block has no per-test reset).
-    await truncateAll();
     const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
     await seedWorkspace(runId, {
       bundle: Buffer.from("BUNDLE"),

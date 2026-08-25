@@ -21,10 +21,12 @@ import { seedAgent, seedSchedule } from "../../helpers/seed.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { createApiKeyCredential } from "../../../src/services/model-providers/credentials.ts";
 import { createOrgModel, setDefaultModel } from "../../../src/services/org-models.ts";
-import { waitForInFlight } from "../../../src/services/run-tracker.ts";
 import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
-import { createFakeOrchestrator } from "../../helpers/run-connection-fixtures.ts";
+import {
+  createFakeOrchestrator,
+  waitForRunPipelineSettled,
+} from "../../helpers/run-connection-fixtures.ts";
 
 const app = getTestApp();
 
@@ -121,15 +123,6 @@ describe("run input resolution — author / editor / schedule / caller layers", 
     return (row!.input ?? {}) as Record<string, unknown>;
   }
 
-  /**
-   * The trigger is fire-and-forget; drain the in-flight tracker so this test's
-   * background writes finish before the next `truncateAll`.
-   */
-  async function settle(): Promise<void> {
-    await waitForInFlight(10_000);
-    await Bun.sleep(300);
-  }
-
   // ── author default ────────────────────────────────────────
 
   it("an author default with no other layer reaches the run", async () => {
@@ -143,7 +136,7 @@ describe("run input resolution — author / editor / schedule / caller layers", 
       folder: "inbox",
       subject: "hello",
     });
-    await settle();
+    await waitForRunPipelineSettled();
   });
 
   // ── editor default ────────────────────────────────────────
@@ -160,7 +153,7 @@ describe("run input resolution — author / editor / schedule / caller layers", 
     const input = await persistedInput(res);
     expect(input.folder).toBe("archive");
     expect(input.tone).toBe("neutral");
-    await settle();
+    await waitForRunPipelineSettled();
   });
 
   it("a caller can still override an UNLOCKED editor default", async () => {
@@ -170,7 +163,7 @@ describe("run input resolution — author / editor / schedule / caller layers", 
     const res = await triggerRun({ input: { subject: "hello", folder: "sent" } });
     expect(res.status).toBe(201);
     expect((await persistedInput(res)).folder).toBe("sent");
-    await settle();
+    await waitForRunPipelineSettled();
   });
 
   // ── schedule values ───────────────────────────────────────
@@ -204,7 +197,7 @@ describe("run input resolution — author / editor / schedule / caller layers", 
       folder: "scheduled",
       subject: "weekly digest",
     });
-    await settle();
+    await waitForRunPipelineSettled();
   });
 
   it("a schedule value on a locked field produces a visible failed run", async () => {
@@ -232,7 +225,7 @@ describe("run input resolution — author / editor / schedule / caller layers", 
     const [row] = await db.select().from(runs).where(eq(runs.scheduleId, schedule.id));
     expect(row!.status).toBe("failed");
     expect(row!.error).toContain("folder");
-    await settle();
+    await waitForRunPipelineSettled();
   });
 
   // ── locked fields ─────────────────────────────────────────
@@ -260,7 +253,7 @@ describe("run input resolution — author / editor / schedule / caller layers", 
     const res = await triggerRun({ input: { subject: "hello" } });
     expect(res.status).toBe(201);
     expect((await persistedInput(res)).folder).toBe("archive");
-    await settle();
+    await waitForRunPipelineSettled();
   });
 
   // ── write-time guard: required + locked + empty ───────────
@@ -289,7 +282,7 @@ describe("run input resolution — author / editor / schedule / caller layers", 
     const run = await triggerRun({ input: {} });
     expect(run.status).toBe(201);
     expect((await persistedInput(run)).subject).toBe("fixed");
-    await settle();
+    await waitForRunPipelineSettled();
   });
 
   it("allows locking an OPTIONAL field with no value at all", async () => {

@@ -18,7 +18,7 @@
  */
 
 import { db } from "./db.ts";
-import { integrationConnections } from "@appstrate/db/schema";
+import { integrationConnections, runs, TERMINAL_RUN_STATUSES } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { seedPackage, seedPackageVersion } from "./seed.ts";
 import { localIntegrationManifest, httpHeaderDelivery } from "./integration-manifests.ts";
@@ -198,13 +198,39 @@ export async function seedDefaultOrgModel(ctx: TestContext): Promise<void> {
   await setDefaultModel(ctx.orgId, modelDbId);
 }
 
+/** Poll `check` until it holds; fail loudly rather than hang forever. */
+async function waitUntil(what: string, check: () => Promise<boolean>): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    if (await check()) return;
+    if (Date.now() >= deadline) throw new Error(`timed out waiting for ${what}`);
+    await Bun.sleep(25);
+  }
+}
+
 /**
  * The trigger is fire-and-forget: the fake orchestrator exits 0 immediately and
- * the platform synthesises a terminal. Drain the in-flight tracker (plus a beat
- * for the post-untrack async tail) so the background DB writes stay inside the
- * CURRENT test instead of racing the next `truncateAll()`.
+ * the platform synthesises a terminal. Wait for the background writes to land
+ * inside the CURRENT test instead of racing the next `truncateAll()`.
+ *
+ * The wait is stated positively — every run row sits at a terminal status —
+ * because the in-flight tracker cannot state it. Draining the tracker is a wait
+ * for an *absence*: `waitForInFlight` returns `true` the instant the tracker is
+ * empty, which is equally what it returns when called before the launch ever
+ * reached `trackRun`. The terminal status is the last write
+ * `executeAgentInBackground` awaits, and `untrackRun` runs in the `finally`
+ * after it, so the row reaching terminal is the event the drain was standing in
+ * for. The drain still follows, to cover that `finally`.
+ *
+ * Reading the whole `runs` table is deliberate and is what lets this be shared:
+ * every caller resets it in `beforeEach`, so whatever is on it belongs to the
+ * test that is settling. An empty table settles immediately — a launch refused
+ * before run creation (the 412 cases) has nothing to wait for.
  */
 export async function waitForRunPipelineSettled(): Promise<void> {
+  await waitUntil("every run of this test to reach a terminal status", async () => {
+    const rows = await db.select({ status: runs.status }).from(runs);
+    return rows.every((row) => TERMINAL_RUN_STATUSES.has(row.status));
+  });
   await waitForInFlight(10_000);
-  await Bun.sleep(300);
 }

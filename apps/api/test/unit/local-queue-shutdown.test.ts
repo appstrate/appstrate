@@ -16,7 +16,9 @@
  *    because it is work being thrown away, it is logged.
  *
  * The queue takes its logger by constructor injection, so these assert the log
- * line directly rather than through a global module mock.
+ * line directly rather than through a global module mock — and, because the
+ * queue registers a sleeper on the same synchronous line that logs it, that
+ * same injected logger is what these tests wait on to know a retry is parked.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -30,19 +32,47 @@ interface LogLine {
   data?: Record<string, unknown>;
 }
 
-/** A `Logger` that records every call, for asserting on emitted lines. */
-function recordingLogger(): { lines: LogLine[]; logger: Logger } {
+interface RecordingLogger {
+  lines: LogLine[];
+  logger: Logger;
+  /**
+   * Resolves once a line whose message contains `substring` has been emitted —
+   * already-recorded lines included, so it cannot miss one it was set up after.
+   */
+  emitted: (substring: string) => Promise<void>;
+}
+
+/** A `Logger` that records every call, for asserting on — and waiting for — emitted lines. */
+function recordingLogger(): RecordingLogger {
   const lines: LogLine[] = [];
+  const waiters: { substring: string; resolve: () => void }[] = [];
   const at =
     (level: LogLine["level"]) =>
     (msg: string, data?: Record<string, unknown>): void => {
       lines.push({ level, msg, data });
+      for (let i = waiters.length - 1; i >= 0; i--) {
+        if (msg.includes(waiters[i]!.substring)) waiters.splice(i, 1)[0]!.resolve();
+      }
     };
   return {
     lines,
     logger: { debug: at("debug"), info: at("info"), warn: at("warn"), error: at("error") },
+    emitted: (substring: string) =>
+      lines.some((l) => l.msg.includes(substring))
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => {
+            waiters.push({ substring, resolve });
+          }),
   };
 }
+
+/**
+ * The line the queue emits when it parks a failed job on its retry timer. It is
+ * written on the same synchronous run as the `sleepingRetries` registration, so
+ * seeing it is exactly "the sleeper exists and `shutdown()` can find it" — the
+ * readiness these tests need before they call `shutdown()`.
+ */
+const RETRY_SCHEDULED = "job failed, retrying in";
 
 /** Lines emitted by the abandon path, whatever the queue name. */
 function abandonLines(lines: LogLine[]): LogLine[] {
@@ -65,28 +95,23 @@ describe("LocalQueue.shutdown — retries inside the budget", () => {
   // released every sleeper unconditionally and this job stopped after its first
   // attempt — `attempts` would be `[0]` and `succeeded` false.
   it("lets a job finish a retry chain that fits in the shutdown budget", async () => {
-    const { logger } = recordingLogger();
+    const { logger, emitted } = recordingLogger();
     const q = new LocalQueue<{ v: string }>("test-shutdown", logger);
 
     const attempts: number[] = [];
     let succeeded = false;
-    const firstFailure = signal();
 
     q.process(
       async (job: QueueJob<{ v: string }>) => {
         attempts.push(job.attemptsMade);
-        if (job.attemptsMade < 2) {
-          if (job.attemptsMade === 0) firstFailure.fire();
-          throw new Error("transient");
-        }
+        if (job.attemptsMade < 2) throw new Error("transient");
         succeeded = true;
       },
       { backoffStrategy: () => 300 },
     );
 
     await q.add("job", { v: "x" }, { attempts: 5 });
-    await firstFailure.fired;
-    await tick(20); // let the retry register as a sleeper before shutting down
+    await emitted(RETRY_SCHEDULED); // the retry is parked; shutdown can see it
 
     const startedAt = Date.now();
     await q.shutdown();
@@ -103,16 +128,14 @@ describe("LocalQueue.shutdown — retries inside the budget", () => {
 
 describe("LocalQueue.shutdown — retries beyond the budget", () => {
   it("abandons a sleeper whose backoff cannot fit, and does not pin the loop", async () => {
-    const { lines, logger } = recordingLogger();
+    const { lines, logger, emitted } = recordingLogger();
     const q = new LocalQueue<{ v: string }>("slow-retry-queue", logger);
 
     const attempts: number[] = [];
-    const firstFailure = signal();
 
     q.process(
       async (job: QueueJob<{ v: string }>) => {
         attempts.push(job.attemptsMade);
-        if (job.attemptsMade === 0) firstFailure.fire();
         throw new Error("transient");
       },
       // Far beyond the 10s shutdown grace period.
@@ -120,8 +143,7 @@ describe("LocalQueue.shutdown — retries beyond the budget", () => {
     );
 
     const jobId = await q.add("job", { v: "x" }, { attempts: 5 });
-    await firstFailure.fired;
-    await tick(20);
+    await emitted(RETRY_SCHEDULED);
 
     const startedAt = Date.now();
     await q.shutdown();
@@ -146,16 +168,14 @@ describe("LocalQueue.shutdown — retries beyond the budget", () => {
   // every sleeper goes regardless of how soon it was due. This is what
   // `_resetLlmUsageRetryWorkerForTests` asks for.
   it("abandons every sleeper under a zero grace, and never runs the attempt", async () => {
-    const { lines, logger } = recordingLogger();
+    const { lines, logger, emitted } = recordingLogger();
     const q = new LocalQueue<{ v: string }>("test-shutdown", logger);
 
     const attempts: number[] = [];
-    const firstFailure = signal();
 
     q.process(
       async (job: QueueJob<{ v: string }>) => {
         attempts.push(job.attemptsMade);
-        if (job.attemptsMade === 0) firstFailure.fire();
         throw new Error("transient");
       },
       // Comfortably inside the PRODUCTION budget — it survives a default
@@ -165,12 +185,16 @@ describe("LocalQueue.shutdown — retries beyond the budget", () => {
     );
 
     await q.add("job", { v: "x" }, { attempts: 5 });
-    await firstFailure.fired;
-    await tick(20);
+    await emitted(RETRY_SCHEDULED);
 
     const startedAt = Date.now();
     await q.shutdown(0);
-    expect(Date.now() - startedAt).toBeLessThan(200);
+    // Released, not waited on — the same budget its two siblings assert. What
+    // discriminates "did not wait for the 300ms backoff" is `attempts` and the
+    // abandon line below, not the clock; this only pins that shutdown did not
+    // sit on the 10s grace, and 2s says that without betting on a 200ms
+    // scheduling window in a process running the whole suite.
+    expect(Date.now() - startedAt).toBeLessThan(2_000);
 
     expect(attempts).toEqual([0]);
     expect(abandonLines(lines)).toHaveLength(1);
@@ -185,16 +209,14 @@ describe("LocalQueue.shutdown — retries beyond the budget", () => {
 
 describe("LocalQueue.shutdown — failures during shutdown", () => {
   it("does not arm a new timer when the retry falls outside the remaining budget", async () => {
-    const { lines, logger } = recordingLogger();
+    const { lines, logger, emitted } = recordingLogger();
     const q = new LocalQueue<{ v: string }>("test-shutdown", logger);
 
     const attempts: number[] = [];
-    const firstFailure = signal();
 
     q.process(
       async (job: QueueJob<{ v: string }>) => {
         attempts.push(job.attemptsMade);
-        if (job.attemptsMade === 0) firstFailure.fire();
         throw new Error("transient");
       },
       // Attempt 2 is due inside the budget and runs DURING shutdown; the retry
@@ -203,8 +225,7 @@ describe("LocalQueue.shutdown — failures during shutdown", () => {
     );
 
     await q.add("job", { v: "x" }, { attempts: 5 });
-    await firstFailure.fired;
-    await tick(20);
+    await emitted(RETRY_SCHEDULED);
 
     const startedAt = Date.now();
     await q.shutdown();

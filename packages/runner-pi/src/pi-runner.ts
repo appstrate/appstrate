@@ -1131,6 +1131,29 @@ interface PiUsage {
   cacheWrite?: number;
   cost?: { total?: number };
 }
+
+/**
+ * Project Pi's legacy `{ input, output, cacheRead, cacheWrite }` counters onto
+ * the canonical snake_case {@link TokenUsage}, so every downstream emit — and
+ * the platform's server-side cost recompute — reads the same four numbers.
+ *
+ * Exported for `apps/api/test/unit/runner-cost-parity.test.ts`, which pins that
+ * recompute against pi-ai's own `calculateCost`. The two cache buckets are
+ * priced an order of magnitude apart (3.75 vs 0.30 USD/Mtok at Claude-class
+ * rates), so crossing them here re-prices every platform run — and a parity
+ * test carrying its own copy of this mapping would agree with itself either
+ * way. NOT re-exported from `index.ts`: nothing outside this package imports
+ * it, and the barrel there lists only what does.
+ */
+export function toReportedUsage(usage: PiUsage): TokenUsage {
+  return {
+    input_tokens: usage.input ?? 0,
+    output_tokens: usage.output ?? 0,
+    cache_creation_input_tokens: usage.cacheWrite ?? 0,
+    cache_read_input_tokens: usage.cacheRead ?? 0,
+  };
+}
+
 interface PiTextContent {
   type: "text";
   text?: string;
@@ -1313,22 +1336,19 @@ export function installSessionBridge(
   const reportedCost = (): number | undefined => (options.unpriced ? undefined : totalCost);
 
   /**
-   * Fold one Pi `Usage` into the run totals and report its deltas.
-   *
-   * Pi exposes the legacy `{ input, output, cacheRead, cacheWrite }` shape;
-   * map it once here so every downstream emit reads the same canonical
-   * snake_case counters. `cost` is Pi's own (`calculateCost` against the
-   * model's rates) — never recomputed.
+   * Fold one Pi `Usage` into the run totals and report its deltas. `cost` is
+   * Pi's own (`calculateCost` against the model's rates) — never recomputed.
    */
   const accumulateUsage = (usage: PiUsage): { inputDelta: number; outputDelta: number } => {
-    const inputDelta = usage.input ?? 0;
-    const outputDelta = usage.output ?? 0;
+    const delta = toReportedUsage(usage);
+    const inputDelta = delta.input_tokens ?? 0;
+    const outputDelta = delta.output_tokens ?? 0;
     totalUsage.input_tokens = (totalUsage.input_tokens ?? 0) + inputDelta;
     totalUsage.output_tokens = (totalUsage.output_tokens ?? 0) + outputDelta;
     totalUsage.cache_creation_input_tokens =
-      (totalUsage.cache_creation_input_tokens ?? 0) + (usage.cacheWrite ?? 0);
+      (totalUsage.cache_creation_input_tokens ?? 0) + (delta.cache_creation_input_tokens ?? 0);
     totalUsage.cache_read_input_tokens =
-      (totalUsage.cache_read_input_tokens ?? 0) + (usage.cacheRead ?? 0);
+      (totalUsage.cache_read_input_tokens ?? 0) + (delta.cache_read_input_tokens ?? 0);
     totalCost += usage.cost?.total ?? 0;
     return { inputDelta, outputDelta };
   };
