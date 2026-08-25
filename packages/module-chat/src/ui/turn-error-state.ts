@@ -75,9 +75,30 @@ export function turnErrorState(
   t: ChatTranslate,
 ): TurnErrorState | null {
   const turn = turnMetadataFromMessage(sourceMessage(message));
-  if (turn?.finishReason === "error") {
+  // A turn cut by the wall-clock ceiling can ALSO have been failing upstream
+  // the whole time: `closePiTurn` classifies and persists the cause whatever
+  // the finish reason, and reading the category only under `"error"` left the
+  // user with "time limit reached" and NOTHING about the 503s or the dead
+  // credential behind it.
+  //
+  // The two sentences COMPOSE rather than replace each other, with no new i18n
+  // key: the deadline notice is a REAL persisted text part (`turnNoticeChunks`)
+  // rendered in the message body, and this alert sits under it — so the cause
+  // is added below the notice, never a second copy of the notice itself.
+  //
+  // A deadline with NO category adds nothing: nothing failed, and the generic
+  // "generation failed" sentence would contradict a notice that says the turn
+  // was cut mid-work. Hence the category is required for that branch, while the
+  // `"error"` branch keeps degrading a legacy category-less turn to `unknown`.
+  if (
+    turn?.finishReason === "error" ||
+    (turn?.finishReason === "deadline" && turn.errorCategory !== undefined)
+  ) {
     return {
       text: t(TURN_ERROR_KEY[turn.errorCategory ?? "unknown"]),
+      // Retry is a property of the CAUSE, not of the ceiling: a deadline turn
+      // whose cause was rate limiting is retryable, one whose credential is
+      // dead is not. Read the persisted verdict either way.
       retryable: turn.errorRetryable !== false,
       requestId: turn.requestId,
     };

@@ -25,7 +25,12 @@
  */
 
 import type { LlmProxyApiKeyConfig, ModelSwap, SidecarConfig } from "./helpers.ts";
-import { LLM_PROXY_TIMEOUT_MS } from "./helpers.ts";
+import {
+  LLM_STREAM_IDLE_TIMEOUT_MS,
+  llmUpstreamAbort,
+  withIdleBound,
+  STREAM_IDLE,
+} from "./helpers.ts";
 import { anthropicThinkingBudgets } from "@appstrate/core/model-generation";
 import { PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "@appstrate/runner-pi/provider-map";
 import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
@@ -136,6 +141,13 @@ export interface PiMessagesBackendDeps {
   limits: Pick<SidecarConfig, "modelContextWindow" | "modelMaxTokens">;
   /** Defaults to {@link streamBacking}. */
   streamBackingFn?: BackingStreamFn;
+  /**
+   * Inter-chunk idle bound on the re-originated stream. Defaults to
+   * {@link LLM_STREAM_IDLE_TIMEOUT_MS} (where the operator override is read);
+   * injected by `app.ts` from `AppDeps.llmStreamIdleTimeoutMs` so tests need
+   * not wait two real minutes.
+   */
+  llmStreamIdleTimeoutMs?: number;
 }
 
 /**
@@ -437,22 +449,71 @@ export function handlePiMessagesRequest(
   const model = buildBackingModel(deps);
   const stream = deps.streamBackingFn ?? streamBacking;
 
-  // The same absolute deadline the non-aliased `/llm/*` forward applies, plus
-  // the client's disconnect — whichever fires first unwinds pi-ai's fetch.
-  const signal = AbortSignal.any([AbortSignal.timeout(LLM_PROXY_TIMEOUT_MS), request.signal]);
+  // The same deadlines the non-aliased `/llm/*` forward applies — the 30 min
+  // absolute cap, the 60 s first-response bound and the inter-chunk idle bound
+  // — combined with the client's disconnect; whichever fires first unwinds
+  // pi-ai's fetch.
+  //
+  // `pi-messages` is one of the four api shapes that IGNORE pi-ai's own
+  // `timeoutMs` (grep `timeoutMs` in `@earendil-works/pi-ai/dist/api/`), and
+  // the BACKING re-originated here can be another one of them, so on this path
+  // `options.signal` is the only deadline that exists at all.
+  //
+  // We never see HTTP headers here (pi-ai owns the fetch), so the first event
+  // yielded by the generator is the equivalent liveness proof, and that is
+  // where `firstResponse()` disarms the TTFB timer — before it can abort a
+  // healthy long stream. The `finally` is the belt: a throw before the first
+  // event must not leave a 60 s timer armed either.
+  //
+  // `unwind` is how this path RELEASES the upstream. The loop below detects a
+  // stall (a pending `next()` is the same shape of pending promise as a pending
+  // `read()`), but detection alone leaves pi-ai's fetch in flight until the
+  // 30 min cap; aborting is what frees the socket. Fired on every exit, not
+  // just the idle one — on a normal `done` the fetch has already finished, so
+  // it is a no-op there.
+  const unwind = new AbortController();
+  const idleTimeoutMs = deps.llmStreamIdleTimeoutMs ?? LLM_STREAM_IDLE_TIMEOUT_MS;
+  const abort = llmUpstreamAbort(AbortSignal.any([request.signal, unwind.signal]));
   const upstream = stream(
     model,
     body.context,
-    projectRequestOptions(body, swap, deps.llm.apiKey, signal),
+    projectRequestOptions(body, swap, deps.llm.apiKey, abort.signal),
   );
 
   const encoder = new TextEncoder();
   const sse = new ReadableStream<Uint8Array>({
     async start(controller) {
       let terminal: PiMessagesEvent | undefined;
+      // Manual iteration, not `for await`: the idle bound has to be armed
+      // against the PENDING `next()` and cleared the moment it settles, which
+      // `for await` gives no seam for. Same instrument as `passUpstream`'s
+      // `reader.read()` — and same reason it cannot be a long-lived timer: it
+      // must measure only the window where we are waiting and the upstream is
+      // silent.
+      const iterator = upstream[Symbol.asyncIterator]();
       try {
-        for await (const event of upstream) {
-          const projected = projectAssistantEvent(event);
+        for (;;) {
+          const outcome = await withIdleBound(iterator.next(), idleTimeoutMs);
+          if (outcome === STREAM_IDLE) {
+            // Server-side only, so it may name the backing.
+            logger.warn("pi-messages backend: upstream went silent mid-stream", {
+              idleTimeoutMs,
+              real: swap.real,
+            });
+            terminal = {
+              type: "error",
+              reason: "error",
+              usage: EMPTY_USAGE,
+              errorMessage: syntheticAliasErrorMessage(swap),
+            };
+            break;
+          }
+          if (outcome.done) break;
+          // Liveness proof — see `llmUpstreamAbort` above. `clearTimeout` is
+          // idempotent, so calling it per event is cheaper than tracking a
+          // "first" flag.
+          abort.firstResponse();
+          const projected = projectAssistantEvent(outcome.value);
           if (!projected) continue;
           if (projected.type === "error") {
             // Attached here so the projection never reads the alias descriptor.
@@ -472,6 +533,13 @@ export function handlePiMessagesRequest(
         logger.warn("pi-messages backend: upstream stream threw", {
           error: err instanceof Error ? err.message : String(err),
         });
+      } finally {
+        abort.firstResponse();
+        // Release the upstream: the abort unwinds pi-ai's in-flight fetch,
+        // `return()` finishes the generator that `for await` would have closed
+        // for us. Both are no-ops once the stream has ended on its own.
+        unwind.abort(new Error("pi-messages backend: releasing the upstream stream"));
+        void Promise.resolve(iterator.return?.()).catch(() => {});
       }
       if (!terminal) {
         // The client MUST see a terminal: `pi-messages` reconstructs the

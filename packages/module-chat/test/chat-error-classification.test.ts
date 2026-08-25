@@ -8,6 +8,12 @@ import {
   refusalCode,
 } from "../src/turn-error.ts";
 
+/**
+ * The RULES moved to `@appstrate/core/model-error` (tested there, case for
+ * case). What is left here is the chat-specific wrapper: unwrapping the error
+ * object, handing the engine's own retry verdict to the shared classifier, and
+ * the marker round-trip that keeps raw provider text server-side.
+ */
 describe("classifyClientTurnError", () => {
   it("turns an aliased 402 into actionable provider-neutral metadata", () => {
     expect(
@@ -46,11 +52,22 @@ describe("classifyClientTurnError", () => {
     });
   });
 
+  it("reads the status off the error envelope, not only out of the prose", () => {
+    expect(
+      classifyClientTurnError(Object.assign(new Error("backend refused"), { status: 429 })),
+    ).toMatchObject({ category: "rate_limited" });
+  });
+
   it("round-trips only the stable category through transient stream markers", () => {
     const classified = classifyClientTurnError("private opaque backend details");
     const marker = clientTurnErrorMarker(classified);
     expect(marker).not.toContain("private opaque backend details");
+    // Pinned as a literal, because `toEqual(classified)` alone passes trivially
+    // for any input that produces no `requestId`.
     expect(clientTurnErrorFromMarker(marker)).toEqual({ category: "unknown", retryable: true });
+    // The marker carries the CATEGORY only, and the two paths must still agree:
+    // the UI reads a failed turn through whichever arrived first.
+    expect(clientTurnErrorFromMarker(marker)).toEqual(classified);
   });
 });
 

@@ -90,6 +90,7 @@
     "./chat-contract": "./src/chat-contract.ts",
     "./file-uri": "./src/file-uri.ts",
     "./chat-turn-metadata": "./src/chat-turn-metadata.ts",
+    "./model-error": "./src/model-error.ts",
     "./bearer": "./src/bearer.ts",
     "./oauth-bearer-swap": "./src/oauth-bearer-swap.ts",
     "./url": "./src/url.ts",

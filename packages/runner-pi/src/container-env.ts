@@ -297,13 +297,18 @@ export const SIDECAR_OPERATOR_ENV_KEYS = [
   // Per-call MCP tool timeout, read on BOTH legs of a tool call (sidecar-side and
   // agent-side), so one operator knob widens both. Absent → the MCP SDK default.
   "APPSTRATE_MCP_TOOL_TIMEOUT_MS",
-  // The four below are read INSIDE the sidecar process. Under
+  // The six below are read INSIDE the sidecar process. Under
   // RUN_ADAPTER=docker/firecracker its env is built from `pickOperatorSidecarEnv()`
   // alone rather than inherited, so a key missing here is silently ignored there.
   "LOG_LEVEL",
   "SIDECAR_API_CALL_CONCURRENCY",
   "SIDECAR_INLINE_TOOL_OUTPUT_TOKENS",
   "SIDECAR_RUN_TOOL_OUTPUT_BUDGET_TOKENS",
+  // LLM upstream deadlines. Self-hosted backings (a local Ollama/vLLM doing a cold
+  // model load) legitimately exceed the compiled defaults, which is the whole reason
+  // these are tunable — so they must reach the container, not just `RUN_ADAPTER=process`.
+  "SIDECAR_LLM_FIRST_RESPONSE_TIMEOUT_MS",
+  "SIDECAR_LLM_STREAM_IDLE_TIMEOUT_MS",
 ] as const;
 
 export type SidecarOperatorEnvKey = (typeof SIDECAR_OPERATOR_ENV_KEYS)[number];
@@ -316,7 +321,7 @@ const logger = createLogger(process.env.LOG_LEVEL ?? "info");
  * The operator keys parsed as a positive integer somewhere on the boot path, and
  * would throw on. The rest are used verbatim or already degrade safely.
  *
- * Four of the five are parsed by the sidecar itself. `SIDECAR_MAX_REQUEST_BODY_BYTES`
+ * Six of the seven are parsed by the sidecar itself. `SIDECAR_MAX_REQUEST_BODY_BYTES`
  * is not any more — see {@link pickOperatorSidecarEnv} — but it belongs in the set
  * all the same: it is still parsed strictly, just earlier and by another module.
  */
@@ -326,6 +331,8 @@ const NUMERIC_SIDECAR_ENV_KEYS = new Set<SidecarOperatorEnvKey>([
   "SIDECAR_API_CALL_CONCURRENCY",
   "SIDECAR_INLINE_TOOL_OUTPUT_TOKENS",
   "SIDECAR_RUN_TOOL_OUTPUT_BUDGET_TOKENS",
+  "SIDECAR_LLM_FIRST_RESPONSE_TIMEOUT_MS",
+  "SIDECAR_LLM_STREAM_IDLE_TIMEOUT_MS",
 ]);
 
 /**
@@ -342,8 +349,8 @@ function isPositiveIntegerEnvValue(value: string): boolean {
  * to spread into a container env; empty and undefined values are omitted.
  *
  * Omitting MALFORMED numeric values is load-bearing, not defensive, for four of the
- * five {@link NUMERIC_SIDECAR_ENV_KEYS}: `SIDECAR_MAX_MCP_ENVELOPE_BYTES`,
- * `SIDECAR_API_CALL_CONCURRENCY` and the two token budgets. The sidecar parses those
+ * seven {@link NUMERIC_SIDECAR_ENV_KEYS}: `SIDECAR_MAX_MCP_ENVELOPE_BYTES`,
+ * `SIDECAR_API_CALL_CONCURRENCY`, the two token budgets and the two LLM deadlines. The sidecar parses those
  * with `readPositiveIntEnv` (`runtime-pi/sidecar/helpers.ts`), which THROWS at module
  * scope on the boot path, inside no `try`. One stale `=0` reaching the container would
  * kill the sidecar process and fail every run; dropping it here keeps runs alive on the

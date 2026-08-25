@@ -788,6 +788,107 @@ describe("handlePiMessagesRequest", () => {
     expect(body.error.message).toContain("appstrate-medium");
     expect(JSON.stringify(body)).not.toContain("deepseek");
   });
+
+  // --- inter-chunk idle bound ---
+  //
+  // The alias path re-originates through pi-ai and consumes a GENERATOR, so it
+  // does not go through `passUpstream` and inherited none of its bounds. It is
+  // also exactly the population that needs one: `pi-messages` is one of the four
+  // api shapes that ignore pi-ai's own `timeoutMs`, and the backing rebuilt here
+  // can be another (`google-vertex`, `bedrock-converse-stream`). Without the
+  // bound a stalled backing burned the whole run budget and died on the
+  // wall-clock watchdog with nothing to show.
+  //
+  // Same instrument as `passUpstream`'s (see `app.test.ts`): armed against the
+  // PENDING `next()` and cleared the moment it settles — never a long-lived
+  // timer, which the healthy-but-slow control below would catch.
+
+  it("terminates the turn when the backing stream goes silent mid-turn", async () => {
+    const stalling: BackingStreamFn = () =>
+      ({
+        async *[Symbol.asyncIterator]() {
+          yield { type: "start", partial: partialMessage([]) } as AssistantMessageEvent;
+          // Silent from here on, and never ends — the shape the 30 min absolute
+          // cap used to be the only answer to.
+          await new Promise(() => {});
+        },
+      }) as unknown as ReturnType<BackingStreamFn>;
+
+    let frames: PiMessagesEvent[] = [];
+    const warnings = await captureWarnings(async () => {
+      const res = handlePiMessagesRequest(
+        { ...depsFor(BACKINGS[0]!, stalling), llmStreamIdleTimeoutMs: 25 },
+        new Request("http://sidecar:8080/llm/messages", { method: "POST" }),
+        CLIENT_BODY,
+      );
+      frames = await readFrames(res);
+    });
+
+    // The client MUST see a terminal: without one `pi-messages` cannot
+    // reconstruct the assistant message and the turn hangs anyway.
+    const terminal = frames.at(-1) as Extract<PiMessagesEvent, { type: "error" }>;
+    expect(terminal.type).toBe("error");
+    // Neutral prose, as on every other alias failure — the stall must not
+    // become the one path that names the backing.
+    expect(terminal.errorMessage).toBe('Upstream model error (model "appstrate-medium")');
+    expect(JSON.stringify(frames)).not.toContain("deepseek");
+
+    const stall = warnings.find(
+      (w) => w.msg === "pi-messages backend: upstream went silent mid-stream",
+    );
+    expect(stall).toMatchObject({ idleTimeoutMs: 25, real: "deepseek-chat" });
+  });
+
+  it("does NOT trip on a slow but healthy backing stream", async () => {
+    // REGRESSION CONTROL. The upstream answers every `next()` well inside the
+    // bound, but the TURN lasts far longer than it. A timer that keeps running
+    // across events — or one hung off total elapsed time — would kill this.
+    const idleTimeoutMs = 120;
+    const gapMs = 40;
+    const events: AssistantMessageEvent[] = [
+      { type: "start", partial: partialMessage([]) },
+      {
+        type: "text_delta",
+        contentIndex: 0,
+        delta: "hi",
+        partial: partialMessage([{ type: "text", text: "hi" }]),
+      },
+      {
+        type: "text_delta",
+        contentIndex: 0,
+        delta: " there",
+        partial: partialMessage([{ type: "text", text: "hi there" }]),
+      },
+      {
+        type: "done",
+        reason: "stop",
+        message: { ...partialMessage([]), stopReason: "stop", usage: USAGE },
+      },
+    ];
+    const slow: BackingStreamFn = () =>
+      ({
+        async *[Symbol.asyncIterator]() {
+          for (const event of events) {
+            await new Promise((r) => setTimeout(r, gapMs));
+            yield event;
+          }
+        },
+      }) as unknown as ReturnType<BackingStreamFn>;
+
+    const started = Date.now();
+    const res = handlePiMessagesRequest(
+      { ...depsFor(BACKINGS[0]!, slow), llmStreamIdleTimeoutMs: idleTimeoutMs },
+      new Request("http://sidecar:8080/llm/messages", { method: "POST" }),
+      CLIENT_BODY,
+    );
+    const frames = await readFrames(res);
+
+    expect(frames.map((f) => f.type)).toEqual(["start", "text_delta", "text_delta", "done"]);
+    // Proof the control tests the right thing: the turn really did outlast the
+    // idle bound, so any implementation timing the wrong interval would have
+    // terminated it with an `error` frame above.
+    expect(Date.now() - started).toBeGreaterThan(idleTimeoutMs);
+  });
 });
 
 /**

@@ -529,6 +529,33 @@ describe("pickOperatorSidecarEnv", () => {
     );
   });
 
+  // The LLM deadline knobs exist BECAUSE a self-hosted backing legitimately
+  // exceeds the compiled defaults, so an operator who sets them under
+  // `RUN_ADAPTER=docker`/`firecracker` must actually get them: the container's
+  // env is built from this allowlist alone. They are also parsed sidecar-side by
+  // `readPositiveIntEnv`, which throws at module scope, so a malformed value has
+  // to be dropped here rather than forwarded — both halves asserted together
+  // because forwarding without the numeric gate would kill every run.
+  it("forwards the LLM deadline knobs, and drops malformed ones", () => {
+    withEnv(
+      {
+        SIDECAR_LLM_FIRST_RESPONSE_TIMEOUT_MS: "90000",
+        SIDECAR_LLM_STREAM_IDLE_TIMEOUT_MS: "300000",
+      },
+      () => {
+        expect(pickOperatorSidecarEnv()).toEqual({
+          SIDECAR_LLM_FIRST_RESPONSE_TIMEOUT_MS: "90000",
+          SIDECAR_LLM_STREAM_IDLE_TIMEOUT_MS: "300000",
+        });
+      },
+    );
+    for (const bad of ["0", "-1", "abc", "12.5"]) {
+      withEnv({ SIDECAR_LLM_STREAM_IDLE_TIMEOUT_MS: bad }, () => {
+        expect(pickOperatorSidecarEnv().SIDECAR_LLM_STREAM_IDLE_TIMEOUT_MS).toBeUndefined();
+      });
+    }
+  });
+
   // The gate must be no stricter than the sidecar's own parse, or it would
   // silently drop values the sidecar would have honoured. `Number` trims, so
   // padded input is valid on BOTH sides — asserted here because the two live

@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
-export type ChatTurnErrorCategory =
-  | "credential_unavailable"
-  | "rate_limited"
-  | "upstream_unavailable"
-  | "invalid_request"
-  | "unknown";
+import type { ModelErrorCategory } from "./model-error.ts";
+
+/**
+ * The chat surface's name for {@link ModelErrorCategory} — an ALIAS, not a
+ * second vocabulary. It stays because the values are persisted under this name
+ * (`AppstrateTurnMetadata.errorCategory`, on immutable chat messages) and
+ * because out-of-tree readers import it; the rules that produce them live in
+ * `./model-error.ts`, shared with the run surface.
+ */
+export type ChatTurnErrorCategory = ModelErrorCategory;
 
 /**
  * `deadline` is Appstrate's own reason (no provider emits it): the turn was cut

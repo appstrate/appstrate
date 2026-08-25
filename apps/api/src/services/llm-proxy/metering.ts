@@ -33,9 +33,14 @@ import {
   syntheticAliasErrorBody,
   LLM_PASSTHROUGH_RESPONSE_HEADERS,
 } from "@appstrate/core/model-swap";
-import { stripUpstreamResponseHeaders } from "@appstrate/connect/proxy-primitives";
+import {
+  stripUpstreamResponseHeaders,
+  withIdleBound,
+  STREAM_IDLE,
+} from "@appstrate/connect/proxy-primitives";
 import type { ResolvedModel } from "../org-models.ts";
 import { storeResponse } from "./response-cache.ts";
+import { LLM_STREAM_IDLE_TIMEOUT_MS } from "./helpers.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal, UpstreamUsage } from "./types.ts";
 
 /** Clone upstream response headers, dropping hop-by-hop + stale content encoding/length. */
@@ -107,10 +112,21 @@ const MAX_TAP_BUFFER_BYTES = 1_000_000;
  * yield usage (probed via `adapter.parseSseUsage([frame])`) are retained, in
  * arrival order, and the adapter extracts the final result from that subset —
  * behaviour-identical to scanning every frame for either shipped adapter.
+ *
+ * IDLE BOUND — the same one {@link guardSseTeardown} applies to the CLIENT
+ * branch, and it has to be here too. `tee()` cancels its source only once BOTH
+ * branches are cancelled, so bounding the client branch alone left this tap
+ * holding a pending `read()` forever: the upstream socket, its body and this
+ * promise stayed pinned with no absolute deadline behind them (`guardedFetch`
+ * detaches its timer at the headers). It also broke the module's accounting
+ * invariant — a tap that never finishes never calls `meter`, so a stalled 2xx
+ * produced no ledger row at all. On expiry the tap returns what it managed to
+ * parse (usually `null`), which the caller meters as an unparsed-usage row.
  */
 export async function tapSseUsage(
   stream: ReadableStream<Uint8Array>,
   adapter: LlmProxyAdapter,
+  idleTimeoutMs: number = LLM_STREAM_IDLE_TIMEOUT_MS,
 ): Promise<UpstreamUsage | null> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
@@ -128,7 +144,17 @@ export async function tapSseUsage(
   };
   try {
     for (;;) {
-      const { value, done } = await reader.read();
+      const outcome = await withIdleBound(reader.read(), idleTimeoutMs);
+      if (outcome === STREAM_IDLE) {
+        logger.warn("llm-proxy: SSE usage tap idle timeout — metering what was parsed", {
+          idleTimeoutMs,
+        });
+        // Releasing THIS branch is half of what cancels the tee'd source; the
+        // client branch releases the other half in `guardSseTeardown`.
+        void reader.cancel(new Error("llm-proxy: SSE idle timeout")).catch(() => {});
+        break;
+      }
+      const { value, done } = outcome;
       if (done) break;
       if (value) buffer += decoder.decode(value, { stream: true });
       // Split on SSE frame delimiter (blank line). Keep the tail in the
@@ -357,24 +383,77 @@ function closeSafely(controller: ReadableStreamDefaultController<Uint8Array>): v
  * partial line on that clean close.
  *
  * `pull` is demand-driven, so backpressure is preserved and nothing is
- * buffered. `onTeardownError` fires only for a genuine upstream read rejection
- * — never for a consumer-cancel close race (those are swallowed).
+ * buffered. `onTeardownError` fires for a genuine upstream read rejection and
+ * for an inter-chunk idle timeout — never for a consumer-cancel close race
+ * (those are swallowed).
+ *
+ * IDLE BOUND — read before touching. `idleTimeoutMs` caps how long the UPSTREAM
+ * may stay silent between two chunks. Because `pull` is demand-driven, the
+ * timer must be armed against the PENDING `reader.read()` and cleared the
+ * moment it settles: that promise is pending exactly while the upstream is
+ * silent AND the consumer is waiting for a chunk. A stream-level watchdog, or
+ * any timer that keeps running between pulls, would instead kill a merely SLOW
+ * CONSUMER on a healthy upstream — a browser tab throttled in the background is
+ * enough to trip it. Do not "simplify" it into one long-lived timer.
+ *
+ * WHY EXPIRY IS A TEARDOWN-ERROR-AND-CLEAN-CLOSE, NOT A STREAM ERROR: the
+ * invariant this whole function exists to hold is that the guarded stream NEVER
+ * errors. It is wrapped BEFORE the alias-swap `pipeThrough`, and an erroring
+ * source there re-creates precisely the unhandled-rejection leak documented
+ * above — one tenant's stalled provider taking down a multi-tenant process.
+ * Erroring on idle would trade a bug for the same bug with a nicer message. The
+ * signal is not lost: `onTeardownError` logs it at the call site, and the
+ * caller sees the same truncated SSE stream an upstream reject already
+ * produces. That is the best achievable at this seam.
  */
 export function guardSseTeardown(
   source: ReadableStream<Uint8Array>,
   onTeardownError: (err: unknown) => void,
+  idleTimeoutMs: number = LLM_STREAM_IDLE_TIMEOUT_MS,
 ): ReadableStream<Uint8Array> {
   const reader = source.getReader();
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
-      let result: Awaited<ReturnType<typeof reader.read>>;
+      let result: Awaited<ReturnType<typeof reader.read>> | typeof STREAM_IDLE;
       try {
-        result = await reader.read();
+        result = await withIdleBound(reader.read(), idleTimeoutMs);
       } catch (err) {
         // The only genuine teardown signal: the upstream/tee branch rejected
         // mid-flux. Report once, then close the client stream cleanly (the
         // caller sees a truncated SSE stream — the best achievable here).
         onTeardownError(err);
+        closeSafely(controller);
+        return;
+      }
+      if (result === STREAM_IDLE) {
+        // Four of the ten api shapes this platform maps ignore pi-ai's own
+        // `timeoutMs`, so this proxy is the only provider-agnostic place a
+        // stalled stream can be caught at all.
+        //
+        // THIS MESSAGE NEVER LEAVES THE SERVER: `onTeardownError` is a logger
+        // call at its only call site (`forwardMeteredResponse` below), and by
+        // this module's own contract the client stream closes CLEANLY rather
+        // than carrying an error. The caller sees a truncated SSE stream.
+        //
+        // That truncation is what a Pi-driven caller classifies on, and it
+        // classifies as retryable without help from this text: pi-ai's adapters
+        // throw on a premature end — `openai-completions.js` "Stream ended
+        // without finish_reason" (whenever `compat.supportsFinishReason`, its
+        // default), `google-generative-ai.js` "Google stream ended without a
+        // finish reason", `anthropic-messages.js` "Anthropic stream ended
+        // before message_stop" — and those match
+        // `RETRYABLE_PROVIDER_ERROR_PATTERN` (`dist/utils/retry.js`:
+        // `ended without`, `stream ended before message_stop`). So the wording
+        // below is free to change; keep it operator-legible.
+        onTeardownError(
+          new Error(`LLM upstream stream timed out: no data received for ${idleTimeoutMs}ms`),
+        );
+        // Release the upstream/tee branch, then close cleanly per the contract
+        // above. Swallow a cancel rejection so teardown can't itself escape.
+        // This is only HALF the reclamation — `tee()` cancels its source once
+        // BOTH branches are cancelled, and the metering tap holds the other
+        // one; it carries the same idle bound for exactly that reason.
+        void reader.cancel(new Error("llm-proxy: SSE idle timeout")).catch(() => {});
         closeSafely(controller);
         return;
       }

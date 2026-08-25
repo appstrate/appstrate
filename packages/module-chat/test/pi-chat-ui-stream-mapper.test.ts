@@ -213,6 +213,90 @@ describe("PiChatUiStreamMapper", () => {
     expect(meta.errorText).toBe("context overflow");
   });
 
+  it("retires a failure a later model call recovered from", () => {
+    // pi retries inside one turn. A 503 followed by a clean call is no longer
+    // the turn's cause — leaving it standing made a turn that later died of the
+    // wall-clock deadline report a cause that no longer applied.
+    const { mapper } = run([
+      {
+        type: "message_end",
+        message: { role: "assistant", stopReason: "error", errorMessage: "upstream 503" },
+      },
+      { type: "message_end", message: { role: "assistant", stopReason: "stop" } },
+    ]);
+    const meta = mapper.result();
+    expect(meta.finishReason).toBe("stop");
+    expect(meta.errorText).toBeUndefined();
+  });
+
+  it("retires it across the whole pi auto-retry shape, agent_end included", () => {
+    // The real event sequence for one chat turn that pi retried once (chat runs
+    // with `retry: { enabled: true, maxRetries: 1 }`). Each internal run closes
+    // with its OWN turn_end + agent_end, and agent_end replays that run's
+    // message list — so the retired failure must not come back on the way out.
+    const { mapper } = run([
+      {
+        type: "message_end",
+        message: { role: "assistant", stopReason: "error", errorMessage: "upstream 503" },
+      },
+      {
+        type: "turn_end",
+        message: { role: "assistant", stopReason: "error", errorMessage: "upstream 503" },
+        toolResults: [],
+      },
+      {
+        type: "agent_end",
+        messages: [
+          { role: "user" },
+          { role: "assistant", stopReason: "error", errorMessage: "upstream 503" },
+        ],
+      },
+      { type: "message_end", message: { role: "assistant", stopReason: "stop" } },
+      { type: "turn_end", message: { role: "assistant", stopReason: "stop" }, toolResults: [] },
+      { type: "agent_end", messages: [{ role: "assistant", stopReason: "stop" }] },
+    ]);
+    const meta = mapper.result();
+    expect(meta.finishReason).toBe("stop");
+    expect(meta.errorText).toBeUndefined();
+  });
+
+  it("reads agent_end's verdict off the LAST assistant message, not the whole list", () => {
+    // Same invariant the runner states for `getTerminalError` and pi itself
+    // uses to decide a retry: an errored message followed by a clean one is a
+    // recovery, whatever order the list happens to carry them in. Capturing
+    // every entry would resurrect the failure from inside a single event.
+    const { mapper } = run([
+      {
+        type: "agent_end",
+        messages: [
+          { role: "user" },
+          { role: "assistant", stopReason: "error", errorMessage: "upstream 503" },
+          { role: "assistant", stopReason: "stop" },
+          { role: "toolResult" },
+        ],
+      },
+    ]);
+    const meta = mapper.result();
+    expect(meta.finishReason).not.toBe("error");
+    expect(meta.errorText).toBeUndefined();
+  });
+
+  it("keeps a failure the turn was cut on (aborted settles nothing)", () => {
+    // Stop / deadline abort mid-flight: the last call decided nothing, so the
+    // earlier failure is still the last thing that went wrong and must reach
+    // the user — this is exactly the deadline-with-a-cause turn.
+    const { mapper } = run([
+      {
+        type: "message_end",
+        message: { role: "assistant", stopReason: "error", errorMessage: "upstream 503" },
+      },
+      { type: "message_end", message: { role: "assistant", stopReason: "aborted" } },
+    ]);
+    const meta = mapper.result();
+    expect(meta.finishReason).toBe("other");
+    expect(meta.errorText).toBe("upstream 503");
+  });
+
   it("does not flag an explicit stop (aborted) as an error", () => {
     const { mapper } = run([
       {

@@ -7,6 +7,14 @@
  * same wire protocol (X-Integration-Id/X-Target/Set-Cookie passthrough) and
  * share the AFPS spec-compliant URL allowlist matcher so drift is
  * impossible by construction.
+ *
+ * The same argument brings the LLM-stream idle bound here
+ * ({@link withIdleBound}, {@link STREAM_IDLE},
+ * {@link DEFAULT_LLM_STREAM_IDLE_TIMEOUT_MS}): the platform LLM gateway
+ * (`apps/api/src/services/llm-proxy/metering.ts`) and the sidecar's `/llm/*`
+ * forward are the same instrument applied twice, and a private workspace
+ * package both already import is the cheapest place to keep them one
+ * implementation.
  */
 
 import {
@@ -280,4 +288,79 @@ export function filterHeaders(
     out[key] = value;
   }
   return out;
+}
+
+/**
+ * Default bound on INTER-CHUNK silence once an LLM stream is flowing: how long
+ * the upstream may say nothing between two body chunks before a proxy declares
+ * the stream dead. Both LLM proxies start from this value and each exposes its
+ * own operator override on top (`SIDECAR_LLM_STREAM_IDLE_TIMEOUT_MS` in the
+ * sidecar, `LLM_PROXY_STREAM_IDLE_TIMEOUT_MS` on the platform).
+ *
+ * This is the bound that fixes the reported bug. Pi's SDK passes a `timeoutMs`
+ * down to its provider adapters, but four of the api shapes this platform maps
+ * ignore it entirely (`google-generative-ai`, `google-vertex`,
+ * `bedrock-converse-stream`, `pi-messages` — grep `timeoutMs` in
+ * `@earendil-works/pi-ai/dist/api/*.js`, they honour only `options.signal`). A
+ * stalled Gemini/Vertex/Bedrock stream was therefore bounded by nothing tighter
+ * than each proxy's absolute cap, and runs died on their wall-clock watchdog
+ * with no error to show the user. An Appstrate-owned proxy is the only
+ * provider-agnostic place that covers all four shapes.
+ *
+ * 120 s, i.e. deliberately looser than either proxy's first-response (TTFB)
+ * bound: once a provider has started streaming, a long pause is a real (if
+ * rare) event — extended-thinking blocks and large parallel tool-call payloads
+ * routinely buy 15-45 s of silence, and a provider-side retry can stretch that.
+ * 120 s is ~3x the worst honest gap while still leaving the shortest run budget
+ * (300 s) room to report the failure and for the agent to retry once.
+ */
+export const DEFAULT_LLM_STREAM_IDLE_TIMEOUT_MS = 120_000;
+
+/**
+ * Resolution marker for {@link withIdleBound} — a value, not a rejection, so
+ * the caller's genuine upstream-error path keeps its own `catch`.
+ */
+export const STREAM_IDLE = Symbol("llm-stream-idle");
+
+/**
+ * Bound a PENDING stream read by an inter-chunk idle deadline.
+ *
+ * Takes the promise rather than the reader/iterator on purpose: the timer must
+ * be created at the moment the read starts and cleared the moment it settles,
+ * so it measures only the window in which the consumer has asked for a chunk
+ * and the upstream has not produced one. Callers must therefore invoke it from
+ * inside `pull` (or per loop turn), never install it as a stream-level
+ * watchdog: a timer that keeps running between pulls would kill a merely SLOW
+ * CONSUMER on a perfectly healthy upstream.
+ *
+ * Any pending promise of that shape works — `reader.read()` on a
+ * `ReadableStream`, `iterator.next()` on an async generator.
+ *
+ * Returns {@link STREAM_IDLE} on expiry (never rejects for it); a genuine read
+ * rejection still propagates untouched.
+ *
+ * What each caller does ON expiry deliberately differs — the sidecar errors its
+ * client stream, the platform gateway must close cleanly to keep its
+ * never-throw invariant — so that decision stays at the call sites and this
+ * helper only reports the fact.
+ */
+export async function withIdleBound<T>(
+  read: Promise<T>,
+  idleTimeoutMs: number,
+): Promise<T | typeof STREAM_IDLE> {
+  // If the timer wins the race, `read` is still pending; a later rejection
+  // would land as a process-level unhandled rejection with nobody left to
+  // catch it. Attach a no-op handler now — the value is already discarded.
+  read.catch(() => {});
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      read,
+      new Promise<typeof STREAM_IDLE>((resolve) => {
+        timer = setTimeout(() => resolve(STREAM_IDLE), idleTimeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }

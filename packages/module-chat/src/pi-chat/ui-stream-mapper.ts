@@ -165,7 +165,23 @@ export class PiChatUiStreamMapper {
         this.captureFailure(e.message);
         return [];
       case "agent_end":
-        for (const m of e.messages ?? []) this.captureFailure(m);
+        // Verdict on the LAST assistant message of the run, never on every
+        // entry in the list. `agent_end.messages` is the run's `newMessages` —
+        // everything it just produced — so replaying all of them through
+        // `captureFailure` re-asserts a failure a later call already recovered
+        // from, one event AFTER `captureMessageEnd` retired it, and drags
+        // `finishReason` back to "error" with it.
+        //
+        // Last-assistant is the rule this stack already states in two places,
+        // not a third one invented here: Pi's own retry decision scans back to
+        // the last assistant message (`AgentSession._willRetryAfterAgentEnd`),
+        // and the runner's terminal verdict is documented as "derived from the
+        // LAST assistant turn … a transient error the agent recovered from
+        // before a later clean turn" returns undefined (`getTerminalError` in
+        // `@appstrate/runner-pi`). It also keeps the reason this branch exists:
+        // a `handleRunFailure` message that never got a `message_end` is the
+        // only assistant entry in its list, so it is still captured.
+        this.captureFailure(lastAssistantMessage(e.messages ?? []));
         return [];
       default:
         return [];
@@ -269,6 +285,25 @@ export class PiChatUiStreamMapper {
     if (!m) return;
     if (m.usage) this.addUsage(m.usage);
     this.finishReason = mapStopReason(m.stopReason);
+    // A model call that SETTLED retires the previous failure. Pi retries inside
+    // one turn, so an early 503 the next call recovered from is no longer this
+    // turn's cause — and `lastError`, which used to be write-once, kept being
+    // reported as one. That is now visible: the client surfaces the persisted
+    // category on a DEADLINE turn too, so a stale text would name a cause that
+    // no longer applies for a turn that simply ran out of clock.
+    //
+    // Two stop reasons deliberately do NOT clear:
+    //  - "error": the call failed; `captureFailure` records it right below.
+    //  - "aborted": a stop / the deadline cut the call mid-flight, so it
+    //    settled nothing — an earlier failure is still the last thing that
+    //    actually went wrong and must keep reaching the user.
+    //
+    // Nothing genuine is silenced on the `error`-chunk path in `engine.ts`
+    // (`meta.errorText ?? (finishReason === "error" ? … )`): the two fields move
+    // together here — the same `message_end` that clears the text also moves
+    // `finishReason` off "error", so a turn still reporting "error" always has
+    // its text (or falls back to "unknown model error").
+    if (m.stopReason !== "error" && m.stopReason !== "aborted") this.lastError = undefined;
     this.captureFailure(message);
   }
 
@@ -331,6 +366,19 @@ function assistantView(message: unknown): PiAssistantView | null {
   if (!message || typeof message !== "object") return null;
   const m = message as { role?: string } & PiAssistantView;
   return m.role === "assistant" ? m : null;
+}
+
+/**
+ * The run's terminal assistant message: the last one in arrival order, or
+ * `undefined` when the list holds none. Scanning back past the tail is what
+ * keeps trailing non-assistant entries (tool results, injected steering
+ * messages) from masking the message that actually decided the run.
+ */
+function lastAssistantMessage(messages: readonly unknown[]): unknown {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (assistantView(messages[i])) return messages[i];
+  }
+  return undefined;
 }
 
 interface PiToolCallBlock {

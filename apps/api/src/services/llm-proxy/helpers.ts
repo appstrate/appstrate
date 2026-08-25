@@ -24,7 +24,73 @@
  */
 
 import { parseSseFrames, parseSseJsonData } from "@appstrate/core/sse";
+import { getEnv } from "@appstrate/env";
+import { DEFAULT_LLM_STREAM_IDLE_TIMEOUT_MS } from "@appstrate/connect/proxy-primitives";
 import { invalidRequest } from "../../lib/errors.ts";
+
+/**
+ * Bound on how long an LLM upstream may take to produce its RESPONSE HEADERS
+ * on a STREAMING call. Passed as `guardedFetch`'s `timeoutMs`, whose contract
+ * is exactly this: it "covers the redirect chain up to the final response's
+ * HEADERS … the timer is detached once the response is returned", so a slow
+ * but healthy body is never aborted by it.
+ *
+ * 60 s: a provider asked for `stream: true` emits its first SSE frame within
+ * seconds; 60 s is roughly 10× the worst honest TTFB we have observed and
+ * still far inside a chat turn's patience. Before this, `timeoutMs` was 0 —
+ * no deadline at all, "the caller's disconnect remains the effective bound" —
+ * which meant a browser tab left open held a dead upstream connection
+ * indefinitely.
+ *
+ * Deliberately IDENTICAL to the sidecar's `LLM_FIRST_RESPONSE_TIMEOUT_MS`
+ * (`runtime-pi/sidecar/helpers.ts`): same concept, same default, so an operator
+ * reading a timeout in one log does not have to ask which proxy produced it.
+ *
+ * Operator-overridable via `LLM_PROXY_FIRST_RESPONSE_TIMEOUT_MS` (the sidecar's
+ * twin is `SIDECAR_LLM_FIRST_RESPONSE_TIMEOUT_MS`). The "first frame within
+ * seconds" reasoning above describes hosted vendors; an `org_models` row may
+ * point at a self-hosted `baseUrl` (Ollama / llama.cpp / vLLM) whose cold model
+ * load holds the headers for minutes, and self-hosting is a first-class
+ * deployment here — so 60 s is a default, not a law.
+ */
+export const LLM_FIRST_RESPONSE_TIMEOUT_MS = getEnv().LLM_PROXY_FIRST_RESPONSE_TIMEOUT_MS ?? 60_000;
+
+/**
+ * Bound on how long a NON-STREAMING upstream may take to produce its response
+ * headers. This is the case the previous `timeoutMs: 0` existed to protect:
+ * with `stream: false` the provider holds the headers for the ENTIRE
+ * generation, so the TTFB bound above would cut off any completion longer than
+ * a minute.
+ *
+ * 10 min matches the non-streaming default of the vendor SDKs themselves
+ * (OpenAI and Anthropic both default to a 600 s request timeout and warn above
+ * it), so nothing that a direct SDK call would have completed is refused here
+ * — while a genuinely dead connection still gets reclaimed instead of living
+ * as long as the caller's socket.
+ *
+ * The sidecar has no twin for this constant on purpose: its `/llm/*` clients
+ * are pi-ai provider adapters, which always send `stream: true`.
+ */
+export const LLM_NON_STREAMING_TIMEOUT_MS = 600_000;
+
+/**
+ * Bound on INTER-CHUNK silence once an SSE response is flowing: how long the
+ * upstream may say nothing between two body chunks before the proxy declares
+ * the stream dead. Enforced in `guardSseTeardown` and `tapSseUsage`
+ * (`./metering.ts`) — both tee branches, since releasing only one leaves the
+ * upstream socket pinned — because no fetch-level signal can express "silent
+ * for 2 min" without also capping the total duration.
+ *
+ * The value and the reasoning behind it live with the shared default
+ * ({@link DEFAULT_LLM_STREAM_IDLE_TIMEOUT_MS} in
+ * `@appstrate/connect/proxy-primitives`), which the sidecar's `/llm/*` forward
+ * reads too — same instrument, one definition. What is local here is the
+ * operator override: `LLM_PROXY_STREAM_IDLE_TIMEOUT_MS`, for the self-hosted
+ * `baseUrl` providers whose inter-chunk gaps a hosted-vendor default does not
+ * describe.
+ */
+export const LLM_STREAM_IDLE_TIMEOUT_MS =
+  getEnv().LLM_PROXY_STREAM_IDLE_TIMEOUT_MS ?? DEFAULT_LLM_STREAM_IDLE_TIMEOUT_MS;
 
 /**
  * Parsed shape of an inbound `/api/llm-proxy/*` request body. Built
