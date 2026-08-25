@@ -36,6 +36,7 @@ import {
 import { stripUpstreamResponseHeaders } from "@appstrate/connect/proxy-primitives";
 import type { ResolvedModel } from "../org-models.ts";
 import { storeResponse } from "./response-cache.ts";
+import { LLM_STREAM_IDLE_TIMEOUT_MS } from "./helpers.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal, UpstreamUsage } from "./types.ts";
 
 /** Clone upstream response headers, dropping hop-by-hop + stale content encoding/length. */
@@ -324,6 +325,44 @@ interface MeteredForwardOptions {
   recordUsage?: (inputs: RecordUsageInputs) => Promise<void>;
 }
 
+/** Resolution marker for {@link withIdleBound} — a value, not a rejection, so
+ *  the genuine upstream-error path keeps its own `catch`. */
+const IDLE = Symbol("llm-sse-idle");
+
+/**
+ * Bound a PENDING `reader.read()` by an inter-chunk idle deadline.
+ *
+ * Takes the promise rather than the reader on purpose: the timer is created at
+ * the moment the read starts and cleared the moment it settles, so it measures
+ * only the window in which the consumer has asked for a chunk and the upstream
+ * has not produced one. See {@link guardSseTeardown} for why that distinction
+ * is the whole point.
+ *
+ * Returns {@link IDLE} on expiry (never rejects for it); a genuine read
+ * rejection still propagates untouched.
+ *
+ * Twin of the sidecar's `withIdleBound` (`runtime-pi/sidecar/app.ts`) — see
+ * `LLM_STREAM_IDLE_TIMEOUT_MS` in `./helpers.ts` for why the two proxies keep
+ * their own copies instead of sharing through `@appstrate/core`.
+ */
+async function withIdleBound<T>(read: Promise<T>, idleTimeoutMs: number): Promise<T | typeof IDLE> {
+  // If the timer wins the race, `read` is still pending; a later rejection
+  // would land as a process-level unhandled rejection with nobody left to
+  // catch it — the exact failure mode this module exists to prevent.
+  read.catch(() => {});
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      read,
+      new Promise<typeof IDLE>((resolve) => {
+        timer = setTimeout(() => resolve(IDLE), idleTimeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** `controller.close()` throws if the stream is already closed/errored (e.g. the
  * consumer cancelled mid-pull). That is not a teardown — swallow it. */
 function closeSafely(controller: ReadableStreamDefaultController<Uint8Array>): void {
@@ -357,24 +396,65 @@ function closeSafely(controller: ReadableStreamDefaultController<Uint8Array>): v
  * partial line on that clean close.
  *
  * `pull` is demand-driven, so backpressure is preserved and nothing is
- * buffered. `onTeardownError` fires only for a genuine upstream read rejection
- * — never for a consumer-cancel close race (those are swallowed).
+ * buffered. `onTeardownError` fires for a genuine upstream read rejection and
+ * for an inter-chunk idle timeout — never for a consumer-cancel close race
+ * (those are swallowed).
+ *
+ * IDLE BOUND — read before touching. `idleTimeoutMs` caps how long the UPSTREAM
+ * may stay silent between two chunks. Because `pull` is demand-driven, the
+ * timer must be armed against the PENDING `reader.read()` and cleared the
+ * moment it settles: that promise is pending exactly while the upstream is
+ * silent AND the consumer is waiting for a chunk. A stream-level watchdog, or
+ * any timer that keeps running between pulls, would instead kill a merely SLOW
+ * CONSUMER on a healthy upstream — a browser tab throttled in the background is
+ * enough to trip it. Do not "simplify" it into one long-lived timer.
+ *
+ * WHY EXPIRY IS A TEARDOWN-ERROR-AND-CLEAN-CLOSE, NOT A STREAM ERROR: the
+ * invariant this whole function exists to hold is that the guarded stream NEVER
+ * errors. It is wrapped BEFORE the alias-swap `pipeThrough`, and an erroring
+ * source there re-creates precisely the unhandled-rejection leak documented
+ * above — one tenant's stalled provider taking down a multi-tenant process.
+ * Erroring on idle would trade a bug for the same bug with a nicer message. The
+ * signal is not lost: `onTeardownError` logs it at the call site, and the
+ * caller sees the same truncated SSE stream an upstream reject already
+ * produces. That is the best achievable at this seam.
  */
 export function guardSseTeardown(
   source: ReadableStream<Uint8Array>,
   onTeardownError: (err: unknown) => void,
+  idleTimeoutMs: number = LLM_STREAM_IDLE_TIMEOUT_MS,
 ): ReadableStream<Uint8Array> {
   const reader = source.getReader();
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
-      let result: Awaited<ReturnType<typeof reader.read>>;
+      let result: Awaited<ReturnType<typeof reader.read>> | typeof IDLE;
       try {
-        result = await reader.read();
+        result = await withIdleBound(reader.read(), idleTimeoutMs);
       } catch (err) {
         // The only genuine teardown signal: the upstream/tee branch rejected
         // mid-flux. Report once, then close the client stream cleanly (the
         // caller sees a truncated SSE stream — the best achievable here).
         onTeardownError(err);
+        closeSafely(controller);
+        return;
+      }
+      if (result === IDLE) {
+        // Four of the ten api shapes this platform maps ignore pi-ai's own
+        // `timeoutMs`, so this proxy is the only provider-agnostic place a
+        // stalled stream can be caught at all.
+        //
+        // THE WORDING IS LOAD-BEARING: pi-ai classifies failures as transient
+        // by regex over the error text (`RETRYABLE_PROVIDER_ERROR_PATTERN` in
+        // `dist/utils/retry.js`, matching `timed? out` / `timeout`), and this
+        // message reaches it whenever a Pi-driven caller reads the log or the
+        // teardown surfaces upward. "went quiet" would be classified as a hard
+        // provider error. Do not reword.
+        onTeardownError(
+          new Error(`LLM upstream stream timed out: no data received for ${idleTimeoutMs}ms`),
+        );
+        // Release the upstream/tee branch, then close cleanly per the contract
+        // above. Swallow a cancel rejection so teardown can't itself escape.
+        void reader.cancel(new Error("llm-proxy: SSE idle timeout")).catch(() => {});
         closeSafely(controller);
         return;
       }

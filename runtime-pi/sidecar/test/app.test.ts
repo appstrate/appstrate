@@ -444,4 +444,126 @@ describe("ALL /llm/* — telemetry", () => {
       warnSpy.mockRestore();
     }
   });
+
+  // --- inter-chunk idle bound ---
+  //
+  // `passUpstream` bounds how long the UPSTREAM may stay silent between two
+  // chunks (`LLM_STREAM_IDLE_TIMEOUT_MS`, 120 s in production; injected here as
+  // a few ms via `deps.llmStreamIdleTimeoutMs`). Four of the ten api shapes
+  // this platform maps ignore pi-ai's own `timeoutMs`, so a stalled
+  // Gemini/Vertex/Bedrock stream had no bound below the 30 min absolute cap and
+  // runs died on their wall-clock watchdog with nothing to show the user.
+  //
+  // The subtlety these tests pin: the wrapper is `pull`-based, so a timeout
+  // must be armed against the PENDING `reader.read()` and cleared when it
+  // settles — never on `maxIdleMs` (which measures CONSUMER pull gaps) and
+  // never on a timer that keeps running between pulls. The slow-consumer case
+  // below is the regression control for exactly that mistake.
+
+  it("errors the stream and logs llm.stream.idle_timeout when the upstream goes silent mid-pull", async () => {
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      // Upstream that hands over one chunk and then never speaks again — the
+      // consumer IS pulling, so the read stays pending and the idle bound is
+      // the only thing that can end it.
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("first-chunk"));
+        },
+      });
+      const fetchFn = mock(
+        async () =>
+          new Response(stream, {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          }),
+      );
+      const deps = makeDeps({
+        fetchFn: fetchFn as unknown as typeof fetch,
+        llmStreamIdleTimeoutMs: 25,
+      });
+      deps.config.llm = LLM_CONFIG;
+      const app = createApp(deps);
+      const res = await app.request("/llm/v1/messages", { method: "POST" });
+
+      await expect(res.text()).rejects.toThrow(/timed out/i);
+
+      const idle = warnSpy.mock.calls.find(([msg]) => msg === "llm.stream.idle_timeout");
+      expect(idle).toBeDefined();
+      const payload = idle?.[1] as Record<string, unknown> | undefined;
+      expect(payload).toMatchObject({ status: 200, authMode: "api_key", idleTimeoutMs: 25 });
+      // Telemetry still describes what DID arrive before the stall.
+      expect(payload?.chunks).toBe(1);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("does NOT trip on a slow consumer reading a healthy upstream", async () => {
+    // REGRESSION CONTROL. This is the failure an idle timeout naively hung off
+    // `maxIdleMs` — or off a timer that survives between pulls — would ship:
+    // the upstream answers every pull immediately, but the CONSUMER dawdles far
+    // longer than the idle bound between reads. That must never be a timeout.
+    const infoSpy = spyOn(logger, "info").mockImplementation(() => {});
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const enc = new TextEncoder();
+      const payloads = ["a", "b", "c", "d"];
+      let next = 0;
+      // Demand-driven upstream: produces only when pulled, and instantly.
+      const stream = new ReadableStream({
+        pull(controller) {
+          if (next >= payloads.length) {
+            controller.close();
+            return;
+          }
+          controller.enqueue(enc.encode(payloads[next]!));
+          next += 1;
+        },
+      });
+      const fetchFn = mock(
+        async () =>
+          new Response(stream, {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          }),
+      );
+      const idleTimeoutMs = 15;
+      const deps = makeDeps({
+        fetchFn: fetchFn as unknown as typeof fetch,
+        llmStreamIdleTimeoutMs: idleTimeoutMs,
+      });
+      deps.config.llm = LLM_CONFIG;
+      const app = createApp(deps);
+      const res = await app.request("/llm/v1/messages", { method: "POST" });
+
+      // Consumer gaps an order of magnitude past the idle bound.
+      const consumerGapMs = idleTimeoutMs * 5;
+      const reader = res.body!.getReader();
+      const seen: string[] = [];
+      const dec = new TextDecoder();
+      for (;;) {
+        await new Promise((r) => setTimeout(r, consumerGapMs));
+        const { value, done } = await reader.read();
+        if (done) break;
+        seen.push(dec.decode(value));
+      }
+
+      expect(seen.join("")).toBe(payloads.join(""));
+      expect(warnSpy.mock.calls.find(([msg]) => msg === "llm.stream.idle_timeout")).toBeUndefined();
+      expect(warnSpy.mock.calls.find(([msg]) => msg === "llm.stream.error")).toBeUndefined();
+
+      // Proof the control tests the right thing: `maxIdleMs` is the
+      // CONSUMER-pull-gap metric, and it really did exceed the idle bound. Any
+      // implementation that timed out on that counter would have failed above.
+      const observed = infoSpy.mock.calls.find(([msg]) => msg === "llm.stream.observed");
+      expect(observed).toBeDefined();
+      const payload = observed?.[1] as Record<string, unknown> | undefined;
+      expect(payload?.chunks).toBe(payloads.length);
+      expect(payload?.maxIdleMs as number).toBeGreaterThan(idleTimeoutMs);
+    } finally {
+      warnSpy.mockRestore();
+      infoSpy.mockRestore();
+    }
+  });
 });

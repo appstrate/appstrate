@@ -25,7 +25,7 @@
  */
 
 import type { LlmProxyApiKeyConfig, ModelSwap, SidecarConfig } from "./helpers.ts";
-import { LLM_PROXY_TIMEOUT_MS } from "./helpers.ts";
+import { llmUpstreamAbort } from "./helpers.ts";
 import { anthropicThinkingBudgets } from "@appstrate/core/model-generation";
 import { PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "@appstrate/runner-pi/provider-map";
 import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
@@ -437,13 +437,24 @@ export function handlePiMessagesRequest(
   const model = buildBackingModel(deps);
   const stream = deps.streamBackingFn ?? streamBacking;
 
-  // The same absolute deadline the non-aliased `/llm/*` forward applies, plus
-  // the client's disconnect — whichever fires first unwinds pi-ai's fetch.
-  const signal = AbortSignal.any([AbortSignal.timeout(LLM_PROXY_TIMEOUT_MS), request.signal]);
+  // The same deadlines the non-aliased `/llm/*` forward applies — the 30 min
+  // absolute cap plus the 60 s first-response bound — combined with the
+  // client's disconnect; whichever fires first unwinds pi-ai's fetch.
+  //
+  // `pi-messages` is one of the four api shapes that IGNORE pi-ai's own
+  // `timeoutMs` (grep `timeoutMs` in `@earendil-works/pi-ai/dist/api/`), so on
+  // this path `options.signal` is the only deadline that exists at all.
+  //
+  // We never see HTTP headers here (pi-ai owns the fetch), so the first event
+  // yielded by the generator is the equivalent liveness proof, and that is
+  // where `firstResponse()` disarms the TTFB timer — before it can abort a
+  // healthy long stream. The `finally` is the belt: a throw before the first
+  // event must not leave a 60 s timer armed either.
+  const abort = llmUpstreamAbort(request.signal);
   const upstream = stream(
     model,
     body.context,
-    projectRequestOptions(body, swap, deps.llm.apiKey, signal),
+    projectRequestOptions(body, swap, deps.llm.apiKey, abort.signal),
   );
 
   const encoder = new TextEncoder();
@@ -452,6 +463,10 @@ export function handlePiMessagesRequest(
       let terminal: PiMessagesEvent | undefined;
       try {
         for await (const event of upstream) {
+          // Liveness proof — see `llmUpstreamAbort` above. `clearTimeout` is
+          // idempotent, so calling it per event is cheaper than tracking a
+          // "first" flag.
+          abort.firstResponse();
           const projected = projectAssistantEvent(event);
           if (!projected) continue;
           if (projected.type === "error") {
@@ -472,6 +487,8 @@ export function handlePiMessagesRequest(
         logger.warn("pi-messages backend: upstream stream threw", {
           error: err instanceof Error ? err.message : String(err),
         });
+      } finally {
+        abort.firstResponse();
       }
       if (!terminal) {
         // The client MUST see a terminal: `pi-messages` reconstructs the

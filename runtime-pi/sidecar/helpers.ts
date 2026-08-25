@@ -46,6 +46,98 @@ export const OUTBOUND_TIMEOUT_MS = 30_000;
 export const LLM_PROXY_TIMEOUT_MS = 1_800_000; // 30 minutes (patched from 300_000 — was killing legitimate long-running agentic runs at exactly 5 min)
 
 /**
+ * Bound on how long an LLM upstream may take to produce its RESPONSE HEADERS
+ * (TTFB). Distinct from {@link LLM_PROXY_TIMEOUT_MS}, which is the ABSOLUTE
+ * cap on the whole exchange: 30 min is the right ceiling for a legitimately
+ * long agentic completion, and exactly the wrong instrument for "the upstream
+ * never answered at all".
+ *
+ * Why this bound is safe at 60 s here even though a non-streaming completion
+ * can legitimately hold its headers for minutes: the ONLY clients of the
+ * sidecar's `/llm/*` surface are pi-ai's provider adapters running inside the
+ * container, and every one of them issues `stream: true` (grep `stream: true`
+ * in `@earendil-works/pi-ai/dist/api/*.js`). A streaming provider emits its
+ * first SSE frame within seconds; 60 s is roughly 10× the worst honest TTFB
+ * we have observed and still an order of magnitude under the shortest run
+ * budget (300 s), so a dead upstream surfaces as an ERROR the agent can retry
+ * instead of a silent wall-clock kill. The platform-side gateway
+ * (`apps/api/src/services/llm-proxy`) serves non-streaming callers too and
+ * therefore keeps a separate, far more generous bound for those — see
+ * `LLM_NON_STREAMING_TIMEOUT_MS` there.
+ *
+ * MUST be disarmed once the headers land: an `AbortSignal` handed to `fetch`
+ * aborts the BODY too, so leaving this armed would kill every stream at 60 s.
+ * {@link llmUpstreamAbort} owns that lifecycle — do not inline
+ * `AbortSignal.timeout(LLM_FIRST_RESPONSE_TIMEOUT_MS)` at a call site.
+ */
+export const LLM_FIRST_RESPONSE_TIMEOUT_MS = 60_000;
+
+/**
+ * Bound on INTER-CHUNK silence once an LLM stream is flowing: how long the
+ * upstream may say nothing between two body chunks before the sidecar declares
+ * the stream dead.
+ *
+ * This is the bound that actually fixes the reported bug. Pi's SDK passes a
+ * `timeoutMs` down to its provider adapters, but four of the api shapes this
+ * platform maps ignore it entirely (`google-generative-ai`, `google-vertex`,
+ * `bedrock-converse-stream`, `pi-messages` — grep `timeoutMs` in
+ * `@earendil-works/pi-ai/dist/api/*.js`, they honour only `options.signal`).
+ * A stalled Gemini/Vertex/Bedrock stream was therefore bounded by nothing
+ * tighter than the 30 min absolute cap, so a run with a 300 s budget died on
+ * its wall-clock watchdog with no error to show the user. Our proxy is the
+ * only provider-agnostic place that covers all four shapes.
+ *
+ * 120 s, i.e. deliberately looser than the first-response bound: once a
+ * provider has started streaming, a long pause is a real (if rare) event —
+ * extended-thinking blocks and large parallel tool-call payloads routinely
+ * buy 15-45 s of silence, and a provider-side retry can stretch that. 120 s
+ * is ~3× the worst honest gap while still leaving the shortest run budget
+ * (300 s) room to report the failure and for the agent to retry once.
+ */
+export const LLM_STREAM_IDLE_TIMEOUT_MS = 120_000;
+
+/**
+ * Abort plumbing for one LLM upstream call: the absolute
+ * {@link LLM_PROXY_TIMEOUT_MS} cap, the {@link LLM_FIRST_RESPONSE_TIMEOUT_MS}
+ * TTFB bound, and optionally the caller's own signal, combined with
+ * `AbortSignal.any` (the idiom already used in `pi-messages-backend.ts`).
+ *
+ * The returned `firstResponse()` MUST be called — from a `finally` — as soon
+ * as the upstream has proven it is alive (headers received, or the first
+ * stream event on the pi-messages path). An abort signal handed to `fetch`
+ * tears down the response BODY as well, so a TTFB timer left armed would kill
+ * every healthy stream at the 60 s mark. `@appstrate/afps-shared`'s
+ * `guardedFetch` solves the same problem the same way (its `timeoutMs`
+ * "covers the redirect chain up to the final response's HEADERS … the timer is
+ * detached once the response is returned"); this is the hand-rolled twin for
+ * the sidecar's raw `fetch` call sites.
+ *
+ * The abort reason is worded to match pi-ai's `RETRYABLE_PROVIDER_ERROR_PATTERN`
+ * (`dist/utils/retry.js`, which matches `timed? out` / `timeout`) so the agent
+ * classifies a dead upstream as a transient failure and retries, instead of
+ * surfacing it as an unclassifiable hard error.
+ */
+export function llmUpstreamAbort(extra?: AbortSignal): {
+  signal: AbortSignal;
+  firstResponse: () => void;
+} {
+  const firstResponse = new AbortController();
+  const timer = setTimeout(
+    () =>
+      firstResponse.abort(
+        new DOMException(
+          `LLM upstream timed out after ${LLM_FIRST_RESPONSE_TIMEOUT_MS}ms waiting for a response`,
+          "TimeoutError",
+        ),
+      ),
+    LLM_FIRST_RESPONSE_TIMEOUT_MS,
+  );
+  const signals: AbortSignal[] = [AbortSignal.timeout(LLM_PROXY_TIMEOUT_MS), firstResponse.signal];
+  if (extra) signals.push(extra);
+  return { signal: AbortSignal.any(signals), firstResponse: () => clearTimeout(timer) };
+}
+
+/**
  * Default cap on simultaneous `api_call` MCP invocations per run.
  * Three matches the typical browsing concurrency a single LLM turn can
  * usefully exploit while leaving headroom under most providers' per-IP

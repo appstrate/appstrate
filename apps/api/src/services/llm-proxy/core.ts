@@ -23,7 +23,11 @@ import { logger } from "../../lib/logger.ts";
 import { invalidRequest } from "../../lib/errors.ts";
 import { getResponseCacheConfig } from "../../lib/llm-proxy-cache-config.ts";
 import { lookupResponse } from "./response-cache.ts";
-import { parseProxyRequest } from "./helpers.ts";
+import {
+  LLM_FIRST_RESPONSE_TIMEOUT_MS,
+  LLM_NON_STREAMING_TIMEOUT_MS,
+  parseProxyRequest,
+} from "./helpers.ts";
 import { forwardMeteredResponse } from "./metering.ts";
 import type { LlmProxyAdapter, LlmProxyPrincipal } from "./types.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -255,10 +259,21 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
     // redirect, and following one would replay the provider API key (in
     // `upstreamHeaders`) against whatever host the redirect names.
     //
-    // timeoutMs: 0 — disables the guard's 30 s first-byte default. A
-    // non-streaming completion legitimately holds the response headers past
-    // 30 s; the previous raw fetch here had no deadline either (behaviour
-    // preserved, the caller's disconnect remains the effective bound).
+    // timeoutMs — a real first-response (HEADERS) bound, chosen per request
+    // shape. The guard's timer is detached the moment the response returns, so
+    // it never touches a slow-but-healthy body; what it guarantees is that an
+    // upstream which never answers is reclaimed instead of hanging for as long
+    // as the caller keeps its socket open.
+    //
+    // This used to be `timeoutMs: 0` — no deadline at all — and the reason was
+    // sound: a NON-STREAMING completion legitimately holds its headers for the
+    // whole generation, so the guard's 30 s default would have cut off any
+    // completion longer than half a minute. That reason is preserved, not
+    // discarded: `stream: false` gets 10 min (the vendor SDKs' own
+    // non-streaming default), and only the streaming shape — which must emit
+    // its first SSE frame within seconds — gets the tight 60 s bound.
+    // Inter-chunk silence AFTER the headers is a different problem with a
+    // different instrument: see `guardSseTeardown` in `./metering.ts`.
     upstream = await egressGuardedFetch(
       upstreamUrl,
       {
@@ -268,7 +283,7 @@ export async function proxyLlmCall(inputs: ProxyCallInputs): Promise<Response> {
       },
       {
         maxRedirects: 0,
-        timeoutMs: 0,
+        timeoutMs: request.stream ? LLM_FIRST_RESPONSE_TIMEOUT_MS : LLM_NON_STREAMING_TIMEOUT_MS,
         logger,
         ...(inputs.fetchImpl ? { fetchImpl: inputs.fetchImpl } : {}),
       },

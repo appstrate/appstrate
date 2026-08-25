@@ -227,6 +227,87 @@ describe("guardSseTeardown", () => {
     expect(seen).toEqual([boom]);
   });
 
+  // --- inter-chunk idle bound ---
+  //
+  // `guardSseTeardown` also bounds how long the UPSTREAM may stay silent
+  // between two chunks (`LLM_STREAM_IDLE_TIMEOUT_MS`, 120 s in production;
+  // passed as a few ms here). Four of the ten api shapes this platform maps
+  // ignore pi-ai's own `timeoutMs`, so before this bound a stalled
+  // Gemini/Vertex/Bedrock stream on the chat path had no deadline at all.
+  //
+  // Two invariants are pinned below: expiry follows the module's
+  // never-error contract (report via `onTeardownError`, close cleanly), and a
+  // SLOW CONSUMER on a healthy upstream is not a timeout.
+
+  it("idle upstream: reports via onTeardownError and closes cleanly (never errors the stream)", async () => {
+    const enc = new TextEncoder();
+    // One frame, then permanent silence — the consumer keeps pulling, so the
+    // read stays pending and only the idle bound can end it.
+    const source = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(enc.encode("partial"));
+      },
+    });
+
+    const seen: unknown[] = [];
+    const guarded = guardSseTeardown(source, (e) => seen.push(e), 25);
+
+    // Resolves, does NOT reject: erroring here would re-open the
+    // unhandled-rejection leak this module exists to close (the guard is
+    // wrapped BEFORE the alias-swap `pipeThrough`).
+    expect(await readAll(guarded)).toBe("partial");
+    expect(seen).toHaveLength(1);
+    // Wording matches pi-ai's RETRYABLE_PROVIDER_ERROR_PATTERN (`timed? out`),
+    // so the stall is classified as transient rather than as a hard error.
+    expect((seen[0] as Error).message).toMatch(/timed out/i);
+  });
+
+  it("does NOT trip on a slow consumer reading a healthy upstream", async () => {
+    // REGRESSION CONTROL. `pull` is demand-driven: an idle timer that keeps
+    // running between pulls (or one hung off a "time since last chunk"
+    // counter) would kill a merely slow consumer on a perfectly healthy
+    // upstream. The upstream below answers every pull instantly; the consumer
+    // waits far longer than the idle bound between reads.
+    const enc = new TextEncoder();
+    const payloads = ["a", "b", "c", "d"];
+    let next = 0;
+    const source = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (next >= payloads.length) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(enc.encode(payloads[next]!));
+        next += 1;
+      },
+    });
+
+    const idleTimeoutMs = 15;
+    const seen: unknown[] = [];
+    const guarded = guardSseTeardown(source, (e) => seen.push(e), idleTimeoutMs);
+
+    const consumerGapMs = idleTimeoutMs * 5;
+    const reader = guarded.getReader();
+    const dec = new TextDecoder();
+    let out = "";
+    const gaps: number[] = [];
+    for (;;) {
+      const before = Date.now();
+      await new Promise((r) => setTimeout(r, consumerGapMs));
+      const { done, value } = await reader.read();
+      gaps.push(Date.now() - before);
+      if (done) break;
+      out += dec.decode(value, { stream: true });
+    }
+
+    expect(out).toBe(payloads.join(""));
+    expect(seen).toEqual([]);
+    // Proof the control tests the right thing: every consumer gap really did
+    // exceed the idle bound, so any implementation timing the wrong interval
+    // would have reported a teardown above.
+    expect(Math.min(...gaps)).toBeGreaterThan(idleTimeoutMs);
+  });
+
   it("full forward path: upstream errors mid-flux under alias-swap → body completes, no escape", async () => {
     // End-to-end through `forwardMeteredResponse` (tee + tap + pipeThrough swap
     // + guard). The upstream emits one frame then errors. With the guard wired

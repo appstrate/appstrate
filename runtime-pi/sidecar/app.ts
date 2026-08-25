@@ -10,9 +10,10 @@ import { BlobStore } from "./blob-store.ts";
 import type { IntegrationBootReport } from "@appstrate/core/sidecar-types";
 import {
   DEFAULT_API_CALL_CONCURRENCY,
-  LLM_PROXY_TIMEOUT_MS,
+  LLM_STREAM_IDLE_TIMEOUT_MS,
   MAX_REQUEST_BODY_SIZE,
   filterHeaders,
+  llmUpstreamAbort,
   readPositiveIntEnv,
   readRequestBodyBounded,
   type SidecarConfig,
@@ -54,6 +55,13 @@ export interface AppDeps {
   cookieJar: Map<string, string[]>;
   fetchFn?: typeof fetch; // default: global fetch — injectable for tests
   isReady?: () => boolean; // default: () => true — controls /health
+  /**
+   * Inter-chunk idle bound applied to proxied `/llm/*` streams. Defaults to
+   * {@link LLM_STREAM_IDLE_TIMEOUT_MS}; the only reason it is injectable is
+   * that the timeout path is otherwise untestable without a real two-minute
+   * wait. Not an operator knob — no env var reads it.
+   */
+  llmStreamIdleTimeoutMs?: number;
   /**
    * OAuth token cache. Required when the sidecar serves OAuth-mode LLM
    * configs (`config.llm.authMode === "oauth"`). Production server.ts
@@ -142,7 +150,46 @@ interface LlmStreamObservation {
   authMode?: "oauth" | "api_key";
 }
 
-async function passUpstream(upstream: Response, observe?: LlmStreamObservation): Promise<Response> {
+/** Resolution marker for {@link withIdleBound} — a value, not a rejection,
+ *  so the genuine upstream-error path keeps its own `catch`. */
+const IDLE = Symbol("llm-stream-idle");
+
+/**
+ * Bound a PENDING `reader.read()` by an inter-chunk idle deadline.
+ *
+ * Takes the promise rather than the reader on purpose: the timer must be
+ * created at the moment the read starts and cleared the moment it settles, so
+ * it measures only the window in which the consumer has asked for a chunk and
+ * the upstream has not produced one. That is the whole reason this is called
+ * from inside `pull` rather than installed as a stream-level watchdog — see
+ * the long comment at the `observed` stream below.
+ *
+ * Returns {@link IDLE} on expiry (never rejects for it); a genuine upstream
+ * read rejection still propagates untouched.
+ */
+async function withIdleBound<T>(read: Promise<T>, idleTimeoutMs: number): Promise<T | typeof IDLE> {
+  // If the timer wins the race, `read` is still pending; a later rejection
+  // would land as a process-level unhandled rejection with nobody left to
+  // catch it. Attach a no-op handler now — the value is already discarded.
+  read.catch(() => {});
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      read,
+      new Promise<typeof IDLE>((resolve) => {
+        timer = setTimeout(() => resolve(IDLE), idleTimeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function passUpstream(
+  upstream: Response,
+  observe?: LlmStreamObservation,
+  idleTimeoutMs: number = LLM_STREAM_IDLE_TIMEOUT_MS,
+): Promise<Response> {
   const responseHeaders: Record<string, string> = {};
   // Shared upstream-response header allowlist (content-type, retry/backoff,
   // x-request-id) — same posture as the platform LLM gateway; everything else
@@ -190,10 +237,48 @@ async function passUpstream(upstream: Response, observe?: LlmStreamObservation):
   // upstream byte timing, but we intentionally match what the serve
   // layer sees so the metric stays comparable to the idle-timeout
   // threshold.
+  //
+  // READ THE PARAGRAPH ABOVE BEFORE TOUCHING THE IDLE TIMEOUT BELOW. Because
+  // this stream is `pull`-based, `maxIdleMs` is NOT upstream silence — it is
+  // consumer latency. Arming a timeout on that counter, or on any timer that
+  // keeps running while nobody is pulling, would kill a merely SLOW CONSUMER
+  // on a perfectly healthy upstream. The correct instrument is the one used
+  // in `withIdleBound`: race a timer against the PENDING `reader.read()`
+  // promise, inside `pull`. That promise is pending exactly while the upstream
+  // is silent AND the consumer is actually waiting for a chunk — the timer is
+  // created when the read starts and cleared the moment it settles, so no
+  // clock runs across a consumer-side pause. Do not "simplify" this into a
+  // single long-lived timer; that is the bug, not the cleanup.
   const observed = new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
-        const { value, done } = await reader.read();
+        const outcome = await withIdleBound(reader.read(), idleTimeoutMs);
+        if (outcome === IDLE) {
+          // Four of the ten api shapes this platform maps ignore pi-ai's own
+          // `timeoutMs` (google-generative-ai, google-vertex,
+          // bedrock-converse-stream, pi-messages), so this proxy is the only
+          // provider-agnostic place a stalled stream can be caught. Without it
+          // the run just burns its wall-clock budget and dies with no error.
+          //
+          // THE WORDING IS LOAD-BEARING: pi-ai classifies a failure as
+          // transient by regex over the error text
+          // (`RETRYABLE_PROVIDER_ERROR_PATTERN` in `dist/utils/retry.js`,
+          // which matches `timed? out` and `timeout`). "timed out" therefore
+          // makes the agent retry the turn; a message like "upstream went
+          // quiet" would be classified as a hard, unretryable provider error
+          // and surface to the user as a mystery. Do not reword.
+          const err = new Error(
+            `LLM upstream stream timed out: no data received for ${idleTimeoutMs}ms`,
+          );
+          logger.warn("llm.stream.idle_timeout", { ...summary(), idleTimeoutMs });
+          // Release the upstream socket before erroring the consumer branch;
+          // swallow the cancel rejection so teardown can't escape as an
+          // unhandled rejection on the sidecar process.
+          void reader.cancel(err).catch(() => {});
+          controller.error(err);
+          return;
+        }
+        const { value, done } = outcome;
         const now = Date.now();
         const gap = now - lastByteAt;
         if (gap > maxIdleMs) maxIdleMs = gap;
@@ -597,30 +682,45 @@ export function createApp(deps: AppDeps): Hono {
     }
 
     let upstream: Response;
+    // THREE deadlines now bound an LLM stream, and the split matters:
+    //   - `LLM_PROXY_TIMEOUT_MS` (30 min) — absolute cap on the whole
+    //     exchange, the right ceiling for a long agentic completion.
+    //   - `LLM_FIRST_RESPONSE_TIMEOUT_MS` (60 s) — TTFB. Disarmed the instant
+    //     the headers land (`abort.firstResponse()` in the `finally`), because
+    //     an abort signal handed to `fetch` tears down the BODY too.
+    //   - `LLM_STREAM_IDLE_TIMEOUT_MS` (120 s) — inter-chunk silence, enforced
+    //     in `passUpstream`, NOT here (a fetch-level signal cannot express
+    //     "silent for 2 min" without also capping the total).
+    // HISTORY, do not re-litigate: this block used to say there was
+    // "deliberately no inter-chunk timeout", because undici's hardcoded 300 s
+    // `bodyTimeout` once motivated a global `globalThis.fetch` → undici swap
+    // that was reverted in #366 (see issue #369). That reasoning stands —
+    // undici is still not the answer, the sidecar runs Bun's native `fetch`
+    // and we are not swapping it back. What changed is that "no body timeout"
+    // stopped being acceptable: pi-ai's per-adapter `timeoutMs` is ignored by
+    // four of the api shapes we map (google-generative-ai, google-vertex,
+    // bedrock-converse-stream, pi-messages), so a stalled stream had NO bound
+    // below 30 min and runs died on their wall-clock watchdog with no error.
+    // The idle bound lives in our own stream wrapper instead — provider
+    // agnostic, and no transport swap.
+    const abort = llmUpstreamAbort();
     try {
-      // `AbortSignal.timeout(LLM_PROXY_TIMEOUT_MS)` is the ONLY deadline on
-      // an LLM stream — an absolute 30 min cap, not an inactivity timer.
-      // There is deliberately no inter-chunk (body) timeout: undici's
-      // hardcoded 300 s `bodyTimeout` (which once motivated a global
-      // `globalThis.fetch` → undici swap, reverted in #366, see issue #369)
-      // does not exist here — the sidecar runs under Bun and `fetch` is
-      // Bun's native implementation, not undici. A long inter-chunk gap on a
-      // streamed completion therefore cannot trip a body timeout; it is only
-      // bounded by the 30 min absolute deadline. Inter-chunk silence is still
-      // observed (`maxIdleMs` in `llm.stream.observed`, #426) so any real
-      // stall surfaces in logs without re-introducing undici.
       upstream = await fetchFn(targetUrl, {
         method,
         headers: forwardedHeaders,
         body,
-        signal: AbortSignal.timeout(LLM_PROXY_TIMEOUT_MS),
+        signal: abort.signal,
         ...(body instanceof ReadableStream ? { duplex: "half" } : {}),
       });
     } catch (err) {
       return llmFetchErrorResponse(c, targetUrl, err);
+    } finally {
+      // Headers are in (or the call already failed) — the upstream has proven
+      // it is alive, so the TTFB timer must stop before it can abort the body.
+      abort.firstResponse();
     }
 
-    return passUpstream(upstream, { targetUrl, authMode: "api_key" });
+    return passUpstream(upstream, { targetUrl, authMode: "api_key" }, deps.llmStreamIdleTimeoutMs);
   });
 
   // OAuth: resolve the real subscription bearer and swap it onto the request,
@@ -687,13 +787,24 @@ export function createApp(deps: AppDeps): Hono {
       body = buffered.byteLength > 0 ? buffered : undefined;
     }
 
-    const doFetch = (headers: Headers): Promise<Response> =>
-      fetchFn(targetUrl, {
-        method,
-        headers,
-        body,
-        signal: AbortSignal.timeout(LLM_PROXY_TIMEOUT_MS),
-      } as RequestInit);
+    // Same deadline split as the api_key path above (absolute cap + TTFB
+    // bound disarmed on headers; inter-chunk silence handled by
+    // `passUpstream`). Armed PER ATTEMPT: the 401 replay below re-enters this
+    // closure and must get its own fresh TTFB window rather than inherit an
+    // already-half-spent one.
+    const doFetch = async (headers: Headers): Promise<Response> => {
+      const abort = llmUpstreamAbort();
+      try {
+        return await fetchFn(targetUrl, {
+          method,
+          headers,
+          body,
+          signal: abort.signal,
+        } as RequestInit);
+      } finally {
+        abort.firstResponse();
+      }
+    };
 
     let upstream: Response;
     try {
@@ -736,11 +847,15 @@ export function createApp(deps: AppDeps): Hono {
 
     // No model-alias swap on the oauth path — the response streams back
     // verbatim (zero-copy telemetry passthrough only).
-    return passUpstream(upstream, {
-      targetUrl,
-      credentialId: llmConfig.credentialId,
-      authMode: "oauth",
-    });
+    return passUpstream(
+      upstream,
+      {
+        targetUrl,
+        credentialId: llmConfig.credentialId,
+        authMode: "oauth",
+      },
+      deps.llmStreamIdleTimeoutMs,
+    );
   }
 
   // MCP exposure — the agent-facing surface for the first-party tools
