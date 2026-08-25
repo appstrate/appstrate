@@ -328,4 +328,106 @@ describe("scrubSecretMaterial", () => {
       "see https://docs.example.com then admin@example.com",
     );
   });
+
+  // The ENCODED rule shipped in the same commit as the fix above and
+  // reproduced, verbatim, the defect that fix had just closed: its tempering
+  // named three delimiters (`%2F`, `%3F`, `%23`) and every OTHER encoded
+  // delimiter decomposes into bytes (`%`, `2`, `C`) the byte class admitted one
+  // at a time. Both renderings of an authority now share one exclusion list.
+  it("control: an ENCODED delimiter ends the encoded authority too", () => {
+    for (const sep of ["%2C", "%20", "%22", "%26", "%27x%2C"]) {
+      const input = `see https%3A%2F%2Fdocs.example.com${sep}contact%3Aadmin%40example.com`;
+      expect(scrubSecretMaterial(input)).toBe(input);
+    }
+    // The host an operator diagnoses with survives in full — the exact bytes
+    // the shipped rule destroyed while masking nothing sensitive.
+    expect(
+      scrubSecretMaterial("see https%3A%2F%2Fdocs.example.com%2Ccontact%3Aadmin%40example.com"),
+    ).toContain("docs.example.com");
+  });
+
+  // The narrowing that fixed the comma replaced a negated class with a
+  // POSITIVE one and dropped eight RFC 3986 §3.2.1 sub-delims that have
+  // nothing to do with the comma problem. Every one of them is a byte a real
+  // DSN password carries, and every password below shipped verbatim.
+  it("masks a DSN password built from RFC 3986 sub-delims", () => {
+    for (const pw of [
+      "s3cr3t!x",
+      "pa$$w0rd",
+      "p(ass)",
+      "x'y",
+      "pass=word",
+      "a;b*c",
+      "p!a$s'w(o)r*d;=x",
+    ]) {
+      const out = scrubSecretMaterial(`postgres://user:${pw}@db.internal:5432/app`);
+      expect(out).toBe("postgres://[redacted]@db.internal:5432/app");
+    }
+    // A masked proxy URL still reads as one — `*` is authority-legal.
+    expect(scrubSecretMaterial("http://user:****@us-proxy.example.com:8080")).toBe(
+      "http://[redacted]@us-proxy.example.com:8080",
+    );
+  });
+
+  // Control for the rule above: admitting the sub-delims must NOT re-admit the
+  // three bytes the comma fix excluded, or the fix is undone.
+  it('control: sub-delims are back but `,`, `&`, `"` and whitespace are not', () => {
+    for (const sep of [",", "&", '"', " "]) {
+      const input = `see https://docs.example.com${sep}contact:admin@example.com`;
+      expect(scrubSecretMaterial(input)).toBe(input);
+    }
+  });
+
+  // The keyword rule's separator group accepted bare whitespace, so
+  // `<NAME> <word>` redacted `<word>` — including in the sidecar's OWN
+  // user-visible errors. This exact string is thrown by `server.ts`, caught
+  // three lines down, scrubbed, and written to stdout as
+  // `APPSTRATE_CONNECT_ERROR:`, which the platform stores and shows the user.
+  // The one word carrying the diagnosis was the one destroyed.
+  it("control: an env-name-shaped keyword does not eat the next word of prose", () => {
+    for (const line of [
+      "connect-run: CONNECT_RESULT_KEY missing — refusing to emit bundle",
+      "connect-run: CONNECT_RESULT_KEY must decode to 32 bytes (AES-256 key)",
+      "missing required field: api_key_id in manifest",
+      "Integration auth refresh skipped — no token_endpoint and no issuer",
+      "auth_key must match ^[a-z][a-z0-9_]*$",
+      "primary_key_violation on table runs",
+      "Restore the CONNECTION_ENCRYPTION_KEY this deployment booted with",
+    ]) {
+      expect(scrubSecretMaterial(line)).toBe(line);
+    }
+  });
+
+  // Second half of the same fix: an assignment separator alone does not reach
+  // the lower_snake FIELD names that share the env-name shape, because they DO
+  // carry an assignment. The env-name tier is uppercase-only for that reason.
+  it("control: lower_snake field names are not env-var names", () => {
+    for (const line of [
+      'token_endpoint_auth_method: "none"',
+      "token_endpoint_auth_method='none'",
+      'refresh_token_issuance: "not_supported"',
+      "authorization_endpoint + token_endpoint for marketplace connect",
+    ]) {
+      expect(scrubSecretMaterial(line)).toBe(line);
+    }
+    // …while the SCREAMING_SNAKE twin of the same shape is still masked, and a
+    // lowercase name whose LAST segment is a keyword stays covered by the bare
+    // keyword tier.
+    expect(scrubSecretMaterial("TOKEN_ENDPOINT_AUTH_METHOD='none'")).toBe(
+      "TOKEN_ENDPOINT_AUTH_METHOD='[redacted]'",
+    );
+    expect(scrubSecretMaterial("notion_token=ntn_9fJ2kQwErTyUiOpAsDfGhJk")).toBe(
+      "notion_token=[redacted]",
+    );
+  });
+
+  // The separator change must not cost the shapes that DO carry a credential:
+  // all three real leak forms use an assignment character.
+  it("keeps every assignment-separated leak shape masked", () => {
+    expect(scrubSecretMaterial("AWS_SECRET_ACCESS_KEY = wJalrXUtnFEMIK7MDENGbPxRfiCY")).toBe(
+      "AWS_SECRET_ACCESS_KEY = [redacted]",
+    );
+    expect(scrubSecretMaterial('{"token": "abc123def456"}')).toBe('{"token": "[redacted]"}');
+    expect(scrubSecretMaterial("KEY_FILE=/etc/secrets/id_rsa")).toBe("KEY_FILE=[redacted]");
+  });
 });

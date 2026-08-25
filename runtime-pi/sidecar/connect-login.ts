@@ -182,6 +182,19 @@ export async function runConnectLogin(opts: RunConnectLoginOptions): Promise<Cre
 }
 
 /**
+ * Cap on the third-party tool's own error prose folded into our error message.
+ *
+ * This is the point where an unbounded, third-party-authored string enters an
+ * `Error` this process carries around — and every consumer of that message
+ * (`server.ts`' connect-run catch, `integrations-boot.ts`' per-spec catch)
+ * hands it to `scrubSecretMaterial`, a linear-cost pass of global regexes, on
+ * a single-threaded sidecar. Capping at the boundary bounds all of them at
+ * once, the same ordering `scrubStderrLine` applies to runner stderr. 2 KB is
+ * far more login-failure prose than any reader needs.
+ */
+const LOGIN_TOOL_ERROR_DETAIL_MAX_CHARS = 2_000;
+
+/**
  * Parse the first text content block of a `CallToolResult` as JSON into the
  * login-tool contract. Throws on a missing/non-text first block or invalid
  * JSON, or when `outputs` is absent / not a string map.
@@ -198,7 +211,7 @@ function parseLoginToolResult(result: {
     const errFirst = result.content?.[0];
     const detail =
       errFirst && errFirst.type === "text" && typeof errFirst.text === "string"
-        ? errFirst.text
+        ? errFirst.text.slice(0, LOGIN_TOOL_ERROR_DETAIL_MAX_CHARS)
         : "";
     throw new Error(`${CONNECT_LOGIN_TOOL_ERROR_PREFIX}${detail ? `: ${detail}` : ""}`);
   }

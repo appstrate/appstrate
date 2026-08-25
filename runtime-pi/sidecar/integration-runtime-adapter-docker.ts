@@ -27,6 +27,7 @@ import {
   buildProxyEnvBlock,
   buildCaEnvBlock,
   isPathSafeForMount,
+  normalizeMountPath,
   registerIntegrationRuntimeAdapter,
   resolveBundleEntry,
   WORKSPACE_ENV_VAR,
@@ -178,6 +179,19 @@ function dockerCliEnv(): Record<string, string> {
  * the per-spec try/catch in `integrations-boot.ts` records it in `failed[]`.
  */
 const DOCKER_EXEC_TIMEOUT_MS = 60_000;
+/**
+ * Cap on the docker diagnostic folded into the thrown error, applied BEFORE
+ * the scrub.
+ *
+ * `docker`'s stdout/stderr are unbounded and third-party-influenced (a failing
+ * `docker run` relays the image's own output), and `scrubSecretMaterial` is a
+ * pass of global regexes whose cost is linear in the input — so scrubbing the
+ * whole stream to produce a one-line error message hands a subprocess a lever
+ * on this single-threaded sidecar's event loop. Slicing first is the same
+ * ordering `scrubStderrLine` uses; the message this feeds is a diagnostic, and
+ * 2 KB of it is already more than any reader needs.
+ */
+const DOCKER_EXEC_DETAIL_MAX_CHARS = 2_000;
 
 async function dockerExec(args: string[]): Promise<string> {
   const bunSpawn = (globalThis as unknown as { Bun?: { spawn?: DockerExecSpawn } }).Bun?.spawn;
@@ -218,7 +232,9 @@ async function dockerExec(args: string[]): Promise<string> {
       // `GET /integrations/boot-report` that the agent container reads, so
       // scrub credential shapes out of it here, at the point the third-party
       // text enters our own error string.
-      const detail = scrubSecretMaterial(stderr.trim() || stdout.trim());
+      const detail = scrubSecretMaterial(
+        (stderr.trim() || stdout.trim()).slice(0, DOCKER_EXEC_DETAIL_MAX_CHARS),
+      );
       throw new Error(`docker ${args[0]} failed (exit ${code}): ${detail}`);
     }
     return stdout.trim();
@@ -280,38 +296,29 @@ async function killContainer(containerId: string): Promise<void> {
  * POSIX path. The extra check below adds a second floor: top-level system
  * directories the runner has no business mutating from credential mounts.
  *
- * Rejected prefixes:
- *   - `/dev/`, `/proc/`, `/sys/` — kernel-managed; mounting credentials
- *     there would corrupt the running container, not write a file.
- *   - `/etc/passwd*`, `/etc/shadow*`, `/etc/sudoers*` — privilege escalation
- *     surface; even if the runner is `--cap-drop ALL`, mounting over these
- *     is operator error worth refusing loudly.
- *   - `/usr/`, `/workspace/` — directories the runner image really has, whose
- *     mode and ownership a staged PARENT would carry into the container (see
- *     {@link stageFileMountsOnHost}). `/workspace` is the per-run volume
- *     SHARED with the agent container and chowned to the runner uid at create
- *     time, so clobbering it reaches beyond this runner; `/usr` is the image's
- *     own tree and a PATH directory. Neither is a credential destination —
- *     `delivery.files` exists for certs, keys and service-account JSON, which
- *     belong under `/run/`, `/etc/<vendor>/` or `/tmp/`.
- *   - `/.docker/`, `/.dockerenv` — Docker-private surfaces.
+ * Rejected, and by whom:
+ *   - SHARED FLOOR ({@link isPathSafeForMount}, every adapter): kernel-managed
+ *     trees (`/dev/`, `/proc/`, `/sys/`); everything the system reads on its
+ *     own initiative — the PATH and loader search directories (`/usr/`,
+ *     `/bin/`, `/sbin/`, `/lib`, `/lib64`), the loader/shell/cron/auth files and
+ *     drop-in subtrees, root's home, the system trust store, and the
+ *     passwd/shadow/sudoers/group families; and `/workspace/`. None of those
+ *     hazards is container-specific — they are WORSE on the process adapter,
+ *     which has fewer containment layers — and `/workspace` is the per-run
+ *     volume SHARED with the agent container and chowned to the runner uid at
+ *     create time, so clobbering it reaches beyond this runner. `/usr/` and
+ *     `/workspace/` were passed here as this adapter's extras until the floor
+ *     absorbed them.
+ *   - DOCKER-ONLY: `/.docker/` (prefix) and `/.dockerenv` (file). They exist
+ *     inside a runner container and mean nothing on a host filesystem.
  *
- * Which of those are SHARED with the process adapter
- * (`isHostPathSafeForMount`), and which are this adapter's own:
- *   - SHARED: the kernel-managed + privilege-escalation floor, `/usr/` and
- *     `/workspace/`. The PATH-plant and workspace-collision hazards are not
- *     container hazards — they are worse on the process adapter, which has
- *     fewer containment layers.
- *   - DOCKER-ONLY: `/.docker/` and `/.dockerenv`. They exist inside a runner
- *     container and mean nothing on a host filesystem.
+ * Still SUPPORTED, and the reason `/etc` is refused file-by-file rather than
+ * wholesale: `delivery.files` exists for certs, keys and service-account JSON,
+ * which belong under `/run/`, `/etc/<vendor>/` or `/tmp/`.
  */
 export function isContainerPathSafeForMount(containerPath: string): boolean {
-  // Shared floor (kernel-managed + privilege-escalation via
-  // `isPathSafeForMount`, plus `/usr/` and `/workspace/` which the process
-  // adapter also refuses) + the Docker-private surfaces `/.docker/` (prefix)
-  // and `/.dockerenv` (file).
   return isPathSafeForMount(containerPath, {
-    extraForbiddenPrefixes: ["/.docker/", "/usr/", "/workspace/"],
+    extraForbiddenPrefixes: ["/.docker/"],
     extraForbiddenFiles: ["/.dockerenv"],
   });
 }
@@ -391,13 +398,18 @@ export async function stageFileMountsOnHost(
     // The root rides the tar as `./` and lands on the container's `/`; see the
     // directory-modes section above for why `mkdtemp`'s 0700 cannot stay.
     await chmod(root, 0o755);
-    for (const [containerPath, entry] of Object.entries(fileMounts)) {
-      // R8a — refuse paths into kernel-managed / privilege-escalation
-      // surfaces. The platform-side validator already strips `..` /
-      // relative paths; this is the second floor.
+    for (const [declaredPath, entry] of Object.entries(fileMounts)) {
+      // Canonicalize ONCE, then check and stage the same spelling. `resolve()`
+      // below always normalized while the check did not, so `/./usr/local/bin/gh`
+      // passed the check and then staged at `<root>/usr/local/bin/gh` — landing
+      // inside the container on exactly the PATH the check exists to refuse.
+      const containerPath = normalizeMountPath(declaredPath);
+      // R8a — refuse paths into kernel-managed / privilege-escalation /
+      // auto-consumed surfaces. The platform-side validator already strips
+      // `..` / relative paths; this is the second floor.
       if (!isContainerPathSafeForMount(containerPath)) {
         throw new Error(
-          `integration-runtime-adapter-docker: refused to mount credential file at unsafe container path ${containerPath}`,
+          `integration-runtime-adapter-docker: refused to mount credential file at unsafe container path ${declaredPath}`,
         );
       }
       const hostFile = resolve(root, containerPath.replace(/^\/+/, ""));
