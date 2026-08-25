@@ -1163,20 +1163,24 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
   });
 });
 
-describe("executeApiCall — finalUrl: redirect terminus and 401 replay target", () => {
+describe("executeApiCall — finalUrl: redirect terminus", () => {
   /**
-   * `finalUrl` is INTERNAL to the credential proxy. It is where the
-   * redirect follower stopped, what the 401 replay re-issues against, and
-   * what the diagnostic envelope reports as `host` / `redirected`. These
-   * cases pin that terminus across the four paths that can produce it: no
-   * redirect, a followed chain, a chain that dies without a `location`,
-   * and the streaming (`redirect: "manual"`) path.
+   * `finalUrl` is INTERNAL to the credential proxy, and an OUTPUT only: it
+   * is where the redirect follower stopped, and what the diagnostic
+   * envelope reports as `host` / `redirected`. Nothing re-issues against
+   * it — the 401 replay re-issues against the resolved target URL and
+   * re-follows the chain, overwriting this value. These cases pin that
+   * terminus across the four paths that can produce it: no redirect, a
+   * followed chain, a chain that dies without a `location`, and the
+   * streaming (`redirect: "manual"`) path.
    *
    * It is NOT an agent-visible field. The `_meta` projection this describe
    * was originally written for (#471) is gone along with
-   * `UpstreamMeta.finalUrl`; an agent following a redirect chain reads
-   * `_meta.headers.location`, which is on `UPSTREAM_HEADER_ALLOWLIST`.
-   * Nothing here asserts anything about `_meta` — that is the point.
+   * `UpstreamMeta.finalUrl` — and no other channel replaced it: the agent
+   * cannot see a redirect's `location` at all (see the `redirect: "manual"`
+   * comment in `doUpstreamRequest`), so a caller that must follow one
+   * re-issues with a buffered body and lets the manual follower walk the
+   * chain. Nothing here asserts anything about `_meta` — that is the point.
    */
   it("returns the resolved target URL when no redirect happens", async () => {
     const deps = makeDeps();

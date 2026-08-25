@@ -110,11 +110,14 @@ const CORPUS: Case[] = [
   },
   {
     // Not provider text: the sidecar manufactures this for EVERY failure on an
-    // aliased model (`syntheticAliasErrorMessage`, `packages/core/src/model-swap.ts`)
-    // so no provider name leaks to the agent — which means it reaches both
-    // classifiers exactly like real provider text, and belongs in the corpus.
+    // aliased model (`syntheticAliasClassifierMessage`,
+    // `packages/core/src/model-swap.ts`) so no provider name leaks to the agent
+    // — which means it reaches both classifiers exactly like real provider
+    // text, and belongs in the corpus. The alias is NOT in it: both classifiers
+    // are substring matchers and an alias is org-controlled text, so an alias
+    // like `gpt-500-fast` would otherwise pick this entry's verdict.
     name: 'platform-manufactured alias error, no status ("Upstream model error")',
-    message: 'Upstream model error (model "my-alias")',
+    message: "Upstream model error",
     category: "upstream_unavailable",
     // The two verdicts differ HERE, and both are right: the SDK finds no
     // retryable pattern in this deliberately neutral prose and stops trying

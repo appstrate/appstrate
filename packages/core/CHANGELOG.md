@@ -12,18 +12,50 @@ Not yet on npm: `8.0.0` is the published version, and `package.json` /
 
 ### Added
 
-- **`projectAliasUpstreamStatus`** and **`ALIAS_COLLAPSED_UPSTREAM_STATUS`**
-  (`./model-swap`) — the allowlist an aliased upstream status must pass before
-  it is disclosed. A status describes the transaction, not the backing, which is
-  why forwarding one costs no opacity and buys back the container's retry
-  budget — but that reasoning holds only for GENERIC codes. `529` is Anthropic's
-  own overload code and `520`–`526` say the backing sits behind Cloudflare, so
-  those name a vendor as surely as its prose does and are collapsed to `502`.
-  An allowlist, not a denylist: the space of vendor- and CDN-specific codes is
-  unenumerable, so a new one must default to opaque. Both boundaries that
-  replace an upstream failure — the sidecar's re-originated `pi-messages` error
-  event and the platform gateway's synthesized response — now call it, so they
-  cannot drift apart. Additive; nothing removed or renamed.
+- **`syntheticAliasClassifierMessage`** (`./model-swap`) — REPLACES
+  **`syntheticAliasErrorMessage`**, which is REMOVED. Same neutral prose, one
+  difference: it takes no `ModelSwap`, so an alias cannot be interpolated into
+  it. Both classifiers that read this string are substring matchers — pi-ai's
+  `isRetryableAssistantError` alternates over `429`/`500`/`502`/`503`/`504`/
+  `524`/`overloaded`/`rate.?limit`/the timeout family, and this package's own
+  `classifyModelError` reads a `\b[45]\d\d\b` out of it — while an alias is
+  ORG-CONTROLLED text. An alias named `gpt-500-fast` (not a contrived name)
+  made EVERY failure on it retryable, terminal `400` included, on both
+  classifiers. The status is still interpolated, and only from the enumerated
+  forwardable set, so the integers that can appear are a closed list of
+  fourteen. Callers of the old helper drop the swap argument and pass the
+  status alone.
+- **`syntheticAliasErrorBody`** (`./model-swap`) — **behaviour change**, name
+  and signature unchanged. The alias moved OUT of `error.message` and into a
+  new `error.model` field — `error.message` is now
+  `"Upstream model error (status 502)"` and `error.model` is `"<alias>"`. An
+  operator still reads which model failed; the sentence a classifier consumes
+  no longer carries org-controlled text. A consumer parsing the alias out of
+  `error.message` must read `error.model` instead.
+- **`projectAliasUpstreamStatus`**,
+  **`ALIAS_COLLAPSED_TRANSIENT_UPSTREAM_STATUS`** and
+  **`ALIAS_COLLAPSED_TERMINAL_UPSTREAM_STATUS`** (`./model-swap`) — the
+  allowlist an aliased upstream status must pass before it is disclosed, and
+  the two codes the rest collapse to. A status describes the transaction, not
+  the backing, which is why forwarding one costs no opacity and buys back the
+  container's retry budget — but that reasoning holds only for GENERIC codes.
+  `529` is Anthropic's own overload code, `520`–`526` say the backing sits
+  behind Cloudflare, `402` is an aggregating gateway out of credit, `422` is
+  Mistral's validation verdict where Anthropic and OpenAI answer `400`, and
+  `431` is an edge code no model API emits: each names a backing as surely as
+  its prose does, so each is collapsed. The collapse target is chosen by the
+  status CLASS, because pi-ai's retry classifier reads the projected status out
+  of the message text and a single target would decide retryability for every
+  failure alike: a 4xx collapses to `400`
+  (`ALIAS_COLLAPSED_TERMINAL_UPSTREAM_STATUS`, matched by neither of pi-ai's
+  patterns, so a permanent failure fails fast) and everything else to `502`
+  (`ALIAS_COLLAPSED_TRANSIENT_UPSTREAM_STATUS`, retryable). An allowlist, not a
+  denylist: the space of vendor- and CDN-specific codes is unenumerable, so a
+  new one must default to opaque — and the class-based target makes that
+  default right on the retry axis too. Both boundaries that replace an upstream
+  failure — the sidecar's re-originated `pi-messages` error event and the
+  platform gateway's synthesized response — now call it, so they cannot drift
+  apart. Additive; nothing removed or renamed.
 - **`isUnconstrainedSchema`** (`./schema-validation`) — "can this schema reject
   any object at all?", the predicate the validators short-circuit on. Additive;
   nothing is removed or renamed. It replaces the `!schema.properties ||

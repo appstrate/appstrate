@@ -37,9 +37,9 @@ import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "@appstrate/runner-pi/mod
 import { logger } from "./logger.ts";
 import {
   syntheticAliasErrorBody,
-  syntheticAliasErrorMessage,
+  syntheticAliasClassifierMessage,
   projectAliasUpstreamStatus,
-  ALIAS_COLLAPSED_UPSTREAM_STATUS,
+  ALIAS_COLLAPSED_TRANSIENT_UPSTREAM_STATUS,
 } from "./model-swap.ts";
 import { streamBacking } from "./pi-sdk.ts";
 import type {
@@ -207,15 +207,18 @@ const ALIAS_MAX_RETRY_DELAY_MS = 10_000;
  * protocol and re-originated upstream, so "I could not reach the backing" is a
  * 502 and "the backing went silent on me" is a 504.
  *
- * The unreachable status IS core's {@link ALIAS_COLLAPSED_UPSTREAM_STATUS}
- * rather than a second literal `502` — the two must move together (a caller
- * cannot tell "the sidecar could not reach the backing" from "the backing
- * answered something too vendor-specific to forward", and both must stay
- * retryable under pi-ai's classifier), and a magic number one package away
- * from the constant it has to equal is exactly the drift this boundary exists
- * to prevent.
+ * The unreachable status IS core's
+ * {@link ALIAS_COLLAPSED_TRANSIENT_UPSTREAM_STATUS} rather than a second
+ * literal `502` — the two must move together (a caller cannot tell "the
+ * sidecar could not reach the backing" from "the backing answered a transient
+ * failure too vendor-specific to forward", and both must stay retryable under
+ * pi-ai's classifier), and a magic number one package away from the constant
+ * it has to equal is exactly the drift this boundary exists to prevent. The
+ * TERMINAL collapse target is deliberately NOT reused here: a hop the sidecar
+ * could not complete is transient by definition, and reporting it as terminal
+ * would spend the container's retry budget on nothing.
  */
-const SIDECAR_UPSTREAM_UNREACHABLE_STATUS = ALIAS_COLLAPSED_UPSTREAM_STATUS;
+const SIDECAR_UPSTREAM_UNREACHABLE_STATUS = ALIAS_COLLAPSED_TRANSIENT_UPSTREAM_STATUS;
 const SIDECAR_UPSTREAM_IDLE_STATUS = 504;
 
 /** Records the status of the last upstream response of one re-originated call. */
@@ -643,7 +646,7 @@ export function handlePiMessagesRequest(
               // 504, not the backing's last status: the stall is THIS hop's
               // verdict on the exchange, and it is unambiguously transient —
               // which is the whole point of carrying a status here.
-              errorMessage: syntheticAliasErrorMessage(swap, SIDECAR_UPSTREAM_IDLE_STATUS),
+              errorMessage: syntheticAliasClassifierMessage(SIDECAR_UPSTREAM_IDLE_STATUS),
             };
             break;
           }
@@ -658,10 +661,10 @@ export function handlePiMessagesRequest(
             // Attached here so the projection never reads the alias descriptor.
             // The STATUS travels with it: it is the only thing in the replaced
             // message the container's retry classifier can act on, and it names
-            // no vendor — see {@link syntheticAliasErrorMessage}.
+            // no vendor — see {@link syntheticAliasClassifierMessage}.
             terminal = {
               ...projected,
-              errorMessage: syntheticAliasErrorMessage(swap, statusProbe.failureStatus()),
+              errorMessage: syntheticAliasClassifierMessage(statusProbe.failureStatus()),
             };
             break;
           }
@@ -696,7 +699,7 @@ export function handlePiMessagesRequest(
           // Reached when the generator ended with no terminal, or the stream
           // machinery threw. Whatever the probe saw still describes it best: a
           // status the backing reported, or 502 for "never got that far".
-          errorMessage: syntheticAliasErrorMessage(swap, statusProbe.failureStatus()),
+          errorMessage: syntheticAliasClassifierMessage(statusProbe.failureStatus()),
         };
       }
       controller.enqueue(encoder.encode(sseFrame(terminal)));

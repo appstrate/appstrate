@@ -37,6 +37,7 @@ import {
   buildProxyEnvBlock,
   buildCaEnvBlock,
   isPathSafeForMount,
+  normalizeMountPath,
   registerIntegrationRuntimeAdapter,
   resolveBundleEntry,
   WORKSPACE_ENV_VAR,
@@ -212,20 +213,20 @@ function planSubprocess(spec: IntegrationSpawnSpec, bundleRoot: string): Subproc
 /**
  * R8a — safe-path floor for `delivery.files` on the process adapter.
  *
- * SHARED with the docker adapter ({@link isContainerPathSafeForMount}), because
- * these surfaces are dangerous wherever the bytes land:
- *   - `/dev/`, `/proc/`, `/sys/` and the passwd/shadow/sudoers/group families —
- *     the kernel-managed + privilege-escalation floor {@link isPathSafeForMount}
- *     enforces for every adapter;
- *   - `/usr/` — a PATH directory. `materializeFileMountsOnHost` does
- *     `mkdir -p` + `writeFile` at the manifest-declared path with the
- *     manifest-declared mode, so `delivery.files: { "/usr/local/bin/gh": … }`
- *     plants an executable on the PATH of everything that runs next. This
- *     adapter has FEWER containment layers than docker, not more: it is the
- *     Tier-0 default and what the Firecracker orchestrator pins, so the bytes
- *     reach the host or the guest rootfs directly.
- *   - `/workspace/` — the per-run tree shared with the agent container, so a
- *     credential mount there collides with (or clobbers) run artifacts.
+ * ENTIRELY the shared floor: {@link isPathSafeForMount} refuses every surface
+ * the system reads on its own initiative — kernel-managed trees, the PATH and
+ * loader search directories, the loader/shell/cron/auth files, the system
+ * trust store, and the per-run `/workspace/` tree. `/usr/` and `/workspace/`
+ * used to be passed here as this adapter's extras; they are not
+ * adapter-specific and both adapters passed them, so they moved into the floor
+ * along with the rest of the class `/usr/` was refused for.
+ *
+ * Why the floor matters MORE here than under docker: this adapter has FEWER
+ * containment layers, not more. It is the Tier-0 default and what the
+ * Firecracker orchestrator pins, and `materializeFileMountsOnHost` does
+ * `mkdir -p` + `writeFile` at the manifest-declared path with the
+ * manifest-declared mode, so the bytes reach the host or the guest rootfs
+ * directly.
  *
  * ADAPTER-SPECIFIC, and deliberately NOT enforced here: `/.docker/` and
  * `/.dockerenv`. Those are Docker-private surfaces that exist inside a runner
@@ -235,9 +236,7 @@ function planSubprocess(spec: IntegrationSpawnSpec, bundleRoot: string): Subproc
  * belong under `/run/`, `/etc/<vendor>/` or `/tmp/` — none of the above.
  */
 export function isHostPathSafeForMount(hostPath: string): boolean {
-  return isPathSafeForMount(hostPath, {
-    extraForbiddenPrefixes: ["/usr/", "/workspace/"],
-  });
+  return isPathSafeForMount(hostPath);
 }
 
 export async function materializeFileMountsOnHost(
@@ -247,14 +246,21 @@ export async function materializeFileMountsOnHost(
   const createdPaths: string[] = [];
   const envOverrides: Record<string, string> = {};
 
-  for (const [containerPath, entry] of Object.entries(fileMounts)) {
-    // R8a — refuse kernel-managed / privilege-escalation surfaces even on
-    // the process adapter. The fallback scratch path bypass is also gated
-    // on this check: a manifest pointing at `/dev/null` would otherwise
-    // silently write to the scratch dir, mojibake'ing the contract.
+  for (const [declaredPath, entry] of Object.entries(fileMounts)) {
+    // The path is canonicalized ONCE, and everything downstream — the safety
+    // check, the `mkdir -p`, the `writeFile`, the scratch mirror and the env
+    // override name — uses that one form. Checking `/./usr/local/bin/gh` while
+    // writing it is how the floor was bypassed: the check compared strings and
+    // the kernel resolved the path, landing the file on the PATH the check had
+    // just refused.
+    const containerPath = normalizeMountPath(declaredPath);
+    // R8a — refuse kernel-managed / privilege-escalation / auto-consumed
+    // surfaces even on the process adapter. The fallback scratch path bypass
+    // is also gated on this check: a manifest pointing at `/dev/null` would
+    // otherwise silently write to the scratch dir, mojibake'ing the contract.
     if (!isHostPathSafeForMount(containerPath)) {
       logger.warn("delivery.files: refused to mount credential file at unsafe path; skipping", {
-        manifestPath: containerPath,
+        manifestPath: declaredPath,
       });
       continue;
     }

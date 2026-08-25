@@ -766,7 +766,7 @@ describe("handlePiMessagesRequest", () => {
     expect(error.type).toBe("error");
     // 502: pi-ai failed this turn without any upstream response reaching the
     // status probe, which is what "unreachable backing" looks like from here.
-    expect(error.errorMessage).toBe('Upstream model error (model "appstrate-medium", status 502)');
+    expect(error.errorMessage).toBe("Upstream model error (status 502)");
     expect(JSON.stringify(frames)).not.toContain("deepseek");
   });
 
@@ -790,8 +790,10 @@ describe("handlePiMessagesRequest", () => {
       "{not json",
     );
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: { message: string } };
-    expect(body.error.message).toContain("appstrate-medium");
+    const body = (await res.json()) as { error: { message: string; model: string } };
+    // The alias is in the structured field, not in the classified sentence.
+    expect(body.error.model).toBe("appstrate-medium");
+    expect(body.error.message).not.toContain("appstrate-medium");
     expect(JSON.stringify(body)).not.toContain("deepseek");
   });
 
@@ -838,9 +840,7 @@ describe("handlePiMessagesRequest", () => {
     // become the one path that names the backing. 504 is this hop's own verdict
     // ("the backing went silent on me"), and it is what makes the container
     // classify the stall as transient instead of fatal.
-    expect(terminal.errorMessage).toBe(
-      'Upstream model error (model "appstrate-medium", status 504)',
-    );
+    expect(terminal.errorMessage).toBe("Upstream model error (status 504)");
     expect(JSON.stringify(frames)).not.toContain("deepseek");
 
     const stall = warnings.find(
@@ -999,9 +999,7 @@ describe("transient upstream failures", () => {
     const frames = await runAgainst(scriptedUpstream([429]).fetch);
     const terminal = frames.at(-1) as Extract<PiMessagesEvent, { type: "error" }>;
     expect(terminal.type).toBe("error");
-    expect(terminal.errorMessage).toBe(
-      'Upstream model error (model "appstrate-medium", status 429)',
-    );
+    expect(terminal.errorMessage).toBe("Upstream model error (status 429)");
 
     // Asked of pi-ai's OWN classifier, not of a transcription of its regex —
     // this assertion has to keep meaning something after a pi upgrade.
@@ -1019,9 +1017,7 @@ describe("transient upstream failures", () => {
     // happens to match — e.g. if the alias name alone tripped the regex.
     const frames = await runAgainst(scriptedUpstream([400]).fetch);
     const terminal = frames.at(-1) as Extract<PiMessagesEvent, { type: "error" }>;
-    expect(terminal.errorMessage).toBe(
-      'Upstream model error (model "appstrate-medium", status 400)',
-    );
+    expect(terminal.errorMessage).toBe("Upstream model error (status 400)");
     expect(
       isRetryableAssistantError({
         ...partialMessage([]),
@@ -1040,9 +1036,7 @@ describe("transient upstream failures", () => {
     for (const fingerprint of [529, 520, 524]) {
       const frames = await runAgainst(scriptedUpstream([fingerprint]).fetch);
       const terminal = frames.at(-1) as Extract<PiMessagesEvent, { type: "error" }>;
-      expect(terminal.errorMessage).toBe(
-        'Upstream model error (model "appstrate-medium", status 502)',
-      );
+      expect(terminal.errorMessage).toBe("Upstream model error (status 502)");
       expect(
         isRetryableAssistantError({
           ...partialMessage([]),
@@ -1057,17 +1051,119 @@ describe("transient upstream failures", () => {
     // Without this the collapse above could be a blanket 502 that throws away
     // the 429/400 partition the two cases before this one depend on.
     //
-    // 413 and 402 carry the second axis: neither fingerprints a vendor, and
-    // both are TERMINAL. Collapsed to 502 they land inside pi-ai's retryable
-    // pattern, so the container spends its whole budget re-sending an
-    // oversized prompt or a request against an exhausted balance.
-    for (const generic of [401, 404, 409, 503, 402, 413, 422]) {
+    // 405/413/415 are here on the second axis: they are verdicts on the HTTP
+    // framing that any server answers, so they fingerprint nothing, and they
+    // are TERMINAL. Collapsed to 502 they would land inside pi-ai's retryable
+    // pattern and the container would spend its whole budget re-sending an
+    // oversized prompt.
+    for (const generic of [401, 404, 409, 503, 405, 413, 415]) {
       const frames = await runAgainst(scriptedUpstream([generic]).fetch);
       const terminal = frames.at(-1) as Extract<PiMessagesEvent, { type: "error" }>;
-      expect(terminal.errorMessage).toBe(
-        `Upstream model error (model "appstrate-medium", status ${generic})`,
-      );
+      expect(terminal.errorMessage).toBe(`Upstream model error (status ${generic})`);
     }
+  });
+
+  it("collapses a PERMANENT vendor-identifying status without making it retryable", async () => {
+    // The defect this case exists for: the two axes were traded against each
+    // other. 402 (an aggregating gateway out of credit — Anthropic, OpenAI and
+    // Mistral have no 402), 422 (Mistral's validation verdict where the others
+    // answer 400) and 431 (an edge/CDN code) each name the backing, so they
+    // must be collapsed; and each is PERMANENT, so collapsing them to the
+    // transient 502 target would have the container retry to exhaustion.
+    //
+    // 402 is the sharpest: pi-ai's NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN
+    // keys on words like "billing" and "insufficient_quota", and this boundary
+    // has already replaced every one of them with "Upstream model error" — the
+    // projected status is the ONLY signal left.
+    for (const fingerprint of [402, 422, 431]) {
+      const frames = await runAgainst(scriptedUpstream([fingerprint]).fetch);
+      const terminal = frames.at(-1) as Extract<PiMessagesEvent, { type: "error" }>;
+      // Opaque: the upstream number never reaches the container.
+      expect(terminal.errorMessage).toBe("Upstream model error (status 400)");
+      // AND terminal, asked of pi-ai's own classifier rather than a
+      // transcription of its regex.
+      expect(
+        isRetryableAssistantError({
+          ...partialMessage([]),
+          stopReason: "error",
+          errorMessage: terminal.errorMessage!,
+        }),
+      ).toBe(false);
+    }
+  });
+
+  /**
+   * THE ESCAPE HATCH from the terminal-vs-transient projection: an alias is
+   * ORG-CONTROLLED text, and the field pi-ai classifies is a substring match.
+   * Interpolated into it, `gpt-500-fast` (not a contrived name) matched the
+   * `500` literal in `RETRYABLE_PROVIDER_ERROR_PATTERN` and made EVERY failure
+   * on that alias retryable — including the terminal `400` this boundary
+   * collapses a permanent, vendor-identifying failure to. The org, not the
+   * transaction, decided the retry verdict.
+   *
+   * The fix is structural, not a keyword filter: `syntheticAliasClassifier\
+   * Message` takes no `ModelSwap`, so there is nothing org-controlled to
+   * interpolate. Sanitizing against pi-ai's list would couple this boundary to
+   * their internals and rot the first time they add a pattern.
+   */
+  const HOSTILE_ALIASES = [
+    "gpt-500-fast",
+    "turbo-502",
+    "claude-overloaded-x",
+    "rate-limit-lite",
+    "model-524-preview",
+    "timeout-tuned-3",
+  ];
+
+  /** Drive one aliased turn under `alias`, and report the terminal event. */
+  async function runUnderAlias(
+    alias: string,
+    upstream: typeof fetch,
+  ): Promise<Extract<PiMessagesEvent, { type: "error" }>> {
+    const base = depsFor(BACKINGS[0]!);
+    const res = handlePiMessagesRequest(
+      { ...base, swap: { ...base.swap, alias }, fetchImpl: upstream },
+      new Request("http://sidecar:8080/llm/messages", { method: "POST" }),
+      CLIENT_BODY,
+    );
+    const frames = await readFrames(res);
+    return frames.at(-1) as Extract<PiMessagesEvent, { type: "error" }>;
+  }
+
+  it("an alias carrying 500/502/overloaded cannot make a terminal failure retryable", async () => {
+    for (const alias of HOSTILE_ALIASES) {
+      // 402 is a permanent, vendor-identifying failure: it collapses to the
+      // TERMINAL 400 target, and that verdict must survive the alias.
+      const terminal = await runUnderAlias(alias, scriptedUpstream([402]).fetch);
+      expect(terminal.errorMessage).toBe("Upstream model error (status 400)");
+      // Asked of pi-ai's OWN classifier — a hand-copied regex would rot exactly
+      // the way the docstring this fix replaced did.
+      expect(
+        isRetryableAssistantError({
+          ...partialMessage([]),
+          stopReason: "error",
+          errorMessage: terminal.errorMessage!,
+        }),
+      ).toBe(false);
+      // The name never reaches the classified field at all — the property, not
+      // a spot-check on the six names above.
+      expect(terminal.errorMessage).not.toContain(alias);
+    }
+  });
+
+  it("control: the status still partitions retryable from terminal under a hostile alias", async () => {
+    // Without this the case above could pass by a message so neutral it is
+    // ALWAYS terminal, which would silently take back the container's retry
+    // budget on a real 429.
+    const terminal = await runUnderAlias("gpt-500-fast", scriptedUpstream([429]).fetch);
+    expect(terminal.errorMessage).toBe("Upstream model error (status 429)");
+    expect(
+      isRetryableAssistantError({
+        ...partialMessage([]),
+        stopReason: "error",
+        errorMessage: terminal.errorMessage!,
+      }),
+    ).toBe(true);
   });
 
   it("still names nothing: the upstream's own error body never reaches the client", async () => {

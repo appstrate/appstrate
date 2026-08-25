@@ -99,7 +99,10 @@ describe("/llm/* alias surface restriction", () => {
       type: "error",
       error: { type: "upstream_error" },
     });
-    expect(body.error.message).toContain("appstrate-medium");
+    // The alias rides `error.model`, a STRUCTURED field — never `error.message`,
+    // which is what a retry classifier substring-matches.
+    expect(body.error.model).toBe("appstrate-medium");
+    expect(body.error.message).not.toContain("appstrate-medium");
     expect(JSON.stringify(body)).not.toContain("deepseek");
     // Refused BEFORE the fetch, so the real credential was never spent on it.
     expect(calls()).toBe(0);
@@ -206,9 +209,7 @@ describe("/llm/* re-origination routing (aliased run)", () => {
     // The neutral envelope — pi-ai's own prose interpolates the provider. The
     // status is the sidecar's own 502: nothing upstream ever answered, so there
     // is no backing status to report and "unreachable" is what it was.
-    expect(frames[0]!["errorMessage"]).toBe(
-      'Upstream model error (model "appstrate-medium", status 502)',
-    );
+    expect(frames[0]!["errorMessage"]).toBe("Upstream model error (status 502)");
     expect(body).not.toContain("deepseek");
     expect(fetchFn).not.toHaveBeenCalled();
   });

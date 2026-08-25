@@ -106,8 +106,11 @@ always-on unit job:
   card can travel.
 - **Errors name nothing.** pi-ai's own error paths interpolate `model.provider`
   (`No API key provided for provider "<x>"`). The `error` event's message is
-  REPLACED with `syntheticAliasErrorMessage`, same whitelist posture as every
-  other alias error surface. The response stays `200 + SSE` even on failure:
+  REPLACED with `syntheticAliasClassifierMessage`, same whitelist posture as
+  every other alias error surface. That helper takes NO `ModelSwap`: the alias
+  is org-controlled text and this string is what a retry classifier matches on,
+  so an alias named `gpt-500-fast` would otherwise make every failure on it
+  retryable. The response stays `200 + SSE` even on failure:
   pi-ai's `pi-messages` reader treats a non-2xx as a transport failure and never
   reaches the terminal event, so a refusal must arrive as an error EVENT to read
   as a failed turn rather than an opaque one.
@@ -190,10 +193,16 @@ neutral synthesized envelope (`syntheticAliasErrorBody`):
   "type": "error",
   "error": {
     "type": "upstream_error",
-    "message": "Upstream model error (model \"<alias>\", status 529)"
+    "message": "Upstream model error (status 502)",
+    "model": "<alias>"
   }
 }
 ```
+
+The alias is a STRUCTURED field, never part of `message`. An operator still
+reads which model failed; the sentence a classifier consumes carries nothing
+org-controlled. (`529` above became `502`: the status is projected before it is
+disclosed — see the status table below.)
 
 This is a whitelist by construction — a scrub would be a blacklist where every
 forgotten surface is a new leak.
@@ -233,12 +242,13 @@ differently — and neither does it by "letting the headers flow".**
   the only side that can read `retry-after`, so it runs pi-ai's own bounded
   provider retry against the backing before reporting anything. (2) What the
   container is told is the STATUS, carried inside the synthesized message —
-  `Upstream model error (model "appstrate-flash", status 429)`. That is not
-  cosmetic: pi's `isRetryableAssistantError` classifies a failed turn by regex
-  over exactly that string, so a status-less message reads as permanent and the
-  container's turn-level retry budget never fires. See
-  `syntheticAliasErrorMessage` for why disclosing the integer costs no opacity
-  (a status describes the transaction, not the vendor).
+  `Upstream model error (status 429)`. That is not cosmetic: pi's
+  `isRetryableAssistantError` classifies a failed turn by regex over exactly
+  that string, so a status-less message reads as permanent and the container's
+  turn-level retry budget never fires. See `syntheticAliasClassifierMessage`
+  for why disclosing the integer costs no opacity (a status describes the
+  transaction, not the vendor) — and why the ALIAS, which does not, is kept out
+  of that same string.
 
 Non-aliased models keep full verbatim passthrough (bodies, headers, hostnames)
 — the opacity cost applies only to aliases, whose contract is precisely that

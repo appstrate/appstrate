@@ -22,10 +22,10 @@ import {
 
 export {
   syntheticAliasErrorBody,
-  syntheticAliasErrorMessage,
+  syntheticAliasClassifierMessage,
   isAliasInferenceCall,
   projectAliasUpstreamStatus,
-  ALIAS_COLLAPSED_UPSTREAM_STATUS,
+  ALIAS_COLLAPSED_TRANSIENT_UPSTREAM_STATUS,
   LLM_PASSTHROUGH_RESPONSE_HEADERS,
 } from "@appstrate/core/model-swap";
 

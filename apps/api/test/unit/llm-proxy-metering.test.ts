@@ -431,13 +431,11 @@ describe("forwardMeteredResponse — aliased error synthesis and header allowlis
     // status every vendor answers alike carries no fingerprint, and collapsing
     // it would lose the one classification signal the scrubbed body left.
     //
-    // 402/405/413/415/422/431 are here because the collapse is not only opaque,
-    // it is RETRYABLE: pi-ai matches the literal "502". A terminal 413
-    // (oversized prompt) or 402 (exhausted credits) collapsed to 502 is retried
-    // to exhaustion on a request that can never succeed.
-    for (const status of [
-      400, 401, 402, 403, 404, 405, 408, 409, 413, 415, 422, 429, 431, 500, 502, 503, 504,
-    ]) {
+    // 405/413/415 are here on the same footing: they are verdicts on the HTTP
+    // framing (method, body size, media type) that any server answers, so no
+    // candidate backing is singled out — and forwarded they stay TERMINAL
+    // under pi-ai's classifier, which is what an oversized prompt deserves.
+    for (const status of [400, 401, 403, 404, 405, 408, 409, 413, 415, 429, 500, 502, 503, 504]) {
       const upstream = new Response(JSON.stringify({ error: { message: "x" } }), {
         status,
         headers: { "content-type": "application/json" },
@@ -446,6 +444,36 @@ describe("forwardMeteredResponse — aliased error synthesis and header allowlis
         swap,
       });
       expect(res.status).toBe(status);
+    }
+  });
+
+  it("collapses a vendor-identifying 4xx to a TERMINAL 400, not a retryable 502", async () => {
+    // The status is disclosed twice on this path — as the HTTP status and
+    // inside the synthetic body — so a code only some candidates answer is a
+    // fingerprint either way. 402 (an aggregating gateway out of credit),
+    // 422 (Mistral's validation verdict where Anthropic/OpenAI answer 400) and
+    // 431 (an edge/CDN code) are all such codes, and all three are PERMANENT:
+    // collapsing them to 502 would put them inside pi-ai's retryable pattern
+    // and spend the container's whole budget re-sending a doomed request.
+    for (const fingerprint of [402, 422, 431]) {
+      const upstream = new Response(
+        JSON.stringify({ error: { message: "insufficient credits" } }),
+        {
+          status: fingerprint,
+          headers: { "content-type": "application/json" },
+        },
+      );
+      const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
+        swap,
+      });
+      expect(res.status).toBe(400);
+      const text = await res.text();
+      // The number in the body is the PROJECTED one: the two disclosures of
+      // the status must not disagree, or the body re-leaks what the status
+      // line was scrubbed of.
+      expect(text).toContain("status 400");
+      expect(text).not.toContain(String(fingerprint));
+      expect(text).not.toContain("credits");
     }
   });
 

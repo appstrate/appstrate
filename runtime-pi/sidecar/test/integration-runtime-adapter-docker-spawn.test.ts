@@ -318,11 +318,20 @@ describe("stageFileMountsOnHost — delivery.files (AFPS §7.6, CC-5)", () => {
   it("refuses a path that would escape the staging root on the host", async () => {
     // The platform-side resolver strips `..`, but the mirror is the first
     // scheme where a `..` that got through would write outside os.tmpdir().
+    //
+    // Which floor catches it MOVED, and the message says so: the container
+    // path is canonicalized before it is judged now, so `/../../etc/cron.d/pwn`
+    // clamps to `/etc/cron.d/pwn` and the safe-path floor refuses it one check
+    // earlier, for naming a cron drop-in. That is the point of canonicalizing
+    // — a spelling no longer decides a verdict — and it leaves the containment
+    // check below as a third floor that nothing currently reaches. Keep it:
+    // it is the only thing standing between a future non-canonical input and
+    // a write outside the staging root.
     await expect(
       stageFileMountsOnHost({
         "/../../etc/cron.d/pwn": { content_b64: Buffer.from("x").toString("base64"), mode: "0400" },
       }),
-    ).rejects.toThrow(/escapes the staging root/);
+    ).rejects.toThrow(/unsafe container path/);
   });
 });
 

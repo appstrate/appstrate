@@ -125,50 +125,104 @@ export const LLM_PASSTHROUGH_RESPONSE_HEADERS: readonly string[] = [
   "x-request-id",
 ];
 
-/** Neutral prose for every synthesized alias error; upstream detail stays in the log. */
+/**
+ * Neutral prose for every synthesized alias error; upstream detail stays in the
+ * log. FIXED text — nothing is interpolated into it but a status from the
+ * enumerated forwardable set, because both classifiers that read it are
+ * substring matchers (see {@link syntheticAliasClassifierMessage}).
+ */
 const ALIAS_UPSTREAM_ERROR_MESSAGE = "Upstream model error";
 
 /**
- * The only upstream statuses an aliased response may carry, and the collapse
- * target for the rest.
+ * The only upstream statuses an aliased response may carry, and how the rest
+ * are collapsed.
  *
- * The set balances TWO axes, and getting either wrong is a real defect:
+ * Every status is judged on TWO INDEPENDENT axes, and a change that trades one
+ * for the other is not a fix:
  *
- * 1. VENDOR IDENTITY — the axis the set was originally drawn on. A status
- *    describes the TRANSACTION, not the backing: every candidate vendor answers
- *    429 when throttled and 400 on a bad request, so forwarding one costs no
- *    opacity. That fails for exactly two families — `529` is Anthropic's own
- *    overload code and `520`–`526` say the backing sits behind Cloudflare —
- *    which name a vendor as surely as its prose does. Those are collapsed.
+ * 1. VENDOR IDENTITY — may the number be disclosed at all? A status normally
+ *    describes the TRANSACTION, not the backing: every candidate backing
+ *    ({@link ALIAS_BACKING_SHAPES} — `anthropic-messages`,
+ *    `openai-completions`, `openai-responses`, `openai-codex-responses`,
+ *    `mistral-conversations`) answers 429 when throttled and 400 on a bad
+ *    request, so forwarding one costs no opacity. A status only SOME of them
+ *    can answer is different: it names the backing as surely as the prose this
+ *    boundary scrubs. Those are collapsed.
  *
- * 2. RETRYABILITY — the axis the first draft missed. The collapse target is
- *    {@link ALIAS_COLLAPSED_UPSTREAM_STATUS} = 502, and pi-ai's
- *    `RETRYABLE_PROVIDER_ERROR_PATTERN` matches the literal `"502"`. So
- *    collapsing does not merely make a status opaque, it makes it RETRYABLE.
- *    That is harmless for the two vendor families above (both are transient
- *    anyway) and wrong for a terminal 4xx: `413` (request too large — what
- *    Anthropic/Vertex/Bedrock answer to an oversized prompt) and `402`
- *    (OpenRouter on exhausted credits) were terminal and became requests
- *    retried to exhaustion that can never succeed. `402` loses more still:
- *    pi-ai's `NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN` keys on the word
- *    "billing", which this boundary has already replaced with
- *    "Upstream model error", so the status is the only actionable signal left.
+ * 2. RETRYABILITY — what may the number be collapsed TO? The container's retry
+ *    budget sits behind pi-ai's `isRetryableAssistantError`, a regex over the
+ *    message text, and the projected status is the ONLY thing left in that
+ *    text once the vendor's prose is replaced. Its
+ *    `RETRYABLE_PROVIDER_ERROR_PATTERN` matches the status literals `429`,
+ *    `500`, `502`, `503`, `504` and `524`; no other 4xx matches anything in
+ *    it, and its `NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN` keys on words
+ *    ("billing", "quota exceeded", "insufficient_quota", …) this boundary has
+ *    already replaced with "Upstream model error". So the collapse TARGET
+ *    decides retryability, and one target cannot serve both kinds of failure:
+ *    collapsing a permanent failure to `502` has the container retry to
+ *    exhaustion a request that can never succeed, while forwarding a
+ *    vendor-identifying code just to keep it terminal re-opens axis 1.
  *
- * `402`, `405`, `413`, `415`, `422` and `431` fingerprint no vendor — every
- * candidate answers them alike — so both axes point the same way and they are
- * forwarded.
+ * Hence two targets, picked by the CLASS of the status being collapsed: a 4xx
+ * becomes {@link ALIAS_COLLAPSED_TERMINAL_UPSTREAM_STATUS} (400 — matched by
+ * neither pi-ai pattern, so terminal) and anything else becomes
+ * {@link ALIAS_COLLAPSED_TRANSIENT_UPSTREAM_STATUS} (502 — retryable). The
+ * class is the upstream's own verdict on whether re-sending the identical
+ * request could ever help, so the projection preserves it rather than
+ * overriding it with whatever the collapse target happens to mean.
  *
- * The set is deliberately an allowlist: an unenumerable space of vendor- and
- * CDN-specific codes cannot be subtracted from safely, and a new one appearing
- * upstream must default to opaque rather than to disclosed. When adding one,
- * check it against BOTH axes.
+ * How each status was judged:
+ *
+ *   - `400` `401` `403` `404` `408` `409` `429` `500` `502` `503` `504` —
+ *     FORWARDED. Generic on axis 1 (every candidate answers them alike), and
+ *     verbatim forwarding is exact on axis 2 by construction.
+ *   - `405` `413` `415` — FORWARDED. These are verdicts on the request's HTTP
+ *     framing (method, body size, media type), not entries in a model API's
+ *     error vocabulary: any HTTP server can answer them and no candidate is
+ *     singled out by one, so axis 1 is clean. All three are terminal when
+ *     forwarded — no substring of `status 413` is in either pi-ai pattern —
+ *     which is the right verdict for an oversized prompt or an unsupported
+ *     media type, so axis 2 is clean too.
+ *   - `402` — COLLAPSED. Anthropic, OpenAI and Mistral have no 402 in their
+ *     error vocabulary; an aggregating gateway out of credit (OpenRouter) does,
+ *     so the number names the backing. The failure is permanent and 400 keeps
+ *     it permanent — which is also the only signal left, since the words
+ *     `NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN` keys on are exactly the ones
+ *     this boundary scrubs.
+ *   - `422` — COLLAPSED. Mistral answers 422 for request-validation failures
+ *     where Anthropic and OpenAI answer 400, so 422-vs-400 partitions the
+ *     candidates. 400 is both the verdict the others give for the same failure
+ *     and terminal.
+ *   - `431` — COLLAPSED. A front-end / CDN code (request headers too large),
+ *     the same class of tell as `520`–`526`: the model API does not emit it,
+ *     the edge in front of it does. Permanent, and 400 keeps it permanent.
+ *   - `529`, `520`–`526` — COLLAPSED, the original reason: `529` is Anthropic's
+ *     own overload code and `520`–`526` say the backing sits behind Cloudflare.
+ *     Both are 5xx and genuinely transient, so 502 hides the tell AND keeps the
+ *     container's retry.
+ *
+ * The set stays an allowlist: the space of vendor- and CDN-specific codes is
+ * unenumerable, so a code nobody has seen must default to opaque rather than to
+ * disclosed — and the class-based target makes that default right on axis 2 as
+ * well, since an unknown 4xx then fails fast and an unknown 5xx is retried.
+ * When adding one, check it against BOTH axes.
  */
 const FORWARDABLE_UPSTREAM_STATUSES: ReadonlySet<number> = new Set([
-  400, 401, 402, 403, 404, 405, 408, 409, 413, 415, 422, 429, 431, 500, 502, 503, 504,
+  400, 401, 403, 404, 405, 408, 409, 413, 415, 429, 500, 502, 503, 504,
 ]);
 
-/** Collapse target: a generic "the upstream hop failed" with no vendor in it. */
-export const ALIAS_COLLAPSED_UPSTREAM_STATUS = 502;
+/**
+ * Collapse target for a TRANSIENT upstream failure: a generic "the upstream hop
+ * failed" with no vendor in it, and retryable under pi-ai's classifier.
+ */
+export const ALIAS_COLLAPSED_TRANSIENT_UPSTREAM_STATUS = 502;
+
+/**
+ * Collapse target for a PERMANENT upstream failure: a generic "that request was
+ * not acceptable", matched by neither pi-ai pattern, so the container fails
+ * fast instead of re-sending a request that can never succeed.
+ */
+export const ALIAS_COLLAPSED_TERMINAL_UPSTREAM_STATUS = 400;
 
 /**
  * Project an upstream status onto the aliased surface. Both boundaries that
@@ -176,50 +230,84 @@ export const ALIAS_COLLAPSED_UPSTREAM_STATUS = 502;
  * error event and the platform gateway's synthesized response — MUST call this
  * before disclosing a status, or the code itself fingerprints the vendor that
  * the body was scrubbed to hide.
+ *
+ * A collapsed 4xx becomes 400 and a collapsed anything-else becomes 502, so
+ * making a status opaque never also makes a permanent failure retryable.
  */
 export function projectAliasUpstreamStatus(status: number): number {
-  return FORWARDABLE_UPSTREAM_STATUSES.has(status) ? status : ALIAS_COLLAPSED_UPSTREAM_STATUS;
+  if (FORWARDABLE_UPSTREAM_STATUSES.has(status)) return status;
+  return status >= 400 && status < 500
+    ? ALIAS_COLLAPSED_TERMINAL_UPSTREAM_STATUS
+    : ALIAS_COLLAPSED_TRANSIENT_UPSTREAM_STATUS;
 }
 
 /**
- * Neutral prose with no protocol envelope: a `pi-messages` `error` event needs a
- * bare string where {@link syntheticAliasErrorBody} needs an HTTP body. pi-ai's own
- * error messages interpolate the provider, so none of them may be forwarded.
+ * True when `status` may be interpolated into a message a retry classifier
+ * reads. The guard is the FORWARDABLE set itself, which makes the integers
+ * that can appear in {@link syntheticAliasClassifierMessage} a closed,
+ * auditable list of fourteen — not "whatever a caller passed". Every caller
+ * already passes either a {@link projectAliasUpstreamStatus} result or a
+ * gateway status of its own, so this never fires in practice; it is here so
+ * that a future caller cannot widen the token set by accident.
+ */
+function isDisclosableAliasStatus(status: number | undefined): status is number {
+  return status !== undefined && FORWARDABLE_UPSTREAM_STATUSES.has(status);
+}
+
+/**
+ * CLASSIFIER SIDE of the alias boundary: the neutral string an aliased failure
+ * puts in a field that a RETRY CLASSIFIER reads — pi-ai's `errorMessage` on a
+ * `pi-messages` error event, and the `error.message` of
+ * {@link syntheticAliasErrorBody}.
+ *
+ * **It takes no {@link ModelSwap}, and that is the whole design.** pi-ai's
+ * `isRetryableAssistantError` is a case-insensitive substring alternation over
+ * exactly this text — `429`, `500`, `502`, `503`, `504`, `524`, `overloaded`,
+ * `rate.?limit`, the timeout family — and the platform's own
+ * `classifyModelError` reads a `\b[45]\d\d\b` out of it. An alias is
+ * ORG-CONTROLLED text. Interpolated here, `gpt-500-fast` (not a contrived
+ * name) made every failure on that alias retryable, terminal `400` included:
+ * the org, not the transaction, decided the retry verdict. Sanitizing the
+ * alias against the classifier's keywords would couple this file to pi-ai's
+ * internals and rot the moment they add a pattern, so the alias is not here to
+ * sanitize.
  *
  * **Pass `status` wherever one is known.** It looks like decoration and is not:
  * this string is the ONLY channel a caller has left to classify the failure,
- * because the body it replaced is gone. pi-ai's `isRetryableAssistantError`
- * (the gate the agent container's retry budget sits behind) is a regex over
- * exactly this text, and its retryable set is largely the transient status
- * literals — `429`, `500`, `502`, `503`, `504`. Omit the status and every
- * aliased failure reads as permanent, so a `429` that the same model on a BYOK
- * credential rides out fails the run instead.
- *
- * Disclosing the integer costs no opacity, which is why the tension resolves
- * this way rather than by loosening the prose: a status describes the
- * TRANSACTION, not the backing. All fourteen candidate vendors answer 429 when
- * throttled and 400 on a bad request, so the number partitions failures by kind
- * and never by vendor — and `MODEL_ALIASES.md` already publishes status codes
- * as part of an alias's contract. What stays replaced is the vendor's prose:
- * model ids, hostnames, provider vocabulary, rate-limit copy.
+ * because the body it replaced is gone. Omit the status and every aliased
+ * failure reads as permanent, so a `429` that the same model on a BYOK
+ * credential rides out fails the run instead. Disclosing the integer costs no
+ * opacity — a status describes the TRANSACTION, not the backing, and
+ * {@link projectAliasUpstreamStatus} has already collapsed the codes that
+ * would name one. What stays replaced is the vendor's prose: model ids,
+ * hostnames, provider vocabulary, rate-limit copy.
  */
-export function syntheticAliasErrorMessage(swap: ModelSwap, status?: number): string {
-  const statusHint = status ? `, status ${status}` : "";
-  return `${ALIAS_UPSTREAM_ERROR_MESSAGE} (model "${swap.alias}"${statusHint})`;
+export function syntheticAliasClassifierMessage(status?: number): string {
+  const statusHint = isDisclosableAliasStatus(status) ? ` (status ${status})` : "";
+  return `${ALIAS_UPSTREAM_ERROR_MESSAGE}${statusHint}`;
 }
 
 /**
- * Caller-facing body replacing a non-2xx upstream response on an ALIASED model:
- * nothing from upstream survives, only the status code and
- * {@link LLM_PASSTHROUGH_RESPONSE_HEADERS}. Carries both family discriminators
- * (`type: "error"` and `error.message`) so one shape parses in either SDK.
+ * WIRE SIDE of the alias boundary: the caller-facing body replacing a non-2xx
+ * upstream response on an ALIASED model. Nothing from upstream survives, only
+ * the projected status code and {@link LLM_PASSTHROUGH_RESPONSE_HEADERS}.
+ * Carries both family discriminators (`type: "error"` and `error.message`) so
+ * one shape parses in either SDK.
+ *
+ * The alias lives in `error.model`, NOT inside `error.message` — an operator
+ * still reads which model failed, and the sentence a classifier consumes stays
+ * free of org-controlled text. That split is not cosmetic: this body reaches
+ * the chat surface's `classifyClientTurnError`, whose status regex matched the
+ * `500` in an alias named `gpt-500-fast` and read a terminal `400` as a
+ * retryable outage. A structured field cannot be mistaken for prose.
  */
 export function syntheticAliasErrorBody(swap: ModelSwap, status?: number): string {
   return JSON.stringify({
     type: "error",
     error: {
       type: "upstream_error",
-      message: syntheticAliasErrorMessage(swap, status),
+      message: syntheticAliasClassifierMessage(status),
+      model: swap.alias,
     },
   });
 }
