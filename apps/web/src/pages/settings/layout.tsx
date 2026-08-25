@@ -511,6 +511,7 @@ export function UnifiedSettingsLayout() {
         data-settings-table-surface="integrated"
         data-settings-content-scope={activeScope}
         data-settings-content-key={contentKey}
+        className="[&_[data-data-table-row]]:[grid-template-columns:var(--dt-cols-3)] [&_[data-data-table-scroll]_table]:min-w-(--dt-full-floor) [&_td[data-data-table-tier]]:flex [&_th[data-data-table-tier]]:block"
       >
         <SettingsPageActionTargetsProvider
           targets={{ desktop: desktopActionTarget, mobile: mobileActionTarget }}

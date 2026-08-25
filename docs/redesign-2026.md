@@ -138,6 +138,7 @@ run it at all:
 bun run lab:shots     # screens × scenarios × widths → PNGs, and the guard below
 bun run lab:measure   # one table's real geometry across a sweep of widths
 bun run lab:settings  # settings context, remount, routing, Back/Close and mobile guard
+bun run lab:settings-data # every settings fact remains reachable at 768 / 390
 bun run lab:tables    # collection versus settings table surfaces at 1440 / 390
 ```
 
@@ -2344,6 +2345,55 @@ That guard also exposed a latent hidden-DOM duplicate: an in-app General entry
 could initialise the mobile settings menu even at desktop width. Initial menu
 opening is now gated by the real mobile breakpoint; the desktop rail remains
 the only settings navigation in its viewport.
+
+**Settings navigation reconciliation, 24 August.** The combined branch already
+contains the last reviewed navigation rather than one of the earlier
+prototypes. On mobile, Settings is the selected destination at the bottom of
+the global drawer, above the account boundary; selecting it again closes that
+drawer. The global two-line header and breadcrumb remain sticky. Inside
+Settings, the one `Menu` trigger opens a full-surface navigation drawer with
+the complete Organisation section and its selector followed by the complete
+Workspace section and its selector. A destination closes that drawer; either
+context selector leaves it open. Desktop and tablet retain the two-section
+rail. The rejected double compact dropdown and the older two framed mobile
+groups are not missing work to merge. `lab:settings` exercises this whole
+contract, including the organisation switcher's mobile viewport fit.
+
+**A hidden settings fact is an inaccessible fact, 24 August.** The tiered table
+grammar was designed to protect identity and Actions from being crushed, but
+in settings it removed every other cell below a container threshold and those
+static rows had no detail destination. At a 768px window, Members therefore
+showed only Member and Actions: Email, Role and Joined were not merely outside
+the initial viewport, they did not render at all. The same defect affected all
+settings column families.
+
+Settings tables now keep the complete column definition rendered at every
+width. Their minimum width is the sum of the declared track floors, gaps and
+padding, not the blanket 56rem tier threshold: a set that fits the 804px
+desktop content keeps fitting there without an invented scroll. When the real
+container is narrower, the existing Radix `ScrollArea` provides horizontal
+access and its stock transient thumb. The cells are not copied into a second
+mobile renderer, so role selects, row menus and pending states remain the same
+controls rather than divergent duplicates. Collection tables outside settings
+retain the tiered, no-scroll treatment.
+
+Sticky edge columns were evaluated and deliberately left out of the shared
+rule. Not every settings table ends in Actions (Webhooks ends in Payload), and
+pinning identity plus the final track in a 390px viewport would cover too much
+of the middle data. The honest fallback is one ordered table whose complete
+width remains reachable.
+
+The regression guard records each first nominal row at 1440, then proves every
+fact remains reachable at 768 and 390 across Members, Workspaces, Models,
+provider credentials, Proxies, collaborator SSO, CLI sessions, End-Users,
+Webhooks and API Keys. It also opens the member role select and row menu after
+horizontal movement. The first run was deliberately red and named the exact
+loss: `COURRIEL, RÔLE, ARRIVÉ LE` at 768. The same command is green after the
+shared fix. A branch and DOM audit found no column-definition regression from
+the reviewed combined branch: Members, Models, Proxies, OAuth, End-Users and
+Webhooks were unchanged; API Keys is the one intentional new table, and CLI's
+tier-three IP and connection date are now reachable instead of permanently
+absent from the settings dialog.
 
 **12. Accessibility, which nothing here has ever checked.** The branch
 re-declares ARIA roles on the table because this file demands it, and that is

@@ -64,6 +64,7 @@
     "lab:shots": "cd e2e && bun lab/shots.mjs",
     "lab:measure": "cd e2e && bun lab/measure.mjs",
     "lab:settings": "cd e2e && bun lab/settings.mjs",
+    "lab:settings-data": "cd e2e && bun lab/settings-data-access.mjs",
     "lab:tables": "cd e2e && bun lab/tables.mjs",
     "lab:record": "cd e2e && bun lab/record.mjs",
     "lint": "eslint . --cache --cache-strategy content",

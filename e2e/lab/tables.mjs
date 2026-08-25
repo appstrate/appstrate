@@ -77,7 +77,7 @@ async function open(page, path, selector = 'table[role="table"]:visible') {
 
 async function frameStyle(table) {
   return table.evaluate((tableElement) => {
-    const element = tableElement.parentElement;
+    const element = tableElement.closest("[data-data-table-frame]");
     if (!element) throw new Error("table frame is missing");
     const style = getComputedStyle(element);
     const shadowColors = style.boxShadow.match(/rgba?\([^)]*\)/g) ?? [];

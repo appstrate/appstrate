@@ -31,38 +31,40 @@
  *   to be RAISED above it (`relative z-10`) or the row swallows the hover with
  *   the click. Raise the titled element itself, not its cell: the dead zone is
  *   then the size of the text rather than the size of the column.
- * - **Columns drop with their track, on the TABLE's width.** A column declares
- *   the room it needs (`tier`), and its cell AND its track go together or the
- *   row keeps a gap where the column was. The threshold is a container query on
- *   the table, not a window breakpoint: this table sits beside a 256px sidebar,
- *   so `md:` let eight columns crush into 700px of table — the agent name, the
- *   only thing that names the row, measured 6px at a 900px window and 0 at 840.
- *   Which is also why every elastic track carries a FLOOR (`minmax(120px,1fr)`,
- *   never `minmax(0,…)`): a `0` minimum tells the browser it may take the
- *   column away entirely, and it does.
+ * - **Collection columns drop with their track, on the TABLE's width.** A
+ *   column declares the room it needs (`tier`), and its cell AND its track go
+ *   together or the row keeps a gap where the column was. Settings is the
+ *   exception because its static rows have no detail destination: there every
+ *   fact remains rendered and the complete track scrolls horizontally when it
+ *   does not fit. Both treatments use the declared track FLOOR
+ *   (`minmax(120px,1fr)`, never `minmax(0,…)`), because a `0` minimum tells the
+ *   browser it may take the column away entirely, and it does.
  */
 
 import type { CSSProperties, ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { cn } from "@appstrate/ui/cn";
+import { ScrollArea, ScrollBar } from "@appstrate/ui/components/scroll-area";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { collectionVerdict, type CollectionState } from "./collection";
 import { ErrorState } from "./page-states";
+
+export type DataColumnWidth = `${number}px` | `minmax(${number}px,${number}fr)`;
 
 export interface DataColumn<T> {
   /** Stable handle, independent of the label — a column set is a list of these. */
   id: string;
   /** Column head, already translated. */
   header: string;
-  /** Grid track: `"88px"` for a column that never moves, `"minmax(0,1fr)"` for one that gives. */
-  width: string;
+  /** Grid track: `"88px"` for a fixed column, `"minmax(100px,1fr)"` for an elastic one with a measurable floor. */
+  width: DataColumnWidth;
   /** Numbers, durations and dates read against the right edge. */
   align?: "end";
   /**
-   * How much room the column needs, and therefore when it appears.
-   * Unset is the row's identity — always drawn. `2` waits for a 36rem table,
-   * `3` for a 56rem one. Each tier's floors have to fit inside its own
-   * threshold; `column-tiers.test.tsx` is what checks that they do.
+   * How much room the column needs, and therefore when it appears in a tiered
+   * collection. Unset is the row's identity, always drawn. `2` waits for a
+   * 36rem table, `3` for a 56rem one. Settings renders all tiers and scrolls
+   * their complete floor. `column-tiers.test.tsx` checks the arithmetic.
    */
   tier?: 2 | 3;
   cell: (row: T) => ReactNode;
@@ -127,6 +129,20 @@ function trackList<T>(columns: DataColumn<T>[]): string {
   return columns.map((c) => c.width).join(" ");
 }
 
+function trackFloor(width: DataColumnWidth): number {
+  const fixed = /^(\d+(?:\.\d+)?)px$/.exec(width);
+  if (fixed) return Number(fixed[1]);
+  const elastic = /^minmax\((\d+(?:\.\d+)?)px,/.exec(width);
+  if (elastic) return Number(elastic[1]);
+  throw new Error(`DataTable cannot read the floor of track ${width}`);
+}
+
+function fullColumnFloor<T>(columns: DataColumn<T>[]): string {
+  const wideSpacing = 16;
+  const tracks = columns.reduce((sum, column) => sum + trackFloor(column.width), 0);
+  return `${tracks + wideSpacing * (columns.length + 1)}px`;
+}
+
 export function DataTable<T>({
   columns,
   rows,
@@ -148,6 +164,7 @@ export function DataTable<T>({
     "--dt-cols": trackList(columns.filter((c) => !c.tier)),
     "--dt-cols-2": trackList(columns.filter((c) => !c.tier || c.tier === 2)),
     "--dt-cols-3": trackList(columns),
+    "--dt-full-floor": fullColumnFloor(columns),
   } as CSSProperties;
 
   // The link goes in the first column of tier one, not in column zero: a run
@@ -164,6 +181,7 @@ export function DataTable<T>({
   if (verdict === "error" || verdict === "empty") {
     return (
       <div
+        data-data-table-frame
         className={cn(
           "@container/table overflow-hidden",
           "bg-card rounded-lg border shadow-sm [[data-settings-table-surface=integrated]_&]:rounded-none [[data-settings-table-surface=integrated]_&]:border-0 [[data-settings-table-surface=integrated]_&]:bg-transparent [[data-settings-table-surface=integrated]_&]:shadow-none",
@@ -176,95 +194,115 @@ export function DataTable<T>({
 
   return (
     <div
+      data-data-table-frame
       className={cn(
         "@container/table overflow-hidden",
         "bg-card rounded-lg border shadow-sm [[data-settings-table-surface=integrated]_&]:rounded-none [[data-settings-table-surface=integrated]_&]:border-0 [[data-settings-table-surface=integrated]_&]:bg-transparent [[data-settings-table-surface=integrated]_&]:shadow-none",
       )}
     >
-      <table role="table" aria-label={label} className="block w-full text-sm" style={tracks}>
-        <thead role="rowgroup" className="block">
-          <tr role="row" className={cn(rowGrid, "border-border h-10 border-b")}>
-            {columns.map((col) => (
-              <th
-                role="columnheader"
-                key={col.id}
-                className={cn(
-                  "text-muted-foreground min-w-0 truncate text-[0.68rem] font-semibold tracking-[0.05em] uppercase",
-                  col.align === "end" ? "text-right" : "text-left",
-                  tierClass(col, "block"),
-                )}
-              >
-                {col.header}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody role="rowgroup" className="block">
-          {banner && (
-            <tr role="row" className="border-border/60 block border-b">
-              <td role="cell" className="block px-3 md:px-4">
-                {banner}
-              </td>
-            </tr>
-          )}
-          {isLoading
-            ? Array.from({ length: SKELETON_ROWS }, (_, i) => (
-                <tr
-                  role="row"
-                  key={i}
-                  aria-hidden
-                  className={cn(rowGrid, "border-border/60 h-12 border-b last:border-b-0")}
+      <ScrollArea data-data-table-scroll>
+        <table role="table" aria-label={label} className="block w-full text-sm" style={tracks}>
+          <thead role="rowgroup" className="block">
+            <tr
+              role="row"
+              data-data-table-row
+              className={cn(rowGrid, "border-border h-10 border-b")}
+            >
+              {columns.map((col) => (
+                <th
+                  role="columnheader"
+                  key={col.id}
+                  data-data-table-column={col.id}
+                  data-data-table-tier={col.tier}
+                  className={cn(
+                    "text-muted-foreground min-w-0 truncate text-[0.68rem] font-semibold tracking-[0.05em] uppercase",
+                    col.align === "end" ? "text-right" : "text-left",
+                    tierClass(col, "block"),
+                  )}
                 >
-                  {columns.map((col) => (
-                    <td role="cell" key={col.id} className={cn("min-w-0", tierClass(col, "block"))}>
-                      <Skeleton className="h-3.5 w-full" />
-                    </td>
-                  ))}
-                </tr>
-              ))
-            : rows.map((row) => {
-                const href = rowHref?.(row);
-                return (
+                  {col.header}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody role="rowgroup" className="block">
+            {banner && (
+              <tr role="row" className="border-border/60 block border-b">
+                <td role="cell" className="block px-3 md:px-4">
+                  {banner}
+                </td>
+              </tr>
+            )}
+            {isLoading
+              ? Array.from({ length: SKELETON_ROWS }, (_, i) => (
                   <tr
                     role="row"
-                    key={rowKey(row)}
-                    className={cn(
-                      rowGrid,
-                      "border-border/60 relative min-h-12 border-b py-2 last:border-b-0",
-                      href && "hover:bg-muted/50 transition-colors",
-                    )}
+                    key={i}
+                    aria-hidden
+                    data-data-table-row
+                    className={cn(rowGrid, "border-border/60 h-12 border-b last:border-b-0")}
                   >
-                    {columns.map((col, i) => (
+                    {columns.map((col) => (
                       <td
                         role="cell"
                         key={col.id}
-                        className={cn(
-                          "flex min-w-0 items-center gap-1.5",
-                          col.align === "end" && "justify-end",
-                          tierClass(col, "flex"),
-                        )}
+                        data-data-table-column={col.id}
+                        data-data-table-tier={col.tier}
+                        className={cn("min-w-0", tierClass(col, "block"))}
                       >
-                        {/* The link belongs to the first cell and covers the row
-                            from there — see the note at the top of the file. */}
-                        {i === linkColumn && href ? (
-                          <Link
-                            to={href}
-                            state={rowState?.(row)}
-                            aria-label={rowLabel?.(row)}
-                            className="flex min-w-0 items-center gap-1.5 after:absolute after:inset-0"
-                          >
-                            {col.cell(row)}
-                          </Link>
-                        ) : (
-                          col.cell(row)
-                        )}
+                        <Skeleton className="h-3.5 w-full" />
                       </td>
                     ))}
                   </tr>
-                );
-              })}
-        </tbody>
-      </table>
+                ))
+              : rows.map((row) => {
+                  const href = rowHref?.(row);
+                  return (
+                    <tr
+                      role="row"
+                      key={rowKey(row)}
+                      data-data-table-row
+                      className={cn(
+                        rowGrid,
+                        "border-border/60 relative min-h-12 border-b py-2 last:border-b-0",
+                        href && "hover:bg-muted/50 transition-colors",
+                      )}
+                    >
+                      {columns.map((col, i) => (
+                        <td
+                          role="cell"
+                          key={col.id}
+                          data-data-table-column={col.id}
+                          data-data-table-tier={col.tier}
+                          className={cn(
+                            "flex min-w-0 items-center gap-1.5",
+                            col.align === "end" && "justify-end",
+                            tierClass(col, "flex"),
+                          )}
+                        >
+                          {/* The link belongs to the first cell and covers the row
+                            from there — see the note at the top of the file. */}
+                          {i === linkColumn && href ? (
+                            <Link
+                              to={href}
+                              state={rowState?.(row)}
+                              aria-label={rowLabel?.(row)}
+                              className="flex min-w-0 items-center gap-1.5 after:absolute after:inset-0"
+                            >
+                              {col.cell(row)}
+                            </Link>
+                          ) : (
+                            col.cell(row)
+                          )}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
+          </tbody>
+        </table>
+        <ScrollBar orientation="horizontal" />
+      </ScrollArea>
     </div>
   );
 }

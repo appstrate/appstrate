@@ -97,6 +97,14 @@ describe("column templates", () => {
     expect(tier1).toBe("minmax(120px,1fr)");
   });
 
+  it("publishes the complete floor for a settings ScrollArea", () => {
+    // Floors: 56 + 120 + 96. Wide spacing: four 16px gaps/paddings.
+    expect(html).toContain("--dt-full-floor:336px");
+    expect(html).toContain("data-data-table-scroll");
+    expect(html).toContain('data-data-table-column="when"');
+    expect(html).toContain('data-data-table-tier="3"');
+  });
+
   it("hides a tiered column's CELL as well as its track", () => {
     // A track dropped without its cell shifts every column after it by one.
     // Head cell plus one body cell per row, for each tiered column.
