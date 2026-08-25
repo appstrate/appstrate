@@ -77,7 +77,9 @@ describe("process adapter — privilege-drop gate", () => {
     // on the unauthenticated `GET /integrations/boot-report`. A refusal that
     // names nothing is the failure mode this repo keeps paying for, so pin
     // the parts that make it actionable: who was refused, why, what to do.
-    const error = await spawn.catch((err: unknown) => err as Error);
+    // `.catch` widens to `Error | SpawnedIntegration`; the assertion above
+    // already established this promise rejects, so narrow to the rejection.
+    const error = (await spawn.catch((err: unknown) => err)) as Error;
     expect(error.message).toContain("@orga/third-party");
     expect(error.message).toContain("@orga/third-party-mcp");
     expect(error.message).toContain("APPSTRATE_RUNNER_EXEC");
