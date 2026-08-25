@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
+
 export const authPaths = {
   "/api/auth/sign-up/email": {
     post: {
@@ -17,7 +19,7 @@ export const authPaths = {
               required: ["email", "password", "name"],
               properties: {
                 email: { type: "string", format: "email" },
-                password: { type: "string", minLength: 8 },
+                password: { type: "string", minLength: MIN_PASSWORD_LENGTH },
                 name: { type: "string" },
               },
             },
@@ -155,7 +157,9 @@ export const authPaths = {
                   description: "Bootstrap token from the install banner / .env.",
                 },
                 email: { type: "string", format: "email" },
-                password: { type: "string", minLength: 8, maxLength: 256 },
+                // Only the minimum is shared — the 256 cap is this endpoint's
+                // own transport bound.
+                password: { type: "string", minLength: MIN_PASSWORD_LENGTH, maxLength: 256 },
                 name: { type: "string", minLength: 1, maxLength: 120 },
               },
             },

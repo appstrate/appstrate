@@ -299,6 +299,14 @@ export interface ResourceEntry {
 export { TERMINAL_RUN_STATUSES, ACTIVE_RUN_STATUSES } from "@appstrate/db/run-status";
 export type { RunStatus, TerminalRunStatus } from "@appstrate/db/run-status";
 
+// --- Auth policy ---
+
+// Same bundler rule as the run statuses above: `password-policy.ts` is
+// import-free, so re-exporting its value here lets the SPA's auth forms read
+// the minimum Better Auth actually enforces instead of restating it. They
+// restated it as 6 while the server enforced 8.
+export { MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
+
 // --- Schedule Types ---
 
 /**

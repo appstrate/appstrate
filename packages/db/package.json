@@ -11,6 +11,7 @@
     "./client": "./src/client.ts",
     "./auth": "./src/auth.ts",
     "./auth-policy": "./src/auth-policy.ts",
+    "./password-policy": "./src/password-policy.ts",
     "./bootstrap-org": "./src/bootstrap-org.ts",
     "./storage": "./src/storage.ts",
     "./notify": "./src/notify.ts"

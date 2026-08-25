@@ -59,13 +59,15 @@ import {
   verifyBootstrapToken,
 } from "../lib/bootstrap-token.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
 import { triggerPostBootstrapOrg } from "../lib/post-bootstrap-hook.ts";
 
 export const redeemSchema = z.object({
   token: z.string().min(1).max(128),
   email: z.email().toLowerCase().trim(),
   name: z.string().min(1).max(120).trim(),
-  password: z.string().min(8).max(256),
+  // Minimum shared with Better Auth's own config; the 256 cap is local.
+  password: z.string().min(MIN_PASSWORD_LENGTH).max(256),
 });
 
 // Stable bigint key for the cluster-wide advisory lock. Picked outside

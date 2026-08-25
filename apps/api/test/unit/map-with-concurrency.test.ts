@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the bounded-concurrency mapper used to stream a run's input
- * files without an unbounded fan-out. Covers order preservation, the
- * concurrency cap, and the abort-on-first-rejection behaviour the workspace
- * rollback relies on.
+ * Unit tests for the bounded-concurrency mapper. It streams a run's input files
+ * without an unbounded fan-out, and since the two pools were collapsed it is
+ * also the boot-time fan-out for orphan cleanup and system-package sync.
+ * Covers order preservation, the concurrency cap, and the
+ * abort-on-first-rejection behaviour the workspace rollback relies on — the one
+ * property the pool it replaced did NOT have.
  */
 
 import { describe, it, expect } from "bun:test";
-import { mapWithConcurrency } from "../../src/services/input-parser.ts";
+import { mapWithConcurrency } from "../../src/lib/map-with-concurrency.ts";
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -74,5 +76,33 @@ describe("mapWithConcurrency", () => {
     // With a cap of 2 and the failure on the first item, the in-flight pair may
     // both start, but the loop stops pulling new work — nowhere near all 10.
     expect(started).toBeLessThan(10);
+  });
+
+  // The property the deleted `mapBounded` lacked, pinned deterministically: a
+  // gate holds every surviving worker until after the rejection has surfaced,
+  // so "what started" is not a function of timer-callback ordering. The old
+  // pool started all 10 here; this one starts only the 4 that were in flight.
+  it("starts NO further item once a callback has rejected", async () => {
+    const started: number[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+
+    const pending = mapWithConcurrency(
+      Array.from({ length: 10 }, (_, i) => i),
+      4,
+      async (i) => {
+        started.push(i);
+        if (i === 2) throw new Error("boom");
+        await gate;
+        return i;
+      },
+    );
+
+    await expect(pending).rejects.toThrow("boom");
+    // Let the three still-blocked workers resume: they must break out of the
+    // loop instead of pulling items 4-9.
+    release();
+    await tick();
+    expect(started).toEqual([0, 1, 2, 3]);
   });
 });

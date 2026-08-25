@@ -23,6 +23,7 @@ import {
   normalizeEmail,
 } from "./auth-policy.ts";
 import { createBootstrapOrg } from "./bootstrap-org.ts";
+import { MIN_PASSWORD_LENGTH } from "./password-policy.ts";
 
 /**
  * True when a `pending` non-expired invitation exists for `email`. Used by
@@ -663,7 +664,10 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
 
     emailAndPassword: {
       enabled: true,
-      minPasswordLength: 8,
+      // The one place this number is enforced. Everything else — the SPA
+      // forms, the OpenAPI request schemas, the OIDC pages — imports the
+      // constant rather than restating it (`src/password-policy.ts`).
+      minPasswordLength: MIN_PASSWORD_LENGTH,
       requireEmailVerification: smtpEnabled,
       // Test-only fast password hasher. Better Auth's default is scrypt
       // (deliberately slow — ~35ms/hash), which dominates the test suite since

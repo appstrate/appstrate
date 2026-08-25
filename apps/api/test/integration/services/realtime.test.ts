@@ -1,67 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeAll, afterEach, mock } from "bun:test";
-import { db } from "../../helpers/db.ts";
-import { sql } from "drizzle-orm";
 import {
   addSubscriber,
   removeSubscriber,
   initRealtime,
   type RealtimeEvent,
 } from "../../../src/services/realtime.ts";
-import { eventData } from "../../helpers/sse.ts";
-
-// Channel defaults mirror the FULL payload the production triggers/broadcaster
-// emit (every key always present, null where the column is nullable). The
-// server now validates each NOTIFY payload against the shared Zod schema and
-// drops anything incomplete, so synthetic fixtures must be complete too — these
-// defaults fill the fields a test doesn't care about; explicit fields win.
-const NOTIFY_DEFAULTS: Record<string, Record<string, unknown>> = {
-  run_update: {
-    operation: "UPDATE",
-    id: "exec-default",
-    package_id: null,
-    status: "running",
-    user_id: null,
-    end_user_id: null,
-    org_id: "org-default",
-    application_id: "app-default",
-    schedule_id: null,
-    error: null,
-    started_at: null,
-    completed_at: null,
-    duration: null,
-  },
-  run_log_insert: {
-    id: 1,
-    run_id: "exec-default",
-    org_id: "org-default",
-    application_id: "app-default",
-    type: "progress",
-    level: "info",
-    event: null,
-    message: null,
-    created_at: "2026-01-01T00:00:00.000Z",
-  },
-  run_metric: {
-    run_id: "exec-default",
-    org_id: "org-default",
-    application_id: "app-default",
-    package_id: "pkg-default",
-    token_usage: null,
-    cost_so_far: 0,
-    cost_pricing_status: null,
-  },
-};
-
-/**
- * Helper: fire pg_notify on a channel with a JSON payload, filling in the
- * channel's required fields so the payload matches the real producer shape.
- */
-async function pgNotify(channel: string, payload: Record<string, unknown>) {
-  const full = { ...(NOTIFY_DEFAULTS[channel] ?? {}), ...payload };
-  await db.execute(sql`SELECT pg_notify(${channel}, ${JSON.stringify(full)})`);
-}
+import { eventData, pgNotify } from "../../helpers/sse.ts";
 
 /**
  * Helper: wait for async PG LISTEN delivery.

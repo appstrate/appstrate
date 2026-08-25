@@ -14,6 +14,7 @@
  * they can sign in with their new password.
  */
 
+import { MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
 import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
 import type { ResolvedAppBranding } from "../services/branding.ts";
@@ -76,9 +77,9 @@ export function renderResetPasswordPage(props: ResetPasswordPageProps): RawHtml 
       <input
         type="password"
         name="password"
-        placeholder="Nouveau mot de passe (8 caractères min.)"
+        placeholder="Nouveau mot de passe (${MIN_PASSWORD_LENGTH} caractères min.)"
         required
-        minlength="8"
+        minlength="${MIN_PASSWORD_LENGTH}"
         autofocus
         autocomplete="new-password"
       />
@@ -87,7 +88,7 @@ export function renderResetPasswordPage(props: ResetPasswordPageProps): RawHtml 
         name="password_confirm"
         placeholder="Confirmer le mot de passe"
         required
-        minlength="8"
+        minlength="${MIN_PASSWORD_LENGTH}"
         autocomplete="new-password"
       />
       <button type="submit">Réinitialiser</button>

@@ -6,13 +6,12 @@ import { useTranslation } from "react-i18next";
 import { useAppForm } from "../hooks/use-app-form";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
-import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
 import { useTheme } from "../stores/theme-store";
 import { useAuth } from "../hooks/use-auth";
 import { useAppConfig } from "../hooks/use-app-config";
 import { Mail } from "lucide-react";
 import { SocialSignInButton } from "./social-sign-in-button";
+import { EmailField, PasswordField } from "./auth-fields";
 import { LegalFooter } from "./legal-footer";
 
 type LoginFormData = {
@@ -109,64 +108,32 @@ export function LoginForm({
       {header === null && switchAuthSlot && <div className="text-center">{switchAuthSlot}</div>}
       <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-6">
         <div className="flex flex-col gap-4">
-          <div className="grid gap-2">
-            <Label htmlFor="email">{t("login.email")}</Label>
-            <Input
-              id="email"
-              type="email"
-              placeholder="email@example.com"
-              autoComplete="email"
-              readOnly={!!fixedEmail}
-              aria-invalid={showError("email") ? true : undefined}
-              className={cn(
-                showError("email") && "border-destructive",
-                fixedEmail && "cursor-not-allowed opacity-60",
-              )}
-              {...(fixedEmail
-                ? { value: fixedEmail }
-                : register("email", {
-                    required: t("validation.required", { ns: "common" }),
-                    pattern: {
-                      value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-                      message: t("validation.emailFormat", { ns: "common" }),
-                    },
-                  }))}
-            />
-            {showError("email") && (
-              <div className="text-destructive text-sm">{errors.email?.message}</div>
-            )}
-          </div>
-          <div className="grid gap-2">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="password">{t("login.password")}</Label>
-              {features.smtp && (
+          <EmailField
+            register={register}
+            name="email"
+            label={t("login.email")}
+            invalid={showError("email")}
+            error={errors.email?.message}
+            fixedValue={fixedEmail}
+          />
+          <PasswordField
+            register={register}
+            name="password"
+            label={t("login.password")}
+            invalid={showError("password")}
+            error={errors.password?.message}
+            autoComplete="current-password"
+            labelAction={
+              features.smtp && (
                 <Link
                   to="/forgot-password"
                   className="text-muted-foreground hover:text-primary text-xs underline-offset-4 hover:underline"
                 >
                   {t("login.forgotPassword")}
                 </Link>
-              )}
-            </div>
-            <Input
-              id="password"
-              type="password"
-              placeholder="••••••••"
-              autoComplete="current-password"
-              aria-invalid={showError("password") ? true : undefined}
-              className={cn(showError("password") && "border-destructive")}
-              {...register("password", {
-                required: t("validation.required", { ns: "common" }),
-                minLength: {
-                  value: 6,
-                  message: t("validation.minLength", { ns: "common", min: 6 }),
-                },
-              })}
-            />
-            {showError("password") && (
-              <div className="text-destructive text-sm">{errors.password?.message}</div>
-            )}
-          </div>
+              )
+            }
+          />
           {errors.root && <p className="text-destructive text-sm">{errors.root.message}</p>}
         </div>
         <Button size="lg" className="w-full" type="submit" disabled={isSubmitting}>
