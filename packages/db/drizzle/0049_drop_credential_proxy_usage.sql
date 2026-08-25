@@ -1,0 +1,121 @@
+-- Drop `credential_proxy_usage`: a write-only table on a hot write path.
+--
+-- ═══ WHAT IT IS ═══
+--
+-- Declared in `src/schema/runs.ts:744-784`: 11 columns, 5 indexes and a UNIQUE
+-- on `request_id` (6 index maintenances per row), plus a CHECK and the sequence
+-- behind `id serial`. One row is appended for EVERY call proxied through
+-- `/api/credential-proxy/*` — every upstream integration request a remote
+-- runner makes.
+--
+-- ═══ NOTHING READS IT ═══
+--
+-- Established by a repo-wide search for both `credentialProxyUsage` (the
+-- drizzle symbol) and `credential_proxy_usage` (the SQL name), excluding
+-- `node_modules`, `.turbo` and this migrations folder. Every hit is one of:
+--
+--   WRITE      apps/api/src/services/credential-proxy-usage.ts:40  (the only
+--              INSERT), called once from apps/api/src/routes/credential-proxy.ts:296
+--   SCHEMA     packages/db/src/schema/runs.ts:744-784
+--   PROSE      docs/architecture/RUN_COST.md, CHANGELOG.md, and five OpenAPI
+--              `runId` field descriptions that merely NAME the table
+--   TEST       apps/api/test/helpers/db.ts:68 (truncation list)
+--
+-- There is no `.select()`, no `.from(credentialProxyUsage)`, no join, no route,
+-- no DTO, no OpenAPI response schema and no frontend component. It is not
+-- reachable from a module either: nothing on the `ctx.services` surface
+-- (`packages/core/src/module.ts`, `apps/api/src/modules/**`) exposes it, so the
+-- out-of-tree `@appstrate/cloud` cannot be reading it — and by construction it
+-- could not want to: the table carries no cost column (its own doc comment says
+-- so), and billing reads the `llm_usage` ledger by serial-id cursor.
+--
+-- ═══ AND IT GROWS FOREVER ═══
+--
+-- No retention sweep exists — no DELETE, no prune job, no TTL. Compare
+-- `run_logs` and `model_provider_pairings`, which both have one. So this is not
+-- "an audit log nobody has queried yet"; it is unbounded storage plus six index
+-- writes per proxied call, bought for nothing. If per-call audit is wanted
+-- later it should be rebuilt with a reader and a retention policy from the
+-- start — the same conclusion 0044/0045 reached for the three
+-- WRITTEN-NEVER-READ columns they dropped.
+--
+-- Kept, deliberately: the `X-Run-Id` request header the route reads. It still
+-- feeds `llm_usage.run_id`, which IS read. Only the audit row goes.
+--
+-- ═══ OPERATOR PRE-FLIGHT — RUN THIS AGAINST PRODUCTION FIRST ═══
+--
+-- This is the one destructive migration in the batch, and `0000_init.sql` is a
+-- SQUASH that production predates, so the declared schema is NOT evidence of
+-- what exists there (see `packages/db/README.md` → "Index drift", and 0041's
+-- header). Before deploying, run against the LIVE database:
+--
+--   -- 1. What is actually there, and how big.
+--   SELECT c.relname,
+--          c.reltuples::bigint                                AS approx_rows,
+--          pg_size_pretty(pg_total_relation_size(c.oid))      AS total_size
+--   FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+--   WHERE n.nspname = 'public' AND c.relname = 'credential_proxy_usage';
+--
+--   -- 2. Which indexes survive there. 0039 already dropped
+--   --    idx_credential_proxy_usage_org_id; the rest are dropped WITH the
+--   --    table, so this is informational, not a gate.
+--   SELECT indexname FROM pg_indexes
+--   WHERE schemaname = 'public' AND tablename = 'credential_proxy_usage';
+--
+--   -- 3. THE GATE. Anything here means the DROP below fails and the deploy
+--   --    stops. Both queries MUST return zero rows.
+--   SELECT conname, conrelid::regclass AS referencing_table
+--   FROM pg_constraint
+--   WHERE confrelid = 'public.credential_proxy_usage'::regclass;
+--
+--   SELECT DISTINCT dv.relname AS dependent_view
+--   FROM pg_depend d
+--   JOIN pg_rewrite r  ON r.oid = d.objid
+--   JOIN pg_class   dv ON dv.oid = r.ev_class
+--   WHERE d.refobjid = 'public.credential_proxy_usage'::regclass
+--     AND dv.relname <> 'credential_proxy_usage';
+--
+-- If query 1 returns no row the table is already gone and `IF EXISTS` makes
+-- this a no-op; if 3 returns anything, STOP — something out of tree depends on
+-- it and this migration must not ship.
+--
+-- ═══ NO `CASCADE`, DELIBERATELY ═══
+--
+-- `DROP TABLE … CASCADE` would silently take dependents with it, which is
+-- exactly the outcome pre-flight query 3 exists to prevent. Without CASCADE an
+-- unexpected dependent raises `2BP01` and aborts the deploy — loud, and the
+-- right failure. `IF EXISTS` is still there so a partially-applied environment
+-- converges (same reasoning as 0039/0045); an absent table IS the intended end
+-- state.
+--
+-- The table's 5 indexes, its UNIQUE constraint, its CHECK, its 5 outbound
+-- foreign keys and the sequence owned by `id serial` are all dropped with it —
+-- no separate statements, and nothing left orphaned.
+--
+-- ═══ LOCK AND COST ═══
+--
+-- `DROP TABLE` takes ACCESS EXCLUSIVE on `credential_proxy_usage` only. It
+-- takes NO lock on `organizations` / `api_keys` / `user` / `runs` /
+-- `applications` — those are the REFERENCED sides, and dropping the referencing
+-- table only removes catalog rows pointing at them. So the blast radius is one
+-- table that nothing reads.
+--
+-- Held to COMMIT like everything else in the batch (drizzle wraps all pending
+-- migrations in ONE `session.transaction(...)`), and fenced with
+-- `SET LOCAL lock_timeout = '3s'` reset to DEFAULT after — same instrument as
+-- 0039/0041/0047/0048; see 0039's header for `SET LOCAL` rather than `SET`. On
+-- expiry the statement errors and aborts that single transaction: `migrate`
+-- throws, boot fails, the deploy fails its health gate. Right trade (fail fast,
+-- retry), but a failed deploy, not a silent skip.
+--
+-- ═══ FORWARD-ONLY, AND THE DATA IS NOT COMING BACK ═══
+--
+-- Rolling this back re-creates an empty table, not its history. Accepted on the
+-- same grounds as 0044/0045: the rows were an input to no decision — no query,
+-- no report, no bill — so nothing downstream needs them. An operator who wants
+-- the history anyway must `CREATE TABLE … AS SELECT * FROM credential_proxy_usage`
+-- into another schema BEFORE the deploy; there is no in-migration escrow,
+-- because a copy nothing reads is the problem this file is removing.
+SET LOCAL lock_timeout = '3s';--> statement-breakpoint
+DROP TABLE IF EXISTS "credential_proxy_usage";--> statement-breakpoint
+SET LOCAL lock_timeout = DEFAULT;

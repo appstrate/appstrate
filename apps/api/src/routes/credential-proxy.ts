@@ -65,7 +65,6 @@ import {
   ProxySubstitutionError,
 } from "../services/credential-proxy/core.ts";
 import { isValidSessionId, bindOrCheckSession } from "../services/credential-proxy/session.ts";
-import { insertCredentialProxyUsage } from "../services/credential-proxy-usage.ts";
 import type { AppEnv } from "../types/index.ts";
 
 import { assertBearerOnly } from "../lib/bearer-only.ts";
@@ -289,23 +288,6 @@ export function createCredentialProxyRouter() {
           durationMs,
         });
 
-        // Record per-call metering for reporting. `request_id` is the row
-        // UNIQUE key — replays (retries of the same proxy request) no-op.
-        // Fire-and-forget: metering failure MUST NOT fail a successful
-        // upstream call; the service logs and drops on DB error.
-        void insertCredentialProxyUsage({
-          orgId,
-          apiKeyId: apiKeyId ?? null,
-          userId: apiKeyId ? null : userId,
-          runId,
-          applicationId,
-          integrationId,
-          targetHost: safeTargetHost(target),
-          httpStatus: result.status,
-          durationMs,
-          requestId: c.get("requestId"),
-        });
-
         // Strip hop-by-hop + stale content-encoding/length (shared helper),
         // plus the X-Stream-* transport hints between the runtime and this
         // proxy, which must not reach the caller.
@@ -419,19 +401,6 @@ const PROXY_CONTROL_HEADERS = new Set([
   // forward (re-encoding would require rebuffering the whole stream).
   "accept-encoding",
 ]);
-
-/**
- * Derive the audit-safe host for usage logging. Returns `null` for
- * unparseable targets — the usage record carries a nullable `target_host`
- * column so we never lose the attribution row on a malformed target.
- */
-function safeTargetHost(target: string): string | null {
-  try {
-    return new URL(target).host;
-  } catch {
-    return null;
-  }
-}
 
 /** Transport hints between the runtime and this proxy — never forwarded to the caller. */
 const STREAM_CONTROL_HEADERS = new Set(["x-stream-request", "x-stream-response"]);

@@ -46,8 +46,8 @@ export const jwks = pgTable("jwks", {
   id: text("id").primaryKey(),
   publicKey: text("public_key").notNull(),
   privateKey: text("private_key").notNull(),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
 });
 
 // ─── Better Auth: device-authorization plugin (RFC 8628) ──────────────────────
@@ -57,9 +57,9 @@ export const deviceCode = pgTable("device_codes", {
   deviceCode: text("device_code").notNull().unique(),
   userCode: text("user_code").notNull().unique(),
   userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
-  expiresAt: timestamp("expires_at").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   status: text("status").notNull(),
-  lastPolledAt: timestamp("last_polled_at"),
+  lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
   pollingInterval: integer("polling_interval"),
   clientId: text("client_id").references(() => oauthClient.clientId, {
     onDelete: "cascade",
@@ -82,9 +82,9 @@ export const oauthClient = pgTable(
     subjectType: text("subject_type"),
     scopes: text("scopes").array().default([]),
     userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
-    createdAt: timestamp("created_at").defaultNow(),
-    updatedAt: timestamp("updated_at").defaultNow(),
-    expiresAt: timestamp("expires_at"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
     name: text("name"),
     uri: text("uri"),
     icon: text("icon"),
@@ -146,10 +146,10 @@ export const oauthRefreshToken = pgTable("oauth_refresh_tokens", {
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
   referenceId: text("reference_id"),
-  expiresAt: timestamp("expires_at"),
-  createdAt: timestamp("created_at").defaultNow(),
-  revoked: timestamp("revoked"),
-  authTime: timestamp("auth_time"),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  revoked: timestamp("revoked", { withTimezone: true }),
+  authTime: timestamp("auth_time", { withTimezone: true }),
   scopes: text("scopes").array().notNull(),
   // RFC 8707 resource indicators (Better Auth 1.7+): the audiences this token
   // was issued for. Optional — first-party flows that pass no `resource` leave
@@ -167,8 +167,8 @@ export const oauthAccessToken = pgTable("oauth_access_tokens", {
   userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
   referenceId: text("reference_id"),
   refreshId: text("refresh_id").references(() => oauthRefreshToken.id, { onDelete: "cascade" }),
-  expiresAt: timestamp("expires_at"),
-  createdAt: timestamp("created_at").defaultNow(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   scopes: text("scopes").array().notNull(),
   // RFC 8707 resource indicators (Better Auth 1.7+) — see oauth_refresh_tokens.
   resources: text("resources").array(),
@@ -185,8 +185,8 @@ export const oauthConsent = pgTable("oauth_consents", {
   // RFC 8707 resource indicators (Better Auth 1.7+) — the resources the user
   // consented the client to access.
   resources: text("resources").array(),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 });
 
 // ─── CLI refresh tokens (issue #165) ──────────────────────────────────────────
@@ -207,16 +207,16 @@ export const cliRefreshToken = pgTable(
     // inside the callback). Matches `ON DELETE SET NULL` from 0005.
     parentId: text("parent_id"),
     scope: text("scope"),
-    expiresAt: timestamp("expires_at").notNull(),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
-    usedAt: timestamp("used_at"),
-    revokedAt: timestamp("revoked_at"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
     revokedReason: text("revoked_reason"),
     deviceName: text("device_name"),
     userAgent: text("user_agent"),
     createdIp: text("created_ip"),
     lastUsedIp: text("last_used_ip"),
-    lastUsedAt: timestamp("last_used_at"),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
   },
   (t) => [
     index("idx_cli_refresh_tokens_family").on(t.familyId),
@@ -240,10 +240,20 @@ export const oidcEndUserProfiles = pgTable(
     authUserId: text("auth_user_id").references(() => user.id, { onDelete: "set null" }),
     status: text("status").notNull().default("active"),
     emailVerified: boolean("email_verified").notNull().default(false),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
-    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("idx_oidc_profiles_auth_user").on(table.authUserId)],
+  (table) => [
+    index("idx_oidc_profiles_auth_user").on(table.authUserId),
+    // Closed vocabulary (migration 0051). `active` is the only value production
+    // code writes, but the column is NOT dead: `modules/oidc/auth/strategy.ts`
+    // rejects every end-user token whose profile is not `active`, which makes
+    // this the one lever that revokes an end-user WITHOUT deleting the
+    // identity. The CHECK turns "an UPDATE to 'suspended' works" from folklore
+    // into a contract, and rejects the typo that would lock someone out
+    // silently.
+    check("oidc_end_user_profiles_status_valid", sql`status IN ('active', 'suspended')`),
+  ],
 );
 
 // ─── Per-application SMTP configuration ──────────────────────────────────────
@@ -263,8 +273,8 @@ export const applicationSmtpConfigs = pgTable(
     secureMode: text("secure_mode", { enum: ["auto", "tls", "starttls", "none"] })
       .notNull()
       .default("auto"),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
-    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   () => [
     check(
@@ -286,8 +296,8 @@ export const applicationSocialProviders = pgTable(
     clientId: text("client_id").notNull(),
     clientSecretEncrypted: text("client_secret_encrypted").notNull(),
     scopes: text("scopes").array(),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
-    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     primaryKey({ columns: [t.applicationId, t.provider] }),

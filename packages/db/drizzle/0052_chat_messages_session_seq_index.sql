@@ -1,0 +1,63 @@
+-- One index on `chat_messages (session_id, seq)`: the sort every reader does
+-- and no index serves.
+--
+-- ═══ THE GAP ═══
+--
+-- `chat_messages` has exactly one index — `uq_chat_messages_session_message`,
+-- UNIQUE on `(session_id, message_id)`. Every read of the table filters on
+-- `session_id`, and two of the three order by `seq`:
+--
+--   packages/module-chat/src/routes.ts:102-104
+--     WHERE session_id = ? ORDER BY seq ASC          (load the whole thread)
+--   packages/module-chat/src/persistence.ts:80-83
+--     WHERE session_id = ? ORDER BY seq DESC LIMIT 1 (the parent of the next turn)
+--   packages/module-chat/src/persistence.ts:192-194
+--     WHERE session_id = ? AND message_id = ?        (served by the UNIQUE index)
+--
+-- The existing index serves the FILTER on all three and the third one whole,
+-- but its second column is `message_id`, so within a session the rows come out
+-- in message-id order — which is a client-generated identity, unrelated to
+-- insertion order. Both `seq`-ordered reads therefore take the index (or a
+-- seq scan) and then SORT.
+--
+-- `(session_id, seq)` makes the filter a seek and the sort free in both
+-- directions (a btree is walkable backwards, so one index serves ASC and DESC).
+-- The DESC-LIMIT-1 read is the one that matters most: it runs on the hot path,
+-- once per user turn, BEFORE inference starts, and it currently sorts the whole
+-- thread to return one row.
+--
+-- Not made UNIQUE: `seq` is `serial` and the table's PRIMARY KEY, so
+-- `(session_id, seq)` is unique by construction. Declaring it would add a
+-- promise the PK already keeps and buy nothing.
+--
+-- ═══ NOT DONE HERE: `format` AND `parent_id` ═══
+--
+-- Both are recorded as recommendations in the table's doc comment
+-- (`src/schema/chat.ts`) rather than acted on, because dropping either needs a
+-- coordinated change inside `packages/module-chat` — which this pass does not
+-- own — and a column that is still echoed to the client cannot be dropped from
+-- one side. See that comment for the argument and for what the removal would
+-- take.
+--
+-- ═══ LOCK AND COST ═══
+--
+-- `CREATE INDEX` (never CONCURRENTLY — Postgres forbids it inside a transaction
+-- block and drizzle wraps the whole pending batch in one; see 0041's header)
+-- takes SHARE on `chat_messages`. SHARE does not conflict with a reader's
+-- ACCESS SHARE, so readers neither block this nor are blocked by it; it DOES
+-- conflict with ROW EXCLUSIVE, so it blocks message WRITES. Locks are held to
+-- COMMIT and drizzle commits the batch as a whole, so that write block lasts
+-- the rest of the batch, not just this build.
+--
+-- Fenced with `SET LOCAL lock_timeout = '3s'`, reset to DEFAULT after — same
+-- instrument as 0039/0041/0047-0051; see 0039's header for `SET LOCAL` rather
+-- than `SET`. On expiry the statement errors and aborts the single transaction
+-- wrapping the batch: `migrate` throws, boot fails, the deploy fails its health
+-- gate. Right trade for a non-urgent index (fail fast, retry), but a failed
+-- deploy, not a silent skip.
+--
+-- `IF NOT EXISTS` so a partially-applied environment converges — an index that
+-- is already present IS the intended end state (same reasoning as 0041).
+SET LOCAL lock_timeout = '3s';--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "idx_chat_messages_session_seq" ON "chat_messages" USING btree ("session_id","seq");--> statement-breakpoint
+SET LOCAL lock_timeout = DEFAULT;

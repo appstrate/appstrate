@@ -19,50 +19,59 @@ import { orgRoleEnum, invitationStatusEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { applications } from "./applications.ts";
 
-export const organizations = pgTable("organizations", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  name: text("name").notNull(),
-  slug: text("slug").unique().notNull(),
-  orgSettings: jsonb("org_settings").notNull().default({}),
-  // The org's default model — a flat model id that may name a system model
-  // (SYSTEM_PROVIDER_KEYS) OR an `org_models.id` (UUID). A pointer rather than
-  // an `is_default` boolean on `org_models` so the default can point at a
-  // system model too (mirrors the integration `client_ref` pattern): picking
-  // any row — system or custom — makes exactly that row the default. NULL ⇒ no
-  // explicit default; the resolution cascade falls to the system-flagged model.
-  // No FK: a system id is not a DB row. Stale custom ids are cleared on delete
-  // and ignored by the resolver (it falls through to the cascade).
-  defaultModelId: text("default_model_id"),
-  // The org's default proxy — same pointer pattern as `default_model_id`: a flat
-  // proxy id naming a system proxy (SYSTEM_PROXIES) OR an `org_proxies.id` (UUID).
-  // A pointer rather than an `is_default` boolean on `org_proxies` so the default
-  // can point at a system proxy too; picking any row — system or custom — makes
-  // exactly that one the default. NULL ⇒ no explicit default; the resolver falls
-  // to the system-flagged proxy then `PROXY_URL`. No FK (a system id is not a DB
-  // row); stale custom ids are cleared on delete and ignored by the resolver.
-  defaultProxyId: text("default_proxy_id"),
-  // Running total of durable file bytes stored by this org. Maintained
-  // transactionally alongside `files` insert/delete so the synchronous
-  // org-storage quota check (`ORG_STORAGE_QUOTA_BYTES`) needs no aggregate
-  // scan. bigint (mode: number) — total storage far exceeds the int4 ceiling.
-  // FK cascade deletes (run/chat-session/end-user/application removed) drop
-  // `files` rows WITHOUT the app-level decrement, so the counter can drift
-  // high; `reconcileOrgFileBytes()` (files.ts GC loop, ~daily) recomputes
-  // it from `SUM(files.size)` and corrects the drift.
-  filesBytesUsed: bigint("files_bytes_used", { mode: "number" }).notNull().default(0),
-  // Per-org durable-file storage limit, in bytes. NULL = no per-org override
-  // (the org falls back to the global env quota). Resolution order the write path
-  // enforces (see `effectiveOrgStorageLimit` in files.ts):
-  //   organizations.files_bytes_limit ?? env.ORG_STORAGE_QUOTA_BYTES ?? unlimited
-  // Pilotable per-org by the out-of-repo cloud module via the narrow
-  // `PlatformServices.setFileStorageLimit` capability. The core stays
-  // billing-neutral: this is a technical byte ceiling, never a plan or price.
-  // bigint (mode: number) — mirrors `files_bytes_used` above.
-  filesBytesLimit: bigint("files_bytes_limit", { mode: "number" }),
-  createdBy: text("created_by").references(() => user.id),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-});
+export const organizations = pgTable(
+  "organizations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    name: text("name").notNull(),
+    slug: text("slug").unique().notNull(),
+    orgSettings: jsonb("org_settings").notNull().default({}),
+    // The org's default model — a flat model id that may name a system model
+    // (SYSTEM_PROVIDER_KEYS) OR an `org_models.id` (UUID). A pointer rather than
+    // an `is_default` boolean on `org_models` so the default can point at a
+    // system model too (mirrors the integration `client_ref` pattern): picking
+    // any row — system or custom — makes exactly that row the default. NULL ⇒ no
+    // explicit default; the resolution cascade falls to the system-flagged model.
+    // No FK: a system id is not a DB row. Stale custom ids are cleared on delete
+    // and ignored by the resolver (it falls through to the cascade).
+    defaultModelId: text("default_model_id"),
+    // The org's default proxy — same pointer pattern as `default_model_id`: a flat
+    // proxy id naming a system proxy (SYSTEM_PROXIES) OR an `org_proxies.id` (UUID).
+    // A pointer rather than an `is_default` boolean on `org_proxies` so the default
+    // can point at a system proxy too; picking any row — system or custom — makes
+    // exactly that one the default. NULL ⇒ no explicit default; the resolver falls
+    // to the system-flagged proxy then `PROXY_URL`. No FK (a system id is not a DB
+    // row); stale custom ids are cleared on delete and ignored by the resolver.
+    defaultProxyId: text("default_proxy_id"),
+    // Running total of durable file bytes stored by this org. Maintained
+    // transactionally alongside `files` insert/delete so the synchronous
+    // org-storage quota check (`ORG_STORAGE_QUOTA_BYTES`) needs no aggregate
+    // scan. bigint (mode: number) — total storage far exceeds the int4 ceiling.
+    // FK cascade deletes (run/chat-session/end-user/application removed) drop
+    // `files` rows WITHOUT the app-level decrement, so the counter can drift
+    // high; `reconcileOrgFileBytes()` (files.ts GC loop, ~daily) recomputes
+    // it from `SUM(files.size)` and corrects the drift.
+    filesBytesUsed: bigint("files_bytes_used", { mode: "number" }).notNull().default(0),
+    // Per-org durable-file storage limit, in bytes. NULL = no per-org override
+    // (the org falls back to the global env quota). Resolution order the write path
+    // enforces (see `effectiveOrgStorageLimit` in files.ts):
+    //   organizations.files_bytes_limit ?? env.ORG_STORAGE_QUOTA_BYTES ?? unlimited
+    // Pilotable per-org by the out-of-repo cloud module via the narrow
+    // `PlatformServices.setFileStorageLimit` capability. The core stays
+    // billing-neutral: this is a technical byte ceiling, never a plan or price.
+    // bigint (mode: number) — mirrors `files_bytes_used` above.
+    filesBytesLimit: bigint("files_bytes_limit", { mode: "number" }),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    // Referencing-side index for the `user` SET NULL action (0048).
+    // Postgres indexes only the REFERENCED side of a foreign key; without
+    // this, deleting one user seq-scans this table under the deletion's lock.
+    index("idx_organizations_created_by").on(table.createdBy),
+  ],
+);
 
 export const organizationMembers = pgTable(
   "org_members",
@@ -95,8 +104,8 @@ export const orgInvitations = pgTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     role: orgRoleEnum("role").notNull(),
     status: invitationStatusEnum("status").notNull().default("pending"),
-    invitedBy: text("invited_by").references(() => user.id),
-    acceptedBy: text("accepted_by").references(() => user.id),
+    invitedBy: text("invited_by").references(() => user.id, { onDelete: "set null" }),
+    acceptedBy: text("accepted_by").references(() => user.id, { onDelete: "set null" }),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     acceptedAt: timestamp("accepted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -104,6 +113,11 @@ export const orgInvitations = pgTable(
   (table) => [
     index("idx_org_invitations_org_id").on(table.orgId),
     index("idx_org_invitations_email").on(table.email),
+    // Referencing-side index for the `user` SET NULL action (0048).
+    // Postgres indexes only the REFERENCED side of a foreign key; without
+    // this, deleting one user seq-scans this table under the deletion's lock.
+    index("idx_org_invitations_invited_by").on(table.invitedBy),
+    index("idx_org_invitations_accepted_by").on(table.acceptedBy),
   ],
 );
 
@@ -126,7 +140,7 @@ export const apiKeys = pgTable(
       .array()
       .notNull()
       .default(sql`'{}'::text[]`),
-    createdBy: text("created_by").references(() => user.id),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
@@ -136,6 +150,10 @@ export const apiKeys = pgTable(
     index("idx_api_keys_org_id").on(table.orgId),
     index("idx_api_keys_application_id").on(table.applicationId),
     uniqueIndex("idx_api_keys_key_hash").on(table.keyHash),
+    // Referencing-side index for the `user` SET NULL action (0048).
+    // Postgres indexes only the REFERENCED side of a foreign key; without
+    // this, deleting one user seq-scans this table under the deletion's lock.
+    index("idx_api_keys_created_by").on(table.createdBy),
   ],
 );
 
@@ -153,12 +171,16 @@ export const orgProxies = pgTable(
     // not a per-row boolean — so it can point at a system proxy too. See the
     // column comment on `organizations`.
     source: text("source").notNull().default("custom"), // "built-in" | "custom"
-    createdBy: text("created_by").references(() => user.id),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_org_proxies_org_id").on(table.orgId),
+    // Referencing-side index for the `user` SET NULL action (0048).
+    // Postgres indexes only the REFERENCED side of a foreign key; without
+    // this, deleting one user seq-scans this table under the deletion's lock.
+    index("idx_org_proxies_created_by").on(table.createdBy),
     check("org_proxies_source_valid", sql`source IN ('built-in', 'custom')`),
   ],
 );
@@ -246,7 +268,7 @@ export const modelProviderCredentials = pgTable(
      * rows. Read the column through that accessor, never directly.
      */
     availableModelIds: jsonb("available_model_ids").$type<string[]>(),
-    createdBy: text("created_by").references(() => user.id),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -257,6 +279,10 @@ export const modelProviderCredentials = pgTable(
     index("idx_model_provider_credentials_expires_at_oauth")
       .on(t.expiresAt)
       .where(sql`${t.expiresAt} IS NOT NULL`),
+    // Referencing-side index for the `user` SET NULL action (0048).
+    // Postgres indexes only the REFERENCED side of a foreign key; without
+    // this, deleting one user seq-scans this table under the deletion's lock.
+    index("idx_model_provider_credentials_created_by").on(t.createdBy),
   ],
 );
 
@@ -388,12 +414,16 @@ export const orgModels = pgTable(
     // not a per-row boolean — so it can point at a system model too. See the
     // column comment on `organizations`.
     source: text("source").notNull().default("custom"), // "built-in" | "custom"
-    createdBy: text("created_by").references(() => user.id),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index("idx_org_models_org_id").on(table.orgId),
+    // Referencing-side index for the `user` SET NULL action (0048).
+    // Postgres indexes only the REFERENCED side of a foreign key; without
+    // this, deleting one user seq-scans this table under the deletion's lock.
+    index("idx_org_models_created_by").on(table.createdBy),
     check("org_models_source_valid", sql`source IN ('built-in', 'custom')`),
   ],
 );

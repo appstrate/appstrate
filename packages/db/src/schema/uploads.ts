@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { pgTable, text, timestamp, integer, uuid, index } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, bigint, uuid, index } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { user } from "./auth.ts";
 import { organizations } from "./organizations.ts";
@@ -46,8 +46,15 @@ export const uploads = pgTable(
     name: text("name").notNull(),
     /** Declared MIME type (re-verified server-side via magic-byte sniffing). */
     mime: text("mime").notNull(),
-    /** Size in bytes (declared, then verified on consumption). */
-    size: integer("size").notNull(),
+    /**
+     * Size in bytes (declared, then verified on consumption). `bigint` to match
+     * `files.size` — an upload is consumed INTO a file, so the same quantity
+     * crossed a type boundary at the seam. Not a bug at the current 100 MiB
+     * cap; a raw `22003 integer out of range` the day that cap passes ~2 GiB.
+     * `{ mode: "number" }` keeps the TypeScript type `number`, as `files.size`
+     * already does.
+     */
+    size: bigint("size", { mode: "number" }).notNull(),
     /**
      * Optional client-declared SHA-256 of the payload (hex, lowercase). When
      * present it is enforced server-side: the S3 presign binds an
