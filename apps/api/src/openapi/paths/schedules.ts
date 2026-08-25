@@ -201,6 +201,15 @@ export const schedulesPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "404": {
+          description:
+            'Agent not found, or the agent has no published version (`no_published_version`). A schedule with no `version_override` fires the PUBLISHED manifest, so a never-published agent is refused here rather than 404ing on every tick; pin the working copy with `version_override: "draft"` to schedule it anyway.',
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },

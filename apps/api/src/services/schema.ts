@@ -115,7 +115,22 @@ function runValidate(
   }
 
   // 3. Compile (cached) + validate
-  const validate = compileCached(effectiveSchema);
+  //
+  // Drop the author's `$schema` first. The shared instance is an Ajv2020 bound
+  // to one dialect, so a manifest declaring a different one — draft-07, which
+  // most JSON Schema tooling still emits — makes `ajv.compile` THROW
+  // ("no schema with key or ref …/draft-07/schema") instead of returning a
+  // validator: a 500 where the whole contract of this function is a 400 with
+  // per-field errors. The input branch above is a SPREAD of the author's
+  // schema, so it forwards the key (the old rebuild-three-keys version dropped
+  // it by accident); the output branch always forwarded it. `$schema` declares
+  // the document's dialect, it asserts nothing about the value, so removing it
+  // cannot change a verdict for any keyword these manifests use.
+  const { $schema: _declaredDialect, ...dialectFreeSchema } =
+    effectiveSchema as JSONSchemaObject & {
+      $schema?: unknown;
+    };
+  const validate = compileCached(dialectFreeSchema as JSONSchemaObject);
   const valid = validate(effectiveData);
 
   // 4. Per-kind error mapping

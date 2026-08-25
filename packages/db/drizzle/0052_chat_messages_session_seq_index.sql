@@ -3,9 +3,13 @@
 --
 -- ═══ THE GAP ═══
 --
--- `chat_messages` has exactly one index — `uq_chat_messages_session_message`,
--- UNIQUE on `(session_id, message_id)`. Every read of the table filters on
--- `session_id`, and two of the three order by `seq`:
+-- `chat_messages` has two indexes, and only one of them is keyed on a session.
+-- `seq` is `serial(...).primaryKey()` (`src/schema/chat.ts:123`), so
+-- `chat_messages_pkey` exists — and it is useless to every read below, none of
+-- which filters on `seq` alone. The session-keyed one is
+-- `uq_chat_messages_session_message`, UNIQUE on `(session_id, message_id)`.
+-- Every read of the table filters on `session_id`, and two of the three order
+-- by `seq`:
 --
 --   packages/module-chat/src/routes.ts:102-104
 --     WHERE session_id = ? ORDER BY seq ASC          (load the whole thread)
@@ -14,8 +18,8 @@
 --   packages/module-chat/src/persistence.ts:192-194
 --     WHERE session_id = ? AND message_id = ?        (served by the UNIQUE index)
 --
--- The existing index serves the FILTER on all three and the third one whole,
--- but its second column is `message_id`, so within a session the rows come out
+-- The UNIQUE index serves the FILTER on all three and the third one whole, but
+-- its second column is `message_id`, so within a session the rows come out
 -- in message-id order — which is a client-generated identity, unrelated to
 -- insertion order. Both `seq`-ordered reads therefore take the index (or a
 -- seq scan) and then SORT.

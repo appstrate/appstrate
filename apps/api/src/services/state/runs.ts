@@ -396,7 +396,27 @@ async function acquireRunNumberLock(tx: DbTx, scope: AppScope, packageId: string
 /**
  * Advisory-lock key serializing per-org run admission. Single-sourced so
  * every party that must serialize against admission (`enforceOrgConcurrencyCap`
- * below, `deleteOrganization`) derives the exact same key.
+ * below, `deletePackageRuns` below, `deleteOrganization`) derives the exact
+ * same key.
+ *
+ * LOCK ORDER — this advisory key is the OUTERMOST lock of the run-admission /
+ * run-teardown family, and every transaction that takes it takes it FIRST:
+ *
+ *   run_concurrency:<org>  →  organizations row  →  packages row  →  files rows
+ *                          →  run_number:<org>:<app>:<package>
+ *
+ * (Each participant takes the subset it needs, never a different order.)
+ *
+ * The order is not cosmetic: `createRun` locks its input `files` rows, and
+ * `deletePackageRuns` / `deleteOrganization` lock `files` while holding this
+ * key. An agent output published by run A can be fed to run B as
+ * `appfile://…` (see `services/input-parser.ts`), so both parties really do
+ * meet on the same file row — `createRun` acquiring the key AFTER its file
+ * lock was an ABBA cycle Postgres resolves with `40P01` and a 500 on one side.
+ *
+ * `organizations` before `files` is the same order every file write and every
+ * parent cascade already uses — see `detachOrDeleteContainedFiles` in
+ * `services/files.ts`, which documents that half.
  */
 export function orgRunConcurrencyLockKey(orgId: string): string {
   return `run_concurrency:${orgId}`;
@@ -552,6 +572,22 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
   const { id, packageId, actor, input } = params;
 
   await db.transaction(async (tx) => {
+    // FIRST statement, before any row lock: the per-org admission key is the
+    // outermost lock of this family and the run-teardown paths take it before
+    // they touch `files` — see {@link orgRunConcurrencyLockKey} for the one
+    // order every participant follows. Taking it after the file lock below is
+    // what made this transaction the ABBA half of a `40P01` against
+    // `deletePackageRuns` (an agent output of one run is a legal
+    // `appfile://` input to the next).
+    //
+    // The file lock's invariant is untouched by the move: it still precedes
+    // the `file_links` INSERT below, in this same transaction, held for the
+    // rest of it — so deletion still cannot slip between validation and the
+    // link. Only the ORDER of two independent acquisitions changed. One
+    // visible consequence, deliberate: a request that is both over-cap and
+    // references a deleted file now answers 429 instead of 409.
+    await enforceOrgConcurrencyCap(tx, scope);
+
     const consumedFileIds = [...new Set(params.consumedFileIds ?? [])];
     if (consumedFileIds.length > 0) {
       const available = await tx
@@ -573,11 +609,9 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
       }
     }
 
-    // Among the admission locks, order matters: acquire the per-org concurrency
-    // lock before the per-package run_number lock (consistent ordering across
-    // callers → no deadlock). Input files are locked first so deletion
-    // cannot slip between validation and the atomic link insert below.
-    await enforceOrgConcurrencyCap(tx, scope);
+    // Last of the admission locks: `run_number` is per (org, app, package) and
+    // nothing outside this file takes it, but it is still acquired after the
+    // per-org key so the two are always seen in the same order.
     await acquireRunNumberLock(tx, scope, packageId);
     const runNumber = await nextRunNumber(tx, scope, packageId);
 

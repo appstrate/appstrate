@@ -107,4 +107,68 @@ describe("createQueue — queue-level defaultJobOptions (no Redis)", () => {
     await waitFor(async () => (await q.count()) === 0);
     expect(attempts).toBe(1);
   });
+
+  /**
+   * `attempts` is the only key of `defaultJobOptions` this queue reads. The
+   * retry DELAY comes from `WorkerOptions.backoffStrategy` (passed to
+   * `process()`), never from `backoff` — which exists on the option type only
+   * because BullMQ uses `{ type: "custom" }` as a pointer to the worker-side
+   * strategy. These two pin that split, which the constructor's doc comment
+   * used to state backwards ("only `attempts` and `backoff` mean anything").
+   */
+  it("takes the retry delay from the worker's backoffStrategy", async () => {
+    const q = await createQueue<{ v: string }>("default-opts-backoff-source", {
+      attempts: 3,
+      backoff: { type: "custom" },
+    });
+    queue = q;
+
+    const strategyCalls: number[] = [];
+    let attempts = 0;
+    q.process(
+      async () => {
+        attempts++;
+        throw new Error("transient");
+      },
+      {
+        backoffStrategy: (attempt) => {
+          strategyCalls.push(attempt);
+          return 1;
+        },
+      },
+    );
+
+    await q.add("deliver", { v: "x" });
+
+    await waitFor(() => attempts >= 3);
+    await waitFor(async () => (await q.count()) === 0);
+    // Consulted once per retry — it is the delay's only source.
+    expect(strategyCalls).toEqual([1, 2]);
+  });
+
+  it("ignores `backoff` in the defaults when the worker declares no strategy", async () => {
+    const q = await createQueue<{ v: string }>("default-opts-backoff-inert", {
+      attempts: 2,
+      backoff: { type: "custom" },
+    });
+    queue = q;
+
+    let attempts = 0;
+    // No worker options at all — so the built-in `1000ms × attempt` fallback
+    // is what schedules the retry, `backoff` above notwithstanding.
+    q.process(async () => {
+      attempts++;
+      throw new Error("transient");
+    });
+
+    await q.add("deliver", { v: "x" });
+    await waitFor(() => attempts >= 1);
+
+    // Well inside the 1s fallback: the second attempt has not fired yet.
+    await new Promise((r) => setTimeout(r, 250));
+    expect(attempts).toBe(1);
+
+    await waitFor(() => attempts >= 2, 5_000);
+    expect(attempts).toBe(2);
+  });
 });

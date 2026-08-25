@@ -418,36 +418,46 @@ export function createSchedulesRouter() {
     );
 
     // Same resolve-and-validate the create route runs, for the same stated
-    // reason: refuse at THIS write rather than silently at every tick. This
-    // path used to run only the lock half, so a PUT replacing `input` with a
-    // wrong-typed or incomplete value answered 200 and then died on every
-    // subsequent fire, visible only in the schedule's failure record.
+    // reason: refuse at THIS write rather than silently at every tick. A PUT
+    // replacing `input` with a wrong-typed or incomplete value used to answer
+    // 200 and then die on every subsequent fire, visible only in the
+    // schedule's failure record.
     //
-    // Unconditional: `existing.input` is `Record | null` (`toSchedule` maps the
-    // JSONB column through `asRecordOrNull`), never `undefined`, so the guard
-    // this used to carry was always true. And it must run even when `input` is
-    // absent from the patch — the schema, the locks AND `version_override` can
-    // all have moved since the schedule was written, and the last of those is
-    // itself patchable right here.
+    // Gated on the patch actually MOVING the manifest decision, which is
+    // exactly `input` and `version_override` — the only two request fields
+    // `assertScheduleTargetValid` reads (its other two arguments, the agent
+    // and the app-level `packageSettings`, are not patchable from here). Run
+    // unconditionally, it also judged patches that cannot invalidate anything,
+    // and its resolve step 404s `no_published_version` on an agent that has
+    // never been published. Schedules on such agents exist — POST accepted
+    // them before this gate — so `{"enabled": false}` on one answered 404 and
+    // an operator could no longer disable a misfiring legacy schedule, only
+    // delete it. A patch that merely REDUCES what the row does must always be
+    // applicable; one that changes what it fires is what has to prove itself.
     //
-    // `data.input ?? existing.input` because a PATCH that omits `input` must
-    // still be checked against the CURRENT schema and locks.
-    const agentForInput = await getPackage(existing.packageId, scope.orgId);
-    // `package_schedules.package_id` is `ON DELETE CASCADE` and `getPackage`
-    // admits system packages, so this is unreachable in practice — it exists so
-    // the impossible case is a typed 404 rather than a schedule validated
-    // against nothing.
-    if (!agentForInput) throw notFound(`Agent '${existing.packageId}' not found`);
-    await assertScheduleTargetValid({
-      agent: agentForInput,
-      // `null` clears the override, i.e. back to the unified default; omitted
-      // leaves whatever the row already replays.
-      versionOverride:
-        (data.version_override !== undefined ? data.version_override : existing.version_override) ??
-        undefined,
-      packageSettings,
-      input: data.input ?? existing.input ?? undefined,
-    });
+    // `data.input ?? existing.input` because a patch that moves only
+    // `version_override` must still be checked against the input the row will
+    // keep replaying (and vice versa) — the pair is validated together, the
+    // gate only decides whether to look at all.
+    if (data.input !== undefined || data.version_override !== undefined) {
+      const agentForInput = await getPackage(existing.packageId, scope.orgId);
+      // `package_schedules.package_id` is `ON DELETE CASCADE` and `getPackage`
+      // admits system packages, so this is unreachable in practice — it exists
+      // so the impossible case is a typed 404 rather than a schedule validated
+      // against nothing.
+      if (!agentForInput) throw notFound(`Agent '${existing.packageId}' not found`);
+      await assertScheduleTargetValid({
+        agent: agentForInput,
+        // `null` clears the override, i.e. back to the unified default; omitted
+        // leaves whatever the row already replays.
+        versionOverride:
+          (data.version_override !== undefined
+            ? data.version_override
+            : existing.version_override) ?? undefined,
+        packageSettings,
+        input: data.input ?? existing.input ?? undefined,
+      });
+    }
 
     // Reject a `model_id_override` that references no real model (no-op when
     // the field isn't part of this patch).

@@ -363,6 +363,63 @@ describe("validateInput", () => {
     const result = validateInput({ topic: "AI" }, schema);
     expect(result.valid).toBe(true);
   });
+
+  /**
+   * The shared AJV is an Ajv2020 bound to one dialect, so a manifest declaring
+   * draft-07 — what most JSON Schema tooling emits — makes `ajv.compile` throw
+   * "no schema with key or ref …/draft-07/schema" rather than return a
+   * validator. That is a 500 on a path whose entire contract is a 400 with
+   * per-field errors. The effective schema must therefore drop `$schema`: it
+   * declares the document's dialect and asserts nothing about the value.
+   */
+  it("a schema declaring a foreign $schema dialect validates instead of throwing", () => {
+    const schema = {
+      $schema: "http://json-schema.org/draft-07/schema#",
+      type: "object",
+      properties: { topic: { type: "string" } },
+      required: ["topic"],
+    } as unknown as JSONSchemaObject;
+
+    expect(() => validateInput({ topic: "AI" }, schema)).not.toThrow();
+    expect(validateInput({ topic: "AI" }, schema).valid).toBe(true);
+
+    // …and it still REJECTS, rather than waving the input through.
+    const missing = validateInput({}, schema);
+    expect(missing.valid).toBe(false);
+    expect(JSON.stringify(missing.errors)).toContain("topic");
+  });
+
+  it("a file field does not resurrect the $schema throw", () => {
+    // The file-field branch is the one that started spreading the author's
+    // schema, so it is the branch that started forwarding `$schema`.
+    const schema = {
+      $schema: "http://json-schema.org/draft-07/schema#",
+      type: "object",
+      properties: {
+        doc: { type: "string", format: "uri", contentMediaType: "application/pdf" },
+        note: { type: "string" },
+      },
+      required: ["doc"],
+    } as unknown as JSONSchemaObject;
+
+    expect(() => validateInput({ note: "hi" }, schema)).not.toThrow();
+    expect(validateInput({ note: "hi" }, schema).valid).toBe(true);
+  });
+});
+
+describe("validateOutput dialect handling", () => {
+  it("a schema declaring a foreign $schema dialect validates instead of throwing", () => {
+    const schema = {
+      $schema: "http://json-schema.org/draft-07/schema#",
+      type: "object",
+      properties: { summary: { type: "string" } },
+      required: ["summary"],
+    } as unknown as JSONSchemaObject;
+
+    expect(() => validateOutput({ summary: "done" }, schema)).not.toThrow();
+    expect(validateOutput({ summary: "done" }, schema).valid).toBe(true);
+    expect(validateOutput({}, schema).valid).toBe(false);
+  });
 });
 
 // =====================================================

@@ -120,9 +120,23 @@
 -- wrapping the batch: `migrate` throws, boot fails, the deploy fails its health
 -- gate. Right trade (fail fast, retry), but a failed deploy, not a silent skip.
 --
--- Every statement is individually guarded (`pg_constraint` lookup,
--- `pg_attribute.attnotnull`, `IF NOT EXISTS`-equivalent), so a partially
--- applied environment converges on replay — same discipline as 0029.
+-- FIVE of the seven statements below carry a guard: a `pg_constraint` lookup
+-- for each of the three CHECKs, `pg_attribute.attnotnull` for the NOT NULL
+-- promotion, and the backfill's own `WHERE timezone IS NULL`, which matches
+-- zero rows on a second pass. The other two are unconditional —
+-- `ALTER COLUMN timezone SET DEFAULT 'UTC'` and
+-- `ALTER COLUMN size SET DATA TYPE bigint`. Both are idempotent anyway
+-- (re-declaring the same default and re-widening an already-`bigint` column are
+-- catalog no-ops), so a partially applied environment still converges on replay
+-- — same discipline as 0029. The conclusion holds; "every statement is
+-- guarded" is what does not.
+--
+-- THE BATCH AROUND IT IS NOT REPLAY-SAFE, and this file's convergence says
+-- nothing about that. 0047 in the same batch converts naive columns with
+-- `USING … AT TIME ZONE 'UTC'`, and a second application MOVES every value it
+-- touches — its header says so and leans on drizzle's journal to guarantee the
+-- file runs exactly once. Converging on replay is a property of THIS migration,
+-- not of the deploy it rides in.
 SET LOCAL lock_timeout = '3s';--> statement-breakpoint
 DO $$
 BEGIN

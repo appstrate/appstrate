@@ -106,21 +106,24 @@ const CONSUME_GRACE_MS = 60 * 60 * 1000;
 
 /**
  * Rows whose storage object is still on disk: the exact complement of what
- * {@link cleanupExpiredUploads} deletes, expressed once so the admission gates
- * and the sweep cannot disagree about it.
+ * {@link cleanupExpiredUploads} deletes, expressed once so the per-org BYTE
+ * ceiling and the sweep cannot disagree about it.
  *
  *   - never consumed and not past its PUT expiry — staged, awaiting bytes;
  *   - consumed, but inside the reuse window (+ the consume grace) the sweep
  *     honours before it may drop the object.
  *
- * The second branch is why this exists. Both create-time gates used to count
+ * The second branch is why this exists. The byte ceiling used to count
  * `consumed_at IS NULL` alone, so the instant an upload was attached its bytes
- * left every ceiling while sitting on disk for another ~25h — stage 2 GiB,
- * consume it, delete the materialised files, and the org is back to a clean
- * slate against every quota with 2 GiB unaccounted, repeatable every few
- * minutes. `ORG_STORAGE_QUOTA_BYTES` never covered this bucket either: it is
- * checked against `organizations.files_bytes_used`, which the `files` table
- * alone maintains.
+ * left it while sitting on disk for another ~25h — stage 2 GiB, consume it,
+ * delete the materialised files, and the org is back to a clean slate against
+ * every quota with 2 GiB unaccounted, repeatable every few minutes.
+ * `ORG_STORAGE_QUOTA_BYTES` never covered this bucket either: it is checked
+ * against `organizations.files_bytes_used`, which the `files` table alone
+ * maintains.
+ *
+ * Deliberately NOT used by the per-actor count gate: that one bounds open
+ * staging slots, not disk (see `createUpload`).
  */
 function retainedUploadCondition(now: Date): SQL {
   const consumedCutoff = new Date(now.getTime() - consumedRetentionMs() - CONSUME_GRACE_MS);
@@ -273,10 +276,22 @@ export async function createUpload(params: CreateUploadParams): Promise<CreateUp
   // Staging budget, computed from the live upload rows (no separate counter) and
   // enforced under the org row's FOR UPDATE lock so two concurrent creates for
   // the same org cannot both pass a stale sum. The lock scope is kept tight —
-  // the aggregates + insert only. Budget is freed at the moment the bytes
-  // actually leave the bucket — see `retainedUploadCondition`, not
-  // `consumed_at IS NULL`: a consumed upload keeps its object for the reuse
-  // window and must keep costing its owner until the sweep can reclaim it.
+  // the aggregates + insert only.
+  //
+  // The two gates deliberately count DIFFERENT sets, because they bound
+  // different things:
+  //
+  //  - the per-org BYTE ceiling bounds what is ON DISK, so it counts
+  //    `retainedUploadCondition` — a consumed upload keeps its object for the
+  //    reuse window and must keep costing its owner until the sweep can
+  //    reclaim it (that is the DoS the byte gate exists for);
+  //  - the per-actor COUNT gate bounds how many staging slots one principal
+  //    may hold OPEN at once, so it counts what is still awaiting bytes:
+  //    `consumed_at IS NULL AND expires_at > now`. Extending it to retained
+  //    rows would turn "50 concurrent" into "50 per ~25h" — a quota the knob
+  //    never claimed, that no abuse needs (the byte ceiling already caps the
+  //    bucket), and that the gate's own advice ("consume … before staging
+  //    more") would then be unable to satisfy.
   await db.transaction(async (tx) => {
     // Lock the org row (same lock the durable files quota takes) to
     // serialise this org's concurrent creates.
@@ -290,15 +305,16 @@ export async function createUpload(params: CreateUploadParams): Promise<CreateUp
     const env = getEnv();
     const now = new Date();
 
-    // Per-actor retained-upload count. Skipped when no principal is attributed
-    // (no actor to bound). `createdBy` / `endUserId` are mutually exclusive.
+    // Per-actor OPEN-slot count: staged, unconsumed, not past its PUT expiry.
+    // Skipped when no principal is attributed (no actor to bound).
+    // `createdBy` / `endUserId` are mutually exclusive.
     if (createdBy !== null || endUserId !== null) {
       const actorFilter =
         createdBy !== null ? eq(uploads.createdBy, createdBy) : eq(uploads.endUserId, endUserId!);
       const [activeForActor] = await tx
         .select({ count: sql<number>`count(*)::int` })
         .from(uploads)
-        .where(and(actorFilter, retainedUploadCondition(now)));
+        .where(and(actorFilter, isNull(uploads.consumedAt), gt(uploads.expiresAt, now)));
       if ((activeForActor?.count ?? 0) >= env.UPLOAD_MAX_ACTIVE_PER_ACTOR) {
         throw uploadStagingLimitExceeded(
           `Too many active staged uploads (max ${env.UPLOAD_MAX_ACTIVE_PER_ACTOR}); ` +

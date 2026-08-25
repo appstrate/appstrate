@@ -20,6 +20,7 @@ import {
 } from "../../helpers/seed.ts";
 import { publishAndInstall, seedDivergedAgent } from "../../helpers/schedule-fixtures.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
+import { schedulesPaths } from "../../../src/openapi/paths/schedules.ts";
 
 const app = getTestApp();
 
@@ -921,6 +922,15 @@ describe("Schedules API", () => {
       expect(pinned.status).toBe(201);
     });
 
+    it("declares that 404 in the OpenAPI spec", () => {
+      // The spec is the published contract for this endpoint; a status only the
+      // implementation knows about is a client that cannot handle it.
+      const post = (schedulesPaths as Record<string, any>)["/api/agents/{scope}/{name}/schedules"]
+        .post;
+      expect(Object.keys(post.responses)).toContain("404");
+      expect(post.responses["404"].description).toContain("no_published_version");
+    });
+
     it("applies the same manifest choice on PUT", async () => {
       const fid = await diverge("put-pub-strict", REQUIRES_EMAIL, REQUIRES_NOTHING);
 
@@ -936,6 +946,67 @@ describe("Schedules API", () => {
 
       expect(res.status).toBe(400);
       expect(JSON.stringify(await res.json())).toContain("email");
+    });
+
+    /**
+     * The gate resolves the manifest the schedule will FIRE, so on a
+     * never-published agent it 404s. Rows like that exist — POST accepted them
+     * before the gate did — and a patch that cannot change what the schedule
+     * fires must stay applicable to them, or the only remaining way to stop a
+     * misfiring legacy schedule is to delete it (DELETE never resolved a
+     * manifest and still answers 204).
+     */
+    describe("a legacy schedule on a never-published agent", () => {
+      async function seedLegacy(name: string): Promise<string> {
+        const fid = agentId(name);
+        const agent = await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+        await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+        const schedule = await seedSchedule({
+          packageId: agent.id,
+          orgId: ctx.orgId,
+          applicationId: ctx.defaultAppId,
+          userId: ctx.user.id,
+          cronExpression: "0 * * * *",
+          name: "Legacy",
+        });
+        return schedule.id;
+      }
+
+      function put(scheduleId: string, body: Record<string, unknown>) {
+        return app.request(`/api/schedules/${scheduleId}`, {
+          method: "PUT",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      }
+
+      it("can still be disabled", async () => {
+        const scheduleId = await seedLegacy("legacy-disable");
+
+        const res = await put(scheduleId, { enabled: false });
+
+        expect(res.status).toBe(200);
+        expect(((await res.json()) as any).enabled).toBe(false);
+      });
+
+      it("can still be renamed and rescheduled", async () => {
+        const scheduleId = await seedLegacy("legacy-rename");
+
+        const res = await put(scheduleId, { name: "Renamed", cron_expression: "0 6 * * *" });
+
+        expect(res.status).toBe(200);
+      });
+
+      it("still 404s when the patch moves what it would fire", async () => {
+        const scheduleId = await seedLegacy("legacy-input");
+
+        // `input` feeds the manifest decision, so this patch has to prove the
+        // target is firable — and it is not.
+        const res = await put(scheduleId, { input: { note: "hi" } });
+
+        expect(res.status).toBe(404);
+        expect(((await res.json()) as any).code).toBe("no_published_version");
+      });
     });
   });
 

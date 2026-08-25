@@ -110,8 +110,14 @@ export class LocalQueue<T> implements JobQueue<T> {
      * them per-`add()` — including the ones the cron evaluator enqueues, which
      * pass none by construction. Same role as BullMQ's `defaultJobOptions`, so
      * a queue declared with `attempts: 8` retries eight times whether or not
-     * Redis is present. Only `attempts` and `backoff` mean anything here; the
-     * retention keys are Redis bookkeeping this queue has no equivalent of.
+     * Redis is present.
+     *
+     * `attempts` is the ONLY key this queue reads (see `executeJob`). The
+     * retention keys are Redis bookkeeping it has no equivalent of, and
+     * `backoff: { type: "custom" }` is BullMQ's pointer to the worker-side
+     * strategy — here the delay comes straight from
+     * `WorkerOptions.backoffStrategy` (supplied to `process()`), falling back
+     * to `1000 * attempt`, so declaring `backoff` here changes nothing.
      */
     private readonly defaultJobOptions?: JobAddOptions,
     /** Injectable for tests; production always uses the app logger. */

@@ -239,13 +239,13 @@ describe("createUpload staging budget", () => {
     });
   });
 
-  it("a consumed upload frees the per-actor budget only once its bytes are reclaimable", async () => {
-    // This used to assert that `consumedAt` alone freed the slot. It does not:
-    // a consumed upload keeps its storage object — deliberately, so the URI
-    // stays re-consumable — until the sweep may drop it at
-    // `consumed_at + UPLOAD_RETENTION_HOURS + CONSUME_GRACE_MS` (~25h). Counting
-    // it as gone the instant it was attached is what let one actor cycle
-    // stage → consume → stage indefinitely against a ceiling of N.
+  it("a consumed upload frees the per-actor budget immediately", async () => {
+    // UPLOAD_MAX_ACTIVE_PER_ACTOR bounds OPEN staging slots — how many uploads
+    // one principal may have awaiting bytes at once — not disk. Counting a
+    // consumed upload's retained object here would turn "N concurrent" into "N
+    // per ~25h" and make the gate's own advice ("consume … before staging
+    // more") impossible to follow. Disk is the BYTE ceiling's job, asserted by
+    // the next test.
     await withEnv({ UPLOAD_MAX_ACTIVE_PER_ACTOR: "1" }, async () => {
       const base = {
         orgId: ctx.orgId,
@@ -255,19 +255,35 @@ describe("createUpload staging budget", () => {
         size: 10,
       };
       const first = await createUpload({ ...base, name: "a.pdf" });
-
-      // Consumed just now → object retained → the slot is still taken.
+      // Mark it consumed → the slot it held is released, even though its bytes
+      // stay on disk for the reuse window.
       await db.update(uploads).set({ consumedAt: new Date() }).where(eq(uploads.id, first.id));
+      await expect(createUpload({ ...base, name: "b.pdf" })).resolves.toMatchObject({
+        object: "upload",
+      });
+    });
+  });
+
+  it("an expired unconsumed upload frees the per-actor budget", async () => {
+    // The other half of "open slot": a staged upload whose PUT window elapsed
+    // is not holding a slot either — nothing will ever arrive for it.
+    await withEnv({ UPLOAD_MAX_ACTIVE_PER_ACTOR: "1" }, async () => {
+      const base = {
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        createdBy: ctx.user.id,
+        mime: "application/pdf",
+        size: 10,
+      };
+      const first = await createUpload({ ...base, name: "a.pdf" });
       await expect(createUpload({ ...base, name: "b.pdf" })).rejects.toMatchObject({
         status: 429,
         code: "upload_staging_limit_exceeded",
       });
 
-      // Past retention + grace → the sweep may reclaim the bytes, so the slot
-      // is genuinely free. Moving `consumed_at` rather than sleeping 25h.
       await db
         .update(uploads)
-        .set({ consumedAt: new Date(Date.now() - 26 * 60 * 60 * 1000) })
+        .set({ expiresAt: new Date(Date.now() - 60_000) })
         .where(eq(uploads.id, first.id));
       await expect(createUpload({ ...base, name: "c.pdf" })).resolves.toMatchObject({
         object: "upload",
@@ -277,7 +293,7 @@ describe("createUpload staging budget", () => {
 
   it("counts a consumed upload's retained bytes against the org staging ceiling", async () => {
     // The escape the byte ceiling had: stage to the limit, attach everything
-    // (both gates filtered `consumed_at IS NULL`, so the total dropped to zero
+    // (the ceiling filtered `consumed_at IS NULL`, so the total dropped to zero
     // while the objects stayed on disk for ~25h), delete the materialised files
     // as their creator so `files_bytes_used` returns to baseline — a clean slate
     // against every gate, with the bytes still there. Repeating that loop is

@@ -46,6 +46,10 @@ interface DedupedRefreshOptions<T> {
    * hand that token back. Forwarded to {@link reReadFreshness} rather than
    * skipping the callback: the re-read has a second job (picking up a peer's
    * just-rotated `refresh_token`) that a forced refresh needs even more.
+   *
+   * Also partitions the singleflight — forced and proactive callers never
+   * share a flight, because a flight applies only its originator's verdict.
+   * See {@link dedupedRefresh}.
    */
   force?: boolean;
   /**
@@ -66,17 +70,39 @@ const inflightRefreshes = new Map<string, Promise<unknown>>();
  * Coalesce a refresh for `key` through the in-process singleflight + the
  * cross-instance Redis lock, with a post-acquire freshness short-circuit.
  *
- * The singleflight map is keyed by `key`; concurrent callers with the same
- * key share the same in-flight promise. The entry is deleted in `finally`.
+ * Concurrent callers sharing a flight key share the same in-flight promise.
+ * The entry is deleted in `finally`.
  *
- * `force` is deliberately NOT part of the key: a forced caller that joins an
- * in-flight proactive refresh still gets a token strictly newer than the one
- * that 401'd it — either the exchange that flight performed, or the peer-written
- * token its re-read found. Splitting the key would only add a redundant second
- * exchange behind the same lock.
+ * **`force` IS part of the flight key**, and that is the whole point of this
+ * helper: a flight carries its originator's `force` verdict all the way to
+ * `reReadFreshness`, so joining someone else's flight means inheriting their
+ * verdict. Sharing one flight across both kinds put back the exact defect the
+ * `force` flag exists to prevent — a forced caller receiving the token that
+ * just 401'd it, with no upstream exchange at all:
+ *
+ *   instance B refreshes and writes a token; instance A's PROACTIVE caller is
+ *   meanwhile queued on the Redis lock; A's flight wins the lock, re-reads,
+ *   finds the token comfortably unexpired and short-circuits. A FORCED caller
+ *   that joined that flight — it holds upstream proof this very token is dead
+ *   — is handed it back and told `{status:"refreshed"}`.
+ *
+ * Narrower than the bug the flag was introduced for (bounded by the lock wait
+ * rather than the token's remaining lifetime, and it needs ≥2 instances for
+ * the re-read to find anything new), but the same silent-success shape, and a
+ * comment claiming otherwise is worth less than no comment.
+ *
+ * The cost of splitting is one extra upstream exchange in the single case
+ * where a forced and a proactive refresh for the same credential overlap: the
+ * forced flight queues on the SAME Redis lock (`opts.lockKey` is unchanged),
+ * so the two are still serialized across instances — no concurrent double-spend
+ * of a rotating `refresh_token` — and the forced flight's own re-read picks up
+ * whatever the proactive one just wrote before exchanging against it. Forced
+ * callers still collapse with each other, which is the storm that matters:
+ * every in-flight sidecar call 401ing at once is one exchange, not N.
  */
 export function dedupedRefresh<T>(key: string, opts: DedupedRefreshOptions<T>): Promise<T> {
-  const cached = inflightRefreshes.get(key) as Promise<T> | undefined;
+  const flightKey = opts.force === true ? `${key}:force` : key;
+  const cached = inflightRefreshes.get(flightKey) as Promise<T> | undefined;
   if (cached) return cached;
 
   const promise = withRedisLock(
@@ -97,8 +123,8 @@ export function dedupedRefresh<T>(key: string, opts: DedupedRefreshOptions<T>): 
       return opts.doRefresh();
     },
   );
-  inflightRefreshes.set(key, promise);
+  inflightRefreshes.set(flightKey, promise);
   return promise.finally(() => {
-    inflightRefreshes.delete(key);
+    inflightRefreshes.delete(flightKey);
   });
 }

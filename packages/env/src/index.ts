@@ -618,12 +618,15 @@ const envSchema = z
     // consumed or expired upload frees the budget immediately.
     UPLOAD_MAX_ACTIVE_PER_ACTOR: z.coerce.number().int().positive().default(50),
 
-    // Ceiling on the summed DECLARED sizes of an org's ACTIVE (unconsumed,
-    // unexpired) staged uploads. A create whose declared size would push the
-    // org's active staging total over this is rejected (403
-    // `storage_limit_exceeded`). Bounds the ephemeral `uploads` bucket footprint
-    // per org before GC; distinct from the durable ORG_STORAGE_QUOTA_BYTES.
-    // Default 2 GiB.
+    // Ceiling on the summed DECLARED sizes of an org's RETAINED staged uploads
+    // — the ones whose storage object is still on disk: unconsumed and
+    // unexpired, PLUS consumed ones still inside the UPLOAD_RETENTION_HOURS
+    // reuse window. A create whose declared size would push that total over
+    // this is rejected (403 `storage_limit_exceeded`). Consuming an upload
+    // therefore does NOT free its bytes until the GC sweep may drop the object
+    // — that is the point: the ceiling tracks the bucket, not the row's status.
+    // Bounds the ephemeral `uploads` bucket footprint per org before GC;
+    // distinct from the durable ORG_STORAGE_QUOTA_BYTES. Default 2 GiB.
     UPLOAD_STAGING_MAX_BYTES_PER_ORG: z.coerce
       .number()
       .int()
