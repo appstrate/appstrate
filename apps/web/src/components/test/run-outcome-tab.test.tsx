@@ -8,21 +8,18 @@
  * in the view, and going through the container would mean standing up a query
  * harness to assert something it does not decide.
  *
- * Same no-DOM harness as `run-row.test.tsx`, plus a `QueryClientProvider`:
- * `FileListPanel` wires the delete/keep mutations on mount (they do not fire,
- * but they need the client) and `MemoryPanel` reads its rows through one.
+ * Same no-DOM harness as `run-row.test.tsx`, through the shared
+ * `test/render.tsx`: its `QueryClientProvider` is what `FileListPanel` needs to
+ * wire the delete/keep mutations on mount (they do not fire, but they need the
+ * client) and what `MemoryPanel` reads its rows through.
  */
 
-import type { ReactElement } from "react";
 import { describe, it, expect } from "bun:test";
-import { renderToStaticMarkup } from "react-dom/server";
-import { MemoryRouter } from "react-router-dom";
-import { I18nextProvider } from "react-i18next";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import agentsFr from "../../locales/fr/agents.json";
 import filesFr from "../../locales/fr/files.json";
 import i18n, { i18nReady } from "../../i18n.ts";
 import type { FileDto } from "../../hooks/use-files.ts";
+import { fileFixture, render } from "../../test/render.tsx";
 import { RunOutcomeView } from "../run-outcome-tab.tsx";
 import { initialRunDetailTab } from "../../lib/run-detail-tabs.ts";
 
@@ -38,18 +35,7 @@ const RUN_ID = "run_1";
 const VIEWER_HEIGHT_CLASS = "h-[max(24rem,calc(100vh-28rem))]";
 
 function file(overrides: Partial<FileDto> & { name: string }): FileDto {
-  return {
-    id: `file_${overrides.name}`,
-    purpose: "agent_output",
-    run_id: RUN_ID,
-    packageId: "@acme/reporter",
-    mime: "text/plain",
-    size: 12,
-    createdAt: "2026-07-01T10:00:00.000Z",
-    expiresAt: null,
-    capabilities: { download: true, delete: false, keep: false },
-    ...overrides,
-  } as unknown as FileDto;
+  return fileFixture({ run_id: RUN_ID, ...overrides });
 }
 
 /** One file the run consumed — never part of the outcome. */
@@ -63,18 +49,6 @@ const UPLOAD = file({ name: "brief.pdf", purpose: "user_upload", run_id: null })
  * purpose. Only its `run_id` tells it apart.
  */
 const CHAINED_IN = file({ name: "source.csv", run_id: "run_0" });
-
-function render(node: ReactElement): string {
-  return renderToStaticMarkup(
-    <QueryClientProvider client={new QueryClient()}>
-      <I18nextProvider i18n={i18n}>
-        <MemoryRouter>{node}</MemoryRouter>
-      </I18nextProvider>
-    </QueryClientProvider>,
-  )
-    .replace(/&#x27;/g, "'")
-    .replace(/&quot;/g, '"');
-}
 
 function outcome(
   files: FileDto[],

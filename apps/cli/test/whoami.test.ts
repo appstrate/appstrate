@@ -24,36 +24,19 @@
  * assert request shape without binding to a real socket.
  */
 
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import {
-  _setKeyringFactoryForTesting,
-  saveTokens,
-  type KeyringHandle,
-} from "../src/lib/keyring.ts";
-import { setProfile } from "../src/lib/config.ts";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { whoamiCommand } from "../src/commands/whoami.ts";
-
-class FakeKeyring implements KeyringHandle {
-  static store = new Map<string, string>();
-  constructor(private profile: string) {}
-  setPassword(v: string): void {
-    FakeKeyring.store.set(this.profile, v);
-  }
-  getPassword(): string | null {
-    return FakeKeyring.store.get(this.profile) ?? null;
-  }
-  deletePassword(): void {
-    FakeKeyring.store.delete(this.profile);
-  }
-}
+import {
+  installFakeKeyring,
+  seedLoggedInProfile,
+  useTempConfigHome,
+  type FakeKeyringInstall,
+} from "./helpers/auth-fixture.ts";
 
 type FetchCall = { url: string; method: string | undefined; auth: string | null };
 
-let tmpDir: string;
-let originalXdg: string | undefined;
+const configHome = useTempConfigHome("appstrate-cli-whoami-");
+let keyring: FakeKeyringInstall;
 const originalFetch = globalThis.fetch;
 
 let fetchCalls: FetchCall[];
@@ -87,51 +70,31 @@ function installFetch(responder: (url: string, init?: RequestInit) => Promise<Re
 import { ExitError } from "./helpers/process-exit.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
 
-beforeAll(() => {
-  originalXdg = process.env.XDG_CONFIG_HOME;
-});
-
-afterAll(() => {
-  if (originalXdg === undefined) delete process.env.XDG_CONFIG_HOME;
-  else process.env.XDG_CONFIG_HOME = originalXdg;
-});
-
 beforeEach(async () => {
-  tmpDir = await mkdtemp(join(tmpdir(), "appstrate-cli-whoami-"));
-  process.env.XDG_CONFIG_HOME = tmpDir;
-  FakeKeyring.store.clear();
-  _setKeyringFactoryForTesting((p) => new FakeKeyring(p));
+  await configHome.setup();
+  keyring = installFakeKeyring();
   fetchCalls = [];
 });
 
 afterEach(async () => {
-  _setKeyringFactoryForTesting(null);
+  keyring.restore();
   globalThis.fetch = originalFetch;
-  await rm(tmpDir, { recursive: true, force: true });
+  await configHome.teardown();
 });
 
-async function seedLoggedInProfile(
-  name: string,
-  overrides: { email?: string; instance?: string } = {},
-): Promise<void> {
-  await setProfile(name, {
-    instance: overrides.instance ?? "https://app.example.com",
-    userId: "u_1",
-    email: overrides.email ?? "stale@example.com",
-  });
-  await saveTokens(name, {
-    accessToken: "tok-abc",
-    expiresAt: Date.now() + 15 * 60 * 1000,
-    refreshToken: "rt-xyz",
-    refreshExpiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
-  });
+/**
+ * The cached email is deliberately STALE: contract #1 is that `whoami` prints
+ * the copy the SERVER returns, never the one `config.toml` kept from login.
+ */
+function seedStaleProfile(name: string): Promise<void> {
+  return seedLoggedInProfile(name, { email: "stale@example.com" });
 }
 
 describe("whoami (happy path)", () => {
   it("prints the SERVER-returned email, not the cached config.toml email", async () => {
     // Seed with a deliberately stale email so we can tell which source
     // ended up on stdout.
-    await seedLoggedInProfile("default", { email: "stale@example.com" });
+    await seedStaleProfile("default");
     installFetch(async (url) => {
       expect(url).toBe("https://app.example.com/api/profile");
       return new Response(
@@ -164,7 +127,7 @@ describe("whoami (happy path)", () => {
     // must still surface a Name line — the JWT carries `name`, but the
     // source of truth is the server response, so we read it back from
     // `/api/profile` rather than decoding the JWT a second time.
-    await seedLoggedInProfile("default");
+    await seedStaleProfile("default");
     installFetch(
       async () =>
         new Response(
@@ -187,7 +150,7 @@ describe("whoami (happy path)", () => {
   });
 
   it("omits the Name line entirely when both displayName and name are null", async () => {
-    await seedLoggedInProfile("default");
+    await seedStaleProfile("default");
     installFetch(
       async () =>
         new Response(
@@ -212,14 +175,7 @@ describe("whoami (happy path)", () => {
   });
 
   it("enriches the Org line with name + id when the profile has an orgId pinned (issue #209)", async () => {
-    await seedLoggedInProfile("default");
-    // Manually pin orgId — `seedLoggedInProfile` doesn't set one.
-    await setProfile("default", {
-      instance: "https://app.example.com",
-      userId: "u_1",
-      email: "alice@example.com",
-      orgId: "org_42",
-    });
+    await seedLoggedInProfile("default", { email: "alice@example.com", orgId: "org_42" });
     installFetch(async (url) => {
       if (url.endsWith("/api/profile")) {
         return new Response(
@@ -250,13 +206,7 @@ describe("whoami (happy path)", () => {
   });
 
   it("falls back to the bare orgId when the pinned org is not in the server list (stale pin)", async () => {
-    await seedLoggedInProfile("default");
-    await setProfile("default", {
-      instance: "https://app.example.com",
-      userId: "u_1",
-      email: "alice@example.com",
-      orgId: "org_gone",
-    });
+    await seedLoggedInProfile("default", { email: "alice@example.com", orgId: "org_gone" });
     installFetch(async (url) => {
       if (url.endsWith("/api/profile")) {
         return new Response(
@@ -279,7 +229,7 @@ describe("whoami (happy path)", () => {
   });
 
   it("sends the stored Bearer token on /api/profile (JWT path, not cookies)", async () => {
-    await seedLoggedInProfile("default");
+    await seedStaleProfile("default");
     installFetch(
       async () =>
         new Response(
@@ -298,7 +248,7 @@ describe("whoami (happy path)", () => {
 
 describe("whoami (error paths)", () => {
   it("reports a re-login hint and exits 1 when the server returns 401", async () => {
-    await seedLoggedInProfile("default");
+    await seedStaleProfile("default");
     installFetch(async (url) => {
       // /api/profile stays a 401; the reactive refresh also 401s with
       // invalid_grant so doRefresh wipes credentials and the original
@@ -349,7 +299,7 @@ describe("whoami (error paths)", () => {
   });
 
   it("exits 1 with an error message when the server is unreachable (fetch throws)", async () => {
-    await seedLoggedInProfile("default");
+    await seedStaleProfile("default");
     installFetch(async () => {
       throw new TypeError("fetch failed");
     });

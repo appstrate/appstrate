@@ -27,7 +27,6 @@ import { ApiError } from "../lib/errors.ts";
 import { asJSONSchemaObject, authorDefaults, type JSONSchemaObject } from "@appstrate/core/form";
 import { validateInput } from "./schema.ts";
 import {
-  assertFieldsUnlocked as assertFieldsUnlockedCore,
   resolveEffectiveInput as resolveEffectiveInputCore,
   type InputLayers,
   type InputOverlayOrigin,
@@ -45,22 +44,6 @@ function lockedFieldError(field: string, origin: InputOverlayOrigin): ApiError {
     detail: `Field '${field}' is locked on this agent and cannot be set at launch — remove it from the ${origin}.`,
     param: `input.${field}`,
   });
-}
-
-/**
- * Refuse an attempt to set a locked field, throwing
- * `ApiError(400, "locked_input_field")`.
- *
- * Called directly by the write path that validates a schedule's stored input
- * before persisting it; the launch paths get it for free through
- * {@link resolveEffectiveInput}.
- */
-export function assertFieldsUnlocked(
-  values: Record<string, unknown> | undefined,
-  lockedFields: readonly string[] | undefined,
-  origin: InputOverlayOrigin = "input",
-): void {
-  assertFieldsUnlockedCore({ origin, values }, lockedFields, lockedFieldError);
 }
 
 /**
@@ -115,11 +98,11 @@ export function assertLockedFieldsSatisfiable(
  * create route throws `validationFailed`, the update route does too, and the
  * fire path calls `failSchedule` and logs. Writing the pair out per site is
  * what let them drift — `PUT /api/schedules/:id` had adopted only the
- * lock half (`assertFieldsUnlocked`) and skipped the validation entirely, so a
- * PUT that replaced `input` with a wrong-typed or incomplete value answered
- * 200 and then failed at EVERY subsequent tick. The create route's own comment
- * says the point is to refuse "at this write rather than silently each tick";
- * its sibling did the opposite.
+ * lock half (core's `assertFieldsUnlocked`) and skipped the validation
+ * entirely, so a PUT that replaced `input` with a wrong-typed or incomplete
+ * value answered 200 and then failed at EVERY subsequent tick. The create
+ * route's own comment says the point is to refuse "at this write rather than
+ * silently each tick"; its sibling did the opposite.
  *
  * A `null` schema means the agent declares none, in which case there is
  * nothing to validate and the resolved input is returned as-is. Resolution

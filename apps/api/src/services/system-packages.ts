@@ -12,6 +12,7 @@ import { computeIntegrity } from "@appstrate/core/integrity";
 import { createVersionAndUpload } from "./package-versions.ts";
 import { uploadPackageFiles, SYSTEM_STORAGE_NAMESPACE } from "./package-items/storage.ts";
 import { storageFolderForType } from "./package-items/config.ts";
+import { mapBounded } from "../lib/map-bounded.ts";
 
 export type { SystemPackageEntry };
 
@@ -45,26 +46,6 @@ let systemPackageVersions: readonly SystemPackageEntry[] = [];
  * caller behind the pool. Kept well under the pool size on purpose.
  */
 const SYNC_CONCURRENCY = 6;
-
-/**
- * `Promise.all`-shaped map with a bounded worker pool. Local by design: this
- * file and `lib/boot.ts` each keep their own tiny pool rather than sharing a
- * new util module.
- */
-async function mapBounded<T>(
-  items: readonly T[],
-  limit: number,
-  fn: (item: T) => Promise<void>,
-): Promise<void> {
-  let cursor = 0;
-  const worker = async (): Promise<void> => {
-    while (cursor < items.length) {
-      const item = items[cursor++]!;
-      await fn(item);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-}
 
 /** Load system packages from AFPS archives. Call once at boot. */
 export async function initSystemPackages(): Promise<void> {

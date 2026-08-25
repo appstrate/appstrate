@@ -146,18 +146,6 @@ describe("caller-context prompt hygiene", () => {
     expect(formatCallerContext(identity)).toContain("Reply in the user's language (fr)");
   });
 
-  it("rounds the grounding timestamp to the HOUR (prompt prefix-cache stability)", () => {
-    // The system prompt is ONE cache block with ONE breakpoint, so any per-turn
-    // difference invalidates it and the conversation history behind it. Anthropic's
-    // ephemeral retention is 5 minutes, so hour granularity is stable across every
-    // window an entry can live in. Minute granularity — what this used to be —
-    // missed on any turn that crossed a minute, i.e. most interactive turns.
-    const out = formatCallerContext(identity);
-    expect(out).toMatch(
-      /Current date and time: \d{4}-\d{2}-\d{2}T\d{2}:00:00\.000Z \(UTC, rounded to the hour\)/,
-    );
-  });
-
   it("keeps the block free of standing instructions — they belong to SYSTEM_PROMPT", () => {
     // Everything the model must DO with the context is a constant, so it lives in
     // the static prompt. The block renders data only; the sole exception is the

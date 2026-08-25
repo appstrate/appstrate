@@ -13,34 +13,16 @@
  *      the user locally logged in.
  */
 
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import {
-  _setKeyringFactoryForTesting,
-  saveTokens,
-  loadTokens,
-  type KeyringHandle,
-} from "../src/lib/keyring.ts";
-import { setProfile, getProfile } from "../src/lib/config.ts";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { loadTokens } from "../src/lib/keyring.ts";
+import { getProfile } from "../src/lib/config.ts";
 import { logoutCommand } from "../src/commands/logout.ts";
-
-// In-memory keyring — same shape as `keyring.test.ts` but scoped to
-// this file so test isolation stays clean.
-class FakeKeyring implements KeyringHandle {
-  static store = new Map<string, string>();
-  constructor(private profile: string) {}
-  setPassword(v: string): void {
-    FakeKeyring.store.set(this.profile, v);
-  }
-  getPassword(): string | null {
-    return FakeKeyring.store.get(this.profile) ?? null;
-  }
-  deletePassword(): void {
-    FakeKeyring.store.delete(this.profile);
-  }
-}
+import {
+  installFakeKeyring,
+  seedLoggedInProfile,
+  useTempConfigHome,
+  type FakeKeyringInstall,
+} from "./helpers/auth-fixture.ts";
 
 type FetchCall = {
   url: string;
@@ -49,13 +31,8 @@ type FetchCall = {
   body: string | null;
 };
 
-let tmpDir: string;
-// Captured at `beforeAll` rather than module load. If another test file
-// running earlier in the same Bun worker mutated `XDG_CONFIG_HOME` and
-// forgot to restore it, a module-level capture would snapshot the stale
-// value — and our `afterAll` would then write that wrong value back
-// into the worker's env, poisoning any test that runs next.
-let originalXdg: string | undefined;
+const configHome = useTempConfigHome("appstrate-cli-logout-");
+let keyring: FakeKeyringInstall;
 const originalFetch = globalThis.fetch;
 let fetchCalls: FetchCall[];
 
@@ -78,42 +55,17 @@ function installFetch(responder: (url: string, init?: RequestInit) => Promise<Re
   globalThis.fetch = stub as unknown as typeof fetch;
 }
 
-beforeAll(() => {
-  originalXdg = process.env.XDG_CONFIG_HOME;
-});
-
-afterAll(() => {
-  if (originalXdg === undefined) delete process.env.XDG_CONFIG_HOME;
-  else process.env.XDG_CONFIG_HOME = originalXdg;
-});
-
 beforeEach(async () => {
-  tmpDir = await mkdtemp(join(tmpdir(), "appstrate-cli-logout-"));
-  process.env.XDG_CONFIG_HOME = tmpDir;
-  FakeKeyring.store.clear();
-  _setKeyringFactoryForTesting((p) => new FakeKeyring(p));
+  await configHome.setup();
+  keyring = installFakeKeyring();
   fetchCalls = [];
 });
 
 afterEach(async () => {
-  _setKeyringFactoryForTesting(null);
+  keyring.restore();
   globalThis.fetch = originalFetch;
-  await rm(tmpDir, { recursive: true, force: true });
+  await configHome.teardown();
 });
-
-async function seedLoggedInProfile(name: string): Promise<void> {
-  await setProfile(name, {
-    instance: "https://app.example.com",
-    userId: "u_1",
-    email: "a@example.com",
-  });
-  await saveTokens(name, {
-    accessToken: "tok-abc",
-    expiresAt: Date.now() + 15 * 60 * 1000,
-    refreshToken: "rt-xyz",
-    refreshExpiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
-  });
-}
 
 describe("logout (with refresh token)", () => {
   it("calls POST /api/auth/cli/revoke with refresh_token + client_id, then wipes state", async () => {

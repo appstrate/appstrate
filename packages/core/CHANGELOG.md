@@ -250,6 +250,24 @@ them, it only names them in docblocks.
 
 ### Changed
 
+- **`@appstrate/afps-shared` dependency range moved to `^0.5.0`.**
+  `@appstrate/core/zip`'s `stripWrapperPrefix` is now a verbatim re-export from
+  the new `@appstrate/afps-shared/archive-prefix` — the export, both overloads
+  and the identity-return behaviour are unchanged, so this is not a surface
+  change. It moved because `packages/afps-runtime` carried a token-for-token
+  copy of the same algorithm, each pointing at the other and asking a human to
+  keep them aligned, with no parity test. That is the shape that had already
+  drifted three times for the MIME set, one of those corrupting every OOXML
+  download.
+
+  **Publish `afps-shared@0.5.0` before this release.** The ordering is already
+  enforced — `verify-package-resolves.ts` packs the real tarball, installs it
+  outside the monorepo and typechecks every subpath, so an unpublished leaf
+  fails the publish rather than the first consumer's `npm install`. Declaring
+  `^0.5.0` rather than leaving `^0.4.0` only changes WHICH error it fails with:
+  `ETARGET / no matching version` at install, which names the missing artifact,
+  instead of a `TS2307` three layers down inside `node_modules`.
+
 - **`SubscriptionChatResolution` → `ChatModelResolution`** (`./chat-contract`),
   and the `PlatformServices` member `resolveSubscriptionChatModel` →
   `resolveChatModel` (`./module`). Both were named after ONE of the two arms

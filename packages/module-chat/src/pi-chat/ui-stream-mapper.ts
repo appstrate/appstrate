@@ -25,6 +25,7 @@
  */
 
 import type { UIMessageChunk } from "ai";
+import { ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
 import type {
   AgentSessionEvent,
   PiAssistantMessageEvent,
@@ -75,7 +76,7 @@ const ZERO_USAGE: PiUsage = {
   cacheRead: 0,
   cacheWrite: 0,
   totalTokens: 0,
-  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  cost: { ...ZERO_MODEL_COST, total: 0 },
 };
 
 function mapStopReason(stop: string | undefined): PiFinishReason {

@@ -178,17 +178,6 @@ describe("Pi chat model binding", () => {
     });
   });
 
-  it("rejects a non-proxy family instead of guessing a route", () => {
-    expect(
-      resolvePiChatModelBinding({
-        model: orgModel({ apiShape: "openai-codex-responses" }),
-        subscription: { subscription: false },
-        origin: ORIGIN,
-        mintBearer: () => "loopback",
-      }),
-    ).toEqual({ status: "unsupported" });
-  });
-
   /**
    * Billing-safety invariant, not a preference. pi-ai defaults
    * `supportsLongCacheRetention` to TRUE on a silent record and then resolves

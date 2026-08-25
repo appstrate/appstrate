@@ -20,11 +20,11 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { renderToStaticMarkup } from "react-dom/server";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient } from "@tanstack/react-query";
 import type { AgentDetail } from "@appstrate/shared-types";
 import { packageKeys } from "../../lib/query-keys.ts";
 import { initialInputValues, type AgentInputSettings } from "../../lib/agent-input.ts";
+import { render } from "../../test/render.tsx";
 import { useScheduleFormDeps } from "../use-schedules.ts";
 
 const PACKAGE_ID = "@myorg/mailer";
@@ -66,22 +66,14 @@ function Probe() {
   return <>{Object.keys(seed).sort().join(",")}</>;
 }
 
-function render(qc: QueryClient): string {
-  return renderToStaticMarkup(
-    <QueryClientProvider client={qc}>
-      <Probe />
-    </QueryClientProvider>,
-  );
-}
-
 describe("useScheduleFormDeps", () => {
   it("returns null while the agent detail is still in flight", () => {
-    expect(render(new QueryClient())).toBe("loading");
+    expect(render(<Probe />, { queryClient: new QueryClient() })).toBe("loading");
   });
 
   it("strips a locked field from the schedule's stored input once the detail lands", () => {
     const qc = new QueryClient();
     qc.setQueryData(DETAIL_KEY, AGENT_DETAIL);
-    expect(render(qc)).toBe("query");
+    expect(render(<Probe />, { queryClient: qc })).toBe("query");
   });
 });

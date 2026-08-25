@@ -6,9 +6,11 @@
  * {@link extractFileIds} keeps matching only whole-string leaf values inside
  * structured JSON (objects/arrays) and never scans embedded prose, and the
  * single-scheme contract: `appfile://` is the only spelling written AND the
- * only one read. The pre-#1177 `document://` scheme is refused, which the last
- * block below pins from both sides — a `doc_` id fails, and so does the
- * `document://file_…` pairing that no build has ever emitted.
+ * only one read. The pre-#1177 `document://` scheme is refused, which the
+ * third block below pins from both sides — a `doc_` id fails, and so does the
+ * `document://file_…` pairing that no build has ever emitted. The last block
+ * covers the sibling `upload://` predicate, which every caller of the URI
+ * helpers (the API parser, `packages/ui`'s `FileWidget`) shares.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -19,6 +21,7 @@ import {
   fileUri,
   isAttachmentUri,
   isFileUri,
+  isUploadUri,
   parseFileUri,
 } from "../src/file-uri.ts";
 
@@ -103,6 +106,10 @@ describe("single-scheme contract (#1177)", () => {
     expect(isFileUri(`appfile://${A}`)).toBe(true);
     expect(isFileUri(`document://${A}`)).toBe(false);
     expect(isFileUri(`file://${A}`)).toBe(false);
+    // `upload://` is an attachment URI but never a stored-file URI: the two
+    // predicates deliberately disagree on it, which is the whole reason both
+    // exist.
+    expect(isFileUri(`upload://upl_aaaaaaaa`)).toBe(false);
     expect(isAttachmentUri(`appfile://${A}`)).toBe(true);
     expect(isAttachmentUri(`document://${A}`)).toBe(false);
     expect(isAttachmentUri(`upload://upl_aaaaaaaa`)).toBe(true);
@@ -112,5 +119,25 @@ describe("single-scheme contract (#1177)", () => {
   it("extractFileIds and extractFileIdsFromText ignore the retired scheme", () => {
     expect(extractFileIds({ report: `document://${A}`, images: [`document://${B}`] })).toEqual([]);
     expect(extractFileIdsFromText(`old document://${A} and new appfile://${B}`)).toEqual([B]);
+  });
+});
+
+describe("isUploadUri", () => {
+  it("accepts valid upload:// strings", () => {
+    expect(isUploadUri("upload://upl_abc")).toBe(true);
+  });
+
+  it("rejects other strings", () => {
+    expect(isUploadUri("https://example.com/file")).toBe(false);
+    expect(isUploadUri("")).toBe(false);
+  });
+
+  it("rejects non-string values", () => {
+    // `FileWidget` (packages/ui) hands raw form-field values straight in, so the
+    // predicate has to survive whatever a schema-driven field holds.
+    expect(isUploadUri(null)).toBe(false);
+    expect(isUploadUri(undefined)).toBe(false);
+    expect(isUploadUri(123)).toBe(false);
+    expect(isUploadUri({})).toBe(false);
   });
 });

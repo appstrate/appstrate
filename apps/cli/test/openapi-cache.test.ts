@@ -12,12 +12,12 @@
  * test.
  */
 
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
-import { mkdtemp, rm, readFile, stat, writeFile, mkdir } from "node:fs/promises";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { readFile, stat, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { fetchOpenApi, getCacheDir, type OpenApiDocument } from "../src/lib/openapi-cache.ts";
 import { AuthError } from "../src/lib/api.ts";
+import { useTempCacheHome } from "./helpers/auth-fixture.ts";
 
 type StubCall = { headers: Record<string, string>; path: string };
 
@@ -27,8 +27,7 @@ const SAMPLE_DOC: OpenApiDocument = {
   paths: {},
 };
 
-let tmp: string;
-let originalXdg: string | undefined;
+const cacheHome = useTempCacheHome("appstrate-cli-openapi-cache-");
 
 function stubFetcher(responder: (call: StubCall) => Response | Promise<Response>): {
   fetcher: Parameters<typeof fetchOpenApi>[2];
@@ -47,35 +46,25 @@ function stubFetcher(responder: (call: StubCall) => Response | Promise<Response>
   return { fetcher, calls };
 }
 
-beforeAll(() => {
-  originalXdg = process.env.XDG_CACHE_HOME;
-});
-
-afterAll(() => {
-  if (originalXdg === undefined) delete process.env.XDG_CACHE_HOME;
-  else process.env.XDG_CACHE_HOME = originalXdg;
-});
-
 beforeEach(async () => {
-  tmp = await mkdtemp(join(tmpdir(), "appstrate-cli-openapi-cache-"));
-  process.env.XDG_CACHE_HOME = tmp;
+  await cacheHome.setup();
 });
 
 afterEach(async () => {
-  await rm(tmp, { recursive: true, force: true });
+  await cacheHome.teardown();
 });
 
 describe("getCacheDir", () => {
   it("honors XDG_CACHE_HOME", () => {
-    expect(getCacheDir()).toBe(join(tmp, "appstrate"));
+    expect(getCacheDir()).toBe(join(cacheHome.dir(), "appstrate"));
   });
 
   it("falls back to ~/.cache/appstrate when XDG_CACHE_HOME is unset", () => {
     delete process.env.XDG_CACHE_HOME;
     const dir = getCacheDir();
     expect(dir).toMatch(/\.cache\/appstrate$/);
-    // Restore so afterEach cleanup works
-    process.env.XDG_CACHE_HOME = tmp;
+    // No manual restore: the fixture holds the tmpdir path itself, so teardown
+    // cleans up and puts the env var back whatever this test left behind.
   });
 });
 

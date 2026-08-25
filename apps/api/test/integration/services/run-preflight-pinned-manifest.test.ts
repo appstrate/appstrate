@@ -29,10 +29,7 @@ import { eq } from "drizzle-orm";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
-import {
-  installPackage,
-  getInstalledPackageSettings,
-} from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/application-packages.ts";
 import { getPackage } from "../../../src/services/package-catalog.ts";
 import { resolveRunPreflight } from "../../../src/services/run-pipeline.ts";
 import type { IntegrationManifestCache } from "../../../src/services/integration-service.ts";
@@ -140,7 +137,6 @@ describe("resolveRunPreflight — integration manifests are read at the PIN", ()
       applicationId: ctx.defaultAppId,
       orgId: ctx.orgId,
       actor: { type: "user", id: ctx.user.id },
-      packageSettings: await getInstalledPackageSettings(ctx.defaultAppId, AGENT),
       ...extra,
     });
   }
@@ -149,8 +145,9 @@ describe("resolveRunPreflight — integration manifests are read at the PIN", ()
     // `scheduler.ts:triggerScheduledRun` passes no memo. Unseeded, the draft's
     // `write` requirement wins and this throws 412 — which the scheduler
     // converts into `failSchedule(...)`, permanently stopping a schedule whose
-    // pinned version is perfectly runnable.
-    await expect(preflight()).resolves.toBeDefined();
+    // pinned version is perfectly runnable. The preflight returns nothing —
+    // passing IS resolving.
+    await expect(preflight()).resolves.toBeUndefined();
   });
 
   it("a caller-supplied memo is the one seeded — no second Map behind its back", async () => {

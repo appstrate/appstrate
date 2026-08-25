@@ -16,7 +16,6 @@ import type { DroppedIntegration } from "./integration-spawn-resolver.ts";
 import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
 import { createRun, appendRunLog } from "./state/runs.ts";
 import { materializeRunUploads, type PendingUploadMaterialization } from "./files.ts";
-import type { InstalledPackageSettings } from "./application-packages.ts";
 import { resolveModel } from "./org-models.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
@@ -164,21 +163,14 @@ interface RunPipelineSuccess {
 // Preflight — shared by run route and scheduler
 // ---------------------------------------------------------------------------
 
-interface PreflightResult {
-  modelId: string | null;
-  generationConfig: ModelGenerationSettings | null;
-  proxyId: string | null;
-}
-
 /**
- * Validate agent readiness and project the per-application run settings.
+ * Validate agent readiness against the PINNED integration manifests.
  * Shared by the POST /run route and the scheduler's triggerScheduledRun.
  *
- * `packageSettings` is supplied by the caller rather than loaded here: both
- * origins already need it BEFORE this point, to resolve the input layers
- * (editor defaults + locked fields) the launch is validated against. One
- * read per trigger, and readiness cannot disagree with input resolution
- * about which row it saw.
+ * Returns nothing: readiness is a gate, and the per-application run settings
+ * (model, generation config, proxy) are read by each origin from the
+ * `InstalledPackageSettings` row it already loaded to resolve the input
+ * layers — projecting them back through here only duplicated that read.
  *
  * Connection overrides are forwarded to readiness so a caller that
  * disambiguates a must_choose situation via `connection_overrides` on
@@ -191,8 +183,6 @@ export async function resolveRunPreflight(params: {
   applicationId: string;
   orgId: string;
   actor: Actor | null;
-  /** Per-application settings row, already loaded by the caller. */
-  packageSettings: InstalledPackageSettings;
   connectionOverrides?: ConnectionOverrides | null;
   scheduleConnectionOverrides?: ConnectionOverrides | null;
   /**
@@ -209,8 +199,8 @@ export async function resolveRunPreflight(params: {
    * one is created below, because the seeding is not optional.
    */
   manifestCache?: IntegrationManifestCache;
-}): Promise<PreflightResult> {
-  const { agent, applicationId, orgId, actor, packageSettings } = params;
+}): Promise<void> {
+  const { agent, applicationId, orgId, actor } = params;
 
   // --- Seed the manifest memo with the PINNED integration manifests ---
   //
@@ -273,12 +263,6 @@ export async function resolveRunPreflight(params: {
       : {}),
     manifestCache,
   });
-
-  return {
-    modelId: packageSettings.modelId,
-    generationConfig: packageSettings.generationConfig,
-    proxyId: packageSettings.proxyId,
-  };
 }
 
 // ---------------------------------------------------------------------------

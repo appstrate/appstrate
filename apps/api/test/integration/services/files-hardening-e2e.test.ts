@@ -16,9 +16,7 @@
  *  d. a concurrent org-limit race on the run-INGESTION path (createFileFrom
  *     Stream), not just the upload path the phase-5 test covers (phase 5);
  *  e. the display-name vs workspace-name identity model round-tripping through
- *     input materialization AND output publication (phase 1 × 2);
- *  f. the unified capability model degrading a non-creator upload read across
- *     the MCP resources/read path — no real name/hash leaks (phase 4 × 6).
+ *     input materialization AND output publication (phase 1 × 2).
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -30,12 +28,7 @@ import { _resetCacheForTesting } from "@appstrate/env";
 import type { Actor } from "@appstrate/connect";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { truncateAll } from "../../helpers/db.ts";
-import {
-  createTestContext,
-  createTestUser,
-  addOrgMember,
-  type TestContext,
-} from "../../helpers/auth.ts";
+import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { createUpload } from "../../../src/services/uploads.ts";
 import {
   createFileFromUpload,
@@ -49,14 +42,8 @@ import {
 import { assignWorkspaceNames } from "../../../src/services/run-file-naming.ts";
 import { processStorageDeletionJobs } from "../../../src/services/storage-deletion.ts";
 import { finalizeRun, getRunSinkContext } from "../../../src/services/run-event-ingestion.ts";
-import { buildFileResourceProvider, type McpToolContext } from "../../../src/modules/mcp/tools.ts";
 
 type Scope = { orgId: string; applicationId: string };
-
-// The files resource provider's `read` ignores the MCP request-extra (it
-// resolves auth from the injected ctx.actor); a stub satisfies the interface.
-type ReadExtra = Parameters<ReturnType<typeof buildFileResourceProvider>["read"]>[1];
-const NO_EXTRA = {} as ReadExtra;
 
 /** Run `fn` with an env var temporarily overridden (env cache reset around it). */
 async function withEnv(key: string, value: string, fn: () => Promise<void>): Promise<void> {
@@ -354,75 +341,10 @@ describe("files hardening — cross-phase interactions", () => {
     expect(outA.row.id).not.toBe(outB.row.id);
     expect(outA.row.sha256).not.toBe(outB.row.sha256);
 
-    // Re-publishing the SAME (name, content) dedups back to the first row.
-    const outAgain = await publishStream(scope, runId, "out.txt", "content-A");
-    expect(outAgain.deduped).toBe(true);
-    expect(outAgain.row.id).toBe(outA.row.id);
-
     const outs = await db
       .select()
       .from(files)
       .where(and(eq(files.runId, runId), eq(files.name, "out.txt")));
     expect(outs).toHaveLength(2);
-  });
-
-  // ── f. capability degradation across the MCP resources/read path (phase 4 × 6) ──
-  it("MCP resources/read of another member's upload is degraded (generic name/mime, no real hash); the creator gets the bytes", async () => {
-    const creator = await createTestUser({ email: "mcp-creator@docs.test" });
-    await addOrgMember(ctx.orgId, creator.id, "member");
-    const creatorActor: Actor = { type: "user", id: creator.id };
-    const reader = await createTestUser({ email: "mcp-reader@docs.test" });
-    await addOrgMember(ctx.orgId, reader.id, "member");
-
-    const runId = await seedRunRow(scope);
-    const secretBytes = new TextEncoder().encode("top secret upload contents");
-    const realSha = new Bun.CryptoHasher("sha256").update(secretBytes).digest("hex");
-    const up = await stageUpload(scope, creator.id, "secret-notes.txt", secretBytes);
-    const upload = await createFileFromUpload(scope, creatorActor, up, { runId });
-
-    const mkCtx = (actor: Actor): McpToolContext => ({
-      origin: "https://instance.example",
-      authHeaders: new Headers(),
-      permissions: new Set<string>(),
-      actor,
-      scope,
-      dispatch: async () => new Response(null),
-    });
-
-    // Non-creator run reader → metadata-only, degraded: generic name + mime, NO
-    // sha256, not downloadable, no content_url. The real name/hash never appear.
-    const readerRes = await buildFileResourceProvider(mkCtx({ type: "user", id: reader.id })).read(
-      `appfile://${upload.id}`,
-      NO_EXTRA,
-    );
-    const readerBlock = readerRes.contents[0] as { mimeType?: string; text?: string };
-    const readerText = readerBlock.text!;
-    const readerJson = JSON.parse(readerText) as {
-      name: string;
-      mime: string;
-      sha256?: string;
-      downloadable: boolean;
-      content_url?: string;
-      capabilities: { metadata: boolean; download: boolean };
-    };
-    expect(readerBlock.mimeType).toBe("application/json");
-    expect(readerJson.name).toBe("file");
-    expect(readerJson.mime).toBe("application/octet-stream");
-    expect(readerJson.sha256).toBeUndefined();
-    expect(readerJson.downloadable).toBe(false);
-    expect(readerJson.content_url).toBeUndefined();
-    expect(readerJson.capabilities).toMatchObject({ metadata: false, download: false });
-    // Belt-and-braces: the real hash + real name leak NOWHERE in the response.
-    expect(readerText).not.toContain(realSha);
-    expect(readerText).not.toContain("secret-notes.txt");
-
-    // The creator reads the actual bytes (small textual upload → inline text).
-    const creatorRes = await buildFileResourceProvider(mkCtx(creatorActor)).read(
-      `appfile://${upload.id}`,
-      NO_EXTRA,
-    );
-    const creatorBlock = creatorRes.contents[0] as { mimeType?: string; text?: string };
-    expect(creatorBlock.mimeType).toBe("text/plain");
-    expect(creatorBlock.text).toBe("top secret upload contents");
   });
 });

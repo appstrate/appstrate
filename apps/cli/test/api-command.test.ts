@@ -11,17 +11,19 @@
  * `api-command.integration.test.ts` against a real Bun.serve().
  */
 
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
-import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { writeFile, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 
-import {
-  _setKeyringFactoryForTesting,
-  saveTokens,
-  type KeyringHandle,
-} from "../src/lib/keyring.ts";
+// Imported directly for the one test that needs a profile with NO stored
+// tokens — the shared seed always writes a pair.
 import { setProfile } from "../src/lib/config.ts";
+import {
+  installFakeKeyring,
+  seedLoggedInProfile,
+  useTempConfigHome,
+  type FakeKeyringInstall,
+} from "./helpers/auth-fixture.ts";
 import { apiCommand, type ApiCommandIO, type ApiCommandOptions } from "../src/commands/api.ts";
 import {
   classifyNetworkError,
@@ -33,20 +35,6 @@ import {
 
 // ─── Test infrastructure ────────────────────────────────────────────
 
-class FakeKeyring implements KeyringHandle {
-  static store = new Map<string, string>();
-  constructor(private profile: string) {}
-  setPassword(v: string): void {
-    FakeKeyring.store.set(this.profile, v);
-  }
-  getPassword(): string | null {
-    return FakeKeyring.store.get(this.profile) ?? null;
-  }
-  deletePassword(): void {
-    FakeKeyring.store.delete(this.profile);
-  }
-}
-
 type FetchCall = {
   url: string;
   method: string;
@@ -55,8 +43,8 @@ type FetchCall = {
   init: Record<string, unknown>;
 };
 
-let tmpDir: string;
-let originalXdg: string | undefined;
+const configHome = useTempConfigHome("appstrate-cli-apicmd-");
+let keyring: FakeKeyringInstall;
 const originalFetch = globalThis.fetch;
 let fetchCalls: FetchCall[];
 
@@ -79,40 +67,29 @@ function installFetch(responder: (call: FetchCall) => Promise<Response> | Respon
   globalThis.fetch = stub as unknown as typeof fetch;
 }
 
-beforeAll(() => {
-  originalXdg = process.env.XDG_CONFIG_HOME;
-});
-afterAll(() => {
-  if (originalXdg === undefined) delete process.env.XDG_CONFIG_HOME;
-  else process.env.XDG_CONFIG_HOME = originalXdg;
-});
 beforeEach(async () => {
-  tmpDir = await mkdtemp(join(tmpdir(), "appstrate-cli-apicmd-"));
-  process.env.XDG_CONFIG_HOME = tmpDir;
-  FakeKeyring.store.clear();
-  _setKeyringFactoryForTesting((p) => new FakeKeyring(p));
+  await configHome.setup();
+  keyring = installFakeKeyring();
   fetchCalls = [];
 });
 afterEach(async () => {
-  _setKeyringFactoryForTesting(null);
+  keyring.restore();
   globalThis.fetch = originalFetch;
-  await rm(tmpDir, { recursive: true, force: true });
+  await configHome.teardown();
 });
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
-async function seedLoggedIn(profileName: string, overrides?: { orgId?: string }): Promise<void> {
-  await setProfile(profileName, {
-    instance: "https://app.example.com",
-    userId: "u_1",
-    email: "a@example.com",
+function seedLoggedIn(profileName: string, overrides?: { orgId?: string }): Promise<void> {
+  return seedLoggedInProfile(profileName, {
     orgId: overrides?.orgId,
-  });
-  await saveTokens(profileName, {
-    accessToken: "access-1",
-    expiresAt: Date.now() + 5 * 60 * 1000, // fresh, no proactive refresh
-    refreshToken: "refresh-1",
-    refreshExpiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+    // Fresh — under no circumstances should these tests trigger a proactive
+    // refresh; the rotate path has its own describe block below.
+    tokens: {
+      accessToken: "access-1",
+      expiresAt: Date.now() + 5 * 60 * 1000,
+      refreshToken: "refresh-1",
+    },
   });
 }
 
@@ -384,7 +361,7 @@ describe("apiCommand — body modes", () => {
   });
 
   it("-d @file uses Bun.file for streaming upload", async () => {
-    const fpath = join(tmpDir, "body.json");
+    const fpath = join(configHome.dir(), "body.json");
     await writeFile(fpath, '{"k":"v"}');
     const { io } = makeIO();
     await runCommand({ method: "POST", path: "/p", data: `@${fpath}` }, io);
@@ -421,7 +398,7 @@ describe("apiCommand — body modes", () => {
   });
 
   it("-F file=@path appends a Blob with the basename as filename", async () => {
-    const fpath = join(tmpDir, "pkg.zip");
+    const fpath = join(configHome.dir(), "pkg.zip");
     await writeFile(fpath, "PK\x03\x04fake-zip-bytes");
     const { io } = makeIO();
     await runCommand({ method: "POST", path: "/p", form: [`file=@${fpath}`] }, io);
@@ -433,7 +410,7 @@ describe("apiCommand — body modes", () => {
   });
 
   it("-F file=@path;type=application/pdf applies the mime override", async () => {
-    const fpath = join(tmpDir, "x.bin");
+    const fpath = join(configHome.dir(), "x.bin");
     await writeFile(fpath, "x");
     const { io } = makeIO();
     await runCommand(
@@ -474,7 +451,7 @@ describe("apiCommand — output", () => {
   it("-o writes body to file byte-exact", async () => {
     const payload = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
     installFetch(() => new Response(payload, { status: 200 }));
-    const outPath = join(tmpDir, "out.bin");
+    const outPath = join(configHome.dir(), "out.bin");
     const { io } = makeIO();
     await runCommand({ method: "GET", path: "/p", output: outPath }, io);
     const written = await readFile(outPath);
@@ -696,16 +673,12 @@ describe("apiCommand — missing credentials", () => {
 
 describe("apiCommand — proactive refresh smoke", () => {
   it("expired access + valid refresh → rotates before the request", async () => {
-    await setProfile("default", {
-      instance: "https://app.example.com",
-      userId: "u_1",
-      email: "a@example.com",
-    });
-    await saveTokens("default", {
-      accessToken: "old-access",
-      expiresAt: Date.now() - 1000, // expired
-      refreshToken: "valid-refresh",
-      refreshExpiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+    await seedLoggedInProfile("default", {
+      tokens: {
+        accessToken: "old-access",
+        expiresAt: Date.now() - 1000, // expired
+        refreshToken: "valid-refresh",
+      },
     });
 
     installFetch((call) => {
@@ -1050,7 +1023,7 @@ describe("apiCommand — -G/--get", () => {
   });
 
   it("-G -d @file reads query string from file", async () => {
-    const tmpFile = join(tmpDir, "qs.txt");
+    const tmpFile = join(configHome.dir(), "qs.txt");
     await writeFile(tmpFile, "q=from-file&n=1");
     installFetch(() => jsonResponse(200, {}));
     const { io } = makeIO();
@@ -1172,7 +1145,7 @@ describe("apiCommand — -T/--upload-file", () => {
   });
 
   it("infers PUT when -T is set and no method/-X is given", async () => {
-    const tmpFile = join(tmpDir, "payload.bin");
+    const tmpFile = join(configHome.dir(), "payload.bin");
     await writeFile(tmpFile, "uploaded-bytes");
     installFetch(() => jsonResponse(200, {}));
     const { io } = makeIO();
@@ -1182,7 +1155,7 @@ describe("apiCommand — -T/--upload-file", () => {
   });
 
   it("-X POST overrides the PUT default", async () => {
-    const tmpFile = join(tmpDir, "payload.bin");
+    const tmpFile = join(configHome.dir(), "payload.bin");
     await writeFile(tmpFile, "x");
     installFetch(() => jsonResponse(200, {}));
     const { io } = makeIO();
@@ -1436,7 +1409,7 @@ describe("apiCommand — --data-urlencode", () => {
   });
 
   it("@file: loads file contents and encodes them", async () => {
-    const f = join(tmpDir, "body.txt");
+    const f = join(configHome.dir(), "body.txt");
     await writeFile(f, "hello world & co");
     installFetch(() => jsonResponse(200, {}));
     const { io } = makeIO();
@@ -1445,7 +1418,7 @@ describe("apiCommand — --data-urlencode", () => {
   });
 
   it("name@file: prefixes with name, encodes file contents", async () => {
-    const f = join(tmpDir, "body.txt");
+    const f = join(configHome.dir(), "body.txt");
     await writeFile(f, "éléphant");
     installFetch(() => jsonResponse(200, {}));
     const { io } = makeIO();
@@ -1503,7 +1476,7 @@ describe("apiCommand — --data-urlencode", () => {
   });
 
   it("--data-urlencode combined with -T exits 2", async () => {
-    const f = join(tmpDir, "up");
+    const f = join(configHome.dir(), "up");
     await writeFile(f, "x");
     installFetch(() => jsonResponse(200, {}));
     const { io, exitCode } = makeIO();

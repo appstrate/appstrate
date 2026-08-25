@@ -83,8 +83,6 @@ interface PreflightGatesOk {
   ok: true;
   /** Agent potentially cloned with a capped `timeout` — pass this to downstream code. */
   agent: LoadedPackage;
-  /** Running run count observed during the concurrency check. Forwarded to `beforeUsage`. */
-  runningCount: number;
   /** Sub-gate durations (ms) for the pipeline's per-stage timing log. */
   timings: PreflightGateTimings;
 }
@@ -233,7 +231,6 @@ export async function runPreflightGates(input: PreflightGatesInput): Promise<Pre
   return {
     ok: true,
     agent,
-    runningCount,
     timings: { rateLimitMs, concurrencyMs, beforeUsageHookMs },
   };
 }

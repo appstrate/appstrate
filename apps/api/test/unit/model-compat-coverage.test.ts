@@ -156,4 +156,25 @@ describe("platform model compat coverage", () => {
     );
     expect(copies).toEqual([]);
   });
+  it("the zero cost record is spelled once, in the constant — never copied back out", () => {
+    // Same failure mode as the assertion above, with one extra edge: this
+    // literal carries TWO rationales — load-bearing opacity in the sidecar
+    // (a real rate card is one catalog lookup from naming the vendor an alias
+    // hides) and required-shape filler everywhere else — so a hand-written
+    // copy also erases which one applies. See `ZERO_MODEL_COST`.
+    //
+    // Whitespace-normalised because the literal was prettier-wrapped at three
+    // of the six sites it replaced, and a line-oriented match misses those.
+    // Anchored on the closing brace, optionally past the `total` roll-up, so it
+    // matches a `ModelCost` and NOT the `Usage` token counts, which open with
+    // the same four keys and continue `, totalTokens: 0, cost: …`.
+    const ZERO_COST_LITERAL =
+      /\binput:\s*0,\s*output:\s*0,\s*cacheRead:\s*0,\s*cacheWrite:\s*0\s*(?:,\s*total:\s*0\s*)?,?\s*\}/;
+    const copies = SCANNED_FILES.filter((f) =>
+      ZERO_COST_LITERAL.test(
+        stripComments(readFileSync(join(REPO_ROOT, f), "utf8")).replace(/\s+/g, " "),
+      ),
+    );
+    expect(copies).toEqual([]);
+  });
 });

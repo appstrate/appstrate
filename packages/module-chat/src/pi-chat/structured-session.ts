@@ -15,6 +15,7 @@
 
 import { getToolName, isToolUIPart, type UIMessage } from "ai";
 import type { Api, Message } from "@appstrate/runner-pi";
+import { ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
 import { messagesWithAttachmentsAsText } from "../attachments.ts";
 import { redactConnectPayload, splitJsonText } from "../connect-offer.ts";
 import { uiMessageText } from "../message-text.ts";
@@ -85,7 +86,7 @@ function historyUsage(contextTokens: number): AssistantMessage["usage"] {
     cacheRead: 0,
     cacheWrite: 0,
     totalTokens: contextTokens,
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    cost: { ...ZERO_MODEL_COST, total: 0 },
   };
 }
 

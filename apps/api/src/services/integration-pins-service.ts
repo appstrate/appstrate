@@ -137,15 +137,6 @@ function toPinSummary(row: PinJoinRow): PinSummary {
   };
 }
 
-async function listPinsBy(conditions: Parameters<typeof and>): Promise<PinSummary[]> {
-  const rows = await db
-    .select({ pin: integrationPins, conn: integrationConnections })
-    .from(integrationPins)
-    .leftJoin(integrationConnections, eq(integrationConnections.id, integrationPins.connectionId))
-    .where(and(...conditions));
-  return rows.map(toPinSummary);
-}
-
 /**
  * List every admin pin governing a (app, integration). Used by the admin UI
  * to render the per-agent pin section + by the runtime resolver via the
@@ -156,11 +147,18 @@ export async function listIntegrationPins(
   scope: AppScope,
   integrationId: string,
 ): Promise<PinSummary[]> {
-  return listPinsBy([
-    eq(integrationPins.applicationId, scope.applicationId),
-    eq(integrationPins.integrationId, integrationId),
-    isNull(integrationPins.userId),
-  ]);
+  const rows = await db
+    .select({ pin: integrationPins, conn: integrationConnections })
+    .from(integrationPins)
+    .leftJoin(integrationConnections, eq(integrationConnections.id, integrationPins.connectionId))
+    .where(
+      and(
+        eq(integrationPins.applicationId, scope.applicationId),
+        eq(integrationPins.integrationId, integrationId),
+        isNull(integrationPins.userId),
+      ),
+    );
+  return rows.map(toPinSummary);
 }
 
 /**

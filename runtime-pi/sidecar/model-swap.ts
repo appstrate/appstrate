@@ -23,7 +23,6 @@ import {
 export {
   syntheticAliasErrorBody,
   syntheticAliasErrorMessage,
-  isAliasBackingShape,
   isAliasInferenceCall,
   LLM_PASSTHROUGH_RESPONSE_HEADERS,
 } from "@appstrate/core/model-swap";

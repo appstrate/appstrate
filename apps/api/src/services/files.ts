@@ -66,7 +66,6 @@ import {
 } from "../lib/errors.ts";
 import { resolveAgentOutputMime } from "./mime-policy.ts";
 import type { ChatAttachmentRequest, ResolvedChatAttachment } from "@appstrate/core/chat-contract";
-import { sanitizeFilename } from "@appstrate/core/naming";
 import { consumeUploadStream, peekUploads, parseUploadUri } from "./uploads.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
 import {
@@ -74,7 +73,7 @@ import {
   recordFileDeleted,
   recordFileStorageLimitRejection,
 } from "@appstrate/core/telemetry";
-import { sanitizeStorageKey } from "./file-storage.ts";
+import { toStorageName } from "../lib/storage-name.ts";
 import { getRun } from "./state/runs.ts";
 import { synthesiseFinalize } from "./run-event-ingestion.ts";
 import { recordAudit } from "./audit.ts";
@@ -170,7 +169,7 @@ export function storageKeyToDeletionJob(
  * defined once.
  */
 function fileStoragePath(scope: AppScope, fileId: string, name: string): string {
-  const safeName = sanitizeStorageKey(sanitizeFilename(name));
+  const safeName = toStorageName(name);
   return `${scope.applicationId}/${fileId}/${safeName}`;
 }
 

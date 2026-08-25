@@ -17,7 +17,7 @@
 
 import { getErrorMessage } from "@appstrate/core/errors";
 import { derivePiProvider } from "@appstrate/runner-pi/provider-map";
-import { PLATFORM_MODEL_COMPAT } from "@appstrate/runner-pi/model-compat";
+import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
 import type { Api, Model } from "./pi-sdk.ts";
 import { MODEL_API_SHAPES } from "@appstrate/core/sidecar-types";
 import {
@@ -221,7 +221,7 @@ function parseModelCost(
   issues: string[],
   warnings: string[],
 ): { input: number; output: number; cacheRead: number; cacheWrite: number } | undefined {
-  const fallback = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  const fallback = { ...ZERO_MODEL_COST };
   if (!raw) {
     // The platform sets MODEL_COST only when the model carries rates AND the
     // run may see them (an aliased model's card names the vendor it hides).
@@ -456,7 +456,9 @@ export function buildPiModelFromEnv(env: RuntimeEnv): Model<Api> {
     input: [...env.modelInput],
     // `Model.cost` is REQUIRED by the Pi SDK on every settled turn, so an unpriced
     // run still hands it zeros; the runner's `unpriced` flag stops the 0 escaping.
-    cost: env.modelCost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    // One spelling of those zeros — see `ZERO_MODEL_COST` for the second, very
+    // different reason the sidecar hands the same literal to pi-ai.
+    cost: env.modelCost ?? { ...ZERO_MODEL_COST },
     contextWindow: env.modelContextWindow,
     maxTokens: env.modelMaxTokens,
   };

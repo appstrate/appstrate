@@ -46,3 +46,50 @@
 export const PLATFORM_MODEL_COMPAT = {
   supportsLongCacheRetention: false,
 } as const;
+
+/**
+ * The all-zero `ModelCost` record — the ONE spelling of
+ * `{ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }`.
+ *
+ * It was hand-written at six construction sites, and the reason it is there is
+ * NOT the same at all six. One indistinguishable literal, two meanings:
+ *
+ *  1. **Load-bearing opacity.** The sidecar rebuilds the REAL backing's pi-ai
+ *     `Model` to re-originate an aliased run's inference against it
+ *     (`runtime-pi/sidecar/pi-messages-backend.ts`, `buildBackingModel`).
+ *     pi-ai writes `usage.cost` from `model.cost` on every settled turn, and
+ *     that number rides the terminal `done` event back into the container —
+ *     where a real rate card is one catalog lookup from naming the vendor the
+ *     alias exists to hide. Zeros here are a DISCLOSURE control: substituting
+ *     the backing's true card would leak the backing. The platform prices the
+ *     ledger row server-side and never reads this value.
+ *
+ *  2. **Required-shape filler.** The Pi SDK types `Model.cost` as required, so
+ *     an UNPRICED model still has to carry the shape
+ *     (`runtime-pi/env.ts`, `packages/module-chat/src/pi-chat/model-binding.ts`).
+ *     Nothing bills off these zeros either: the runner's `unpriced` flag and
+ *     the row's `pricing_status='unpriced'` are what stop a 0 escaping as a
+ *     real price.
+ *
+ * What both meanings share is the invariant that matters: **a zero here is
+ * never a price**. Any site that wants zeros because the model really is free
+ * must say so with a real `ModelCost`, not by spreading this.
+ *
+ * Lives beside {@link PLATFORM_MODEL_COMPAT} for the same reason that constant
+ * does — every model-record construction site in the tree already imports this
+ * module, and a rule that has to be remembered at each new site is a
+ * convention, not a rule.
+ *
+ * Spread it rather than assigning it, so the `Usage.cost` shape (which adds a
+ * `total` roll-up) can extend it without re-forking the four rates:
+ *
+ * ```ts
+ * cost: { ...ZERO_MODEL_COST, total: 0 }
+ * ```
+ */
+export const ZERO_MODEL_COST = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+} as const;

@@ -3,8 +3,9 @@
 /**
  * Unit tests for the pure helpers in the files service: the single access-
  * capability computation (D2 / Anthropic rule + the `user_upload` privacy
- * decision), the org-quota math, retention-expiry stamping, the `appfile://`
- * URI parser, and the streaming SHA-256 counter.
+ * decision), the org-quota math, retention-expiry stamping, and the streaming
+ * SHA-256 counter. The `appfile://` URI helpers themselves belong to
+ * `@appstrate/core` and are covered by `packages/core/test/file-uri.test.ts`.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -17,7 +18,6 @@ import {
   toFileDto,
   type FileRow,
 } from "../../../src/services/files.ts";
-import { isFileUri, parseFileUri, fileUri } from "@appstrate/core/file-uri";
 import type { Actor } from "@appstrate/connect";
 
 const userA: Actor = { type: "user", id: "user-a" };
@@ -264,22 +264,6 @@ describe("retentionExpiry", () => {
     const exp = retentionExpiry(7, now);
     expect(exp).not.toBeNull();
     expect(exp!.toISOString()).toBe("2026-01-08T00:00:00.000Z");
-  });
-});
-
-describe("file URI helpers", () => {
-  it("round-trips a valid file id", () => {
-    const uri = fileUri("file_abc12345");
-    expect(uri).toBe("appfile://file_abc12345");
-    expect(isFileUri(uri)).toBe(true);
-    expect(parseFileUri(uri)).toBe("file_abc12345");
-  });
-
-  it("rejects malformed / foreign URIs", () => {
-    expect(isFileUri("upload://upl_x")).toBe(false);
-    expect(parseFileUri("appfile://nope")).toBeNull();
-    expect(parseFileUri("appfile://file_short")).toBeNull(); // < 8 id chars
-    expect(parseFileUri("upload://upl_abc12345")).toBeNull();
   });
 });
 

@@ -52,32 +52,13 @@ import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { ensureBucket } from "@appstrate/db/storage";
 import { logInfraMode } from "../infra/index.ts";
 import { installPermissionAuditLogger } from "./permission-audit.ts";
+import { mapBounded } from "./map-bounded.ts";
 
 /**
  * Max concurrent orphan stop+finalize pairs at boot. See the call site — kept
  * well under the postgres.js pool (`max: 20`).
  */
 const ORPHAN_CLEANUP_CONCURRENCY = 6;
-
-/**
- * `Promise.all`-shaped map with a bounded worker pool. Local by design: this
- * file and `services/system-packages.ts` each keep their own tiny pool rather
- * than sharing a new util module.
- */
-async function mapBounded<T>(
-  items: readonly T[],
-  limit: number,
-  fn: (item: T) => Promise<void>,
-): Promise<void> {
-  let cursor = 0;
-  const worker = async (): Promise<void> => {
-    while (cursor < items.length) {
-      const item = items[cursor++]!;
-      await fn(item);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-}
 
 /**
  * Phase 1 — everything the HTTP surface's *shape* depends on, plus every

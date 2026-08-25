@@ -248,12 +248,6 @@ describe("formatCallerContext", () => {
     expect(out).toContain("Reply in the user's language (fr)");
   });
 
-  it("always grounds date/language from the server (UTC + fr)", () => {
-    const out = formatCallerContext({ user: { name: "Ada" }, org: { role: "member" } });
-    expect(out).toContain("(UTC, rounded to the hour)");
-    expect(out).toContain("Reply in the user's language (fr)");
-  });
-
   it("does NOT render recent runs — they would bust the prompt cache every turn", () => {
     const out = formatCallerContext({
       user: { name: "Ada" },
@@ -303,6 +297,13 @@ describe("formatCallerContext", () => {
     expect(formatCallerContext(ctx, { now: at })).toContain("2026-06-25T09:00:00.000Z");
     // No time-of-day precision survives anywhere in the block.
     expect(formatCallerContext(ctx, { now: at })).not.toMatch(/T\d{2}:(?!00:00\.000Z)/);
+    // `opts.now` exists only to make the invariant testable, so the DEFAULT
+    // clock has to be floored by the same code — a regression that floored the
+    // injected stamp alone would leave everything above green while every real
+    // turn re-rendered the block.
+    expect(formatCallerContext(ctx)).toMatch(
+      /Current date and time: \d{4}-\d{2}-\d{2}T\d{2}:00:00\.000Z \(UTC, rounded to the hour\)/,
+    );
   });
 });
 

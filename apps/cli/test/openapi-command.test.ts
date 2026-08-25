@@ -14,35 +14,21 @@
  * is structured.
  */
 
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
-import {
-  _setKeyringFactoryForTesting,
-  saveTokens,
-  type KeyringHandle,
-} from "../src/lib/keyring.ts";
-import { setProfile } from "../src/lib/config.ts";
 import {
   openapiExportCommand,
   openapiListCommand,
   openapiShowCommand,
 } from "../src/commands/openapi.ts";
-
-class FakeKeyring implements KeyringHandle {
-  static store = new Map<string, string>();
-  constructor(private profile: string) {}
-  setPassword(v: string): void {
-    FakeKeyring.store.set(this.profile, v);
-  }
-  getPassword(): string | null {
-    return FakeKeyring.store.get(this.profile) ?? null;
-  }
-  deletePassword(): void {
-    FakeKeyring.store.delete(this.profile);
-  }
-}
+import {
+  installFakeKeyring,
+  seedLoggedInProfile,
+  useTempCacheHome,
+  useTempConfigHome,
+  type FakeKeyringInstall,
+} from "./helpers/auth-fixture.ts";
 
 /**
  * Every command invocation gets its own `createMemoryIO()` sink rather than
@@ -59,10 +45,9 @@ class FakeKeyring implements KeyringHandle {
 import { ExitError } from "./helpers/process-exit.ts";
 import { createMemoryIO } from "./helpers/memory-io.ts";
 
-let tmpConfig: string;
-let tmpCache: string;
-let originalXdgConfig: string | undefined;
-let originalXdgCache: string | undefined;
+const configHome = useTempConfigHome("appstrate-cli-openapi-cfg-");
+const cacheHome = useTempCacheHome("appstrate-cli-openapi-cache-");
+let keyring: FakeKeyringInstall;
 const originalFetch = globalThis.fetch;
 
 let fetchCalls: Array<{ url: string; method: string | undefined; headers: Record<string, string> }>;
@@ -77,48 +62,19 @@ function installFetch(responder: (url: string, init?: RequestInit) => Promise<Re
   globalThis.fetch = stub as unknown as typeof fetch;
 }
 
-beforeAll(() => {
-  originalXdgConfig = process.env.XDG_CONFIG_HOME;
-  originalXdgCache = process.env.XDG_CACHE_HOME;
-});
-
-afterAll(() => {
-  if (originalXdgConfig === undefined) delete process.env.XDG_CONFIG_HOME;
-  else process.env.XDG_CONFIG_HOME = originalXdgConfig;
-  if (originalXdgCache === undefined) delete process.env.XDG_CACHE_HOME;
-  else process.env.XDG_CACHE_HOME = originalXdgCache;
-});
-
 beforeEach(async () => {
-  tmpConfig = await mkdtemp(join(tmpdir(), "appstrate-cli-openapi-cfg-"));
-  tmpCache = await mkdtemp(join(tmpdir(), "appstrate-cli-openapi-cache-"));
-  process.env.XDG_CONFIG_HOME = tmpConfig;
-  process.env.XDG_CACHE_HOME = tmpCache;
-  FakeKeyring.store.clear();
-  _setKeyringFactoryForTesting((p) => new FakeKeyring(p));
+  await configHome.setup();
+  await cacheHome.setup();
+  keyring = installFakeKeyring();
   fetchCalls = [];
 });
 
 afterEach(async () => {
-  _setKeyringFactoryForTesting(null);
+  keyring.restore();
   globalThis.fetch = originalFetch;
-  await rm(tmpConfig, { recursive: true, force: true });
-  await rm(tmpCache, { recursive: true, force: true });
+  await configHome.teardown();
+  await cacheHome.teardown();
 });
-
-async function seedLoggedInProfile(name = "default"): Promise<void> {
-  await setProfile(name, {
-    instance: "https://app.example.com",
-    userId: "u_1",
-    email: "a@example.com",
-  });
-  await saveTokens(name, {
-    accessToken: "tok-abc",
-    expiresAt: Date.now() + 15 * 60 * 1000,
-    refreshToken: "rt-xyz",
-    refreshExpiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
-  });
-}
 
 function sampleSchema() {
   return {
@@ -429,7 +385,7 @@ describe("openapi export", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const target = join(tmpCache, "schema.json");
+    const target = join(cacheHome.dir(), "schema.json");
     const { io, stdout, stderr } = createMemoryIO();
     await openapiExportCommand({ profile: "default", output: target }, io);
     const written = await readFile(target, "utf-8");

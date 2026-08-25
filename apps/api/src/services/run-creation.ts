@@ -71,7 +71,11 @@ type CreateRunResult =
   | {
       ok: true;
       runId: string;
-      sinkCredentials?: SinkCredentials;
+      /**
+       * Always present on the success arm — the remote origin cannot create a
+       * run without minting them, so the caller has no absent case to handle.
+       */
+      sinkCredentials: SinkCredentials;
     }
   | {
       ok: false;

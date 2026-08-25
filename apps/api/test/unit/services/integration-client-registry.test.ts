@@ -5,7 +5,6 @@ import {
   initSystemIntegrations,
   __resetSystemIntegrationsForTest,
   isSystemIntegration,
-  getSystemIntegrationClients,
   getSystemIntegrationClientById,
   listSystemIntegrationClientsFor,
   getDefaultSystemIntegrationClient,
@@ -51,8 +50,6 @@ describe("integration-client-registry", () => {
       expect(isSystemIntegration(DRIVE)).toBe(true);
       expect(isSystemIntegration("@x/none")).toBe(false);
 
-      expect(getSystemIntegrationClients().size).toBe(2);
-
       const gmail = getSystemIntegrationClientById("gmail-system");
       expect(gmail).not.toBeNull();
       expect(gmail!.clientId).toBe("gm-client.apps.googleusercontent.com");
@@ -62,6 +59,9 @@ describe("integration-client-registry", () => {
 
       const forGmail = listSystemIntegrationClientsFor(GMAIL, "google");
       expect(forGmail.map((d) => d.id)).toEqual(["gmail-system"]);
+      expect(listSystemIntegrationClientsFor(DRIVE, "google").map((d) => d.id)).toEqual([
+        "drive-system",
+      ]);
 
       expect(getDefaultSystemIntegrationClient(GMAIL, "google")!.id).toBe("gmail-system");
       expect(getDefaultSystemIntegrationClient(GMAIL, "nope")).toBeNull();
@@ -72,7 +72,6 @@ describe("integration-client-registry", () => {
       initSystemIntegrations([{ id: MCP }]);
       // Auto-active by membership, even though it ships no static client.
       expect(isSystemIntegration(MCP)).toBe(true);
-      expect(getSystemIntegrationClients().size).toBe(0);
       expect(getDefaultSystemIntegrationClient(MCP, "oauth")).toBeNull();
       expect(listSystemIntegrationClientsFor(MCP, "oauth")).toEqual([]);
     });
@@ -193,7 +192,8 @@ describe("integration-client-registry", () => {
       ]);
       expect(isSystemIntegration(GMAIL)).toBe(true);
       expect(isSystemIntegration(MCP)).toBe(true);
-      expect(getSystemIntegrationClients().size).toBe(1);
+      expect(listSystemIntegrationClientsFor(GMAIL, "google").map((d) => d.id)).toEqual(["good"]);
+      expect(listSystemIntegrationClientsFor(MCP, "oauth")).toEqual([]);
     });
 
     it("throws on a bad nested client, naming the entry AND the offending client", () => {
@@ -279,7 +279,7 @@ describe("integration-client-registry", () => {
       __resetSystemIntegrationsForTest();
       // Reset leaves an empty (initialized) registry — accessors degrade to
       // empty/null/false, they do not trip the access-before-init guard.
-      expect(getSystemIntegrationClients().size).toBe(0);
+      expect(listSystemIntegrationClientsFor("@x/y", "google")).toEqual([]);
       expect(getSystemIntegrationClientById("x")).toBeNull();
       expect(getDefaultSystemIntegrationClient("@x/y", "google")).toBeNull();
       expect(isSystemIntegration("@x/y")).toBe(false);

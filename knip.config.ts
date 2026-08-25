@@ -27,11 +27,33 @@ import type { KnipConfig } from "knip";
  * Anything that is neither is dead, and gets deleted instead of listed.
  *
  * Not covered, deliberately: whether a **published** package's public export
- * still has a reader. `@appstrate/core`, `@appstrate/afps-runtime` and the
- * `@appstrate/module-*` packages are consumed out of tree (cloud,
- * connect-helper, third-party modules), so "no in-repo reader" is not
- * evidence of death for them; proving one of those is dead needs the
- * consumers, not this repo.
+ * still has a reader. `@appstrate/core` and `@appstrate/afps-shared` are on npm
+ * and consumed out of tree (`cloud`, `connect-helper`, third-party modules), so
+ * "no in-repo reader" is not evidence of death for them; proving one of those
+ * is dead needs the consumers, not this repo.
+ *
+ * That list used to read "`@appstrate/core`, `@appstrate/afps-runtime` and the
+ * `@appstrate/module-*` packages", and for five of those six it was simply
+ * false — which is not a cosmetic error, because the exemption below is granted
+ * on the strength of it. **Only two scoped packages in this monorepo have ever
+ * been published**: `@appstrate/core` and `@appstrate/afps-shared`, the only two
+ * with a publish workflow (`publish-core.yml`, `publish-afps-shared.yml`) and a
+ * release tag. `@appstrate/afps-runtime` carries `publishConfig` but has no
+ * workflow, no `afps-runtime@*` tag, and npm holds one `0.0.0` placeholder from
+ * 2026-04-20 against a local 0.2.0; `@appstrate/runner-pi` and all four
+ * `@appstrate/module-*` packages are absent from npm entirely and are reached
+ * in-tree by `workspace:*` or by a `MODULES` specifier the loader resolves by
+ * name. `@appstrate/ui` is a third case: `"private": true` here, yet 1.0.1 sits
+ * on npm from before that flag — treated as private below, which is the strict
+ * direction.
+ *
+ * The cost of the wrong premise is measurable: two exports in
+ * `packages/afps-runtime/src/resolvers/bundle-adapter.ts`
+ * (`readPackageText` / `readPackageBytes`) sat dead behind it, documented as
+ * sparing duplication "every resolver would otherwise duplicate" while no
+ * resolver called either. Found by hand, not by this gate. Verify publication
+ * before granting the exemption to anything else — `npm view <pkg> versions`
+ * and `ls .github/workflows/publish-*`, not the manifest's `publishConfig`.
  *
  * How that exemption is actually obtained matters, and is the one thing that
  * is easy to get wrong here. knip does **not** read `exports`, `bin`, `main`
@@ -146,11 +168,20 @@ function manifestEntries(workspace: string, omitExports: readonly string[] = [])
  * `src/modules/*` — wider than the noise it removed, and blind to the real
  * dead named export it was supposed to catch.
  *
- * It stays off for `packages/core`, `packages/afps-runtime`,
- * `packages/afps-shared`, `packages/runner-pi`, `apps/cli` and the
- * `packages/module-*` packages — all published, all read out of tree — and
- * for the workspaces whose only entries are Docker CMDs or Playwright specs,
- * which export nothing.
+ * It stays off for `packages/core` and `packages/afps-shared`, which are
+ * genuinely published and genuinely read out of tree, and for the workspaces
+ * whose only entries are Docker CMDs or Playwright specs, which export nothing.
+ *
+ * It ALSO stays off, for now, for `packages/afps-runtime`, `packages/runner-pi`,
+ * `apps/cli` and the four `packages/module-*` packages — and that is a DEFERRAL,
+ * not the exemption above: per the header, none of them is on npm, so each has
+ * the same unearned exemption `packages/ui` and its six siblings gave up. The
+ * flag was measured on `packages/afps-runtime` (176 findings, 122 distinct
+ * names, 159 of them barrel re-export lines) and the result is not a hygiene
+ * list — it is the single question of whether an unpublished package keeps a
+ * portable public API, which belongs to its own pass. See that workspace's
+ * block below for the numbers. Do not grant these the published-package
+ * exemption on re-reading this file; they are owed a triage, not a pass.
  */
 
 const config: KnipConfig = {
@@ -371,11 +402,22 @@ const config: KnipConfig = {
       ],
     },
 
+    /**
+     * NOT published, despite the `publishConfig` in its manifest — see the
+     * `includeEntryExports` note above for the evidence and for what that
+     * costs. `includeEntryExports` is therefore UNSET here on purpose and NOT
+     * because the published-package exemption applies: turning it on reports
+     * 176 findings (79 exports + 97 exported types, 122 distinct names), 159 of
+     * them lines in the `src/index.ts` and `src/bundle/index.ts` barrels. Their
+     * disposition is one product question — does an unpublished package keep a
+     * portable public API — not 159 hygiene calls, so it is deferred to its own
+     * pass rather than triaged in a sweep. Measured 2026-08-25; re-measure
+     * before acting.
+     */
     "packages/afps-runtime": {
       entry: [
         // Every target of the `exports` map plus the manifest `bin` (the
-        // `afps` executable): published on npm, so out-of-tree readers reach
-        // these directly.
+        // `afps` executable, run from a checkout).
         ...manifestEntries("packages/afps-runtime"),
         "examples/**/build.ts",
       ],

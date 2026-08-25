@@ -15,7 +15,7 @@ import type {
   SubscriptionChatModel,
   ChatModelResolution,
 } from "@appstrate/core/chat-contract";
-import { PLATFORM_MODEL_COMPAT } from "@appstrate/runner-pi/model-compat";
+import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
 import {
   derivePiProvider,
   llmProxyBaseUrl,
@@ -99,12 +99,9 @@ function toPiModel(input: {
     reasoning: input.reasoning === true,
     ...(input.reasoningLevelMap ? { thinkingLevelMap: input.reasoningLevelMap } : {}),
     input: (input.input ?? ["text"]) as Model<Api>["input"],
-    cost: (input.cost ?? {
-      input: 0,
-      output: 0,
-      cacheRead: 0,
-      cacheWrite: 0,
-    }) as Model<Api>["cost"],
+    // `Model.cost` is required by the Pi SDK; an unpriced model still carries
+    // the shape. One spelling of those zeros — see `ZERO_MODEL_COST`.
+    cost: (input.cost ?? { ...ZERO_MODEL_COST }) as Model<Api>["cost"],
     // One rule, one constant — see `PLATFORM_MODEL_COMPAT`. Chat runs in the
     // API process, so `PI_CACHE_RETENTION` is reachable by whoever configures
     // the deployment; the flag on the record is what holds regardless.

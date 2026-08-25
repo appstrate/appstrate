@@ -8,16 +8,7 @@
  * CLI tests. No real network, no real keyring.
  */
 
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import {
-  _setKeyringFactoryForTesting,
-  saveTokens,
-  type KeyringHandle,
-} from "../src/lib/keyring.ts";
-import { setProfile } from "../src/lib/config.ts";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import {
   listApplications,
   createApplication,
@@ -25,20 +16,12 @@ import {
   findDefaultApplication,
   type Application,
 } from "../src/lib/applications.ts";
-
-class FakeKeyring implements KeyringHandle {
-  static store = new Map<string, string>();
-  constructor(private profile: string) {}
-  setPassword(v: string): void {
-    FakeKeyring.store.set(this.profile, v);
-  }
-  getPassword(): string | null {
-    return FakeKeyring.store.get(this.profile) ?? null;
-  }
-  deletePassword(): void {
-    FakeKeyring.store.delete(this.profile);
-  }
-}
+import {
+  installFakeKeyring,
+  seedLoggedInProfile,
+  useTempConfigHome,
+  type FakeKeyringInstall,
+} from "./helpers/auth-fixture.ts";
 
 type FetchCall = {
   url: string;
@@ -47,8 +30,8 @@ type FetchCall = {
   headers: Record<string, string>;
 };
 
-let tmpDir: string;
-let originalXdg: string | undefined;
+const configHome = useTempConfigHome("appstrate-cli-apps-");
+let keyring: FakeKeyringInstall;
 const originalFetch = globalThis.fetch;
 let fetchCalls: FetchCall[];
 
@@ -64,42 +47,20 @@ function installFetch(responder: (url: string, init?: RequestInit) => Promise<Re
   globalThis.fetch = stub as unknown as typeof fetch;
 }
 
-beforeAll(() => {
-  originalXdg = process.env.XDG_CONFIG_HOME;
-});
-
-afterAll(() => {
-  if (originalXdg === undefined) delete process.env.XDG_CONFIG_HOME;
-  else process.env.XDG_CONFIG_HOME = originalXdg;
-});
-
 beforeEach(async () => {
-  tmpDir = await mkdtemp(join(tmpdir(), "appstrate-cli-apps-"));
-  process.env.XDG_CONFIG_HOME = tmpDir;
-  FakeKeyring.store.clear();
-  _setKeyringFactoryForTesting((p) => new FakeKeyring(p));
+  await configHome.setup();
+  keyring = installFakeKeyring();
   fetchCalls = [];
 });
 
 afterEach(async () => {
-  _setKeyringFactoryForTesting(null);
+  keyring.restore();
   globalThis.fetch = originalFetch;
-  await rm(tmpDir, { recursive: true, force: true });
+  await configHome.teardown();
 });
 
-async function seedAuth(name = "default"): Promise<void> {
-  await setProfile(name, {
-    instance: "https://app.example.com",
-    userId: "u_1",
-    email: "alice@example.com",
-    orgId: "org_1",
-  });
-  await saveTokens(name, {
-    accessToken: "tok-abc",
-    expiresAt: Date.now() + 15 * 60 * 1000,
-    refreshToken: "rt-xyz",
-    refreshExpiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
-  });
+function seedAuth(name = "default"): Promise<void> {
+  return seedLoggedInProfile(name, { email: "alice@example.com", orgId: "org_1" });
 }
 
 function appRow(overrides: Partial<Application> = {}): Application {
