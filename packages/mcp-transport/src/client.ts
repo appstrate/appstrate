@@ -228,14 +228,22 @@ export async function createMcpHttpClient(
 /**
  * `client.connect`, with the caller's signal actually attached.
  *
- * This is the ONLY cancellation seam a connect has, and it is enough to bound
- * every one of them. `Client.connect(transport, options)` forwards `options` to
- * the `initialize` REQUEST, where the SDK's protocol layer both
+ * This is the ONLY cancellation seam a connect has, and it bounds the phase
+ * that actually wedges. `Client.connect(transport, options)` forwards `options`
+ * to the `initialize` REQUEST, where the SDK's protocol layer both
  * `throwIfAborted()`s up front and registers an abort listener that rejects the
- * pending request; `transport.start()` opens no socket, so nothing else in a
- * connect can block. A retry loop is therefore not an alternative bound — it
- * wraps attempts, it cannot interrupt one — which is why the signal goes here
- * rather than only around the loop.
+ * pending request; `transport.start()` opens no socket. A retry loop is
+ * therefore not an alternative bound — it wraps attempts, it cannot interrupt
+ * one — which is why the signal goes here rather than only around the loop.
+ *
+ * RESIDUAL, on purpose: `connect` does one more thing after `initialize`
+ * settles — it awaits a `notifications/initialized` POST, and the SDK passes
+ * that one no options, so no signal reaches it. An abort landing in that window
+ * is not honoured and the connect resolves normally once the POST returns. It
+ * is a single fire-and-forget round trip against a server that has just proved
+ * it answers, not the open-ended wait `initialize` is, so it is left alone
+ * rather than papered over with a second timer. `client-connect-residual` in
+ * the tests pins it, so this note cannot quietly become false.
  *
  * Without it a connect answers only to the SDK's 60 s
  * `DEFAULT_REQUEST_TIMEOUT_MSEC`: a caller's own deadline (a chat turn's stop

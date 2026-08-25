@@ -1031,6 +1031,40 @@ describe("transient upstream failures", () => {
     ).toBe(false);
   });
 
+  it("collapses a vendor-fingerprinting status to a generic gateway error", async () => {
+    // `529` is Anthropic's own "overloaded" code and `520`–`526` are
+    // Cloudflare's — forwarding either tells the container which backing it is
+    // really talking to, which is the one thing the alias boundary exists to
+    // withhold. They are projected to 502, which `isRetryableAssistantError`
+    // already treats as retryable, so nothing is lost but the fingerprint.
+    for (const fingerprint of [529, 520, 524]) {
+      const frames = await runAgainst(scriptedUpstream([fingerprint]).fetch);
+      const terminal = frames.at(-1) as Extract<PiMessagesEvent, { type: "error" }>;
+      expect(terminal.errorMessage).toBe(
+        'Upstream model error (model "appstrate-medium", status 502)',
+      );
+      expect(
+        isRetryableAssistantError({
+          ...partialMessage([]),
+          stopReason: "error",
+          errorMessage: terminal.errorMessage!,
+        }),
+      ).toBe(true);
+    }
+  });
+
+  it("control: a generic status is still forwarded verbatim", async () => {
+    // Without this the collapse above could be a blanket 502 that throws away
+    // the 429/400 partition the two cases before this one depend on.
+    for (const generic of [401, 404, 409, 503]) {
+      const frames = await runAgainst(scriptedUpstream([generic]).fetch);
+      const terminal = frames.at(-1) as Extract<PiMessagesEvent, { type: "error" }>;
+      expect(terminal.errorMessage).toBe(
+        `Upstream model error (model "appstrate-medium", status ${generic})`,
+      );
+    }
+  });
+
   it("still names nothing: the upstream's own error body never reaches the client", async () => {
     // The status travels; the prose does not. A 429 body is exactly where a
     // provider writes its rate-limit copy, its model id and its own vocabulary.

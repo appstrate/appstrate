@@ -90,6 +90,14 @@ export function isIntegrationConnectCompletion(
 }
 
 /**
+ * What `URL.origin` serialises to for a scheme that carries no tuple origin
+ * (`about:`, `data:`, `file:`, `blob:null`) and what every sandboxed document
+ * reports as its `postMessage` origin. It identifies nobody, so it is never a
+ * valid party to this handshake on either side.
+ */
+const OPAQUE_ORIGIN = "null";
+
+/**
  * Whether a `message` event may be acted on as a connect completion.
  *
  * The origin is checked before the payload: a listener that reads `event.data`
@@ -107,9 +115,20 @@ export function isIntegrationConnectMessage<T extends { origin: string; data: un
   try {
     self = integrationConnectOrigin(selfUrl);
   } catch {
-    // An opaque origin (the literal `"null"` a sandboxed document reports) does
-    // not parse. Trust nothing rather than throw out of a `message` listener.
+    // An unparseable `selfUrl` (the bare literal `"null"`, an empty string).
+    // Trust nothing rather than throw out of a `message` listener.
     return false;
   }
-  return event.origin === self && isIntegrationConnectCompletion(event.data);
+  // A URL can PARSE and still serialise to the opaque origin `"null"`:
+  // `about:blank`, `data:`, `file:` and `blob:null` all do. Every sandboxed
+  // sender also reports `"null"`, so an equality test would make two unrelated
+  // opaque origins compare equal and accept a forged completion. An opaque
+  // origin identifies nobody — it can never be the platform origin a
+  // completion is sent from, so it is refused outright rather than matched.
+  if (self === OPAQUE_ORIGIN) return false;
+  return (
+    event.origin !== OPAQUE_ORIGIN &&
+    event.origin === self &&
+    isIntegrationConnectCompletion(event.data)
+  );
 }

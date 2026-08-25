@@ -218,6 +218,39 @@ describe("scrubSecretMaterial", () => {
     expect(scrubSecretMaterial("Bearer%20abc%2Bdef%3Dghi")).toBe("Bearer [redacted]");
   });
 
+  // Fourth regression on the anchor, from the other side. `CRED_START`
+  // excludes `_` on the left, so a keyword glued to an UNDERSCORE never
+  // matched — and `FOO_TOKEN=` is the dominant shape on the paths this
+  // scrubber was just routed through: docker's `--env-file` diagnostics quote
+  // back `NAME=value` lines and runner stderr prints env names, both landing
+  // in `failed[].error` on the UNAUTHENTICATED `GET /integrations/boot-report`.
+  it("masks a keyword preceded by an underscore (FOO_TOKEN=…)", () => {
+    expect(scrubSecretMaterial("NOTION_TOKEN=ntn_9fJ2kQwErTyUiOpAsDfGhJk")).not.toContain(
+      "ntn_9fJ2kQwErTyUiOpAsDfGhJk",
+    );
+    expect(scrubSecretMaterial("no variable name on line 'GCP_SECRET=hunter2'")).not.toContain(
+      "hunter2",
+    );
+    expect(scrubSecretMaterial("STRIPE_API_KEY=rk_live_0123456789")).not.toContain(
+      "rk_live_0123456789",
+    );
+  });
+
+  // URL userinfo is a credential channel of its own: `git`-style remotes and
+  // proxy URLs carry it, and no keyword/prefix rule sees it.
+  it("masks URL userinfo", () => {
+    expect(scrubSecretMaterial("https://user:hunter2@host/path")).not.toContain("hunter2");
+    expect(scrubSecretMaterial("clone http://x-token:s3cr3tvalue@github.com/o/r")).not.toContain(
+      "s3cr3tvalue",
+    );
+    // The rest of the URL survives — it is what an operator diagnoses with.
+    expect(scrubSecretMaterial("https://user:hunter2@host/path")).toContain("host/path");
+    // An `@` in a path is not userinfo.
+    expect(scrubSecretMaterial("https://host/users/me@example.com")).toBe(
+      "https://host/users/me@example.com",
+    );
+  });
+
   it("leaves prose that merely starts with a key prefix alone", () => {
     expect(scrubSecretMaterial("found skeletons in pkgroots directory")).toBe(
       "found skeletons in pkgroots directory",
@@ -227,6 +260,11 @@ describe("scrubSecretMaterial", () => {
     expect(scrubSecretMaterial("risk-averse and disk-usage notes")).toBe(
       "risk-averse and disk-usage notes",
     );
+    // `mytoken=` is preceded by `y`, not a boundary — still prose. Admitting
+    // `_` on the keyword rule must not admit an alphanumeric too.
     expect(scrubSecretMaterial("the mytoken=abc case")).toBe("the mytoken=abc case");
+    expect(scrubSecretMaterial("mypassword=abc and 9secret=z")).toBe(
+      "mypassword=abc and 9secret=z",
+    );
   });
 });

@@ -124,12 +124,49 @@ describe("writeSecretEnvFile — docker --env-file line containment", () => {
     ).rejects.toThrow(/GCP_KEY/);
   });
 
-  it("refuses a carriage return, a leading '#', and a leading '='", async () => {
+  it("refuses an EMBEDDED carriage return", async () => {
+    // Docker's scanner (`bufio.ScanLines`) strips a trailing `\r` but leaves a
+    // lone interior one attached to the value; other readers treat it as a
+    // line break. The embedded case stays closed.
     await expect(writeSecretEnvFile({ K: "a\rb" })).rejects.toThrow(/"K"/);
-    await expect(writeSecretEnvFile({ K: "#commented-out" })).rejects.toThrow(/"K"/);
-    await expect(writeSecretEnvFile({ K: "=bad" })).rejects.toThrow(/"K"/);
+    await expect(writeSecretEnvFile({ K: "a\r\nRUN_TOKEN" })).rejects.toThrow(/"K"/);
+  });
+
+  it("accepts a value that merely ENDS with a newline", async () => {
+    // The motivating case in this function's own docstring: a token pasted
+    // with a trailing newline. Entries are joined with `\n`, so a trailing
+    // newline produces an EMPTY line, which docker's parser skips (`len(line)
+    // > 0` guard) — no bare-name line, no environ resolution. Refusing it
+    // turned a working integration into `ok:false` and aborted the run, and
+    // diverged by tier (process/Firecracker pass env directly and kept
+    // working).
+    const { path } = await writeSecretEnvFile({ TOKEN: "tok-123\n", B: "x\r\n" });
+    expect(await readFile(path, "utf8")).toBe("TOKEN=tok-123\nB=x");
+  });
+
+  it("refuses a key that is not a portable env-var name", async () => {
+    // An empty key emits `=<value>` and docker answers `no variable name on
+    // line '=<value>'` — echoing the DECRYPTED credential into `failed[].error`
+    // on the unauthenticated boot report. A key containing `=` silently sets a
+    // different variable (docker splits on the first `=`).
+    await expect(writeSecretEnvFile({ "": "s3cr3t-value" })).rejects.toThrow(
+      expect.objectContaining({
+        message: expect.not.stringContaining("s3cr3t-value") as unknown as string,
+      }),
+    );
+    await expect(writeSecretEnvFile({ "A=B": "v" })).rejects.toThrow(/"A=B"/);
     await expect(writeSecretEnvFile({ "#K": "v" })).rejects.toThrow(/"#K"/);
     await expect(writeSecretEnvFile({ "K\nINJECTED": "v" })).rejects.toThrow(/INJECTED/);
+    await expect(writeSecretEnvFile({ "1BAD": "v" })).rejects.toThrow(/"1BAD"/);
+    await expect(writeSecretEnvFile({ "HAS SPACE": "v" })).rejects.toThrow(/"HAS SPACE"/);
+  });
+
+  it("accepts a value starting with '#' or '='", async () => {
+    // Neither is a docker parse hazard: a `#` comment is only recognised at
+    // LINE start and the value never is, and `SplitN(line, "=", 2)` gives the
+    // whole remainder to the value. Refusing them broke passwords.
+    const { path } = await writeSecretEnvFile({ P: "#hash-first", Q: "=equals-first" });
+    expect(await readFile(path, "utf8")).toBe("P=#hash-first\nQ==equals-first");
   });
 
   it("never names the value in the rejection", async () => {
@@ -219,10 +256,44 @@ describe("stageFileMountsOnHost — delivery.files (AFPS §7.6, CC-5)", () => {
       },
     });
     expect(await readFile(join(dir, "etc/appstrate/certs/deep/ca.pem"), "utf8")).toBe("CA");
-    // Staged directories stay permissive: `docker cp` applies the archive's
-    // directory mode to a destination directory that already exists, and
-    // narrowing the runner's /tmp (1777) would break it.
-    expect((await stat(join(dir, "etc"))).mode & 0o777).toBe(0o777);
+    // Staged parents are 0755, not 0777. Every one of them maps onto a REAL
+    // runner directory (`/etc`, `/run`, `/usr/local/bin`), so if the archive's
+    // directory mode is applied on extraction, 0777 world-writes them.
+    expect((await stat(join(dir, "etc"))).mode & 0o777).toBe(0o755);
+    expect((await stat(join(dir, "etc/appstrate"))).mode & 0o777).toBe(0o755);
+  });
+
+  it("stages the sticky dirs sticky and the root traversable", async () => {
+    // The root entry is shipped as `docker cp <root>/. <id>:/`, whose tar
+    // carries a `./` header. `mkdtemp` leaves it 0700: if directory modes are
+    // applied on extraction, `/` becomes 0700 and every runner image (all five
+    // run `USER runner:runner`, uid 1001) fails to traverse it.
+    const dir = await stageFileMountsOnHost({
+      "/tmp/session/cookie.txt": { content_b64: Buffer.from("C").toString("base64"), mode: "0400" },
+      "/run/creds/k.pem": { content_b64: Buffer.from("K").toString("base64"), mode: "0400" },
+    });
+    expect((await stat(dir)).mode & 0o7777).toBe(0o755);
+    // `/tmp` is 1777 in every base image; narrowing it to 0755 would break
+    // every runtime that writes there. Only the world-writable half is
+    // asserted: Bun's `fs.chmod` masks off every bit above 0o777, so the
+    // sticky bit never lands (see `STICKY_STAGED_DIRS`).
+    expect((await stat(join(dir, "tmp"))).mode & 0o777).toBe(0o777);
+    expect((await stat(join(dir, "tmp/session"))).mode & 0o7777).toBe(0o755);
+    expect((await stat(join(dir, "run"))).mode & 0o7777).toBe(0o755);
+  });
+
+  it("refuses a mount under /usr or /workspace", async () => {
+    // Both are real runner directories whose mode and ownership a staged
+    // parent would carry: `/workspace` is the per-run volume SHARED with the
+    // agent container (chowned 1001:1001 at create time), and `/usr` is the
+    // image's own tree. Neither is a credential destination.
+    for (const bad of ["/usr/local/bin/creds", "/workspace/token.json", "/workspace"]) {
+      await expect(
+        stageFileMountsOnHost({
+          [bad]: { content_b64: Buffer.from("x").toString("base64"), mode: "0400" },
+        }),
+      ).rejects.toThrow(/unsafe container path/);
+    }
   });
 
   it("decodes binary content losslessly", async () => {

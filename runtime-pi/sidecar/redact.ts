@@ -154,6 +154,29 @@ export function filterSensitiveHeaders(
 const CRED_START = String.raw`(?<=^|%[0-9A-Fa-f]{2}|[^A-Za-z0-9_])`;
 
 /**
+ * Start-of-KEYWORD anchor. Identical to {@link CRED_START} except that `_` is
+ * admitted on the left.
+ *
+ * That single character was the fourth bug on this anchor, from the side the
+ * first three did not cover. `CRED_START` treats `_` as a word character, so
+ * `NOTION_TOKEN=…`, `GCP_SECRET=…` and `STRIPE_API_KEY=…` never matched — and
+ * `FOO_TOKEN=value` is the dominant shape on the paths this scrubber is
+ * routed through: docker's `--env-file` parser quotes the offending
+ * `NAME=value` line back in its diagnostics, and runner stderr prints env
+ * names. Both end up in `failed[].error` on the UNAUTHENTICATED
+ * `GET /integrations/boot-report` the agent container reads.
+ *
+ * It stays as strict as `\b` on every OTHER left-hand character, which is what
+ * keeps `mytoken=abc` and `9secret=z` readable prose: a keyword glued to a
+ * letter or a digit is still part of a longer word, a keyword glued to `_` is
+ * an env-var name whose value is a credential. Only the keyword rule uses
+ * this — the credential-SHAPE rules (`sk-…`, `ghp_…`, `eyJ…`, `AKIA…`,
+ * `ya29.`) keep `CRED_START`, where `_` on the left genuinely means "middle of
+ * an identifier".
+ */
+const KEYWORD_START = String.raw`(?<=^|%[0-9A-Fa-f]{2}|[^A-Za-z0-9])`;
+
+/**
  * Ordered scrub rules. Compiled once: these run on every proxied error body.
  *
  * `Bearer|Basic` and `sk-ant-` deliberately carry NO anchor — those literals
@@ -167,6 +190,17 @@ const CRED_START = String.raw`(?<=^|%[0-9A-Fa-f]{2}|[^A-Za-z0-9_])`;
  * and the whole set runs in linear time.
  */
 const SCRUB_RULES: ReadonlyArray<readonly [RegExp, string]> = [
+  // URL userinfo (`scheme://user:pass@host/…`). A credential channel no
+  // keyword or prefix rule sees: `pass` is arbitrary, and the whole `user:pass`
+  // is masked rather than just the half after the colon, because a bare-token
+  // userinfo (`https://<token>@host`) carries the secret in the FIRST half.
+  // Runs first so a URL whose userinfo happens to contain a keyword
+  // (`https://token:hunter2@host/path`) is masked as userinfo rather than
+  // swallowing the host and path into the keyword rule's value class.
+  // The character class stops at `/`, `?`, `#` and whitespace, so an `@`
+  // inside a path or query (`/users/me@example.com`) is not userinfo and is
+  // left alone.
+  [/(:\/\/)[^/?#@\s]*@/g, "$1[redacted]@"],
   [/(Bearer|Basic)(?:\s|%20)+[A-Za-z0-9._~+/=%-]+/gi, "$1 [redacted]"],
   [new RegExp(`${CRED_START}eyJ[A-Za-z0-9._-]{10,}`, "g"), "[redacted-jwt]"],
   [/sk-ant-[A-Za-z0-9._-]+/gi, "[redacted-key]"],
@@ -178,7 +212,7 @@ const SCRUB_RULES: ReadonlyArray<readonly [RegExp, string]> = [
   [new RegExp(`${CRED_START}ya29\\.[A-Za-z0-9._-]{6,}`, "g"), "[redacted-key]"],
   [
     new RegExp(
-      `${CRED_START}(token|secret|password|api[_-]?key|authorization|access[_-]?token|refresh[_-]?token)` +
+      `${KEYWORD_START}(token|secret|password|api[_-]?key|authorization|access[_-]?token|refresh[_-]?token)` +
         `((?:["'\\s:=]|%20|%3A|%3D|%22|%27)+)[^\\s"',&]+`,
       "gi",
     ),

@@ -24,7 +24,7 @@
  * {@link requirePrivilegeDropWrapper}.
  */
 
-import { mkdir, writeFile, chmod, rm } from "node:fs/promises";
+import { mkdir, stat, writeFile, chmod, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -95,26 +95,65 @@ const HOST_INTERPRETER_BY_TYPE: Record<
  * and `none` (api_call-only) never reach an adapter, so they are
  * unaffected by this gate.
  *
+ * What is checked, and what that proves. The var must name a regular file
+ * carrying the SETUID bit (`S_ISUID`) — the shipped wrapper is built
+ * `chown root:1000` + `chmod 4750`
+ * (`apps/api/src/modules/firecracker/scripts/Dockerfile.rootfs`). Presence
+ * alone proved nothing: `APPSTRATE_RUNNER_EXEC=/usr/bin/env` satisfied it while
+ * exec'ing the runner on the sidecar's own uid, so the gate reported a boundary
+ * that did not exist. A file with no setuid bit CANNOT change the child's uid,
+ * whatever it does once running, so refusing it is exact.
+ *
+ * It is not checked that the setuid owner is root, or that it is anyone other
+ * than the sidecar's own uid: a stat cannot tell a privilege DROP from a
+ * same-uid setuid file, and the wrapper's uid layout is the guest image's to
+ * declare, not the sidecar's to assume. This is a misconfiguration gate, not an
+ * adversary boundary — the party who sets this env var is the orchestrator, and
+ * the party it defends against is the third-party runner bytes, which cannot
+ * set it.
+ *
  * Returns the wrapper path so the caller reads the environment exactly
  * once — the check and the value it gates can never disagree.
  */
-function requirePrivilegeDropWrapper(spec: IntegrationSpawnSpec): string {
+async function requirePrivilegeDropWrapper(spec: IntegrationSpawnSpec): Promise<string> {
   const wrapper = process.env.APPSTRATE_RUNNER_EXEC;
-  if (wrapper) return wrapper;
   const serverPackageId = spec.manifest.server?.packageId ?? spec.integrationId;
-  throw new Error(
-    `${spec.integrationId}: refusing to spawn its mcp-server "${serverPackageId}" — ` +
-      `source.kind "local" runs third-party code, and this adapter cannot drop privilege ` +
-      `(no APPSTRATE_RUNNER_EXEC wrapper), so the runner would be a same-uid child of the ` +
-      `sidecar and could read the sidecar's environment — platform API key, run token, ` +
-      `proxy credentials, every connected integration's decrypted tokens — straight out ` +
-      `of /proc. Remedies, cheapest first: set INTEGRATION_RUNTIME_ADAPTER=docker to keep ` +
-      `the run itself in process mode while each integration runner gets its own ` +
-      `container; or run under RUN_ADAPTER=docker; or under RUN_ADAPTER=firecracker, ` +
-      `whose guest supervisor execs every runner through a setuid wrapper onto a ` +
-      `dedicated uid. Integrations whose source.kind is "remote" or "none" spawn nothing ` +
-      `and are unaffected.`,
-  );
+  // Explicitly typed so TypeScript narrows `wrapper` past the first refusal:
+  // a `never` return only narrows through an annotated binding.
+  const refuse: (why: string) => never = (why: string) => {
+    throw new Error(
+      `${spec.integrationId}: refusing to spawn its mcp-server "${serverPackageId}" — ` +
+        `source.kind "local" runs third-party code, and this adapter cannot drop privilege ` +
+        `(${why}), so the runner would be a same-uid child of the ` +
+        `sidecar and could read the sidecar's environment — platform API key, run token, ` +
+        `proxy credentials, every connected integration's decrypted tokens — straight out ` +
+        `of /proc. Remedies, cheapest first: set INTEGRATION_RUNTIME_ADAPTER=docker to keep ` +
+        `the run itself in process mode while each integration runner gets its own ` +
+        `container; or run under RUN_ADAPTER=docker; or under RUN_ADAPTER=firecracker, ` +
+        `whose guest supervisor execs every runner through a setuid wrapper onto a ` +
+        `dedicated uid. Integrations whose source.kind is "remote" or "none" spawn nothing ` +
+        `and are unaffected.`,
+    );
+  };
+  if (!wrapper) refuse("no APPSTRATE_RUNNER_EXEC wrapper");
+
+  // The try wraps ONLY the syscall, so a refusal thrown below cannot be
+  // mistaken for a stat failure and re-labelled.
+  let st: Awaited<ReturnType<typeof stat>>;
+  try {
+    st = await stat(wrapper);
+  } catch {
+    refuse(`APPSTRATE_RUNNER_EXEC "${wrapper}" does not exist or cannot be stat'ed`);
+  }
+  if (!st.isFile()) refuse(`APPSTRATE_RUNNER_EXEC "${wrapper}" is not a regular file`);
+  // 0o4000 = S_ISUID. Bun exposes no `constants.S_ISUID`, and the octal is the
+  // same number the wrapper's `chmod 4750` writes.
+  if ((st.mode & 0o4000) === 0) {
+    refuse(
+      `APPSTRATE_RUNNER_EXEC "${wrapper}" carries no setuid bit, so exec'ing it leaves the runner on the sidecar's uid`,
+    );
+  }
+  return wrapper;
 }
 
 interface SubprocessPlan {
@@ -280,7 +319,7 @@ export function createProcessIntegrationRuntimeAdapter(): IntegrationRuntimeAdap
       // First, before any credential material is rendered: a runner we are
       // going to refuse must not have `delivery.files` secrets written to
       // disk on its behalf.
-      const runnerExec = requirePrivilegeDropWrapper(spec);
+      const runnerExec = await requirePrivilegeDropWrapper(spec);
       const plan = planSubprocess(spec, bundleRoot);
       const procEnv: Record<string, string> = { ...spec.spawnEnv };
       if (egress) {

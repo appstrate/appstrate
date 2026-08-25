@@ -89,6 +89,58 @@ describe("process adapter — privilege-drop gate", () => {
     await adapter.shutdown();
   });
 
+  it("refuses a wrapper that carries no setuid bit", async () => {
+    // The gate was presence-only, so `APPSTRATE_RUNNER_EXEC=/usr/bin/env`
+    // neutralised it silently and the sidecar handed its whole environ's
+    // readability to third-party bytes while reporting a boundary. A file with
+    // no setuid bit cannot change the child's uid whatever it does.
+    const dir = await mkdtemp(join(tmpdir(), "appstrate-nosuid-"));
+    const wrapper = join(dir, "runner-exec");
+    await writeFile(wrapper, '#!/bin/sh\nexec "$@"\n', { mode: 0o755 });
+    process.env.APPSTRATE_RUNNER_EXEC = wrapper;
+    const adapter = createProcessIntegrationRuntimeAdapter();
+    await adapter.prepare("run-nosuid");
+    try {
+      const spawn = adapter.spawn({
+        runId: "run-nosuid",
+        spec: localSpec(),
+        bundleRoot,
+        egress: null,
+        workspaceHandle: null,
+        onStderrLine: () => {},
+      });
+      await expect(spawn).rejects.toThrow(/setuid/);
+      const error = (await spawn.catch((err: unknown) => err)) as Error;
+      // Actionable: names the file it rejected and the remedies, like the
+      // absent-wrapper refusal does.
+      expect(error.message).toContain(wrapper);
+      expect(error.message).toContain("RUN_ADAPTER=docker");
+    } finally {
+      await adapter.shutdown();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a wrapper that does not exist", async () => {
+    process.env.APPSTRATE_RUNNER_EXEC = join(bundleRoot, "no-such-wrapper");
+    const adapter = createProcessIntegrationRuntimeAdapter();
+    await adapter.prepare("run-missing");
+    try {
+      await expect(
+        adapter.spawn({
+          runId: "run-missing",
+          spec: localSpec(),
+          bundleRoot,
+          egress: null,
+          workspaceHandle: null,
+          onStderrLine: () => {},
+        }),
+      ).rejects.toThrow(/refusing to spawn/);
+    } finally {
+      await adapter.shutdown();
+    }
+  });
+
   it("spawns through the wrapper when the supervisor supplied one", async () => {
     const wrapper = await installPassthroughRunnerExec();
     const adapter = createProcessIntegrationRuntimeAdapter();

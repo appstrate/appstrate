@@ -248,6 +248,40 @@ describe("createMcpHttpClient — connect cancellation", () => {
   }, 2_000);
 });
 
+/**
+ * `client-connect-residual` — the documented gap in {@link connectWithSignal}'s
+ * bound, pinned so the docstring cannot drift back into claiming the signal
+ * covers the whole connect. `Client.connect` awaits a
+ * `notifications/initialized` POST AFTER the options-bounded `initialize`, and
+ * the SDK gives that call no options, hence no signal.
+ *
+ * This asserts CURRENT behaviour, not a fix: it passes before and after. Delete
+ * it only together with the residual paragraph it guards.
+ */
+describe("createMcpHttpClient — client-connect-residual", () => {
+  it("does not honour an abort landing after initialize settles", async () => {
+    const NOTIFY_DELAY_MS = 200;
+    const { fetch: base, url } = mountStandalone([echoTool()]);
+    const ac = new AbortController();
+    const fetcher: typeof fetch = (async (req: Request | string | URL, init?: RequestInit) => {
+      const request = req instanceof Request ? req : new Request(req as string, init);
+      if ((await request.clone().text()).includes("notifications/initialized")) {
+        // Exactly the window the docstring names: initialize has answered,
+        // the notification is in flight, the caller gives up.
+        ac.abort(new Error("caller gave up"));
+        await new Promise((r) => setTimeout(r, NOTIFY_DELAY_MS));
+      }
+      return base(request);
+    }) as typeof fetch;
+
+    const started = Date.now();
+    const client = await createMcpHttpClient(url, { fetch: fetcher, signal: ac.signal });
+    // Resolved despite the abort, and only after the POST came back.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(NOTIFY_DELAY_MS);
+    await client.close();
+  }, 5_000);
+});
+
 describe("wrapClient — cancellation", () => {
   it("aborts an in-flight call when the AbortSignal fires", async () => {
     const pair = await createInProcessPair([slowTool()]);

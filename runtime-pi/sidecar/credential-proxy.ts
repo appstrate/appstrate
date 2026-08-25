@@ -228,9 +228,19 @@ function assertNever(value: never): never {
 
 /**
  * Which URL policy admitted the call that captured (or is about to replay) a
- * cookie: `allowlist` when the integration's `authorized_uris` gated it,
- * `open` when nothing host-specific did (`allow_all_uris`, or no allowlist at
- * all — the SSRF floor is not a trust boundary, it only excludes internals).
+ * cookie.
+ *
+ * `allowlist` — the integration's `authorized_uris` gated it AND some entry
+ * names this exact host with a wildcard-free host segment
+ * (`hostLiterallyAllowlisted`). That conjunction is the whole point: matching
+ * an entry is not enough, because the AFPS glob grammar lets `*`/`**` span the
+ * host (`https://**`, `https://*.myshopify.com/**`), and then the concrete
+ * host was picked by the AGENT at call time, not written down by the operator.
+ * `system-packages/` ships such entries on user-registrable subdomains.
+ *
+ * `open` — everything else: `allow_all_uris`, no allowlist at all, or an
+ * allowlist matched only through a glob host. The SSRF floor is not a trust
+ * boundary, it only excludes internals.
  */
 type CookieGate = "allowlist" | "open";
 
@@ -285,14 +295,19 @@ function originOf(url: string): string {
  * Two admission rules, and only two:
  *   - Same origin as capture — always. That IS sticky-session continuity, and
  *     it is what the jar exists for.
- *   - Different origin — only when BOTH the capturing call and this call were
- *     gated by the integration's `authorized_uris`. That is the declared
- *     multi-host case (Dropbox `api ⇄ content`, Twilio `api ⇄ lookups ⇄
- *     verify`) and it takes the same stance as the redirect follower's hybrid
- *     credential strip 150 lines away in `api-call-engine.ts`: inside a
- *     declared allowlist, hosts are inside the trust boundary by construction;
- *     outside one, origin equality is the boundary (WHATWG). Cookies are
- *     credentials too.
+ *   - Different origin — only when BOTH the capturing call and this call
+ *     landed on a host the operator wrote down LITERALLY in
+ *     `authorized_uris` (`gate === "allowlist"`, see {@link CookieGate}).
+ *     That is the declared multi-host case (Dropbox `api ⇄ content`, Twilio
+ *     `api ⇄ lookups ⇄ verify`) and it takes the same stance as the redirect
+ *     follower's hybrid credential strip 150 lines away in
+ *     `api-call-engine.ts`: a host the operator named is inside the trust
+ *     boundary by declaration; anywhere else, origin equality is the boundary
+ *     (WHATWG). What it deliberately does NOT extend to is two hosts that only
+ *     share a glob — `victim.myshopify.com` and `attacker.myshopify.com` both
+ *     match `https://*.myshopify.com/**` and are two different tenants.
+ *     Cookies are credentials too, and a replayed one carries no `{{field}}`
+ *     template, so `substitutesCredential` never sees it.
  *
  * Same-origin buckets are folded in LAST so a fresh same-origin value wins
  * over a stale sibling-host one of the same name.
@@ -430,6 +445,13 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
 
   const effectiveAllowAll = creds.allowAllUris && !substitutesCredential;
 
+  /**
+   * Cookie scope for this call — see {@link CookieGate}. Assigned by whichever
+   * branch below admits the call, so the recorded gate and the policy that
+   * actually ran can never disagree.
+   */
+  let cookieGate: CookieGate = "open";
+
   if (effectiveAllowAll) {
     const refusal = await refuseSsrfTarget(resolvedUrl, deps.resolveHost);
     if (refusal) return refusal;
@@ -444,6 +466,14 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     if (!hostLiterallyAllowlisted(resolvedUrl, creds.authorizedUris)) {
       const refusal = await refuseSsrfTarget(resolvedUrl, deps.resolveHost);
       if (refusal) return refusal;
+    } else {
+      // The SAME predicate that decides whether the allowlist is a host-level
+      // operator declaration for the SSRF gate decides it for cookies: only a
+      // wildcard-free host entry names this host, and only then is the
+      // cross-host fold in `eligibleCookies` a statement the operator made.
+      // A glob-matched host is agent-chosen, so the call keeps the
+      // origin-scoped `open` bucket.
+      cookieGate = "allowlist";
     }
   } else if (substitutesCredential) {
     // allow_all_uris was the only permission but the call would exfiltrate a
@@ -459,14 +489,9 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     if (refusal) return refusal;
   }
 
-  // 4b. Cookie scope for this call. `gate` records WHICH branch above
-  //     admitted it, and `targetOrigin` where it is going — together they name
+  // 4b. Where this call is going. Together with `cookieGate` above it names
   //     the jar bucket this call may read from and will write to. See
   //     {@link cookieBucketKey}.
-  const cookieGate: CookieGate =
-    !effectiveAllowAll && creds.authorizedUris && creds.authorizedUris.length
-      ? "allowlist"
-      : "open";
   const targetOrigin = originOf(resolvedUrl);
   /**
    * Cookies captured by THIS call, across every redirect hop and the 401

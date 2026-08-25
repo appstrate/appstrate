@@ -94,7 +94,7 @@ export function useHostedConnectPopup() {
               // from our own origin, so a foreign-origin message is a forgery —
               // it must not stand in for a real connect.
               if (!isIntegrationConnectMessage(e, window.location.origin)) return;
-              if (e.data.ok === true) onHit();
+              if (isSuccess(e.data)) onHit();
             };
             window.addEventListener("message", onMessage);
             let bc: BroadcastChannel | null = null;

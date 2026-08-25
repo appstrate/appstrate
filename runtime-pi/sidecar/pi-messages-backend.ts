@@ -35,7 +35,11 @@ import { anthropicThinkingBudgets } from "@appstrate/core/model-generation";
 import { PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "@appstrate/runner-pi/provider-map";
 import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
 import { logger } from "./logger.ts";
-import { syntheticAliasErrorBody, syntheticAliasErrorMessage } from "./model-swap.ts";
+import {
+  syntheticAliasErrorBody,
+  syntheticAliasErrorMessage,
+  projectAliasUpstreamStatus,
+} from "./model-swap.ts";
 import { streamBacking } from "./pi-sdk.ts";
 import type {
   Api,
@@ -213,8 +217,11 @@ interface UpstreamStatusProbe {
    * The status a failed turn should report, or `undefined` when there is
    * nothing honest to report:
    *
-   *   - the backing answered with an error status → that status, verbatim
-   *     (this is what makes a `429` retryable in the container again);
+   *   - the backing answered with an error status → that status when it is
+   *     generic enough to name no vendor ({@link
+   *     FORWARDABLE_UPSTREAM_STATUSES} — this is what makes a `429` retryable
+   *     in the container again), otherwise
+   *     {@link SIDECAR_UPSTREAM_UNREACHABLE_STATUS};
    *   - nothing ever answered — DNS, connect, TLS, an aborted fetch →
    *     {@link SIDECAR_UPSTREAM_UNREACHABLE_STATUS};
    *   - the backing answered 2xx and the turn failed AFTER that (a truncated
@@ -253,7 +260,10 @@ function createUpstreamStatusProbe(base: typeof fetch): UpstreamStatusProbe {
     ),
     failureStatus: () => {
       if (observed === undefined) return SIDECAR_UPSTREAM_UNREACHABLE_STATUS;
-      return observed >= 400 ? observed : undefined;
+      if (observed < 400) return undefined;
+      // One home for the projection, shared with the platform gateway: a
+      // vendor- or CDN-specific code names the backing as surely as its prose.
+      return projectAliasUpstreamStatus(observed);
     },
   };
 }

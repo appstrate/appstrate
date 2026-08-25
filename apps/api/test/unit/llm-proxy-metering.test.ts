@@ -426,6 +426,22 @@ describe("forwardMeteredResponse — aliased error synthesis and header allowlis
     backingApiShape: "anthropic-messages" as const,
   };
 
+  it("forwards a GENERIC upstream status verbatim on an aliased model", async () => {
+    // The control that keeps the projection from becoming a blanket 502: a
+    // status every vendor answers alike carries no fingerprint, and collapsing
+    // it would lose the one classification signal the scrubbed body left.
+    for (const status of [400, 401, 403, 404, 408, 409, 429, 500, 502, 503, 504]) {
+      const upstream = new Response(JSON.stringify({ error: { message: "x" } }), {
+        status,
+        headers: { "content-type": "application/json" },
+      });
+      const res = await forwardMeteredResponse(upstream, anthropicMessagesAdapter, makeCtx(), {
+        swap,
+      });
+      expect(res.status).toBe(status);
+    }
+  });
+
   it("replaces an aliased upstream error body with the synthetic envelope and strips fingerprinting headers", async () => {
     const upstream = new Response(
       JSON.stringify({
@@ -449,9 +465,12 @@ describe("forwardMeteredResponse — aliased error synthesis and header allowlis
       swap,
     });
 
-    // Status flows for retry/backoff; the body is the neutral envelope —
-    // nothing of the upstream prose (nor the real id) survives.
-    expect(res.status).toBe(529);
+    // The body is the neutral envelope — nothing of the upstream prose (nor
+    // the real id) survives. The STATUS is projected before it is disclosed:
+    // 529 is Anthropic's own overload code, so forwarding it would name the
+    // backing the body was scrubbed to hide. It collapses to 502, which is
+    // still retryable, so the retry/backoff contract is unchanged.
+    expect(res.status).toBe(502);
     expect(res.headers.get("content-type")).toBe("application/json");
     const text = await res.text();
     expect(text).toContain("appstrate-medium");

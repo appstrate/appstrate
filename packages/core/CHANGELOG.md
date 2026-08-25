@@ -7,11 +7,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Not yet on npm: `8.0.0` is the published version, and `package.json` /
+`CORE_VERSION` stay there until the next release tag moves them.
+
+### Added
+
+- **`projectAliasUpstreamStatus`** and **`ALIAS_COLLAPSED_UPSTREAM_STATUS`**
+  (`./model-swap`) — the allowlist an aliased upstream status must pass before
+  it is disclosed. A status describes the transaction, not the backing, which is
+  why forwarding one costs no opacity and buys back the container's retry
+  budget — but that reasoning holds only for GENERIC codes. `529` is Anthropic's
+  own overload code and `520`–`526` say the backing sits behind Cloudflare, so
+  those name a vendor as surely as its prose does and are collapsed to `502`.
+  An allowlist, not a denylist: the space of vendor- and CDN-specific codes is
+  unenumerable, so a new one must default to opaque. Both boundaries that
+  replace an upstream failure — the sidecar's re-originated `pi-messages` error
+  event and the platform gateway's synthesized response — now call it, so they
+  cannot drift apart. Additive; nothing removed or renamed.
+- **`isUnconstrainedSchema`** (`./schema-validation`) — "can this schema reject
+  any object at all?", the predicate the validators short-circuit on. Additive;
+  nothing is removed or renamed. It replaces the `!schema.properties ||
+Object.keys(schema.properties).length === 0` test that three validators
+  carried, which answered a DIFFERENT question: `properties` says what a named
+  key must look like, and a schema constrains plenty without naming one.
+  `{properties: {}, required: [...]}`, `{properties: {},
+additionalProperties: false}` and `{allOf: [{required: [...]}]}` were all
+  returned as `valid: true` before Ajv ran — under `strict: false` Ajv would
+  have enforced every one. **Behaviour change**: such a schema is now enforced,
+  so a value that used to pass may now be rejected. A schema carrying nothing
+  but `type` / `title` / `description` / `$schema` / `$comment` (and an empty
+  `properties`) still short-circuits exactly as before.
+- **`./model-error`** — `classifyModelError`, `ModelErrorCategory`,
+  `ModelErrorInput`, `ModelErrorClassification` and
+  `MODEL_ERROR_RETRYABLE_BY_CATEGORY`. THE rules that turn a raw provider
+  failure string into a provider-neutral verdict, moved out of the chat module
+  so the run surface classifies with the same ones. `ChatTurnErrorCategory`
+  (`./chat-turn-metadata`) is now an alias of `ModelErrorCategory` — same five
+  values, same persisted field, no behaviour change for any input.
+  `retryable` is derived from the category alone, so every path that rebuilds
+  one (live classification, stream marker, persisted turn) reaches the same
+  answer.
+- **`./connect-handshake`** — `INTEGRATION_CONNECT_CHANNEL`,
+  `INTEGRATION_CONNECT_MESSAGE_TYPE`, `IntegrationConnectCompletion`,
+  `buildIntegrationConnectCompletion`, `integrationConnectOrigin`,
+  `isIntegrationConnectCompletion` and `isIntegrationConnectMessage`. The
+  completion handshake an integration-connect flow uses to tell the surface
+  that started it that the connection landed — the `BroadcastChannel` name, the
+  `postMessage` type, the payload, and the origin policy for both directions.
+  These were private constants duplicated across the API, the SPA and the chat
+  module, kept aligned by "must match" comments, and the two senders had
+  already drifted: one scoped its `postMessage` to the platform origin, the
+  other posted to `"*"`. Additive; nothing is removed or renamed. Out-of-tree
+  modules that render their own connect surface should read the constants from
+  here rather than re-declaring them, and MUST validate `event.origin` with
+  `isIntegrationConnectMessage` before acting on a `message` event.
+
+### Changed
+
+- **`sanitizeFilename` truncates on whole code points** (`./naming`), and
+  `encodeFilenameHeader` / `attachmentDisposition` are now total. The cap was a
+  `slice` over UTF-16 code units, so a name whose 255th unit was the first half
+  of a surrogate pair became a LONE surrogate — a string `encodeURIComponent`
+  throws `URIError` on. That name is durable (`files.name`, part of the
+  `(run_id, sha256, name)` dedup identity), so every later download of the file
+  500'd on both serving branches. The orphaned half is now dropped, and an
+  unpaired surrogate reaching either encoder from any other producer becomes
+  U+FFFD instead of a throw. No signature changes; a well-formed name — emoji
+  and CJK included — encodes byte-identically to before.
+- **`PUBLISHED_FILE_LOG_EVENTS` is deprecated** (`./file-uri`) — both readers
+  (the web shell's run page, the chat module's run card) now compare against
+  the singular `PUBLISHED_FILE_LOG_EVENT` the sink writes, so the list has no
+  in-repo consumer left. It stays exported, unchanged and still `["file"]`,
+  because removing a published name is breaking; delete at the next major.
+  Nothing on the wire moves.
+- **`@appstrate/afps-shared` dependency range moved to `^0.5.0`.**
+  `@appstrate/core/zip`'s `stripWrapperPrefix` is now a verbatim re-export from
+  the new `@appstrate/afps-shared/archive-prefix` — the export, both overloads
+  and the identity-return behaviour are unchanged, so this is not a surface
+  change. It moved because `packages/afps-runtime` carried a token-for-token
+  copy of the same algorithm, each pointing at the other and asking a human to
+  keep them aligned, with no parity test. That is the shape that had already
+  drifted three times for the MIME set, one of those corrupting every OOXML
+  download.
+
+  **Publish `afps-shared@0.5.0` before this release.** The ordering is already
+  enforced — `verify-package-resolves.ts` packs the real tarball, installs it
+  outside the monorepo and typechecks every subpath, so an unpublished leaf
+  fails the publish rather than the first consumer's `npm install`. Declaring
+  `^0.5.0` rather than leaving `^0.4.0` only changes WHICH error it fails with:
+  `ETARGET / no matching version` at install, which names the missing artifact,
+  instead of a `TS2307` three layers down inside `node_modules`.
+
+## [8.0.0] — 2026-08-25
+
 Breaking, batched per the release policy in `.github/workflows/publish-core.yml`:
 these changes accumulate here until a deliberate major. **This is that major —
-`8.0.0`** — and the version moves in `package.json` even though nothing is
-published yet, which is the opposite of what this section said for most of the
-cycle. The reason it had to move is worth stating, because the argument for
+`8.0.0`** — and the version moved in `package.json` ahead of publication, which
+is the opposite of what this section said for most of the cycle. The reason it had to move is worth stating, because the argument for
 holding it at `7.0.0` was sound about the thing it was reasoning about and
 silent about the thing that actually breaks.
 
@@ -35,9 +127,9 @@ call a platform service whose signature moved under it — silently, without an
 error." Holding the constant at a version whose surface no longer exists is
 what produced both halves.
 
-Publishing `8.0.0` to npm stays gated on the `core@8.0.0` tag and is still
-independent of this branch; what moves here is the constant the platform
-compares against, plus the `version` field the drift guard
+Publishing `8.0.0` to npm was gated on the `core@8.0.0` tag, independent of the
+branch that wrote this; what moved here is the constant the platform compares
+against, plus the `version` field the drift guard
 (`test/core-version.test.ts`) pins it to.
 
 **Out-of-tree consumers.** The config removals below touch nothing `cloud` or
@@ -122,29 +214,6 @@ them, it only names them in docblocks.
 
 ### Added
 
-- **`isUnconstrainedSchema`** (`./schema-validation`) — "can this schema reject
-  any object at all?", the predicate the validators short-circuit on. Additive;
-  nothing is removed or renamed. It replaces the `!schema.properties ||
-Object.keys(schema.properties).length === 0` test that three validators
-  carried, which answered a DIFFERENT question: `properties` says what a named
-  key must look like, and a schema constrains plenty without naming one.
-  `{properties: {}, required: [...]}`, `{properties: {},
-additionalProperties: false}` and `{allOf: [{required: [...]}]}` were all
-  returned as `valid: true` before Ajv ran — under `strict: false` Ajv would
-  have enforced every one. **Behaviour change**: such a schema is now enforced,
-  so a value that used to pass may now be rejected. A schema carrying nothing
-  but `type` / `title` / `description` / `$schema` / `$comment` (and an empty
-  `properties`) still short-circuits exactly as before.
-- **`./model-error`** — `classifyModelError`, `ModelErrorCategory`,
-  `ModelErrorInput`, `ModelErrorClassification` and
-  `MODEL_ERROR_RETRYABLE_BY_CATEGORY`. THE rules that turn a raw provider
-  failure string into a provider-neutral verdict, moved out of the chat module
-  so the run surface classifies with the same ones. `ChatTurnErrorCategory`
-  (`./chat-turn-metadata`) is now an alias of `ModelErrorCategory` — same five
-  values, same persisted field, no behaviour change for any input.
-  `retryable` is derived from the category alone, so every path that rebuilds
-  one (live classification, stream marker, persisted turn) reaches the same
-  answer.
 - **Alias-opacity surface** (`./model-swap`, #1202) — `ALIAS_CLIENT_API_SHAPE`,
   `AliasBackingApiShape`, `isAliasBackingShape`, `isAliasClientShape`,
   `isAliasInferenceCall`, `syntheticAliasErrorMessage`, and `ModelSwapBacking`
@@ -275,50 +344,7 @@ additionalProperties: false}` and `{allOf: [{required: [...]}]}` were all
   is how one runtime keeps steering models toward a name #1177's vocabulary
   made attractive. It supplies no trailing punctuation.
 
-- **`./connect-handshake`** — `INTEGRATION_CONNECT_CHANNEL`,
-  `INTEGRATION_CONNECT_MESSAGE_TYPE`, `IntegrationConnectCompletion`,
-  `buildIntegrationConnectCompletion`, `integrationConnectOrigin`,
-  `isIntegrationConnectCompletion` and `isIntegrationConnectMessage`. The
-  completion handshake an integration-connect flow uses to tell the surface
-  that started it that the connection landed — the `BroadcastChannel` name, the
-  `postMessage` type, the payload, and the origin policy for both directions.
-  These were private constants duplicated across the API, the SPA and the chat
-  module, kept aligned by "must match" comments, and the two senders had
-  already drifted: one scoped its `postMessage` to the platform origin, the
-  other posted to `"*"`. Additive; nothing is removed or renamed. Out-of-tree
-  modules that render their own connect surface should read the constants from
-  here rather than re-declaring them, and MUST validate `event.origin` with
-  `isIntegrationConnectMessage` before acting on a `message` event.
-
 ### Changed
-
-- **`sanitizeFilename` truncates on whole code points** (`./naming`), and
-  `encodeFilenameHeader` / `attachmentDisposition` are now total. The cap was a
-  `slice` over UTF-16 code units, so a name whose 255th unit was the first half
-  of a surrogate pair became a LONE surrogate — a string `encodeURIComponent`
-  throws `URIError` on. That name is durable (`files.name`, part of the
-  `(run_id, sha256, name)` dedup identity), so every later download of the file
-  500'd on both serving branches. The orphaned half is now dropped, and an
-  unpaired surrogate reaching either encoder from any other producer becomes
-  U+FFFD instead of a throw. No signature changes; a well-formed name — emoji
-  and CJK included — encodes byte-identically to before.
-- **`@appstrate/afps-shared` dependency range moved to `^0.5.0`.**
-  `@appstrate/core/zip`'s `stripWrapperPrefix` is now a verbatim re-export from
-  the new `@appstrate/afps-shared/archive-prefix` — the export, both overloads
-  and the identity-return behaviour are unchanged, so this is not a surface
-  change. It moved because `packages/afps-runtime` carried a token-for-token
-  copy of the same algorithm, each pointing at the other and asking a human to
-  keep them aligned, with no parity test. That is the shape that had already
-  drifted three times for the MIME set, one of those corrupting every OOXML
-  download.
-
-  **Publish `afps-shared@0.5.0` before this release.** The ordering is already
-  enforced — `verify-package-resolves.ts` packs the real tarball, installs it
-  outside the monorepo and typechecks every subpath, so an unpublished leaf
-  fails the publish rather than the first consumer's `npm install`. Declaring
-  `^0.5.0` rather than leaving `^0.4.0` only changes WHICH error it fails with:
-  `ETARGET / no matching version` at install, which names the missing artifact,
-  instead of a `TS2307` three layers down inside `node_modules`.
 
 - **`SubscriptionChatResolution` → `ChatModelResolution`** (`./chat-contract`),
   and the `PlatformServices` member `resolveSubscriptionChatModel` →

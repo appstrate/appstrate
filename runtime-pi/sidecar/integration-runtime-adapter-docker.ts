@@ -146,7 +146,17 @@ type DockerExecSpawn = (
  * line in the first place; this is the second floor.)
  *
  * Shared with the `docker start -ai` transport below so the two spawn paths
- * cannot drift.
+ * cannot drift (that one lands a superset — see there).
+ *
+ * The scope is deliberately "find the socket", not "configure the client".
+ * `DOCKER_TLS_VERIFY`, `DOCKER_CERT_PATH`, `DOCKER_CONTEXT` and `DOCKER_CONFIG`
+ * used to reach the CLI (it inherited `process.env` wholesale) and no longer
+ * do. That is a non-event for the documented deployment — a plaintext
+ * socket-proxy on `DOCKER_HOST` — and it BREAKS a TLS-secured or
+ * context-selected remote daemon, which would now be contacted unverified or
+ * not found. Widening the list is the fix if that setup ever ships; each added
+ * name also becomes reachable from an `=`-less `--env-file` line, so add only
+ * names that carry no secret.
  */
 const DOCKER_CLI_ENV_KEYS = ["PATH", "HOME", "DOCKER_HOST"] as const;
 
@@ -277,13 +287,21 @@ async function killContainer(containerId: string): Promise<void> {
  *     surface; even if the runner is `--cap-drop ALL`, mounting over these
  *     is operator error worth refusing loudly.
  *   - `/.docker/`, `/.dockerenv` — Docker-private surfaces.
+ *   - `/usr/`, `/workspace/` — directories the runner image really has, whose
+ *     mode and ownership a staged PARENT would carry into the container (see
+ *     {@link stageFileMountsOnHost}). `/workspace` is the per-run volume
+ *     SHARED with the agent container and chowned to the runner uid at create
+ *     time, so clobbering it reaches beyond this runner; `/usr` is the image's
+ *     own tree. Neither is a credential destination — `delivery.files` exists
+ *     for certs, keys and service-account JSON, which belong under `/run/`,
+ *     `/etc/<vendor>/` or `/tmp/`.
  */
 export function isContainerPathSafeForMount(containerPath: string): boolean {
   // Shared floor + Docker-private surfaces: `/.docker/` (prefix) and
   // `/.dockerenv` (file) on top of the kernel-managed +
   // privilege-escalation floor enforced by `isPathSafeForMount`.
   return isPathSafeForMount(containerPath, {
-    extraForbiddenPrefixes: ["/.docker/"],
+    extraForbiddenPrefixes: ["/.docker/", "/usr/", "/workspace/"],
     extraForbiddenFiles: ["/.dockerenv"],
   });
 }
@@ -318,17 +336,38 @@ export function isContainerPathSafeForMount(containerPath: string): boolean {
  *     and the one the mirror specifically needs: a `..` that got past the first
  *     two would now escape `tempDir` on the HOST, which the flat scheme could
  *     not do.
- *   - `mkdtemp` yields a 0700 directory owned by the sidecar uid and the whole
- *     tree is removed on shutdown. Mirroring puts a manifest PATH on the host
- *     fs (it is not secret — it is in the manifest); the credential BYTES keep
- *     the manifest-declared mode.
- *   - Staged DIRECTORIES are 0777 deliberately. `docker cp` applies the
- *     archive's directory mode to a destination directory that already exists,
- *     so a restrictive staged mode would silently narrow the runner's `/tmp`
- *     (1777) and break every runtime that writes there. Widening is the safe
- *     direction here: the runner is `--cap-drop ALL --security-opt
- *     no-new-privileges` in a per-run ephemeral container, and only the files
- *     carry credentials.
+ *   - The staging tree lives on the SIDECAR's own filesystem, is owned by the
+ *     sidecar uid, and is removed on shutdown. Mirroring puts a manifest PATH
+ *     there (it is not secret — it is in the manifest); the credential BYTES
+ *     keep the manifest-declared mode (typically 0400), which is what actually
+ *     protects them, at both ends of the copy.
+ *
+ * Directory modes, and the mechanism they depend on. The mirror ships as a tar
+ * (`docker cp <root>/. <id>:/`) whose DIRECTORY entries carry a mode, and the
+ * `./` entry for the root itself maps onto the container's `/`. Whether an
+ * extractor merging into an existing tree APPLIES an archive directory's mode
+ * to a destination directory that already exists is the open question, and it
+ * was not settled here against a live daemon. So every staged mode below is
+ * chosen to be correct under BOTH answers: if modes are applied, each one
+ * equals what the runner image already has; if they are not, nothing was
+ * riding on them either way. Do not "simplify" one of them back on the
+ * assumption that modes are ignored without settling the question first.
+ *
+ *   - The root is 0755, not the 0700 `mkdtemp` hands out. 0700 applied to `/`
+ *     would leave every runner image unable to traverse its own root — all
+ *     five run `USER runner:runner` (uid 1001), not root.
+ *   - Staged parents are 0755, the mode `/etc` and `/run` already carry. They
+ *     were 0777, on the reasoning that widening is the safe direction; it is
+ *     not, because these are REAL runner directories and 0777 makes them
+ *     world-writable inside the container.
+ *   - {@link STICKY_STAGED_DIRS} are the exception: `/tmp` and `/var/tmp` are
+ *     1777 in every base image, and 0755 there would break every runtime that
+ *     writes to them. The world-writable half is what matters and is what
+ *     lands; the sticky bit is requested but not reachable from here — Bun's
+ *     `fs.chmod` masks off every bit above 0o777 (setuid/setgid/sticky alike,
+ *     measured on 1.3.11), so 0777 is what the staged directory actually
+ *     carries. Nothing depends on the sticky bit: the runner container has one
+ *     user.
  *
  * Throws (after wiping the partial staging directory) on an unsafe path or an
  * I/O failure, so the per-spec try/catch in `integrations-boot.ts` records it.
@@ -339,6 +378,9 @@ export async function stageFileMountsOnHost(
   const tempDir = await mkdtemp(join(tmpdir(), "appstrate-files-"));
   const root = resolve(tempDir);
   try {
+    // The root rides the tar as `./` and lands on the container's `/`; see the
+    // directory-modes section above for why `mkdtemp`'s 0700 cannot stay.
+    await chmod(root, 0o755);
     for (const [containerPath, entry] of Object.entries(fileMounts)) {
       // R8a — refuse paths into kernel-managed / privilege-escalation
       // surfaces. The platform-side validator already strips `..` /
@@ -375,57 +417,96 @@ export async function stageFileMountsOnHost(
 }
 
 /**
- * `mkdir -p` from `root` down to `dir`, forcing 0777 on every level. The
- * explicit chmod is required because `mkdir`'s `mode` is masked by the process
- * umask; the mode itself is explained on {@link stageFileMountsOnHost}.
+ * Container directories that are sticky-world-writable in every base image and
+ * must be staged that way — see {@link stageFileMountsOnHost}. Keyed by the
+ * CONTAINER path, which is what the staged directory maps onto.
+ */
+const STICKY_STAGED_DIRS = new Set(["/tmp", "/var/tmp"]);
+
+/**
+ * `mkdir -p` from `root` down to `dir`, setting each level to the mode the
+ * container directory it maps onto already has: 0755, or 1777 for a
+ * {@link STICKY_STAGED_DIRS} entry. The explicit chmod is required because
+ * `mkdir`'s `mode` is masked by the process umask; why these modes and not
+ * others is explained on {@link stageFileMountsOnHost}.
  */
 async function mkdirStagedParents(dir: string, root: string): Promise<void> {
   if (dir === root) return;
   await mkdir(dir, { recursive: true });
   let current = root;
+  let containerPath = "";
   for (const segment of relative(root, dir).split(sep)) {
     current = join(current, segment);
-    await chmod(current, 0o777);
+    containerPath += `/${segment}`;
+    await chmod(current, STICKY_STAGED_DIRS.has(containerPath) ? 0o1777 : 0o755);
   }
 }
 
 /**
- * Refuse anything that would let an env entry break out of its own
- * `KEY=VALUE` line in a `docker --env-file`.
+ * A portable POSIX environment-variable name. Docker's env-file parser is
+ * looser, but nothing looser is usable by a runtime, and this one shape closes
+ * three separate hazards at once:
  *
- * This is not a formatting nicety. Docker parses the file line by line and,
- * for a line with NO `=`, resolves the bare name against the **docker CLI
- * process's own environment**. So a single `\n` inside a credential value —
- * routine in a GCP service-account `private_key`, an SSH key, or a token
- * pasted with a trailing newline, all of which reach us through
+ *   - an EMPTY key emits `=<value>` and docker answers
+ *     `no variable name on line '=<value>'` — quoting the whole line, i.e. the
+ *     DECRYPTED credential, into `failed[].error` on the unauthenticated
+ *     `GET /integrations/boot-report`;
+ *   - a key containing `=` silently sets a DIFFERENT variable, because docker
+ *     splits each line on its first `=`;
+ *   - a key containing `\n`, a leading `#` or leading whitespace re-opens the
+ *     line-escape / comment-swallow cases {@link envFileLine} exists for.
+ */
+const PORTABLE_ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * Render one `KEY=VALUE` line for a `docker --env-file`, refusing anything
+ * that would let the entry break out of that line.
+ *
+ * This is not a formatting nicety. Docker parses the file line by line
+ * (`bufio.Scanner`) and, for a line with NO `=`, resolves the bare name
+ * against the **docker CLI process's own environment** (`os.LookupEnv`). So a
+ * newline in the MIDDLE of a credential value — routine in a GCP
+ * service-account `private_key` or an SSH key, both of which reach us through
  * `delivery.env` — makes docker copy a variable of the attacker's choosing out
  * of the sidecar's environment and into a third-party container that has
  * network egress. Quoting is NOT a fix: docker does not unquote env-file
  * values, so `KEY="a\nB"` still ends the line at the newline.
  *
- * `\r` is refused for the same reason (docker's scanner splits on `\n` and
- * leaves a stray `\r` attached to the value; other readers treat a lone `\r`
- * as a line break). A leading `#` makes the line a comment, so the credential
- * silently never arrives; a leading `=` is a docker parse error. The rule is
- * applied identically to the key and the value: no integration credential
- * legitimately needs any of these bytes, and a single predicate cannot drift
- * between the two halves.
+ * A TRAILING newline is a different case and is NOT an escape: entries are
+ * joined with `\n`, so a value ending in one produces an EMPTY line, which
+ * docker's parser skips outright (`len(line) > 0` guard) — no bare-name line,
+ * nothing resolved. Refusing it would reject a token pasted with a trailing
+ * newline, which is exactly the input the process and Firecracker adapters
+ * keep working (they hand env straight to the child), so the docker adapter
+ * would fail the run on a tier-specific technicality. It is stripped instead.
+ * The same goes for a trailing `\r`, which `bufio.ScanLines` strips itself;
+ * an INTERIOR lone `\r` stays refused, because docker leaves it attached to
+ * the value and other readers treat it as a line break.
+ *
+ * Nothing else about the VALUE is constrained. A leading `#` only starts a
+ * comment at LINE start, and a value never is; a leading `=` just rides along,
+ * since `SplitN(line, "=", 2)` hands the whole remainder to the value. Both
+ * are legal password bytes, and refusing them broke working integrations.
  *
  * The thrown message names the KEY only. The value is the credential.
  */
-function assertEnvFileLineSafe(key: string, value: string): void {
-  for (const [half, text] of [
-    ["name", key],
-    ["value", value],
-  ] as const) {
-    if (/[\r\n]/.test(text) || text.startsWith("#") || text.startsWith("=")) {
-      throw new Error(
-        `integration-runtime-adapter-docker: refusing to deliver env var "${key}" — its ${half} ` +
-          `contains a line break or starts with '#'/'=', which docker's --env-file format cannot ` +
-          `represent without letting the entry escape its own line`,
-      );
-    }
+function envFileLine(key: string, value: string): string {
+  if (!PORTABLE_ENV_NAME_RE.test(key)) {
+    throw new Error(
+      `integration-runtime-adapter-docker: refusing to deliver env var "${key}" — a delivery.env ` +
+        `name must match ${PORTABLE_ENV_NAME_RE.source}; anything else either escapes its own ` +
+        `line in docker's --env-file format or silently names a different variable`,
+    );
   }
+  const trimmed = value.replace(/[\r\n]+$/, "");
+  if (/[\r\n]/.test(trimmed)) {
+    throw new Error(
+      `integration-runtime-adapter-docker: refusing to deliver env var "${key}" — its value ` +
+        `contains an embedded line break, which docker's --env-file format cannot represent ` +
+        `without letting the entry escape its own line`,
+    );
+  }
+  return `${key}=${trimmed}`;
 }
 
 /**
@@ -438,21 +519,22 @@ function assertEnvFileLineSafe(key: string, value: string): void {
  * env-file keeps the values off argv; the caller reads it once (create bakes
  * the env into the container config) and deletes it immediately after.
  *
- * The file uses docker's `KEY=VALUE`-per-line format, one line per entry, and
- * every entry is checked by {@link assertEnvFileLineSafe} first — see there for
- * why a newline in a value is an exfiltration primitive rather than a
- * formatting nuisance. Created with mode 0600 (+ explicit chmod, defeating a
- * permissive umask) so only the sidecar uid can read it.
+ * The file uses docker's `KEY=VALUE`-per-line format, one line per entry, each
+ * rendered by {@link envFileLine} — see there for why an embedded newline is an
+ * exfiltration primitive rather than a formatting nuisance, and why a trailing
+ * one is not. Created with mode 0600 (+ explicit chmod, defeating a permissive
+ * umask) so only the sidecar uid can read it.
  */
 export async function writeSecretEnvFile(
   env: Record<string, string>,
 ): Promise<{ path: string; dir: string }> {
-  const entries = Object.entries(env);
-  // Validate BEFORE mkdtemp so a rejected spec leaves nothing on disk.
-  for (const [k, v] of entries) assertEnvFileLineSafe(k, v);
+  // Render (and thereby validate) BEFORE mkdtemp so a rejected spec leaves
+  // nothing on disk.
+  const body = Object.entries(env)
+    .map(([k, v]) => envFileLine(k, v))
+    .join("\n");
   const dir = await mkdtemp(join(tmpdir(), "appstrate-env-"));
   const path = join(dir, "integration.env");
-  const body = entries.map(([k, v]) => `${k}=${v}`).join("\n");
   await writeFile(path, body, { mode: 0o600 });
   // Explicit chmod in case the process umask stripped bits at create time.
   await chmod(path, 0o600);
@@ -736,8 +818,12 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
         args: ["start", "-ai", containerId],
         // `env` is NOT passed to the docker CLI — credentials were baked
         // into the container at create-time via the (now-deleted) 0600
-        // `--env-file`. The CLI only needs the daemon-socket lookup vars;
-        // same allowlist `dockerExec` applies, from one constant.
+        // `--env-file`. The CLI only needs the daemon-socket lookup vars, so
+        // it gets the same {@link DOCKER_CLI_ENV_KEYS} constant `dockerExec`
+        // uses. What lands is a SUPERSET, not the same set: the transport
+        // unions this list with its own `DEFAULT_ENV_PASSTHROUGH`, which adds
+        // `LANG`/`LC_ALL` (`PATH`/`HOME` overlap). Neither carries anything
+        // this boundary is protecting.
         envPassthrough: [...DOCKER_CLI_ENV_KEYS],
         onStderrLine,
       });

@@ -94,6 +94,59 @@ describe("boot report — third-party failure text is scrubbed", () => {
     }
   });
 
+  it("masks the MITM CA bring-up breadcrumb", async () => {
+    // The CA breadcrumb interpolated `err.message` raw into the same
+    // unauthenticated report. The message is not sidecar-authored on every
+    // path: here `mkdtemp` quotes the TMPDIR it was handed straight back.
+    const spec = {
+      integrationId: "@tractr/mitm",
+      namespace: "mitm",
+      sourceKind: "none",
+      manifest: { name: "@tractr/mitm", version: "1.0.0" },
+      spawnEnv: {},
+      httpDeliveryAuths: {
+        main: {
+          authKey: "main",
+          authType: "custom",
+          authorizedUris: ["https://api.example.com/**"],
+        },
+      },
+    } as unknown as IntegrationSpawnSpec;
+
+    const previousTmp = process.env.TMPDIR;
+    const previousAdapter = process.env.INTEGRATION_RUNTIME_ADAPTER;
+    process.env.INTEGRATION_RUNTIME_ADAPTER = "process";
+    // Non-existent, so `prepareRunCa`'s own mkdtemp rejects with a message
+    // that quotes the path.
+    process.env.TMPDIR = `/nonexistent-Bearer-${SECRET}/`;
+    let result: Awaited<ReturnType<typeof bootIntegrations>> | null = null;
+    try {
+      result = await bootIntegrations(
+        [spec],
+        {
+          platformApiUrl: "http://platform.local",
+          runToken: "run-token",
+          fetchFn: (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch,
+        },
+        undefined,
+      );
+      const crumb = result.report.breadcrumbs.find((b) =>
+        b.message.startsWith("MITM CA bring-up failed"),
+      );
+      expect(crumb).toBeDefined();
+      // Still diagnosable — the failure mode survives.
+      expect(crumb!.message).toContain("nonexistent");
+      expect(crumb!.message).not.toContain(SECRET);
+      expect(String((crumb!.data as { error?: unknown }).error)).not.toContain(SECRET);
+    } finally {
+      if (previousTmp === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = previousTmp;
+      if (previousAdapter === undefined) delete process.env.INTEGRATION_RUNTIME_ADAPTER;
+      else process.env.INTEGRATION_RUNTIME_ADAPTER = previousAdapter;
+      if (result) await result.shutdown();
+    }
+  });
+
   it("masks runner stderr on the operator log, not only on the report copy", async () => {
     // Runner stderr already reached the report scrubbed; the operator's log
     // aggregator — a WIDER audience — was getting the raw line, because the

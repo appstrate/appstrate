@@ -1283,7 +1283,12 @@ export async function bootIntegrations(
       // below and land in `failed`, which aborts the run. We log + breadcrumb
       // the root cause here so the per-integration failures downstream are
       // attributable (typically openssl missing from the sidecar image).
-      const msg = err instanceof Error ? err.message : String(err);
+      //
+      // Scrubbed for the same reason the per-spec catch below is: this message
+      // is not all sidecar-authored — openssl's workdir errors quote the path
+      // they were handed — and it lands on the UNAUTHENTICATED
+      // `GET /integrations/boot-report`, verbatim, twice (crumb message + data).
+      const msg = scrubSecretMaterial(err instanceof Error ? err.message : String(err));
       logger.warn("integration MITM CA bring-up failed; HTTP-delivery integrations will skip", {
         runId,
         error: msg,

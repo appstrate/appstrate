@@ -129,6 +129,40 @@ export const LLM_PASSTHROUGH_RESPONSE_HEADERS: readonly string[] = [
 const ALIAS_UPSTREAM_ERROR_MESSAGE = "Upstream model error";
 
 /**
+ * The only upstream statuses an aliased response may carry, and the collapse
+ * target for the rest.
+ *
+ * A status describes the TRANSACTION, not the backing — every candidate vendor
+ * answers 429 when throttled and 400 on a bad request — which is why forwarding
+ * one costs no opacity and buys back the container's retry budget. That
+ * reasoning holds for the GENERIC codes and fails for the rest: `529` is
+ * Anthropic's own overload code, and `520`–`526` say the backing sits behind
+ * Cloudflare. Those two families name a vendor as surely as its prose does, so
+ * they are collapsed rather than forwarded.
+ *
+ * The set is deliberately an allowlist: an unenumerable space of vendor- and
+ * CDN-specific codes cannot be subtracted from safely, and a new one appearing
+ * upstream must default to opaque rather than to disclosed.
+ */
+const FORWARDABLE_UPSTREAM_STATUSES: ReadonlySet<number> = new Set([
+  400, 401, 403, 404, 408, 409, 429, 500, 502, 503, 504,
+]);
+
+/** Collapse target: a generic "the upstream hop failed" with no vendor in it. */
+export const ALIAS_COLLAPSED_UPSTREAM_STATUS = 502;
+
+/**
+ * Project an upstream status onto the aliased surface. Both boundaries that
+ * replace an upstream failure — the sidecar's re-originated `pi-messages`
+ * error event and the platform gateway's synthesized response — MUST call this
+ * before disclosing a status, or the code itself fingerprints the vendor that
+ * the body was scrubbed to hide.
+ */
+export function projectAliasUpstreamStatus(status: number): number {
+  return FORWARDABLE_UPSTREAM_STATUSES.has(status) ? status : ALIAS_COLLAPSED_UPSTREAM_STATUS;
+}
+
+/**
  * Neutral prose with no protocol envelope: a `pi-messages` `error` event needs a
  * bare string where {@link syntheticAliasErrorBody} needs an HTTP body. pi-ai's own
  * error messages interpolate the provider, so none of them may be forwarded.

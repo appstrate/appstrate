@@ -24,6 +24,7 @@ export {
   syntheticAliasErrorBody,
   syntheticAliasErrorMessage,
   isAliasInferenceCall,
+  projectAliasUpstreamStatus,
   LLM_PASSTHROUGH_RESPONSE_HEADERS,
 } from "@appstrate/core/model-swap";
 

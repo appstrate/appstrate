@@ -1861,6 +1861,88 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     expect(cookiesSeen[1]).toContain("sess=DROPBOX");
   });
 
+  it("does not replay a cookie across hosts a GLOB allowlist entry matched", async () => {
+    // `https://*.myshopify.com/**` (and `https://**`) admit a host the AGENT
+    // chose, so an allowlist match is no longer an operator statement that the
+    // two hosts share a trust boundary — `system-packages/` ships wildcard
+    // hosts on user-registrable subdomains for freshdesk, salesforce,
+    // pipedrive, activecampaign and more. Same predicate the SSRF branch uses
+    // to decide the allowlist is a host-level declaration.
+    const globCreds = mock(async (): Promise<CredentialsResponse> => ({
+      credentials: { access_token: "tok-123" },
+      authorizedUris: ["https://*.myshopify.com/**"],
+      allowAllUris: false,
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer",
+      credentialFieldName: "access_token",
+    }));
+    const { cookiesSeen, fetchFn } = recordingFetch("sess=VICTIM-SESSION");
+    const deps = makeDeps({ fetchFn, fetchCredentials: globCreds });
+
+    await executeApiCall(
+      {
+        integrationId: "shopify",
+        targetUrl: "https://victim.myshopify.com/admin",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    await executeApiCall(
+      {
+        integrationId: "shopify",
+        targetUrl: "https://attacker.myshopify.com/collect",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(cookiesSeen[1] ?? "").not.toContain("VICTIM-SESSION");
+    // Still sticky for the origin that captured it.
+    expect(
+      deps.cookieJar.get(cookieBucketKey("shopify", "open", "https://victim.myshopify.com")),
+    ).toEqual(["sess=VICTIM-SESSION"]);
+  });
+
+  it("does not replay a cookie across hosts under a `https://**` allowlist", async () => {
+    // The degenerate glob: an allowlist that matches every host is not weaker
+    // than `allow_all_uris`, and must not be treated as a trust declaration.
+    const anyHostCreds = mock(async (): Promise<CredentialsResponse> => ({
+      credentials: { access_token: "tok-123" },
+      authorizedUris: ["https://**"],
+      allowAllUris: false,
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer",
+      credentialFieldName: "access_token",
+    }));
+    const { cookiesSeen, fetchFn } = recordingFetch("sess=VICTIM-SESSION");
+    const deps = makeDeps({ fetchFn, fetchCredentials: anyHostCreds });
+
+    await executeApiCall(
+      {
+        integrationId: "anyhost",
+        targetUrl: "https://provider.example.com/login",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    await executeApiCall(
+      {
+        integrationId: "anyhost",
+        targetUrl: "https://attacker.example.net/collect",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(cookiesSeen[1] ?? "").not.toContain("VICTIM-SESSION");
+  });
+
   it("does not lend an allow_all-captured cookie to an allowlisted host", async () => {
     // An integration can declare BOTH `allow_all_uris` and an allowlist. A
     // cookie captured on an agent-chosen host was never inside the declared

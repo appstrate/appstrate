@@ -15,9 +15,16 @@
  * round-trips, never isolation. It stands in for the supervisor's setuid
  * wrapper so the argv-forwarding path (`wrapper <interpreter> <entry>`)
  * is exercised exactly as in the guest.
+ *
+ * It DOES carry the setuid bit, because the adapter now stats for it (a
+ * wrapper without one cannot change the child's uid, so it is refused). The
+ * bit is set through the `chmod` CLI: Bun's `fs.chmod` silently masks off
+ * every bit above 0o777, so `chmod(path, 0o4755)` lands as 0755 and the
+ * fixture would be refused. Setting it is enough — the kernel ignores setuid
+ * on `#!` scripts anyway, and nothing here depends on an actual uid change.
  */
 
-import { mkdtemp, writeFile, chmod, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, stat, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -32,7 +39,10 @@ export async function installPassthroughRunnerExec(): Promise<PassthroughRunnerE
   const dir = await mkdtemp(join(tmpdir(), "appstrate-runner-exec-"));
   const path = join(dir, "runner-exec");
   await writeFile(path, '#!/bin/sh\nexec "$@"\n');
-  await chmod(path, 0o755);
+  await Bun.spawn(["chmod", "4755", path], { stdout: "ignore", stderr: "ignore" }).exited;
+  if (((await stat(path)).mode & 0o4000) === 0) {
+    throw new Error(`runner-exec fixture: could not set the setuid bit on ${path}`);
+  }
   const previous = process.env.APPSTRATE_RUNNER_EXEC;
   process.env.APPSTRATE_RUNNER_EXEC = path;
   return {

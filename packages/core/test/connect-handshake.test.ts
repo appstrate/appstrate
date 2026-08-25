@@ -106,4 +106,37 @@ describe("isIntegrationConnectMessage", () => {
     expect(isIntegrationConnectMessage({ origin: SELF, data }, "null")).toBe(false);
     expect(isIntegrationConnectMessage({ origin: SELF, data }, "")).toBe(false);
   });
+
+  // The unparseable cases above are the ones an equality test survives. These
+  // are the ones it does not: a `selfUrl` that PARSES and still serialises to
+  // the opaque origin "null" — which is also what every sandboxed sender
+  // reports — so `event.origin === self` makes two unrelated nobodies match.
+  const OPAQUE_SELF_URLS = [
+    "about:blank",
+    "data:text/html,<p>connect</p>",
+    "file:///Users/x/connect.html",
+    "blob:null",
+  ];
+
+  it("has an opaque origin for every one of those self URLs", () => {
+    // The premise of the test below: these parse, so the try/catch above never
+    // sees them, and they all reduce to the same string.
+    for (const url of OPAQUE_SELF_URLS) {
+      expect(integrationConnectOrigin(url)).toBe("null");
+    }
+  });
+
+  it("refuses a forged completion when the receiver's own origin is opaque", () => {
+    for (const url of OPAQUE_SELF_URLS) {
+      // The attack: any sandboxed frame posts with origin "null" and matches.
+      expect(isIntegrationConnectMessage({ origin: "null", data }, url)).toBe(false);
+      // And an opaque receiver trusts nobody at all, not just not-"null".
+      expect(isIntegrationConnectMessage({ origin: SELF, data }, url)).toBe(false);
+    }
+  });
+
+  it("refuses an opaque sender against a real receiver origin", () => {
+    expect(isIntegrationConnectMessage({ origin: "null", data }, SELF)).toBe(false);
+    expect(isIntegrationConnectMessage({ origin: "null", data }, `${SELF}/connect`)).toBe(false);
+  });
 });
