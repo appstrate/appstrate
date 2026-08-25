@@ -40,8 +40,8 @@ import type { RuntimePiEnvOptions } from "../src/container-env.ts";
  * MAXIMAL on purpose: an option left unset is a hole in the allowlist, since a
  * key emitted behind that conditional would never appear in the pinned set and
  * could be added without failing anything. So this pins what the builder CAN
- * emit, not one production run — `agentInput` and `disableModelRetry` come from
- * the CLI / GitHub Action side of the same contract.
+ * emit, not one production run — `agentInput` comes from the CLI / GitHub
+ * Action side of the same contract.
  *
  * Sidecar-backed, because an aliased run always is: the sidecar is the only place
  * the alias→real `model` swap happens, so skipping it would hand the agent the
@@ -86,7 +86,6 @@ const RUN: RuntimePiEnvOptions = {
   maxFileBytes: 104_857_600,
   forwardProxyUrl: "http://sidecar:8081",
   noProxy: "sidecar,localhost,127.0.0.1",
-  disableModelRetry: true,
   sink: {
     url: "https://appstrate.test/api/runs/run_1/events",
     finalizeUrl: "https://appstrate.test/api/runs/run_1/events/finalize",
@@ -136,7 +135,6 @@ const ALIASED_CONTAINER_ENV_KEYS = [
   "MODEL_MAX_TOKENS",
   "MODEL_REASONING",
   "MODEL_REASONING_LEVEL",
-  "MODEL_RETRY_ENABLED",
   "MODEL_TEMPERATURE",
   "NO_PROXY",
   "OUTPUT_SCHEMA",

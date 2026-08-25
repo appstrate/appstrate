@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-export { toSlug, CREDENTIAL_KEY_RE } from "@appstrate/core/naming";
+export { toSlug } from "@appstrate/core/naming";
 
 /**
  * NFD-normalize, strip diacritics, and lowercase a string. Shared scaffold for

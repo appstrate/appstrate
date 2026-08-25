@@ -13,7 +13,6 @@
  */
 
 import { UPSTREAM_HEADER_ALLOWLIST, type UpstreamMeta } from "@appstrate/mcp-transport";
-import { stripUserInfoAndFragment } from "./helpers.ts";
 
 // Re-export the shared constants/types so existing in-tree imports
 // (sidecar/mcp.ts) keep resolving against `./upstream-meta` without a
@@ -45,18 +44,11 @@ export function projectAllowedHeaders(source: Headers): Record<string, string> {
  * Build the `_meta` payload for a CallToolResult given an upstream
  * `Response`. The Response body is NOT consumed — the caller still
  * owns it for `content[]` materialization.
- *
- * `finalUrl` is the URL the response was eventually served from after
- * the sidecar's redirect follower; sanitised (userinfo + fragment
- * stripped) to mirror WHATWG Fetch `Response.url` and prevent
- * credential / implicit-flow-token leakage.
  */
-export function buildUpstreamMeta(response: Response, finalUrl?: string): UpstreamMeta {
-  const sanitised = finalUrl !== undefined ? stripUserInfoAndFragment(finalUrl) : undefined;
+export function buildUpstreamMeta(response: Response): UpstreamMeta {
   return {
     status: response.status,
     headers: projectAllowedHeaders(response.headers),
-    ...(sanitised !== undefined ? { finalUrl: sanitised } : {}),
   };
 }
 

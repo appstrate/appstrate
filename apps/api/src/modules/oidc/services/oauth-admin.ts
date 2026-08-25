@@ -89,25 +89,16 @@ export class OAuthAdminValidationError extends Error {
 }
 
 /**
- * Resource spellings that a migration has rewritten out of the database, and
- * the spelling that replaced each. DIAGNOSTIC ONLY — nothing here is an alias:
- * a retired spelling is still rejected, and comparisons stay exact. Its one job
- * is to let an error message say "this was renamed" instead of "unknown scope".
- *
- * `documents` → `files`: issue #1177, data rewritten by migration
- * `0046_legacy_permission_scope_strings`. That migration is the only one that
- * has ever rewritten a value in a field this service manages — `name`,
- * `redirectUris`, `postLogoutRedirectUris`, `skipConsent` and `clientSecret`
- * have no retired vocabulary — so `scopes` is the only field that can go stale
- * in an operator's env without the operator having changed anything.
- */
-const RETIRED_SCOPE_RESOURCES: Readonly<Record<string, string>> = Object.freeze({
-  documents: "files",
-});
-
-/**
  * The retired scope spellings in `scopes`, each paired with what replaced it.
  * Empty when the list uses only current vocabulary — the normal case.
+ *
+ * DIAGNOSTIC ONLY — `documents:*` is not an alias: it is still rejected, and
+ * comparisons stay exact. The one job here is to let an error message say
+ * "this was renamed" instead of "unknown scope". `documents` → `files` is
+ * issue #1177, data rewritten by migration `0046_legacy_permission_scope_strings`
+ * — the only migration that has ever rewritten a value in a field this service
+ * manages, so `scopes` is the only field that can go stale in an operator's env
+ * without the operator having changed anything.
  *
  * Exported so the env-sync (`instance-client-sync.ts`) can tell a `scopes`
  * drift caused by a stale `OIDC_INSTANCE_CLIENTS` entry apart from a genuine
@@ -120,9 +111,8 @@ export function retiredScopeRenames(
   for (const scope of scopes) {
     const sep = scope.indexOf(":");
     if (sep <= 0) continue;
-    const replacement = RETIRED_SCOPE_RESOURCES[scope.slice(0, sep)];
-    if (replacement === undefined) continue;
-    out.push({ retired: scope, replacement: `${replacement}${scope.slice(sep)}` });
+    if (scope.slice(0, sep) !== "documents") continue;
+    out.push({ retired: scope, replacement: `files${scope.slice(sep)}` });
   }
   return out;
 }

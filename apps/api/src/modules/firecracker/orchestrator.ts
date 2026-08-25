@@ -341,11 +341,6 @@ export interface FirecrackerOrchestratorDeps {
    */
   platformApiUrl?: string;
   /**
-   * Chroot-prep filesystem ops (hardlink/chown/…). Injectable for unit
-   * tests only — chown to an unallocated jail uid requires root.
-   */
-  jailFs?: JailFs;
-  /**
    * Single MMDS PUT (credential broker) — writes the payload to the VMM's
    * in-memory data store over its unix API socket. Injectable so unit
    * tests can pin the broker contract (payload PUT'd, failure fail-closes
@@ -412,8 +407,8 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
   /** Host-lock pidfile path once acquired (see acquireHostLock). */
   private hostLockPath: string | null = null;
 
-  /** Chroot-prep fs ops — node:fs/promises in production (see deps.jailFs). */
-  private readonly jailFs: JailFs;
+  /** Chroot-prep fs ops — node:fs/promises ({@link defaultJailFs}). */
+  private readonly jailFs: JailFs = defaultJailFs;
 
   /** Single MMDS PUT (credential broker) — see deps.mmdsPut / defaultMmdsPut. */
   private readonly mmdsPut: (apiSocketPath: string, payload: MmdsPayload) => Promise<void>;
@@ -451,7 +446,6 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
 
   constructor(deps: FirecrackerOrchestratorDeps = {}) {
     this.hostExec = deps.hostExec ?? createHostExec();
-    this.jailFs = deps.jailFs ?? defaultJailFs;
     this.mmdsPut = deps.mmdsPut ?? this.defaultMmdsPut.bind(this);
     this.agentArgvOverride = deps.agentArgvOverride;
     this.platformApiUrlOverride = deps.platformApiUrl;

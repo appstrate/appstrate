@@ -61,7 +61,6 @@ import {
   zeroTokenUsage,
   type RunError,
   type RunOptions,
-  type Runner,
   type RunResult,
   type TokenUsage,
 } from "@appstrate/afps-runtime/runner";
@@ -69,7 +68,7 @@ import {
 /**
  * Pi model configuration. Mirrors the Pi SDK's `Model<Api>` shape so
  * callers familiar with the Pi ecosystem get a drop-in fit; kept as its
- * own alias so we can evolve the Runner contract without tracking every
+ * own alias so we can evolve the runner contract without tracking every
  * Pi SDK type move.
  */
 export type PiModelConfig = Model<Api>;
@@ -246,11 +245,11 @@ export interface PiRunnerOptions {
   /** Directory Pi SDK uses for per-session scratch. Defaults to `/tmp/pi-agent`. */
   agentDir?: string;
   /**
-   * Tool extension factories to load into the Pi SDK session. The AFPS
-   * {@link Runner} contract does not mandate where tools come from — in
-   * AFPS tools come from spawned `mcp-server` packages and
-   * integrations; callers map those to Pi extension factories before
-   * constructing the Runner. Default: empty (no extensions).
+   * Tool extension factories to load into the Pi SDK session. AFPS does
+   * not mandate where tools come from — in AFPS tools come from spawned
+   * `mcp-server` packages and integrations; callers map those to Pi
+   * extension factories before constructing the runner. Default: empty
+   * (no extensions).
    */
   extensionFactories?: ExtensionFactory[];
   /** Path where the credential store persists. Defaults to `/tmp/pi-auth/auth.json`. */
@@ -390,7 +389,7 @@ type _ApiShapeSubsetOfPi = ModelApiShape extends KnownApi ? true : never;
 const _assertApiShapeSubsetOfPi: _ApiShapeSubsetOfPi = true;
 void _assertApiShapeSubsetOfPi;
 
-export class PiRunner implements Runner {
+export class PiRunner {
   readonly name = "pi-runner";
 
   protected readonly opts: PiRunnerOptions;

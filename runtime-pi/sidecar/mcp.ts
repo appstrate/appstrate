@@ -864,7 +864,7 @@ function buildSidecarTools(options: MountMcpOptions): {
   // handed the model `{"status":200}` and discarded the response body
   // sitting in `content`. See issue #876.
   //
-  // The upstream status/headers/finalUrl ride on `_meta`
+  // The upstream status/headers ride on `_meta`
   // (`UPSTREAM_META_KEY`); the agent-side shaper re-renders the status
   // into a model-visible text line.
   //
@@ -1167,15 +1167,12 @@ function buildSidecarTools(options: MountMcpOptions): {
         ...(blobStore ? { blobStore } : {}),
         tokenBudget,
         source: `${ctx.label}:${ctx.integrationId}`,
-        // Attach upstream `{ status, headers, finalUrl }` to the
-        // CallToolResult `_meta` payload so the agent-side resolver
-        // can surface real HTTP status / response headers (Location,
-        // ETag, Upload-Offset, …) to chunked-upload protocols, plus
-        // the post-redirect terminal URL for OAuth/CAS/magic-link
-        // callback extraction. Always on for `api_call` — the
-        // runtime parser requires it.
+        // Attach upstream `{ status, headers }` to the CallToolResult
+        // `_meta` payload so the agent-side resolver can surface real
+        // HTTP status / response headers (Location, ETag,
+        // Upload-Offset, …) to chunked-upload protocols. Always on for
+        // `api_call` — the runtime parser requires it.
         attachUpstreamMeta: true,
-        upstreamFinalUrl: result.finalUrl,
       });
     }
   }
@@ -1333,29 +1330,18 @@ interface ResponseToToolResultOptions {
   /** Source label propagated to the BlobStore record (for observability). */
   source?: string;
   /**
-   * When true, attach upstream `{ status, headers, finalUrl }` to the
+   * When true, attach upstream `{ status, headers }` to the
    * `CallToolResult._meta` payload under {@link UPSTREAM_META_KEY}.
    * Required for protocols where the agent must read response
    * headers (`Location:` for resumable uploads, `ETag:` for S3
-   * multipart, `Upload-Offset:` for tus) or the post-redirect
-   * terminal URL (OAuth Authorization Code, CAS ticket, magic-link).
-   * Headers are filtered server-side via the allowlist in
-   * `./upstream-meta.ts`; finalUrl is sanitised (userinfo + fragment
-   * stripped) before serialisation.
+   * multipart, `Upload-Offset:` for tus). Headers are filtered
+   * server-side via the allowlist in `./upstream-meta.ts`.
    *
    * Defaults to false for the first-party `run_history` / `recall_memory`
    * tools. The `api_call` path always passes `true` (the runtime parser
    * hard-requires `_meta`), as does the `api_upload` Pi tool.
    */
   attachUpstreamMeta?: boolean;
-  /**
-   * URL the response was eventually served from after any redirect
-   * follow. Forwarded to {@link buildUpstreamMeta} which sanitises it
-   * before serialisation. Omitted when no redirect happened (the
-   * sidecar passes `result.finalUrl` from {@link executeApiCall}
-   * regardless — equals the resolved target URL when no chain).
-   */
-  upstreamFinalUrl?: string;
 }
 
 /**
@@ -1446,7 +1432,7 @@ async function responseToToolResult(
   // but resolving the meta up-front keeps the code path linear and
   // documents the dependency: meta is independent of content.
   const upstreamMeta: UpstreamMeta | undefined = options.attachUpstreamMeta
-    ? buildUpstreamMeta(res, options.upstreamFinalUrl)
+    ? buildUpstreamMeta(res)
     : undefined;
 
   // Budget meta accumulates per-response: estimated cost + the tracker's
@@ -1470,9 +1456,9 @@ async function responseToToolResult(
   //
   // No `structuredContent` is attached here. The response body owns
   // `content`, and a `structuredContent` that does not mirror it makes
-  // spec-compliant clients drop the body (#876). The status, headers and
-  // finalUrl travel on `_meta[UPSTREAM_META_KEY]`, which the agent-side
-  // shaper reads back into a model-visible `[api_call status=…]` line.
+  // spec-compliant clients drop the body (#876). The status and headers
+  // travel on `_meta[UPSTREAM_META_KEY]`, which the agent-side shaper
+  // reads back into a model-visible `[api_call status=…]` line.
   const withMeta = (r: Result): Result => {
     if (!upstreamMeta && !budgetMeta) return r;
     const meta: Record<string, unknown> = {};

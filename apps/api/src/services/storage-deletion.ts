@@ -72,7 +72,7 @@ const BACKOFF_CAP_MS = 6 * 60 * 60 * 1000;
  * mid-flight and another instance re-claims jobs this pass is still executing.
  * 50 × 15s ≈ 12.5 min, inside the 15-minute lease.
  */
-const DEFAULT_BATCH_LIMIT = 50;
+const BATCH_LIMIT = 50;
 
 /**
  * Lease window: how far a claim pushes `next_attempt_at` forward while a pass
@@ -80,7 +80,7 @@ const DEFAULT_BATCH_LIMIT = 50;
  * no separate column. A worker that crashes between claim and settle leaves its
  * jobs leased; they simply become due again once the lease expires and a later
  * pass re-runs the (idempotent) delete. Sized to cover a FULL batch of slow
- * deletes (see {@link DEFAULT_BATCH_LIMIT}) rather than a single one.
+ * deletes (see {@link BATCH_LIMIT}) rather than a single one.
  */
 const CLAIM_LEASE_MS = 15 * 60 * 1000;
 
@@ -142,8 +142,6 @@ interface ProcessStorageDeletionDeps {
   deleteFile?: (bucket: string, path: string) => Promise<void>;
   /** Small-object download used to expand run-workspace manifests. */
   downloadFile?: (bucket: string, path: string) => Promise<Uint8Array | null>;
-  /** Max jobs to claim in this pass. */
-  batchLimit?: number;
   /** Random source for backoff jitter (test seam). */
   rand?: () => number;
 }
@@ -232,7 +230,6 @@ export async function processStorageDeletionJobs(
 ): Promise<ProcessStorageDeletionResult> {
   const del = deps.deleteFile ?? storageDelete;
   const download = deps.downloadFile ?? storageDownload;
-  const batchLimit = deps.batchLimit ?? DEFAULT_BATCH_LIMIT;
   const rand = deps.rand ?? Math.random;
 
   let completed = 0;
@@ -252,7 +249,7 @@ export async function processStorageDeletionJobs(
       ),
     )
     .orderBy(storageDeletionJobs.nextAttemptAt)
-    .limit(batchLimit)
+    .limit(BATCH_LIMIT)
     .for("update", { skipLocked: true });
 
   const claimedJobs = await db

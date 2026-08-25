@@ -75,8 +75,6 @@ export interface RuntimePiEnvOptions {
   outputSchema?: unknown;
   /** Forward-proxy URL. When set, HTTP(S)_PROXY + NO_PROXY are emitted. */
   forwardProxyUrl?: string;
-  /** Turn off the Pi SDK's retry loop (default on, `maxRetries: 4`) when wiring an external one. */
-  disableModelRetry?: boolean;
   /** Hosts excluded from the proxy. Required with {@link forwardProxyUrl} on a sidecar run. */
   noProxy?: string;
   sink?: {
@@ -243,10 +241,6 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
     env.https_proxy = opts.forwardProxyUrl;
     env.NO_PROXY = noProxy;
     env.no_proxy = noProxy;
-  }
-
-  if (opts.disableModelRetry) {
-    env.MODEL_RETRY_ENABLED = "false";
   }
 
   if (opts.sink) {

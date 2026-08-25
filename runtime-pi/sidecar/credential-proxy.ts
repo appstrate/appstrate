@@ -118,10 +118,12 @@ interface ApiCallSuccess {
   /**
    * URL the response was eventually served from after any redirect
    * follow. Equals the resolved target URL when no redirect happened.
-   * Propagated to `_meta["dev.appstrate/upstream"].finalUrl` (sanitised
-   * for userinfo + fragment) by the MCP handler so agents driving
-   * OAuth Authorization Code / CAS / magic-link flows can extract
-   * callback query params from the terminal hop.
+   *
+   * Internal to this module: it drives the redirect follower and the
+   * 401-retry replay. It is NOT projected onto the agent-visible
+   * `_meta` — that projection existed for #471 but nothing ever read
+   * it (`mcp-forward.ts` drops `_meta` wholesale), so it was removed
+   * rather than left as a documented capability with no consumer.
    */
   finalUrl: string;
   /**

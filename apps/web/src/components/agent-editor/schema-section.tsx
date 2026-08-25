@@ -24,13 +24,7 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import {
-  toSlug,
-  toLiveSlug,
-  toCredentialKey,
-  toLiveCredentialKey,
-  CREDENTIAL_KEY_RE,
-} from "../../lib/strings";
+import { toSlug, toLiveSlug } from "../../lib/strings";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
@@ -68,7 +62,7 @@ export interface SchemaField {
   arrayEnumItems?: string;
 }
 
-type SchemaMode = "input" | "output" | "credentials";
+type SchemaMode = "input" | "output";
 
 interface SchemaSectionProps {
   title: string;
@@ -130,15 +124,9 @@ function SortableFieldCard({
   const isString = field.type === "string" && !isFile;
   const isArray = field.type === "array";
 
-  // Credential keys must match the sidecar substitution contract (underscore-based,
-  // no hyphens) — agent/tool input keys stay slug-based (hyphen-based,
-  // URL-safe). See @appstrate/core/naming#CREDENTIAL_KEY_RE.
-  const keyTransform =
-    mode === "credentials"
-      ? { live: toLiveCredentialKey, final: toCredentialKey }
-      : { live: toLiveSlug, final: toSlug };
-  const keyIsInvalid =
-    mode === "credentials" && field.key.length > 0 && !CREDENTIAL_KEY_RE.test(field.key);
+  // Agent/tool input and output keys are slug-based (hyphen-based, URL-safe):
+  // `live` while the user types, `final` on blur.
+  const keyTransform = { live: toLiveSlug, final: toSlug };
 
   return (
     <div
@@ -162,11 +150,8 @@ function SortableFieldCard({
           value={field.key}
           onChange={(e) => onUpdate(index, { key: keyTransform.live(e.target.value) })}
           onBlur={() => onUpdate(index, { key: keyTransform.final(field.key) })}
-          className={`h-7 w-[120px] min-w-0 shrink-0 font-mono text-xs ${
-            keyIsInvalid ? "border-destructive focus-visible:ring-destructive" : ""
-          }`}
+          className="h-7 w-[120px] min-w-0 shrink-0 font-mono text-xs"
           disabled={readOnly}
-          aria-invalid={keyIsInvalid || undefined}
         />
         <Select
           value={field.type}

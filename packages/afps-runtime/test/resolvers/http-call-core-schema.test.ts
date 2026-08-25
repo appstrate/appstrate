@@ -20,8 +20,7 @@ import {
 } from "../../src/resolvers/http-call-core.ts";
 import { ResolverError } from "../../src/errors.ts";
 import type { ApiCallMeta, ApiCallResponse } from "../../src/resolvers/http-call-core.ts";
-import type { ToolContext } from "../../src/resolvers/types.ts";
-import type { RunEvent } from "../../src/resolvers/index.ts";
+import type { RunEvent, ToolContext } from "../../src/resolvers/index.ts";
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
