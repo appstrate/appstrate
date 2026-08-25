@@ -177,6 +177,68 @@ const CRED_START = String.raw`(?<=^|%[0-9A-Fa-f]{2}|[^A-Za-z0-9_])`;
 const KEYWORD_START = String.raw`(?<=^|%[0-9A-Fa-f]{2}|[^A-Za-z0-9])`;
 
 /**
+ * The NAME half of the keyword rule: a keyword anywhere inside an env-var
+ * name, not only at its end.
+ *
+ * Fifth bug on the same rule, and the one that mattered most on the sink it
+ * was routed to. {@link KEYWORD_START} admitting `_` on the LEFT only bought
+ * the names whose LAST segment is the keyword (`NOTION_TOKEN`); the separator
+ * group AFTER the keyword never admitted `_`, so every name carrying a
+ * segment past the keyword shipped its value verbatim —
+ * `AWS_SECRET_ACCESS_KEY`, the most canonical `delivery.env` name there is,
+ * and `CLIENT_SECRET_ID` among them. Anchoring the keyword as a
+ * suffix-OR-infix of an underscore-joined name closes both sides at once.
+ *
+ * Two tiers, because the widening must not cost legibility:
+ *
+ *   - STRONG keywords (`token`, `secret`, `password`, `api_key`,
+ *     `authorization`, `access_token`, `refresh_token`) read as credential
+ *     names on their own, so they match with or without surrounding segments —
+ *     exactly as before, plus the segments.
+ *   - `key` alone is prose: it appears in every second error string an
+ *     operator reads ("no api key provided", "key ghp_… rejected"). It counts
+ *     only when glued into an underscore-joined name (`GCP_KEY`,
+ *     `PRIVATE_KEY`, `KEY_FILE`), which no sentence produces.
+ *
+ * `mytoken=`, `9secret=` and `monkey_bars=` stay prose: the first two fail
+ * {@link KEYWORD_START} at the keyword and have no `_` to start a name from,
+ * the third has an `_` but no keyword on a segment boundary.
+ *
+ * BOTH quantifiers are bounded, and that is load-bearing rather than
+ * cosmetic. Segment bodies are `[A-Za-z0-9]` only (`_` is the separator, never
+ * part of a body), but an UNBOUNDED `(?:[A-Za-z0-9]+_)*` still costs O(n) of
+ * backtracking at every start offset that has no keyword, i.e. O(n²) over the
+ * text — and one caller (`logOauthLlmResponse`) scrubs the WHOLE upstream body
+ * before truncating it, so the input size is upstream-controlled. Measured on
+ * the degenerate `SEG_SEG_SEG…` input: 8 KB took 247 ms unbounded, and it grew
+ * quadratically from there. `{0,8}` segments of `{1,64}` bytes covers every
+ * real env-var name (`AWS_SECRET_ACCESS_KEY` is 4) and makes the per-offset
+ * work constant, so the whole pass stays linear.
+ */
+const SEGMENT_BODY = String.raw`[A-Za-z0-9]{1,64}`;
+const KEYWORD_ENV_NAME =
+  String.raw`(?:${SEGMENT_BODY}_){0,8}` +
+  String.raw`(?:token|secret|password|api[_-]?key|authorization|access[_-]?token|refresh[_-]?token)` +
+  String.raw`(?:_${SEGMENT_BODY}){0,8}` +
+  String.raw`|(?:[A-Za-z0-9]{0,64}_){1,8}key(?:_${SEGMENT_BODY}){0,8}` +
+  String.raw`|key(?:_${SEGMENT_BODY}){1,8}`;
+
+/**
+ * Bytes a URL authority may carry before the `@` that ends its userinfo.
+ *
+ * Deliberately a POSITIVE class rather than the negated `[^/?#@\s]` it
+ * replaced. That negation stopped only at `/`, `?`, `#` and whitespace, so a
+ * comma between two unrelated URLs let one match run from the first
+ * authority all the way to an `@` in the second:
+ * `see https://docs.example.com,contact:admin@example.com` came out as
+ * `see https://[redacted]@example.com` — the host the operator diagnoses with,
+ * gone, and nothing sensitive masked in exchange. Restricting to the bytes a
+ * userinfo actually carries (unreserved + `:` + percent-triplets) refuses any
+ * match spanning a comma, a quote or an ampersand.
+ */
+const USERINFO_BYTE = String.raw`[A-Za-z0-9._~:%+-]`;
+
+/**
  * Ordered scrub rules. Compiled once: these run on every proxied error body.
  *
  * `Bearer|Basic` and `sk-ant-` deliberately carry NO anchor — those literals
@@ -197,10 +259,17 @@ const SCRUB_RULES: ReadonlyArray<readonly [RegExp, string]> = [
   // Runs first so a URL whose userinfo happens to contain a keyword
   // (`https://token:hunter2@host/path`) is masked as userinfo rather than
   // swallowing the host and path into the keyword rule's value class.
-  // The character class stops at `/`, `?`, `#` and whitespace, so an `@`
-  // inside a path or query (`/users/me@example.com`) is not userinfo and is
-  // left alone.
-  [/(:\/\/)[^/?#@\s]*@/g, "$1[redacted]@"],
+  // {@link USERINFO_BYTE} admits neither `/`, `?`, `#`, whitespace nor a
+  // comma, so an `@` inside a path or query (`/users/me@example.com`) is not
+  // userinfo, and a match can never span from one URL to the next.
+  [new RegExp(`(:\\/\\/)${USERINFO_BYTE}*@`, "g"), "$1[redacted]@"],
+  // Percent-encoded form (`https%3A%2F%2Fuser%3Apass%40host%2Fcb`). Encoded
+  // URLs are the whole reason this file has an anchor of its own, and a
+  // `redirect_uri=` value — where an OAuth error body echoes a userinfo back —
+  // is encoded by definition. Lazy, and tempered against the encoded
+  // delimiters, so the match stops at the FIRST `%40` of the authority rather
+  // than running through `%2F` into the path.
+  [new RegExp(`(%3A%2F%2F)(?:(?!%2F|%3F|%23)${USERINFO_BYTE})*?%40`, "gi"), "$1[redacted]%40"],
   [/(Bearer|Basic)(?:\s|%20)+[A-Za-z0-9._~+/=%-]+/gi, "$1 [redacted]"],
   [new RegExp(`${CRED_START}eyJ[A-Za-z0-9._-]{10,}`, "g"), "[redacted-jwt]"],
   [/sk-ant-[A-Za-z0-9._-]+/gi, "[redacted-key]"],
@@ -212,8 +281,7 @@ const SCRUB_RULES: ReadonlyArray<readonly [RegExp, string]> = [
   [new RegExp(`${CRED_START}ya29\\.[A-Za-z0-9._-]{6,}`, "g"), "[redacted-key]"],
   [
     new RegExp(
-      `${KEYWORD_START}(token|secret|password|api[_-]?key|authorization|access[_-]?token|refresh[_-]?token)` +
-        `((?:["'\\s:=]|%20|%3A|%3D|%22|%27)+)[^\\s"',&]+`,
+      `${KEYWORD_START}(${KEYWORD_ENV_NAME})` + `((?:["'\\s:=]|%20|%3A|%3D|%22|%27)+)[^\\s"',&]+`,
       "gi",
     ),
     "$1$2[redacted]",

@@ -1056,7 +1056,12 @@ describe("transient upstream failures", () => {
   it("control: a generic status is still forwarded verbatim", async () => {
     // Without this the collapse above could be a blanket 502 that throws away
     // the 429/400 partition the two cases before this one depend on.
-    for (const generic of [401, 404, 409, 503]) {
+    //
+    // 413 and 402 carry the second axis: neither fingerprints a vendor, and
+    // both are TERMINAL. Collapsed to 502 they land inside pi-ai's retryable
+    // pattern, so the container spends its whole budget re-sending an
+    // oversized prompt or a request against an exhausted balance.
+    for (const generic of [401, 404, 409, 503, 402, 413, 422]) {
       const frames = await runAgainst(scriptedUpstream([generic]).fetch);
       const terminal = frames.at(-1) as Extract<PiMessagesEvent, { type: "error" }>;
       expect(terminal.errorMessage).toBe(

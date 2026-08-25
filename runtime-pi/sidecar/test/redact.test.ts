@@ -267,4 +267,65 @@ describe("scrubSecretMaterial", () => {
       "mypassword=abc and 9secret=z",
     );
   });
+
+  // Fifth regression on the same anchor, and the one that matters most on the
+  // sink these rules were routed to. Admitting `_` on the LEFT of the keyword
+  // only covers env names whose LAST segment is the keyword (`NOTION_TOKEN`).
+  // The separator group after the keyword does not admit `_`, so every name
+  // with a segment AFTER the keyword — `AWS_SECRET_ACCESS_KEY`, the single most
+  // canonical `delivery.env` name there is, and `CLIENT_SECRET_ID` — shipped
+  // its value verbatim into `failed[].error` on the UNAUTHENTICATED
+  // `GET /integrations/boot-report`.
+  it("masks a keyword that is an INFIX of an env-var name (AWS_SECRET_ACCESS_KEY=…)", () => {
+    expect(scrubSecretMaterial("AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMIK7MDENGbPxRfiCY")).toBe(
+      "AWS_SECRET_ACCESS_KEY=[redacted]",
+    );
+    expect(scrubSecretMaterial("CLIENT_SECRET_ID=zzz111")).toBe("CLIENT_SECRET_ID=[redacted]");
+    // Bare `KEY` as an env-name segment: the literal name the docker-spawn
+    // suite uses for a `delivery.env` credential.
+    expect(scrubSecretMaterial("GCP_KEY=hunter2secret")).toBe("GCP_KEY=[redacted]");
+    expect(scrubSecretMaterial("PRIVATE_KEY=abc123def")).toBe("PRIVATE_KEY=[redacted]");
+    // The env NAME survives — it is what tells the operator which credential
+    // the container failed to boot with.
+    expect(scrubSecretMaterial("env-file line 1: AWS_SECRET_ACCESS_KEY=wJalrXUtnFE")).toContain(
+      "AWS_SECRET_ACCESS_KEY",
+    );
+  });
+
+  it("control: `key` on its own is prose, not an env-var name", () => {
+    // The widening is to env-var NAMES, not to the bare word. `key` appears in
+    // every second error string an operator reads; redacting the word after it
+    // would cost more legibility than it buys. It only counts when glued into
+    // an underscore-joined name.
+    expect(scrubSecretMaterial("key ghp_ABCdef123456789")).toBe("key [redacted-key]");
+    expect(scrubSecretMaterial("no api key provided")).toBe("no api key provided");
+    expect(scrubSecretMaterial("monkey_bars=up")).toBe("monkey_bars=up");
+    // And the left-anchor stays exactly as strict as before for the infix form.
+    expect(scrubSecretMaterial("mysecretstuff=abc")).toBe("mysecretstuff=abc");
+  });
+
+  // The userinfo rule shipped blind to the percent-encoded form the rest of
+  // this file exists to handle: `redirect_uri=` values are encoded by
+  // definition, and an encoded `user:pass@host` is exactly the shape an OAuth
+  // error body echoes back.
+  it("masks percent-encoded URL userinfo", () => {
+    const out = scrubSecretMaterial("redirect_uri=https%3A%2F%2Fuser%3Ahunter2%40host%2Fcb");
+    expect(out).not.toContain("hunter2");
+    // The host survives — same trade as the literal form.
+    expect(out).toContain("host%2Fcb");
+  });
+
+  // …and too broad in the other direction: the negated class stopped only at
+  // `/?#` and whitespace, so a comma between two unrelated URLs let the match
+  // run from the first authority to an `@` in the second, swallowing the host
+  // the operator diagnoses with.
+  it("control: a comma is not authority-legal, so a bare host keeps its name", () => {
+    expect(scrubSecretMaterial("see https://docs.example.com,contact:admin@example.com")).toBe(
+      "see https://docs.example.com,contact:admin@example.com",
+    );
+    // Same shape with whitespace, which the old class already refused.
+    expect(scrubSecretMaterial("see https://docs.example.com then admin@example.com")).toBe(
+      "see https://docs.example.com then admin@example.com",
+    );
+  });
 });

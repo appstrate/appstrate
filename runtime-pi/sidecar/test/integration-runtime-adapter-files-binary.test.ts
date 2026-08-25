@@ -103,6 +103,38 @@ describe("delivery.files — safe-path floor (R8a)", () => {
     }
   });
 
+  // `/usr/` and `/workspace/` are NOT docker-private surfaces — they are
+  // PATH-writable and workspace-collision surfaces, and both matter at least
+  // as much on the process adapter, which has FEWER containment layers than
+  // docker, is the Tier-0 default, and is what the Firecracker orchestrator
+  // pins. A manifest declaring `delivery.files: { "/usr/local/bin/gh": … }`
+  // was refused under docker and, under process, sent
+  // `materializeFileMountsOnHost` through `mkdir -p /usr/local/bin` +
+  // `writeFile` on the host / guest rootfs — planting an executable on PATH.
+  it("rejects host paths under /usr and /workspace (PATH + workspace collision)", () => {
+    expect(isHostPathSafeForMount("/usr/local/bin/gh")).toBe(false);
+    expect(isHostPathSafeForMount("/usr/lib/x")).toBe(false);
+    expect(isHostPathSafeForMount("/workspace/token.json")).toBe(false);
+    expect(isHostPathSafeForMount("/workspace")).toBe(false);
+    // Same verdict on the docker side — this floor is SHARED, not mirrored.
+    expect(isContainerPathSafeForMount("/usr/local/bin/gh")).toBe(false);
+    expect(isContainerPathSafeForMount("/workspace/token.json")).toBe(false);
+  });
+
+  it("materializeFileMountsOnHost skips a /usr/local/bin executable plant", async () => {
+    // The gate is what stops the write, so exercise it through the writer and
+    // not only through the predicate: nothing is created, nothing is surfaced
+    // via the scratch-path fallback either.
+    const { createdPaths, envOverrides } = await materializeFileMountsOnHost("run-path-plant", {
+      "/usr/local/bin/gh": {
+        content_b64: Buffer.from("#!/bin/sh\n").toString("base64"),
+        mode: "0755",
+      },
+    });
+    expect(createdPaths).toEqual([]);
+    expect(envOverrides).toEqual({});
+  });
+
   it("accepts /run/, /tmp/, /etc/appstrate/, /var/* (manifest-friendly)", () => {
     expect(isHostPathSafeForMount("/run/creds/token")).toBe(true);
     expect(isHostPathSafeForMount("/tmp/cert.pem")).toBe(true);

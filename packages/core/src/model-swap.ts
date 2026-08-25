@@ -132,20 +132,39 @@ const ALIAS_UPSTREAM_ERROR_MESSAGE = "Upstream model error";
  * The only upstream statuses an aliased response may carry, and the collapse
  * target for the rest.
  *
- * A status describes the TRANSACTION, not the backing — every candidate vendor
- * answers 429 when throttled and 400 on a bad request — which is why forwarding
- * one costs no opacity and buys back the container's retry budget. That
- * reasoning holds for the GENERIC codes and fails for the rest: `529` is
- * Anthropic's own overload code, and `520`–`526` say the backing sits behind
- * Cloudflare. Those two families name a vendor as surely as its prose does, so
- * they are collapsed rather than forwarded.
+ * The set balances TWO axes, and getting either wrong is a real defect:
+ *
+ * 1. VENDOR IDENTITY — the axis the set was originally drawn on. A status
+ *    describes the TRANSACTION, not the backing: every candidate vendor answers
+ *    429 when throttled and 400 on a bad request, so forwarding one costs no
+ *    opacity. That fails for exactly two families — `529` is Anthropic's own
+ *    overload code and `520`–`526` say the backing sits behind Cloudflare —
+ *    which name a vendor as surely as its prose does. Those are collapsed.
+ *
+ * 2. RETRYABILITY — the axis the first draft missed. The collapse target is
+ *    {@link ALIAS_COLLAPSED_UPSTREAM_STATUS} = 502, and pi-ai's
+ *    `RETRYABLE_PROVIDER_ERROR_PATTERN` matches the literal `"502"`. So
+ *    collapsing does not merely make a status opaque, it makes it RETRYABLE.
+ *    That is harmless for the two vendor families above (both are transient
+ *    anyway) and wrong for a terminal 4xx: `413` (request too large — what
+ *    Anthropic/Vertex/Bedrock answer to an oversized prompt) and `402`
+ *    (OpenRouter on exhausted credits) were terminal and became requests
+ *    retried to exhaustion that can never succeed. `402` loses more still:
+ *    pi-ai's `NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN` keys on the word
+ *    "billing", which this boundary has already replaced with
+ *    "Upstream model error", so the status is the only actionable signal left.
+ *
+ * `402`, `405`, `413`, `415`, `422` and `431` fingerprint no vendor — every
+ * candidate answers them alike — so both axes point the same way and they are
+ * forwarded.
  *
  * The set is deliberately an allowlist: an unenumerable space of vendor- and
  * CDN-specific codes cannot be subtracted from safely, and a new one appearing
- * upstream must default to opaque rather than to disclosed.
+ * upstream must default to opaque rather than to disclosed. When adding one,
+ * check it against BOTH axes.
  */
 const FORWARDABLE_UPSTREAM_STATUSES: ReadonlySet<number> = new Set([
-  400, 401, 403, 404, 408, 409, 429, 500, 502, 503, 504,
+  400, 401, 402, 403, 404, 405, 408, 409, 413, 415, 422, 429, 431, 500, 502, 503, 504,
 ]);
 
 /** Collapse target: a generic "the upstream hop failed" with no vendor in it. */

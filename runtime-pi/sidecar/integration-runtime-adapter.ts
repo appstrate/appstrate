@@ -214,9 +214,12 @@ export function resolveBundleEntry(bundleRoot: string, entryPoint: string): stri
  * traversal + NUL bytes + pure root before any of this runs; this is a
  * second floor enforced at spawn time.
  *
- * Adapters extend the floor with their own surfaces via `extraForbidden*`
- * — the docker adapter adds `/.docker/` (prefix) and `/.dockerenv` (file)
- * for Docker-private paths. Matching semantics are preserved exactly:
+ * Adapters extend the floor with their own surfaces via `extraForbidden*`.
+ * BOTH spawning adapters add `/usr/` and `/workspace/` (PATH-plant and
+ * workspace-collision surfaces, not container-specific ones); the docker
+ * adapter alone adds `/.docker/` (prefix) and `/.dockerenv` (file), which are
+ * Docker-private and meaningless on a host filesystem.
+ * Matching semantics are preserved exactly:
  * a prefix matches when the path equals the prefix without its trailing
  * slash OR starts with the prefix; a file matches on exact equality.
  */

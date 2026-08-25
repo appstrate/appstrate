@@ -430,7 +430,14 @@ describe("forwardMeteredResponse — aliased error synthesis and header allowlis
     // The control that keeps the projection from becoming a blanket 502: a
     // status every vendor answers alike carries no fingerprint, and collapsing
     // it would lose the one classification signal the scrubbed body left.
-    for (const status of [400, 401, 403, 404, 408, 409, 429, 500, 502, 503, 504]) {
+    //
+    // 402/405/413/415/422/431 are here because the collapse is not only opaque,
+    // it is RETRYABLE: pi-ai matches the literal "502". A terminal 413
+    // (oversized prompt) or 402 (exhausted credits) collapsed to 502 is retried
+    // to exhaustion on a request that can never succeed.
+    for (const status of [
+      400, 401, 402, 403, 404, 405, 408, 409, 413, 415, 422, 429, 431, 500, 502, 503, 504,
+    ]) {
       const upstream = new Response(JSON.stringify({ error: { message: "x" } }), {
         status,
         headers: { "content-type": "application/json" },

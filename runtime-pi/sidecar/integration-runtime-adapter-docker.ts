@@ -286,20 +286,30 @@ async function killContainer(containerId: string): Promise<void> {
  *   - `/etc/passwd*`, `/etc/shadow*`, `/etc/sudoers*` — privilege escalation
  *     surface; even if the runner is `--cap-drop ALL`, mounting over these
  *     is operator error worth refusing loudly.
- *   - `/.docker/`, `/.dockerenv` — Docker-private surfaces.
  *   - `/usr/`, `/workspace/` — directories the runner image really has, whose
  *     mode and ownership a staged PARENT would carry into the container (see
  *     {@link stageFileMountsOnHost}). `/workspace` is the per-run volume
  *     SHARED with the agent container and chowned to the runner uid at create
  *     time, so clobbering it reaches beyond this runner; `/usr` is the image's
- *     own tree. Neither is a credential destination — `delivery.files` exists
- *     for certs, keys and service-account JSON, which belong under `/run/`,
- *     `/etc/<vendor>/` or `/tmp/`.
+ *     own tree and a PATH directory. Neither is a credential destination —
+ *     `delivery.files` exists for certs, keys and service-account JSON, which
+ *     belong under `/run/`, `/etc/<vendor>/` or `/tmp/`.
+ *   - `/.docker/`, `/.dockerenv` — Docker-private surfaces.
+ *
+ * Which of those are SHARED with the process adapter
+ * (`isHostPathSafeForMount`), and which are this adapter's own:
+ *   - SHARED: the kernel-managed + privilege-escalation floor, `/usr/` and
+ *     `/workspace/`. The PATH-plant and workspace-collision hazards are not
+ *     container hazards — they are worse on the process adapter, which has
+ *     fewer containment layers.
+ *   - DOCKER-ONLY: `/.docker/` and `/.dockerenv`. They exist inside a runner
+ *     container and mean nothing on a host filesystem.
  */
 export function isContainerPathSafeForMount(containerPath: string): boolean {
-  // Shared floor + Docker-private surfaces: `/.docker/` (prefix) and
-  // `/.dockerenv` (file) on top of the kernel-managed +
-  // privilege-escalation floor enforced by `isPathSafeForMount`.
+  // Shared floor (kernel-managed + privilege-escalation via
+  // `isPathSafeForMount`, plus `/usr/` and `/workspace/` which the process
+  // adapter also refuses) + the Docker-private surfaces `/.docker/` (prefix)
+  // and `/.dockerenv` (file).
   return isPathSafeForMount(containerPath, {
     extraForbiddenPrefixes: ["/.docker/", "/usr/", "/workspace/"],
     extraForbiddenFiles: ["/.dockerenv"],

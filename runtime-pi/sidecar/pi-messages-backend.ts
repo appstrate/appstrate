@@ -39,6 +39,7 @@ import {
   syntheticAliasErrorBody,
   syntheticAliasErrorMessage,
   projectAliasUpstreamStatus,
+  ALIAS_COLLAPSED_UPSTREAM_STATUS,
 } from "./model-swap.ts";
 import { streamBacking } from "./pi-sdk.ts";
 import type {
@@ -205,8 +206,16 @@ const ALIAS_MAX_RETRY_DELAY_MS = 10_000;
  * that is exactly what the sidecar is on this path: it terminated the client's
  * protocol and re-originated upstream, so "I could not reach the backing" is a
  * 502 and "the backing went silent on me" is a 504.
+ *
+ * The unreachable status IS core's {@link ALIAS_COLLAPSED_UPSTREAM_STATUS}
+ * rather than a second literal `502` — the two must move together (a caller
+ * cannot tell "the sidecar could not reach the backing" from "the backing
+ * answered something too vendor-specific to forward", and both must stay
+ * retryable under pi-ai's classifier), and a magic number one package away
+ * from the constant it has to equal is exactly the drift this boundary exists
+ * to prevent.
  */
-const SIDECAR_UPSTREAM_UNREACHABLE_STATUS = 502;
+const SIDECAR_UPSTREAM_UNREACHABLE_STATUS = ALIAS_COLLAPSED_UPSTREAM_STATUS;
 const SIDECAR_UPSTREAM_IDLE_STATUS = 504;
 
 /** Records the status of the last upstream response of one re-originated call. */
@@ -217,10 +226,10 @@ interface UpstreamStatusProbe {
    * The status a failed turn should report, or `undefined` when there is
    * nothing honest to report:
    *
-   *   - the backing answered with an error status → that status when it is
-   *     generic enough to name no vendor ({@link
-   *     FORWARDABLE_UPSTREAM_STATUSES} — this is what makes a `429` retryable
-   *     in the container again), otherwise
+   *   - the backing answered with an error status → that status when
+   *     {@link projectAliasUpstreamStatus} forwards it (generic enough to name
+   *     no vendor, and terminal-vs-transient preserved — this is what makes a
+   *     `429` retryable in the container again), otherwise
    *     {@link SIDECAR_UPSTREAM_UNREACHABLE_STATUS};
    *   - nothing ever answered — DNS, connect, TLS, an aborted fetch →
    *     {@link SIDECAR_UPSTREAM_UNREACHABLE_STATUS};

@@ -210,18 +210,34 @@ function planSubprocess(spec: IntegrationSpawnSpec, bundleRoot: string): Subproc
  * Returns the set of created paths so `shutdown()` can clean them up.
  */
 /**
- * R8a — same safe-path floor as the docker adapter. Even though the process
- * adapter writes to the host filesystem (where the manifest path is far less
- * dangerous than inside a container), we still refuse kernel-managed surfaces
- * and the well-known privilege-escalation files to keep the contract uniform
- * across adapters and to prevent dev tooling from accidentally overwriting
- * host configs.
+ * R8a — safe-path floor for `delivery.files` on the process adapter.
+ *
+ * SHARED with the docker adapter ({@link isContainerPathSafeForMount}), because
+ * these surfaces are dangerous wherever the bytes land:
+ *   - `/dev/`, `/proc/`, `/sys/` and the passwd/shadow/sudoers/group families —
+ *     the kernel-managed + privilege-escalation floor {@link isPathSafeForMount}
+ *     enforces for every adapter;
+ *   - `/usr/` — a PATH directory. `materializeFileMountsOnHost` does
+ *     `mkdir -p` + `writeFile` at the manifest-declared path with the
+ *     manifest-declared mode, so `delivery.files: { "/usr/local/bin/gh": … }`
+ *     plants an executable on the PATH of everything that runs next. This
+ *     adapter has FEWER containment layers than docker, not more: it is the
+ *     Tier-0 default and what the Firecracker orchestrator pins, so the bytes
+ *     reach the host or the guest rootfs directly.
+ *   - `/workspace/` — the per-run tree shared with the agent container, so a
+ *     credential mount there collides with (or clobbers) run artifacts.
+ *
+ * ADAPTER-SPECIFIC, and deliberately NOT enforced here: `/.docker/` and
+ * `/.dockerenv`. Those are Docker-private surfaces that exist inside a runner
+ * container and mean nothing on the host filesystem.
+ *
+ * `delivery.files` exists for certs, keys and service-account JSON, which
+ * belong under `/run/`, `/etc/<vendor>/` or `/tmp/` — none of the above.
  */
 export function isHostPathSafeForMount(hostPath: string): boolean {
-  // Process adapter uses the shared floor with no extra surfaces — the
-  // subprocess shares the host fs, so only the kernel-managed +
-  // privilege-escalation floor applies.
-  return isPathSafeForMount(hostPath);
+  return isPathSafeForMount(hostPath, {
+    extraForbiddenPrefixes: ["/usr/", "/workspace/"],
+  });
 }
 
 export async function materializeFileMountsOnHost(
