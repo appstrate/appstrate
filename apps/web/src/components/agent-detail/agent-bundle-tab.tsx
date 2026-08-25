@@ -3,12 +3,13 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
-import type { AgentDetail } from "@appstrate/shared-types";
+import type { AgentDetail, VersionDetailResponse } from "@appstrate/shared-types";
 import { FileExplorer } from "../package-files/file-explorer";
 import { VersionHistory } from "../version-history";
 import { JsonView } from "../json-view";
+import { DiffTab } from "../diff-tab";
 
-type BundleSection = "overview" | "files" | "dependencies" | "schemas" | "versions";
+type BundleSection = "overview" | "files" | "dependencies" | "schemas" | "versions" | "diff";
 
 function Fact({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -24,14 +25,22 @@ export function AgentBundleTab({
   detail,
   version,
   isOwned,
+  isHistorical = false,
+  latestVersion,
+  currentManifest,
+  currentContent,
 }: {
   packageId: string;
   detail: AgentDetail;
   version?: string;
   isOwned: boolean;
+  isHistorical?: boolean;
+  latestVersion?: VersionDetailResponse;
+  currentManifest?: Record<string, unknown>;
+  currentContent?: string | null;
 }) {
   const { t } = useTranslation("agents");
-  const [section, setSection] = useState<BundleSection>("overview");
+  const [section, setSection] = useState<BundleSection>(isHistorical ? "files" : "overview");
   const promptLength = detail.prompt?.length ?? 0;
   const inputCount = Object.keys(detail.input?.schema?.properties ?? {}).length;
   const outputCount = Object.keys(detail.output?.schema?.properties ?? {}).length;
@@ -50,47 +59,62 @@ export function AgentBundleTab({
             <TabsTrigger value="dependencies">{t("detail.bundle.dependencies")}</TabsTrigger>
             <TabsTrigger value="schemas">{t("detail.bundle.schemas")}</TabsTrigger>
             <TabsTrigger value="versions">{t("detail.bundle.versions")}</TabsTrigger>
+            <TabsTrigger value="diff">{t("detail.bundle.diff")}</TabsTrigger>
           </TabsList>
         </div>
 
         <TabsContent value="overview" className="mt-4 space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <Fact label={t("detail.bundle.manifest")} value={t("detail.bundle.valid")} />
-            <Fact
-              label={t("detail.bundle.prompt")}
-              value={t("detail.bundle.characterCount", { count: promptLength })}
-            />
-            <Fact
-              label={t("detail.bundle.inputSchema")}
-              value={t("detail.overview.fieldCount", { count: inputCount })}
-            />
-            <Fact
-              label={t("detail.bundle.outputSchema")}
-              value={
-                detail.output?.schema
-                  ? t("detail.overview.fieldCount", { count: outputCount })
-                  : t("detail.overview.unknown")
-              }
-            />
-          </div>
-          <div className="grid gap-3 md:grid-cols-3">
-            <Fact
-              label={t("detail.overview.skills")}
-              value={t("detail.overview.itemCount", { count: detail.dependencies.skills.length })}
-            />
-            <Fact
-              label={t("detail.overview.integrations")}
-              value={t("detail.overview.itemCount", {
-                count: detail.dependencies.integrations.length,
-              })}
-            />
-            <Fact
-              label={t("detail.overview.mcpServers")}
-              value={t("detail.overview.itemCount", {
-                count: detail.dependencies.mcp_servers.length,
-              })}
-            />
-          </div>
+          {isHistorical && (
+            <p className="text-muted-foreground rounded-lg border p-4 text-sm">
+              {t("detail.bundle.historicalSummaryUnavailable")}
+            </p>
+          )}
+          {!isHistorical && (
+            <>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <Fact
+                  label={t("detail.bundle.manifest")}
+                  value={detail.manifest ? t("detail.bundle.valid") : t("detail.overview.unknown")}
+                />
+                <Fact
+                  label={t("detail.bundle.prompt")}
+                  value={t("detail.bundle.characterCount", { count: promptLength })}
+                />
+                <Fact
+                  label={t("detail.bundle.inputSchema")}
+                  value={t("detail.overview.fieldCount", { count: inputCount })}
+                />
+                <Fact
+                  label={t("detail.bundle.outputSchema")}
+                  value={
+                    detail.output?.schema
+                      ? t("detail.overview.fieldCount", { count: outputCount })
+                      : t("detail.overview.unknown")
+                  }
+                />
+              </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                <Fact
+                  label={t("detail.overview.skills")}
+                  value={t("detail.overview.itemCount", {
+                    count: detail.dependencies.skills.length,
+                  })}
+                />
+                <Fact
+                  label={t("detail.overview.integrations")}
+                  value={t("detail.overview.itemCount", {
+                    count: detail.dependencies.integrations.length,
+                  })}
+                />
+                <Fact
+                  label={t("detail.overview.mcpServers")}
+                  value={t("detail.overview.itemCount", {
+                    count: detail.dependencies.mcp_servers.length,
+                  })}
+                />
+              </div>
+            </>
+          )}
         </TabsContent>
 
         <TabsContent value="files" className="mt-4">
@@ -98,62 +122,95 @@ export function AgentBundleTab({
         </TabsContent>
 
         <TabsContent value="dependencies" className="mt-4 space-y-4">
-          <section className="rounded-lg border p-4">
-            <h3 className="text-sm font-semibold">{t("detail.overview.skills")}</h3>
-            <div className="mt-3 space-y-2">
-              {detail.dependencies.skills.map((skill) => (
-                <div key={skill.id} className="flex justify-between gap-3 text-sm">
-                  <code>{skill.id}</code>
-                  <span className="text-muted-foreground">{skill.version ?? "—"}</span>
+          {isHistorical ? (
+            <p className="text-muted-foreground rounded-lg border p-4 text-sm">
+              {t("detail.bundle.historicalSummaryUnavailable")}
+            </p>
+          ) : (
+            <>
+              <section className="rounded-lg border p-4">
+                <h3 className="text-sm font-semibold">{t("detail.overview.skills")}</h3>
+                <div className="mt-3 space-y-2">
+                  {detail.dependencies.skills.map((skill) => (
+                    <div key={skill.id} className="flex justify-between gap-3 text-sm">
+                      <code>{skill.id}</code>
+                      <span className="text-muted-foreground">{skill.version ?? "—"}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </section>
-          <section className="rounded-lg border p-4">
-            <h3 className="text-sm font-semibold">{t("detail.overview.integrations")}</h3>
-            <div className="mt-3 space-y-2">
-              {detail.dependencies.integrations.map((integration) => (
-                <div key={integration.id} className="flex justify-between gap-3 text-sm">
-                  <code>{integration.id}</code>
-                  <span className="text-muted-foreground">{integration.version}</span>
+              </section>
+              <section className="rounded-lg border p-4">
+                <h3 className="text-sm font-semibold">{t("detail.overview.integrations")}</h3>
+                <div className="mt-3 space-y-2">
+                  {detail.dependencies.integrations.map((integration) => (
+                    <div key={integration.id} className="flex justify-between gap-3 text-sm">
+                      <code>{integration.id}</code>
+                      <span className="text-muted-foreground">{integration.version}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </section>
-          <section className="rounded-lg border p-4">
-            <h3 className="text-sm font-semibold">{t("detail.overview.mcpServers")}</h3>
-            <div className="mt-3 space-y-2">
-              {detail.dependencies.mcp_servers.map((server) => (
-                <div key={server.id} className="flex justify-between gap-3 text-sm">
-                  <code>{server.id}</code>
-                  <span className="text-muted-foreground">{server.version}</span>
+              </section>
+              <section className="rounded-lg border p-4">
+                <h3 className="text-sm font-semibold">{t("detail.overview.mcpServers")}</h3>
+                <div className="mt-3 space-y-2">
+                  {detail.dependencies.mcp_servers.map((server) => (
+                    <div key={server.id} className="flex justify-between gap-3 text-sm">
+                      <code>{server.id}</code>
+                      <span className="text-muted-foreground">{server.version}</span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </section>
+              </section>
+            </>
+          )}
         </TabsContent>
 
         <TabsContent value="schemas" className="mt-4 grid gap-4 lg:grid-cols-2">
-          <section className="min-w-0 rounded-lg border p-4">
-            <h3 className="mb-3 text-sm font-semibold">{t("detail.bundle.inputSchema")}</h3>
-            {detail.input?.schema ? (
-              <JsonView data={detail.input.schema} />
-            ) : (
-              <p className="text-muted-foreground text-sm">{t("detail.overview.unknown")}</p>
-            )}
-          </section>
-          <section className="min-w-0 rounded-lg border p-4">
-            <h3 className="mb-3 text-sm font-semibold">{t("detail.bundle.outputSchema")}</h3>
-            {detail.output?.schema ? (
-              <JsonView data={detail.output.schema} />
-            ) : (
-              <p className="text-muted-foreground text-sm">{t("detail.overview.unknown")}</p>
-            )}
-          </section>
+          {isHistorical ? (
+            <p className="text-muted-foreground rounded-lg border p-4 text-sm lg:col-span-2">
+              {t("detail.bundle.historicalSummaryUnavailable")}
+            </p>
+          ) : (
+            <>
+              <section className="min-w-0 rounded-lg border p-4">
+                <h3 className="mb-3 text-sm font-semibold">{t("detail.bundle.inputSchema")}</h3>
+                {detail.input?.schema ? (
+                  <JsonView data={detail.input.schema} />
+                ) : (
+                  <p className="text-muted-foreground text-sm">{t("detail.overview.unknown")}</p>
+                )}
+              </section>
+              <section className="min-w-0 rounded-lg border p-4">
+                <h3 className="mb-3 text-sm font-semibold">{t("detail.bundle.outputSchema")}</h3>
+                {detail.output?.schema ? (
+                  <JsonView data={detail.output.schema} />
+                ) : (
+                  <p className="text-muted-foreground text-sm">{t("detail.overview.unknown")}</p>
+                )}
+              </section>
+            </>
+          )}
         </TabsContent>
 
         <TabsContent value="versions" className="mt-4">
           <VersionHistory packageId={packageId} type="agent" isOwned={isOwned} />
+        </TabsContent>
+
+        <TabsContent value="diff" className="mt-4">
+          {latestVersion && !isHistorical ? (
+            <DiffTab
+              type="agent"
+              latestVersion={latestVersion}
+              currentManifest={currentManifest}
+              currentContent={currentContent}
+            />
+          ) : (
+            <p className="text-muted-foreground rounded-lg border p-4 text-sm">
+              {isHistorical
+                ? t("detail.bundle.historicalSummaryUnavailable")
+                : t("detail.bundle.diffHint")}
+            </p>
+          )}
         </TabsContent>
       </Tabs>
     </div>

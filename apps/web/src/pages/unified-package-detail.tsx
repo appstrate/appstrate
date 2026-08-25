@@ -44,6 +44,7 @@ import { AgentRunsTab, AgentMemoryTab } from "../components/package-detail/agent
 import { AgentOverviewTab } from "../components/agent-detail/agent-overview-tab";
 import { AgentConfigurationView } from "../components/agent-detail/agent-configuration-view";
 import { AgentBundleTab } from "../components/agent-detail/agent-bundle-tab";
+import { AGENT_DETAIL_TABS } from "../lib/agent-detail-tabs";
 import { RunAgentButton } from "../components/run-agent-button";
 import { PackageCard } from "../components/package-card";
 import { useAgentReadiness } from "../hooks/use-agent-readiness";
@@ -197,17 +198,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   } | null>(null);
 
   // ── State ──
-  const allValidTabs: DetailTab[] = [
-    "overview",
-    "runs",
-    "configuration",
-    "memory",
-    "bundle",
-    "versions",
-    "diff",
-    "content",
-    "usedBy",
-  ];
+  const allValidTabs: DetailTab[] =
+    type === "agent"
+      ? [...AGENT_DETAIL_TABS]
+      : ["overview", "versions", "diff", "content", "usedBy"];
   // Configuration tab visibility (uses draft schema — version-aware override applied after loading)
   const draftConfigSchema = agentDetail?.config?.schema;
   const hasDraftConfigSchema = !!(
@@ -230,7 +224,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // still wins in `useTabWithHash`.
   const defaultTab: DetailTab =
     type === "agent"
-      ? "overview"
+      ? isVersionView
+        ? "bundle"
+        : "overview"
       : primaryDisplayFile(type).source === "content"
         ? "content"
         : "overview";
@@ -266,27 +262,40 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // pinned, the live draft otherwise. Same rule the file explorer follows.
   const effectiveManifest = isHistoricalVersion ? versionDetail?.manifest : currentManifest;
 
-  // ── Version-aware config schema ──
-  // When viewing a historical version, use that version's config schema (or empty if none).
-  // An empty schema means "no config fields" — distinct from undefined which means "use draft".
-  const versionConfigSchema = (() => {
-    const config = versionDetail?.manifest?.config as { schema?: JSONSchemaObject } | undefined;
-    return config?.schema;
+  // ── Version-aware input schema ──
+  // A version snapshot does not carry the workspace's model, proxy or saved
+  // values. The only honest form shape available here is the archived AFPS
+  // input schema. An empty schema is distinct from undefined, which means
+  // "fall back to the current draft" in the form components.
+  const versionInputSchema = (() => {
+    const input = versionDetail?.manifest?.input as { schema?: JSONSchemaObject } | undefined;
+    return input?.schema;
   })();
   const effectiveConfigSchema = isHistoricalVersion
-    ? (versionConfigSchema ?? EMPTY_CONFIG_SCHEMA)
+    ? (versionInputSchema ?? EMPTY_CONFIG_SCHEMA)
     : agentDetail?.config?.schema;
   const downloadVersion = (isHistoricalVersion ? versionDetail?.version : version) ?? undefined;
 
   // ── Unified detail for SharedHeader ──
+  const historicalManifestName =
+    typeof versionDetail?.manifest?.display_name === "string"
+      ? versionDetail.manifest.display_name
+      : packageId;
+  const historicalManifestDescription =
+    typeof versionDetail?.manifest?.description === "string"
+      ? versionDetail.manifest.description
+      : "";
   const unifiedForHeader = {
     id: packageId,
-    displayName,
-    description:
-      type === "agent" ? (agentDetail!.description ?? "") : (pkgDetail?.description ?? ""),
+    displayName: isHistoricalVersion ? historicalManifestName : displayName,
+    description: isHistoricalVersion
+      ? historicalManifestDescription
+      : type === "agent"
+        ? (agentDetail!.description ?? "")
+        : (pkgDetail?.description ?? ""),
     source: source ?? ("local" as const),
     type,
-    version,
+    version: isHistoricalVersion ? versionDetail?.version : version,
   };
 
   // ── Render ──
@@ -307,13 +316,17 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     label: t("detail.tabOverview"),
   };
 
-  const agentTabs: Array<{ id: DetailTab; label: string }> = [
-    { id: "overview", label: t("detail.tabOverview") },
-    { id: "runs", label: t("detail.tabRuns") },
-    { id: "configuration", label: t("detail.tabConfiguration") },
-    { id: "memory", label: t("detail.tabMemory") },
-    { id: "bundle", label: t("detail.tabBundle") },
-  ];
+  const agentTabLabels: Record<(typeof AGENT_DETAIL_TABS)[number], string> = {
+    overview: t("detail.tabOverview"),
+    runs: t("detail.tabRuns"),
+    configuration: t("detail.tabConfiguration"),
+    memory: t("detail.tabMemory"),
+    bundle: t("detail.tabBundle"),
+  };
+  const agentTabs: Array<{ id: DetailTab; label: string }> = AGENT_DETAIL_TABS.map((id) => ({
+    id,
+    label: agentTabLabels[id],
+  }));
 
   const pkgTabs: Array<{ id: DetailTab; label: string }> = [
     overviewTab,
@@ -472,8 +485,13 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
       </Tabs>
 
       {/* Tab content */}
-      {type === "agent" && tab === "overview" && agentDetail && (
+      {type === "agent" && tab === "overview" && agentDetail && !isHistoricalVersion && (
         <AgentOverviewTab packageId={packageId} detail={agentDetail} />
+      )}
+      {type === "agent" && tab === "overview" && isHistoricalVersion && (
+        <div className="text-muted-foreground rounded-lg border p-4 text-sm">
+          {t("detail.overview.historicalUnavailable")}
+        </div>
       )}
       {type === "agent" && tab === "configuration" && agentDetail && (
         <AgentConfigurationView
@@ -497,6 +515,10 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           detail={agentDetail}
           version={versionLabel}
           isOwned={isOwned}
+          isHistorical={isHistoricalVersion}
+          latestVersion={latestVersionForDiff}
+          currentManifest={currentManifest}
+          currentContent={currentContent}
         />
       )}
 
@@ -506,7 +528,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         <ManifestOverview manifest={effectiveManifest} type={type} />
       )}
 
-      {tab === "content" && (
+      {type !== "agent" && tab === "content" && (
         <FileExplorer packageId={packageId} type={type} version={versionLabel} />
       )}
 
@@ -536,9 +558,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           );
         })()}
 
-      {tab === "versions" && <VersionHistory packageId={packageId} type={type} isOwned={isOwned} />}
+      {type !== "agent" && tab === "versions" && (
+        <VersionHistory packageId={packageId} type={type} isOwned={isOwned} />
+      )}
 
-      {tab === "diff" && latestVersionForDiff && (
+      {type !== "agent" && tab === "diff" && latestVersionForDiff && (
         <DiffTab
           type={type}
           latestVersion={latestVersionForDiff}

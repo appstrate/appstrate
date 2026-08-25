@@ -2534,6 +2534,82 @@ endpoint-level `Json200` contract and confines the generated mismatch to the
 two schema values and recorded-value map rather than weakening the whole
 fixture.
 
+The fixed-point review caught three first-pass lies before the Run surface was
+built. Readiness now evaluates the AFPS input schema that Configuration
+actually edits, a connection requiring a choice no longer counts as resolved,
+and the manifest summary says Unknown when the backend did not return a
+manifest. Runtime tools are derived only when the returned manifest exposes
+them. Historical Configuration does not reuse current connection or schedule
+editors: those facts are absent from the version snapshot, so the page says so
+and remains read-only instead of showing mutable current state as history.
+
+The second fixed-point review found that model and proxy editors were still
+current even though the rest of the historical page was read-only, and that
+Bundle summaries still received the draft detail. Historical Configuration now
+shows only the archived AFPS input schema, never current Appstrate values.
+Historical Bundle opens its exact archived files and explicitly withholds any
+summary that would otherwise mix that archive with the current draft. Legacy
+Agent hashes for Content, Versions and Diff no longer reactivate standalone
+primary destinations; versions and the real draft diff live inside Bundle.
+Historical Agent URLs open Bundle rather than Overview. If an old Overview hash
+is used, the page explains that installation state is current and points to the
+archived Bundle instead of drawing current model, connection and memory data
+under a historical banner. The header likewise derives its version and any
+available name or description from the archived record.
+
+**Run detail separates live execution from historical results, 25 August.** A
+Run now exposes exactly Execution and Results. Its header keeps status,
+Agent/version or inline identity, start, live or final duration, trigger, cost,
+output-file count and the existing Re-run or Cancel action visible without an
+extra disclosure. Execution preserves the existing realtime log stream,
+terminal refresh, metrics, diagnostics and artifact warnings. At desktop sizes
+the log owns two thirds of the page and the immutable launch snapshot owns the
+remaining third. At 375px the log stays primary and `View snapshot` opens that
+same historical data in the standard modal. The snapshot reuses the existing
+input, effective config, runner, model, proxy, connection, usage and per-turn
+readouts; an inline Run additionally shows its frozen prompt and manifest. It
+never reads the Agent's current Configuration.
+
+Results groups generated files, structured output and only the persistence
+rows written by that Run. Successful Runs with production open there by
+default. Active Runs keep Results disabled with an explicit explanation;
+failed, cancelled and successful Runs without production open Execution. A
+terminal failed or cancelled Run may still expose Results when partial output
+exists. `Run` remains the historical record: no new persistence model, schema
+or synthetic production object was added.
+
+The snapshot lists input files separately from input values. Results never
+translate a documents-endpoint failure into “no result”: an API error remains
+an error even when the local array is empty, and the Run's server-reported file
+count keeps the section present. An empty structured object is not production.
+No file means no file section, one file opens in the existing direct preview,
+and several files keep the list plus preview path. Failed and cancelled output
+is labelled partial. A failed Run exposes direct Re-run, Edit and re-run, and
+Copy details actions; a success that finishes while Execution is open exposes
+View results.
+
+The typed Lab set now covers one active Run, one successful Run with two files
+and structured output, one failure with partial structured output, one
+cancelled Run with partial structured output and one inline Run with a frozen
+definition. Document and persistence handlers honour their Run filters,
+including unanchored uploads referenced by `document://` in the Run input, and
+terminal Run pages can mark notifications read without tripping the fixture
+guard. The screen list names the five Agent destinations plus active,
+successful, failed, cancelled and inline Run states. Production data still has
+two honest gaps: version snapshots do not include historical connection or
+schedule resolution, and Agent input replacement rules are not represented by
+the current API. Those surfaces say unavailable rather than deriving them from
+current state.
+
+The first visual pass covered the eight primary Agent and Run screens at 1440
+and 375 with no horizontal page overflow and no missing fixture. It caught
+three Lab errors that static review did not: active Runs inherited two output
+documents from the list factory, terminal pages called an unserved mark-read
+endpoint, and Run persistence ignored its `runId` filter. The fixtures and
+handlers now reproduce the real lifecycle boundary. Inline Results also keeps
+Source visible, with the exact retained Prompt and Manifest or an explicit
+expired state, rather than linking to a shadow Agent that does not exist.
+
 **12. Accessibility, which nothing here has ever checked.** The branch
 re-declares ARIA roles on the table because this file demands it, and that is
 the whole of it: not one contrast ratio, keyboard path or touch target has ever

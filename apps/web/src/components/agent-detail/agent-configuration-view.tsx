@@ -47,11 +47,7 @@ export function AgentConfigurationView({
       >
         <AgentConfigurationTab
           packageId={packageId}
-          configSchemaOverride={
-            isHistorical
-              ? configSchemaOverride
-              : (detail.input?.schema)
-          }
+          configSchemaOverride={isHistorical ? configSchemaOverride : detail.input?.schema}
           isHistorical={isHistorical}
         />
       </ConfigurationSection>
@@ -59,13 +55,25 @@ export function AgentConfigurationView({
         title={t("detail.configuration.connections")}
         description={t("detail.configuration.connectionsDescription")}
       >
-        <AgentConnectionsSection packageId={packageId} detail={detail} />
+        {isHistorical ? (
+          <p className="text-muted-foreground text-sm">
+            {t("detail.configuration.historicalUnavailable")}
+          </p>
+        ) : (
+          <AgentConnectionsSection packageId={packageId} detail={detail} />
+        )}
       </ConfigurationSection>
       <ConfigurationSection
         title={t("detail.configuration.schedules")}
         description={t("detail.configuration.schedulesDescription")}
       >
-        <AgentSchedulesTab packageId={packageId} />
+        {isHistorical ? (
+          <p className="text-muted-foreground text-sm">
+            {t("detail.configuration.historicalUnavailable")}
+          </p>
+        ) : (
+          <AgentSchedulesTab packageId={packageId} />
+        )}
       </ConfigurationSection>
     </div>
   );

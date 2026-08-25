@@ -51,11 +51,28 @@ export const SCREENS = [
   // The two detail pages that host the compact lists: an agent's Connexions
   // and Mémoire tabs, and a run's Documents and Mémoire tabs. They are here
   // because the third body of a collection lives on them and nowhere else.
-  { path: "/agents/@tractr/compta-trimestrielle", name: "agent-detail" },
-  { path: "/agents/@tractr/compta-trimestrielle#connections", name: "agent-connections" },
+  { path: "/agents/@tractr/compta-trimestrielle#overview", name: "agent-overview" },
+  { path: "/agents/@tractr/compta-trimestrielle#runs", name: "agent-runs" },
+  { path: "/agents/@tractr/compta-trimestrielle#configuration", name: "agent-configuration" },
   { path: "/agents/@tractr/compta-trimestrielle#memory", name: "agent-memory" },
-  { path: "/agents/@tractr/compta-trimestrielle/runs/run_01", name: "run-detail" },
-  { path: "/agents/@tractr/compta-trimestrielle/runs/run_01#memory", name: "run-memory" },
+  { path: "/agents/@tractr/compta-trimestrielle#bundle", name: "agent-bundle" },
+  {
+    path: "/agents/@tractr/compta-trimestrielle/runs/run_01#execution",
+    name: "run-execution-active",
+  },
+  {
+    path: "/agents/@tractr/compta-trimestrielle/runs/run_02#results",
+    name: "run-results-success",
+  },
+  {
+    path: "/agents/@tractr/rq-entreprise-communications/runs/run_03#execution",
+    name: "run-execution-failed",
+  },
+  {
+    path: "/agents/@tractr/analyse-recurrence-articles-tastet/runs/run_05#execution",
+    name: "run-execution-cancelled",
+  },
+  { path: "/agents/@inline/r-8f2c41/runs/run_07#results", name: "run-results-inline" },
   // The settings surfaces, which are routed modals over whatever page you were
   // on. Every one of them is a list, and step B is about what they draw while
   // that list is on its way.

@@ -4,37 +4,36 @@ import { describe, expect, it } from "bun:test";
 import { RUN_DETAIL_TABS, effectiveRunDetailTab, initialRunDetailTab } from "../run-detail-tabs";
 
 const available = (
-  overrides: Partial<{ hasDeliverable: boolean; hasResult: boolean; hasMemory: boolean }> = {},
+  overrides: Partial<{
+    isActive: boolean;
+    isSuccessful: boolean;
+    hasResults: boolean;
+  }> = {},
 ) => ({
-  hasDeliverable: false,
-  hasResult: false,
-  hasMemory: false,
+  isActive: false,
+  isSuccessful: false,
+  hasResults: false,
   ...overrides,
 });
 describe("run detail tabs", () => {
-  it("registers the deliverable hash", () => {
-    expect(RUN_DETAIL_TABS).toContain("deliverable");
+  it("exposes exactly Execution and Results", () => {
+    expect(RUN_DETAIL_TABS).toEqual(["execution", "results"]);
   });
 
-  it("defaults to deliverable, then result, then logs", () => {
-    expect(initialRunDetailTab(available({ hasDeliverable: true, hasResult: true }))).toBe(
-      "deliverable",
+  it("opens successful runs with production on Results", () => {
+    expect(initialRunDetailTab(available({ isSuccessful: true, hasResults: true }))).toBe(
+      "results",
     );
-    expect(initialRunDetailTab(available({ hasResult: true }))).toBe("result");
-    expect(initialRunDetailTab(available())).toBe("logs");
   });
 
-  it("clamps unavailable deep links without discarding their requested hash", () => {
-    expect(effectiveRunDetailTab("deliverable", available({ hasResult: true }))).toBe("result");
-    expect(effectiveRunDetailTab("deliverable", available())).toBe("logs");
-    expect(effectiveRunDetailTab("deliverable", available({ hasDeliverable: true }))).toBe(
-      "deliverable",
-    );
-    expect(effectiveRunDetailTab("result", available({ hasDeliverable: true }))).toBe("logs");
+  it("opens active, failed, cancelled, and empty successful runs on Execution", () => {
+    expect(initialRunDetailTab(available({ isActive: true }))).toBe("execution");
+    expect(initialRunDetailTab(available())).toBe("execution");
+    expect(initialRunDetailTab(available({ isSuccessful: true }))).toBe("execution");
   });
 
-  it("clamps a stale memory hash when the optional trigger is absent", () => {
-    expect(effectiveRunDetailTab("memory", available())).toBe("logs");
-    expect(effectiveRunDetailTab("memory", available({ hasMemory: true }))).toBe("memory");
+  it("keeps Results disabled while a run is active", () => {
+    expect(effectiveRunDetailTab("results", available({ isActive: true }))).toBe("execution");
+    expect(effectiveRunDetailTab("results", available({ hasResults: true }))).toBe("results");
   });
 });

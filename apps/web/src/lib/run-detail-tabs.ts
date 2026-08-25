@@ -1,30 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
-export const RUN_DETAIL_TABS = [
-  "deliverable",
-  "result",
-  "logs",
-  "memory",
-  "documents",
-  "info",
-] as const;
+export const RUN_DETAIL_TABS = ["execution", "results"] as const;
 
 export type RunDetailTab = (typeof RUN_DETAIL_TABS)[number];
 
 export interface RunTabAvailability {
-  hasDeliverable: boolean;
-  hasResult: boolean;
-  hasMemory: boolean;
+  isActive: boolean;
+  isSuccessful: boolean;
+  hasResults: boolean;
 }
 
-/** Select the most useful page when a run is opened without an explicit hash. */
+/** Select the primary task for the current lifecycle state. */
 export function initialRunDetailTab({
-  hasDeliverable,
-  hasResult,
+  isActive,
+  isSuccessful,
+  hasResults,
 }: RunTabAvailability): RunDetailTab {
-  if (hasDeliverable) return "deliverable";
-  if (hasResult) return "result";
-  return "logs";
+  if (!isActive && isSuccessful && hasResults) return "results";
+  return "execution";
 }
 
 /**
@@ -36,10 +29,6 @@ export function effectiveRunDetailTab(
   requested: RunDetailTab,
   availability: RunTabAvailability,
 ): RunDetailTab {
-  if (requested === "deliverable" && !availability.hasDeliverable) {
-    return availability.hasResult ? "result" : "logs";
-  }
-  if (requested === "result" && !availability.hasResult) return "logs";
-  if (requested === "memory" && !availability.hasMemory) return "logs";
+  if (requested === "results" && availability.isActive) return "execution";
   return requested;
 }

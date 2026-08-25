@@ -32,6 +32,7 @@ import {
   type ModelGenerationSettings,
 } from "@appstrate/core/model-generation";
 import { ModelGenerationFields } from "../model-generation-fields";
+import { JsonView } from "../json-view";
 
 // ─── Config Section ─────────────────────────────────────────────────
 
@@ -253,6 +254,22 @@ export function AgentConfigurationTab({
     ? configSchemaOverride
     : (configSchemaOverride ?? detail?.config?.schema);
   const hasConfigSchema = !!(schema?.properties && Object.keys(schema.properties).length > 0);
+
+  if (isHistorical) {
+    return (
+      <div className="space-y-4">
+        <p className="text-muted-foreground text-sm">
+          {t("detail.configuration.historicalDefaultsUnavailable")}
+        </p>
+        {hasConfigSchema && schema && (
+          <div className="rounded-lg border p-4">
+            <h3 className="mb-3 text-sm font-medium">{t("detail.bundle.inputSchema")}</h3>
+            <JsonView data={schema} />
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">

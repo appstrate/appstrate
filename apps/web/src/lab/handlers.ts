@@ -470,9 +470,29 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     handler: (url, s) => {
       const all = list(f.documents.data, s, f.heavyDocuments);
       const purpose = url.searchParams.get("purpose");
+      const runId = url.searchParams.get("run_id");
+      const run = runId ? f.runs.find((candidate) => candidate.id === runId) : undefined;
+      const inputDocumentIds = new Set<string>();
+      const collectInputDocumentIds = (value: unknown) => {
+        if (typeof value === "string" && value.startsWith("document://")) {
+          inputDocumentIds.add(value.slice("document://".length));
+          return;
+        }
+        if (Array.isArray(value)) {
+          value.forEach(collectInputDocumentIds);
+          return;
+        }
+        if (value && typeof value === "object") {
+          Object.values(value).forEach(collectInputDocumentIds);
+        }
+      };
+      collectInputDocumentIds(run?.input);
       const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
       const filtered = all.filter((document) => {
         if (purpose && document.purpose !== purpose) return false;
+        if (runId && document.run_id !== runId && !inputDocumentIds.has(document.id)) {
+          return false;
+        }
         return !q || document.name.toLowerCase().includes(q);
       });
       const limit = Number(url.searchParams.get("limit") ?? 25);
@@ -507,7 +527,22 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   {
     method: "GET",
     pattern: /^\/api\/packages\/agents\/[^/]+\/[^/]+$/,
-    handler: () => ({ status: 200, body: f.agentDetail }),
+    handler: (url) => {
+      const packageId = typedPackageId(url);
+      if (packageId === f.agentDetail.id) return { status: 200, body: f.agentDetail };
+      const name = packageId.split("/").pop() ?? packageId;
+      return {
+        status: 200,
+        body: {
+          ...f.agentDetail,
+          id: packageId,
+          display_name: name
+            .split("-")
+            .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(" "),
+        },
+      };
+    },
   },
   {
     // Served out of the same array the run LIST answers from, so a run cannot
@@ -523,7 +558,16 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   {
     method: "GET",
     pattern: /^\/api\/runs\/[^/]+\/logs$/,
-    handler: (_u, s) => ({ status: 200, body: { ...f.runLogs, data: list(f.runLogs.data, s) } }),
+    handler: (url, s) => {
+      const parts = url.pathname.split("/");
+      const runId = parts[parts.length - 2] ?? "";
+      const rows = f.runLogs.data.map((row, index) => ({
+        ...row,
+        id: index + 1,
+        runId,
+      }));
+      return { status: 200, body: { ...f.runLogs, data: list(rows, s) } };
+    },
   },
   {
     // `?kind=pinned` and `?kind=memory` are two calls against one endpoint, and
@@ -533,8 +577,13 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     pattern: /^\/api\/agents\/[^/]+\/[^/]+\/persistence$/,
     handler: (url, s) => {
       const kind = url.searchParams.get("kind");
-      const pinned = list(f.agentPersistence.pinned ?? [], s);
-      const memories = list(f.agentPersistence.memories ?? [], s);
+      const runId = url.searchParams.get("runId");
+      const pinned = list(f.agentPersistence.pinned ?? [], s).filter(
+        (row) => !runId || row.runId === runId,
+      );
+      const memories = list(f.agentPersistence.memories ?? [], s).filter(
+        (row) => !runId || row.runId === runId,
+      );
       if (kind === "pinned") return { status: 200, body: { pinned } };
       if (kind === "memory") return { status: 200, body: { memories } };
       return { status: 200, body: { pinned, memories } };
@@ -733,8 +782,13 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     }),
   },
   {
-    method: "POST",
+    method: "PUT",
     pattern: /^\/api\/notifications\/read-all$/,
+    handler: () => ({ status: 200, body: {} }),
+  },
+  {
+    method: "PUT",
+    pattern: /^\/api\/notifications\/read\/[^/]+$/,
     handler: () => ({ status: 200, body: {} }),
   },
 

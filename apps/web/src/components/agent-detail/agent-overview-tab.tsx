@@ -122,11 +122,11 @@ export function AgentOverviewTab({
   const { data: agentModel } = useAgentModel(packageId);
   const { data: proxies } = useProxies();
   const { data: agentProxy } = useAgentProxy(packageId);
-  const { data: schedules } = useSchedules(packageId);
-  const { data: connections } = useAgentConnectionReadiness(packageId);
-  const { data: memories } = useAgentMemories(packageId);
-  const { data: pinned } = useAgentPinned(packageId);
-  const readiness = useAgentReadiness(detail, agentModel?.modelId, models);
+  const { data: schedules, isError: schedulesError } = useSchedules(packageId);
+  const { data: connections, isError: connectionsError } = useAgentConnectionReadiness(packageId);
+  const { data: memories, isError: memoriesError } = useAgentMemories(packageId);
+  const { data: pinned, isError: pinnedError } = useAgentPinned(packageId);
+  const readiness = useAgentReadiness(detail, agentModel?.modelId, models, detail.input?.schema);
 
   const defaultModel = models?.find((model) => model.is_default);
   const resolvedModel = models?.find((model) => model.id === agentModel?.modelId) ?? defaultModel;
@@ -136,14 +136,18 @@ export function AgentOverviewTab({
   const inputCount = Object.keys(inputProperties).length;
   const configuredCount = Object.keys(detail.config.current ?? {}).length;
   const connectionRows = connections?.integrations ?? [];
+  const nextSchedule = schedules?.find((schedule) => schedule.enabled && schedule.next_run_at);
   const connectionCount = connectionRows.filter(
-    (row) => row.resolution?.resolved_connection_id || row.resolution?.status === "must_choose",
+    (row) => row.resolution?.resolved_connection_id,
   ).length;
+  const connectionsKnown =
+    detail.dependencies.integrations.length === 0 || (!!connections && !connectionsError);
   const ready =
     readiness.hasPrompt &&
     readiness.hasRequiredSkills &&
     readiness.hasRequiredConfig &&
     readiness.hasModel &&
+    connectionsKnown &&
     !connections?.blocks_run;
 
   const unknown = t("detail.overview.unknown");
@@ -151,7 +155,10 @@ export function AgentOverviewTab({
     {
       icon: CalendarClock,
       label: t("detail.overview.schedules"),
-      value: schedules ? t("detail.overview.itemCount", { count: schedules.length }) : unknown,
+      value:
+        schedules && !schedulesError
+          ? t("detail.overview.itemCount", { count: schedules.length })
+          : unknown,
     },
     { icon: Cpu, label: t("detail.overview.model"), value: resolvedModel?.label ?? unknown },
     {
@@ -166,7 +173,10 @@ export function AgentOverviewTab({
     {
       icon: Plug,
       label: t("detail.overview.connections"),
-      value: connections ? t("detail.overview.itemCount", { count: connectionCount }) : unknown,
+      value:
+        connections && !connectionsError
+          ? t("detail.overview.itemCount", { count: connectionCount })
+          : unknown,
     },
   ];
   const dependencyNodes = [
@@ -185,7 +195,13 @@ export function AgentOverviewTab({
       label: t("detail.overview.mcpServers"),
       value: t("detail.overview.itemCount", { count: detail.dependencies.mcp_servers.length }),
     },
-    { icon: Wrench, label: t("detail.overview.systemTools"), value: unknown },
+    {
+      icon: Wrench,
+      label: t("detail.overview.systemTools"),
+      value: Array.isArray(detail.manifest?.runtime_tools)
+        ? t("detail.overview.itemCount", { count: detail.manifest.runtime_tools.length })
+        : unknown,
+    },
   ];
 
   return (
@@ -352,9 +368,15 @@ export function AgentOverviewTab({
           >
             <span className="inline-flex items-center gap-2">
               <Database className="text-muted-foreground size-4" />
-              {t("detail.overview.pins", { count: pinned?.length ?? 0 })}
+              {pinned && !pinnedError
+                ? t("detail.overview.pins", { count: pinned.length })
+                : t("detail.overview.pinsUnknown")}
             </span>
-            <span>{t("detail.overview.notes", { count: memories?.length ?? 0 })}</span>
+            <span>
+              {memories && !memoriesError
+                ? t("detail.overview.notes", { count: memories.length })
+                : t("detail.overview.notesUnknown")}
+            </span>
             <span className="text-muted-foreground ml-auto text-xs">
               {t("detail.overview.openMemory")}
             </span>
@@ -389,11 +411,11 @@ export function AgentOverviewTab({
           <p className="text-muted-foreground text-xs font-semibold tracking-wide uppercase">
             {t("detail.overview.nextExecution")}
           </p>
-          {schedules?.find((schedule) => schedule.enabled) ? (
+          {nextSchedule?.next_run_at ? (
             <div className="mt-3 flex items-center gap-3 text-sm">
               <CalendarClock className="text-muted-foreground size-4" />
               <span className="truncate">
-                {schedules.find((schedule) => schedule.enabled)?.name}
+                {formatDateField(nextSchedule.next_run_at, "datetime")}
               </span>
               <Link
                 to={{ hash: "#configuration" }}
@@ -402,6 +424,8 @@ export function AgentOverviewTab({
                 {t("detail.overview.open")}
               </Link>
             </div>
+          ) : schedulesError ? (
+            <p className="text-muted-foreground mt-3 text-sm">{unknown}</p>
           ) : (
             <p className="text-muted-foreground mt-3 text-sm">{t("detail.overview.noSchedule")}</p>
           )}
