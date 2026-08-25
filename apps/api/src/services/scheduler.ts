@@ -24,7 +24,6 @@ import {
   extractRunAgentDenorm,
 } from "./run-pipeline.ts";
 import { getInstalledPackageSettings } from "./application-packages.ts";
-import type { IntegrationManifestCache } from "./integration-service.ts";
 import { resolveEffectiveInput } from "./input-resolution.ts";
 import { withoutLockedFields } from "@appstrate/core/input-resolution";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -549,20 +548,9 @@ export async function triggerScheduledRun(
     // resolution below, and the model/proxy this fire launches with.
     const packageSettings = await getInstalledPackageSettings(applicationId, packageId);
 
-    // One memo for this whole fire, threaded through BOTH stages exactly as the
-    // HTTP route does (`routes/runs.ts`). `resolveRunPreflight` resolves every
-    // declared integration to seed the pinned manifests readiness judges on, and
-    // `prepareAndExecuteRun` re-resolves them a few lines down to freeze the
-    // spawn versions. Without a shared Map each stage built its own and threw it
-    // away, so a schedule declaring org-local integrations paid the package +
-    // version + manifest SELECTs twice per fire. System integrations short-circuit
-    // in memory, which is why this was a cost and never a correctness bug.
-    const manifestCache: IntegrationManifestCache = new Map();
-
     // Shared preflight: validate readiness
     try {
       await resolveRunPreflight({
-        manifestCache,
         agent,
         applicationId,
         orgId,
@@ -666,7 +654,6 @@ export async function triggerScheduledRun(
         applicationId,
         scheduleConnectionOverrides: overrides.connectionOverrides ?? null,
         dependencyOverrides: overrides.dependencyOverrides ?? null,
-        manifestCache,
       });
     } catch (err) {
       if (err instanceof ApiError) {

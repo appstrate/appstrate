@@ -1303,23 +1303,31 @@ const SKIP_FILES = new Set<string>([
 ]);
 
 // The barrier. Both entries above are load-bearing and neither can be derived,
-// so the only honest assertion is that nobody added a third without reading the
-// paragraph above. Bump this deliberately, in the same commit as the entry, with
-// a comment saying why that file's routes may not be checked against the spec.
+// so the only honest assertion is that the set still holds exactly what was
+// reviewed. Checked with `!==`, not `>`: a narrowing is a SAFER state, but it
+// leaves this constant claiming a file is skipped when it is not, and a gate
+// whose own bookkeeping has drifted is the thing this branch exists to stop.
+// The message below therefore names the right repair for each direction.
 const SANCTIONED_SKIP_COUNT = 2;
 if (SKIP_FILES.size !== SANCTIONED_SKIP_COUNT) {
   exitCode = 1;
-  console.log(`\n  4b. SKIP_FILES guard`);
-  console.log(`  --------------------`);
+  const widened = SKIP_FILES.size > SANCTIONED_SKIP_COUNT;
+  console.log(`\n  5. Code ⊆ Spec — SKIP_FILES guard`);
+  console.log(`  ---------------------------------`);
   console.log(
-    `  ERROR  SKIP_FILES holds ${SKIP_FILES.size} entries, expected ${SANCTIONED_SKIP_COUNT}: ` +
+    `  ERROR  SKIP_FILES holds ${SKIP_FILES.size} entr${SKIP_FILES.size === 1 ? "y" : "ies"}, ` +
+      `expected ${SANCTIONED_SKIP_COUNT}: ` +
       `${[...SKIP_FILES].join(", ")}`,
   );
   console.log(
-    `\n  A whole-file skip hides every route in that file from the Code ⊆ Spec check, ` +
-      `and §5b cannot report what the spec never documented. Verify the file's ` +
-      `literal-path routes individually, or — if a skip is genuinely unavoidable — ` +
-      `raise SANCTIONED_SKIP_COUNT here with a justifying comment so the decision is reviewed.`,
+    widened
+      ? `\n  A whole-file skip hides every route in that file from the Code ⊆ Spec check, ` +
+          `and §5b cannot report what the spec never documented. Verify the file's ` +
+          `literal-path routes individually, or — if a skip is genuinely unavoidable — ` +
+          `raise SANCTIONED_SKIP_COUNT with a justifying comment so the decision is reviewed.`
+      : `\n  A skip was REMOVED, which is a widening of coverage and almost certainly ` +
+          `correct. Lower SANCTIONED_SKIP_COUNT to ${SKIP_FILES.size} so this constant ` +
+          `stops asserting a skip that no longer exists.`,
   );
 }
 
