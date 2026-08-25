@@ -18,20 +18,17 @@
 import { describe, it, expect } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { loadTokens, saveTokens } from "../src/lib/keyring.ts";
+import {
+  loadTokens,
+  saveTokens,
+  _isKeyringFactoryOverriddenForTesting,
+} from "../src/lib/keyring.ts";
 import { getProfile } from "../src/lib/config.ts";
 import {
   installFakeKeyring,
   seedLoggedInProfile,
   useTempConfigHome,
 } from "./helpers/auth-fixture.ts";
-
-/**
- * Profile name for the `restore()` probe below. Deliberately not a name any
- * real login would produce: the probe's post-restore read runs against the
- * developer's ACTUAL keyring, and must find nothing there.
- */
-const PROBE_PROFILE = "appstrate-fixture-restore-probe";
 
 const TOKENS = {
   accessToken: "tok-isolation",
@@ -61,58 +58,34 @@ describe("installFakeKeyring", () => {
     first.restore();
   });
 
-  it("restore() unwires the fake so later suites are not left holding it", async () => {
-    // Observing the unwiring means asking `keyring.ts` a question only the fake
-    // can answer, and then showing it stops answering. Two shapes were tried and
-    // rejected first:
+  it("restore() unwires the fake so later suites are not left holding it", () => {
+    // Three shapes were tried before this one:
     //
-    //  - comparing `install.store` identities across two installs, which is what
-    //    this test used to do. It proves nothing: `installFakeKeyring()`
-    //    allocates a fresh `Map` on every call, so the two stores are distinct
-    //    whether or not `restore()` did anything at all. Stubbing `restore()` to
-    //    an empty function left that version green while all fifteen suites
-    //    calling it in `afterEach` would have leaked a live fake to whatever ran
-    //    next in the same `bun test` process;
-    //  - reading `_keyringFactory` back from `keyring.ts`, which has no accessor
-    //    for it — and adding one to production source to satisfy a test is the
-    //    wrong trade when the production read path already exposes the answer.
+    //  - comparing `install.store` identities across two installs, which is
+    //    what this test used to do. It proves nothing: `installFakeKeyring()`
+    //    allocates a fresh `Map` per call, so the stores differ whether or not
+    //    `restore()` did anything. Stubbing `restore()` to an empty function
+    //    left that version green while all fifteen suites calling it in
+    //    `afterEach` would have leaked a live fake to whatever ran next;
+    //  - reading `_keyringFactory` back and comparing it to null, which cannot
+    //    work: `_setKeyringFactoryForTesting(null)` reinstalls a new closure
+    //    over `new Entry(...)` rather than clearing the variable;
+    //  - probing through `loadTokens` after the restore and expecting a miss.
+    //    That version passed locally and SEGFAULTED CI (Bun 1.3.14, exit 132):
+    //    the read reaches `@napi-rs/keyring` for real, and on a Linux runner
+    //    with no keyring daemon the native call crashes the process before any
+    //    JS runs. `APPSTRATE_ALLOW_PLAINTEXT_TOKENS` does not help — it gates a
+    //    thrown error, and a segfault is not one. A unit test has no business
+    //    touching the host's credential store at all.
     //
-    // So probe through `loadTokens` on a profile name no real credential store
-    // can carry. While the fake is wired the probe finds the seeded tokens; once
-    // it is unwired the read reaches the real `@napi-rs/keyring` (no entry for
-    // this profile) and then the file fallback (a temp XDG dir with no
-    // `appstrate/` subtree), so it must answer null. Reads only — a WRITE after
-    // `restore()` would land in the developer's Keychain, which is the reason
-    // the previous shape of this test asserted on nothing.
-    const home = useTempConfigHome("appstrate-cli-fixture-restore-");
-    await home.setup();
-    // A keyring that is installed but not serving (locked Keychain on an
-    // SSH-attached macOS, frozen gnome-keyring) makes the post-restore read
-    // THROW via `refuseBrokenKeyring` instead of answering null. Accepting the
-    // plaintext file fallback for the duration of the probe keeps this test
-    // about `restore()` rather than about the host's daemon; the temp XDG dir
-    // holds no credentials file, so the fallback still answers null.
-    const plaintextBefore = process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS;
-    process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS = "1";
+    // So ask `keyring.ts` directly, through the read half of the same seam.
+    expect(_isKeyringFactoryOverriddenForTesting()).toBe(false);
+
     const install = installFakeKeyring();
-    try {
-      await saveTokens(PROBE_PROFILE, TOKENS);
-      expect((await loadTokens(PROBE_PROFILE))?.accessToken).toBe("tok-isolation");
+    expect(_isKeyringFactoryOverriddenForTesting()).toBe(true);
 
-      install.restore();
-
-      // The fake no longer serves `keyring.ts`...
-      expect(await loadTokens(PROBE_PROFILE)).toBeNull();
-      // ...even though the store still holds the value. `restore()` unwires the
-      // fake, it does not clear it — that distinction is what makes the null
-      // above a statement about the wiring and not about the data.
-      expect(install.store.get(PROBE_PROFILE)).toContain("tok-isolation");
-    } finally {
-      install.restore();
-      if (plaintextBefore === undefined) delete process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS;
-      else process.env.APPSTRATE_ALLOW_PLAINTEXT_TOKENS = plaintextBefore;
-      await home.teardown();
-    }
+    install.restore();
+    expect(_isKeyringFactoryOverriddenForTesting()).toBe(false);
   });
 });
 
