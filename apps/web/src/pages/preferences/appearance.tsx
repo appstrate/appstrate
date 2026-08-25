@@ -10,6 +10,7 @@ import {
 } from "@appstrate/ui/components/select";
 import { useTheme } from "../../stores/theme-store";
 import { useUpdateLanguage } from "../../hooks/use-profile";
+import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
 
 export function PreferencesAppearancePage() {
   const { t, i18n } = useTranslation(["settings", "common"]);
@@ -17,49 +18,35 @@ export function PreferencesAppearancePage() {
   const updateLanguage = useUpdateLanguage();
 
   return (
-    <>
-      <div className="text-muted-foreground mb-4 text-sm font-medium">{t("preferences.theme")}</div>
-      <div className="border-border bg-card mb-4 rounded-lg border p-5">
-        <div className="flex items-center gap-3">
-          <div className="flex-1">
-            <Select value={theme} onValueChange={(v) => setTheme(v as "light" | "dark" | "system")}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="light">{t("preferences.themeLight")}</SelectItem>
-                <SelectItem value="dark">{t("preferences.themeDark")}</SelectItem>
-                <SelectItem value="system">{t("preferences.themeSystem")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </div>
+    <SettingsGroup title={t("preferences.interface")}>
+      <SettingRow variant="field" label={t("preferences.theme")}>
+        <Select value={theme} onValueChange={(v) => setTheme(v as "light" | "dark" | "system")}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="light">{t("preferences.themeLight")}</SelectItem>
+            <SelectItem value="dark">{t("preferences.themeDark")}</SelectItem>
+            <SelectItem value="system">{t("preferences.themeSystem")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </SettingRow>
 
-      <div className="text-muted-foreground mb-4 text-sm font-medium">
-        {t("preferences.language")}
-      </div>
-      <div className="border-border bg-card mb-4 rounded-lg border p-5">
-        <div className="flex items-center gap-3">
-          <div className="flex-1">
-            <Select
-              value={i18n.language}
-              onValueChange={(lng) =>
-                updateLanguage.mutate({ body: { language: lng as "fr" | "en" } })
-              }
-              disabled={updateLanguage.isPending}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="fr">{t("preferences.langFr")}</SelectItem>
-                <SelectItem value="en">{t("preferences.langEn")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </div>
-    </>
+      <SettingRow variant="field" label={t("preferences.language")}>
+        <Select
+          value={i18n.language}
+          onValueChange={(lng) => updateLanguage.mutate({ body: { language: lng as "fr" | "en" } })}
+          disabled={updateLanguage.isPending}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="fr">{t("preferences.langFr")}</SelectItem>
+            <SelectItem value="en">{t("preferences.langEn")}</SelectItem>
+          </SelectContent>
+        </Select>
+      </SettingRow>
+    </SettingsGroup>
   );
 }

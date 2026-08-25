@@ -71,6 +71,89 @@ export const session = {
   },
 };
 
+/** Better Auth owns this wire shape, so it is not part of the OpenAPI schema. */
+export const linkedAccounts = [
+  { providerId: "credential", accountId: profile.email },
+  { providerId: "google", accountId: profile.email },
+];
+
+/** Personal CLI sessions reuse the admin rows without the owning-member fields. */
+export const personalCliSessions: Json200<"/api/auth/cli/sessions", "get"> = {
+  object: "list",
+  hasMore: false,
+  data: [
+    {
+      familyId: "cli_personal_lab_1",
+      deviceName: "MacBook Pro",
+      userAgent: "appstrate-cli/2.4.0 (darwin arm64)",
+      createdIp: "24.201.44.10",
+      lastUsedIp: "24.201.44.10",
+      lastUsedAt: ago(12),
+      createdAt: ago(40_000),
+      expiresAt: ago(-200_000),
+      current: false,
+    },
+    {
+      familyId: "cli_personal_lab_2",
+      deviceName: "GitHub Actions",
+      userAgent: "appstrate-action/1.3.0",
+      createdIp: "20.205.243.166",
+      lastUsedIp: "20.205.243.166",
+      lastUsedAt: ago(1_200),
+      createdAt: ago(80_000),
+      expiresAt: ago(-100_000),
+      current: false,
+    },
+  ],
+};
+
+/** Personal connection management needs healthy and reconnect-required rows. */
+export const myConnections: Json200<"/api/me/connections", "get"> = {
+  object: "list",
+  hasMore: false,
+  data: [
+    {
+      kind: "integration",
+      source_id: "@appstrate/google-drive",
+      display_name: "Google Drive",
+      logo: "",
+      total_connections: 2,
+      connections: [
+        {
+          connection_id: "conn_personal_lab_1",
+          kind: "integration",
+          label: "Drive principal",
+          scopes_granted: ["drive.readonly", "drive.file"],
+          connected_at: ago(90_000),
+          needs_reconnection: false,
+          expiresAt: null,
+          identity: profile.email,
+          reused_by_agents: 3,
+          auth_key: "drive",
+          shared_with_org: true,
+          org: { id: ORG_ID, name: "Tractr" },
+          application: { id: APP_ID, name: "Production" },
+        },
+        {
+          connection_id: "conn_personal_lab_2",
+          kind: "integration",
+          label: "Archives",
+          scopes_granted: ["drive.readonly"],
+          connected_at: ago(140_000),
+          needs_reconnection: true,
+          expiresAt: ago(2_000),
+          identity: "archives@tractr.net",
+          reused_by_agents: 1,
+          auth_key: "drive",
+          shared_with_org: false,
+          org: { id: ORG_ID, name: "Tractr" },
+          application: { id: APP_ID, name: "Production" },
+        },
+      ],
+    },
+  ],
+};
+
 export const orgs: Json200<"/api/orgs", "get"> = {
   object: "list",
   hasMore: false,

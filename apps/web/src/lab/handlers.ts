@@ -96,7 +96,28 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     pattern: /^\/api\/auth\/get-session$/,
     handler: () => ({ status: 200, body: f.session, delayMs: 40 }),
   },
+  {
+    method: "GET",
+    pattern: /^\/api\/auth\/list-accounts$/,
+    handler: () => ({ status: 200, body: f.linkedAccounts }),
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/auth\/cli\/sessions$/,
+    handler: (_u, s) => ({
+      status: 200,
+      body: { ...f.personalCliSessions, data: list(f.personalCliSessions.data, s) },
+    }),
+  },
   { method: "GET", pattern: /^\/api\/profile$/, handler: () => ({ status: 200, body: f.profile }) },
+  {
+    method: "GET",
+    pattern: /^\/api\/me\/connections$/,
+    handler: (_u, s) => ({
+      status: 200,
+      body: { ...f.myConnections, data: list(f.myConnections.data, s) },
+    }),
+  },
   {
     method: "GET",
     pattern: /^\/api\/orgs$/,

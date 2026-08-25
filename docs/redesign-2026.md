@@ -2453,6 +2453,17 @@ Webhooks were unchanged; API Keys is the one intentional new table, and CLI's
 tier-three IP and connection date are now reachable instead of permanently
 absent from the settings dialog.
 
+**Personal preferences re-entered the lab, 25 August.** Appearance now uses the
+same field-row grammar as General: Theme and Language each have one control on
+one surface rather than a bordered select inside a second bordered card.
+Security, Devices and My connections looked empty only because their Better
+Auth, personal CLI and user-connection reads had no lab handlers. Typed nominal
+fixtures now exercise two CLI device kinds plus healthy and reconnect-required
+connections; the Better Auth account list keeps its native wire shape because
+it is outside the OpenAPI document. All five preference destinations are
+permanent harness screens, so those holes cannot disappear behind an unvisited
+route again.
+
 **12. Accessibility, which nothing here has ever checked.** The branch
 re-declares ARIA roles on the table because this file demands it, and that is
 the whole of it: not one contrast ratio, keyboard path or touch target has ever
