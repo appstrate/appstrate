@@ -19,8 +19,9 @@
  *  3. a card-local `connection_update` SSE stream (cross-tab/device backstop).
  * The first to fire wins; `resumed` guards against a double resume.
  *
- * The callback page contract lives in `apps/api/src/lib/oauth-popup-html.ts`
- * (channel name + message type must match the literals below).
+ * The callback page contract — channel name, message type, payload and the
+ * origin policy both directions must agree on — lives in
+ * `@appstrate/core/connect-handshake`.
  *
  * Layout invariant: the card is mounted from the FIRST frame of the initiate
  * tool call (before the auth url exists) and keeps the SAME two-row geometry
@@ -33,9 +34,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAui } from "@assistant-ui/react";
 import { AlertTriangleIcon, CheckIcon, Loader2Icon } from "lucide-react";
 import { encodePackageIdPath } from "@appstrate/core/naming";
+import { INTEGRATION_CONNECT_CHANNEL } from "@appstrate/core/connect-handshake";
 import { Button } from "@appstrate/ui/components/button";
 import { useChatHeaders } from "./runtime-context.ts";
 import {
+  acceptsCompletionMessage,
   claimResume,
   completionMatches,
   encodeResume,
@@ -43,9 +46,6 @@ import {
   type ResumeMeta,
 } from "./auth-offer.ts";
 import { IntegrationIcon } from "./integration-icon.tsx";
-
-const BROADCAST_CHANNEL = "appstrate_integration";
-const MESSAGE_TYPE = "appstrate:integration_connection";
 
 type Phase = "idle" | "pending" | "done" | "connected" | "error";
 
@@ -201,22 +201,24 @@ export function OAuthConnectCard({
     // Correlation (state AND packageId) lives in `completionMatches` — see its
     // doc for why packageId is required: the hosted-connect offer carries no
     // state, so without the package filter every card accepted every completion.
-    const matches = (d: CompletionDetail | undefined) =>
-      completionMatches(d, { messageType: MESSAGE_TYPE, state, packageId });
+    const card = { state, packageId };
+    const resume = (d: CompletionDetail) => complete(d.ok !== false, d.error);
 
+    // `acceptsCompletionMessage` validates `ev.origin` before the payload — a
+    // `message` listener that skips that check authenticates nothing.
     const onMessage = (ev: MessageEvent) => {
-      const d = ev.data as CompletionDetail | undefined;
-      if (matches(d)) complete(d!.ok !== false, d!.error);
+      if (acceptsCompletionMessage(ev, window.location.origin, card)) resume(ev.data);
     };
     window.addEventListener("message", onMessage);
 
     let bc: BroadcastChannel | null = null;
     if (typeof BroadcastChannel !== "undefined") {
       try {
-        bc = new BroadcastChannel(BROADCAST_CHANNEL);
+        // Same-origin by spec, so there is no origin to validate here.
+        bc = new BroadcastChannel(INTEGRATION_CONNECT_CHANNEL);
         bc.onmessage = (ev) => {
           const d = ev.data as CompletionDetail | undefined;
-          if (matches(d)) complete(d!.ok !== false, d!.error);
+          if (completionMatches(d, card)) resume(d!);
         };
       } catch {
         bc = null;

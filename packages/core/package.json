@@ -94,7 +94,8 @@
     "./bearer": "./src/bearer.ts",
     "./oauth-bearer-swap": "./src/oauth-bearer-swap.ts",
     "./url": "./src/url.ts",
-    "./run-and-wait-client": "./src/run-and-wait-client.ts"
+    "./run-and-wait-client": "./src/run-and-wait-client.ts",
+    "./connect-handshake": "./src/connect-handshake.ts"
   },
   "dependencies": {
     "@afps-spec/schema": "^0.6.1",

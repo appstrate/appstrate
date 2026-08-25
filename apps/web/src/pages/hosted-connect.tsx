@@ -6,6 +6,7 @@ import { Spinner } from "../components/spinner";
 import { CredentialFields } from "../components/integration-connect/credential-fields";
 import { IntegrationIcon } from "../components/integration-icon";
 import { client, type paths } from "../api/client";
+import { publishConnectCompletion } from "../lib/connect-completion";
 import type { IntegrationManifestAuth } from "../hooks/use-integrations";
 
 /**
@@ -27,11 +28,6 @@ import type { IntegrationManifestAuth } from "../hooks/use-integrations";
  * leftover localStorage selection is never read.
  */
 
-// Must match `apps/api/src/lib/oauth-popup-html.ts` so the chat ConnectCard
-// (postMessage / BroadcastChannel listener) auto-resumes on success.
-const INTEGRATION_BROADCAST_CHANNEL = "appstrate_integration";
-const INTEGRATION_MESSAGE_TYPE = "appstrate:integration_connection";
-
 /**
  * The spec leaves the manifest `auth` block open (`additionalProperties`), so
  * the generated type is a bare record — narrow it for `<CredentialFields>`.
@@ -42,29 +38,6 @@ type ConnectContext = Omit<
 > & { auth: IntegrationManifestAuth };
 
 type Phase = "loading" | "form" | "submitting" | "done" | "error";
-
-function signalSuccess(packageId: string): void {
-  const detail = { type: INTEGRATION_MESSAGE_TYPE, ok: true, packageId };
-  try {
-    // Broadcast to the opener regardless of origin (`"*"`), matching the OAuth
-    // callback page (`oauth-popup-html.ts`). The payload is a non-secret
-    // completion ping (`{ type, ok, packageId }`) — no credential ever crosses
-    // it — and a same-origin lock would silently starve EMBEDDED integrators
-    // (cross-origin opener) of the signal, leaving them only the popup-close
-    // fallback. Our own SPA listener still validates `e.origin` on receipt, so
-    // a wide targetOrigin here doesn't weaken what we trust inbound.
-    if (window.opener) window.opener.postMessage(detail, "*");
-  } catch {
-    /* opener gone — fall through to the channel */
-  }
-  try {
-    const bc = new BroadcastChannel(INTEGRATION_BROADCAST_CHANNEL);
-    bc.postMessage(detail);
-    bc.close();
-  } catch {
-    /* BroadcastChannel unsupported — the SSE backstop still fires server-side */
-  }
-}
 
 export function HostedConnectPage() {
   const { t } = useTranslation("settings");
@@ -113,7 +86,11 @@ export function HostedConnectPage() {
         params: { header: { "x-connect-csrf": context.csrf } },
         body: { credentials: values },
       });
-      signalSuccess(context.package_id);
+      publishConnectCompletion(
+        { ok: true, packageId: context.package_id },
+        window.opener as Window | null,
+        window.location.origin,
+      );
       setPhase("done");
       // Close the popup/tab after a short confirmation, mirroring the OAuth page.
       setTimeout(() => {

@@ -25,30 +25,15 @@
  */
 
 import { escapeHtml } from "@appstrate/core/html";
+import {
+  INTEGRATION_CONNECT_CHANNEL,
+  buildIntegrationConnectCompletion,
+  integrationConnectOrigin,
+  type IntegrationConnectCompletion,
+} from "@appstrate/core/connect-handshake";
 import { getPublicAppOrigin } from "./public-url.ts";
 
-/**
- * Target origin for the `postMessage` to `window.opener`. Scoping the message
- * to the platform's own origin — instead of the wildcard `"*"` — stops any
- * unrelated page that happened to open `auth_url` from reading the `state` +
- * `packageId` the callback broadcasts. The opener is always the dashboard SPA
- * served from `APP_URL`, so its origin is the correct (and only) audience.
- */
-function appOrigin(): string {
-  return getPublicAppOrigin();
-}
-
-/** Channel name shared with the chat auth card (`packages/module-chat`). */
-const INTEGRATION_BROADCAST_CHANNEL = "appstrate_integration";
-/** postMessage / BroadcastChannel message type the chat card listens for. */
-const INTEGRATION_MESSAGE_TYPE = "appstrate:integration_connection";
-
-interface OAuthCallbackDetail {
-  /** Signed state echoed by the provider — correlates the waiting card. */
-  state?: string | undefined;
-  /** `@scope/name` of the integration just connected. */
-  packageId?: string | undefined;
-}
+type OAuthCallbackDetail = Pick<IntegrationConnectCompletion, "state" | "packageId">;
 
 const LINE_SEPARATOR = String.fromCharCode(0x2028);
 const PARA_SEPARATOR = String.fromCharCode(0x2029);
@@ -67,14 +52,18 @@ function jsonForScript(value: unknown): string {
     .join("\\u2029");
 }
 
-function page(payload: Record<string, unknown>, body: string, closeDelayMs: number): string {
-  const data = jsonForScript({ type: INTEGRATION_MESSAGE_TYPE, ...payload });
-  const targetOrigin = JSON.stringify(appOrigin());
+function page(
+  payload: Parameters<typeof buildIntegrationConnectCompletion>[0],
+  body: string,
+  closeDelayMs: number,
+): string {
+  const data = jsonForScript(buildIntegrationConnectCompletion(payload));
+  const targetOrigin = JSON.stringify(integrationConnectOrigin(getPublicAppOrigin()));
   return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Appstrate</title><style>body{font-family:system-ui,-apple-system,sans-serif;display:flex;min-height:100vh;margin:0;align-items:center;justify-content:center;background:#0b0b0c;color:#e5e5e5}main{text-align:center;padding:2rem;max-width:28rem}.ok{color:#4ade80}.err{color:#f87171}p{line-height:1.5}</style></head><body><main>${body}</main><script>
 (function(){
   var detail = ${data};
   try { if (window.opener) window.opener.postMessage(detail, ${targetOrigin}); } catch (e) {}
-  try { var bc = new BroadcastChannel(${JSON.stringify(INTEGRATION_BROADCAST_CHANNEL)}); bc.postMessage(detail); bc.close(); } catch (e) {}
+  try { var bc = new BroadcastChannel(${JSON.stringify(INTEGRATION_CONNECT_CHANNEL)}); bc.postMessage(detail); bc.close(); } catch (e) {}
   setTimeout(function(){ try { window.close(); } catch (e) {} }, ${closeDelayMs});
 })();
 </script></body></html>`;

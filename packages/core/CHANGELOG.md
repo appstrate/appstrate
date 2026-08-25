@@ -275,6 +275,21 @@ additionalProperties: false}` and `{allOf: [{required: [...]}]}` were all
   is how one runtime keeps steering models toward a name #1177's vocabulary
   made attractive. It supplies no trailing punctuation.
 
+- **`./connect-handshake`** — `INTEGRATION_CONNECT_CHANNEL`,
+  `INTEGRATION_CONNECT_MESSAGE_TYPE`, `IntegrationConnectCompletion`,
+  `buildIntegrationConnectCompletion`, `integrationConnectOrigin`,
+  `isIntegrationConnectCompletion` and `isIntegrationConnectMessage`. The
+  completion handshake an integration-connect flow uses to tell the surface
+  that started it that the connection landed — the `BroadcastChannel` name, the
+  `postMessage` type, the payload, and the origin policy for both directions.
+  These were private constants duplicated across the API, the SPA and the chat
+  module, kept aligned by "must match" comments, and the two senders had
+  already drifted: one scoped its `postMessage` to the platform origin, the
+  other posted to `"*"`. Additive; nothing is removed or renamed. Out-of-tree
+  modules that render their own connect surface should read the constants from
+  here rather than re-declaring them, and MUST validate `event.origin` with
+  `isIntegrationConnectMessage` before acting on a `message` event.
+
 ### Changed
 
 - **`sanitizeFilename` truncates on whole code points** (`./naming`), and
