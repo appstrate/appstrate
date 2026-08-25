@@ -2399,7 +2399,7 @@ export interface paths {
         put?: never;
         /**
          * Test model connection
-         * @description Test that the model's API key and base URL are valid by making a lightweight request to the provider. Rate limited to 5 requests per minute.
+         * @description Test that the model's API key and base URL are valid by making a lightweight request to the provider. Rate limited to 5 requests per minute. Not available for a managed (aliased) model: the result would report the hidden backing's round-trip time and upstream status.
          */
         post: operations["testModel"];
         delete?: never;
@@ -13839,7 +13839,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Model updated — the bare updated model resource (same shape as `GET`/`list`). */
+            /** @description Model updated — the bare updated model resource (same shape as `GET`/`list`). For a managed (aliased) model the binding fields are nulled, exactly as on `list`. */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -13907,6 +13907,7 @@ export interface operations {
                     "application/json": components["schemas"]["TestResult"];
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];

@@ -909,6 +909,66 @@ describe("Models API", () => {
       });
       expect(res.status).toBe(400);
     });
+
+    it("projects a model alias on the update response — parity with the list (Threat A)", async () => {
+      const credentialId = await createProviderKey();
+      // A distinctive backing id so the payload grep below is unambiguous.
+      const realModelId = "secret-backing-put-7k4v";
+
+      const create = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Appstrate Medium",
+          modelId: realModelId,
+          credentialId,
+          aliased: true,
+        }),
+      });
+      expect(create.status).toBe(201);
+      const created = (await create.json()) as any;
+
+      // A no-op update: the caller supplies NOTHING about the binding. This is
+      // what separates PUT from POST — the create response may echo the
+      // binding back because the operator just sent it in the request body,
+      // but an `{ enabled }` update discloses fields the caller never had.
+      const put = await app.request(`/api/models/${created.id}`, {
+        method: "PUT",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ enabled: true }),
+      });
+      expect(put.status).toBe(200);
+      const updated = (await put.json()) as any;
+
+      // The update response must hide exactly what the list response hides.
+      const list = await app.request("/api/models", { headers: authHeaders(ctx) });
+      const listRow = (((await list.json()) as any).data as any[]).find((m) => m.id === created.id);
+      expect(listRow).toBeDefined();
+      for (const field of [
+        "apiShape",
+        "providerId",
+        "providerName",
+        "baseUrl",
+        "modelId",
+        "credentialId",
+        "contextWindow",
+        "maxTokens",
+        "cost",
+      ]) {
+        expect(listRow[field]).toBeNull();
+        expect(updated[field]).toBeNull();
+      }
+
+      // The alias identity itself still round-trips — projection, not erasure.
+      expect(updated.id).toBe(created.id);
+      expect(updated.label).toBe("Appstrate Medium");
+      expect(updated.aliased).toBe(true);
+      expect(updated.enabled).toBe(true);
+
+      // Hard guarantee: the real upstream id never appears anywhere in the
+      // update payload (mirrors the list-projection test above).
+      expect(JSON.stringify(updated)).not.toContain(realModelId);
+    });
   });
 
   describe("PUT /api/models/default", () => {
@@ -1423,6 +1483,63 @@ describe("Models API", () => {
       // The owner passes the permission guard; the body may then succeed or
       // surface a provider error, but it is never an authorization failure.
       expect(res.status).not.toBe(403);
+    });
+  });
+
+  describe("POST /api/models/:id/test — model alias", () => {
+    it("refuses the connection test for an alias (timing + upstream-status oracle)", async () => {
+      const credentialId = await createProviderKey();
+      const realModelId = "secret-backing-test-9m2p";
+
+      const create = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "Appstrate Medium",
+          modelId: realModelId,
+          credentialId,
+          aliased: true,
+        }),
+      });
+      expect(create.status).toBe(201);
+      const created = (await create.json()) as any;
+
+      const res = await app.request(`/api/models/${created.id}/test`, {
+        method: "POST",
+        headers: authHeaders(ctx),
+      });
+
+      // Refused server-side, BEFORE any upstream fetch: a `{ ok, latency,
+      // status }` answer would report the backing's own round-trip time and
+      // HTTP status back to the caller, and spend the platform credential
+      // doing it.
+      expect(res.status).toBe(400);
+      const body = await res.text();
+      expect(body).not.toContain(realModelId);
+      // The refusal names no backing detail either.
+      expect(body).not.toContain("openai");
+      expect(body).not.toContain("api.openai.com");
+    });
+
+    it("still tests a NON-aliased model (the refusal is alias-scoped)", async () => {
+      const key = await seedOrgModelProviderKey({
+        orgId: ctx.orgId,
+        apiShape: "openai",
+        baseUrl: "https://api.openai.com",
+      });
+      const model = await seedOrgModel({
+        orgId: ctx.orgId,
+        credentialId: key.id,
+        modelId: "gpt-4o",
+        label: "Plain model",
+      });
+      const res = await app.request(`/api/models/${model.id}/test`, {
+        method: "POST",
+        headers: authHeaders(ctx),
+      });
+      // The upstream call may succeed or fail on its own merits; what must NOT
+      // happen is the alias refusal.
+      expect(res.status).not.toBe(400);
     });
   });
 });

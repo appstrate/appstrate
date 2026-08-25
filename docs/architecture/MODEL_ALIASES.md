@@ -23,10 +23,15 @@ is that no Appstrate surface hands the backing over.
 There are two threat models against that requirement.
 
 - **Threat A — the dashboard / API caller.** A user reading `/api/models`, a run
-  detail, or calling `/api/llm-proxy/*` must never learn the backing
-  provider/endpoint/model id. **Closed.** The read projection leaves only the
-  alias identity plus the portable generation-support vector (see
-  `projectAliasedModel`); every binding, pricing and catalog field is `null`.
+  detail, or calling `/api/llm-proxy/*` must not be HANDED the backing
+  provider/endpoint/model id. **Partially closed, and it cannot be fully
+  closed.** The read projection leaves only the alias identity plus the portable
+  generation-support vector (see `projectAliasedModel`); every binding, pricing
+  and catalog field is `null`. But a caller who can send arbitrary prompts
+  through the gateway identifies the vendor anyway, and a structural oracle in
+  the gateway's own routing identifies the protocol family before any prompt is
+  sent. Written out in full under
+  "[Threat A — what alias masking actually buys](#threat-a--what-alias-masking-actually-buys)".
 - **Threat B — the agent runtime (adversarial code inside the container).** The
   agent needs _some_ protocol information to format requests. It gets a
   vendor-neutral dialect against the sidecar's own endpoint, with no rate card.
@@ -378,6 +383,251 @@ carve-outs are deliberate, and one gap is structural:
   each other — never to the platform.
 
 In all four, **ship the platform before or with the runtime images.**
+
+## Threat A — what alias masking actually buys
+
+This section used to say **"Closed."** That was false, and the falsehood was the
+dangerous part: a reader planning a feature on top of aliases would have taken
+"the org cannot learn the vendor" as a property they could rely on. It is not
+one. What follows is the honest boundary.
+
+### Status: the platform does not disclose the backing. It cannot conceal it.
+
+**Vendor identity is not cryptographically or structurally concealed from a
+caller who can send arbitrary prompts through an aliased model.** It is not a
+matter of a leak still to be plugged — there is no version of this design in
+which it is concealed, because the thing being hidden is the identity of the
+system generating the text, and the caller is reading the text.
+
+The order of magnitude, so nobody has to guess: published text-only
+fingerprinting (LLMmap, USENIX Security 2025) identifies **42 model versions at
+over 95% accuracy within 8 interactions**, using nothing but the response
+strings — no headers, no timing, no token counts. Passive stylometry, with no
+chosen prompts at all, separates five major vendors at 95%+. Against that, a
+field rewrite on the response body is not a weak defence; it is not a defence.
+Of the twelve published attack families in that literature, exactly **one** —
+reading an identifying field out of the response envelope — is defeated by
+hiding response fields. The other eleven read the generated text, the timing, or
+the token boundaries.
+
+So the requirement is stated the way the top of this page states it: **the
+platform does not hand the backing over**. Not: the org cannot find out.
+
+### What IS masked
+
+Real, and worth keeping — each of these is a place the vendor's name would
+otherwise appear in an Appstrate surface for free:
+
+| masked                     | where                                                                           |
+| -------------------------- | ------------------------------------------------------------------------------- |
+| backing model id           | `projectAliasedModel` nulls `modelId`; `swapResponseModelJson` rewrites `model` |
+| provider id / display name | `projectAliasedModel` nulls `providerId` / `providerName`                       |
+| endpoint hostname          | `projectAliasedModel` nulls `baseUrl`; the gateway originates the upstream call |
+| rate card / context window | `projectAliasedModel` nulls `cost`, `contextWindow`, `maxTokens`                |
+| protocol family on the DTO | `projectAliasedModel` nulls `apiShape` (but see the oracle below)               |
+| provider error prose       | replaced wholesale by `syntheticAliasErrorBody` — never forwarded               |
+| vendor response headers    | reduced to `LLM_PASSTHROUGH_RESPONSE_HEADERS`                                   |
+| the agent container's env  | pinned as an exact set by `packages/runner-pi/test/alias-env-allowlist.test.ts` |
+
+The env surface is the one item on this list with a **CI gate**, and that is why
+it is the one item that stays closed as the code moves: any new variable fails
+the test until someone adds it deliberately.
+
+Two surfaces were added to that list by the same change that made this page
+honest, both on `/api/models` and both reachable with `models:write` (an
+admin/owner grant, or an API key minted with the scope):
+
+- **`PUT /api/models/{id}` now projects its response.** It returned
+  `getOrgModel()` raw, so a no-op `PUT {"enabled":true}` answered with
+  `providerId`, `providerName`, `baseUrl`, `apiShape`, `contextWindow` and
+  `cost`. Its only guard was `isSystemModel`, which rejects env-declared models
+  and says nothing about a DB-row alias. The asymmetry with `POST` is kept
+  deliberately: a create response echoes a binding the operator just sent, an
+  update response discloses one the caller never held.
+- **`POST /api/models/{id}/test` now refuses an alias** with a 400, before any
+  fetch. It issued a live `GET {realBaseUrl}/models` on the platform credential
+  and returned `{ ok, latency, status }` — the backing's own round-trip time and
+  upstream HTTP status, i.e. two oracles and an unmetered spend of a platform
+  credential. The dashboard hides the button for aliased rows to match.
+
+Neither was a fingerprinting attack; both simply handed the binding over. They
+are the kind of leak worth fixing precisely because they are cheap to fix.
+
+### What is NOT masked
+
+Ordered by how cheap the attack is. The first item needs no prompt at all.
+
+1. **The `apiShape` route-family oracle — structural, pre-prompt, ~3 requests.**
+   The gateway mounts one route per protocol family from `LLM_PROXY_ROUTES`
+   (`packages/runner-pi/src/llm-proxy-routes.ts:63`) — `openai-completions`,
+   `anthropic-messages`, `mistral-conversations`. `resolvePresetForOrg`
+   (`apps/api/src/services/llm-proxy/core.ts:358`) rejects a preset whose real
+   `apiShape` is not the route's, so posting the same alias id to each route in
+   turn answers "wrong family" (400) on all but one. The 400's _message_ is
+   masked for an alias — `LlmProxyModelApiMismatchError` deliberately omits
+   `actual` — but masking the message does not mask the **signal**: 400-versus-
+   proceed is itself the answer, and three families are separated in at most
+   three requests (two, then inference by elimination). The repo's own
+   `apps/api/test/integration/routes/llm-proxy.test.ts` asserts both halves of
+   that oracle, one test apart, while believing it closed.
+   `projectAliasedModel` nulling `apiShape` on the DTO does not touch it. **The
+   permission required is `llm-proxy:call`, which is an ordinary
+   `MEMBER_PERMISSIONS` grant** (`apps/api/src/lib/permissions.ts:191`) — not an
+   admin capability. Any member of the org can run this.
+
+2. **Response body fields outside `model`.** `rewriteModelRealToAlias`
+   (`packages/core/src/model-swap.ts:83`) rewrites keys literally named `model`,
+   at three fixed locations (top level, `message`, `response`). Every other key
+   in a 2xx body is forwarded verbatim, including ones that name the vendor
+   outright by their own key name: OpenAI's `system_fingerprint` and
+   `service_tier`, the `id` prefix (`chatcmpl-` vs Anthropic's `msg_`), and
+   DeepSeek's top-level `prompt_cache_hit_tokens` — which the metering code
+   already reads (`apps/api/src/services/llm-proxy/openai.ts:67`), so it is
+   known to arrive. These are the cheap ones, and they are gifts: they identify
+   the vendor with no statistics and no chosen prompts.
+
+   Closing them is a **denylist over a set nobody can enumerate** — that set is
+   a property of the vendors' live APIs, not of this source — which is exactly
+   the argument the canonical-dialect section makes for the sidecar. It is worth
+   trimming the known gifts anyway; it is not worth believing the trim is a
+   boundary. (Note that `google-*`, `azure-*` and `bedrock-*` cannot be alias
+   backings at all — `isAliasBackingShape` rejects them — so Google's
+   `modelVersion`, the textbook case of an identifying key not named `model`,
+   is out of scope here by construction rather than by masking.)
+
+3. **SSE frame structure.** The gateway proxies the upstream stream. Anthropic
+   emits `message_start` / `content_block_delta` / `message_delta`; the OpenAI
+   families emit `chat.completion.chunk` objects with `choices[].delta`. The
+   event names and the frame shape are the protocol, and they are not rewritten.
+   This is a restatement of (1) that does not even need the probe requests.
+
+4. **Inter-token timing.** Time-to-first-token and sustained inter-token latency
+   are stable per backing at a given load. Nothing in the proxy path normalises
+   them, and normalising them would mean buffering the stream, which is the
+   feature.
+
+5. **Tokenizer boundaries.** `usage.input` for a controlled probe string is a
+   tokenizer fingerprint — a fixed probe tokenizes to a different integer under
+   each vocabulary, and a handful of probes separates the families. The count is
+   load-bearing for billing on this path exactly as it is for the container
+   (see tier 2 below): it cannot be withheld.
+
+6. **Stylometry and direct interrogation.** The caller can ask the model who it
+   is, and can fingerprint refusal style, formatting tics, and system-prompt
+   behaviour. This is item (1) of the LLMmap result and needs no platform
+   surface at all.
+
+Items 3–6 are the same irreducible tier as
+"[Threat B in two tiers](#threat-b-in-two-tiers)" §Tier 2, reached through a
+different door. The split in that section — _what the platform discloses_ versus
+_what an observer can infer_ — is the right frame for Threat A too, and this
+section is that frame applied to the gateway/dashboard caller.
+
+### Market context
+
+**No commercial LLM gateway claims vendor opacity.** OpenRouter, LiteLLM,
+Portkey, Cloudflare AI Gateway, Kong, Braintrust, Vercel AI Gateway and AWS
+Bedrock all disclose the upstream vendor — most of them advertise it as a
+feature, because "you can see and choose the provider" is what a gateway sells.
+
+The most instructive case is Bedrock, because AWS built the industry's most
+complete normalisation layer and then documented its limit. The Converse API
+works, in AWS's own description, by **dropping most model-native fields by
+default** — and AWS then shipped `additionalModelResponseFieldPaths`, an escape
+hatch that reads arbitrary JSON Pointers into the vendor's untouched native
+response. The normalised view is a convenience, not a boundary, and the vendor's
+own payload is still there behind it. That is the same shape as this design's
+`model`-only rewrite, with a decade more engineering behind it.
+
+Nobody sells this property. That is evidence about the property, not about the
+competition.
+
+### So what is alias masking FOR?
+
+It is worth having. It is not worth misdescribing.
+
+**Good for:**
+
+- **Casual inspection.** The dashboard, the model picker and the run detail show
+  `Appstrate Medium`, not `deepseek-chat`. The overwhelming majority of users
+  never probe anything, and for them the abstraction simply holds.
+- **Dashboard and API hygiene.** A vendor name does not appear in a payload a
+  customer's own tooling stores, screenshots, or pastes into a ticket.
+- **Not leaking a vendor name by accident.** The real value: a customer's logs,
+  a run's error surface, an exported artefact — none of them acquire a vendor
+  name because a field happened to ride along. The error-synthesis and header-
+  allowlist work in this document is what buys that, and it buys it reliably.
+- **Product framing.** Appstrate can re-point `appstrate-medium` at a different
+  backing without breaking a caller's configuration. That is a real capability
+  and it is independent of whether the old backing was identifiable.
+
+**Not good for:**
+
+- **Contractual or compliance non-disclosure.** If a customer contract, a
+  subprocessor list, or a regulatory position depends on the vendor being
+  unknowable to the customer, this mechanism does not provide it and no
+  extension of it will. That has to be handled in the contract.
+- **Defence against a motivated adversary.** An org member with `llm-proxy:call`
+  and an afternoon identifies the backing. Assume any org that wants to know,
+  knows.
+- **Any security property.** Nothing in the platform's authorization or tenancy
+  model may be built on the assumption that the backing is secret.
+
+### Tracked: the `apiShape` oracle is not closed
+
+Closing item (1) above is a **product-visible API change** and is deliberately
+NOT shipped in the change that made this page honest. The two candidate designs,
+what each breaks, and the recommendation are in the design note immediately
+below. It is open work, not a decision already taken.
+
+#### Design note — closing the route-family oracle (not implemented)
+
+Two options, both real, neither free.
+
+**Option 1 — refuse aliases on the vendor-shaped gateway routes.**
+`resolvePresetForOrg` gains an alias check before the `apiShape` comparison and
+rejects any aliased preset with a single neutral error, identically on all three
+routes. Files: `apps/api/src/services/llm-proxy/core.ts` (the check),
+`apps/api/src/openapi/paths/llm-proxy.ts` (document the refusal),
+`apps/api/test/integration/routes/llm-proxy.test.ts` (the existing masking test
+becomes a refusal test).
+
+- Closes the oracle completely: every route answers the same thing, so there is
+  no signal to difference.
+- **Breaks**: aliased models stop working through `/api/llm-proxy/*` entirely —
+  the direct API path, `appstrate run` against a remote instance, and the
+  GitHub Action. Anything that is not an agent run in a container loses aliases.
+  That is a capability removal, not a hardening.
+
+**Option 2 — serve one closed client dialect on the gateway.** Mount a single
+alias route speaking `pi-messages` — the vendor-neutral dialect the sidecar
+already terminates and re-originates — and refuse aliases on the three
+vendor-shaped routes. Files: `apps/api/src/routes/llm-proxy.ts` (mount),
+a new gateway-side `pi-messages` backend mirroring
+`runtime-pi/sidecar/pi-messages-backend.ts`, plus the same three files as
+Option 1.
+
+- Closes the oracle **and** items (2) and (3): a closed event union carries no
+  vendor vocabulary and no vendor frame shape, by construction rather than by
+  denylist. It is the design this document already argues for on the sidecar
+  side, applied to the second inference path.
+- **Breaks**: every existing gateway caller of an aliased model must change
+  protocol — they currently speak the backing's own dialect and would have to
+  speak `pi-messages`. It also duplicates the sidecar's projection logic on the
+  platform, or requires extracting it into a shared module.
+- Leaves items (4)–(6) untouched, as any design does.
+
+**Recommendation: Option 2, staged** — mount the `pi-messages` alias route
+first, migrate callers, and only then refuse aliases on the vendor-shaped
+routes, so the capability is never absent. Extract the projection from
+`runtime-pi/sidecar/pi-messages-backend.ts` into a shared module rather than
+mirroring it; two copies of a whitelist projection is precisely the drift this
+document warns about elsewhere.
+
+**Do not do either one silently.** Both change what an existing API caller can
+do, so both need the API-versioning and deprecation path, not a patch release.
+
+Until then, this page says the oracle is open, because it is.
 
 ## Threat B in two tiers
 
