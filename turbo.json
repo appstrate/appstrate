@@ -213,6 +213,14 @@
       "inputs": [
         "scripts/**/*.ts",
         "scripts/tsconfig.json",
+        // The two root config files `scripts/tsconfig.json` pulls in. They are
+        // in no other program, which is how `knip.config.ts` came to carry a
+        // duplicate object key (TS1117) that nothing reported. Listing them in
+        // the tsconfig alone does not close that: turbo hashes THIS list, so
+        // without these two lines an edit to either file is a `cache hit,
+        // replaying logs` and the gate reports a green it never re-derived.
+        "knip.config.ts",
+        "commitlint.config.ts",
         "apps/*/src/**",
         "apps/*/package.json",
         "apps/*/tsconfig.json",
