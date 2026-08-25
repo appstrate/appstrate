@@ -8,7 +8,9 @@
  * Two consumers:
  *   1. `scripts/verify-compose-defaults.ts` — PR-time guard that fails
  *      CI when a tracked compose template mirrors a code default (the
- *      #513 `MODULES` drift class).
+ *      #513 `MODULES` drift class), in either of the two shapes a
+ *      compose file can pin a value: the `${VAR:-default}` fallback and
+ *      the literal `VAR: value` / `- VAR=value` assignment.
  *   2. `apps/cli` — the runtime side (issue #515): `appstrate doctor`
  *      flags an operator's *on-disk* `docker-compose.yml` when it still
  *      carries stale duplicated defaults, and `appstrate install
@@ -71,6 +73,7 @@ export const CODE_DEFAULTS: Record<string, string> = {
   RUNTIME_IMAGE_WARM_INTERVAL_SECONDS: "300",
   SIDECAR_MAX_REQUEST_BODY_BYTES: "10485760",
   SIDECAR_MAX_MCP_ENVELOPE_BYTES: "16777216",
+  SYSTEM_INTEGRATIONS: "[]",
   SYSTEM_PROVIDER_KEYS: "[]",
   SYSTEM_PROXIES: "[]",
   TRUST_PROXY: "false",
@@ -168,14 +171,29 @@ export const ALLOWLIST: Record<string, { yamlDefault: string; reason: string }> 
 
 // ─── Compose default extraction ──────────────────────────────────────
 
+/**
+ * Which YAML shape the value was written in.
+ *
+ *   - `interpolation` — `MODULES=${MODULES:-a,b}`. The variable is still
+ *     overridable from the host environment; only the fallback duplicates.
+ *   - `literal` — `MODULES: a,b` (or `- MODULES=a,b`). The value is pinned:
+ *     the host environment cannot override it at all.
+ *
+ * They are not the same defect and must not read the same in an error
+ * message. An interpolation is repaired by shortening the line to a bare
+ * passthrough; a literal is repaired by deleting it outright.
+ */
+export type ComposeDefaultForm = "interpolation" | "literal";
+
 interface ComposeDefaultMatch {
   /** 1-based line number within the analyzed content. */
   line: number;
   varName: string;
-  /** The `default` captured from `${NAME:-default}`. */
+  /** The default, as compose will read it (quotes and comment stripped). */
   yamlDefault: string;
   /** The full source line the match was found on (verbatim). */
   raw: string;
+  form: ComposeDefaultForm;
 }
 
 // Match `${NAME:-default}` where default can be anything except `}`.
@@ -188,9 +206,57 @@ function defaultPattern(): RegExp {
   return /\$\{([A-Z_][A-Z0-9_]*):-([^}]*)\}/g;
 }
 
+// The literal shapes — the ones `defaultPattern()` is blind to, and the
+// reason `test/setup/docker-compose.health-e2e.yml` pinned `MODULES`,
+// `SYSTEM_PROVIDER_KEYS` and `SYSTEM_PROXIES` at their schema defaults for a
+// whole release while this module reported the file clean. A pinned literal is
+// the WORSE half of #513: `${MODULES:-…}` at least still lets the host
+// environment win, a literal does not.
+//
+// Both are anchored and capture at most once per line, so unlike
+// `defaultPattern()` they carry no `/g` `lastIndex` state and can safely be
+// module-level constants.
+//
+// Mapping form — `      MODULES: oidc,webhooks`. Leading indentation is
+// REQUIRED: a compose env key is always nested under `environment:`, and
+// demanding it keeps top-level document keys out.
+const LITERAL_MAPPING = /^\s+([A-Z_][A-Z0-9_]*):[ \t]+(\S.*?)\s*$/;
+// Sequence form — `      - MODULES=oidc,webhooks`, the same container the
+// interpolated entries use.
+const LITERAL_SEQUENCE = /^\s*-\s*([A-Z_][A-Z0-9_]*)=(.*?)\s*$/;
+
 /**
- * Extract every `${NAME:-default}` occurrence from a compose file's text.
- * Pure — takes the file content, returns one match per occurrence.
+ * A YAML scalar as docker compose will actually read it: one surrounding pair
+ * of quotes removed, and a trailing ` # comment` dropped from an unquoted
+ * value (YAML ends an unquoted scalar at a space-preceded `#`).
+ *
+ * Comparing before this ran would miss `SYSTEM_PROXIES: "[]"` mirroring the
+ * `[]` code default purely because of the quotes — and comparing a value whose
+ * comment is still attached would silently under-report instead of
+ * over-reporting, which is the wrong direction for a gate.
+ */
+function unquoteYamlScalar(raw: string): string {
+  const trimmed = raw.trim();
+  const first = trimmed[0];
+  if (
+    trimmed.length >= 2 &&
+    (first === '"' || first === "'") &&
+    trimmed[trimmed.length - 1] === first
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed.replace(/\s+#.*$/, "").trim();
+}
+
+/**
+ * Extract every default a compose file pins, in either shape: the
+ * `${NAME:-default}` interpolation and the literal `NAME: value` /
+ * `- NAME=value` assignment. Pure — takes the file content, returns one match
+ * per occurrence, in line order.
+ *
+ * A line carrying an interpolation is never ALSO read as a literal: the
+ * interpolation is the operative shape there, and `- DATABASE_URL=postgres://${POSTGRES_USER:-x}@db`
+ * would otherwise be reported twice under two different values.
  */
 export function extractComposeDefaults(content: string): ComposeDefaultMatch[] {
   const lines = content.split("\n");
@@ -200,12 +266,36 @@ export function extractComposeDefaults(content: string): ComposeDefaultMatch[] {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? "";
     pattern.lastIndex = 0;
+    let interpolated = false;
     let m: RegExpExecArray | null;
     while ((m = pattern.exec(line)) !== null) {
       const [, varName, yamlDefault] = m;
       if (!varName) continue;
-      matches.push({ line: i + 1, varName, yamlDefault: yamlDefault ?? "", raw: line });
+      interpolated = true;
+      matches.push({
+        line: i + 1,
+        varName,
+        yamlDefault: yamlDefault ?? "",
+        raw: line,
+        form: "interpolation",
+      });
     }
+    if (interpolated) continue;
+
+    const literal = LITERAL_MAPPING.exec(line) ?? LITERAL_SEQUENCE.exec(line);
+    if (!literal) continue;
+    const [, varName, rawValue] = literal;
+    if (!varName || rawValue === undefined) continue;
+    // `${OTHER}` with no `:-` is a passthrough with an indirection, not a
+    // pinned value — it declares no default and is none of this gate's business.
+    if (rawValue.includes("${")) continue;
+    matches.push({
+      line: i + 1,
+      varName,
+      yamlDefault: unquoteYamlScalar(rawValue),
+      raw: line,
+      form: "literal",
+    });
   }
 
   return matches;
@@ -220,6 +310,7 @@ export interface ComposeDuplicateFinding {
   yamlDefault: string;
   codeDefault: string;
   raw: string;
+  form: ComposeDefaultForm;
 }
 
 export interface ComposeAllowlistDriftFinding {
@@ -229,6 +320,7 @@ export interface ComposeAllowlistDriftFinding {
   yamlDefault: string;
   expectedYamlDefault: string;
   raw: string;
+  form: ComposeDefaultForm;
 }
 
 export type ComposeFinding = ComposeDuplicateFinding | ComposeAllowlistDriftFinding;
@@ -237,9 +329,11 @@ export type ComposeFinding = ComposeDuplicateFinding | ComposeAllowlistDriftFind
  * Analyze a compose file's text against {@link CODE_DEFAULTS} /
  * {@link ALLOWLIST}. Returns findings in line order:
  *
- *   - `duplicate`       — a `${VAR:-x}` whose `x` equals the code default
- *                         (the #513 drift class — safe-but-stale, the
- *                         YAML value masks future schema changes).
+ *   - `duplicate`       — a pinned value equal to the code default, in
+ *                         either shape (the #513 drift class — safe-but-stale,
+ *                         the YAML value masks future schema changes). Only an
+ *                         EXACT mirror is a finding: a compose file that
+ *                         deliberately sets something else is not this bug.
  *   - `allowlist-drift` — an intentional override whose recorded
  *                         yamlDefault no longer matches the file.
  *
@@ -264,6 +358,7 @@ export function analyzeComposeDefaults(content: string): ComposeFinding[] {
           yamlDefault: match.yamlDefault,
           expectedYamlDefault: allowed.yamlDefault,
           raw: match.raw,
+          form: match.form,
         });
       }
       continue;
@@ -277,6 +372,7 @@ export function analyzeComposeDefaults(content: string): ComposeFinding[] {
         yamlDefault: match.yamlDefault,
         codeDefault,
         raw: match.raw,
+        form: match.form,
       });
     }
   }
@@ -367,8 +463,12 @@ export function rewriteStaleComposeDefaults(content: string): ComposeFixResult {
         line: dup.line,
         varName: dup.varName,
         reason:
-          "duplicated default is not a bare `- VAR=${VAR:-default}` sequence entry " +
-          "(mapping form, inline interpolation, or trailing comment) — edit by hand",
+          dup.form === "literal"
+            ? "the value is pinned as a literal, not a `${VAR:-default}` fallback — " +
+              "the repair is to DELETE the line so the schema default applies, and " +
+              "removing an operator's line is not an edit this rewriter will guess at"
+            : "duplicated default is not a bare `- VAR=${VAR:-default}` sequence entry " +
+              "(mapping form, inline interpolation, or trailing comment) — edit by hand",
         raw: original,
       });
       continue;

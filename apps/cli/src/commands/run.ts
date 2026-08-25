@@ -225,7 +225,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   const inheritedConfig = await maybeFetchRunConfig(target, resolverInputs, opts);
 
   // Apply inherited model id as the default model when the user did not
-  // pass `--model` and there's no APPSTRATE_MODEL env var. This lets the
+  // pass `--model` and there's no APPSTRATE_MODEL_ID env var. This lets the
   // CLI reproduce a UI run that selected a specific preset.
   const llmFlagsWithInheritance: RunCommandOptions =
     inheritedConfig.modelId && !opts.model && !process.env.APPSTRATE_MODEL_ID

@@ -2,7 +2,7 @@
 
 /**
  * `checkUsageAllowed` — the chat-surface entry into the unified `beforeUsage`
- * admission hook (`services/chat-subscription.ts`). The chat module calls it
+ * admission hook (`services/chat-platform-services.ts`). The chat module calls it
  * before starting ANY turn — built-in, API-key, or oauth-subscription. The gate
  * resolves system-provided vs. org-owned SERVER-SIDE so the chat module stays
  * dumb, but that resolution is REPORTED, not used to pre-filter:
@@ -26,7 +26,7 @@
  */
 
 import { describe, it, expect, afterAll, beforeEach } from "bun:test";
-import { checkUsageAllowed } from "../../../src/services/chat-subscription.ts";
+import { checkUsageAllowed } from "../../../src/services/chat-platform-services.ts";
 import {
   initSystemModelProviderKeys,
   getSystemModels,

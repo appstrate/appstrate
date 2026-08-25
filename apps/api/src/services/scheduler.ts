@@ -545,30 +545,28 @@ export async function triggerScheduledRun(
     }
 
     // Per-application settings: editor defaults + locked fields for the input
-    // resolution below, and the model/proxy the preflight projects back.
+    // resolution below, and the model/proxy this fire launches with.
     const packageSettings = await getInstalledPackageSettings(applicationId, packageId);
 
     // Shared preflight: validate readiness
-    let preflightModelId: string | null;
-    let preflightGenerationConfig: ModelGenerationSettings | null;
-    let preflightProxyId: string | null;
     try {
-      const preflight = await resolveRunPreflight({
+      await resolveRunPreflight({
         agent,
         applicationId,
         orgId,
         actor,
-        packageSettings,
         // Schedule freezes per-integration picks at create time; forward
         // them so readiness honours the same disambiguation the run
         // pipeline will use a few lines down (matches the "single source
         // of truth" intent of overrides).
         scheduleConnectionOverrides: overrides.connectionOverrides ?? null,
+        // `package_schedules.dependency_overrides` — the same value forwarded
+        // into `prepareAndExecuteRun` below. Without it a schedule pinned to a
+        // working copy would have its readiness judged against the published
+        // version it is deliberately bypassing, and `failSchedule` would stop
+        // the schedule over a disagreement it invented.
+        dependencyOverrides: overrides.dependencyOverrides ?? null,
       });
-
-      preflightModelId = preflight.modelId;
-      preflightGenerationConfig = preflight.generationConfig;
-      preflightProxyId = preflight.proxyId;
     } catch (err) {
       if (err instanceof ApiError) {
         logger.warn("Agent readiness check failed, skipping schedule", {
@@ -637,8 +635,8 @@ export async function triggerScheduledRun(
 
     const runId = `run_${crypto.randomUUID()}`;
 
-    const finalModelId = overrides.modelIdOverride ?? preflightModelId;
-    const finalProxyId = overrides.proxyIdOverride ?? preflightProxyId;
+    const finalModelId = overrides.modelIdOverride ?? packageSettings.modelId;
+    const finalProxyId = overrides.proxyIdOverride ?? packageSettings.proxyId;
 
     try {
       await prepareAndExecuteRun({
@@ -648,7 +646,7 @@ export async function triggerScheduledRun(
         actor,
         input: resolvedInput,
         modelId: finalModelId,
-        generationConfig: preflightGenerationConfig,
+        generationConfig: packageSettings.generationConfig,
         generationConfigOverride: overrides.generationConfigOverride ?? null,
         proxyId: finalProxyId,
         overrideVersionLabel,

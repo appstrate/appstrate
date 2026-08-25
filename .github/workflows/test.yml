@@ -44,14 +44,31 @@ jobs:
       - name: Start test infrastructure
         run: docker compose -f test/setup/docker-compose.test.yml up -d --wait
 
-      # Path list covers every package whose tests are pure unit (no service deps
-      # beyond the Docker stack the preload boots). Integration tests for
-      # apps/api/test/integration/ and apps/api/src/modules/oidc/test/integration/
-      # remain in the heavier `integration` job below — they need DB seeding and
-      # are slower to run, so they stay opt-in via the `integration` label or
-      # post-merge on main. The fast public-origin regression has its own
-      # mandatory step and coverage flag immediately below.
-      # Anything pure-unit must run on every PR.
+      # Everything is a unit test unless it is explicitly infra-heavy. This is an
+      # exclusion list, not the hand-enumerated inclusion list it replaced: that
+      # list silently dropped every suite landing outside it, so `scripts/test/`,
+      # `packages/afps-shared/` (the SSRF guard, signed tokens, zip-bomb bounds),
+      # `packages/module-*`, `packages/shared-types/` (the RBAC policy) and
+      # `test/supply-chain-barrels.test.ts` ran only in the label-gated
+      # `integration` job below — i.e. never on the PR that changed them. With
+      # default discovery plus three ignores, a new suite is on the PR gate by
+      # default and only an explicit opt-out takes it off.
+      #
+      # What is excluded, and why:
+      #  - `**/test/integration/**` — apps/api/test/integration/ plus the modules'
+      #    own integration dirs (oidc, mcp, webhooks). They need DB seeding and are
+      #    slow, so they stay opt-in via the `integration` label or post-merge on
+      #    main. The two that are release invariants keep their own mandatory
+      #    steps immediately below.
+      #  - `apps/cli/**` — a separate workspace with its own bunfig.toml (no Docker
+      #    preload); run from that directory in the last step so it picks up the
+      #    right config.
+      #  - `e2e/**` — Playwright specs, which `bun test` would otherwise discover
+      #    (`*.spec.ts` matches its default filename pattern). This repeats the
+      #    entry already in the root bunfig.toml on purpose: `--path-ignore-patterns`
+      #    REPLACES the config value instead of merging with it, so dropping the
+      #    flag here re-admits the specs and the job fails on Playwright imports.
+      #
       # --coverage on the always-on unit job is what gives every PR a coverage
       # signal (Codecov patch coverage + the `unit` flag) without paying for the
       # heavier `integration` job below. The full project total is reconstructed
@@ -60,22 +77,9 @@ jobs:
       - name: Run unit tests
         run: |
           bun test --coverage --coverage-reporter=lcov --coverage-dir=coverage \
-            apps/api/test/unit/ \
-            apps/api/src/modules/firecracker/test/unit/ \
-            apps/api/src/modules/mcp/test/unit/ \
-            apps/api/src/modules/oidc/test/unit/ \
-            apps/api/src/modules/webhooks/test/unit/ \
-            apps/web/src/ \
-            packages/module-chat/ \
-            runtime-pi/ \
-            packages/connect/ \
-            packages/core/ \
-            packages/afps-runtime/ \
-            packages/mcp-transport/ \
-            packages/runner-pi/ \
-            packages/emails/ \
-            packages/env/ \
-            packages/ui/
+            --path-ignore-patterns='**/test/integration/**' \
+            --path-ignore-patterns='apps/cli/**' \
+            --path-ignore-patterns='e2e/**'
 
       - name: Run public-origin regression
         run: |
@@ -208,7 +212,7 @@ jobs:
 
   runtime-e2e:
     name: Runtime container e2e
-    # The runtime-pi document-provisioning spin only reproduces in the BUNDLED
+    # The runtime-pi file-provisioning spin only reproduces in the BUNDLED
     # image, so `runtime-pi/test/provision-container.e2e.test.ts` needs the real
     # `appstrate-pi` image built — which the fast `unit` job does not do (it
     # would blow the 5-min budget), so that test SKIPS there. This job builds

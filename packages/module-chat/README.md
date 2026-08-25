@@ -36,10 +36,13 @@ inachevé.
 ### Protections côté modèle
 
 - **Redaction des liens de connexion** : dans le forwarder Pi
-  (`src/pi-chat/mcp-tools.ts`), le canal `content` — seul sérialisé vers le
-  modèle par pi-ai — est redacté, tandis que `details` conserve le payload
-  complet pour que l'UI extraie l'offre de connexion (`src/ui/auth-offer.ts`).
-  La redaction s'applique aussi au replay de l'historique persisté
+  (`src/pi-chat/mcp-tools.ts`), les deux canaux de payload sont redactés — le
+  canal `content` (seul sérialisé vers le modèle par pi-ai) comme `details`
+  (vue JSON de l'UI, mais persistée). L'URL vivante ne survit qu'à un seul
+  endroit : le champ typé `connectOffer`, que la carte de connexion lit via
+  `readConnectOffer` (`src/ui/auth-offer.ts`) — jamais en scrapant le payload,
+  qui ne contient plus que le placeholder (issue #906). La redaction s'applique
+  aussi au replay de l'historique persisté
   (`src/pi-chat/structured-session.ts`).
 - **Politique d'index d'opérations** : `applyOperationIndexPolicy`
   (`src/operation-index.ts`), appliquée par le moteur au prompt système après

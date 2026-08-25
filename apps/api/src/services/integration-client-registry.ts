@@ -356,14 +356,6 @@ export function isSystemIntegration(integrationId: string): boolean {
   return ensureInitialized().ids.has(integrationId);
 }
 
-/** All system integration clients, keyed by id. */
-export function getSystemIntegrationClients(): ReadonlyMap<
-  string,
-  SystemIntegrationClientDefinition
-> {
-  return ensureInitialized().clients;
-}
-
 /** Resolve a system client by its id, or `null` when unknown. */
 export function getSystemIntegrationClientById(
   id: string,

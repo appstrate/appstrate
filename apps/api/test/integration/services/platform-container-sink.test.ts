@@ -16,6 +16,10 @@
  *      the container exits without calling finalize itself, covering
  *      crashes, timeouts, and defensive success-on-exit-0.
  *
+ *   3. Container teardown does NOT enqueue the run-workspace deletion —
+ *      `finalizeRun` owns it, inside the terminal CAS transaction, and every
+ *      teardown path converges there.
+ *
  * Uses a fake `RunOrchestrator` so the tests exercise the real
  * lifecycle code without Docker. Every DB assertion hits the real
  * Postgres instance started by the test preload.
@@ -24,7 +28,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs, runLogs } from "@appstrate/db/schema";
+import { runs, runLogs, storageDeletionJobs } from "@appstrate/db/schema";
 import { encrypt } from "@appstrate/connect";
 import type {
   RunOrchestrator,
@@ -39,6 +43,10 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { runPlatformContainer } from "../../../src/services/run-launcher/pi.ts";
+import {
+  runWorkspaceBundleKey,
+  runWorkspaceManifestKey,
+} from "../../../src/services/run-workspace-manifest.ts";
 import {
   executeAgentInBackground,
   type ExecuteAgentInBackgroundInput,
@@ -349,6 +357,29 @@ describe("runPlatformContainer — sink env-var injection", () => {
 
     expect(result.cancelled).toBe(true);
   });
+
+  it("teardown enqueues NO workspace deletion — that belongs to finalizeRun", async () => {
+    // `runPlatformContainer` used to call `deleteRunWorkspace(runId)` from its
+    // `finally`, duplicating what `finalizeRun` already enqueues inside the
+    // terminal CAS transaction: same two keys, same reason, second
+    // (non-durable) transaction. This run never finalises — no run row exists
+    // at all — so ANY job row here comes from the teardown.
+    const fake = createFakeOrchestrator({ exitCode: 0 });
+    await runPlatformContainer({
+      runId: "run_teardown",
+      context: buildContext("run_teardown"),
+      plan: buildRunPlan(),
+      sinkCredentials: mintSinkCredentials({
+        runId: "run_teardown",
+        appUrl: "http://platform:3000",
+        ttlSeconds: 60,
+      }),
+      orchestrator: fake.orchestrator,
+    });
+
+    const jobs = await db.select().from(storageDeletionJobs);
+    expect(jobs).toEqual([]);
+  });
 });
 
 describe("executeAgentInBackground — server-side finalize synthesis", () => {
@@ -492,5 +523,21 @@ describe("executeAgentInBackground — server-side finalize synthesis", () => {
     const [second] = await db.select().from(runs).where(eq(runs.id, runId)).limit(1);
     expect(second!.sinkClosedAt?.getTime()).toBe(firstClosedAt?.getTime());
     expect(second!.status).toBe("failed"); // first write wins
+  });
+
+  it("the run-workspace bundle + manifest are still enqueued for deletion, exactly once", async () => {
+    // The companion to the teardown assertion above: dropping the launcher's
+    // duplicate must not drop the deletion itself. This exercises the full
+    // container-exit path (`runPlatformContainer` teardown →
+    // `synthesiseFinalize` → `finalizeRun`), which is the one every other
+    // termination path also converges on (the container's own `sink.finalize`,
+    // the cancel route, the stall watchdog, the boot orphan sweep).
+    const { runId } = await runWithFakeOrchestrator({ exitCode: 137 });
+
+    const jobs = await db.select().from(storageDeletionJobs);
+    expect(jobs.map((j) => j.storageKey).sort()).toEqual(
+      [runWorkspaceBundleKey(runId), runWorkspaceManifestKey(runId)].sort(),
+    );
+    expect(jobs.map((j) => j.reason)).toEqual(["run_workspace_deleted", "run_workspace_deleted"]);
   });
 });

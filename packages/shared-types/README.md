@@ -4,12 +4,13 @@ Shared TypeScript type definitions used by both frontend (`apps/web`) and backen
 
 ## What it provides
 
-- **DB model re-exports**: `UserProfile`, `Run`, `RunLog`, `Schedule`
+- **DB model re-exports**: `UserProfile`
 - **Enums**: `RunStatus`, `OrgRole`
-- **API response types**: `AgentListItem`, `AgentDetail`, `OrgPackageItem`, `AppConfig`, `Features`
-- **Integration types**: `IntegrationSummary`, `IntegrationDetail`, `IntegrationConnection`, `IntegrationCandidate`, `IntegrationPin`
+- **Wire DTOs**: `RunWireDto` (+ `EnrichedRun`), `ScheduleWireDto` (+ `EnrichedSchedule`), `ListEnvelope<T>`
+- **API response types**: `AgentListItem`, `AgentDetail`, `OrgPackageItem`, `AppConfig`, `AppConfigFeatures`
+- **Integration types**: `IntegrationSummary`, `IntegrationConnection`, `IntegrationCandidate`, `IntegrationPin`
 - **Headless types**: `ApplicationInfo`, `EndUserInfo`, `ApiKeyInfo`
-- **Utility functions**: `isPromptEmpty()`, `findMissingDependencies()`
+- **Policy helpers**: `assignableRolesForMember()`, `canRemoveMember()` (`ASSIGNABLE_ORG_ROLES`)
 
 ## Usage
 

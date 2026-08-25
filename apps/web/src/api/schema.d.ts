@@ -18069,7 +18069,7 @@ export interface operations {
                  *       },
                  *       "prompt": "Summarize the attached file in three bullet points.",
                  *       "input": {
-                 *         "docId": "doc_123"
+                 *         "audience": "engineering"
                  *       }
                  *     }
                  */
@@ -18117,7 +18117,7 @@ export interface operations {
                      *       "scheduleId": null,
                      *       "status": "pending",
                      *       "input": {
-                     *         "docId": "doc_123"
+                     *         "audience": "engineering"
                      *       },
                      *       "result": null,
                      *       "artifacts": null,

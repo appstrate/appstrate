@@ -190,7 +190,11 @@ them, it only names them in docblocks.
   `scheduleValues` would leave the CLI carrying a field it can never fill. The
   refusal is injected (`lockedFieldError`) so each host keeps its own error
   surface — `ApiError(400, "locked_input_field")` on the platform, a CLI error
-  type locally — without re-deriving the rule.
+  type locally — without re-deriving the rule. The shape of all that is public
+  too: `InputLayers` (one run's layers in precedence order), `InputOverlay` and
+  `InputOverlayOrigin` (a layered source and the words the refusal quotes back —
+  "schedule input" or "input"), and `LockedFieldErrorFactory` (the host-supplied
+  error constructor).
 - **`compileCached`, `MAX_CACHED_VALIDATORS`** (`./schema-validation`) — the
   module's compiled-validator cache, exported so `apps/api`'s three server-only
   validators compile through it instead of standing up a second Ajv instance.
@@ -203,7 +207,8 @@ them, it only names them in docblocks.
   manifest may carry, and the one helper every read path funnels stored ids
   through. It drops ids the platform does not know, collapses duplicates,
   preserves the author's order, and — the part that matters — REPORTS every
-  drop to its caller rather than swallowing it.
+  drop to its caller rather than swallowing it, through the published
+  `CanonicalizedRuntimeToolIds` result type.
 
   An alias table (`LEGACY_RUNTIME_TOOL_ALIASES` and friends, mapping the
   retired `publish_document` forward to `publish_file`) was drafted for this
@@ -222,7 +227,50 @@ them, it only names them in docblocks.
   `RuntimeImageMember`, `RuntimeImageTagMismatch`. `packages/env` composes the
   operator wording; the rule and both its carve-outs live here.
 
+- **`recordFileCreated`, `recordFileDeleted`, `recordFilePartialPublication`,
+  `recordFileStorageLimitRejection`** (`./telemetry`) — the file-lifecycle
+  counters behind `appstrate.files.created` / `.deleted` /
+  `.partial_publications` / `.storage_limit_rejections`. They are published
+  because the seam that calls each one is the caller's, not core's, which makes
+  that seam part of the contract — so it is documented on every function.
+  Three of the four are single-seam EVENT counters, where a second call site
+  would report a number nobody can interpret: `commitFileRow` for a create (so a
+  deduped agent-output republish, which never commits, is correctly not
+  counted), `assertWithinOrgQuota` for a rejection (it fires once per logical
+  refusal — the pre-flight reject OR the `FOR UPDATE` re-check, never both), and
+  the finalize CAS winner for a partial publication. `recordFileDeleted` is
+  deliberately the exception: it counts ROWS removed from the `files` table
+  rather than events, so every row-removing path calls it — explicit delete,
+  container-teardown detach-or-delete, and the retention GC sweep — and the sum
+  stays interpretable. Its docblock names all three.
+
+- **`CONTEXT_FREE_FILENAMES_PHRASE`** (`./naming`) — the six context-free
+  deliverable filenames (`report.md`, `summary.md`, …, `file.md`) rendered as a
+  prompt sentence fragment, to interpolate after "never use context-free names
+  such as ". Published so every prompt-assembling runtime discourages the same
+  six: the list and its rendering are one fact, and a second hand-written copy
+  is how one runtime keeps steering models toward a name #1177's vocabulary
+  made attractive. It supplies no trailing punctuation.
+
 ### Changed
+
+- **`@appstrate/afps-shared` dependency range moved to `^0.5.0`.**
+  `@appstrate/core/zip`'s `stripWrapperPrefix` is now a verbatim re-export from
+  the new `@appstrate/afps-shared/archive-prefix` — the export, both overloads
+  and the identity-return behaviour are unchanged, so this is not a surface
+  change. It moved because `packages/afps-runtime` carried a token-for-token
+  copy of the same algorithm, each pointing at the other and asking a human to
+  keep them aligned, with no parity test. That is the shape that had already
+  drifted three times for the MIME set, one of those corrupting every OOXML
+  download.
+
+  **Publish `afps-shared@0.5.0` before this release.** The ordering is already
+  enforced — `verify-package-resolves.ts` packs the real tarball, installs it
+  outside the monorepo and typechecks every subpath, so an unpublished leaf
+  fails the publish rather than the first consumer's `npm install`. Declaring
+  `^0.5.0` rather than leaving `^0.4.0` only changes WHICH error it fails with:
+  `ETARGET / no matching version` at install, which names the missing artifact,
+  instead of a `TS2307` three layers down inside `node_modules`.
 
 - **`SubscriptionChatResolution` → `ChatModelResolution`** (`./chat-contract`),
   and the `PlatformServices` member `resolveSubscriptionChatModel` →

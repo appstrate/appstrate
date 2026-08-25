@@ -22,7 +22,7 @@ import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedOrgModelProviderOAuth } from "../../helpers/seed.ts";
 import { TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 import { createOrgModel } from "../../../src/services/org-models.ts";
-import { recordChatUsage, resolveChatModel } from "../../../src/services/chat-subscription.ts";
+import { recordChatUsage, resolveChatModel } from "../../../src/services/chat-platform-services.ts";
 
 describe("resolveChatModel", () => {
   let ctx: TestContext;

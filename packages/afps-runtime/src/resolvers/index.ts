@@ -38,7 +38,7 @@ export type {
 // resolver authors can import all the types they need from one place.
 export type { RunEvent } from "@afps-spec/types";
 
-export { resolvePackageRef, readPackageText, readPackageBytes } from "./bundle-adapter.ts";
+export { resolvePackageRef } from "./bundle-adapter.ts";
 
 // Canonical `delivery.http` credential-injection resolver (shared with
 // `@appstrate/connect`, which re-exports these).
@@ -57,6 +57,7 @@ export { substituteVars } from "./template-vars.ts";
 
 // Reusable credential-injecting HTTP-call core — tool factory + helpers.
 export {
+  ABSOLUTE_BODY_CEILING,
   ABSOLUTE_MAX_RESPONSE_SIZE,
   defaultInlineLimit,
   MAX_REQUEST_BODY_SIZE,

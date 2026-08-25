@@ -43,7 +43,7 @@ import {
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import type { SinkCredentials } from "../../lib/mint-sink-credentials.ts";
-import { uploadRunBundle, deleteRunWorkspace } from "../run-workspace-storage.ts";
+import { uploadRunBundle } from "../run-workspace-storage.ts";
 import { startBootHeartbeat } from "../run-boot-heartbeat.ts";
 import { runWithSpan, currentTraceparent, recordContainerSpawn } from "@appstrate/core/telemetry";
 
@@ -95,12 +95,11 @@ interface RunPlatformContainerInput {
   orchestrator?: RunOrchestrator;
   /**
    * Injectable workspace provisioning — production defaults to the
-   * run-workspace storage helpers. The agent fetches the bundle itself at
+   * run-workspace storage helper. The agent fetches the bundle itself at
    * startup; input files were already streamed into the workspace during
    * upload-consume. Tests substitute a capturing stub.
    */
   uploadBundle?: typeof uploadRunBundle;
-  deleteWorkspace?: typeof deleteRunWorkspace;
   /**
    * Grace (ms) added to `plan.timeout` for the platform's safety-net
    * container watchdog. Defaults to {@link platformTimeoutBootGraceMs}.
@@ -141,7 +140,6 @@ async function runPlatformContainerImpl(
   const { runId, context, plan, sinkCredentials, signal } = input;
   const orch = input.orchestrator ?? getOrchestrator();
   const uploadBundle = input.uploadBundle ?? uploadRunBundle;
-  const deleteWorkspace = input.deleteWorkspace ?? deleteRunWorkspace;
 
   const { llmConfig } = plan;
 
@@ -532,9 +530,16 @@ async function runPlatformContainerImpl(
         });
       });
     }
-    // Drop the provisioning archive — the agent has long since fetched it.
-    // Best-effort: deleteRunWorkspace never throws.
-    await deleteWorkspace(runId);
+    // NOTHING drops the run workspace here. `finalizeRun` enqueues the bundle
+    // + files-manifest deletion INSIDE its terminal CAS transaction
+    // (run-event-ingestion.ts), and every path that tears this container down
+    // converges there: the container's own `sink.finalize`, the synthesised
+    // terminal `executeAgentInBackground` posts for each exit code / timeout /
+    // orchestrator throw, the cancel route, the stall watchdog, and the boot
+    // orphan sweep. Enqueuing again from this `finally` was the same two keys
+    // with the same reason in a second, non-durable transaction — pure
+    // duplicate work, and strictly weaker than the transactional one, which
+    // survives a SIGKILL between the terminal write and this teardown.
   }
 }
 

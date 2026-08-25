@@ -13,18 +13,14 @@
  * wrong on a different row shape. Both now go through `runFileDirection`.
  *
  * Same no-DOM harness as `run-outcome-tab.test.tsx` (this repo has no jsdom):
- * `renderToStaticMarkup`, plus the `QueryClientProvider` `FileListPanel` needs
- * to wire its delete/keep mutations on mount.
+ * the shared `test/render.tsx`, whose `QueryClientProvider` is what
+ * `FileListPanel` needs to wire its delete/keep mutations on mount.
  */
 
-import type { ReactElement } from "react";
 import { describe, it, expect } from "bun:test";
-import { renderToStaticMarkup } from "react-dom/server";
-import { MemoryRouter } from "react-router-dom";
-import { I18nextProvider } from "react-i18next";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import i18n, { i18nReady } from "../../i18n.ts";
 import type { FileDto } from "../../hooks/use-files.ts";
+import { fileFixture, render } from "../../test/render.tsx";
 import { FileListPanel, type DirectionFilter } from "../file-list-panel.tsx";
 
 await i18nReady;
@@ -38,18 +34,7 @@ const OUTPUT_BADGE = "Produit en sortie";
 const INPUT_BADGE = "Utilisé en entrée";
 
 function file(overrides: Partial<FileDto> & { name: string }): FileDto {
-  return {
-    id: `file_${overrides.name}`,
-    purpose: "agent_output",
-    run_id: RUN,
-    packageId: "@acme/reporter",
-    mime: "text/plain",
-    size: 12,
-    createdAt: "2026-07-01T10:00:00.000Z",
-    expiresAt: null,
-    capabilities: { download: true, delete: false, keep: false },
-    ...overrides,
-  } as unknown as FileDto;
+  return fileFixture({ run_id: RUN, ...overrides });
 }
 
 /** Produced by this run — the only true output. */
@@ -60,18 +45,6 @@ const UPLOADED_FOR_RUN = file({ name: "brief.pdf", purpose: "user_upload", run_i
 const CHAINED_IN = file({ name: "source.csv", run_id: EARLIER });
 
 const ALL = [UPLOADED_FOR_RUN, CHAINED_IN, PRODUCED];
-
-function render(node: ReactElement): string {
-  return renderToStaticMarkup(
-    <QueryClientProvider client={new QueryClient()}>
-      <I18nextProvider i18n={i18n}>
-        <MemoryRouter>{node}</MemoryRouter>
-      </I18nextProvider>
-    </QueryClientProvider>,
-  )
-    .replace(/&#x27;/g, "'")
-    .replace(/&quot;/g, '"');
-}
 
 /**
  * Exactly what the run Files tab renders: the run's whole page of files plus
@@ -97,23 +70,17 @@ function count(html: string, needle: string): number {
 
 describe("run file direction badge", () => {
   it("badges only what the run produced as an output", () => {
+    // One assertion over the whole fixture, because the counts pin BOTH
+    // observed bugs at once and no single-row case adds to them:
+    //   - keyed on `run_id` alone, `UPLOADED_FOR_RUN` (`user_upload` + this
+    //     run's id) badges as produced → 2 outputs / 1 input;
+    //   - keyed on `purpose` alone, `CHAINED_IN` (an earlier run's
+    //     `agent_output`) badges as produced → 2 outputs / 1 input.
+    // The rule itself is exercised directly in `lib/test/files.test.ts`; what
+    // this asserts is that the tile is wired to it.
     const html = panel("all");
     expect(count(html, OUTPUT_BADGE)).toBe(1);
     expect(count(html, INPUT_BADGE)).toBe(2);
-  });
-
-  it("badges an upload made FOR this run as an input, not an output", () => {
-    // The observed bug: `purpose: "user_upload"` + this run's id. Keyed on
-    // `run_id` alone, a run with one input and one output badged BOTH produced.
-    const html = panel("all", [UPLOADED_FOR_RUN]);
-    expect(html).toContain(INPUT_BADGE);
-    expect(html).not.toContain(OUTPUT_BADGE);
-  });
-
-  it("badges a file chained in from an earlier run as an input", () => {
-    const html = panel("all", [CHAINED_IN]);
-    expect(html).toContain(INPUT_BADGE);
-    expect(html).not.toContain(OUTPUT_BADGE);
   });
 });
 

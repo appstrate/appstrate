@@ -18,33 +18,20 @@
  */
 
 import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import {
-  _setKeyringFactoryForTesting,
-  saveTokens,
-  type KeyringHandle,
-} from "../src/lib/keyring.ts";
+import { type Tokens } from "../src/lib/keyring.ts";
+// Imported directly for the one test that needs a profile with NO tokens —
+// the shared seed always writes a pair.
 import { setProfile } from "../src/lib/config.ts";
 import { tokenCommand } from "../src/commands/token.ts";
+import {
+  installFakeKeyring,
+  seedLoggedInProfile,
+  useTempConfigHome,
+  type FakeKeyringInstall,
+} from "./helpers/auth-fixture.ts";
 
-class FakeKeyring implements KeyringHandle {
-  static store = new Map<string, string>();
-  constructor(private profile: string) {}
-  setPassword(v: string): void {
-    FakeKeyring.store.set(this.profile, v);
-  }
-  getPassword(): string | null {
-    return FakeKeyring.store.get(this.profile) ?? null;
-  }
-  deletePassword(): void {
-    FakeKeyring.store.delete(this.profile);
-  }
-}
-
-let tmpDir: string;
-let originalXdg: string | undefined;
+const configHome = useTempConfigHome("appstrate-cli-token-");
+let keyring: FakeKeyringInstall;
 
 /**
  * Every test injects its own sink instead of reassigning the process-wide
@@ -65,39 +52,24 @@ function makeJwt(payload: Record<string, unknown>): string {
   return [header, body, "sig"].join(".");
 }
 
-async function seedProfile(
-  name: string,
-  tokens: {
-    accessToken: string;
-    expiresAt: number;
-    refreshToken: string;
-    refreshExpiresAt: number;
-  },
-): Promise<void> {
-  await setProfile(name, {
-    instance: "https://app.example.com",
-    userId: "usr_1",
-    email: "alice@example.com",
-  });
-  await saveTokens(name, tokens);
+function seedProfile(name: string, tokens: Tokens): Promise<void> {
+  return seedLoggedInProfile(name, { userId: "usr_1", email: "alice@example.com", tokens });
 }
 
 beforeAll(async () => {
-  tmpDir = await mkdtemp(join(tmpdir(), "appstrate-cli-token-"));
-  originalXdg = process.env.XDG_CONFIG_HOME;
-  process.env.XDG_CONFIG_HOME = tmpDir;
-  _setKeyringFactoryForTesting((profile) => new FakeKeyring(profile));
+  await configHome.setup();
+  keyring = installFakeKeyring();
 });
 
 afterAll(async () => {
-  if (originalXdg === undefined) delete process.env.XDG_CONFIG_HOME;
-  else process.env.XDG_CONFIG_HOME = originalXdg;
-  _setKeyringFactoryForTesting(null);
-  await rm(tmpDir, { recursive: true, force: true });
+  keyring.restore();
+  await configHome.teardown();
 });
 
+// The config tree is shared by the whole file (created once above), so each
+// test starts from an empty credential store rather than the previous test's.
 beforeEach(() => {
-  FakeKeyring.store.clear();
+  keyring.store.clear();
 });
 
 describe("token (happy path)", () => {

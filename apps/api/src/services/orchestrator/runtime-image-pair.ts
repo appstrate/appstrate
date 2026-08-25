@@ -18,9 +18,10 @@
  */
 
 import * as docker from "../docker.ts";
-import { logger } from "../../lib/logger.ts";
+import { logger as defaultLogger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { OCI_REVISION_LABEL } from "@appstrate/core/image-ref";
+import type { Logger } from "@appstrate/core/logger";
 
 /**
  * A revision label that carries no information. Both Dockerfiles default their
@@ -34,6 +35,13 @@ interface RuntimeImageRevisionDeps {
   readonly sidecarImage: string;
   /** Injection seam for tests. Defaults to the real Docker inspect. */
   readonly readImageLabels?: (image: string) => Promise<Record<string, string>>;
+  /**
+   * Injection seam for tests, same idiom as `LocalQueue`'s constructor logger.
+   * The warning IS the product of this function — the returned revisions are
+   * only what it compared — so it has to be observable without a global module
+   * mock, or a test cannot tell "detected drift" from "read two labels".
+   */
+  readonly logger?: Logger;
 }
 
 /**
@@ -41,13 +49,16 @@ interface RuntimeImageRevisionDeps {
  * warn when they disagree. Never throws — see the module doc for why this half
  * is advisory.
  *
- * Returns the two revisions read, so callers and tests can assert on what was
- * compared rather than on log output.
+ * Returns the two revisions read, so a caller can report what was compared.
+ * That return value is NOT the detection, though — a drifted pair and a matched
+ * pair return the same shape — so the warning is emitted through the injected
+ * `logger` seam and tests assert on the line itself.
  */
 export async function warnOnRuntimeImageRevisionDrift(
   deps: RuntimeImageRevisionDeps,
 ): Promise<{ piRevision: string; sidecarRevision: string }> {
   const readLabels = deps.readImageLabels ?? docker.readImageLabels;
+  const log = deps.logger ?? defaultLogger;
 
   let piRevision = UNKNOWN_REVISION;
   let sidecarRevision = UNKNOWN_REVISION;
@@ -60,7 +71,7 @@ export async function warnOnRuntimeImageRevisionDrift(
     piRevision = piLabels[OCI_REVISION_LABEL] ?? UNKNOWN_REVISION;
     sidecarRevision = sidecarLabels[OCI_REVISION_LABEL] ?? UNKNOWN_REVISION;
   } catch (err) {
-    logger.warn("Could not read runtime image build stamps", {
+    log.warn("Could not read runtime image build stamps", {
       error: getErrorMessage(err),
     });
     return { piRevision, sidecarRevision };
@@ -75,7 +86,7 @@ export async function warnOnRuntimeImageRevisionDrift(
   }
 
   if (piRevision !== sidecarRevision) {
-    logger.warn("runtime image pair built from different revisions", {
+    log.warn("runtime image pair built from different revisions", {
       piImage: deps.piImage,
       piRevision,
       sidecarImage: deps.sidecarImage,

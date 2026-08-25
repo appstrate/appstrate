@@ -130,9 +130,14 @@ test.describe("MCP over an API key (full stack)", () => {
       .map((t) => t.name)
       .sort();
     // The pre-#1177 names (`list_documents`, `read_document`,
-    // `validate_package_document`, `import_package_document`) are registered as
-    // HIDDEN aliases — callable via `tools/call`, deliberately absent here so
-    // the model never sees two entries for one capability.
+    // `validate_package_document`, `import_package_document`) are not
+    // registered at all — not even as hidden aliases. They were once
+    // callable-but-unlisted because the server advertises
+    // `tools: { listChanged: false }`, so a client that listed before an
+    // upgrade and calls an old name after it is behaving correctly. Removing
+    // them costs such a client one `-32602 Unknown tool` and a re-list;
+    // keeping them cost a permanent second dispatch path. See
+    // `apps/api/src/modules/mcp/tools.ts` (`buildMcpTools`).
     expect(names).toEqual([
       "describe_operation",
       "get_me",

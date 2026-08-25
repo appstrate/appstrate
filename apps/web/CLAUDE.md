@@ -2,7 +2,7 @@
 
 Conventions for `apps/web` and `packages/ui`. Root guide: `../../CLAUDE.md`.
 
-- **i18n**: `i18next` + `react-i18next`. Default `fr`, supported `fr`/`en`. Namespaces `common`/`agents`/`settings`. Locales in `apps/web/src/locales/{lang}/`.
+- **i18n**: `i18next` + `react-i18next`. Default `fr`, supported `fr`/`en`. Namespaces `common`/`agents`/`settings`/`chat`/`files`. Locales in `apps/web/src/locales/{lang}/`.
 - **Styling**: Tailwind 4 (`@tailwindcss/vite` + `tailwind-merge`). Single `styles.css`, `@import "tailwindcss"` + custom `@theme inline` dark theme. Utility classes only.
 - **Auth**: Better Auth React client. `credentials: "include"` + `X-Org-Id`/`X-Application-Id` injected by the typed client's middleware (`api/client.ts`) from `org-store`/`app-store`.
 - **Realtime**: SSE hooks (`use-realtime.ts`) + `useGlobalRunSync` patches React Query cache directly for `run_update` AND `connection_update` events (the latter drives live `Reconnection required` badge updates across tabs). `useGlobalRunSync` uses `fetch()` + `ReadableStream` (NOT `EventSource`) to avoid Safari auto-reconnect — **do not convert**. `GlobalRealtimeSync` mounted inside `MainLayout` only (not onboarding/welcome). SSE channels emitted: `run_update`, `run_log`, `run_metric`, `connection_update` — actor-scoped server-side via subscriber filter on `userId`/`endUserId`.

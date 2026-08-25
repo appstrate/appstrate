@@ -657,6 +657,94 @@ describe("Agents API", () => {
       expect(row.enabled).toBe(true);
       expect(row.input).toEqual({});
     });
+
+    // ─── 16 KB byte cap on the stored document ─────────────────────────────
+    //
+    // `application_packages.input_settings` is read on EVERY run launch
+    // (`getInstalledPackageSettings`) and on every agent-detail load, yet
+    // neither of its members was bounded: `values` is pruned to the schema's
+    // declared properties but a declared string's LENGTH is not, and
+    // `locked_fields` is stored verbatim without being pruned at all. The only
+    // ceiling was the global 10 MiB body limit — 640× the cap on the column's
+    // closest sibling, `package_schedules.input` (16 KB).
+    //
+    // The cap lives in `updateInstalledPackage`, the column's ONE write path,
+    // not in the route body schema: the route is not the only caller, and a
+    // caller that never sees `agentInputSettingsSchema` must be refused too.
+
+    /** Seed + install an agent whose single input field is free text. */
+    async function seedNoteAgent(id: string) {
+      await seedAgent({
+        id,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: id,
+          version: "0.1.0",
+          type: "agent",
+          description: "Test",
+          input: { schema: { type: "object", properties: { note: { type: "string" } } } },
+        },
+      });
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, id);
+    }
+
+    /** A `values` document whose JSON weighs well over 16 KB — and well under
+     *  the 10 MiB body limit, so nothing upstream refuses it first. */
+    const overCapValues = { note: "x".repeat(64 * 1024) };
+
+    it("refuses an over-cap document through the public route, naming the field", async () => {
+      const agentId = "@myorg/over-cap-agent";
+      await seedNoteAgent(agentId);
+
+      const res = await app.request(`/api/agents/${agentId}/input-settings`, {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ values: overCapValues, locked_fields: [] }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { errors?: { field: string; message: string }[] };
+      expect(body.errors?.[0]?.field).toBe("input_settings");
+      expect(body.errors?.[0]?.message).toMatch(/max is 16384/);
+
+      // Nothing reached Postgres: the row still holds the empty default
+      // `installPackage` wrote.
+      const stored = await getInstalledPackageSettings(ctx.defaultAppId, agentId);
+      expect(stored.values).toEqual({});
+    });
+
+    it("refuses an over-cap document written straight through the service", async () => {
+      const agentId = "@myorg/over-cap-service-agent";
+      await seedNoteAgent(agentId);
+
+      await expect(
+        updateInstalledPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, agentId, {
+          inputSettings: { values: overCapValues, locked: [] },
+        }),
+      ).rejects.toThrow(/max is 16384/);
+
+      const stored = await getInstalledPackageSettings(ctx.defaultAppId, agentId);
+      expect(stored.values).toEqual({});
+    });
+
+    it("still accepts a fat but realistic document", async () => {
+      // Guard against a cap that legitimate use hits: a 4 KB instruction
+      // template is comfortably storable.
+      const agentId = "@myorg/under-cap-agent";
+      await seedNoteAgent(agentId);
+      const note = "x".repeat(4 * 1024);
+
+      const res = await app.request(`/api/agents/${agentId}/input-settings`, {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ values: { note }, locked_fields: ["note"] }),
+      });
+
+      expect(res.status).toBe(200);
+      const stored = await getInstalledPackageSettings(ctx.defaultAppId, agentId);
+      expect(stored.values).toEqual({ note });
+    });
   });
 
   describe("GET /api/agents/:scope/:name/bundle — 404 distinction", () => {

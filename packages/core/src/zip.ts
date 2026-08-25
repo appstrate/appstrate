@@ -21,6 +21,7 @@ import {
   DecompressionLimitError,
   type BoundedUnzipLimits,
 } from "@appstrate/afps-shared/unzip-bounded";
+import { stripWrapperPrefix } from "@appstrate/afps-shared/archive-prefix";
 import { PACKAGE_CONTENT_FILE } from "./package-files.ts";
 
 export type { Zippable };
@@ -142,64 +143,23 @@ export function unzipArtifact(
 // ─────────────────────────────────────────────
 
 /**
- * Detect and strip a single common wrapper folder from ZIP entries.
- * ZIPs created by macOS Finder or `zip -r folder/` wrap all files under
- * a top-level directory. This function strips that prefix so lookups
- * like `files["manifest.json"]` work regardless of how the ZIP was created.
+ * Detect and strip a single common wrapper folder from ZIP entries — re-exported
+ * verbatim from the zero-dependency `@appstrate/afps-shared` package, so the
+ * `@appstrate/core/zip` public surface is unchanged (both overloads, `Record`
+ * and `Map`, and the identity return when there is nothing to strip).
  *
- * Only strips when ALL entries share a single first-level prefix and none
- * are at the root level. Returns the original collection unchanged otherwise.
+ * The implementation lives in `@appstrate/afps-shared/archive-prefix` because
+ * `@appstrate/afps-runtime` strips the same prefix on its `.afps` ingestion
+ * path and must NOT take a runtime dependency on `@appstrate/core`. Before this
+ * move it kept a hand-copy of the `Map` branch under a comment asking a human
+ * to keep the two in sync, with no parity test policing it — the same
+ * arrangement that let the media-type set drift three times before it moved to
+ * `@appstrate/afps-shared/mime`.
  *
- * Accepts either a `Record<string, Uint8Array>` (default ZIP shape) or a
- * `Map<string, Uint8Array>` (sanitized bundle shape) and returns the same
- * type as the input.
- *
- * NOTE: `@appstrate/afps-runtime` keeps a local Map-only copy of this
- * algorithm to remain a zero-`@appstrate/core`-dependency package. Keep the
- * two implementations in sync. See
- * `packages/afps-runtime/src/bundle/archive-utils.ts`.
+ * See that module for the full rule, including why an entry at the root level
+ * or a second top-level folder means "strip nothing".
  */
-export function stripWrapperPrefix(files: Record<string, Uint8Array>): Record<string, Uint8Array>;
-export function stripWrapperPrefix(files: Map<string, Uint8Array>): Map<string, Uint8Array>;
-export function stripWrapperPrefix(
-  files: Record<string, Uint8Array> | Map<string, Uint8Array>,
-): Record<string, Uint8Array> | Map<string, Uint8Array> {
-  if (files instanceof Map) {
-    if (files.size === 0) return files;
-    const prefixes = new Set<string>();
-    for (const key of files.keys()) {
-      const slashIdx = key.indexOf("/");
-      if (slashIdx === -1) return files; // root-level file → no stripping
-      prefixes.add(key.slice(0, slashIdx));
-    }
-    if (prefixes.size !== 1) return files; // multiple top-level folders → ambiguous
-    const prefix = `${[...prefixes][0]}/`;
-    const stripped = new Map<string, Uint8Array>();
-    for (const [key, value] of files) {
-      stripped.set(key.slice(prefix.length), value);
-    }
-    return stripped;
-  }
-
-  const keys = Object.keys(files);
-  if (keys.length === 0) return files;
-
-  const prefixes = new Set<string>();
-  for (const key of keys) {
-    const slashIdx = key.indexOf("/");
-    if (slashIdx === -1) return files; // root-level file → no stripping
-    prefixes.add(key.slice(0, slashIdx));
-  }
-
-  if (prefixes.size !== 1) return files; // multiple top-level folders → ambiguous
-
-  const prefix = `${[...prefixes][0]}/`;
-  const stripped: Record<string, Uint8Array> = {};
-  for (const [key, value] of Object.entries(files)) {
-    stripped[key.slice(prefix.length)] = value;
-  }
-  return stripped;
-}
+export { stripWrapperPrefix };
 
 // ─────────────────────────────────────────────
 // Unified package ZIP parser — handles agent, skill, tool

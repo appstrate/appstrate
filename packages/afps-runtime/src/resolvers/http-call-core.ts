@@ -60,39 +60,91 @@ export const defaultInlineLimit = 256 * 1024;
 export const ABSOLUTE_MAX_RESPONSE_SIZE = 1_000_000;
 
 /**
- * Hard upper bound on `{ fromFile }` and `{ fromBytes }` request bodies.
- * Mirrors `MAX_REQUEST_BODY_SIZE` on the sidecar — checked client-side so
- * over-sized uploads fail with a typed error instead of a 413.
+ * Absolute ceiling for any request-body cap override. Above this, raising
+ * the limit stops being a config knob and starts being real engineering
+ * (a streaming refactor, chunked uploads), so an override past it is
+ * refused rather than honoured.
  *
- * Default 10 MB. Configurable via the `SIDECAR_MAX_REQUEST_BODY_BYTES`
- * env var, which is read by both the sidecar and the runtime so the two
- * layers stay aligned. Override is rejected if non-positive or above
- * 100 MB (the absolute ceiling).
+ * Single-sourced: `runtime-pi/sidecar/helpers.ts` imports this rather than
+ * spelling `100 * 1024 * 1024` a second time, and applies it to its own
+ * `SIDECAR_MAX_MCP_ENVELOPE_BYTES` knob too.
  */
-export const MAX_REQUEST_BODY_SIZE = (() => {
-  const raw = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
-    ?.env?.SIDECAR_MAX_REQUEST_BODY_BYTES;
-  const fallback = 10 * 1024 * 1024;
-  if (raw === undefined || raw === "") return fallback;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) return fallback;
-  if (parsed > 100 * 1024 * 1024) return fallback;
-  return parsed;
-})();
+export const ABSOLUTE_BODY_CEILING = 100 * 1024 * 1024;
 
 /**
- * Above this size, `{ fromFile }` uploads are streamed from disk to
- * the sidecar instead of being read into memory first. Mirrors the
- * sidecar's own `STREAMING_THRESHOLD` so the two layers transition
- * together.
+ * Resolve the request-body cap from `SIDECAR_MAX_REQUEST_BODY_BYTES`,
+ * falling back to 10 MB when unset/empty.
+ *
+ * Strict on purpose: a malformed or over-ceiling override THROWS instead of
+ * quietly reverting to the default, because a cap the operator believes
+ * they raised and did not is a silent production incident. Message wording
+ * is kept identical to the sidecar's `readPositiveIntEnv` — the two used to
+ * be separate parsers and operators may match on either text.
+ *
+ * `process` is read through `globalThis` so the module still loads in a
+ * runtime without it (this package is published and runs outside Bun/Node).
+ */
+function readRequestBodyCapEnv(): number {
+  const name = "SIDECAR_MAX_REQUEST_BODY_BYTES";
+  const raw = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
+    ?.env?.[name];
+  if (raw === undefined || raw === "") return 10 * 1024 * 1024;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${name} must be a positive integer (bytes), got ${JSON.stringify(raw)}.`);
+  }
+  if (parsed > ABSOLUTE_BODY_CEILING) {
+    throw new Error(
+      `${name}=${parsed} exceeds the absolute ceiling of ${ABSOLUTE_BODY_CEILING} (bytes). ` +
+        `Caps above this require code changes (memory pressure on the sidecar).`,
+    );
+  }
+  return parsed;
+}
+
+/**
+ * Hard upper bound on `{ fromFile }`, `{ fromBytes }` and `{ multipart }`
+ * request bodies — checked client-side so over-sized uploads fail with a
+ * typed error instead of a 413. Default 10 MB, configurable via
+ * `SIDECAR_MAX_REQUEST_BODY_BYTES`.
+ *
+ * SOLE reader of that variable, read before touching: `runtime-pi/sidecar/
+ * helpers.ts` re-exports THIS constant instead of parsing the variable
+ * again. It used to parse it independently, and the two parsers disagreed
+ * on failure policy — the sidecar's threw at boot on a malformed or
+ * over-ceiling override, this one silently returned 10 MB. Both module
+ * graphs load in the sidecar process (it imports these resolvers for
+ * `executeApiCall`), so which policy an operator observed was decided by
+ * import order: a typo'd override either wedged the sidecar or quietly ran
+ * at the default. One parser, one policy, and the strict one, since a cap
+ * that silently did not take effect is the worse of the two failures.
+ *
+ * The 10 MB literal is the default for the standalone/CLI resolver path,
+ * which has no sidecar to align with.
+ */
+export const MAX_REQUEST_BODY_SIZE = readRequestBodyCapEnv();
+
+/**
+ * Above this size, `{ fromFile }` uploads are streamed from disk instead
+ * of being read into memory first — applied by {@link resolveBodyForFetch}
+ * when the caller opts into streaming.
+ *
+ * Sole source, read before touching: the sidecar declared a same-named
+ * constant until it was deleted as unused (`runtime-pi/sidecar/helpers.ts`
+ * records the deletion). Nothing mirrors this value any more; it is not a
+ * sidecar knob and not settable, so changing it is a code change here.
  */
 export const STREAMING_THRESHOLD = 1 * 1024 * 1024;
 
 /**
- * Hard upper bound on streamed request/response bodies. Mirrors
- * `MAX_STREAMED_BODY_SIZE` on the sidecar — `{ fromFile }` uploads
- * larger than this fail client-side with a typed error before any
- * bytes hit the wire.
+ * Hard upper bound on streamed request/response bodies — `{ fromFile }`
+ * uploads larger than this fail client-side with a typed error before any
+ * bytes hit the wire, and streamed responses are cut off at it.
+ *
+ * Sole source, same history as {@link STREAMING_THRESHOLD}: the sidecar's
+ * same-named constant is gone. The in-container resolvers
+ * (`runtime-pi/mcp/api-upload-resolver.ts`) and the platform's
+ * `/api/credential-proxy/proxy` route both import this one.
  */
 export const MAX_STREAMED_BODY_SIZE = 100 * 1024 * 1024;
 

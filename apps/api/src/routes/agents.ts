@@ -227,8 +227,9 @@ export function createAgentsRouter() {
       // the settings form re-submits what it was handed, and the launch form
       // seeds it as caller input on every run. Prune it to the declared keys.
       //
-      // This is NOT the "silent drop of a caller value" `assertFieldsUnlocked`
-      // refuses: that rule protects a value a CALLER sent for a field that
+      // This is NOT the "silent drop of a caller value"
+      // `@appstrate/core/input-resolution`'s `assertFieldsUnlocked` refuses: that
+      // rule protects a value a CALLER sent for a field that
       // exists. Here the editor is replacing the entire stored document, and a
       // key that matches no declared property has nothing to resolve into —
       // keeping it only poisons every launch.

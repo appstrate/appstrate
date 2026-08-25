@@ -106,6 +106,20 @@ interface FinalizeRunInput {
 /** Key prefix for webhook-id replay dedup. */
 const REPLAY_KEY_PREFIX = "appstrate:remote-run:replay:";
 
+/**
+ * Operator-facing message for the "LLM never reachable" failure shape —
+ * a run that produced zero tokens (see {@link runHadZeroTokens}). Distinct
+ * from a terminal model error the runner already stamped: that verdict is
+ * the runner's authoritative call (runner-pi's `getTerminalError()`), and
+ * finalize no longer scans the `run_logs` adapter-error trail at all.
+ *
+ * One generic reason on purpose, so finalize stays transport-agnostic: the
+ * proxy a run resolved at preflight is not in the sink context, and naming it
+ * would cost a query for a message nobody can act on differently.
+ */
+const LLM_UNREACHABLE_MESSAGE =
+  "The AI agent could not reach the LLM API — check that the API key is valid and the provider is accessible";
+
 // ---------------------------------------------------------------------------
 // DB helpers
 // ---------------------------------------------------------------------------
@@ -458,7 +472,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   if (status === "success") {
     if (runHadZeroTokens(validatedUsage)) {
       status = "failed";
-      errorMessage = llmUnreachableMessage(run);
+      errorMessage = LLM_UNREACHABLE_MESSAGE;
     }
   }
 
@@ -979,23 +993,6 @@ async function readLastKnownUsage(runId: string): Promise<TokenUsage | null> {
   if (!row?.tokenUsage) return null;
   const parsed = tokenUsageSchema.safeParse(row.tokenUsage);
   return parsed.success ? parsed.data : null;
-}
-
-/**
- * Operator-facing message for the "LLM never reachable" failure shape —
- * a run that produced zero tokens (see {@link runHadZeroTokens}). Distinct
- * from a terminal model error the runner already stamped: that verdict is
- * the runner's authoritative call (runner-pi's `getTerminalError()`), and
- * finalize no longer scans the `run_logs` adapter-error trail at all.
- */
-function llmUnreachableMessage(run: RunSinkContext): string {
-  // Runs that carry a `proxyLabel` resolved a proxy at preflight — when they
-  // subsequently fail to reach the LLM, the proxy is the first suspect. Keep
-  // the two wordings separate so operators can spot which failure mode applies.
-  // `run.proxyLabel` isn't in the sink context; we'd need a query. Scoping the
-  // message to a single generic reason keeps finalize transport-agnostic.
-  void run;
-  return "The AI agent could not reach the LLM API — check that the API key is valid and the provider is accessible";
 }
 
 // ---------------------------------------------------------------------------

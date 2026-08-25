@@ -32,23 +32,23 @@ describe("llm-proxy route table", () => {
 
   for (const shape of SHAPES) {
     // THE invariant: what the client is pointed at, plus what the vendor SDK
-    // appends, is exactly what the server mounts. Both halves come from the
-    // same row, so this is what makes "one authority" true rather than merely
-    // intended — `apps/api` mounts `llmProxyUrlPath`, while chat and the CLI
-    // point their clients at `llmProxyBaseUrl`, and nothing else forces the two
-    // to agree.
+    // appends, is exactly what the server mounts. `apps/api` mounts
+    // `llmProxyUrlPath`, chat and the CLI point their clients at
+    // `llmProxyBaseUrl`, and nothing else forces the two to agree.
+    //
+    // Be precise about what this catches, because it is narrower than it looks:
+    // both sides read the same ROW, so no table content can break it. What it
+    // pins is the two FUNCTION BODIES against each other — the mount prefix,
+    // the segment order, and above all that both spend `baseSuffix` exactly
+    // once. Dropping it from `llmProxyUrlPath` fails this case; so does moving
+    // the `/api/llm-proxy` mount on one side only. It has teeth only for a row
+    // whose `baseSuffix` is non-empty (`openai-completions` today), which is
+    // also the only row where the two functions can disagree at all.
     it(`${shape}: client base + sdkPath === server mount`, () => {
       const base = llmProxyBaseUrl(ORIGIN, shape);
       expect(base).not.toBeNull();
       const clientUrl = `${base!}${LLM_PROXY_ROUTES[shape].sdkPath}`;
       expect(clientUrl).toBe(`${ORIGIN}/api/llm-proxy${llmProxyUrlPath(shape)}`);
-    });
-
-    it(`${shape}: the mounted path is rooted at the shape`, () => {
-      // Guards the segment order: a row whose `baseSuffix` swallowed the shape
-      // name would still satisfy the symmetry above, because both sides read
-      // the same row.
-      expect(llmProxyUrlPath(shape).startsWith(`/${shape}`)).toBe(true);
     });
   }
 

@@ -20,6 +20,12 @@ import { db } from "./client.ts";
 import { organizations } from "./schema.ts";
 import { organizationMembers } from "./schema/organizations.ts";
 
+/**
+ * Return type of the exported `createBootstrapOrg`; callers read it by
+ * inference and never name it — see `knip.config.ts` on `@typeContract`.
+ *
+ * @typeContract
+ */
 export type CreateBootstrapOrgResult =
   | {
       created: true;

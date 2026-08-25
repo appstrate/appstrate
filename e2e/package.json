@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "typecheck": "tsc --noEmit",
     "test": "npx playwright test",
     "test:api": "npx playwright test --project=api",
     "test:ui": "npx playwright test --project=ui",

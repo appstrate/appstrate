@@ -83,9 +83,33 @@ const SERVICE_NAME = "appstrate";
 // `_setKeyringFactoryForTesting()` to exercise the fallback path on
 // hosts that happen to have a working keyring daemon.
 let _keyringFactory: KeyringFactory = (profile) => new Entry(SERVICE_NAME, profile);
+let _keyringFactoryOverridden = false;
 
 export function _setKeyringFactoryForTesting(factory: KeyringFactory | null): void {
   _keyringFactory = factory ?? ((profile) => new Entry(SERVICE_NAME, profile));
+  _keyringFactoryOverridden = factory !== null;
+}
+
+/**
+ * Read side of the seam above, for the fixture's own test only.
+ *
+ * Unwiring cannot be observed through `_keyringFactory`: passing `null`
+ * reinstalls a NEW closure over `new Entry(...)`, so the variable is never
+ * `null` and two reads of it are never equal. The fixture test therefore tried
+ * to observe the unwiring by READING through the restored factory and expecting
+ * a miss — which reaches `@napi-rs/keyring` for real. On a Linux CI runner with
+ * no keyring daemon that call SEGFAULTS the process (Bun 1.3.14, exit 132)
+ * before any JS error handling runs, so neither `classifyKeyringError` nor the
+ * `APPSTRATE_ALLOW_PLAINTEXT_TOKENS` fallback can catch it: those guard a
+ * thrown error, and a native crash is not one.
+ *
+ * A boolean beside the factory is the whole fix. It changes no resolution
+ * behaviour — `_keyringFactory` is assigned exactly as before — and it lets the
+ * test assert the property directly instead of inferring it from a native call
+ * nobody should be making in a unit test.
+ */
+export function _isKeyringFactoryOverriddenForTesting(): boolean {
+  return _keyringFactoryOverridden;
 }
 
 function fallbackPath(): string {

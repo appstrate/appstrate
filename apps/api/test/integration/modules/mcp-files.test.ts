@@ -446,12 +446,9 @@ describe("mcp resources/read (appfile://)", () => {
     const memberB = await createTestUser({ email: "mcpb@docs.test" });
     await addOrgMember(ctx.orgId, memberB.id, "member");
     const runId = await seedRun(scope);
-    const up = await stageUpload(
-      scope,
-      memberB.id,
-      "secret.txt",
-      new TextEncoder().encode("member B private text"),
-    );
+    const secretBytes = new TextEncoder().encode("member B private text");
+    const realSha = new Bun.CryptoHasher("sha256").update(secretBytes).digest("hex");
+    const up = await stageUpload(scope, memberB.id, "secret.txt", secretBytes);
     const actorB: Actor = { type: "user", id: memberB.id };
     const upload = await createFileFromUpload(scope, actorB, up, { runId });
 
@@ -467,13 +464,21 @@ describe("mcp resources/read (appfile://)", () => {
     const meta = JSON.parse(contents[0]!.text as string) as Record<string, unknown>;
     expect(meta).toMatchObject({ id: upload.id, downloadable: false });
     expect(String(meta.note)).toContain("not downloadable");
-    // Degraded per the privacy decision: generic name, no real hash, and the
-    // capabilities say metadata is withheld.
+    // Degraded per the privacy decision: generic name, generic mime, no real
+    // hash, no content URL to follow, and the capabilities say metadata is
+    // withheld.
     expect(meta.name).toBe("file");
+    expect(meta.mime).toBe("application/octet-stream");
     expect(meta.sha256).toBeUndefined();
+    expect(meta.content_url).toBeUndefined();
     expect((meta.capabilities as Record<string, unknown>).metadata).toBe(false);
-    // The private text is never inlined into the read.
+    // Belt-and-braces on the serialized envelope, not just the parsed fields:
+    // the private text, the real filename and the real hash leak NOWHERE in
+    // the response — a degradation that dropped one of the three would still
+    // satisfy the field-by-field assertions above.
     expect(contents[0]!.text).not.toContain("member B private text");
+    expect(contents[0]!.text).not.toContain("secret.txt");
+    expect(contents[0]!.text).not.toContain(realSha);
   });
 
   it("returns metadata only for a textual agent_output over the 1 MiB inline limit", async () => {

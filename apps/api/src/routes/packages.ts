@@ -449,6 +449,16 @@ async function createVersionSafe(params: {
 
 interface PackageRouteConfig {
   cfg: PackageTypeConfig;
+  /**
+   * How this type names ONE of its packages in an error message ("Skill
+   * '@acme/x' not found"). Stated per entry, not derived: `cfg.label` is a
+   * plural display string, and deriving the singular from it by dropping its
+   * last character made "the label ends in a droppable s" an unwritten
+   * invariant of every label — one a plural like "MCP Bundles" (or any label
+   * whose singular is not the plural minus a letter) breaks silently, in the
+   * error text, where nothing type-checks it.
+   */
+  labelSingular: string;
   /** URL path segment used for routing (e.g. "skills", "integrations"). */
   path: string;
   parseOpts: {
@@ -528,6 +538,7 @@ interface PackageRouteConfig {
 const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
   skill: {
     cfg: CONFIG_BY_TYPE.skill,
+    labelSingular: "Skill",
     path: "skills",
     parseOpts: { requiredFile: "SKILL.md", contentFileExt: null },
     storageFileName: "SKILL.md",
@@ -536,6 +547,7 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
   },
   agent: {
     cfg: CONFIG_BY_TYPE.agent,
+    labelSingular: "Agent",
     path: "agents",
     parseOpts: { requiredFile: null, contentFileExt: null },
     storageFileName: "prompt.md",
@@ -557,6 +569,7 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
   // sources that need no server bundle.
   integration: {
     cfg: CONFIG_BY_TYPE.integration,
+    labelSingular: "Integration",
     path: "integrations",
     parseOpts: { requiredFile: null, contentFileExt: null },
     storageFileName: "manifest.json",
@@ -569,6 +582,7 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
   // Referenced by an integration's `source.kind: "local"`.
   "mcp-server": {
     cfg: CONFIG_BY_TYPE["mcp-server"],
+    labelSingular: "MCP Server",
     path: "mcp-servers",
     parseOpts: { requiredFile: null, contentFileExt: null },
     storageFileName: "manifest.json",
@@ -747,7 +761,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
 
     if (isSystemPackage(parsed.id)) {
       throw forbidden(
-        `${rcfg.cfg.label.slice(0, -1)} '${parsed.id}' is a system package and cannot be modified`,
+        `${rcfg.labelSingular} '${parsed.id}' is a system package and cannot be modified`,
       );
     }
 
@@ -869,6 +883,25 @@ export function getItemId(c: Context<AppEnv>): string {
 }
 
 /**
+ * Load the org's package of this route's type, or 404 with the type's own
+ * wording ("Skill '@acme/x' not found").
+ *
+ * Seven handlers needed exactly this pair and each spelled it out again. It is
+ * a plain call, not a middleware like {@link requirePackageInOrg}: three of the
+ * seven run the lookup only AFTER their `isSystemPackage` 403 and their
+ * running-runs 409, and a middleware — which necessarily runs before the
+ * handler — would answer 404 where those answer 403/409 today. Keeping it a
+ * call keeps every handler's check order exactly where its author put it.
+ */
+async function loadOrgItemOr404(rcfg: PackageRouteConfig, orgId: string, itemId: string) {
+  const item = await getOrgItem(orgId, itemId, rcfg.cfg);
+  if (!item) {
+    throw notFound(`${rcfg.labelSingular} '${itemId}' not found`);
+  }
+  return item;
+}
+
+/**
  * Build the canonical package detail DTO for skills / integrations / mcp-servers
  * — the exact object the `GET` detail endpoint serializes (`OrgPackageItemDetail`).
  * Org-scoped (no app-install gate): the GET handler applies that gate before
@@ -926,12 +959,12 @@ function makeGetHandler(rcfg: PackageRouteConfig) {
 
     // Enforce app-level access: all apps can only access installed packages
     if (!(await hasPackageAccess({ orgId, applicationId }, itemId))) {
-      throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
+      throw notFound(`${rcfg.labelSingular} '${itemId}' not found`);
     }
 
     const dto = await buildPackageDetailDto(rcfg, itemId, orgId);
     if (!dto) {
-      throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
+      throw notFound(`${rcfg.labelSingular} '${itemId}' not found`);
     }
 
     return c.json(dto);
@@ -942,16 +975,14 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
     const itemId = getItemId(c);
-    const label = rcfg.cfg.label.slice(0, -1);
 
     if (isSystemPackage(itemId)) {
-      throw forbidden(`${label} '${itemId}' is a system package and cannot be modified`);
+      throw forbidden(
+        `${rcfg.labelSingular} '${itemId}' is a system package and cannot be modified`,
+      );
     }
 
-    const existing = await getOrgItem(orgId, itemId, rcfg.cfg);
-    if (!existing) {
-      throw notFound(`${label} '${itemId}' not found`);
-    }
+    const existing = await loadOrgItemOr404(rcfg, orgId, itemId);
 
     const body = await readJsonBody(c, packageJsonUpdateSchema);
 
@@ -1035,7 +1066,10 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
     );
 
     if (!updated) {
-      throw conflict("conflict", `${label} was modified concurrently. Reload and try again.`);
+      throw conflict(
+        "conflict",
+        `${rcfg.labelSingular} was modified concurrently. Reload and try again.`,
+      );
     }
 
     // Bytes for `rcfg.storageFileName`. When that file is NOT the type's
@@ -1102,10 +1136,9 @@ async function assertNoRunningRuns(
     itemId,
   );
   if (running > 0) {
-    const label = rcfg.cfg.label.slice(0, -1);
     throw conflict(
       "agent_in_use",
-      `${running} run(s) still running for this ${label.toLowerCase()}`,
+      `${running} run(s) still running for this ${rcfg.labelSingular.toLowerCase()}`,
     );
   }
 }
@@ -1114,10 +1147,11 @@ function makeDeleteHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
     const itemId = getItemId(c);
-    const label = rcfg.cfg.label.slice(0, -1);
 
     if (isSystemPackage(itemId)) {
-      throw forbidden(`${label} '${itemId}' is a system package and cannot be deleted`);
+      throw forbidden(
+        `${rcfg.labelSingular} '${itemId}' is a system package and cannot be deleted`,
+      );
     }
 
     await assertNoRunningRuns(c, rcfg, itemId);
@@ -1126,7 +1160,7 @@ function makeDeleteHandler(rcfg: PackageRouteConfig) {
     if (!result.ok) {
       throw conflict(
         "in_use",
-        `${label} '${itemId}' is used by ${result.dependents!.length} package(s)`,
+        `${rcfg.labelSingular} '${itemId}' is used by ${result.dependents!.length} package(s)`,
       );
     }
 
@@ -1145,10 +1179,7 @@ function makeListVersionsHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
     const itemId = getItemId(c);
-    const item = await getOrgItem(orgId, itemId, rcfg.cfg);
-    if (!item) {
-      throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
-    }
+    await loadOrgItemOr404(rcfg, orgId, itemId);
     const versions = await listPackageVersions(itemId);
     return c.json({ versions });
   };
@@ -1199,10 +1230,7 @@ function makeVersionDetailHandler(rcfg: PackageRouteConfig) {
     const itemId = getItemId(c);
     const versionSpec = c.req.param("version")!;
 
-    const existing = await getOrgItem(orgId, itemId, rcfg.cfg);
-    if (!existing) {
-      throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
-    }
+    await loadOrgItemOr404(rcfg, orgId, itemId);
 
     const dto = await buildVersionDetailDto(rcfg, itemId, versionSpec);
     if (!dto) {
@@ -1217,10 +1245,7 @@ function makeVersionInfoHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
     const itemId = getItemId(c);
-    const item = await getOrgItem(orgId, itemId, rcfg.cfg);
-    if (!item) {
-      throw notFound(`${rcfg.cfg.label.slice(0, -1)} '${itemId}' not found`);
-    }
+    await loadOrgItemOr404(rcfg, orgId, itemId);
     const info = await getVersionInfo(itemId, orgId);
     return c.json(info);
   };
@@ -1231,18 +1256,14 @@ function makeCreateVersionHandler(rcfg: PackageRouteConfig) {
     const orgId = c.get("orgId");
     const user = c.get("user");
     const itemId = getItemId(c);
-    const label = rcfg.cfg.label.slice(0, -1);
 
     if (isSystemPackage(itemId)) {
-      throw forbidden(`${label} '${itemId}' is a system package`);
+      throw forbidden(`${rcfg.labelSingular} '${itemId}' is a system package`);
     }
 
     await assertNoRunningRuns(c, rcfg, itemId);
 
-    const item = await getOrgItem(orgId, itemId, rcfg.cfg);
-    if (!item) {
-      throw notFound(`${label} '${itemId}' not found`);
-    }
+    const item = await loadOrgItemOr404(rcfg, orgId, itemId);
 
     // Re-validate the draft manifest at the publish gate (defense in depth).
     // Save/import already validate, but cutting a version must not trust a
@@ -1324,10 +1345,9 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
     const itemId = getItemId(c);
-    const label = rcfg.cfg.label.slice(0, -1);
 
     if (isSystemPackage(itemId)) {
-      throw forbidden(`${label} '${itemId}' is a system package`);
+      throw forbidden(`${rcfg.labelSingular} '${itemId}' is a system package`);
     }
 
     await assertNoRunningRuns(c, rcfg, itemId);
@@ -1338,9 +1358,9 @@ function makeRestoreVersionHandler(rcfg: PackageRouteConfig) {
       throw notFound(`Version '${versionSpec}' not found`);
     }
 
-    const existing = await getOrgItem(orgId, itemId, rcfg.cfg);
-    if (!existing || !existing.lock_version) {
-      throw notFound(`${label} '${itemId}' not found`);
+    const existing = await loadOrgItemOr404(rcfg, orgId, itemId);
+    if (!existing.lock_version) {
+      throw notFound(`${rcfg.labelSingular} '${itemId}' not found`);
     }
 
     // Extract `packages.draft_content` from the version ZIP.
@@ -1430,17 +1450,13 @@ function makeDeleteVersionHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
     const itemId = getItemId(c);
-    const label = rcfg.cfg.label.slice(0, -1);
 
     if (isSystemPackage(itemId)) {
-      throw forbidden(`${label} '${itemId}' is a system package`);
+      throw forbidden(`${rcfg.labelSingular} '${itemId}' is a system package`);
     }
 
     // Verify org ownership before deletion
-    const existing = await getOrgItem(orgId, itemId, rcfg.cfg);
-    if (!existing) {
-      throw notFound(`${label} '${itemId}' not found`);
-    }
+    await loadOrgItemOr404(rcfg, orgId, itemId);
 
     await assertNoRunningRuns(c, rcfg, itemId);
 
@@ -2188,7 +2204,7 @@ export function createPackagesRouter() {
 
   // POST /api/packages/import-github — import a package from a GitHub URL
   router.post("/import-github", rateLimit(10), requirePermission("agents", "write"), async (c) => {
-    const data = await readJsonBody(c, githubImportSchema, "url");
+    const data = await readJsonBody(c, githubImportSchema, { param: "url" });
 
     let zipBytes: Uint8Array;
     try {

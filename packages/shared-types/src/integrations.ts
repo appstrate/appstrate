@@ -132,32 +132,6 @@ export interface IntegrationAuthStatus {
  */
 export type { IntegrationToolCatalogEntry };
 
-export interface IntegrationDetail {
-  manifest: IntegrationManifestView;
-  auths: IntegrationAuthStatus[];
-  /** Effective agent-facing tool catalog — the picker's source of truth. */
-  tool_catalog: IntegrationToolCatalogEntry[];
-  /**
-   * AFPS §7.8 opt-in surfaced verbatim from the integration manifest.
-   * When `true`, the agent editor's tool picker MAY offer the
-   * "Include all upstream tools (advanced)" toggle that sets
-   * `integrations_configuration.<id>.tools = "*"`.
-   */
-  allow_undeclared_tools: boolean;
-  /**
-   * Activation state in the current application — `true` when an enabled
-   * application_packages row exists. Resource state shared with the list
-   * endpoint; returned by every detail-shaped response (GET detail,
-   * POST activate, PATCH settings) per #657.
-   */
-  active: boolean;
-  /**
-   * Admin gate: when `true`, only org admins may create personal
-   * connections in this application. `false` when not activated.
-   */
-  block_user_connections: boolean;
-}
-
 export interface IntegrationOAuthClient {
   /** Row UUID — the `client_ref` handle for rotate / delete / default-client. */
   id: string;

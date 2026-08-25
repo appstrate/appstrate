@@ -3,7 +3,7 @@
 /**
  * Unit tests for the `appstrate org` subcommand family (issue #209):
  * `list`, `current`, `switch`, `create`. All tests run against a real
- * logged-in profile (seeded via `setProfile` + FakeKeyring) and a
+ * logged-in profile (seeded via the shared `helpers/auth-fixture.ts`) and a
  * stubbed `fetch` — we don't go through commander, we call each
  * subcommand function directly so the injected `deps` (picker / create
  * prompt) aren't bypassed by non-TTY guards.
@@ -15,41 +15,25 @@
  * #1180.
  */
 
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import {
-  _setKeyringFactoryForTesting,
-  saveTokens,
-  type KeyringHandle,
-} from "../src/lib/keyring.ts";
-import { setProfile, readConfig } from "../src/lib/config.ts";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { readConfig } from "../src/lib/config.ts";
 import {
   orgListCommand,
   orgCurrentCommand,
   orgSwitchCommand,
   orgCreateCommand,
 } from "../src/commands/org.ts";
-
-class FakeKeyring implements KeyringHandle {
-  static store = new Map<string, string>();
-  constructor(private profile: string) {}
-  setPassword(v: string): void {
-    FakeKeyring.store.set(this.profile, v);
-  }
-  getPassword(): string | null {
-    return FakeKeyring.store.get(this.profile) ?? null;
-  }
-  deletePassword(): void {
-    FakeKeyring.store.delete(this.profile);
-  }
-}
+import {
+  installFakeKeyring,
+  seedLoggedInProfile,
+  useTempConfigHome,
+  type FakeKeyringInstall,
+} from "./helpers/auth-fixture.ts";
 
 type FetchCall = { url: string; method: string | undefined; body?: string };
 
-let tmpDir: string;
-let originalXdg: string | undefined;
+const configHome = useTempConfigHome("appstrate-cli-org-cmd-");
+let keyring: FakeKeyringInstall;
 const originalFetch = globalThis.fetch;
 
 let fetchCalls: FetchCall[];
@@ -104,47 +88,20 @@ function installFetch(responders: Responders): void {
   globalThis.fetch = stub as unknown as typeof fetch;
 }
 
-beforeAll(() => {
-  originalXdg = process.env.XDG_CONFIG_HOME;
-});
-
-afterAll(() => {
-  if (originalXdg === undefined) delete process.env.XDG_CONFIG_HOME;
-  else process.env.XDG_CONFIG_HOME = originalXdg;
-});
-
 beforeEach(async () => {
-  tmpDir = await mkdtemp(join(tmpdir(), "appstrate-cli-org-cmd-"));
-  process.env.XDG_CONFIG_HOME = tmpDir;
-  FakeKeyring.store.clear();
-  _setKeyringFactoryForTesting((p) => new FakeKeyring(p));
+  await configHome.setup();
+  keyring = installFakeKeyring();
   fetchCalls = [];
 });
 
 afterEach(async () => {
-  _setKeyringFactoryForTesting(null);
+  keyring.restore();
   globalThis.fetch = originalFetch;
-  await rm(tmpDir, { recursive: true, force: true });
+  await configHome.teardown();
 });
 
-async function seedLoggedIn(
-  orgId?: string,
-  profile = "default",
-  applicationId?: string,
-): Promise<void> {
-  await setProfile(profile, {
-    instance: "https://app.example.com",
-    userId: "u_1",
-    email: "alice@example.com",
-    ...(orgId ? { orgId } : {}),
-    ...(applicationId ? { applicationId } : {}),
-  });
-  await saveTokens(profile, {
-    accessToken: "tok-abc",
-    expiresAt: Date.now() + 15 * 60 * 1000,
-    refreshToken: "rt-xyz",
-    refreshExpiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
-  });
+function seedLoggedIn(orgId?: string, profile = "default", applicationId?: string): Promise<void> {
+  return seedLoggedInProfile(profile, { email: "alice@example.com", orgId, applicationId });
 }
 
 async function pinnedOrgId(profile = "default"): Promise<string | undefined> {

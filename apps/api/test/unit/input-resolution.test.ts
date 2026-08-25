@@ -14,7 +14,6 @@ import { describe, it, expect } from "bun:test";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { ApiError } from "../../src/lib/errors.ts";
 import {
-  assertFieldsUnlocked,
   assertLockedFieldsSatisfiable,
   resolveEffectiveInput,
 } from "../../src/services/input-resolution.ts";
@@ -133,13 +132,6 @@ describe("resolveEffectiveInput — three-layer precedence", () => {
     });
     expect(resolved.folder).toBe("archive");
     expect(resolved.tone).toBe("neutral");
-  });
-});
-
-describe("assertFieldsUnlocked", () => {
-  it("is a no-op when nothing is locked", () => {
-    expect(() => assertFieldsUnlocked({ folder: "sent" }, [])).not.toThrow();
-    expect(() => assertFieldsUnlocked({ folder: "sent" }, undefined)).not.toThrow();
   });
 });
 

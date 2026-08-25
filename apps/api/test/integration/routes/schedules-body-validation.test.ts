@@ -34,24 +34,8 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedSchedule } from "../../helpers/seed.ts";
+import { expectRejectedField } from "../../helpers/body-validation.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
-
-/**
- * Assert a body-validation refusal AND which field it blamed. A bare
- * `expect(400)` would still pass if the request started failing for an
- * unrelated reason (a guard reordered, a middleware rejecting earlier), so each
- * negative case below pins the RFC-9457 `errors[]` entry to the exact schema
- * rule it exists to cover.
- */
-async function expectRejectedField(res: Response, field: string) {
-  expect(res.status).toBe(400);
-  const body = (await res.json()) as {
-    code: string;
-    errors?: Array<{ field: string }>;
-  };
-  expect(body.code).toBe("validation_failed");
-  expect(body.errors?.map((e) => e.field)).toContain(field);
-}
 
 const app = getTestApp();
 

@@ -14,6 +14,12 @@
  * lookup — a body this surface cannot honour never reaches version resolution.
  * It also keeps these tests from firing a real run, whose background tail
  * would race the next `truncateAll()`.
+ *
+ * Each negative case pins the RFC-9457 `code` and the blamed `errors[].field`
+ * through {@link expectRejectedField} rather than the bare status: a `400` on
+ * this surface is reachable for reasons that have nothing to do with the schema
+ * rule under test, so a status-only assertion would stay green after that rule
+ * stopped firing.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -21,6 +27,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
+import { expectRejectedField } from "../../helpers/body-validation.ts";
 import { installPackage } from "../../../src/services/application-packages.ts";
 
 const app = getTestApp();
@@ -67,27 +74,34 @@ describe("POST /api/agents/:scope/:name/run — body validation", () => {
     // other parameters. The barrier is generic — it refuses any undeclared
     // field, and names none.
     const res = await post({ input: {}, config: { days: 30 } });
-    expect(res.status).toBe(400);
+    await expectRejectedField(res, "body");
   });
 
   it("rejects a malformed JSON body with 400 instead of launching without input", async () => {
+    // The one refusal on this surface that is NOT `validation_failed`: the body
+    // never reaches the schema, so `readJsonBody` answers `invalid_request` with
+    // no `errors[]`. Asserted by code rather than through
+    // `expectRejectedField` — a malformed body that started answering
+    // `validation_failed` would mean it HAD parsed, which is the opposite of
+    // what this case covers.
     const res = await raw('{"input": {');
     expect(res.status).toBe(400);
+    expect(((await res.json()) as { code: string }).code).toBe("invalid_request");
   });
 
   it("rejects a wrong-typed input with 400", async () => {
     const res = await post({ input: "not-an-object" });
-    expect(res.status).toBe(400);
+    await expectRejectedField(res, "input");
   });
 
   it("rejects a non-string rerun_from with 400", async () => {
     const res = await post({ rerun_from: 42 });
-    expect(res.status).toBe(400);
+    await expectRejectedField(res, "rerun_from");
   });
 
   it("rejects an empty connection_overrides value with 400", async () => {
     const res = await post({ input: {}, connection_overrides: { "@acme/gmail": "" } });
-    expect(res.status).toBe(400);
+    await expectRejectedField(res, "connection_overrides.@acme/gmail");
   });
 
   it("reads the body behind an Idempotency-Key — the CLI's path", async () => {
@@ -107,7 +121,7 @@ describe("POST /api/agents/:scope/:name/run — body validation", () => {
       },
       body: JSON.stringify({ input: {}, config: { days: 30 } }),
     });
-    expect(res.status).toBe(400);
+    await expectRejectedField(res, "body");
   });
 
   it("accepts every declared field", async () => {
@@ -160,7 +174,7 @@ describe("POST /api/runs/inline/validate — body validation", () => {
 
   it("rejects an unknown field with 400", async () => {
     const res = await post({ manifest: validManifest(), prompt: "do", nope: 1 });
-    expect(res.status).toBe(400);
+    await expectRejectedField(res, "body");
   });
 
   it("rejects dependency_overrides — accepted and silently ignored before #1187", async () => {
@@ -173,7 +187,7 @@ describe("POST /api/runs/inline/validate — body validation", () => {
       prompt: "do",
       dependency_overrides: { "@acme/skill": "draft" },
     });
-    expect(res.status).toBe(400);
+    await expectRejectedField(res, "body");
   });
 
   it("accepts `generation` — honoured on this surface, now documented too", async () => {

@@ -58,9 +58,24 @@ export function isBootstrapOwner(email: string): boolean {
   return env.AUTH_BOOTSTRAP_OWNER_EMAIL === normalizeEmail(email);
 }
 
-/** Reasons surfaced by `evaluateSignupPolicy`. Stable identifiers — used in error messages and tests. */
+/**
+ * Reasons surfaced by `evaluateSignupPolicy`. Stable identifiers — used in
+ * error messages and tests.
+ *
+ * Named in `SignupPolicyDecision` below, which is this package's exported
+ * return type; no caller imports either name, they read the decision by
+ * inference. That makes both part of `evaluateSignupPolicy`'s contract rather
+ * than independent exports — see `knip.config.ts` on `@typeContract`.
+ *
+ * @typeContract
+ */
 export type SignupBlockReason = "signup_disabled" | "signup_domain_not_allowed";
 
+/**
+ * Return type of `evaluateSignupPolicy`; callers read it by inference.
+ *
+ * @typeContract
+ */
 export type SignupPolicyDecision =
   | { allowed: true; reason: "open" | "platform_admin" | "bootstrap" | "invitation" | "domain_ok" }
   | { allowed: false; reason: SignupBlockReason };

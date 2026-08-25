@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import type { KnipConfig } from "knip";
 
 /**
@@ -23,11 +27,33 @@ import type { KnipConfig } from "knip";
  * Anything that is neither is dead, and gets deleted instead of listed.
  *
  * Not covered, deliberately: whether a **published** package's public export
- * still has a reader. `@appstrate/core`, `@appstrate/afps-runtime` and the
- * `@appstrate/module-*` packages are consumed out of tree (cloud,
- * connect-helper, third-party modules), so "no in-repo reader" is not
- * evidence of death for them; proving one of those is dead needs the
- * consumers, not this repo.
+ * still has a reader. `@appstrate/core` and `@appstrate/afps-shared` are on npm
+ * and consumed out of tree (`cloud`, `connect-helper`, third-party modules), so
+ * "no in-repo reader" is not evidence of death for them; proving one of those
+ * is dead needs the consumers, not this repo.
+ *
+ * That list used to read "`@appstrate/core`, `@appstrate/afps-runtime` and the
+ * `@appstrate/module-*` packages", and for five of those six it was simply
+ * false — which is not a cosmetic error, because the exemption below is granted
+ * on the strength of it. **Only two scoped packages in this monorepo have ever
+ * been published**: `@appstrate/core` and `@appstrate/afps-shared`, the only two
+ * with a publish workflow (`publish-core.yml`, `publish-afps-shared.yml`) and a
+ * release tag. `@appstrate/afps-runtime` carries `publishConfig` but has no
+ * workflow, no `afps-runtime@*` tag, and npm holds one `0.0.0` placeholder from
+ * 2026-04-20 against a local 0.2.0; `@appstrate/runner-pi` and all four
+ * `@appstrate/module-*` packages are absent from npm entirely and are reached
+ * in-tree by `workspace:*` or by a `MODULES` specifier the loader resolves by
+ * name. `@appstrate/ui` is a third case: `"private": true` here, yet 1.0.1 sits
+ * on npm from before that flag — treated as private below, which is the strict
+ * direction.
+ *
+ * The cost of the wrong premise is measurable: two exports in
+ * `packages/afps-runtime/src/resolvers/bundle-adapter.ts`
+ * (`readPackageText` / `readPackageBytes`) sat dead behind it, documented as
+ * sparing duplication "every resolver would otherwise duplicate" while no
+ * resolver called either. Found by hand, not by this gate. Verify publication
+ * before granting the exemption to anything else — `npm view <pkg> versions`
+ * and `ls .github/workflows/publish-*`, not the manifest's `publishConfig`.
  *
  * How that exemption is actually obtained matters, and is the one thing that
  * is easy to get wrong here. knip does **not** read `exports`, `bin`, `main`
@@ -42,10 +68,53 @@ import type { KnipConfig } from "knip";
  * is exactly how this config drifted: 6 dead files and ~450 phantom unused
  * exports, all of them entries that had simply stopped being declared.
  *
- * Practical rule when adding a workspace below: open its `package.json`
- * first, and enumerate. The `!` suffix marks a production entry, which is
- * what a published export map and a `bin` are; test entries carry no `!`.
+ * That re-declaration is no longer written by hand. `manifestEntries()` below
+ * reads the workspace's `package.json` and derives it, so a manifest edit
+ * cannot silently desynchronise from this file. What stays hand-written is
+ * the other half — the entries no manifest implies (Docker CMDs, test
+ * fixtures, operator scripts) — and those still need the "what reaches it"
+ * justification rule 1 asks for.
  */
+
+const ROOT = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * The `entry` patterns a workspace's `package.json` implies: every target of
+ * its `exports` map (walking conditional and array forms), every `bin`
+ * target, and `main`/`module`. Each is emitted with the `!` suffix that marks
+ * a production entry — an export map and a `bin` are exactly that.
+ *
+ * `omitExports` drops an `exports` **key** from the derivation. It exists for
+ * the one case where a manifest target must deliberately not be an entry, and
+ * every use of it carries the reason at the call site. It takes the subpath
+ * key rather than the file pattern so that a manifest retarget does not
+ * silently re-add what was omitted on purpose.
+ */
+function manifestEntries(workspace: string, omitExports: readonly string[] = []): string[] {
+  const manifest = JSON.parse(
+    readFileSync(resolve(ROOT, workspace, "package.json"), "utf8"),
+  ) as Partial<Record<"main" | "module" | "bin" | "exports", unknown>>;
+
+  const targets: string[] = [];
+  const collect = (value: unknown): void => {
+    if (typeof value === "string") targets.push(value);
+    else if (Array.isArray(value)) value.forEach(collect);
+    else if (value !== null && typeof value === "object") Object.values(value).forEach(collect);
+  };
+
+  collect(manifest.main);
+  collect(manifest.module);
+  collect(manifest.bin);
+  if (manifest.exports !== null && typeof manifest.exports === "object") {
+    for (const [subpath, target] of Object.entries(manifest.exports)) {
+      if (!omitExports.includes(subpath)) collect(target);
+    }
+  } else {
+    collect(manifest.exports);
+  }
+
+  return [...new Set(targets.map((target) => `${target.replace(/^\.\//, "")}!`))];
+}
 
 /**
  * Test files are **not** declared here. knip ships a Bun plugin that reads
@@ -64,6 +133,55 @@ import type { KnipConfig } from "knip";
  * `treatConfigHintsAsErrors` below for why it is NOT escalated to an error.
  *
  * The one gap the plugin leaves is called out at `apps/api` below.
+ */
+
+/**
+ * `includeEntryExports` — why seven workspaces below set it and the rest do
+ * not.
+ *
+ * knip does not report the exports of an entry file: reaching a file as an
+ * entry marks everything it exports as used (`isReferenced`,
+ * knip/dist/graph-explorer/operations/is-referenced.js). That is exactly
+ * right for a **published** package, whose readers live out of tree — and
+ * exactly wrong for a private one, because the mechanism this config uses to
+ * obtain that exemption (declaring every `exports` target as an entry) is
+ * structural: it applies to any workspace with an export map, published or
+ * not.
+ *
+ * The line is therefore drawn at "private workspace WITH an `exports` map":
+ * `packages/db`, `packages/ui`, `packages/connect`, `packages/emails`,
+ * `packages/env`, `packages/shared-types` and `packages/mcp-transport`. All
+ * seven are `"private": true` with only in-repo consumers, so "no in-repo
+ * reader" *is* evidence of death for them and the exemption is unearned. They
+ * opt back in; doing so the first time reported 36 unused exports and 38
+ * unused exported types the gate had been structurally unable to see.
+ *
+ * `apps/api` and `apps/web` are private too, and deliberately NOT in that
+ * list: neither declares an `exports` map, so the exemption above is not what
+ * is happening to them. Every entry they declare is a file something outside
+ * the import graph runs — a Docker CMD, a `MODULES` specifier the loader
+ * resolves by name, a `test/tables.ts` the root preload reaches with a
+ * computed `await import()` (test/setup/preload.ts:342), a type-level guard
+ * that exists only to be typechecked. Turning the flag on for them reported
+ * exactly five module `default`s and three types, all of them those cases,
+ * and suppressing them would have taken glob-wide `ignoreIssues` over
+ * `src/modules/*` — wider than the noise it removed, and blind to the real
+ * dead named export it was supposed to catch.
+ *
+ * It stays off for `packages/core` and `packages/afps-shared`, which are
+ * genuinely published and genuinely read out of tree, and for the workspaces
+ * whose only entries are Docker CMDs or Playwright specs, which export nothing.
+ *
+ * It ALSO stays off, for now, for `packages/afps-runtime`, `packages/runner-pi`,
+ * `apps/cli` and the four `packages/module-*` packages — and that is a DEFERRAL,
+ * not the exemption above: per the header, none of them is on npm, so each has
+ * the same unearned exemption `packages/ui` and its six siblings gave up. The
+ * flag was measured on `packages/afps-runtime` (176 findings, 122 distinct
+ * names, 159 of them barrel re-export lines) and the result is not a hygiene
+ * list — it is the single question of whether an unpublished package keeps a
+ * portable public API, which belongs to its own pass. See that workspace's
+ * block below for the numbers. Do not grant these the published-package
+ * exemption on re-reading this file; they are owed a triage, not a pass.
  */
 
 const config: KnipConfig = {
@@ -95,6 +213,53 @@ const config: KnipConfig = {
    */
 
   /**
+   * An exported `interface` whose only reference is inside its own file is
+   * the *shape* of something else that file exports — the parameter of an
+   * exported function, its return type, the type of an exported const. It is
+   * part of that declaration's contract, not an independent export, and
+   * un-exporting it to quiet this gate is forbidden (AGENTS.md). Enabling the
+   * flag for `interface` drops 24 such findings and changes nothing else.
+   *
+   * `type` is deliberately NOT enabled alongside it, and that asymmetry is
+   * the point: knip counts a bare `export type { X } from "./y"` re-export as
+   * a use of `X` within the re-exporting file, so `type: true` would silence
+   * every dead type-only barrel re-export — 27 of which this config's first
+   * green run found and deleted. The handful of `type` aliases genuinely in
+   * the `interface` position carry a `@typeContract` tag instead (below).
+   */
+  ignoreExportsUsedInFile: { interface: true },
+
+  /**
+   * Per-symbol carve-outs, tagged at the declaration so the reason travels
+   * with the code instead of drifting in a glob here. Two tags exist, and a
+   * new use of either MUST carry its own prose justification at the site:
+   *
+   *   `@openapiMirror` — the export is reached BY NAME, never by an import.
+   *     `verify:openapi` step #7 resolves it out of the *string*
+   *     `sharedTypeName` in `apps/api/src/openapi/response-type-registry.ts`
+   *     through the TypeScript Compiler API, and
+   *     `scripts/lib/ts-interface-required-keys.ts` fails the gate if the
+   *     name stops being exported. knip sees a string literal, not an edge.
+   *
+   *   `@typeContract` — the `type`-alias half of the `ignoreExportsUsedInFile`
+   *     rule above: a parameter or return type of an exported function in the
+   *     same file, which callers read by inference and never name.
+   */
+  tags: ["-openapiMirror", "-typeContract"],
+
+  /**
+   * `packages/ui/src/components/*.tsx` holds vendored shadcn/ui component
+   * families, copied in whole and re-exported in whole. A family is
+   * correct-by-construction: `DialogPortal`/`DialogOverlay`/`DialogClose` ship
+   * with `Dialog` whether or not this app renders each one today, and pruning
+   * them would fight the next `shadcn add` diff for no gain. Only the
+   * `exports` issue type is suppressed — a component FILE nothing imports is
+   * still reported, which is the whole reason the `./components/*` wildcard
+   * was dropped from the `packages/ui` entry list below.
+   */
+  ignoreIssues: { "packages/ui/src/components/*.tsx": ["exports"] },
+
+  /**
    * Invoked through `npx`/`bunx` or a shell builtin, so no manifest lists
    * them: `playwright` (e2e job + `test:e2e` script), `which`/`mktemp`
    * (POSIX utilities called from scripts and one test).
@@ -111,18 +276,28 @@ const config: KnipConfig = {
 
   workspaces: {
     // The root manifest is private and declares no `exports`, `bin` or
-    // `main`, so there are no manifest entries to re-declare here.
+    // `main`, so `manifestEntries` derives nothing for it.
     ".": {
       entry: [
-        // Operator backstops. Run by hand, never imported — but REACHABLE:
-        // `bun run audit:storage-orphans` / `bun run audit:empty-integrations`.
-        // They had no package.json entry for a while, which made this exemption
-        // a claim about a script nothing could invoke: 800 lines kept alive by
-        // the list that was supposed to justify keeping them.
-        "scripts/storage-orphans.ts",
-        "scripts/audit-empty-integration-selections.ts",
+        ...manifestEntries("."),
         // Dev utility that mints a CONFORMANCE_TOKENS bearer, documented in
-        // its own header.
+        // its own header. Run by hand and by hand only — unlike the two
+        // operator backstops (`scripts/storage-orphans.ts`,
+        // `scripts/audit-empty-integration-selections.ts`) it has no `bun run`
+        // script, so nothing derives it and it has to be named here.
+        //
+        // Those two backstops used to be listed alongside it, from a time when
+        // they had no package.json entry either — which made the exemption a
+        // claim about a script nothing could invoke, 800 lines kept alive by
+        // the list that was supposed to justify keeping them. They have
+        // `audit:storage-orphans` / `audit:empty-integrations` now, knip's Bun
+        // plugin derives an entry from each, and it flagged the duplicate
+        // declarations as redundant. Deleting them is not the usual
+        // entry-redundant trap described below: that trap is about knip
+        // reaching a file through module *resolution*, which moves with the
+        // host, whereas this reachability is read straight out of
+        // package.json. Delete the `bun run` script and the file goes back to
+        // being reported as unused — which is the claim we wanted anchored.
         "scripts/conformance/grab-token.ts",
         // System-package sources: `build:system-packages` reads them off disk
         // and bundles them, so nothing imports them.
@@ -140,7 +315,7 @@ const config: KnipConfig = {
         // Manifest `module`: the Hono server itself, run by `bun --hot
         // apps/api/src/index.ts` (the workspace `dev` script) and by the
         // Docker image CMD.
-        "src/index.ts!",
+        ...manifestEntries("apps/api"),
         // Built-in modules are loaded by name out of the `MODULES` env var,
         // never statically imported.
         "src/modules/*/index.ts",
@@ -179,6 +354,9 @@ const config: KnipConfig = {
       ignoreDependencies: ["@appstrate/module-(chat|claude-code|codex|observability)"],
     },
 
+    // The one workspace whose entries are NOT derived from its manifest:
+    // `bin` points at ./dist/cli.js, a build artifact that does not exist in
+    // a clean checkout and that knip cannot walk back to a source file.
     "apps/cli": {
       entry: [
         // Bundled to dist/cli.js by scripts/build.ts; `bin` points at the
@@ -194,6 +372,7 @@ const config: KnipConfig = {
     // reached from index.html by the Vite plugin, not from this list.
     "apps/web": {
       entry: [
+        ...manifestEntries("apps/web"),
         // Type-level guard over the generated OpenAPI types: it exists to be
         // type-checked, so it has no importer by design.
         "src/api/schema.assert.ts",
@@ -201,51 +380,43 @@ const config: KnipConfig = {
     },
 
     "packages/db": {
+      includeEntryExports: true,
       entry: [
         // Every target of the `exports` map — the workspace consumers
         // (apps/api, apps/cli, the modules) import these subpaths by name.
-        "src/schema/index.ts!",
-        "src/run-status.ts!",
-        "src/pricing-status.ts!",
-        "src/client.ts!",
-        "src/auth.ts!",
-        "src/auth-policy.ts!",
-        "src/bootstrap-org.ts!",
-        "src/storage.ts!",
-        "src/notify.ts!",
+        ...manifestEntries("packages/db"),
         // Migration CLI, invoked as `bun packages/db/src/migrate.ts`.
         "src/migrate.ts",
       ],
     },
 
     "packages/mcp-transport": {
+      includeEntryExports: true,
       entry: [
         // Sole `exports` target, imported as `@appstrate/mcp-transport`.
-        "src/index.ts!",
+        ...manifestEntries("packages/mcp-transport"),
         // Spawned as a subprocess by the transport tests.
         "test/fixtures/echo-server.ts",
       ],
     },
 
+    /**
+     * NOT published, despite the `publishConfig` in its manifest — see the
+     * `includeEntryExports` note above for the evidence and for what that
+     * costs. `includeEntryExports` is therefore UNSET here on purpose and NOT
+     * because the published-package exemption applies: turning it on reports
+     * 176 findings (79 exports + 97 exported types, 122 distinct names), 159 of
+     * them lines in the `src/index.ts` and `src/bundle/index.ts` barrels. Their
+     * disposition is one product question — does an unpublished package keep a
+     * portable public API — not 159 hygiene calls, so it is deferred to its own
+     * pass rather than triaged in a sweep. Measured 2026-08-25; re-measure
+     * before acting.
+     */
     "packages/afps-runtime": {
       entry: [
-        // Every target of the `exports` map: published on npm, so out-of-tree
-        // readers reach these subpaths directly.
-        "src/index.ts!",
-        "src/cli/index.ts!",
-        "src/errors.ts!",
-        "src/interfaces/index.ts!",
-        "src/types/index.ts!",
-        "src/events/index.ts!",
-        "src/sinks/index.ts!",
-        "src/template/index.ts!",
-        "src/transport/trace-context.ts!",
-        "src/bundle/index.ts!",
-        "src/runner/index.ts!",
-        "src/resolvers/index.ts!",
-        "src/conformance/index.ts!",
-        // Manifest `bin`: the `afps` executable itself.
-        "bin/afps.ts!",
+        // Every target of the `exports` map plus the manifest `bin` (the
+        // `afps` executable, run from a checkout).
+        ...manifestEntries("packages/afps-runtime"),
         "examples/**/build.ts",
       ],
     },
@@ -256,79 +427,23 @@ const config: KnipConfig = {
     // tables — the root test preload skips the file when it is absent, which
     // is why module-chat (no tables of its own) declares none.
     "packages/module-chat": {
-      entry: ["src/index.ts!", "src/ui/index.tsx!", "src/ui/use-sessions.ts!"],
+      entry: [...manifestEntries("packages/module-chat")],
     },
     "packages/module-claude-code": {
-      entry: ["src/index.ts!", "test/tables.ts"],
+      entry: [...manifestEntries("packages/module-claude-code"), "test/tables.ts"],
     },
     "packages/module-codex": {
-      entry: ["src/index.ts!", "test/tables.ts"],
+      entry: [...manifestEntries("packages/module-codex"), "test/tables.ts"],
     },
     "packages/module-observability": {
-      entry: ["src/index.ts!", "test/tables.ts"],
+      entry: [...manifestEntries("packages/module-observability"), "test/tables.ts"],
     },
 
     "packages/core": {
       // Every target of the `exports` map. Published on npm and consumed out
       // of tree (cloud, connect-helper, third-party modules), so each subpath
       // is a public entry whose readers this repo cannot see.
-      entry: [
-        "src/image-ref.ts!",
-        "src/logger.ts!",
-        "src/env.ts!",
-        "src/ajv.ts!",
-        "src/api-errors.ts!",
-        "src/safe-json.ts!",
-        "src/storage.ts!",
-        "src/storage-s3.ts!",
-        "src/storage-fs.ts!",
-        "src/errors.ts!",
-        "src/validation.ts!",
-        "src/integration.ts!",
-        "src/mcp-server.ts!",
-        "src/mcp-server-meta.ts!",
-        "src/mcp-server-bundle/index.ts!",
-        "src/zip.ts!",
-        "src/package-files.ts!",
-        "src/naming.ts!",
-        "src/mime.ts!",
-        "src/dependencies.ts!",
-        "src/integrity.ts!",
-        "src/semver.ts!",
-        "src/dist-tags.ts!",
-        "src/version-policy.ts!",
-        "src/system-packages.ts!",
-        "src/runtime-tools-catalog.ts!",
-        "src/runtime-tool-defs.ts!",
-        "src/runtime-event-drain.ts!",
-        "src/ssrf.ts!",
-        "src/sse.ts!",
-        "src/html.ts!",
-        "src/schemas.ts!",
-        "src/schema-validation.ts!",
-        "src/form.ts!",
-        "src/input-resolution.ts!",
-        "src/format.ts!",
-        "src/module.ts!",
-        "src/telemetry.ts!",
-        "src/permissions.ts!",
-        "src/platform-types.ts!",
-        "src/token-usage.ts!",
-        "src/token-budget.ts!",
-        "src/sidecar-types.ts!",
-        "src/model-swap.ts!",
-        "src/model-generation.ts!",
-        "src/pairing-token.ts!",
-        "src/jwt.ts!",
-        "src/dedupe-label.ts!",
-        "src/chat-contract.ts!",
-        "src/file-uri.ts!",
-        "src/chat-turn-metadata.ts!",
-        "src/bearer.ts!",
-        "src/oauth-bearer-swap.ts!",
-        "src/url.ts!",
-        "src/run-and-wait-client.ts!",
-      ],
+      entry: [...manifestEntries("packages/core")],
       /**
        * Optional peer dependencies: the S3 storage adapter and the Hono
        * middleware are imported behind a runtime feature check, and hosts that
@@ -344,71 +459,50 @@ const config: KnipConfig = {
     },
 
     // Docker entrypoints: the image CMD runs them directly. Neither manifest
-    // declares `exports`, `bin` or `main`.
-    "runtime-pi": { entry: ["entrypoint.ts!"] },
+    // declares `exports`, `bin` or `main`, so nothing is derived.
+    "runtime-pi": { entry: [...manifestEntries("runtime-pi"), "entrypoint.ts!"] },
     "runtime-pi/sidecar": {
-      entry: ["server.ts!", "test/fixtures/**/server.ts"],
+      entry: [...manifestEntries("runtime-pi/sidecar"), "server.ts!", "test/fixtures/**/server.ts"],
     },
 
     // Every target of the `exports` map. afps-shared is published on npm
-    // (core resolves it by range); the rest are workspace-internal libraries
-    // whose consumers import the subpath by name.
+    // (core resolves it by range).
     "packages/afps-shared": {
-      entry: [
-        "src/companion-files.ts!",
-        "src/semver-resolve.ts!",
-        "src/integrity.ts!",
-        "src/credential-template.ts!",
-        "src/delivery-http.ts!",
-        "src/api-tool-naming.ts!",
-        "src/mcp-naming.ts!",
-        "src/file-field.ts!",
-        "src/ssrf.ts!",
-        "src/token-usage.ts!",
-        "src/ssrf-dns.ts!",
-        "src/guarded-fetch.ts!",
-        "src/signed-token.ts!",
-        "src/unzip-bounded.ts!",
-        "src/backoff.ts!",
-        "src/mime.ts!",
-      ],
+      entry: [...manifestEntries("packages/afps-shared")],
     },
     "packages/connect": {
-      entry: [
-        "src/index.ts!",
-        "src/connect/index.ts!",
-        "src/proxy-primitives.ts!",
-        "src/proxy-ca-planner.ts!",
-        "src/integration-mitm-planner.ts!",
-        "src/integration-credentials.ts!",
-        "src/afps-delivery.ts!",
-      ],
+      includeEntryExports: true,
+      entry: [...manifestEntries("packages/connect")],
     },
-    "packages/emails": { entry: ["src/index.ts!"] },
-    "packages/env": { entry: ["src/index.ts!"] },
+    "packages/emails": {
+      includeEntryExports: true,
+      entry: [...manifestEntries("packages/emails")],
+    },
+    "packages/env": {
+      includeEntryExports: true,
+      entry: [...manifestEntries("packages/env")],
+    },
     "packages/runner-pi": {
-      entry: [
-        "src/index.ts!",
-        "src/runtime-tools/index.ts!",
-        "src/provider-map.ts!",
-        "src/model-compat.ts!",
-      ],
+      entry: [...manifestEntries("packages/runner-pi")],
     },
-    "packages/shared-types": { entry: ["src/index.ts!"] },
+    "packages/shared-types": {
+      includeEntryExports: true,
+      entry: [...manifestEntries("packages/shared-types")],
+    },
     "packages/ui": {
-      entry: [
-        "src/schema-form/index.tsx!",
-        "src/components/sidebar-context.ts!",
-        "src/components/model-generation-labels.ts!",
-        // Wildcard subpath `./components/*` — apps/web imports design-system
-        // components one file at a time.
-        "src/components/*.tsx!",
-        "src/cn.ts!",
-        "src/use-mobile.ts!",
-      ],
+      includeEntryExports: true,
+      // The `./components/*` wildcard target is deliberately NOT an entry.
+      // `packages/ui` is private with exactly one in-repo consumer
+      // (`apps/web`), so the published-package carve-out does not apply and
+      // "no in-repo reader" *is* evidence of death — but declaring the
+      // wildcard as an entry made every design-system component reachable
+      // without an importer, so a component nobody renders could never be
+      // reported. apps/web imports each component by its own subpath, which
+      // puts the live ones in the graph on their own.
+      entry: [...manifestEntries("packages/ui", ["./components/*"])],
     },
     // Playwright specs, discovered by the runner, not imported.
-    e2e: { entry: ["**/*.spec.ts"] },
+    e2e: { entry: [...manifestEntries("e2e"), "**/*.spec.ts"] },
   },
 };
 

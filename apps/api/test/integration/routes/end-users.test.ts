@@ -2,8 +2,9 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
-import { truncateAll } from "../../helpers/db.ts";
+import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import { endUsers } from "@appstrate/db/schema";
 
 const app = getTestApp();
 
@@ -138,6 +139,62 @@ describe("End-Users API", () => {
       const body = (await res.json()) as any;
       expect(body.data).toHaveLength(1);
       expect(body.data[0].name).toBe("Zaphod Beeblebrox");
+    });
+
+    describe("?limit", () => {
+      /**
+       * The spec declares `minimum: 1, maximum: 100, default: 20`
+       * (`openapi/paths/end-users.ts`) and nothing used to enforce it: the route
+       * coerced the param with a bare `Number()`, so `?limit=abc` produced
+       * `NaN`, `??` did not catch it and neither did `Math.min(Math.max(NaN, 1),
+       * 100)`. Drizzle's pg dialect emits the `limit` clause only for a
+       * `number >= 0`, so the clause was DROPPED — not a 500, an unbounded query
+       * returning every end-user in the application, with `limit: null` and
+       * `hasMore: false` in the envelope.
+       *
+       * `PAGE + 1` rows exist in every case below, so a dropped clause is
+       * visible in `data.length`, not just in the echoed `limit`.
+       */
+      const PAGE = 20;
+
+      beforeEach(async () => {
+        await db.insert(endUsers).values(
+          Array.from({ length: PAGE + 1 }, (_, i) => ({
+            id: `eu_limitprobe_${String(i).padStart(2, "0")}`,
+            applicationId: ctx.defaultAppId,
+            orgId: ctx.orgId,
+            name: `Probe ${i}`,
+          })),
+        );
+      });
+
+      it.each([
+        ["abc", "non-numeric"],
+        ["-5", "below the minimum"],
+        ["1e9", "above the maximum"],
+      ])("falls back to the default page size for ?limit=%s (%s)", async (value) => {
+        const res = await app.request(`/api/end-users?limit=${value}`, {
+          headers: apiKeyHeaders(),
+        });
+
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as any;
+        expect(body.limit).toBe(PAGE);
+        expect(body.data).toHaveLength(PAGE);
+        expect(body.hasMore).toBe(true);
+      });
+
+      it("honours a valid limit", async () => {
+        const res = await app.request("/api/end-users?limit=3", {
+          headers: apiKeyHeaders(),
+        });
+
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as any;
+        expect(body.limit).toBe(3);
+        expect(body.data).toHaveLength(3);
+        expect(body.hasMore).toBe(true);
+      });
     });
   });
 

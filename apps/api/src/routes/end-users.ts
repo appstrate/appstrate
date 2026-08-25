@@ -19,6 +19,7 @@ import {
 import { invalidRequest } from "../lib/errors.ts";
 import { readJsonBody } from "../lib/request-body.ts";
 import { setCursorLinkHeader } from "../lib/pagination-link.ts";
+import { parseListPagination } from "../lib/list-query.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getAppScope } from "../lib/scope.ts";
@@ -91,7 +92,13 @@ export function createEndUsersRouter() {
   // GET /api/end-users — list end-users in the application (cursor-based pagination)
   router.get("/", rateLimit(300), requirePermission("end-users", "read"), async (c) => {
     const scope = getAppScope(c);
-    const limit = c.req.query("limit") ? Number(c.req.query("limit")) : undefined;
+    // Keyset-paginated on `startingAfter`/`endingBefore`, so only the helper's
+    // `limit` applies. A bare `Number("abc")` here used to hand `NaN` to the
+    // query builder, and drizzle's pg dialect emits the `limit` clause only for
+    // a `number >= 0` — `NaN` is not, so the clause vanished and the request
+    // returned the application's ENTIRE end-user table. Out-of-range or
+    // unparseable now falls back to the documented default of 20.
+    const { limit } = parseListPagination(c, { defaultLimit: 20 });
     const startingAfter = c.req.query("startingAfter");
     const endingBefore = c.req.query("endingBefore");
     const externalId = c.req.query("externalId");

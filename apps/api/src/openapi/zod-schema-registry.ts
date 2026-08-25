@@ -14,6 +14,7 @@
 
 import { z } from "zod";
 import type { OpenApiSchemaEntry } from "@appstrate/core/module";
+import { LLM_PROXY_ROUTES, llmProxyUrlPath, type ProxiedApiShape } from "@appstrate/runner-pi";
 
 // --- End-User schemas (routes/end-users.ts) ---
 import { createEndUserSchema, updateEndUserSchema } from "../routes/end-users.ts";
@@ -658,13 +659,19 @@ export const EXEMPT_REQUEST_BODIES: Record<string, string> = {
   "POST /api/auth/cli/revoke": "Better Auth CLI-grant route; no Zod in this repo",
   "POST /api/auth/cli/sessions/revoke": "Better Auth CLI-session route; no Zod in this repo",
   // The LLM proxy forwards the provider's own request envelope verbatim; the
-  // schema is the provider's, and re-declaring it as Zod would fork it.
-  "POST /api/llm-proxy/anthropic-messages/v1/messages":
-    "verbatim provider passthrough; the body schema is Anthropic's, not ours",
-  "POST /api/llm-proxy/openai-completions/v1/chat/completions":
-    "verbatim provider passthrough; the body schema is OpenAI's, not ours",
-  "POST /api/llm-proxy/mistral-conversations/v1/chat/completions":
-    "verbatim provider passthrough; the body schema is Mistral's, not ours",
+  // schema is the provider's, and re-declaring it as Zod would fork it. That is
+  // true of every shape in `LLM_PROXY_ROUTES` by construction — a shape is in
+  // that table precisely because the proxy passes it through — so the keys are
+  // DERIVED from it rather than spelled out a third time beside the mount
+  // (`routes/llm-proxy.ts`) and the document (`openapi/paths/llm-proxy.ts`),
+  // both of which already read the table. A fourth shape gets its mount, its
+  // path entry and this exemption in one edit.
+  ...Object.fromEntries(
+    (Object.keys(LLM_PROXY_ROUTES) as ProxiedApiShape[]).map((shape) => [
+      `POST /api/llm-proxy${llmProxyUrlPath(shape)}`,
+      "verbatim provider passthrough; the body schema is the upstream provider's, not ours",
+    ]),
+  ),
   // JSON-RPC 2.0 envelope dispatched by the MCP server; the method-level
   // params are validated per tool, not by one body schema.
   "POST /api/mcp/o/{org}":

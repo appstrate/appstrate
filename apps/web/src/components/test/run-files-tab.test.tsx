@@ -15,15 +15,11 @@
  * Same no-DOM harness as `run-outcome-tab.test.tsx`.
  */
 
-import type { ReactElement } from "react";
 import { describe, it, expect } from "bun:test";
-import { renderToStaticMarkup } from "react-dom/server";
-import { MemoryRouter } from "react-router-dom";
-import { I18nextProvider } from "react-i18next";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import filesFr from "../../locales/fr/files.json";
 import i18n, { i18nReady } from "../../i18n.ts";
 import type { FileDto } from "../../hooks/use-files.ts";
+import { fileFixture, render } from "../../test/render.tsx";
 import { RunFilesView } from "../run-files-tab.tsx";
 
 await i18nReady;
@@ -32,29 +28,7 @@ await i18n.changeLanguage("fr");
 const RUN_ID = "run_1";
 
 function file(name: string): FileDto {
-  return {
-    id: `file_${name}`,
-    purpose: "agent_output",
-    run_id: RUN_ID,
-    packageId: "@acme/reporter",
-    mime: "text/plain",
-    size: 12,
-    createdAt: "2026-07-01T10:00:00.000Z",
-    expiresAt: null,
-    capabilities: { download: true, delete: false, keep: false },
-  } as unknown as FileDto;
-}
-
-function render(node: ReactElement): string {
-  return renderToStaticMarkup(
-    <QueryClientProvider client={new QueryClient()}>
-      <I18nextProvider i18n={i18n}>
-        <MemoryRouter>{node}</MemoryRouter>
-      </I18nextProvider>
-    </QueryClientProvider>,
-  )
-    .replace(/&#x27;/g, "'")
-    .replace(/&quot;/g, '"');
+  return fileFixture({ name, run_id: RUN_ID });
 }
 
 function filesTab(files: FileDto[], extra: { hasMore?: boolean } = {}): string {

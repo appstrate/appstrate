@@ -45,6 +45,14 @@ import {
   KNOWN_DRIFT,
   EXEMPT_SCHEMAS,
 } from "../apps/api/src/openapi/response-type-registry.ts";
+// Relative, like every other cross-workspace import in this file: the root
+// manifest declares no `@appstrate/runner-pi` dependency, and this gate only
+// needs the one path table.
+import {
+  LLM_PROXY_ROUTES,
+  llmProxyUrlPath,
+  type ProxiedApiShape,
+} from "../packages/runner-pi/src/llm-proxy-routes.ts";
 import { collectModuleOpenApi, discoverWorkspaceModuleDirs } from "./lib/module-openapi.ts";
 import { getTypeShape, type TypeShape } from "./lib/ts-interface-required-keys.ts";
 
@@ -1258,13 +1266,29 @@ for (const m of indexSrc.matchAll(
 
 // 4b. Route files referenced by mounts — parse each factory body or default body
 //     and combine with the mount prefix.
+//
+// A whole-file skip removes every route in that file from `codeEndpoints`, so
+// §5 (Code ⊆ Spec) cannot see them. §5b (Spec ⊆ Code) only half-covers that: it
+// reports a skipped file's endpoints as "registered by no router" if the spec
+// ALREADY documents them, which is the case for a file being newly skipped. It
+// reports NOTHING for a file whose endpoints were never documented — the spec
+// side has nothing to iterate. The already-skipped
+// `modules/firecracker/runner/server` demonstrates the shape: 13 routes, none
+// in the spec, and this gate is silent about all of them (there, deliberately —
+// see below).
+//
+// So widening this set IS a silent coverage hole for a new file, and the size
+// assertion under it is the barrier. It is one literal rather than the
+// `ALLOWED_SKIP_FILES` twin-set it replaces — that duplicate went stale under a
+// rename without failing, whereas a count cannot disagree with itself.
 const SKIP_FILES = new Set<string>([
   // Routes registered with a COMPUTED path (`router.post(llmProxyUrlPath(shape),
   // …)` — a call, not a string/template literal). The path can't be captured
   // statically, so the emitted endpoints are covered by SPEC_ONLY_ALLOWLIST in
   // §5b. (This used to describe `router.post(entry.urlPath, …)`, a bare
   // identifier read off a local config array; that array is gone. Before that
-  // it read "covered by check #1", the hand-typed endpoint list §5b replaced.) (packages.ts is NOT skipped: its template-literal
+  // it read "covered by check #1", the hand-typed endpoint list §5b replaced.)
+  // (packages.ts is NOT skipped: its template-literal
   // `${path}` routes are now expanded by resolveTemplatedPath against the
   // in-file ROUTE_CONFIGS `path:` literals and verified against the spec like
   // any literal route; an unresolvable `${…}` fails the run.)
@@ -1278,34 +1302,32 @@ const SKIP_FILES = new Set<string>([
   "modules/firecracker/runner/server",
 ]);
 
-// Meta-guard: a whole-file skip lets every endpoint in that file escape the
-// Code ⊆ Spec check (above), so adding one must be a deliberate, reviewed act.
-// Sanctioned skips: `routes/llm-proxy` (variable-path config loop) and the
-// firecracker runner daemon server (standalone process, not platform API).
-// If anyone widens this set, fail loudly here and force per-route handling or
-// an explicit, justified decision instead of a silent coverage hole.
-const ALLOWED_SKIP_FILES = new Set<string>([
-  "routes/llm-proxy",
-  "modules/firecracker/runner/server",
-]);
-const unexpectedSkips = [...SKIP_FILES].filter((f) => !ALLOWED_SKIP_FILES.has(f));
-if (SKIP_FILES.size > ALLOWED_SKIP_FILES.size || unexpectedSkips.length > 0) {
+// The barrier. Both entries above are load-bearing and neither can be derived,
+// so the only honest assertion is that the set still holds exactly what was
+// reviewed. Checked with `!==`, not `>`: a narrowing is a SAFER state, but it
+// leaves this constant claiming a file is skipped when it is not, and a gate
+// whose own bookkeeping has drifted is the thing this branch exists to stop.
+// The message below therefore names the right repair for each direction.
+const SANCTIONED_SKIP_COUNT = 2;
+if (SKIP_FILES.size !== SANCTIONED_SKIP_COUNT) {
   exitCode = 1;
+  const widened = SKIP_FILES.size > SANCTIONED_SKIP_COUNT;
   console.log(`\n  5. Code ⊆ Spec — SKIP_FILES guard`);
   console.log(`  ---------------------------------`);
   console.log(
-    `  ERROR  SKIP_FILES must contain only the sanctioned whole-file skip ` +
-      `(${[...ALLOWED_SKIP_FILES].join(", ")}).`,
+    `  ERROR  SKIP_FILES holds ${SKIP_FILES.size} entr${SKIP_FILES.size === 1 ? "y" : "ies"}, ` +
+      `expected ${SANCTIONED_SKIP_COUNT}: ` +
+      `${[...SKIP_FILES].join(", ")}`,
   );
-  if (unexpectedSkips.length > 0) {
-    console.log(`  Unexpected skip(s) that would hide endpoints from the Code ⊆ Spec check:`);
-    for (const f of unexpectedSkips) console.log(`    - ${f}`);
-  }
   console.log(
-    `\n  A whole-file skip silently excludes every route in that file. Don't widen ` +
-      `SKIP_FILES — verify the file's literal-path routes against the spec individually, ` +
-      `or, if a skip is genuinely unavoidable, add the file to ALLOWED_SKIP_FILES in this ` +
-      `file with a justifying comment so the decision is reviewed.`,
+    widened
+      ? `\n  A whole-file skip hides every route in that file from the Code ⊆ Spec check, ` +
+          `and §5b cannot report what the spec never documented. Verify the file's ` +
+          `literal-path routes individually, or — if a skip is genuinely unavoidable — ` +
+          `raise SANCTIONED_SKIP_COUNT with a justifying comment so the decision is reviewed.`
+      : `\n  A skip was REMOVED, which is a widening of coverage and almost certainly ` +
+          `correct. Lower SANCTIONED_SKIP_COUNT to ${SKIP_FILES.size} so this constant ` +
+          `stops asserting a skip that no longer exists.`,
   );
 }
 
@@ -1367,7 +1389,8 @@ if (existsSync(modulesDir)) {
       const src = readFileSync(filePath, "utf8");
       if (!src.includes("new Hono")) continue; // only files that define a router
       const rel = "modules/" + filePath.slice(modulesDir.length + 1);
-      // Same sanctioned whole-file skip as 4b (guarded by ALLOWED_SKIP_FILES).
+      // Same sanctioned whole-file skip as 4b (see SKIP_FILES' own comment for
+      // why a widened skip still fails, at §5b).
       if (SKIP_FILES.has(rel.replace(/\.ts$/, ""))) continue;
       for (const reg of extractRouterRegistrations(src, src, rel)) {
         const fullPath = normaliseHonoPath(reg.path);
@@ -1546,20 +1569,22 @@ const SPEC_ONLY_ALLOWLIST = new Set<string>([
   "GET /api/openapi.json",
 
   // LLM proxy shapes. `routes/llm-proxy.ts` mounts them from `LLM_PROXY_ROUTES`
-  // (`@appstrate/runner-pi`) via `llmProxyUrlPath(shape)`, a call this parser
-  // cannot evaluate, which is why the whole file sits in SKIP_FILES.
+  // via `llmProxyUrlPath(shape)`, a call this parser cannot evaluate, which is
+  // why the whole file sits in SKIP_FILES; this exemption exists only because
+  // §5b then compares against code endpoints the skip removed.
   //
-  // Neither side spells these paths as literals any more: the spec derives its
-  // keys from the SAME table (`openapi/paths/llm-proxy.ts`). That is what keeps
-  // the skip honest now — not this list. A `baseSuffix` edit moves the mounted
-  // route and the document together, so they cannot disagree; the symmetry
-  // between a client's base URL and the server's mount is asserted directly in
-  // `packages/runner-pi/test/llm-proxy-routes.test.ts`. This allowlist remains
-  // only because §5b compares against code endpoints the skip removed, and
-  // documenting a fourth shape without listing it here still fails the run.
-  "POST /api/llm-proxy/anthropic-messages/v1/messages",
-  "POST /api/llm-proxy/openai-completions/v1/chat/completions",
-  "POST /api/llm-proxy/mistral-conversations/v1/chat/completions",
+  // DERIVED from that same table, not spelled out. Both the mount and the
+  // document already read it — `openapi/paths/llm-proxy.ts` states in its own
+  // header that hand-spelling the paths "is what would let the published
+  // contract drift from a live endpoint with every check still green", and the
+  // check it was talking about kept the last hand-written copy three files
+  // away. Reading the table means a `baseSuffix` edit, or a fourth shape, moves
+  // the mounted route, the document and this exemption in one step; the
+  // symmetry between a client's base URL and the server's mount is asserted
+  // directly in `packages/runner-pi/test/llm-proxy-routes.test.ts`.
+  ...(Object.keys(LLM_PROXY_ROUTES) as ProxiedApiShape[]).map(
+    (shape) => `POST /api/llm-proxy${llmProxyUrlPath(shape)}`,
+  ),
 ]);
 
 const undocumentedInCode = [...specEndpoints]
@@ -1594,8 +1619,8 @@ if (undocumentedInCode.length === 0) {
 // stops being enumerated by ANY check here — the only remaining signal is
 // `detect:breaking` against the committed baseline, which a legitimate
 // `openapi:baseline` regeneration wipes. Assert both sets stay live. This is
-// the same contract §5's ALLOWED_SKIP_FILES and §7's staleExempt already
-// enforce for their own exemption lists.
+// the same contract §4b's staleExemptBodies, §6's staleResponseSchema and §7's
+// staleExempt already enforce for their own exemption lists.
 const staleSpecOnly = [...SPEC_ONLY_ALLOWLIST].filter((ep) => !specEndpoints.has(ep)).sort();
 const staleCodeToSpec = [...CODE_TO_SPEC_ALLOWLIST].filter((ep) => !codeEndpoints.has(ep)).sort();
 
@@ -1709,16 +1734,22 @@ const RESPONSE_SCHEMA_ALLOWLIST = new Set<string>([
   "POST /activate/approve 200",
   "POST /activate/deny 200",
   "GET /api/integrations/callback 200",
-  // LLM proxy passthrough — the body is the upstream provider's response,
-  // verbatim; there is no stable schema to declare.
-  "POST /api/llm-proxy/anthropic-messages/v1/messages 200",
-  "POST /api/llm-proxy/mistral-conversations/v1/chat/completions 200",
-  "POST /api/llm-proxy/openai-completions/v1/chat/completions 200",
+  // The three `/api/llm-proxy/*` 200s used to sit here, on the reasoning that a
+  // verbatim upstream passthrough "has no stable schema to declare". It does:
+  // `openapi/paths/llm-proxy.ts` declares a permissive `{ type: "object",
+  // additionalProperties: true }` passthrough schema explicitly to satisfy this
+  // very check, and says so in a comment. Two files asserted opposite things
+  // about the same three endpoints, and the exemption won by short-circuiting.
 ]);
 
 const JSON_MEDIA_TYPE = /^application\/([a-z0-9.+-]+\+)?json$/;
 
 const schemaGaps: string[] = [];
+// Every 2xx-non-204 response key this step considered, allowlisted or not —
+// the domain RESPONSE_SCHEMA_ALLOWLIST is allowed to name. Collected here
+// rather than re-walked afterwards so the "which responses does this step
+// judge" predicate exists once.
+const consideredResponses = new Set<string>();
 for (const [specPath, pathItem] of Object.entries(
   openApiSpec.paths as Record<string, Record<string, unknown>>,
 )) {
@@ -1729,6 +1760,7 @@ for (const [specPath, pathItem] of Object.entries(
     for (const [status, rawResp] of Object.entries(responses)) {
       if (!/^2\d\d$/.test(status) || status === "204") continue;
       const key = `${verb.toUpperCase()} ${specPath} ${status}`;
+      consideredResponses.add(key);
       if (RESPONSE_SCHEMA_ALLOWLIST.has(key)) continue;
 
       let resp = rawResp as Record<string, unknown>;
@@ -1750,18 +1782,42 @@ for (const [specPath, pathItem] of Object.entries(
   }
 }
 
-if (schemaGaps.length === 0) {
+// RESPONSE_SCHEMA_ALLOWLIST was the last hand-maintained exemption list in this
+// file without a staleness assertion — §4b's EXEMPT_REQUEST_BODIES, §5b's two
+// endpoint allowlists and §7's EXEMPT_SCHEMAS all carry one, for the reason §5b
+// states outright: an exemption that no longer applies is the failure mode. An
+// entry naming a response the spec no longer serves is not inert, it is a
+// pre-authorised hole waiting for the path to come back schema-less. (The only
+// list still exempt from this is ERROR_STATUS_ALLOWLIST, deliberately empty.)
+const staleResponseSchema = [...RESPONSE_SCHEMA_ALLOWLIST]
+  .filter((key) => !consideredResponses.has(key))
+  .sort();
+
+if (schemaGaps.length === 0 && staleResponseSchema.length === 0) {
   console.log(
-    `  OK — every 2xx JSON response declares a schema (allowlist: ${RESPONSE_SCHEMA_ALLOWLIST.size}).`,
+    `  OK — every 2xx JSON response declares a schema (allowlist: ${RESPONSE_SCHEMA_ALLOWLIST.size}, all live).`,
   );
 } else {
   exitCode = 1;
-  console.log(`\n  2xx responses without a schema (${schemaGaps.length}):`);
-  for (const gap of schemaGaps.sort()) console.log(`    - ${gap}`);
-  console.log(
-    `\n  Declare a response schema in apps/api/src/openapi/paths/, switch the ` +
-      `response to 204, or add a justified entry to RESPONSE_SCHEMA_ALLOWLIST in this file.`,
-  );
+  if (schemaGaps.length > 0) {
+    console.log(`\n  2xx responses without a schema (${schemaGaps.length}):`);
+    for (const gap of schemaGaps.sort()) console.log(`    - ${gap}`);
+    console.log(
+      `\n  Declare a response schema in apps/api/src/openapi/paths/, switch the ` +
+        `response to 204, or add a justified entry to RESPONSE_SCHEMA_ALLOWLIST in this file.`,
+    );
+  }
+  if (staleResponseSchema.length > 0) {
+    console.log(
+      `\n  Stale RESPONSE_SCHEMA_ALLOWLIST entries — the spec declares no such ` +
+        `2xx response any more (${staleResponseSchema.length}):`,
+    );
+    for (const key of staleResponseSchema) console.log(`    - ${key}`);
+    console.log(
+      `\n  Delete the stale entries. An exemption that outlives its response pre-approves ` +
+        `a schema-less body the day that path returns.`,
+    );
+  }
 }
 
 // ═══════════════════════════════════════════════════

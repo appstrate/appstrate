@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/afps-shared",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Zero-dependency AFPS helpers shared by @appstrate/core and @appstrate/afps-runtime (companion-file checks, semver resolution, SRI integrity, credential templates, delivery.http projection)",
   "license": "Apache-2.0",
   "type": "module",
@@ -49,6 +49,7 @@
     "./guarded-fetch": "./src/guarded-fetch.ts",
     "./signed-token": "./src/signed-token.ts",
     "./unzip-bounded": "./src/unzip-bounded.ts",
+    "./archive-prefix": "./src/archive-prefix.ts",
     "./backoff": "./src/backoff.ts",
     "./mime": "./src/mime.ts"
   },

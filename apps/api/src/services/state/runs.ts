@@ -46,8 +46,8 @@ import { listResponse } from "../../lib/list-response.ts";
 import { scopedWhere } from "../../lib/db-helpers.ts";
 import { orgOrSystemFilter } from "../../lib/package-helpers.ts";
 import { type Actor, actorFilter } from "../../lib/actor.ts";
-import { runMetadataSchema, runLogDataSchema } from "../../lib/jsonb-schemas.ts";
-import { ApiError, conflict, invalidRequest } from "../../lib/errors.ts";
+import { runLogDataSchema } from "../../lib/jsonb-schemas.ts";
+import { ApiError, conflict } from "../../lib/errors.ts";
 import { getPlatformRunLimits } from "../run-limits.ts";
 import { detachOrDeleteContainedFiles } from "../files.ts";
 import { normalizeScope } from "@appstrate/core/naming";
@@ -88,16 +88,6 @@ export function runAgentIdentity(row: {
     row.packageId ??
     (row.agentScope && row.agentName ? `@${row.agentScope}/${row.agentName}` : "@deleted/unknown")
   );
-}
-
-function parseRunMetadata(value: Record<string, unknown>) {
-  const result = runMetadataSchema.safeParse(value);
-  if (!result.success) {
-    throw invalidRequest(
-      `Invalid run metadata: ${result.error.issues[0]?.message ?? "validation failed"}`,
-    );
-  }
-  return result.data;
 }
 
 /**
@@ -715,29 +705,14 @@ export async function updateRun(
   id: string,
   updates: {
     status?: string;
-    result?: Record<string, unknown>;
-    checkpoint?: Record<string, unknown>;
-    error?: string;
-    completedAt?: string;
-    duration?: number;
     tokenUsage?: Record<string, unknown>;
-    metadata?: Record<string, unknown>;
-    /** ISO-8601 timestamp; closes the signed-event sink — subsequent POSTs reject with 410. */
-    sinkClosedAt?: string;
   },
   executor: Db = db,
 ): Promise<void> {
   const set: Record<string, unknown> = {};
 
   if (updates.status !== undefined) set.status = updates.status;
-  if (updates.error !== undefined) set.error = updates.error;
-  if (updates.completedAt !== undefined) set.completedAt = new Date(updates.completedAt);
-  if (updates.duration !== undefined) set.duration = updates.duration;
-  if (updates.result !== undefined) set.result = updates.result;
-  if (updates.checkpoint !== undefined) set.checkpoint = updates.checkpoint;
   if (updates.tokenUsage !== undefined) set.tokenUsage = updates.tokenUsage;
-  if (updates.metadata !== undefined) set.metadata = parseRunMetadata(updates.metadata);
-  if (updates.sinkClosedAt !== undefined) set.sinkClosedAt = new Date(updates.sinkClosedAt);
 
   // Monotone status invariant, enforced in the WHERE (not read-then-write):
   // a run that reached a terminal status (success|failed|timeout|cancelled)
@@ -1588,19 +1563,14 @@ export async function getRunFull(scope: AppScope, id: string, actor: Actor | nul
 }
 
 /**
- * Org-scoped run log read. `order: "asc"` (default) returns entries in
- * insertion order (`id ASC`); `"desc"` selects the most recent `limit`
- * entries and is cheaper when only a tail is needed. The returned batch
- * is always chronological — `desc` affects which rows are selected, not
- * the order callers receive.
+ * Org-scoped run log read. Entries come back in insertion order (`id ASC`),
+ * the only order any caller has ever wanted.
  *
- * `sinceId` (asc-only) returns rows with `id > sinceId`, the cursor used
- * by the CLI's polling loop in `runRemote`. Append-only `id` (BIGSERIAL)
- * makes this a stable monotonic cursor: callers track the last id they
- * rendered and pass it back, so each poll's payload size is bounded by
- * the rows produced since the previous poll instead of the run's full
- * history. Not legal with `order: "desc"` — the call throws to surface
- * the misuse rather than silently fall back to a full scan.
+ * `sinceId` returns rows with `id > sinceId`, the cursor used by the CLI's
+ * polling loop in `runRemote`. Append-only `id` (BIGSERIAL) makes this a
+ * stable monotonic cursor: callers track the last id they rendered and pass
+ * it back, so each poll's payload size is bounded by the rows produced since
+ * the previous poll instead of the run's full history.
  *
  * `minLevel` filters by minimum severity using the fixed `run_logs.level`
  * domain (`debug < info < warn < error`): `minLevel: "info"` returns
@@ -1624,26 +1594,21 @@ export async function listRunLogs(args: {
    * `sinceId` for longer runs.
    */
   limit?: number;
-  order?: "asc" | "desc";
   sinceId?: number;
   minLevel?: RunLogLevel;
 }) {
-  const { runId, orgId, limit = 1000, order = "asc", sinceId, minLevel } = args;
-  if (sinceId !== undefined && order === "desc") {
-    throw new Error("listRunLogs: sinceId is not supported with order=desc");
-  }
+  const { runId, orgId, limit = 1000, sinceId, minLevel } = args;
   const filters = [eq(runLogs.runId, runId), eq(runLogs.orgId, orgId)];
   if (sinceId !== undefined) filters.push(gt(runLogs.id, sinceId));
   if (minLevel !== undefined && minLevel !== "debug") {
     filters.push(inArray(runLogs.level, RUN_LOG_LEVELS.slice(RUN_LOG_LEVELS.indexOf(minLevel))));
   }
-  const q = db
+  return await db
     .select()
     .from(runLogs)
     .where(and(...filters))
-    .orderBy(order === "desc" ? desc(runLogs.id) : runLogs.id);
-  const rows = await q.limit(limit);
-  return order === "desc" ? rows.reverse() : rows;
+    .orderBy(runLogs.id)
+    .limit(limit);
 }
 
 /**

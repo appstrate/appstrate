@@ -7,9 +7,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { mkdtemp, rm, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import {
   readConfig,
   writeConfig,
@@ -21,23 +20,20 @@ import {
   resolveProfileName,
   type Config,
 } from "../src/lib/config.ts";
+import { useTempConfigHome } from "./helpers/auth-fixture.ts";
 
-let tmpDir: string;
-const originalXdg = process.env.XDG_CONFIG_HOME;
+// Redirects the whole XDG tree at a per-test tmpdir so `config.ts` uses it
+// naturally via its production path-resolution (no test backdoor).
+// `~/.config/appstrate/` is never touched.
+const configHome = useTempConfigHome("appstrate-cli-config-");
 
 beforeEach(async () => {
-  // Redirect the whole XDG tree at a per-test tmpdir so `config.ts`
-  // uses it naturally via its production path-resolution (no test
-  // backdoor). `~/.config/appstrate/` is never touched.
-  tmpDir = await mkdtemp(join(tmpdir(), "appstrate-cli-config-"));
-  process.env.XDG_CONFIG_HOME = tmpDir;
+  await configHome.setup();
   delete process.env.APPSTRATE_PROFILE;
 });
 
 afterEach(async () => {
-  if (originalXdg === undefined) delete process.env.XDG_CONFIG_HOME;
-  else process.env.XDG_CONFIG_HOME = originalXdg;
-  await rm(tmpDir, { recursive: true, force: true });
+  await configHome.teardown();
 });
 
 describe("readConfig", () => {
@@ -86,7 +82,7 @@ describe("readConfig", () => {
     expect(read).toEqual(input);
     expect(read.profiles.legacy!.applicationId).toBeUndefined();
     const { readFile } = await import("node:fs/promises");
-    const raw = await readFile(join(tmpDir, "appstrate", "config.toml"), "utf-8");
+    const raw = await readFile(join(configHome.dir(), "appstrate", "config.toml"), "utf-8");
     expect(raw).not.toContain("applicationId");
   });
 
@@ -104,8 +100,8 @@ describe("readConfig", () => {
       // missing userId + email
     ].join("\n");
     const fs = await import("node:fs/promises");
-    await fs.mkdir(join(tmpDir, "appstrate"), { recursive: true });
-    await fs.writeFile(join(tmpDir, "appstrate", "config.toml"), bad);
+    await fs.mkdir(join(configHome.dir(), "appstrate"), { recursive: true });
+    await fs.writeFile(join(configHome.dir(), "appstrate", "config.toml"), bad);
     const config = await readConfig();
     expect(Object.keys(config.profiles)).toEqual(["ok"]);
   });
@@ -118,7 +114,7 @@ describe("writeConfig", () => {
       profiles: { default: { instance: "https://a", userId: "u", email: "e" } },
     });
     const { stat } = await import("node:fs/promises");
-    const s = await stat(join(tmpDir, "appstrate", "config.toml"));
+    const s = await stat(join(configHome.dir(), "appstrate", "config.toml"));
     // On systems where umask would normally widen the mode, the
     // explicit `mode: 0o600` on `writeFile` + our `chmod` follow-up must
     // still produce user-only access.
@@ -131,7 +127,7 @@ describe("writeConfig", () => {
       profiles: { default: { instance: "https://a", userId: "u", email: "e" } },
     });
     const { readdir } = await import("node:fs/promises");
-    const entries = await readdir(tmpDir);
+    const entries = await readdir(configHome.dir());
     // No `.tmp` files lingering after a successful write.
     expect(entries.some((e) => e.endsWith(".tmp"))).toBe(false);
   });
@@ -225,7 +221,7 @@ describe("updateProfile", () => {
     const after = await getProfile("dev");
     expect(after!.applicationId).toBeUndefined();
     const { readFile } = await import("node:fs/promises");
-    const raw = await readFile(join(tmpDir, "appstrate", "config.toml"), "utf-8");
+    const raw = await readFile(join(configHome.dir(), "appstrate", "config.toml"), "utf-8");
     expect(raw).not.toContain("applicationId");
   });
 
@@ -293,7 +289,7 @@ describe("resolveProfileName", () => {
 describe("TOML file format", () => {
   it("writes keys as [profile.<name>] sections", async () => {
     await setProfile("prod", { instance: "https://a", userId: "u1", email: "e@e" });
-    const raw = await readFile(join(tmpDir, "appstrate", "config.toml"), "utf-8");
+    const raw = await readFile(join(configHome.dir(), "appstrate", "config.toml"), "utf-8");
     expect(raw).toContain("[profile.prod]");
     expect(raw).toContain('instance = "https://a"');
   });

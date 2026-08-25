@@ -17,76 +17,49 @@
  * in-process so tests are fast and deterministic.
  */
 
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
-import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 
-import {
-  _setKeyringFactoryForTesting,
-  saveTokens,
-  type KeyringHandle,
-} from "../src/lib/keyring.ts";
-import { setProfile } from "../src/lib/config.ts";
 import { apiCommand, type ApiCommandIO, type ApiCommandOptions } from "../src/commands/api.ts";
 import { startTestServer, type TestServerHandle } from "./fixtures/test-server.ts";
+import {
+  installFakeKeyring,
+  seedLoggedInProfile,
+  useTempConfigHome,
+  type FakeKeyringInstall,
+} from "./helpers/auth-fixture.ts";
 
 // ─── Scaffolding (re-uses the same idioms as api-command.test.ts) ──
 
-class FakeKeyring implements KeyringHandle {
-  static store = new Map<string, string>();
-  constructor(private profile: string) {}
-  setPassword(v: string): void {
-    FakeKeyring.store.set(this.profile, v);
-  }
-  getPassword(): string | null {
-    return FakeKeyring.store.get(this.profile) ?? null;
-  }
-  deletePassword(): void {
-    FakeKeyring.store.delete(this.profile);
-  }
-}
-
-let tmpDir: string;
-let originalXdg: string | undefined;
+const configHome = useTempConfigHome("appstrate-cli-apiint-");
+let keyring: FakeKeyringInstall;
 let primary: TestServerHandle;
 let peer: TestServerHandle;
 
-beforeAll(() => {
-  originalXdg = process.env.XDG_CONFIG_HOME;
-});
-afterAll(() => {
-  if (originalXdg === undefined) delete process.env.XDG_CONFIG_HOME;
-  else process.env.XDG_CONFIG_HOME = originalXdg;
-});
 beforeEach(async () => {
-  tmpDir = await mkdtemp(join(tmpdir(), "appstrate-cli-apiint-"));
-  process.env.XDG_CONFIG_HOME = tmpDir;
-  FakeKeyring.store.clear();
-  _setKeyringFactoryForTesting((p) => new FakeKeyring(p));
+  await configHome.setup();
+  keyring = installFakeKeyring();
 
   // Peer first so the primary can reference its URL for cross-origin redirects.
   peer = await startTestServer();
   primary = await startTestServer({ redirectTargetUrl: () => peer.url });
 
-  await setProfile("default", {
+  await seedLoggedInProfile("default", {
     instance: primary.url,
-    userId: "u_1",
-    email: "a@example.com",
-  });
-  await saveTokens("default", {
-    accessToken: "real-access",
-    expiresAt: Date.now() + 5 * 60 * 1000,
-    refreshToken: "r",
-    refreshExpiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+    tokens: {
+      accessToken: "real-access",
+      expiresAt: Date.now() + 5 * 60 * 1000,
+      refreshToken: "r",
+    },
   });
 });
 afterEach(async () => {
-  _setKeyringFactoryForTesting(null);
+  keyring.restore();
   await primary.close();
   await peer.close();
-  await rm(tmpDir, { recursive: true, force: true });
+  await configHome.teardown();
 });
 
 // ─── IO capture ────────────────────────────────────────────────────
@@ -230,7 +203,7 @@ describe("apiCommand integration — SSE", () => {
 
 describe("apiCommand integration — multipart upload", () => {
   it("POST -F file=@path round-trips bytes and filename", async () => {
-    const fpath = join(tmpDir, "pkg.zip");
+    const fpath = join(configHome.dir(), "pkg.zip");
     const bytes = new Uint8Array(2048);
     for (let i = 0; i < bytes.length; i++) bytes[i] = (i * 7919) & 0xff;
     await writeFile(fpath, bytes);
@@ -288,7 +261,7 @@ describe("apiCommand integration — stdin upload", () => {
 
 describe("apiCommand integration — binary download", () => {
   it("-o writes the 1MB binary payload byte-exact", async () => {
-    const outPath = join(tmpDir, "download.bin");
+    const outPath = join(configHome.dir(), "download.bin");
     const captured = makeIO();
     await run({ method: "GET", path: "/binary", output: outPath }, captured);
     expect(captured.exitCode.value).toBe(0);
@@ -347,7 +320,7 @@ describe("apiCommand integration — redirect + Authorization", () => {
   });
 
   it("307 with an empty body (the #1021 papercut) → 0 bytes, exit 0, stderr hint", async () => {
-    const outPath = join(tmpDir, "out.md");
+    const outPath = join(configHome.dir(), "out.md");
     const captured = makeIO();
     await run({ method: "GET", path: "/redirect/307", output: outPath }, captured);
     // Exit code deliberately unchanged: scripts depend on the default

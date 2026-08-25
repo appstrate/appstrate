@@ -26,38 +26,22 @@
  * (issue #1180). A per-test sink only ever holds this command's output.
  */
 
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import {
-  _setKeyringFactoryForTesting,
-  loadTokens,
-  type KeyringHandle,
-} from "../src/lib/keyring.ts";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { loadTokens } from "../src/lib/keyring.ts";
 import { readConfig } from "../src/lib/config.ts";
 import { loginCommand } from "../src/commands/login.ts";
 import type { Org } from "../src/lib/orgs.ts";
 import type { Application } from "../src/lib/applications.ts";
-
-class FakeKeyring implements KeyringHandle {
-  static store = new Map<string, string>();
-  constructor(private profile: string) {}
-  setPassword(v: string): void {
-    FakeKeyring.store.set(this.profile, v);
-  }
-  getPassword(): string | null {
-    return FakeKeyring.store.get(this.profile) ?? null;
-  }
-  deletePassword(): void {
-    FakeKeyring.store.delete(this.profile);
-  }
-}
+import {
+  installFakeKeyring,
+  useTempConfigHome,
+  type FakeKeyringInstall,
+} from "./helpers/auth-fixture.ts";
 
 type FetchCall = { url: string; method: string | undefined; body?: string };
 
-let tmpDir: string;
-let originalXdg: string | undefined;
+const configHome = useTempConfigHome("appstrate-cli-login-org-");
+let keyring: FakeKeyringInstall;
 const originalFetch = globalThis.fetch;
 
 let fetchCalls: FetchCall[];
@@ -177,27 +161,16 @@ function installDefaultResponders(overrides: ResponderMap = {}): void {
   globalThis.fetch = stub as unknown as typeof fetch;
 }
 
-beforeAll(() => {
-  originalXdg = process.env.XDG_CONFIG_HOME;
-});
-
-afterAll(() => {
-  if (originalXdg === undefined) delete process.env.XDG_CONFIG_HOME;
-  else process.env.XDG_CONFIG_HOME = originalXdg;
-});
-
 beforeEach(async () => {
-  tmpDir = await mkdtemp(join(tmpdir(), "appstrate-cli-login-org-"));
-  process.env.XDG_CONFIG_HOME = tmpDir;
-  FakeKeyring.store.clear();
-  _setKeyringFactoryForTesting((p) => new FakeKeyring(p));
+  await configHome.setup();
+  keyring = installFakeKeyring();
   fetchCalls = [];
 });
 
 afterEach(async () => {
-  _setKeyringFactoryForTesting(null);
+  keyring.restore();
   globalThis.fetch = originalFetch;
-  await rm(tmpDir, { recursive: true, force: true });
+  await configHome.teardown();
 });
 
 async function readPinnedOrgId(profile = "default"): Promise<string | undefined> {

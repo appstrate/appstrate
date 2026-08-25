@@ -64,7 +64,8 @@ import { modelGenerationSettingsSchema } from "@appstrate/core/model-generation"
  * nothing, so an unknown field was dropped without a trace and a malformed body
  * became `{}` — a 201 for a run executing with parameters nobody asked for.
  * That is the exact failure `assertFieldsUnlocked` states as a rule
- * (`input-resolution.ts`) and the one #1179 fixed on the MCP surface, and the
+ * (`@appstrate/core/input-resolution`) and the one #1179 fixed on the MCP
+ * surface, and the
  * launch body was the last place the rule did not hold. `POST /runs/remote` was
  * already `.strict()`; the schedule bodies (`routes/schedules.ts`) took the
  * rule afterwards, and the four launch surfaces now agree.
@@ -295,19 +296,20 @@ export function createRunsRouter() {
         // `prepareAndExecuteRun` all load the same integration manifests;
         // sharing the Map collapses those repeats into one SELECT + Zod
         // parse per integration. Request-scoped: dies with this handler.
+        // `resolveRunPreflight` seeds it with the PINNED manifests before it
+        // reads anything, so the advisory verdict and the kickoff's gates
+        // judge the same versions.
         const manifestCache: IntegrationManifestCache = new Map();
 
-        const {
-          modelId: preflightModelId,
-          generationConfig: preflightGenerationConfig,
-          proxyId: preflightProxyId,
-        } = await resolveRunPreflight({
+        await resolveRunPreflight({
           agent: effectiveAgent,
           applicationId: c.get("applicationId"),
           orgId,
           actor,
-          packageSettings,
           connectionOverrides: connectionOverrides ?? null,
+          // Same overrides handed to `prepareAndExecuteRun` below, so the
+          // preflight seeds the manifests the kickoff will freeze.
+          dependencyOverrides: dependencyOverrides ?? null,
           manifestCache,
         });
 
@@ -329,10 +331,10 @@ export function createRunsRouter() {
           pendingFiles,
           // `appfile://` inputs to protect via `file_links` (chaining).
           consumedFileIds,
-          modelId: modelIdOverride ?? preflightModelId,
-          generationConfig: preflightGenerationConfig,
+          modelId: modelIdOverride ?? packageSettings.modelId,
+          generationConfig: packageSettings.generationConfig,
           generationConfigOverride: generationConfigOverride ?? null,
-          proxyId: proxyIdOverride ?? preflightProxyId,
+          proxyId: proxyIdOverride ?? packageSettings.proxyId,
           overrideVersionLabel,
           dependencyOverrides: dependencyOverrides ?? null,
           applicationId: c.get("applicationId"),

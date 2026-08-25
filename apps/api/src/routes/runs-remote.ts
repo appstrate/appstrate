@@ -353,17 +353,6 @@ export function createRunsRemoteRouter() {
           detail: result.error.message,
         });
       }
-      if (!result.sinkCredentials) {
-        // Remote origin always returns credentials; the absence is a service bug.
-        logger.error("createRun remote returned no sinkCredentials", { runId });
-        throw new ApiError({
-          status: 500,
-          code: "sink_credentials_missing",
-          title: "Internal Error",
-          detail: "Remote run created without sink credentials — please retry",
-        });
-      }
-
       logger.info("runs.remote.attribution", {
         runId: result.runId,
         orgId,

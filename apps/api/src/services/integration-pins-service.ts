@@ -52,7 +52,7 @@ import { actorOrSharedFilter, type Actor } from "../lib/actor.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
 import { getPackage } from "./package-catalog.ts";
 import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
-import { fetchIntegrationManifest } from "./integration-service.ts";
+import { fetchIntegrationManifest, resolveRunIntegrationVersions } from "./integration-service.ts";
 import { getOrgDefault } from "./integration-org-defaults-service.ts";
 import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
 import {
@@ -137,15 +137,6 @@ function toPinSummary(row: PinJoinRow): PinSummary {
   };
 }
 
-async function listPinsBy(conditions: Parameters<typeof and>): Promise<PinSummary[]> {
-  const rows = await db
-    .select({ pin: integrationPins, conn: integrationConnections })
-    .from(integrationPins)
-    .leftJoin(integrationConnections, eq(integrationConnections.id, integrationPins.connectionId))
-    .where(and(...conditions));
-  return rows.map(toPinSummary);
-}
-
 /**
  * List every admin pin governing a (app, integration). Used by the admin UI
  * to render the per-agent pin section + by the runtime resolver via the
@@ -156,11 +147,18 @@ export async function listIntegrationPins(
   scope: AppScope,
   integrationId: string,
 ): Promise<PinSummary[]> {
-  return listPinsBy([
-    eq(integrationPins.applicationId, scope.applicationId),
-    eq(integrationPins.integrationId, integrationId),
-    isNull(integrationPins.userId),
-  ]);
+  const rows = await db
+    .select({ pin: integrationPins, conn: integrationConnections })
+    .from(integrationPins)
+    .leftJoin(integrationConnections, eq(integrationConnections.id, integrationPins.connectionId))
+    .where(
+      and(
+        eq(integrationPins.applicationId, scope.applicationId),
+        eq(integrationPins.integrationId, integrationId),
+        isNull(integrationPins.userId),
+      ),
+    );
+  return rows.map(toPinSummary);
 }
 
 /**
@@ -803,6 +801,34 @@ export async function resolveAgentConnectionReadiness(args: {
   // Without it each pick re-fetched every integration manifest, so an agent
   // declaring N integrations paid O(N²) manifest reads for one page load.
   const manifestCache: IntegrationManifestCache = new Map();
+
+  // Seed that memo with each declared integration's PINNED manifest BEFORE
+  // either cascade reads it — the same seeding the run performs at kickoff
+  // (run-pipeline Step 2a / run-creation, both via
+  // `freezeRunSpawnDependencies` → `resolveRunIntegrationVersions`). Unseeded,
+  // `buildRequirement` falls through to `fetchIntegrationManifest`, which reads
+  // `packages.draft_manifest`: the readiness verdict would then judge auth keys
+  // and required scopes against the integration author's LIVE DRAFT while the
+  // run-kickoff 412 judges them against the pinned published version — exactly
+  // the disagreement this function's contract above forbids. (#1178 closed the
+  // agent-manifest half of it; this is the integration-manifest half.)
+  //
+  // The result is deliberately ignored. An unsatisfiable pin is a
+  // `dependency_unresolved` (422) the kickoff raises on its own, not a
+  // connection verdict this endpoint can express; the ids it leaves unseeded
+  // keep the pre-existing draft fallback rather than blanking the Connexions
+  // tab. Every id that DID resolve is seeded either way.
+  //
+  // Independent of the `version` selector: that selector picks the AGENT
+  // manifest, and a run of the draft agent still freezes its integration pins
+  // against published versions. Seeding unconditionally is what keeps the two
+  // aligned for `?version=draft` as well.
+  await resolveRunIntegrationVersions({
+    agentManifest,
+    orgId: scope.orgId,
+    manifestCache,
+  });
+
   const userId = actor.type === "user" ? actor.id : null;
 
   // Two cascades, deliberately — they answer different questions over the SAME

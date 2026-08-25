@@ -24,8 +24,7 @@
  */
 
 import { ApiError } from "../lib/errors.ts";
-import { sanitizeStorageKey } from "./file-storage.ts";
-import { sanitizeFilename } from "@appstrate/core/naming";
+import { toStorageName } from "../lib/storage-name.ts";
 
 /**
  * 400 raised when two input files resolve to the same workspace filename.
@@ -43,9 +42,8 @@ function duplicateFileName(name: string): ApiError {
 }
 
 /**
- * Reduce a display name to a single, safe path segment: strip directory
- * separators + control chars ({@link sanitizeFilename}), fold to an ASCII
- * storage key ({@link sanitizeStorageKey}), and never emit an empty string or a
+ * Reduce a display name to a single, safe path segment: fold to an ASCII
+ * storage key ({@link toStorageName}), and never emit an empty string or a
  * `.`/`..` segment (which the container provisioning guard rejects). This is
  * the segment the collision resolver disambiguates.
  *
@@ -53,7 +51,7 @@ function duplicateFileName(name: string): ApiError {
  * surface worth pinning, so its tests cover this too.
  */
 function toWorkspaceSegment(displayName: string): string {
-  const seg = sanitizeStorageKey(sanitizeFilename(displayName));
+  const seg = toStorageName(displayName);
   if (seg === "" || seg === "." || seg === "..") return "file";
   return seg;
 }

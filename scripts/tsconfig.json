@@ -22,5 +22,18 @@
   // comment in packages/core/src/module.ts). Listing the module entrypoints
   // supplies them; without it this config reports 9 phantom errors in a file
   // that is clean under `apps/api/tsconfig.json`.
-  "include": ["**/*.ts", "../apps/api/src/modules/*/index.ts"]
+  //
+  // The two root-level config files are here for the same reason. They are in
+  // no other program — every workspace tsconfig is rooted inside its own
+  // package and `tsconfig.base.json` has no `include` — so `knip.config.ts`
+  // carried a duplicate object key (TS1117) that `bun run check` could not
+  // see: ESLint's `no-dupe-keys` is off under `eslint-recommended` precisely
+  // because TypeScript is supposed to catch it, and no TypeScript was looking.
+  // A gate config that is itself unchecked is the weakest link.
+  "include": [
+    "**/*.ts",
+    "../apps/api/src/modules/*/index.ts",
+    "../knip.config.ts",
+    "../commitlint.config.ts"
+  ]
 }

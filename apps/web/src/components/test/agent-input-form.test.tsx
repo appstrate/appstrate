@@ -13,22 +13,19 @@
  *   - a pre-filled field must be behind the collapsed "Avancé" fold, i.e. NOT
  *     in the markup until the user opens it.
  *
- * The web test runner has no DOM, so the component is rendered with
- * `renderToStaticMarkup` and asserted on its HTML — the same approach as
- * `run-row.test.tsx`. `<SchemaForm>` is lazy, so the two editable sections
+ * The web test runner has no DOM, so the component is rendered through the
+ * shared `test/render.tsx` harness and asserted on its HTML — the same approach
+ * as `run-row.test.tsx`. `<SchemaForm>` is lazy, so the two editable sections
  * render their Suspense fallback here; the assertions are on the section
  * boundaries this component owns, never on RJSF's internals.
  */
 
-import type { ReactElement } from "react";
 import { describe, it, expect } from "bun:test";
-import { renderToStaticMarkup } from "react-dom/server";
-import { I18nextProvider } from "react-i18next";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { SchemaWrapper } from "@appstrate/core/form";
 import i18n, { i18nReady } from "../../i18n.ts";
 import agentsFr from "../../locales/fr/agents.json";
 import type { AgentInputSettings } from "../../lib/agent-input.ts";
+import { render } from "../../test/render.tsx";
 import { AgentInputForm } from "../agent-input-form.tsx";
 
 await i18nReady;
@@ -44,21 +41,6 @@ const WRAPPER: SchemaWrapper = {
     },
   },
 };
-
-/**
- * `renderToStaticMarkup` escapes the apostrophes and quotes the French copy is
- * full of; decode them back so an assertion can be written with the literal
- * bundle string instead of a hand-escaped copy that drifts from it.
- */
-function render(node: ReactElement): string {
-  return renderToStaticMarkup(
-    <QueryClientProvider client={new QueryClient()}>
-      <I18nextProvider i18n={i18n}>{node}</I18nextProvider>
-    </QueryClientProvider>,
-  )
-    .replace(/&#x27;/g, "'")
-    .replace(/&quot;/g, '"');
-}
 
 function form(settings: AgentInputSettings, value: Record<string, unknown> = {}): string {
   return render(

@@ -28,7 +28,7 @@ import type { LlmProxyApiKeyConfig, ModelSwap, SidecarConfig } from "./helpers.t
 import { LLM_PROXY_TIMEOUT_MS } from "./helpers.ts";
 import { anthropicThinkingBudgets } from "@appstrate/core/model-generation";
 import { PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "@appstrate/runner-pi/provider-map";
-import { PLATFORM_MODEL_COMPAT } from "@appstrate/runner-pi/model-compat";
+import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
 import { logger } from "./logger.ts";
 import { syntheticAliasErrorBody, syntheticAliasErrorMessage } from "./model-swap.ts";
 import { streamBacking } from "./pi-sdk.ts";
@@ -84,11 +84,12 @@ function warnOnSdkDrift(request: Request): void {
  */
 const PI_DEFAULT_MAX_TOKENS = 16_384;
 
-/** Zero per-token rates for the rebuilt `Model` — see {@link buildBackingModel}. */
-const ZERO_RATES = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } as const;
-
-/** The same zeros in `Usage.cost` shape (which adds the `total` roll-up). */
-const ZERO_USAGE_COST = { ...ZERO_RATES, total: 0 } as const;
+/**
+ * The zeros of {@link ZERO_MODEL_COST} in `Usage.cost` shape (which adds the
+ * `total` roll-up). Here they are load-bearing opacity, not filler — see
+ * {@link buildBackingModel} and the constant's own docblock.
+ */
+const ZERO_USAGE_COST = { ...ZERO_MODEL_COST, total: 0 } as const;
 
 const EMPTY_USAGE: Usage = {
   input: 0,
@@ -176,7 +177,7 @@ export function buildBackingModel(deps: PiMessagesBackendDeps): Model<Api> {
       ...(swap.anthropicAdaptiveReasoning ? { forceAdaptiveThinking: true } : {}),
     },
     input: narrowInputModalities(backing.input),
-    cost: { ...ZERO_RATES },
+    cost: { ...ZERO_MODEL_COST },
     // The REAL limits: `maxTokens` is the upstream response cap, `contextWindow`
     // sizes pi-ai's clamp, and a zero window is pi-ai's "do not clamp" sentinel.
     contextWindow: limits.modelContextWindow ?? 0,

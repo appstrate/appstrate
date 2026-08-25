@@ -33,12 +33,12 @@ export async function createAuthedContext(
   applicationId: string,
 ): Promise<import("@playwright/test").BrowserContext> {
   const context = await browser.newContext();
-  const cookieMatch = auth.cookie.match(/better-auth\.session_token=([^;]+)/);
-  if (cookieMatch) {
+  const sessionToken = auth.cookie.match(/better-auth\.session_token=([^;]+)/)?.[1];
+  if (sessionToken) {
     await context.addCookies([
       {
         name: "better-auth.session_token",
-        value: cookieMatch[1],
+        value: sessionToken,
         domain: "localhost",
         path: "/",
       },

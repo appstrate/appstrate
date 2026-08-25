@@ -28,7 +28,7 @@ import {
   llmProxyBaseUrl,
   PROVIDER_BY_API,
 } from "@appstrate/runner-pi";
-import { PLATFORM_MODEL_COMPAT } from "@appstrate/runner-pi/model-compat";
+import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
 import { ANTHROPIC_OAUTH_PLACEHOLDER_API_KEY } from "@appstrate/core/oauth-bearer-swap";
 import { listModelPresets, PROXY_SUPPORTED_APIS, type ModelPreset } from "../../lib/models.ts";
 
@@ -134,7 +134,11 @@ export function resolveModel(flags: ModelFlags): ResolvedModel {
     baseUrl: "",
     reasoning: false,
     input: ["text"],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    // The Pi SDK types `Model.cost` as required and env mode prices nothing
+    // here — the caller's own key, the vendor's own bill, no `llm_usage` row.
+    // One spelling of those zeros; `ZERO_MODEL_COST` carries both reasons the
+    // record exists, and the `compat` exemption above does NOT extend to it.
+    cost: { ...ZERO_MODEL_COST },
     contextWindow: 200_000,
     maxTokens: 8192,
   };

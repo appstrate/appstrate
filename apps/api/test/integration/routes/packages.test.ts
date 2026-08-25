@@ -238,6 +238,11 @@ describe("Packages API", () => {
       });
 
       expect(res.status).toBe(404);
+      // Agents answer this route through their own `agentDetailHandler`, which
+      // spells the word itself — pinned here so it cannot drift away from the
+      // wording the generic handlers derive from `labelSingular`.
+      const body = (await res.json()) as { detail: string };
+      expect(body.detail).toBe("Agent '@pkgorg/does-not-exist' not found");
     });
 
     it("returns 404 for package from another org", async () => {
@@ -301,6 +306,11 @@ describe("Packages API", () => {
       });
 
       expect(res.status).toBe(404);
+      // The detail names ONE skill, not the plural route label. The singular is
+      // declared per route config (`labelSingular`) rather than sliced off the
+      // plural, so this pins the text a reader of the error actually sees.
+      const body = (await res.json()) as { detail: string };
+      expect(body.detail).toBe("Skill '@pkgorg/nope' not found");
     });
 
     it("returns 404 from custom app when skill is not installed", async () => {
@@ -1992,6 +2002,8 @@ describe("Packages API", () => {
       });
 
       expect(res.status).toBe(404);
+      const body = (await res.json()) as { detail: string };
+      expect(body.detail).toBe("Agent '@pkgorg/no-such-agent' not found");
     });
 
     it("returns 401 without authentication", async () => {
@@ -2495,6 +2507,8 @@ describe("Packages API", () => {
       });
 
       expect(res.status).toBe(404);
+      const body = (await res.json()) as { detail: string };
+      expect(body.detail).toBe("Agent '@pkgorg/ghost' not found");
     });
   });
 

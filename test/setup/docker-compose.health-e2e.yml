@@ -14,13 +14,22 @@ services:
       DOCKER_SOCKET: "${HEALTH_E2E_DOCKER_SOCKET:-/var/run/docker.sock}"
       PI_IMAGE: "${HEALTH_E2E_IMAGE:-appstrate-health-e2e:local}"
       SIDECAR_IMAGE: "${HEALTH_E2E_IMAGE:-appstrate-health-e2e:local}"
-      MODULES: oidc,webhooks,mcp,core-providers,@appstrate/module-chat
+      # MODULES / SYSTEM_PROVIDER_KEYS / SYSTEM_PROXIES / SYSTEM_INTEGRATIONS are
+      # deliberately NOT pinned here. They used to be, at values byte-identical
+      # to the Zod defaults in packages/env/src/index.ts — so a module added to
+      # the schema would have left this e2e testing the old set forever (#513,
+      # one level down). docker-compose.yml declares them as bare passthroughs,
+      # so dropping them lets the schema default reach the container and the
+      # e2e follows the platform automatically.
+      #
+      # SYSTEM_INTEGRATIONS was the fourth, and it outlived the other three by a
+      # release: `verify-compose-defaults` could not see it because CODE_DEFAULTS
+      # in apps/cli/src/lib/compose-defaults.ts never listed the variable. The
+      # extractor reading the literal form is only half the gate — the table it
+      # compares against has to know the variable exists.
       S3_BUCKET: appstrate
       S3_REGION: us-east-1
       S3_ENDPOINT: http://appstrate-minio:9000
       AWS_ACCESS_KEY_ID: e2e-minio
       AWS_SECRET_ACCESS_KEY: e2e-minio-password
-      SYSTEM_PROVIDER_KEYS: "[]"
-      SYSTEM_PROXIES: "[]"
-      SYSTEM_INTEGRATIONS: "[]"
       LOG_LEVEL: warn

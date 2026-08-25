@@ -25,9 +25,11 @@ import {
 import { installPackage } from "../../../src/services/application-packages.ts";
 import { createApiKeyCredential } from "../../../src/services/model-providers/credentials.ts";
 import { createOrgModel, setDefaultModel } from "../../../src/services/org-models.ts";
-import { waitForInFlight } from "../../../src/services/run-tracker.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
-import { createFakeOrchestrator } from "../../helpers/run-connection-fixtures.ts";
+import {
+  createFakeOrchestrator,
+  waitForRunPipelineSettled,
+} from "../../helpers/run-connection-fixtures.ts";
 
 const app = getTestApp();
 
@@ -324,19 +326,6 @@ describe("Runs API", () => {
       return createOrgModel(ctx.orgId, label, "gpt-5.5", ctx.user.id, credentialId);
     }
 
-    /**
-     * The trigger is fire-and-forget: the fake-orchestrator workload exits 0
-     * immediately and the platform synthesises a success terminal. Wait for
-     * the in-flight tracker to drain, then give the post-untrack async tail
-     * (`void emitEvent(...)`, event-buffer flush) a beat to finish, so the
-     * background DB writes are contained within THIS test instead of racing
-     * the next test's truncateAll.
-     */
-    async function waitForBackgroundSettled(): Promise<void> {
-      await waitForInFlight(10_000);
-      await Bun.sleep(300);
-    }
-
     it("echoes the org default's model_label and model_source 'org'", async () => {
       await seedRunnableAgent();
       const modelDbId = await seedOrgModel("Echo Default GPT");
@@ -395,7 +384,7 @@ describe("Runs API", () => {
         origin: "platform",
       });
 
-      await waitForBackgroundSettled();
+      await waitForRunPipelineSettled();
     });
 
     it("echoes the pinned model when the body carries an explicit modelId", async () => {
@@ -418,7 +407,7 @@ describe("Runs API", () => {
       expect(body.model_label).toBe("Echo Pinned GPT");
       expect(body.model_source).toBe("org");
 
-      await waitForBackgroundSettled();
+      await waitForRunPipelineSettled();
     });
   });
 

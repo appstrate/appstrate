@@ -379,23 +379,29 @@ describe("autoPresentFile", () => {
     ).toBeUndefined();
   });
 
-  it("is the card's only auto-presentation path, fired at most once", () => {
-    // No DOM in this runner, so the wiring is asserted on the source: the card
-    // must derive its candidate from the rule (not from a server field), must
-    // present through the host opener only, and must keep the once-only ref —
-    // a file published after the panel opened never closes or swaps it.
+  it("leaves the card no reader of the retired agent-declared selection", () => {
+    // A source-text grep, and deliberately only the NEGATIVE half of one — the
+    // same rule the `useRunLogStream source guards` block below states, for the
+    // same reason. There is no DOM harness in this repo, so the card cannot be
+    // rendered; "this string is absent" is the one claim a grep answers
+    // honestly, because it fails on the thing coming back and cannot pass by
+    // luck of formatting.
+    //
+    // The positive assertions this case used to carry are gone — both species
+    // the doctrine below names, and both were demonstrated on this card:
+    //  - `toContain("autoPresentFile({ files, status: effectiveStatus, sweepDone })")`
+    //    pinned one unwrapped call expression. Letting prettier rewrap it —
+    //    zero behaviour change — failed it, while `const _x = autoPresentFile({…})`,
+    //    a call whose result is discarded, would have passed. What it reached
+    //    for is the rule itself, which the cases above test directly.
+    //  - `toContain("producedFiles")` was already satisfied by the unrelated
+    //    `producedFilesTruncated` further down the same file, so dropping the
+    //    authoritative `/api/files` read out of the counted set — the real
+    //    defect it was there to catch — left the whole suite green.
     const card = readFileSync(
       fileURLToPath(new URL("../src/ui/chat-run-progress-card.tsx", import.meta.url)),
       "utf8",
     );
-    expect(card).toContain("autoPresentFile({ files, status: effectiveStatus, sweepDone })");
-    // The counted set unions the authoritative `/api/files` read on top of the
-    // log frames — the log window is capped and drops a chatty run's
-    // end-of-run publications.
-    expect(card).toContain("producedFiles");
-    expect(card).toContain("if (hasAutoPresented.current) return;");
-    expect(card).toContain("hasAutoPresented.current = true;");
-    // The retired agent-declared selection has no reader left anywhere.
     expect(card).not.toContain("primary");
     expect(card).not.toContain("presentation:");
   });
@@ -570,10 +576,26 @@ describe("shouldRaiseSweepDone", () => {
 /**
  * The two guards that survive as source-text greps. There is NO DOM harness in
  * this repo (no jsdom, no happy-dom, no testing-library), so `useRunLogStream`
- * cannot be instantiated and these two facts have no other observer. Every
- * POSITIVE assertion this block used to carry is gone: asserting that a source
- * file contains `await readProducedFiles();` passed for the defect above and
- * failed on a rename — the opposite of coverage.
+ * cannot be instantiated and these two facts have no other observer.
+ *
+ * Two different rules apply below, because the two cases are not the same kind
+ * of assertion.
+ *
+ * A NEGATIVE grep ("this string is absent") is the honest one, and it is all
+ * the first case uses: it fails on the thing coming back and cannot pass by
+ * luck of formatting.
+ *
+ * A POSITIVE grep is admissible only when it claims REACHABILITY and nothing
+ * more, with the invariant itself asserted directly beside it — which is the
+ * exact shape of the second case: the `toContain` says only "the hook calls the
+ * shared path builder", and what that builder must produce is then asserted on
+ * its own return value, two lines down. Positives that tried to carry the
+ * invariant themselves are gone, in both the species this suite has seen (see
+ * the `autoPresentFile` block above, where both were demonstrated): one pinned a
+ * whole unwrapped call expression and failed on a prettier rewrap, while a call
+ * whose result was discarded would have passed it; the other was already
+ * satisfied by an unrelated identifier in the same file, so the defect it
+ * existed to catch left the suite green.
  */
 describe("useRunLogStream source guards", () => {
   const hook = readFileSync(

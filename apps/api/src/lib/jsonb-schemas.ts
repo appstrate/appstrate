@@ -39,14 +39,32 @@ function withByteCap(maxBytes: number) {
   };
 }
 
-/** `runs.metadata` — opaque platform-written payload (e.g. `degraded_integrations`). */
-export const runMetadataSchema = z
-  .record(z.string(), jsonValueSchema)
-  .superRefine(withByteCap(8 * KB));
-
 /** `package_schedules.input` — JSON input replayed into every triggered run. */
 export const scheduleInputSchema = z
   .record(z.string(), jsonValueSchema)
+  .superRefine(withByteCap(16 * KB));
+
+/**
+ * `application_packages.input_settings` — the agent's editor-set input
+ * defaults (`values`) plus the input fields the editor froze (`locked`), as one
+ * document. The wire pairs these as `values` / `locked_fields`; inside the
+ * column the name `input_settings` already supplies the noun, so `locked` is
+ * the member name here.
+ *
+ * Same 16 KB cap as {@link scheduleInputSchema}, the sibling holding the very
+ * same kind of payload — per-field values resolved against the agent's
+ * `input.schema`. Neither member was otherwise bounded: `values` is pruned to
+ * the schema's declared properties at the write route, but a declared string's
+ * LENGTH is not, and `locked` is stored verbatim without being pruned at all.
+ * The column is read on every run launch (`getInstalledPackageSettings`) and on
+ * every agent-detail load, so a bloated row is paid for on the hot path, not
+ * merely at rest.
+ */
+export const inputSettingsSchema = z
+  .object({
+    values: z.record(z.string(), jsonValueSchema),
+    locked: z.array(z.string()),
+  })
   .superRefine(withByteCap(16 * KB));
 
 /**

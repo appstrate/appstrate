@@ -181,7 +181,7 @@ Trade-off vs. local stdio runners — defence-in-depth coverage:
 
 Other deltas: no `.afps-bundle` signing surface, every tool call exits the perimeter (no air-gapped self-host), the per-call audit trail collapses from "raw upstream HTTP" to "MCP tool call". Operators pick per integration based on trust model — `source.kind: "remote"` is the right choice for managed/upstream-trusted MCPs; `source.kind: "local"` (with the referenced mcp-server's `server.type` being `node|python|binary|uv`) stays the right choice for sandboxed local execution where the MITM gives you a meaningful security boundary.
 
-Reference integration: `@appstrate/gmail-mcp@2.3.1` (in `scripts/system-packages/integration-gmail-mcp-2.3.1/`) — Gmail backed by Google's official remote MCP. Same 10-tool catalog as Google's hosted server, with per-tool `tools_policy.{name}.required_scopes` driving the niveau 2 scope inference (gmail.readonly | compose | labels | modify spread across the catalog).
+Reference integration: `@appstrate/gmail-mcp@2.3.1` (in `scripts/system-packages/integration-gmail-mcp-2.3.1/`) — Gmail backed by Google's official remote MCP. Same 21-tool catalog as Google's hosted server, with per-tool `tools_policy.{name}.required_scopes` driving the niveau 2 scope inference (gmail.readonly | compose | labels | modify spread across the catalog).
 
 ### AFPS Integrations — Phase 8: per-run shared workspace volume + MCP Roots
 

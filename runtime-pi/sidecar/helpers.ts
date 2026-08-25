@@ -16,6 +16,10 @@
 export { isBlockedHost, isBlockedUrl, resolveAndCheckHost } from "@appstrate/core/ssrf";
 export type { HostResolver } from "@appstrate/core/ssrf";
 
+// Imported (not just re-exported) because `readPositiveByteEnv` below defaults
+// its `ceiling` parameter to it. See the re-export note further down.
+import { ABSOLUTE_BODY_CEILING } from "@appstrate/afps-runtime/resolvers";
+
 // Accepts both simple IDs (gmail) and scoped IDs (@appstrate/gmail)
 export const INTEGRATION_ID_RE = /^(@[a-z0-9][a-z0-9-]*\/)?[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 
@@ -50,10 +54,11 @@ export const LLM_PROXY_TIMEOUT_MS = 1_800_000; // 30 minutes (patched from 300_0
  */
 export const DEFAULT_API_CALL_CONCURRENCY = 3;
 
-/** Absolute hard-cap for any body-size env override. Above this, raising
- *  the limit requires real engineering (streaming refactor, chunked
- *  uploads) rather than a config knob. */
-export const ABSOLUTE_BODY_CEILING = 100 * 1024 * 1024;
+// Absolute hard-cap for any body-size env override, single-sourced from
+// `@appstrate/afps-runtime/resolvers` — it applies the same ceiling to the
+// request-body cap below, and two copies of `100 * 1024 * 1024` that agree
+// only by coincidence are a coin-flip waiting to diverge.
+export { ABSOLUTE_BODY_CEILING };
 
 /**
  * Resolve a positive integer from an env var, falling back to
@@ -117,21 +122,20 @@ export function readPositiveByteEnv(
  * {@link MAX_MCP_ENVELOPE_SIZE} since base64 inflation (~1.37×) plus
  * JSON-RPC overhead must fit in the MCP envelope.
  *
- * Second reader, different policy: `@appstrate/afps-runtime/resolvers`
- * parses the SAME `SIDECAR_MAX_REQUEST_BODY_BYTES` for its own
- * `MAX_REQUEST_BODY_SIZE`, and on a malformed value it silently falls back to
- * 10 MB where this one throws at boot. So a typo'd override yields a sidecar
- * that refuses to start OR a client-side check quietly running at the default,
- * depending on which module observes it first — and both are loaded in the
- * sidecar process. The strict reading is the correct one (a cap the operator
- * thinks they raised and did not is a production incident waiting to happen);
- * the fix is for the resolvers to consume this value rather than re-parse the
- * variable, which is a change in packages/afps-runtime, not here.
+ * NOT parsed here, read before touching: this used to be its own
+ * `readPositiveByteEnv("SIDECAR_MAX_REQUEST_BODY_BYTES", …)` call, and
+ * `@appstrate/afps-runtime/resolvers` parsed the SAME variable for its own
+ * `MAX_REQUEST_BODY_SIZE` with the opposite failure policy — this one threw
+ * at boot on a malformed or over-ceiling override, that one silently fell
+ * back to 10 MB. Both module graphs load in THIS process (the sidecar imports
+ * the resolvers for `executeApiCall`), so which policy an operator observed
+ * was decided by import order: a typo'd override either wedged the sidecar or
+ * quietly ran at the default. The resolvers now own the sole parse, and they
+ * kept the strict policy — a cap the operator thinks they raised and did not
+ * is a production incident waiting to happen — so the sidecar consumes their
+ * value instead of re-deriving it.
  */
-export const MAX_REQUEST_BODY_SIZE = readPositiveByteEnv(
-  "SIDECAR_MAX_REQUEST_BODY_BYTES",
-  10 * 1024 * 1024,
-);
+export { MAX_REQUEST_BODY_SIZE } from "@appstrate/afps-runtime/resolvers";
 
 /**
  * Hard cap on the JSON-RPC envelope a single `/mcp` request may carry.

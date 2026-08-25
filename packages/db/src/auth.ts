@@ -198,6 +198,14 @@ export interface RealmResolutionContext {
   query: Record<string, unknown> | null;
 }
 
+/**
+ * Parameter type of the exported `setRealmResolver` injection slot; the OIDC
+ * module passes a function literal and never names the type, so this is part
+ * of that function's contract rather than an independent export — see
+ * `knip.config.ts` on `@typeContract`.
+ *
+ * @typeContract
+ */
 export type RealmResolver = (ctx: RealmResolutionContext) => Promise<string>;
 
 let _realmResolver: RealmResolver | null = null;
@@ -274,7 +282,7 @@ export function withBootstrapTokenRedemption<T>(fn: () => Promise<T>): Promise<T
 }
 
 /** True when the current async context is inside `withBootstrapTokenRedemption`. */
-export function isBootstrapTokenRedemptionActive(): boolean {
+function isBootstrapTokenRedemptionActive(): boolean {
   return bootstrapTokenRedemptionStore.getStore() === true;
 }
 
@@ -288,7 +296,7 @@ export function withSmtpOverride<T>(
 }
 
 /** Return the active SMTP override, if any. Called from BA mail callbacks. */
-export function getSmtpOverride(): SmtpOverride | undefined {
+function getSmtpOverride(): SmtpOverride | undefined {
   return smtpOverrideStore.getStore();
 }
 

@@ -15,10 +15,16 @@
 import { describe, it, expect } from "bun:test";
 import { computeTokenCost, type TokenCost } from "@appstrate/afps-runtime/runner";
 import { modelCostSchema } from "@appstrate/core/module";
-import type { TokenUsage } from "@appstrate/shared-types";
 // The record the CONTAINER drives its pi-ai session with — the process whose
 // `calculateCost` this file transcribes. Built here, not read as text.
 import { parseRuntimeEnv, buildPiModelFromEnv } from "../../../../runtime-pi/env.ts";
+// The REAL snake_case projection `installSessionBridge` applies to Pi's
+// counters before the platform prices them. Imported from the source path
+// rather than `@appstrate/runner-pi`, whose barrel lists only names read
+// outside that package. Transcribing it here instead would make both sides of
+// the parity read the same copy, and the comparison would hold under a
+// cacheRead/cacheWrite swap in the code it is supposed to be pinning.
+import { toReportedUsage } from "../../../../packages/runner-pi/src/pi-runner.ts";
 
 /** Pi's own four counters, as `installSessionBridge` reads them off the SDK. */
 interface PiUsage {
@@ -52,15 +58,22 @@ function piReference(usage: PiUsage, rates: Required<TokenCost>): number {
 }
 
 /**
- * The platform's snake_case projection of the same counters — the mapping
- * `installSessionBridge` performs before emitting `appstrate.metric`.
+ * Assert `source` contains a snippet, with every whitespace difference erased
+ * on both sides.
+ *
+ * `dist/models.js` is a build output, so its spacing belongs to whichever
+ * bundler the vendor happened to run — a minified release would fail all six
+ * assertions below while every rate stayed exactly where it is. A canary that
+ * cries on formatting is one the next upgrade learns to wave through, which is
+ * the only way this one can fail at its job. Everything below the whitespace —
+ * operators, operands, their order — is still pinned character for character,
+ * and the snippets stay written the way the library writes them so a reader can
+ * diff them against the source by eye.
  */
-function toReportedUsage(usage: PiUsage): TokenUsage {
-  return {
-    input_tokens: usage.input,
-    output_tokens: usage.output,
-    cache_read_input_tokens: usage.cacheRead,
-    cache_creation_input_tokens: usage.cacheWrite,
+function whitespaceInsensitiveContains(source: string): (snippet: string) => void {
+  const normalized = source.replace(/\s+/g, "");
+  return (snippet) => {
+    expect(normalized).toContain(snippet.replace(/\s+/g, ""));
   };
 }
 
@@ -176,21 +189,17 @@ describe("runner cost parity: server recompute vs pi-ai calculateCost (container
     const source = await Bun.file(
       new URL("../../../../node_modules/@earendil-works/pi-ai/dist/models.js", import.meta.url),
     ).text();
-    const normalizedSource = source.replace(/\s+/g, " ");
+    const contains = whitespaceInsensitiveContains(source);
 
-    expect(normalizedSource).toContain("usage.cost.input = (rates.input / 1000000) * usage.input;");
-    expect(normalizedSource).toContain(
-      "usage.cost.output = (rates.output / 1000000) * usage.output;",
-    );
-    expect(normalizedSource).toContain(
-      "usage.cost.cacheRead = (rates.cacheRead / 1000000) * usage.cacheRead;",
-    );
-    expect(normalizedSource).toContain(
+    contains("usage.cost.input = (rates.input / 1000000) * usage.input;");
+    contains("usage.cost.output = (rates.output / 1000000) * usage.output;");
+    contains("usage.cost.cacheRead = (rates.cacheRead / 1000000) * usage.cacheRead;");
+    contains(
       "usage.cost.cacheWrite = (rates.cacheWrite * shortWrite + rates.input * 2 * longWrite) / 1000000;",
     );
     // The two dropped branches, pinned by their source text so a library change
     // that makes either reachable by default is caught here.
-    expect(normalizedSource).toContain("for (const tier of model.cost.tiers ?? [])");
-    expect(normalizedSource).toContain("const longWrite = usage.cacheWrite1h ?? 0;");
+    contains("for (const tier of model.cost.tiers ?? [])");
+    contains("const longWrite = usage.cacheWrite1h ?? 0;");
   });
 });

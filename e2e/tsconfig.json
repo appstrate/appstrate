@@ -1,0 +1,14 @@
+{
+  // Playwright transpiles specs without typechecking them, so a type error here
+  // would only ever surface as a runtime failure inside the e2e job. This config
+  // exists so `turbo typecheck` covers the workspace like the other 20.
+  //
+  // `DOM` is in `lib` because these files straddle two runtimes: the test body
+  // runs under Bun/Node, but every `page.evaluate` / `addInitScript` callback is
+  // serialised and executed inside the browser, where `window` & friends are real.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM", "DOM.Iterable"]
+  },
+  "include": ["**/*.ts"]
+}
