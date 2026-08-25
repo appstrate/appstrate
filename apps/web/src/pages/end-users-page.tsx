@@ -27,7 +27,12 @@ import { SettingsPageActions } from "../components/settings/settings-page-action
 import { PageActionsMenu } from "../components/page-actions-menu";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { endUserDisplayName, useEndUserColumns } from "./end-user-columns";
-import { endUserHref, endUsersHref } from "./end-user-route";
+import {
+  endUserEditReturn,
+  endUserHref,
+  endUsersHref,
+  withEndUserEditReturn,
+} from "./end-user-route";
 
 export function EndUsersPage() {
   // Remount on application switch so cursor + loadedPages (and the rest of the
@@ -108,9 +113,13 @@ function EndUsersPageContent() {
   };
 
   const setEditMode = (id: string, editing: boolean) => {
+    if (!editing && endUserEditReturn(location.state) === "list") {
+      closeUser();
+      return;
+    }
     navigate(endUserHref(location, id, editing), {
       replace: true,
-      state: location.state,
+      state: editing ? withEndUserEditReturn(location.state, "detail") : location.state,
     });
   };
 
@@ -123,7 +132,10 @@ function EndUsersPageContent() {
     deletingUserId: deleteMutation.isPending
       ? (deleteMutation.variables?.params.path.id ?? null)
       : null,
-    onEdit: (user) => navigate(endUserHref(location, user.id, true), { state: location.state }),
+    onEdit: (user) =>
+      navigate(endUserHref(location, user.id, true), {
+        state: withEndUserEditReturn(location.state, "list"),
+      }),
     onDelete: setPendingDelete,
   });
   const visibility = useColumnVisibility("end-users");

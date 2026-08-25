@@ -6,6 +6,32 @@ interface LocationParts {
   hash: string;
 }
 
+export type EndUserEditReturn = "list" | "detail";
+
+const EDIT_RETURN_KEY = "endUserEditReturn";
+
+/** Remember whether Edit was entered from the table deed or the detail panel. */
+export function withEndUserEditReturn(
+  state: unknown,
+  destination: EndUserEditReturn,
+): Record<string, unknown> {
+  const previous = state && typeof state === "object" ? state : {};
+  return { ...previous, [EDIT_RETURN_KEY]: destination };
+}
+
+/** Direct and bookmarked edit URLs fall back to the list, never to a surprise detail. */
+export function endUserEditReturn(state: unknown): EndUserEditReturn {
+  if (
+    state &&
+    typeof state === "object" &&
+    EDIT_RETURN_KEY in state &&
+    state[EDIT_RETURN_KEY as keyof typeof state] === "detail"
+  ) {
+    return "detail";
+  }
+  return "list";
+}
+
 function href(location: LocationParts, params: URLSearchParams): string {
   const search = params.toString();
   return `${location.pathname}${search ? `?${search}` : ""}${location.hash}`;

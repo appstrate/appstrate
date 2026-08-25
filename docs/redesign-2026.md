@@ -2480,6 +2480,14 @@ a chance to work. The panel content now establishes inline-size containment.
 Measured at 1024, 900, 768 and 390, MCP access stays inside the panel while its
 code values remain independently scrollable and copyable.
 
+**End-user Edit returns to its real origin, 25 August.** The row's direct pencil
+and the detail panel's Edit button shared the same addressable `?edit=1` URL,
+but Cancel always removed only the edit flag. That incorrectly opened detail
+after a direct table deed. Navigation state now records whether editing began
+from the list or from detail: Cancel and Save return direct edits to the list,
+while an edit entered from detail returns to detail. A bookmarked edit URL
+defaults safely to the list.
+
 **12. Accessibility, which nothing here has ever checked.** The branch
 re-declares ARIA roles on the table because this file demands it, and that is
 the whole of it: not one contrast ratio, keyboard path or touch target has ever

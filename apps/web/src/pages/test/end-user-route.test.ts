@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { endUserHref, endUsersHref } from "../end-user-route";
+import {
+  endUserEditReturn,
+  endUserHref,
+  endUsersHref,
+  withEndUserEditReturn,
+} from "../end-user-route";
 
 const location = {
   pathname: "/workspace-settings/end-users",
@@ -29,5 +34,19 @@ describe("end-user panel URL", () => {
         search: "?source=crm&user=eu_1&edit=1",
       }),
     ).toBe("/workspace-settings/end-users?source=crm#directory");
+  });
+
+  it("remembers that a table deed must return to the list", () => {
+    const state = withEndUserEditReturn({ background: "/runs" }, "list");
+    expect(endUserEditReturn(state)).toBe("list");
+    expect(state.background).toBe("/runs");
+  });
+
+  it("remembers that detail-owned editing must return to detail", () => {
+    expect(endUserEditReturn(withEndUserEditReturn(null, "detail"))).toBe("detail");
+  });
+
+  it("makes an addressable edit URL return to the list by default", () => {
+    expect(endUserEditReturn(undefined)).toBe("list");
   });
 });
