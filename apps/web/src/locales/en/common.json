@@ -30,6 +30,7 @@
   "nav.mcpServers": "MCP Servers",
   "nav.integrations": "Integrations",
   "nav.import": "Import",
+  "pageActions.label": "Actions",
   "nav.appSettings": "App Settings",
   "nav.credits": "Credits",
   "btn.cancel": "Cancel",

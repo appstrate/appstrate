@@ -5,13 +5,13 @@ import { useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Plus, Webhook } from "lucide-react";
 import { usePermissions } from "@/hooks/use-permissions";
-import { Button } from "@appstrate/ui/components/button";
+import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useWebhooks } from "../hooks/use-webhooks";
 import { ErrorState, EmptyState } from "@/components/page-states";
 import { DataTable } from "@/components/data-table";
 import { SettingsPageActions } from "@/components/settings/settings-page-actions";
+import { PageActionsMenu } from "@/components/page-actions-menu";
 import { useWebhookColumns } from "../components/webhook-columns";
-import { TOOLBAR_ACTION } from "@/lib/toolbar-button";
 import { WebhookCreateModal } from "../components/webhook-create-modal";
 import { getErrorMessage } from "@appstrate/core/errors";
 
@@ -29,10 +29,12 @@ export function WebhooksPage() {
   return (
     <div>
       <SettingsPageActions>
-        <Button variant="outline" className={TOOLBAR_ACTION} onClick={() => setCreateOpen(true)}>
-          <Plus />
-          {t("settings:webhooks.createTitle")}
-        </Button>
+        <PageActionsMenu>
+          <DropdownMenuItem data-page-action="create" onSelect={() => setCreateOpen(true)}>
+            <Plus />
+            {t("settings:webhooks.createTitle")}
+          </DropdownMenuItem>
+        </PageActionsMenu>
       </SettingsPageActions>
 
       <DataTable

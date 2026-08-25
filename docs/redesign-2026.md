@@ -509,12 +509,11 @@ The pattern, and where it deviates:
   disclosure row with the filters, which was simply a bug.)
 - **TWO treatments, and the SURFACE is what separates them**
   (`lib/toolbar-button.ts`, so every screen uses the same two). A control that
-  adjusts the view — Filters, Columns, Import — is an outline on the canvas:
-  solid grey border, no fill, no shadow. A control that acts on the data keeps
-  a surface: white, slightly raised. Reading a bar left to right you can tell a
-  setting from a deed without reading a word.
-  No filled blue in the bar. "Nouvel agent" was the one, and it made the agents
-  screen the only one whose action did not look like every other screen's.
+  adjusts the view — Filters or Columns — is an outline on the canvas: solid
+  grey border, no fill, no shadow. The title-level `Actions` trigger keeps a
+  surface: white, slightly raised. Import and "Nouvel agent" used to sit in the
+  bar as deeds; both now live inside that stable title menu. No filled blue in
+  the bar.
   Note the trap in getting there: shadcn's `outline` variant paints
   `bg-background`, which is WHITE here (our page canvas is its own `--canvas`),
   so every one of them came out as a white pill on grey. Any port of a shadcn
@@ -522,12 +521,11 @@ The pattern, and where it deviates:
 - **The open filter row shows on the button that opened it**, through
   `aria-expanded:bg-accent` — the state is the style hook, so there is no
   second flag to keep in step.
-- **The view toggle opens the row**, before the search and well before the
-  actions. "What am I looking at" comes before "which rows" and before "what do
-  I do", and it was sitting in the middle of the action cluster where it read
-  as one more button rather than as a choice of representation. Its style is
-  the shell's product tabs: a grey track, a white chip on the chosen one, no
-  colour — the bar has none anywhere else, and a blue fill read as a state.
+- **The view toggle ends the toolbar**, opposite Search and the table
+  utilities. It no longer sits in an action cluster because page deeds moved to
+  the title. Its style is the shell's product tabs: a grey track, a white chip
+  on the chosen one, no colour — the bar has none anywhere else, and a blue
+  fill read as a state.
 - **Dashed stays for the DIMENSION triggers only**, inside the filter row,
   where the metaphor holds: each one is an empty slot you can fill, and its
   border closes once it is filled. The Filters button itself is solid — it
@@ -559,16 +557,12 @@ The pattern, and where it deviates:
   the same obligation — Back has to undo a filter. The search is the exception,
   replaced rather than pushed: eight keystrokes would otherwise be eight
   history entries.
-- **On a list screen the page's action IS in the bar**, at the right end beside
-  the view controls, where shadcn puts "Add task". Screens with no list keep
-  theirs at title height.
-- **The right end sheds words before icons** as the bar narrows: the labels on
-  the filters and columns buttons first, then the label on the page's own
-  action — which the CALLER writes with `@…/bar`, the container
-  the bar names, so the whole row degrades together. **No overflow menu**:
-  shadcn hides its View button and keeps "Add task" whole, and the control a
-  screen exists to offer is the last thing that should need a second click to
-  find.
+- ~~**On a list screen the page's action IS in the bar.**~~ Superseded on 24
+  August by the page-deed rule below: page deeds now use one title-level
+  `Actions` menu at every width. The toolbar contains only search, filters,
+  columns and view controls. Their labels may still shed before their icons as
+  the toolbar narrows; that responsive rule never applies to the stable
+  `Actions` trigger.
 - **The count is NOT on the bar — it is under the table**, in the footer with
   the page controls, which is where shadcn keeps it too
   (`data-table-pagination.tsx`). A toolbar is what you act WITH; a footer is
@@ -942,9 +936,10 @@ something that contradicts one.
 - **The canvas stays #FAFAFA.** Judged on 21 August against two deeper greys
   (#F6F6F6 and #F1F1F1) in the lab, on the real screens rather than on
   screenshots: the gap between the grey and the white of the cards and the
-  actions reads well enough as it is. So the two toolbar treatments and the view
-  toggle's track are settled with it, and none of the three is reopened without
-  a reason that is not taste. 2% off white is quiet ON PURPOSE.
+  actions reads well enough as it is. So the toolbar-control treatment, the
+  page-action treatment and the view toggle's track are settled with it, and
+  none of the three is reopened without a reason that is not taste. 2% off
+  white is quiet ON PURPOSE.
 - **A concept has to be visible to be learned.** The workspace level shows even
   when an org has one, because a level nobody ever sees is a level nobody
   learns. Its menu ends on a way to create one rather than a dead end.
@@ -958,13 +953,13 @@ something that contradicts one.
   and the free space is between the trail and the bell, which is where the chat
   put its context tabs. (The SHELL header, that is. Where a page's own actions
   go is the next entry, and it changed.)
-- **On a list screen, the page's actions sit at the right end of the TOOLBAR
-  row**, beside the view controls — where shadcn puts "Add task". Every table
-  screen then keeps its controls and its actions in the same corner, and the
-  title row stays clean. Screens with no list keep theirs at title height, in
-  `PageHeader`'s `actions`. This revises the earlier call ("page actions have a
-  home, the `actions` slot at title height"), which was made before there was a
-  toolbar to put them on.
+- **Page deeds use one `Actions` menu at every width.** (24 August.) Whether a
+  page has one deed or several, its title end exposes one stable trigger and the
+  menu carries every available deed. Search, filters, columns and view changes
+  remain list controls below; they never enter this menu. `PageHeader` owns the
+  trigger on level-one pages and `SettingsPageActions` portals the same trigger
+  beside the settings title. A page with no deed, Documents today, has no empty
+  trigger.
 - **Direct manipulation in forms.** No Edit button revealing a field. Fields,
   dropdowns and toggles, Notion-style rows, as a systematic pattern.
 - **A modal must have a URL.** Non-negotiable — support has to be able to say
@@ -1283,9 +1278,9 @@ shape — the apparatus is the TABLE's, not the collection's:
   `/schedules`, which never counted at all.
 - ~~**The bar vanishes when the list is empty.**~~ Fixed: the three early
   returns above the toolbar are gone, the states are drawn IN the body, and the
-  empty state no longer re-offers the page's actions as unlabelled squares —
-  the bar above carries them, written out. The `emptyExtraActions` prop that
-  fed them was passed by nobody and is deleted.
+  empty state no longer re-offers the page's actions as unlabelled squares. The
+  stable title-level `Actions` menu now carries them. The `emptyExtraActions`
+  prop that fed them was passed by nobody and is deleted.
 - ~~**`/schedules` has no search and no filters.**~~ Both landed, and both are
   honest: `GET /api/schedules` returns the list whole, with no paging and no
   query parameters, so a client-side box searches every schedule rather than
@@ -1815,19 +1810,17 @@ Active state is one state badge, while origin and version are plain facts. Its
 cards keep the real route to the detail and activation flow. Non-admins may
 browse and consult; only admins see `+ Custom integration`.
 
-Both list actions live at the right of the toolbar. `+ Custom integration`
-keeps `/integrations/new`, and `Browse catalogue` pushes `?catalogue=1`; browser
-Back reverses catalogue filters in order and then closes the panel. The close
-control returns directly to the location from which the catalogue was opened,
-so Back from the closed page cannot reopen it. A cold catalogue URL closes by
-removing its catalogue-only keys. No install endpoint or authentication
-taxonomy was invented.
-
-A follow-up on 23 August made Browse catalogue an action in the toolbar rather
-than a view utility: it now uses the white, slightly raised action surface,
-while Filters and Columns stay unfilled on the grey canvas. The custom
-integration action keeps the same deed treatment and its existing admin
-permission.
+~~Both list actions live at the right of the toolbar.~~ Superseded on 24 August:
+`Custom integration` and `Browse catalogue` now live in the title-level
+`Actions` menu. The destinations and history behaviour are unchanged:
+`Custom integration` keeps `/integrations/new`, and `Browse catalogue` pushes
+`?catalogue=1`; browser Back reverses catalogue filters in order and then
+closes the panel. The close control returns directly to the location from which
+the catalogue was opened, so Back from the closed page cannot reopen it. A cold
+catalogue URL closes by removing its catalogue-only keys. No install endpoint
+or authentication taxonomy was invented. Filters and Columns remain unfilled
+controls on the grey canvas, while the page menu keeps the white, slightly
+raised deed treatment and the existing admin permissions.
 
 The catalogue's desktop browse surface now puts its icon, title, description,
 search and status navigation in the fixed 224px rail. The content pane contains
@@ -2232,12 +2225,37 @@ and MCP Servers now default to Table like Documents, Runs, Schedules and
 Integrations; an explicitly saved user preference still wins.
 
 Real page actions moved from the apparatus to title height. Level-one package,
-run and schedule actions are owned by `PageHeader`; Integrations keeps one
-Actions menu containing Catalogue and creation. Settings already owns its page
-title in the shared shell, so `SettingsPageActions` portals each page's CTA into
-the shell's desktop and mobile title slots. End-Users' one-off search row moved
-onto `ListToolbar` at the same time. The only remaining toolbar actions are for
-embedded collections that have no page header of their own.
+run and schedule actions are owned by `PageHeader`; settings already owns its
+page title in the shared shell, so `SettingsPageActions` portals page actions
+into the shell's desktop and mobile title slots. End-Users' one-off search row
+moved onto `ListToolbar` at the same time. The only remaining toolbar actions
+are for embedded collections that have no page header of their own.
+
+**One Actions trigger everywhere, 24 August.** `PageActionsMenu` is now the
+page-level deed primitive at every viewport, not a responsive fallback. Agents
+and Skills put Import and Create in it; MCP Servers puts its one honest Import
+deed there because that surface remains browse-only and has no in-app editor.
+Runs puts Mark all read there, Schedules puts Create there, and Integrations
+uses the same primitive for Catalogue and Create. Documents has no page deed
+and therefore no trigger. Members, Workspaces, Models, provider credentials,
+Proxies, OAuth clients, End-Users, Webhooks and API Keys all use the same menu
+through `SettingsPageActions`, even when the menu contains one item.
+
+This is deliberately a PAGE rule, not a row or detail rewrite. Table rows keep
+their direct frequent control plus `…` grammar. Package and Integration details
+keep a direct primary runtime deed where one exists and their established
+lifecycle overflow; Schedule detail keeps its direct Edit excursion. Those
+controls act on the entity currently open rather than choosing a deed for a
+collection, so forcing them into the collection menu would erase the existing
+primary-action hierarchy.
+
+The table guard opens the trigger on every covered collection and settings
+surface at 1440 and 390, then compares the visible menu deeds in order. The
+fourteen affected screens also produced 28 nominal captures at those widths,
+with no fixture hole; the rendered pixels were inspected as well as their DOM.
+`bun test apps/web` is green at 635 tests, `lab:settings` remains green and
+`bun run check` is green at 33/33 tasks with the same nine pre-existing
+warnings.
 
 The integration creation chooser keeps the three approved paths visible, but
 only Manual is a live destination today. Chat and Coding agent are disabled and
@@ -2367,9 +2385,8 @@ responsive-and-accessibility pass is the part worth having, and it is what this
 block is. The skill itself is left alone; it is simply not the tool for this.
 
 After those, what is left in this section is: the Usage page (a feature to
-build, not a defect), storage and MCP connect to the form pattern, the
-page-action rule on screens without a list, per-org colour and logo (deferred by
-decision, twice — do not start it).
+build, not a defect), storage and MCP connect to the form pattern, and per-org
+colour and logo (deferred by decision, twice — do not start it).
 
 - ~~**The tier-one budget is the window, and it should be the container.**~~
   Closed 22 August, and it was worth the detour. The test asserted 390 (the
@@ -2553,13 +2570,9 @@ decision, twice — do not start it).
   and the settings screen.
 - **Library browsing** (skills and templates) reuses `PanelDialog`.
   Integrations uses it already, as recorded in Open block 7.
-- **The page-action rule is applied to LIST screens only.** On a screen with a
-  list, the action sits at the right end of the bar; a screen without one keeps
-  it at title height in `PageHeader`. Olivier's ask is that it be the same place
-  either way — top-right of the body, whether the page holds a table or free
-  content. Getting there means the bar (or something bar-shaped) on every screen
-  that has an action, which is a sweep of the detail and settings pages, done on
-  purpose rather than in passing.
+- ~~**The page-action rule is applied to LIST screens only.**~~ Superseded on
+  24 August. Level-one and settings pages now use one title-level `Actions` menu
+  at every width; entity details retain their primary/overflow hierarchy.
 - ~~**Integrations is the one list still card-only.**~~ Superseded by the 23
   August product decision recorded in Open block 7. The 22 August decision
   correctly separated the organisation collection from the catalogue, but its

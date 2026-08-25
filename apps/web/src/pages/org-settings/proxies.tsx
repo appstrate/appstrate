@@ -4,12 +4,11 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { CheckCircle2, FlaskConical, Globe, Plus, Trash2 } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
 import { DropdownMenuItem, DropdownMenuSeparator } from "@appstrate/ui/components/dropdown-menu";
 import { DataTable, type DataColumn } from "../../components/data-table";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
-import { TOOLBAR_ACTION } from "../../lib/toolbar-button";
+import { PageActionsMenu } from "../../components/page-actions-menu";
 import { usePermissions } from "../../hooks/use-permissions";
 import {
   useProxies,
@@ -226,10 +225,12 @@ export function OrgSettingsProxiesPage() {
           surface, not a filled blue. A screen whose table now looks like every
           other table cannot keep the one button that does not. */}
       <SettingsPageActions>
-        <Button variant="outline" size="sm" className={TOOLBAR_ACTION} onClick={onCreate}>
-          <Plus />
-          {t("proxies.add")}
-        </Button>
+        <PageActionsMenu>
+          <DropdownMenuItem data-page-action="create" onSelect={onCreate}>
+            <Plus />
+            {t("proxies.add")}
+          </DropdownMenuItem>
+        </PageActionsMenu>
       </SettingsPageActions>
 
       <DataTable

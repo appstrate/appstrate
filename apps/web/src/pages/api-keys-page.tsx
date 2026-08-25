@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { KeyRound, Plus } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
 import { ConfirmModal } from "../components/confirm-modal";
-import { Button } from "@appstrate/ui/components/button";
+import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useCurrentApplicationId } from "../hooks/use-current-application";
 import {
   useApiKeys,
@@ -16,7 +16,7 @@ import {
 import { ErrorState, EmptyState } from "../components/page-states";
 import { DataTable } from "../components/data-table";
 import { SettingsPageActions } from "../components/settings/settings-page-actions";
-import { TOOLBAR_ACTION } from "../lib/toolbar-button";
+import { PageActionsMenu } from "../components/page-actions-menu";
 import { ApiKeyCreateModal } from "../components/api-key-create-modal";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { useApiKeyColumns } from "./api-key-columns";
@@ -47,10 +47,12 @@ export function ApiKeysPage() {
   return (
     <div>
       <SettingsPageActions>
-        <Button variant="outline" className={TOOLBAR_ACTION} onClick={() => setCreateOpen(true)}>
-          <Plus />
-          {t("settings:apiKeys.createBtn")}
-        </Button>
+        <PageActionsMenu>
+          <DropdownMenuItem data-page-action="create" onSelect={() => setCreateOpen(true)}>
+            <Plus />
+            {t("settings:apiKeys.createBtn")}
+          </DropdownMenuItem>
+        </PageActionsMenu>
       </SettingsPageActions>
 
       <div className="mb-4 flex items-center justify-end">

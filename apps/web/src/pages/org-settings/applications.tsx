@@ -5,14 +5,14 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { AppWindow, Plus } from "lucide-react";
 import { usePermissions } from "../../hooks/use-permissions";
-import { Button } from "@appstrate/ui/components/button";
+import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useApplications } from "../../hooks/use-applications";
 import { useAppSwitcher } from "../../hooks/use-current-application";
 import { ErrorState, EmptyState } from "../../components/page-states";
 import { DataTable } from "../../components/data-table";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
+import { PageActionsMenu } from "../../components/page-actions-menu";
 import { useApplicationColumns } from "./application-columns";
-import { TOOLBAR_ACTION } from "../../lib/toolbar-button";
 import { ApplicationCreateModal } from "../../components/application-create-modal";
 import { getErrorMessage } from "@appstrate/core/errors";
 
@@ -42,15 +42,16 @@ export function OrgSettingsApplicationsPage() {
   return (
     <>
       <SettingsPageActions>
-        <Button
-          variant="outline"
-          className={TOOLBAR_ACTION}
-          data-testid="create-application-button"
-          onClick={() => setCreateOpen(true)}
-        >
-          <Plus />
-          {t("applications.create")}
-        </Button>
+        <PageActionsMenu>
+          <DropdownMenuItem
+            data-page-action="create"
+            data-testid="create-application-button"
+            onSelect={() => setCreateOpen(true)}
+          >
+            <Plus />
+            {t("applications.create")}
+          </DropdownMenuItem>
+        </PageActionsMenu>
       </SettingsPageActions>
 
       <DataTable

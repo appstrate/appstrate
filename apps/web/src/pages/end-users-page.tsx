@@ -8,6 +8,7 @@ import { Plus, SearchX, Users } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { Button } from "@appstrate/ui/components/button";
+import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import {
   useDeleteEndUser,
   useEndUser,
@@ -23,7 +24,7 @@ import { Modal } from "../components/modal";
 import { DataTable, columnMenu, visibleColumns } from "../components/data-table";
 import { ListToolbar } from "../components/list-toolbar";
 import { SettingsPageActions } from "../components/settings/settings-page-actions";
-import { TOOLBAR_ACTION } from "../lib/toolbar-button";
+import { PageActionsMenu } from "../components/page-actions-menu";
 import { useColumnVisibility } from "../stores/column-visibility-store";
 import { endUserDisplayName, useEndUserColumns } from "./end-user-columns";
 import { endUserHref, endUsersHref } from "./end-user-route";
@@ -134,10 +135,12 @@ function EndUsersPageContent() {
   return (
     <div>
       <SettingsPageActions>
-        <Button variant="outline" className={TOOLBAR_ACTION} onClick={() => setCreateOpen(true)}>
-          <Plus />
-          {t("applications.newEndUser")}
-        </Button>
+        <PageActionsMenu>
+          <DropdownMenuItem data-page-action="create" onSelect={() => setCreateOpen(true)}>
+            <Plus />
+            {t("applications.newEndUser")}
+          </DropdownMenuItem>
+        </PageActionsMenu>
       </SettingsPageActions>
 
       <ListToolbar

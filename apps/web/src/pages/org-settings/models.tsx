@@ -4,8 +4,8 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { BrainCircuit, KeyRound, Plus } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
 import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
+import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { usePermissions } from "../../hooks/use-permissions";
 import {
   useModels,
@@ -35,7 +35,7 @@ import { ErrorState, EmptyState } from "../../components/page-states";
 import { useCredentialColumns, useModelColumns } from "./model-columns";
 import { DataTable } from "../../components/data-table";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
-import { TOOLBAR_ACTION } from "../../lib/toolbar-button";
+import { PageActionsMenu } from "../../components/page-actions-menu";
 
 function ModelsList({
   models,
@@ -75,10 +75,12 @@ function ModelsList({
   return (
     <>
       <SettingsPageActions>
-        <Button variant="outline" size="sm" className={TOOLBAR_ACTION} onClick={onCreate}>
-          <Plus />
-          {t("models.add")}
-        </Button>
+        <PageActionsMenu>
+          <DropdownMenuItem data-page-action="create-model" onSelect={onCreate}>
+            <Plus />
+            {t("models.add")}
+          </DropdownMenuItem>
+        </PageActionsMenu>
       </SettingsPageActions>
 
       <DataTable
@@ -137,10 +139,12 @@ function CredentialsSection({
           flows. Removing a module from `MODULES` hides its OAuth tile from the
           in-modal provider picker with zero UI footprint here. */}
       <SettingsPageActions>
-        <Button variant="outline" size="sm" className={TOOLBAR_ACTION} onClick={onCreate}>
-          <Plus />
-          {t("credentials.add")}
-        </Button>
+        <PageActionsMenu>
+          <DropdownMenuItem data-page-action="create-credential" onSelect={onCreate}>
+            <Plus />
+            {t("credentials.add")}
+          </DropdownMenuItem>
+        </PageActionsMenu>
       </SettingsPageActions>
 
       <DataTable

@@ -4,12 +4,12 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Plug, Plus, Upload, Wrench } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
+import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { ImportModal } from "../components/import-modal";
 import { usePackageList, type PackageType } from "../hooks/use-packages";
 import { type CardItem, PackageTab } from "./package-list";
-import { TOOLBAR_ACTION } from "../lib/toolbar-button";
 import { packageNewPath } from "../lib/package-paths";
+import { PageActionsMenu } from "../components/page-actions-menu";
 
 type BrowseType = Extract<PackageType, "skill" | "mcp-server">;
 
@@ -70,33 +70,20 @@ export function ItemTab({
         emptyHint={t("packages.emptyItemsHint", { type: typeLabel })}
         emptyIcon={presentation.emptyIcon}
         extraActions={
-          <>
-            <Button
-              variant="outline"
-              size="sm"
-              className={TOOLBAR_ACTION}
-              title={t("nav.import", { ns: "common" })}
-              onClick={() => setImportOpen(true)}
-            >
+          <PageActionsMenu>
+            <DropdownMenuItem data-page-action="import" onSelect={() => setImportOpen(true)}>
               <Upload />
-              <span className="hidden sm:inline">{t("nav.import", { ns: "common" })}</span>
-            </Button>
+              {t("nav.import", { ns: "common" })}
+            </DropdownMenuItem>
             {!readOnly && (
-              <Link to={packageNewPath(type)}>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className={TOOLBAR_ACTION}
-                  title={t("list.createItem", { ns: "agents", type: typeLabel })}
-                >
+              <DropdownMenuItem asChild data-page-action="create">
+                <Link to={packageNewPath(type)}>
                   <Plus />
-                  <span className="hidden sm:inline">
-                    {t("list.createItem", { ns: "agents", type: typeLabel })}
-                  </span>
-                </Button>
-              </Link>
+                  {t("list.createItem", { ns: "agents", type: typeLabel })}
+                </Link>
+              </DropdownMenuItem>
             )}
-          </>
+          </PageActionsMenu>
         }
         title={title}
         breadcrumbs={[{ label: title }]}

@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Calendar, Plus, SearchX } from "lucide-react";
 import { usePermissions } from "../hooks/use-permissions";
-import { Button } from "@appstrate/ui/components/button";
+import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useAgents } from "../hooks/use-packages";
 import { useAllSchedules } from "../hooks/use-schedules";
 import { PageHeader } from "../components/page-header";
@@ -16,10 +16,10 @@ import { CardGrid } from "../components/card-grid";
 import { columnMenu, visibleColumns } from "../components/data-table";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { useColumnVisibility } from "../stores/column-visibility-store";
-import { TOOLBAR_ACTION } from "../lib/toolbar-button";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useListParams } from "../lib/list-params";
 import { useScheduleViewStore } from "../stores/list-view-store";
+import { PageActionsMenu } from "../components/page-actions-menu";
 
 /** The values the state dimension accepts — a URL is user input. */
 const STATES = ["enabled", "disabled"] as const;
@@ -34,17 +34,13 @@ export function SchedulesListPage() {
   const view = useScheduleViewStore((state) => state.view);
   const setView = useScheduleViewStore((state) => state.setView);
 
-  const create = (
-    <Button
-      variant="outline"
-      size="sm"
-      className={TOOLBAR_ACTION}
-      title={t("schedules.create")}
-      onClick={() => navigate("/schedules/new")}
-    >
-      <Plus />
-      <span className="hidden sm:inline">{t("schedules.create")}</span>
-    </Button>
+  const actions = (
+    <PageActionsMenu>
+      <DropdownMenuItem data-page-action="create" onSelect={() => navigate("/schedules/new")}>
+        <Plus />
+        {t("schedules.create")}
+      </DropdownMenuItem>
+    </PageActionsMenu>
   );
 
   // The same cached agents query every other surface holds, keyed by package id.
@@ -99,7 +95,7 @@ export function SchedulesListPage() {
         title={t("schedules.title")}
         emoji="📅"
         breadcrumbs={[{ label: t("schedules.title") }]}
-        actions={isAdmin ? create : undefined}
+        actions={isAdmin ? actions : undefined}
       />
 
       <ListToolbar

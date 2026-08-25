@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { useForm, useWatch } from "react-hook-form";
 import { Plus, Users } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
+import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
@@ -27,8 +28,8 @@ import { CopyLinkButton } from "../../components/copy-link-button";
 import { ErrorState, EmptyState } from "../../components/page-states";
 import { DataTable } from "../../components/data-table";
 import { SettingsPageActions } from "../../components/settings/settings-page-actions";
+import { PageActionsMenu } from "../../components/page-actions-menu";
 import { useMemberColumns } from "./member-columns";
-import { TOOLBAR_ACTION } from "../../lib/toolbar-button";
 import { Spinner } from "../../components/spinner";
 import { toast } from "sonner";
 import {
@@ -170,10 +171,12 @@ export function OrgSettingsMembersPage() {
     <>
       {isAdmin && (
         <SettingsPageActions>
-          <Button variant="outline" className={TOOLBAR_ACTION} onClick={() => setInviteOpen(true)}>
-            <Plus />
-            {t("orgSettings.inviteMember")}
-          </Button>
+          <PageActionsMenu>
+            <DropdownMenuItem data-page-action="invite" onSelect={() => setInviteOpen(true)}>
+              <Plus />
+              {t("orgSettings.inviteMember")}
+            </DropdownMenuItem>
+          </PageActionsMenu>
         </SettingsPageActions>
       )}
 

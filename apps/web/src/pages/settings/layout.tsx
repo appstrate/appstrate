@@ -485,7 +485,11 @@ export function UnifiedSettingsLayout() {
           </Button>
           <div className="mt-6 flex min-h-9 items-center justify-between gap-3">
             <h1 className="text-xl font-semibold">{label(activeItem.labelKey)}</h1>
-            <div ref={setMobileActionTarget} className="flex shrink-0 items-center gap-2" />
+            <div
+              ref={setMobileActionTarget}
+              data-page-actions
+              className="flex shrink-0 items-center gap-2"
+            />
           </div>
         </div>
       )}
@@ -493,7 +497,11 @@ export function UnifiedSettingsLayout() {
       {activeItem && (
         <div className="mb-6 hidden min-h-9 items-center justify-between gap-4 md:flex">
           <h3 className="text-lg font-semibold">{label(activeItem.labelKey)}</h3>
-          <div ref={setDesktopActionTarget} className="flex shrink-0 items-center gap-2" />
+          <div
+            ref={setDesktopActionTarget}
+            data-page-actions
+            className="flex shrink-0 items-center gap-2"
+          />
         </div>
       )}
       <div

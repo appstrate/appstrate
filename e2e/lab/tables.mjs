@@ -18,25 +18,25 @@ const BASE = process.env.LAB_URL ?? "http://localhost:5175";
 const WIDTHS = [1440, 390];
 
 const MAIN_COLLECTIONS = [
-  { path: "/agents", expectsPageActions: true },
-  { path: "/skills", expectsPageActions: true },
-  { path: "/mcp-servers", expectsPageActions: true },
-  { path: "/documents", expectsPageActions: false },
-  { path: "/runs", expectsPageActions: true },
-  { path: "/schedules", expectsPageActions: true },
-  { path: "/integrations", expectsPageActions: true },
+  { path: "/agents", pageActions: ["import", "create"] },
+  { path: "/skills", pageActions: ["import", "create"] },
+  { path: "/mcp-servers", pageActions: ["import"] },
+  { path: "/documents", pageActions: [] },
+  { path: "/runs", pageActions: ["mark-all-read"] },
+  { path: "/schedules", pageActions: ["create"] },
+  { path: "/integrations", pageActions: ["catalogue", "create"] },
 ];
 
 const SETTINGS_TABLES = [
-  "/org-settings/members",
-  "/org-settings/applications",
-  "/org-settings/models",
-  "/org-settings/proxies",
-  "/org-settings/oauth",
-  "/org-settings/cli-sessions",
-  "/workspace-settings/end-users",
-  "/workspace-settings/webhooks",
-  "/workspace-settings/api-keys",
+  { path: "/org-settings/members", pageActions: ["invite"] },
+  { path: "/org-settings/applications", pageActions: ["create"] },
+  { path: "/org-settings/models", pageActions: ["create-model"] },
+  { path: "/org-settings/proxies", pageActions: ["create"] },
+  { path: "/org-settings/oauth", pageActions: ["create"] },
+  { path: "/org-settings/cli-sessions", pageActions: [] },
+  { path: "/workspace-settings/end-users", pageActions: ["create"] },
+  { path: "/workspace-settings/webhooks", pageActions: ["create"] },
+  { path: "/workspace-settings/api-keys", pageActions: ["create"] },
 ];
 
 const browser = await chromium.launch({ channel: "chrome" });
@@ -134,9 +134,32 @@ function assertTableSurface(style, path, width, surface) {
   assertNoOverflow(style, path, width);
 }
 
+async function assertPageActions(page, path, width, expectedActions) {
+  const trigger = page.locator("[data-page-actions]:visible [data-page-actions-trigger]").first();
+  assertEqual(
+    await page.locator("[data-page-actions]:visible [data-page-actions-trigger]").count(),
+    expectedActions.length > 0 ? 1 : 0,
+    `${path} must expose one stable Actions trigger when it has page deeds at ${width}`,
+  );
+  if (expectedActions.length === 0) return;
+
+  await trigger.click();
+  const menu = page.locator('[role="menu"]:visible').first();
+  await menu.waitFor({ state: "visible" });
+  const renderedActions = await menu
+    .locator("[data-page-action]")
+    .evaluateAll((items) => items.map((item) => item.getAttribute("data-page-action")));
+  assertEqual(
+    JSON.stringify(renderedActions),
+    JSON.stringify(expectedActions),
+    `${path} Actions menu must carry every page deed at ${width}`,
+  );
+  await page.keyboard.press("Escape");
+}
+
 for (const width of WIDTHS) {
   await withPage(width, async (page) => {
-    for (const { path, expectsPageActions } of MAIN_COLLECTIONS) {
+    for (const { path, pageActions } of MAIN_COLLECTIONS) {
       const table = await open(page, path);
       const style = await frameStyle(table);
       assertTableSurface(style, path, width, "card");
@@ -145,16 +168,13 @@ for (const width of WIDTHS) {
       await toolbar.waitFor({ state: "visible" });
       assertEqual(await toolbar.locator('[aria-pressed="true"]').count(), 1, path);
       assertEqual(await toolbar.locator('[aria-pressed="false"]').count(), 1, path);
-      if (expectsPageActions) {
-        const pageActions = page.locator("[data-page-actions]:visible");
-        assertEqual(await pageActions.count(), 1, `${path} must keep its deeds beside the title`);
-        assertEqual(await toolbar.locator("[data-page-actions]").count(), 0, path);
-      }
+      await assertPageActions(page, path, width, pageActions);
+      assertEqual(await toolbar.locator("[data-page-actions]").count(), 0, path);
     }
   });
 
   await withPage(width, async (page) => {
-    for (const path of SETTINGS_TABLES) {
+    for (const { path, pageActions } of SETTINGS_TABLES) {
       let table;
       try {
         table = await open(page, path, '[data-settings-content-key] table[role="table"]:visible');
@@ -165,6 +185,7 @@ for (const width of WIDTHS) {
       }
       const style = await frameStyle(table);
       assertTableSurface(style, path, width, "integrated");
+      await assertPageActions(page, path, width, pageActions);
     }
   });
 
@@ -177,6 +198,7 @@ for (const width of WIDTHS) {
       .first();
     await credentialsTable.waitFor({ state: "visible" });
     assertTableSurface(await frameStyle(credentialsTable), modelsPath, width, "integrated");
+    await assertPageActions(page, modelsPath, width, ["create-credential"]);
 
     const detailPath = "/integrations/@appstrate/google-drive";
     const connectionsTable = await open(page, detailPath, 'main table[role="table"]:visible');

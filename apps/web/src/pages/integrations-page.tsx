@@ -6,7 +6,6 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Bot,
   Boxes,
-  ChevronDown,
   LibraryBig,
   MessageSquareText,
   PencilLine,
@@ -17,12 +16,7 @@ import {
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@appstrate/ui/components/dropdown-menu";
+import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { PageHeader } from "../components/page-header";
 import { Modal } from "../components/modal";
 import { CardGrid } from "../components/card-grid";
@@ -31,7 +25,7 @@ import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { PanelDialog } from "../components/panel-dialog";
 import { ErrorState, EmptyState } from "../components/page-states";
 import { IntegrationIcon } from "../components/integration-icon";
-import { TOOLBAR_ACTION } from "../lib/toolbar-button";
+import { PageActionsMenu } from "../components/page-actions-menu";
 import {
   INTEGRATION_ORIGINS,
   INTEGRATION_STATUSES,
@@ -411,26 +405,21 @@ export function IntegrationsPage() {
         breadcrumbs={[{ label: t("integrations.title") }]}
         wrapActions
         actions={
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className={TOOLBAR_ACTION}>
-                {t("integrations.actions")}
-                <ChevronDown />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={openCatalogue}>
-                <LibraryBig />
-                {t("integrations.catalogue.browse")}
+          <PageActionsMenu>
+            <DropdownMenuItem data-page-action="catalogue" onSelect={openCatalogue}>
+              <LibraryBig />
+              {t("integrations.catalogue.browse")}
+            </DropdownMenuItem>
+            {isAdmin && (
+              <DropdownMenuItem
+                data-page-action="create"
+                onSelect={() => setCreationMethodOpen(true)}
+              >
+                <Plus />
+                {t("integrations.create")}
               </DropdownMenuItem>
-              {isAdmin && (
-                <DropdownMenuItem onSelect={() => setCreationMethodOpen(true)}>
-                  <Plus />
-                  {t("integrations.create")}
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
+            )}
+          </PageActionsMenu>
         }
       >
         <p className="text-muted-foreground mt-1 text-sm">{t("integrations.subtitle")}</p>

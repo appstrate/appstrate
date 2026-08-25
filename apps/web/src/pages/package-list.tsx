@@ -6,6 +6,7 @@ import { Trans, useTranslation } from "react-i18next";
 import { type LucideIcon, Layers, Plus, SearchX, Upload } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
 import { Button } from "@appstrate/ui/components/button";
+import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useAgents } from "../hooks/use-packages";
 import { useUnreadCountsByAgent } from "../hooks/use-notifications";
 import { PackageCard } from "../components/package-card";
@@ -16,8 +17,8 @@ import { useColumnVisibility } from "../stores/column-visibility-store";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
 import { usePackageViewStore } from "../stores/list-view-store";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
-import { TOOLBAR_ACTION } from "../lib/toolbar-button";
 import { PageHeader, type BreadcrumbEntry } from "../components/page-header";
+import { PageActionsMenu } from "../components/page-actions-menu";
 import { ImportModal } from "../components/import-modal";
 import { ErrorState, EmptyState } from "../components/page-states";
 import { usePermissions } from "../hooks/use-permissions";
@@ -197,29 +198,18 @@ export function PackageList() {
         emptyIcon={Layers}
         extraActions={
           isAdmin ? (
-            <>
-              <Button
-                variant="outline"
-                size="sm"
-                className={TOOLBAR_ACTION}
-                title={t("nav.import", { ns: "common" })}
-                onClick={() => setImportOpen(true)}
-              >
+            <PageActionsMenu>
+              <DropdownMenuItem data-page-action="import" onSelect={() => setImportOpen(true)}>
                 <Upload />
-                <span className="hidden sm:inline">{t("nav.import", { ns: "common" })}</span>
-              </Button>
-              <Link to="/agents/new">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className={TOOLBAR_ACTION}
-                  title={t("list.create")}
-                >
+                {t("nav.import", { ns: "common" })}
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild data-page-action="create">
+                <Link to="/agents/new">
                   <Plus />
-                  <span className="hidden sm:inline">{t("list.create")}</span>
-                </Button>
-              </Link>
-            </>
+                  {t("list.create")}
+                </Link>
+              </DropdownMenuItem>
+            </PageActionsMenu>
           ) : undefined
         }
       />

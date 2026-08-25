@@ -5,11 +5,11 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Plus, KeyRound } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
+import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { DataTable } from "@/components/data-table";
 import { SettingsPageActions } from "@/components/settings/settings-page-actions";
+import { PageActionsMenu } from "@/components/page-actions-menu";
 import { ErrorState, EmptyState } from "@/components/page-states";
-import { TOOLBAR_ACTION } from "@/lib/toolbar-button";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { useOAuthClients } from "../hooks/use-oauth-clients";
 import { OAuthClientFormModal } from "./oauth-client-form-modal";
@@ -62,15 +62,12 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
           )}
         </p>
         <SettingsPageActions>
-          <Button
-            size="sm"
-            variant="outline"
-            className={TOOLBAR_ACTION}
-            onClick={() => setSelectedClient("new")}
-          >
-            <Plus />
-            {t("settings:oauthClients.createBtn")}
-          </Button>
+          <PageActionsMenu>
+            <DropdownMenuItem data-page-action="create" onSelect={() => setSelectedClient("new")}>
+              <Plus />
+              {t("settings:oauthClients.createBtn")}
+            </DropdownMenuItem>
+          </PageActionsMenu>
         </SettingsPageActions>
       </div>
 

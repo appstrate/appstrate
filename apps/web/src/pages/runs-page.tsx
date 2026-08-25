@@ -4,14 +4,15 @@ import { useTranslation } from "react-i18next";
 import { CheckCheck, SearchX } from "lucide-react";
 import { runStatusValues } from "@appstrate/shared-types";
 import { Button } from "@appstrate/ui/components/button";
+import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { useUnreadCount, useMarkAllRead } from "../hooks/use-notifications";
 import { PageHeader } from "../components/page-header";
 import { EmptyState } from "../components/page-states";
 import { ListToolbar, type FilterSpec } from "../components/list-toolbar";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useListParams } from "../lib/list-params";
-import { TOOLBAR_ACTION } from "../lib/toolbar-button";
 import { RunList } from "../components/run-list";
+import { PageActionsMenu } from "../components/page-actions-menu";
 import type { RunKindFilter } from "../hooks/use-paginated-runs";
 import { useRunViewStore } from "../stores/list-view-store";
 
@@ -92,17 +93,16 @@ export function RunsPage() {
         emoji="▶️"
         breadcrumbs={[{ label: t("runs.title") }]}
         actions={
-          <Button
-            variant="outline"
-            size="sm"
-            className={TOOLBAR_ACTION}
-            title={t("runs.markAllRead")}
-            onClick={() => markAllRead.mutate({})}
-            disabled={markAllRead.isPending || !unreadCount}
-          >
-            <CheckCheck />
-            <span className="hidden sm:inline">{t("runs.markAllRead")}</span>
-          </Button>
+          <PageActionsMenu>
+            <DropdownMenuItem
+              data-page-action="mark-all-read"
+              onSelect={() => markAllRead.mutate({})}
+              disabled={markAllRead.isPending || !unreadCount}
+            >
+              <CheckCheck />
+              {t("runs.markAllRead")}
+            </DropdownMenuItem>
+          </PageActionsMenu>
         }
       />
 
