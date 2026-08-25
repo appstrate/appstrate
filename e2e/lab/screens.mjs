@@ -21,8 +21,11 @@ export const SCREENS = [
   { path: "/runs", name: "runs" },
   { path: "/schedules", name: "schedules" },
   { path: "/agents", name: "agents" },
+  { path: "/agents?create=agent", name: "agent-creation" },
   { path: "/skills", name: "skills" },
+  { path: "/skills?create=skill", name: "skill-creation" },
   { path: "/mcp-servers", name: "mcp-servers" },
+  { path: "/mcp-servers?create=mcp-server", name: "mcp-server-creation" },
   {
     path: "/skills/@tractr/compta-references",
     name: "skill-detail",
@@ -37,6 +40,7 @@ export const SCREENS = [
     via: { path: "/mcp-servers", text: "qbo-mcp" },
   },
   { path: "/integrations", name: "integrations" },
+  { path: "/integrations?create=integration", name: "integration-creation" },
   { path: "/integrations?catalogue=1", name: "integration-catalogue" },
   { path: "/integrations/@appstrate/google-drive", name: "integration-detail" },
   {

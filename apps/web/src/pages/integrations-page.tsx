@@ -1,24 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import {
-  Bot,
-  Boxes,
-  LibraryBig,
-  MessageSquareText,
-  PencilLine,
-  Plus,
-  Search,
-  SearchX,
-} from "lucide-react";
+import { Boxes, LibraryBig, Plus, Search, SearchX } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
 import { PageHeader } from "../components/page-header";
-import { Modal } from "../components/modal";
 import { CardGrid } from "../components/card-grid";
 import { DataTable, columnMenu, visibleColumns } from "../components/data-table";
 import { ListFooter, ListToolbar } from "../components/list-toolbar";
@@ -26,6 +16,12 @@ import { PanelDialog } from "../components/panel-dialog";
 import { ErrorState, EmptyState } from "../components/page-states";
 import { IntegrationIcon } from "../components/integration-icon";
 import { PageActionsMenu } from "../components/page-actions-menu";
+import { CreationHandoffModal } from "../components/creation-handoff-modal";
+import {
+  chatDraftNavigationState,
+  creationResourceFromSearch,
+  creationSearch,
+} from "../lib/creation-handoff";
 import {
   INTEGRATION_ORIGINS,
   INTEGRATION_STATUSES,
@@ -92,84 +88,6 @@ function IntegrationCard({ integration }: { integration: IntegrationSummaryWire 
         <p className="text-muted-foreground mt-3 line-clamp-2 text-sm">{manifest.description}</p>
       )}
     </Link>
-  );
-}
-
-/**
- * PROTOTYPE: creation-method chooser. Its row grammar is intentionally local,
- * but can later take a resource noun and option set for MCP servers, skills or
- * agents once those flows have real destinations.
- */
-function IntegrationCreationMethodModal({
-  open,
-  onClose,
-  onManual,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onManual: () => void;
-}) {
-  const { t } = useTranslation("settings");
-  const methods = [
-    {
-      id: "manual",
-      icon: PencilLine,
-      title: t("integrations.creation.manual.title"),
-      description: t("integrations.creation.manual.description"),
-      onClick: onManual,
-      disabled: false,
-    },
-    {
-      id: "chat",
-      icon: MessageSquareText,
-      title: t("integrations.creation.chat.title"),
-      description: t("integrations.creation.chat.description"),
-      onClick: undefined,
-      disabled: true,
-    },
-    {
-      id: "coding-agent",
-      icon: Bot,
-      title: t("integrations.creation.codingAgent.title"),
-      description: t("integrations.creation.codingAgent.description"),
-      onClick: undefined,
-      disabled: true,
-    },
-  ];
-
-  return (
-    <Modal open={open} onClose={onClose} title={t("integrations.creation.title")}>
-      <div className="space-y-2">
-        {methods.map(({ id, icon: Icon, title, description, onClick, disabled }) => (
-          <Button
-            key={id}
-            type="button"
-            variant="outline"
-            className="h-auto min-h-16 w-full justify-start gap-3 p-3 text-left whitespace-normal"
-            onClick={onClick}
-            disabled={disabled}
-            data-creation-method={id}
-          >
-            <span className="bg-muted grid size-9 shrink-0 place-items-center rounded-md">
-              <Icon />
-            </span>
-            <span className="min-w-0">
-              <span className="flex items-center gap-2 text-sm font-semibold">
-                {title}
-                {disabled && (
-                  <Badge variant="secondary" className="font-normal">
-                    {t("integrations.creation.unavailable")}
-                  </Badge>
-                )}
-              </span>
-              <span className="text-muted-foreground mt-0.5 block text-xs leading-relaxed font-normal">
-                {description}
-              </span>
-            </span>
-          </Button>
-        ))}
-      </div>
-    </Modal>
   );
 }
 
@@ -322,7 +240,7 @@ export function IntegrationsPage() {
   const setView = useIntegrationViewStore((state) => state.setView);
   const visibility = useColumnVisibility("integrations");
   const searchPlaceholder = useSearchPlaceholder(t("integrations.title"));
-  const [creationMethodOpen, setCreationMethodOpen] = useState(false);
+  const creationOpen = creationResourceFromSearch(location.search) === "integration";
 
   const statuses = list.values("status", INTEGRATION_STATUSES);
   const origins = list.values("origin", INTEGRATION_ORIGINS);
@@ -413,7 +331,16 @@ export function IntegrationsPage() {
             {isAdmin && (
               <DropdownMenuItem
                 data-page-action="create"
-                onSelect={() => setCreationMethodOpen(true)}
+                onSelect={() =>
+                  navigate(
+                    {
+                      pathname: location.pathname,
+                      search: creationSearch(location.search, "integration"),
+                      hash: location.hash,
+                    },
+                    { state: location.state },
+                  )
+                }
               >
                 <Plus />
                 {t("integrations.create")}
@@ -488,14 +415,23 @@ export function IntegrationsPage() {
         count={isLoading || error ? undefined : t("integrations.count", { count: shown.length })}
       />
 
-      <IntegrationCreationMethodModal
-        open={creationMethodOpen}
-        onClose={() => setCreationMethodOpen(false)}
-        onManual={() => {
-          setCreationMethodOpen(false);
-          navigate("/integrations/new");
-        }}
-      />
+      {creationOpen && (
+        <CreationHandoffModal
+          resource="integration"
+          onClose={() =>
+            navigate(
+              {
+                pathname: location.pathname,
+                search: creationSearch(location.search, null),
+                hash: location.hash,
+              },
+              { replace: true, state: location.state },
+            )
+          }
+          onManual={() => navigate("/integrations/new")}
+          onChat={(prompt) => navigate("/chat", { state: chatDraftNavigationState(prompt) })}
+        />
+      )}
 
       {catalogueOpen && (
         <CataloguePanel

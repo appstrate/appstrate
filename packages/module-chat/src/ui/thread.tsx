@@ -17,6 +17,7 @@ import {
   ActionBarPrimitive,
   AuiIf,
   useAuiState,
+  unstable_useComposerInput,
 } from "@assistant-ui/react";
 import {
   AlertTriangleIcon,
@@ -55,7 +56,13 @@ import {
   ATTACHMENT_IMAGE_CLASS,
 } from "./document-attachment.tsx";
 
-export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
+export function Thread({
+  composerSlot,
+  initialComposerDraft,
+}: {
+  composerSlot?: React.ReactNode;
+  initialComposerDraft?: string;
+}) {
   return (
     <ThreadPrimitive.Root
       // `canvas`, not `background`: a full-page thread is a PAGE, and pages in
@@ -75,7 +82,7 @@ export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
       {/* Empty: composer centered mid-screen for a strong first impression.
           Non-empty: classic scrollable transcript with a sticky footer. */}
       <AuiIf condition={(s) => s.thread.isEmpty}>
-        <ThreadWelcome composerSlot={composerSlot} />
+        <ThreadWelcome composerSlot={composerSlot} initialComposerDraft={initialComposerDraft} />
       </AuiIf>
 
       <AuiIf condition={(s) => !s.thread.isEmpty}>
@@ -89,7 +96,7 @@ export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
 
           <ThreadPrimitive.ViewportFooter className="bg-canvas sticky bottom-0 mt-2 flex w-full max-w-(--thread-max-width) flex-col items-center gap-2 pb-4">
             <ScrollToBottom />
-            <Composer slot={composerSlot} />
+            <Composer slot={composerSlot} initialDraft={initialComposerDraft} />
             <Disclaimer />
           </ThreadPrimitive.ViewportFooter>
         </ThreadPrimitive.Viewport>
@@ -107,7 +114,13 @@ const WELCOME_SUGGESTIONS = [
   "Cherche dans mes documents",
 ];
 
-function ThreadWelcome({ composerSlot }: { composerSlot?: React.ReactNode }) {
+function ThreadWelcome({
+  composerSlot,
+  initialComposerDraft,
+}: {
+  composerSlot?: React.ReactNode;
+  initialComposerDraft?: string;
+}) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-4">
       <div className="flex w-full max-w-(--thread-max-width) flex-col items-stretch gap-6">
@@ -117,7 +130,7 @@ function ThreadWelcome({ composerSlot }: { composerSlot?: React.ReactNode }) {
             Demandez à lancer un agent, inspecter un run, ou chercher dans vos documents.
           </p>
         </div>
-        <Composer slot={composerSlot} />
+        <Composer slot={composerSlot} initialDraft={initialComposerDraft} />
         <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
           {WELCOME_SUGGESTIONS.map((s) => (
             <ThreadPrimitive.Suggestion key={s} prompt={s} method="replace" autoSend asChild>
@@ -244,7 +257,14 @@ function SentAttachmentChip() {
   return <DocumentAttachment doc={{ id: resolved.id, name, mime: contentType }} />;
 }
 
-function Composer({ slot }: { slot?: React.ReactNode }) {
+function Composer({ slot, initialDraft }: { slot?: React.ReactNode; initialDraft?: string }) {
+  const composer = unstable_useComposerInput();
+  const seeded = React.useRef(false);
+  React.useEffect(() => {
+    if (seeded.current || !initialDraft || composer.value) return;
+    seeded.current = true;
+    composer.setText(initialDraft);
+  }, [composer, initialDraft]);
   // No focus ring on the box: the app's global `textarea:focus` ring is too
   // intense here. min-h-9 + px-0 override the global `textarea { min-h-80px }`
   // base rule (utilities beat the base layer) for a compact, Codex-like field.

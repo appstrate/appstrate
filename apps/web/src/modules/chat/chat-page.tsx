@@ -21,6 +21,7 @@ import {
 } from "./conversation-sidebar-state";
 import { ConversationContextActions, ConversationSidebar } from "./conversation-sidebar";
 import { ChatShell } from "./chat-shell";
+import { readChatComposerDraft } from "../../lib/creation-handoff";
 
 export function ChatModulePage() {
   // Conversation id lives in the URL (`/chat/:conversationId`) so a refresh or
@@ -41,6 +42,7 @@ export function ChatModulePage() {
   // lazily on its first message (ChatGPT-style) without ever resurfacing the
   // previous one on a bare `/chat`.
   const location = useLocation();
+  const initialComposerDraft = readChatComposerDraft(location.state);
   const onConversationChange = useCallback(
     (id: string | null) => {
       dispatchSidebar({ type: "conversation-change" });
@@ -113,6 +115,7 @@ export function ChatModulePage() {
             getHeaders={getHeaders}
             conversationId={conversationId ?? null}
             newChatKey={location.key}
+            initialComposerDraft={initialComposerDraft}
             onConversationChange={onConversationChange}
             onOpenDocument={presentDocument}
             downloadDocument={onDownloadDocument}

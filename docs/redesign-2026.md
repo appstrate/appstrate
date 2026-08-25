@@ -2236,8 +2236,9 @@ are for embedded collections that have no page header of their own.
 
 **One Actions trigger everywhere, 24 August.** `PageActionsMenu` is now the
 page-level deed primitive at every viewport, not a responsive fallback. Agents
-and Skills put Import and Create in it; MCP Servers puts its one honest Import
-deed there because that surface remains browse-only and has no in-app editor.
+and Skills put Import and Create in it; MCP Servers puts Import and Create
+there too. Its Create deed opens the shared handoff, whose manual branch returns
+to Import because that surface remains browse-only and has no in-app editor.
 Runs puts Mark all read there, Schedules puts Create there, and Integrations
 uses the same primitive for Catalogue and Create. Documents has no page deed
 and therefore no trigger. Members, Workspaces, Models, provider credentials,
@@ -2260,10 +2261,51 @@ with no fixture hole; the rendered pixels were inspected as well as their DOM.
 `bun run check` is green at 33/33 tasks with the same nine pre-existing
 warnings.
 
-The integration creation chooser keeps the three approved paths visible, but
-only Manual is a live destination today. Chat and Coding agent are disabled and
-labelled Coming soon until their flows exist; an enabled no-op button would
-teach a false capability.
+**Creation handoff, 24 August.** The integration-only chooser is now one shared,
+addressable creation modal for Agents, Skills, Integrations and MCP Servers.
+The collection's `Actions > Create` deed pushes `?create=<resource>`; Back closes
+it, while its close control removes only that key and preserves the rest of the
+list URL. All three choices are live, but they hand off differently rather than
+pretending every resource has the same editor.
+
+Manual keeps the destinations that already existed: the Agent, Skill and
+Integration editors. MCP Servers remain browse-only in the web app, so their
+honest manual path is the existing package import modal, not an invented empty
+editor. Build with Chat opens a new Appstrate Chat and seeds its composer with a
+resource-specific prompt without sending it. The reader can edit or discard the
+brief before the first turn. The prompt names only operation ids present in the
+OpenAPI catalogue, requires `describe_operation` before `invoke_operation`, and
+requires a reviewable draft plus explicit confirmation before publication.
+
+MCP-server authoring uses the deeper workflow the platform MCP already exposes:
+`get_runtime_capabilities`, one inline `run_and_wait` that writes and packages
+the executable files and publishes the archive with `publish_document`, then
+`validate_package_document`, followed by `import_package_document` only when
+the result is both valid and importable, the caller has the tool, and the user
+confirmed. It is therefore a real Chat capability, not a disabled promise, even
+though there is no web editor for it.
+
+Delegate to a coding agent opens a second step with a copyable prompt and the
+same `McpClientConnect` component used by Organisation settings > MCP access.
+Claude Code, Cursor, VS Code and generic JSON therefore derive their endpoint,
+commands and deeplinks from `buildMcpClientConfig`; the handoff does not duplicate
+connection strings that could drift. A coding agent without that MCP is told to
+stop and ask for the connection rather than reconstructing an endpoint.
+
+The prompt and URL projections have unit coverage. `lab:creation` exercises the
+four three-choice modals at 1440 and 390, the coding prompt and canonical MCP
+connection instructions, the unsent Chat draft, and the existing manual editor
+and MCP import destinations. The four modal surfaces are also permanent nominal
+lab screens, so `lab:shots` keeps their fixtures and pixels visible.
+
+The four nominal screens produced eight inspected captures at 1440 and 390
+with no fixture hole. Their dialog and viewport geometry has zero overflow at
+both widths. `bun test apps/web packages/module-chat` is green at 977 tests,
+`lab:tables` and `lab:creation` are green, and `bun run check` is green at 33/33
+tasks with the same nine pre-existing warnings. The first check reproduced the
+documented worktree setup trap because the copied `.env` lacked
+`CONNECT_SESSION_SECRET`; adding the ignored local value let the complete gate
+run rather than misreading an environment refusal as a code failure.
 
 The mobile organisation switcher exposed a separate surface bug during this
 pass. Opened from the sidebar, it retained the desktop right-opening, two-column

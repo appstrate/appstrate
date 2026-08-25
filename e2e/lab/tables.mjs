@@ -20,7 +20,7 @@ const WIDTHS = [1440, 390];
 const MAIN_COLLECTIONS = [
   { path: "/agents", pageActions: ["import", "create"] },
   { path: "/skills", pageActions: ["import", "create"] },
-  { path: "/mcp-servers", pageActions: ["import"] },
+  { path: "/mcp-servers", pageActions: ["import", "create"] },
   { path: "/documents", pageActions: [] },
   { path: "/runs", pageActions: ["mark-all-read"] },
   { path: "/schedules", pageActions: ["create"] },

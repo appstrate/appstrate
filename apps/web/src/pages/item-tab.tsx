@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Plug, Plus, Upload, Wrench } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
@@ -10,6 +10,12 @@ import { usePackageList, type PackageType } from "../hooks/use-packages";
 import { type CardItem, PackageTab } from "./package-list";
 import { packageNewPath } from "../lib/package-paths";
 import { PageActionsMenu } from "../components/page-actions-menu";
+import { CreationHandoffModal } from "../components/creation-handoff-modal";
+import {
+  chatDraftNavigationState,
+  creationResourceFromSearch,
+  creationSearch,
+} from "../lib/creation-handoff";
 
 type BrowseType = Extract<PackageType, "skill" | "mcp-server">;
 
@@ -44,6 +50,19 @@ export function ItemTab({
   const { t } = useTranslation(["settings", "agents", "common"]);
   const { data: rawItems, isLoading } = usePackageList(type);
   const [importOpen, setImportOpen] = useState(false);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const creationOpen = creationResourceFromSearch(location.search) === type;
+
+  const closeCreation = () =>
+    navigate(
+      {
+        pathname: location.pathname,
+        search: creationSearch(location.search, null),
+        hash: location.hash,
+      },
+      { replace: true, state: location.state },
+    );
 
   const presentation = TYPE_PRESENTATION[type];
   const typeLabel = t(presentation.typeKey);
@@ -75,20 +94,43 @@ export function ItemTab({
               <Upload />
               {t("nav.import", { ns: "common" })}
             </DropdownMenuItem>
-            {!readOnly && (
-              <DropdownMenuItem asChild data-page-action="create">
-                <Link to={packageNewPath(type)}>
-                  <Plus />
-                  {t("list.createItem", { ns: "agents", type: typeLabel })}
-                </Link>
-              </DropdownMenuItem>
-            )}
+            <DropdownMenuItem
+              data-page-action="create"
+              onSelect={() =>
+                navigate(
+                  {
+                    pathname: location.pathname,
+                    search: creationSearch(location.search, type),
+                    hash: location.hash,
+                  },
+                  { state: location.state },
+                )
+              }
+            >
+              <Plus />
+              {t("list.createItem", { ns: "agents", type: typeLabel })}
+            </DropdownMenuItem>
           </PageActionsMenu>
         }
         title={title}
         breadcrumbs={[{ label: title }]}
       />
       <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
+      {creationOpen && (
+        <CreationHandoffModal
+          resource={type}
+          onClose={closeCreation}
+          onManual={() => {
+            if (readOnly) {
+              closeCreation();
+              setImportOpen(true);
+              return;
+            }
+            navigate(packageNewPath(type));
+          }}
+          onChat={(prompt) => navigate("/chat", { state: chatDraftNavigationState(prompt) })}
+        />
+      )}
     </>
   );
 }

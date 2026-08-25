@@ -99,6 +99,11 @@ export interface ChatPageProps {
    */
   newChatKey?: string;
   /**
+   * Optional text staged in a brand-new conversation's composer. The module
+   * never sends it: the reader can edit or discard the handoff before sending.
+   */
+  initialComposerDraft?: string;
+  /**
    * Called when the active conversation changes (selection, new thread, or when
    * a brand-new conversation is created lazily on its first message). The host
    * navigates its URL.
@@ -126,6 +131,7 @@ export function ChatPage({
   getHeaders,
   conversationId,
   newChatKey,
+  initialComposerDraft,
   onConversationChange,
   onOpenDocument,
   downloadDocument,
@@ -241,6 +247,7 @@ export function ChatPage({
               id={activeId}
               getHeaders={getHeaders}
               isPersisted={isPersisted}
+              initialComposerDraft={isPersisted ? undefined : initialComposerDraft}
               onConversationChange={onConversationChange}
               attachments={attachments}
               composerSlot={
@@ -266,6 +273,7 @@ interface ConversationProps {
   id: string;
   getHeaders?: GetHeaders;
   isPersisted: boolean;
+  initialComposerDraft?: string;
   onConversationChange?: SelectConversation;
   /** Composer attachment adapter, built once by `ChatPage` from the host props. */
   attachments: AttachmentAdapter;
@@ -322,6 +330,7 @@ function ConversationInner({
   onConversationChange,
   attachments,
   composerSlot,
+  initialComposerDraft,
 }: ConversationProps & { initialMessages: UIMessage[] }) {
   const queryClient = useQueryClient();
 
@@ -436,7 +445,7 @@ function ConversationInner({
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <Thread composerSlot={composerSlot} />
+      <Thread composerSlot={composerSlot} initialComposerDraft={initialComposerDraft} />
     </AssistantRuntimeProvider>
   );
 }
