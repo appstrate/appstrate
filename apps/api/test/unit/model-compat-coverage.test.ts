@@ -55,6 +55,33 @@ const SCANNED_FILES = [...new Bun.Glob("**/*.ts").scanSync({ cwd: REPO_ROOT, onl
   .sort();
 
 /**
+ * Every non-test source file, WITHOUT the `Model<Api>|PiModelConfig` content
+ * filter above.
+ *
+ * The builder scan wants that filter — it is looking for declarations typed as
+ * a model record, and a file that never names the type has none. The zero-cost
+ * duplication rule is not about model records at all: it says the four-zero
+ * `ModelCost` literal is spelled once in the tree, and it applies wherever
+ * someone writes it. Two of the six sites `ZERO_MODEL_COST` replaced —
+ * `module-chat/src/pi-chat/structured-session.ts` and `ui-stream-mapper.ts` —
+ * pass the cost through without naming either spelling of the model type, so
+ * scanning the narrow set would have let a seventh copy back in at exactly the
+ * places the constant was introduced to clean up.
+ */
+const ZERO_COST_DECLARATION = "packages/runner-pi/src/model-compat.ts";
+
+const ALL_SOURCE_FILES = [...new Bun.Glob("**/*.ts").scanSync({ cwd: REPO_ROOT, onlyFiles: true })]
+  .filter((rel) => !EXCLUDED_SEGMENT_RE.test(rel) && !rel.endsWith(".test.ts"))
+  // The constant's own definition necessarily contains the literal. Excluded by
+  // PATH, not by a content filter, so the exemption is exactly one file and
+  // cannot silently grow to cover a real copy. Note this file names neither
+  // `Model<Api>` nor `PiModelConfig` — which is why the narrow builder scan
+  // never had to exempt it, and equally why that scan could not have policed
+  // the two module-chat sites that pass a cost through without naming the type.
+  .filter((rel) => rel !== ZERO_COST_DECLARATION)
+  .sort();
+
+/**
  * A builder is a declaration whose type says it produces a model record. Both
  * shapes appear: a typed local (`const model: Model<Api> = {`) and a function
  * whose return type is the record (`): Model<Api> {`), under either spelling of
@@ -149,7 +176,7 @@ describe("platform model compat coverage", () => {
   it("the flag is spelled once, in the constant — never copied back out", () => {
     // The failure mode this whole gate replaces: a fourth hand-written copy,
     // which passes the assertions above while re-forking the rationale.
-    const copies = SCANNED_FILES.filter((f) =>
+    const copies = ALL_SOURCE_FILES.filter((f) =>
       stripComments(readFileSync(join(REPO_ROOT, f), "utf8")).includes(
         "supportsLongCacheRetention",
       ),
@@ -170,7 +197,7 @@ describe("platform model compat coverage", () => {
     // the same four keys and continue `, totalTokens: 0, cost: …`.
     const ZERO_COST_LITERAL =
       /\binput:\s*0,\s*output:\s*0,\s*cacheRead:\s*0,\s*cacheWrite:\s*0\s*(?:,\s*total:\s*0\s*)?,?\s*\}/;
-    const copies = SCANNED_FILES.filter((f) =>
+    const copies = ALL_SOURCE_FILES.filter((f) =>
       ZERO_COST_LITERAL.test(
         stripComments(readFileSync(join(REPO_ROOT, f), "utf8")).replace(/\s+/g, " "),
       ),

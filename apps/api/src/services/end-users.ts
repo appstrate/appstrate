@@ -113,12 +113,18 @@ export async function listEndUsers(
   } = {},
 ): Promise<ListEnvelope<EndUserInfo>> {
   // The route validates `limit` up front (`parseListPagination`, 1..100), so
-  // this clamp is defence-in-depth for direct service callers — and both halves
-  // earn their keep. Drizzle's pg dialect emits the `limit` clause only for a
-  // `number >= 0`, so a `NaN` or a negative arriving here would not error: the
-  // clause would be dropped and the query would run UNBOUNDED. The floor is
-  // what prevents that; the cap bounds the page size.
-  const limit = Math.min(Math.max(params.limit ?? 20, 1), 100);
+  // this clamp is defence-in-depth for direct service callers. Drizzle's pg
+  // dialect emits the `limit` clause only for a `number >= 0`, so a `NaN` or a
+  // negative arriving here would not error: the clause would be dropped and the
+  // query would run UNBOUNDED over the application's whole `end_users` table.
+  //
+  // Three guards, one per way in, because `Math.max` does not do what it looks
+  // like it does here: `Math.max(NaN, 1)` is `NaN`, and `Math.min(NaN, 100)` is
+  // `NaN` again, so the floor stops a NEGATIVE and sails a `NaN` straight
+  // through to the dropped clause. The finiteness check is the half that closes
+  // that path; the floor bounds below, the cap bounds the page size.
+  const requested = params.limit ?? 20;
+  const limit = Math.min(Math.max(Number.isFinite(requested) ? requested : 20, 1), 100);
   const fetchLimit = limit + 1; // Fetch one extra to detect hasMore
 
   const conditions = [
