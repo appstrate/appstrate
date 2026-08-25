@@ -13,6 +13,17 @@ const resources = [
   ["/integrations?create=integration", "integration"],
   ["/mcp-servers?create=mcp-server", "mcp-server"],
 ];
+const editorDestinations = [
+  ["/agents?create=agent", "/agents/new"],
+  ["/skills?create=skill", "/skills/new"],
+  ["/integrations?create=integration", "/integrations/new"],
+];
+const chatOperations = [
+  ["/agents?create=agent", "createAgent"],
+  ["/skills?create=skill", "createSkill"],
+  ["/integrations?create=integration", "createIntegrationPackage"],
+  ["/mcp-servers?create=mcp-server", "get_runtime_capabilities"],
+];
 
 async function withPage(width, run) {
   const context = await browser.newContext({ viewport: { width, height: 1000 } });
@@ -65,27 +76,31 @@ await withPage(1440, async (page) => {
       chatPosts += 1;
     }
   });
-  await page.goto(`${BASE}/agents?create=agent`, { waitUntil: "domcontentloaded" });
-  await page.locator('[data-creation-method="chat"]').click();
-  await page.waitForURL("**/chat");
-  const composer = page.getByPlaceholder("Message Appstrate…");
-  await composer.waitFor({ state: "visible" });
-  await page.waitForFunction(() => {
-    const composer = [...document.querySelectorAll("textarea")].find(
-      (element) => element.placeholder === "Message Appstrate…",
-    );
-    return Boolean(composer?.value.includes("createAgent"));
-  });
-  assert.match(await composer.inputValue(), /createAgent/);
+  for (const [path, operation] of chatOperations) {
+    await page.goto(`${BASE}${path}`, { waitUntil: "domcontentloaded" });
+    await page.locator('[data-creation-method="chat"]').click();
+    await page.waitForURL("**/chat");
+    const composer = page.getByPlaceholder("Message Appstrate…");
+    await composer.waitFor({ state: "visible" });
+    await page.waitForFunction((expected) => {
+      const input = [...document.querySelectorAll("textarea")].find(
+        (element) => element.placeholder === "Message Appstrate…",
+      );
+      return Boolean(input?.value.includes(expected));
+    }, operation);
+    assert.match(await composer.inputValue(), new RegExp(operation));
+  }
   assert.equal(chatPosts, 0);
 });
-console.log("  Chat receives an editable draft without sending it: ok");
+console.log("  four specific Chat drafts remain editable and unsent: ok");
 
 await withPage(1440, async (page) => {
-  await page.goto(`${BASE}/agents?create=agent`, { waitUntil: "domcontentloaded" });
-  await page.locator('[data-creation-method="manual"]').click();
-  await page.waitForURL("**/agents/new");
-  assert.equal(new URL(page.url()).pathname, "/agents/new");
+  for (const [path, destination] of editorDestinations) {
+    await page.goto(`${BASE}${path}`, { waitUntil: "domcontentloaded" });
+    await page.locator('[data-creation-method="manual"]').click();
+    await page.waitForURL(`**${destination}`);
+    assert.equal(new URL(page.url()).pathname, destination);
+  }
 
   await page.goto(`${BASE}/mcp-servers?create=mcp-server`, {
     waitUntil: "domcontentloaded",
@@ -95,6 +110,6 @@ await withPage(1440, async (page) => {
     .getByRole("heading", { name: /Importer un package|Import package/ })
     .waitFor({ state: "visible" });
 });
-console.log("  existing manual editor and MCP import destinations: ok");
+console.log("  three existing editors and MCP import destination: ok");
 
 await browser.close();

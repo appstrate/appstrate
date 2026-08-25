@@ -35,6 +35,7 @@ window.__APP_CONFIG__ = {
     orgCreationDisabled: false,
     bootstrapTokenPending: false,
     chat: true,
+    mcp: true,
     billing: true,
     webhooks: true,
     oidc: true,

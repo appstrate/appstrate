@@ -17,11 +17,7 @@ import { ErrorState, EmptyState } from "../components/page-states";
 import { IntegrationIcon } from "../components/integration-icon";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
-import {
-  chatDraftNavigationState,
-  creationResourceFromSearch,
-  creationSearch,
-} from "../lib/creation-handoff";
+import { useCreationHandoff } from "../hooks/use-creation-handoff";
 import {
   INTEGRATION_ORIGINS,
   INTEGRATION_STATUSES,
@@ -240,7 +236,7 @@ export function IntegrationsPage() {
   const setView = useIntegrationViewStore((state) => state.setView);
   const visibility = useColumnVisibility("integrations");
   const searchPlaceholder = useSearchPlaceholder(t("integrations.title"));
-  const creationOpen = creationResourceFromSearch(location.search) === "integration";
+  const creation = useCreationHandoff("integration", isAdmin);
 
   const statuses = list.values("status", INTEGRATION_STATUSES);
   const origins = list.values("origin", INTEGRATION_ORIGINS);
@@ -329,19 +325,7 @@ export function IntegrationsPage() {
               {t("integrations.catalogue.browse")}
             </DropdownMenuItem>
             {isAdmin && (
-              <DropdownMenuItem
-                data-page-action="create"
-                onSelect={() =>
-                  navigate(
-                    {
-                      pathname: location.pathname,
-                      search: creationSearch(location.search, "integration"),
-                      hash: location.hash,
-                    },
-                    { state: location.state },
-                  )
-                }
-              >
+              <DropdownMenuItem data-page-action="create" onSelect={creation.open}>
                 <Plus />
                 {t("integrations.create")}
               </DropdownMenuItem>
@@ -415,21 +399,12 @@ export function IntegrationsPage() {
         count={isLoading || error ? undefined : t("integrations.count", { count: shown.length })}
       />
 
-      {creationOpen && (
+      {creation.isOpen && (
         <CreationHandoffModal
           resource="integration"
-          onClose={() =>
-            navigate(
-              {
-                pathname: location.pathname,
-                search: creationSearch(location.search, null),
-                hash: location.hash,
-              },
-              { replace: true, state: location.state },
-            )
-          }
+          onClose={creation.close}
           onManual={() => navigate("/integrations/new")}
-          onChat={(prompt) => navigate("/chat", { state: chatDraftNavigationState(prompt) })}
+          onChat={creation.openChat}
         />
       )}
 

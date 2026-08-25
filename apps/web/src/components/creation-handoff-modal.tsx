@@ -7,11 +7,8 @@ import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import { buildMcpClientConfig } from "../lib/mcp-client-config";
-import {
-  buildCreationPrompt,
-  type CreationLocale,
-  type CreationResource,
-} from "../lib/creation-handoff";
+import { buildCreationPrompt, type CreationResource } from "../lib/creation-handoff";
+import { useAppConfig } from "../hooks/use-app-config";
 import { useOrg } from "../hooks/use-org";
 import { CopyBlock } from "./copy-block";
 import { Modal } from "./modal";
@@ -37,14 +34,17 @@ export function CreationHandoffModal({
   onManual,
   onChat,
 }: CreationHandoffModalProps) {
-  const { t, i18n } = useTranslation("settings");
+  const { t } = useTranslation("settings");
+  const { features } = useAppConfig();
   const { currentOrg } = useOrg();
   const [codingHandoff, setCodingHandoff] = useState(false);
-  const locale: CreationLocale = i18n.language.toLowerCase().startsWith("fr") ? "fr" : "en";
   const resourceName = t(RESOURCE_KEYS[resource]);
-  const codingPrompt = buildCreationPrompt(resource, "coding-agent", locale);
-  const chatPrompt = buildCreationPrompt(resource, "chat", locale);
+  const translatePrompt = (key: string, values?: Record<string, string>) => t(key, values);
+  const codingPrompt = buildCreationPrompt(resource, "coding-agent", translatePrompt);
+  const chatPrompt = buildCreationPrompt(resource, "chat", translatePrompt);
   const manualIsImport = resource === "mcp-server";
+  const chatAvailable = Boolean(features.chat);
+  const codingAgentAvailable = Boolean(features.mcp);
 
   if (codingHandoff) {
     const serverName = currentOrg ? `appstrate-${currentOrg.slug}` : "appstrate";
@@ -97,20 +97,29 @@ export function CreationHandoffModal({
         manualIsImport ? "creation.manual.importDescription" : "creation.manual.description",
       ),
       onClick: onManual,
+      disabled: false,
     },
     {
       id: "chat",
       icon: MessageSquareText,
       title: t("creation.chat.title"),
-      description: t("creation.chat.description"),
+      description: t(
+        chatAvailable ? "creation.chat.description" : "creation.chat.unavailableDescription",
+      ),
       onClick: () => onChat(chatPrompt),
+      disabled: !chatAvailable,
     },
     {
       id: "coding-agent",
       icon: Bot,
       title: t("creation.codingAgent.title"),
-      description: t("creation.codingAgent.description"),
+      description: t(
+        codingAgentAvailable
+          ? "creation.codingAgent.description"
+          : "creation.codingAgent.unavailableDescription",
+      ),
       onClick: () => setCodingHandoff(true),
+      disabled: !codingAgentAvailable,
     },
   ];
 
@@ -122,13 +131,14 @@ export function CreationHandoffModal({
       className="sm:max-w-xl"
     >
       <div className="space-y-2" data-creation-chooser={resource}>
-        {methods.map(({ id, icon: Icon, title, description, onClick }) => (
+        {methods.map(({ id, icon: Icon, title, description, onClick, disabled }) => (
           <Button
             key={id}
             type="button"
             variant="outline"
             className="h-auto min-h-16 w-full justify-start gap-3 p-3 text-left whitespace-normal"
             onClick={onClick}
+            disabled={disabled}
             data-creation-method={id}
           >
             <span className="bg-muted grid size-9 shrink-0 place-items-center rounded-md">

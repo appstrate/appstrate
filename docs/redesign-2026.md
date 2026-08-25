@@ -2265,8 +2265,10 @@ warnings.
 addressable creation modal for Agents, Skills, Integrations and MCP Servers.
 The collection's `Actions > Create` deed pushes `?create=<resource>`; Back closes
 it, while its close control removes only that key and preserves the rest of the
-list URL. All three choices are live, but they hand off differently rather than
-pretending every resource has the same editor.
+list URL. The trigger, the addressable modal and every handoff share the same
+admin-write guard, so a copied query string cannot expose creation controls to
+a role that cannot complete them. The three choices hand off differently
+rather than pretending every resource has the same editor.
 
 Manual keeps the destinations that already existed: the Agent, Skill and
 Integration editors. MCP Servers remain browse-only in the web app, so their
@@ -2274,8 +2276,11 @@ honest manual path is the existing package import modal, not an invented empty
 editor. Build with Chat opens a new Appstrate Chat and seeds its composer with a
 resource-specific prompt without sending it. The reader can edit or discard the
 brief before the first turn. The prompt names only operation ids present in the
-OpenAPI catalogue, requires `describe_operation` before `invoke_operation`, and
-requires a reviewable draft plus explicit confirmation before publication.
+OpenAPI catalogue, with the ids compile-time checked as `keyof operations`,
+requires `describe_operation` before `invoke_operation`, and requires a
+reviewable draft plus explicit confirmation before publication. Prompt prose
+lives in the EN/FR i18next catalogues; one prompt projection assembles either
+language instead of hiding a second localization system in TypeScript.
 
 MCP-server authoring uses the deeper workflow the platform MCP already exposes:
 `get_runtime_capabilities`, one inline `run_and_wait` that writes and packages
@@ -2291,12 +2296,18 @@ Claude Code, Cursor, VS Code and generic JSON therefore derive their endpoint,
 commands and deeplinks from `buildMcpClientConfig`; the handoff does not duplicate
 connection strings that could drift. A coding agent without that MCP is told to
 stop and ask for the connection rather than reconstructing an endpoint.
+The chooser reads the installation's module capabilities before offering those
+handoffs: Chat is disabled with an explanation when `features.chat` is absent,
+and coding-agent delegation is disabled when `features.mcp` is absent. Manual
+creation remains available. A shared navigation hook owns opening, closing and
+the unsent Chat draft so the collection implementations cannot drift.
 
 The prompt and URL projections have unit coverage. `lab:creation` exercises the
 four three-choice modals at 1440 and 390, the coding prompt and canonical MCP
-connection instructions, the unsent Chat draft, and the existing manual editor
-and MCP import destinations. The four modal surfaces are also permanent nominal
-lab screens, so `lab:shots` keeps their fixtures and pixels visible.
+connection instructions, all four resource-specific unsent Chat drafts, all
+three existing manual editors, and the MCP import destination. The four modal
+surfaces are also permanent nominal lab screens, so `lab:shots` keeps their
+fixtures and pixels visible.
 
 The four nominal screens produced eight inspected captures at 1440 and 390
 with no fixture hole. Their dialog and viewport geometry has zero overflow at

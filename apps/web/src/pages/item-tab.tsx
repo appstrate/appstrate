@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Plug, Plus, Upload, Wrench } from "lucide-react";
 import { DropdownMenuItem } from "@appstrate/ui/components/dropdown-menu";
@@ -11,11 +11,8 @@ import { type CardItem, PackageTab } from "./package-list";
 import { packageNewPath } from "../lib/package-paths";
 import { PageActionsMenu } from "../components/page-actions-menu";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
-import {
-  chatDraftNavigationState,
-  creationResourceFromSearch,
-  creationSearch,
-} from "../lib/creation-handoff";
+import { useCreationHandoff } from "../hooks/use-creation-handoff";
+import { usePermissions } from "../hooks/use-permissions";
 
 type BrowseType = Extract<PackageType, "skill" | "mcp-server">;
 
@@ -40,29 +37,19 @@ const TYPE_PRESENTATION: Record<
 
 export function ItemTab({
   type = "skill",
-  readOnly = false,
+  manualCreation = "editor",
 }: {
   /** Package type to list. Defaults to "skill" to preserve existing callers. */
   type?: BrowseType;
-  /** When true, hides the "create" editor link (browse-only surface). */
-  readOnly?: boolean;
+  /** Existing manual destination for this collection. */
+  manualCreation?: "editor" | "import";
 }) {
   const { t } = useTranslation(["settings", "agents", "common"]);
   const { data: rawItems, isLoading } = usePackageList(type);
+  const { isAdmin } = usePermissions();
   const [importOpen, setImportOpen] = useState(false);
-  const location = useLocation();
   const navigate = useNavigate();
-  const creationOpen = creationResourceFromSearch(location.search) === type;
-
-  const closeCreation = () =>
-    navigate(
-      {
-        pathname: location.pathname,
-        search: creationSearch(location.search, null),
-        hash: location.hash,
-      },
-      { replace: true, state: location.state },
-    );
+  const creation = useCreationHandoff(type, isAdmin);
 
   const presentation = TYPE_PRESENTATION[type];
   const typeLabel = t(presentation.typeKey);
@@ -89,46 +76,36 @@ export function ItemTab({
         emptyHint={t("packages.emptyItemsHint", { type: typeLabel })}
         emptyIcon={presentation.emptyIcon}
         extraActions={
-          <PageActionsMenu>
-            <DropdownMenuItem data-page-action="import" onSelect={() => setImportOpen(true)}>
-              <Upload />
-              {t("nav.import", { ns: "common" })}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              data-page-action="create"
-              onSelect={() =>
-                navigate(
-                  {
-                    pathname: location.pathname,
-                    search: creationSearch(location.search, type),
-                    hash: location.hash,
-                  },
-                  { state: location.state },
-                )
-              }
-            >
-              <Plus />
-              {t("list.createItem", { ns: "agents", type: typeLabel })}
-            </DropdownMenuItem>
-          </PageActionsMenu>
+          isAdmin ? (
+            <PageActionsMenu>
+              <DropdownMenuItem data-page-action="import" onSelect={() => setImportOpen(true)}>
+                <Upload />
+                {t("nav.import", { ns: "common" })}
+              </DropdownMenuItem>
+              <DropdownMenuItem data-page-action="create" onSelect={creation.open}>
+                <Plus />
+                {t("list.createItem", { ns: "agents", type: typeLabel })}
+              </DropdownMenuItem>
+            </PageActionsMenu>
+          ) : undefined
         }
         title={title}
         breadcrumbs={[{ label: title }]}
       />
       <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
-      {creationOpen && (
+      {creation.isOpen && (
         <CreationHandoffModal
           resource={type}
-          onClose={closeCreation}
+          onClose={creation.close}
           onManual={() => {
-            if (readOnly) {
-              closeCreation();
+            if (manualCreation === "import") {
+              creation.close();
               setImportOpen(true);
               return;
             }
             navigate(packageNewPath(type));
           }}
-          onChat={(prompt) => navigate("/chat", { state: chatDraftNavigationState(prompt) })}
+          onChat={creation.openChat}
         />
       )}
     </>

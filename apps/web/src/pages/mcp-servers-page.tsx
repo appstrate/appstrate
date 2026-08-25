@@ -3,5 +3,5 @@
 import { ItemTab } from "./item-tab";
 
 export function McpServersPage() {
-  return <ItemTab type="mcp-server" readOnly />;
+  return <ItemTab type="mcp-server" manualCreation="import" />;
 }

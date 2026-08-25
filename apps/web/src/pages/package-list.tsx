@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { type ReactNode, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { Trans, useTranslation } from "react-i18next";
 import { type LucideIcon, Layers, Plus, SearchX, Upload } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
@@ -23,11 +23,7 @@ import { ImportModal } from "../components/import-modal";
 import { ErrorState, EmptyState } from "../components/page-states";
 import { usePermissions } from "../hooks/use-permissions";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
-import {
-  chatDraftNavigationState,
-  creationResourceFromSearch,
-  creationSearch,
-} from "../lib/creation-handoff";
+import { useCreationHandoff } from "../hooks/use-creation-handoff";
 
 export interface CardItem {
   id: string;
@@ -176,19 +172,8 @@ export function PackageList() {
   const { data: unreadCounts } = useUnreadCountsByAgent();
   const { isAdmin } = usePermissions();
   const [importOpen, setImportOpen] = useState(false);
-  const location = useLocation();
   const navigate = useNavigate();
-  const creationOpen = creationResourceFromSearch(location.search) === "agent";
-
-  const closeCreation = () =>
-    navigate(
-      {
-        pathname: location.pathname,
-        search: creationSearch(location.search, null),
-        hash: location.hash,
-      },
-      { replace: true, state: location.state },
-    );
+  const creation = useCreationHandoff("agent", isAdmin);
 
   const items: CardItem[] | undefined = agents?.map((f) => ({
     id: f.id,
@@ -222,19 +207,7 @@ export function PackageList() {
                 <Upload />
                 {t("nav.import", { ns: "common" })}
               </DropdownMenuItem>
-              <DropdownMenuItem
-                data-page-action="create"
-                onSelect={() =>
-                  navigate(
-                    {
-                      pathname: location.pathname,
-                      search: creationSearch(location.search, "agent"),
-                      hash: location.hash,
-                    },
-                    { state: location.state },
-                  )
-                }
-              >
+              <DropdownMenuItem data-page-action="create" onSelect={creation.open}>
                 <Plus />
                 {t("list.create")}
               </DropdownMenuItem>
@@ -243,12 +216,12 @@ export function PackageList() {
         }
       />
       <ImportModal open={importOpen} onClose={() => setImportOpen(false)} />
-      {creationOpen && (
+      {creation.isOpen && (
         <CreationHandoffModal
           resource="agent"
-          onClose={closeCreation}
+          onClose={creation.close}
           onManual={() => navigate("/agents/new")}
-          onChat={(prompt) => navigate("/chat", { state: chatDraftNavigationState(prompt) })}
+          onChat={creation.openChat}
         />
       )}
     </div>
