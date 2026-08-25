@@ -924,10 +924,15 @@ async function spawnAndConnectLocalIntegration(params: {
     bundleRoot: root,
     egress: egressCtx,
     workspaceHandle: params.workspaceHandle,
-    onStderrLine: (line) => {
+    // Scrub ONCE, at the point third-party bytes enter the process, so both
+    // consumers get the same masked line. Scrubbing only the report copy left
+    // the operator's log aggregator holding the raw line — a wider audience,
+    // not a narrower one, than the report the scrub was written for.
+    onStderrLine: (raw) => {
+      const line = scrubStderrLine(raw);
       logger.info(`${logLabel} integration stderr`, { integrationId: spec.integrationId, line });
       if (params.stderrTail) {
-        params.stderrTail.push(scrubStderrLine(line));
+        params.stderrTail.push(line);
         if (params.stderrTail.length > STDERR_TAIL_MAX_LINES) params.stderrTail.shift();
       }
     },
@@ -1619,7 +1624,16 @@ export async function bootIntegrations(
         },
       });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      // Scrub the failure message itself, not just the stderr tail appended
+      // below. `msg` is third-party text on several paths — a `connect.tool`
+      // login tool's own error prose (`parseLoginToolResult` surfaces it
+      // verbatim), a `docker`/runner diagnostic that quotes back what it was
+      // given, a platform error `detail`. All of it lands in `failed[].error`
+      // and on a breadcrumb, both served by the UNAUTHENTICATED
+      // `GET /integrations/boot-report` the agent container reads as its boot
+      // gate. Scrubbing one half of a string the caller reads whole was the
+      // bug.
+      const msg = scrubSecretMaterial(err instanceof Error ? err.message : String(err));
       const ms = Math.round(performance.now() - specStart);
       // #779 — append the runner's stderr tail so the boot report carries
       // the actual upstream cause, not just the transport-level symptom

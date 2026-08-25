@@ -11,14 +11,15 @@
  * at {@link CA_CONTAINER_PATH}.
  */
 
-import { mkdtemp, writeFile, chmod, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, chmod, rm } from "node:fs/promises";
 import { tmpdir, hostname } from "node:os";
-import { posix, join } from "node:path";
+import { posix, join, dirname, relative, resolve, sep } from "node:path";
 
 import { SubprocessTransport } from "@appstrate/mcp-transport";
 import { isMcpServerRuntime, type McpServerRuntime } from "@appstrate/core/mcp-server";
 
 import { logger } from "./logger.ts";
+import { scrubSecretMaterial } from "./redact.ts";
 import type { IntegrationSpawnSpec } from "./integrations-boot.ts";
 import { createIntegrationDnsResponder } from "./integration-dns-responder.ts";
 import { createTransparentEgressListener } from "./integration-transparent-listener.ts";
@@ -50,8 +51,11 @@ const DEFAULT_RUNNER_IMAGE_BY_TYPE: Record<McpServerRuntime, string> = {
   node: "appstrate-mcp-runner-node:latest",
   // In process mode `bun` runs as a host subprocess; in docker mode it gets
   // its own container here, like every other runtime — keeps tier-3's
-  // cgroup/cap-drop/network isolation (the sidecar runs as root with the
-  // Docker socket mounted, so third-party bun code never shares its process).
+  // cgroup/cap-drop/network isolation. The sidecar holds the Docker socket
+  // and every integration's decrypted credentials in its own environment
+  // (it runs UNPRIVILEGED, as `nobody:nobody` — see the image's `USER`
+  // line — but that is not an isolation boundary against code sharing its
+  // process), so third-party bun code must never share it.
   bun: "appstrate-mcp-runner-bun:latest",
   python: "appstrate-mcp-runner-python:latest",
   // MCPB 0.4 / AFPS §3.4 — `uv` runs Python through Astral's `uv`
@@ -121,8 +125,39 @@ interface DockerExecSubprocess {
 
 type DockerExecSpawn = (
   cmd: string[],
-  opts: { stdin: "ignore"; stdout: "pipe"; stderr: "pipe" },
+  opts: {
+    stdin: "ignore";
+    stdout: "pipe";
+    stderr: "pipe";
+    env: Record<string, string>;
+  },
 ) => DockerExecSubprocess & { kill: (signal?: number | string) => void };
+
+/**
+ * The ONLY host env the `docker` CLI is ever given.
+ *
+ * `Bun.spawn` defaults `env` to `process.env`, which for the sidecar means the
+ * run token, the proxy URL (with basic-auth) and `INTEGRATIONS_TO_SPAWN_JSON`
+ * (every integration's decrypted credentials). The CLI needs none of that — it
+ * only has to find the daemon socket. Handing it the minimum closes a whole
+ * class of leaks rather than one instance: docker's `--env-file` parser resolves
+ * a line with NO `=` against its own environment, so anything present here is
+ * reachable from an env-file line. (`writeSecretEnvFile` refuses to emit such a
+ * line in the first place; this is the second floor.)
+ *
+ * Shared with the `docker start -ai` transport below so the two spawn paths
+ * cannot drift.
+ */
+const DOCKER_CLI_ENV_KEYS = ["PATH", "HOME", "DOCKER_HOST"] as const;
+
+function dockerCliEnv(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const key of DOCKER_CLI_ENV_KEYS) {
+    const value = process.env[key];
+    if (typeof value === "string" && value.length > 0) out[key] = value;
+  }
+  return out;
+}
 
 /**
  * Upper bound on any single `docker` CLI invocation. A wedged docker daemon
@@ -141,6 +176,7 @@ async function dockerExec(args: string[]): Promise<string> {
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
+    env: dockerCliEnv(),
   });
   // Race `proc.exited` against a timer. On expiry, kill the subprocess and
   // reject; on the normal path, clear the timer so it doesn't keep the
@@ -166,7 +202,14 @@ async function dockerExec(args: string[]): Promise<string> {
       timeout,
     ]);
     if (code !== 0) {
-      throw new Error(`docker ${args[0]} failed (exit ${code}): ${stderr.trim() || stdout.trim()}`);
+      // Docker's diagnostics quote back what it was given — an `--env-file`
+      // parse error names the offending line, a `cp` error names paths. This
+      // message travels into `failed[].error` on the UNAUTHENTICATED
+      // `GET /integrations/boot-report` that the agent container reads, so
+      // scrub credential shapes out of it here, at the point the third-party
+      // text enters our own error string.
+      const detail = scrubSecretMaterial(stderr.trim() || stdout.trim());
+      throw new Error(`docker ${args[0]} failed (exit ${code}): ${detail}`);
     }
     return stdout.trim();
   } finally {
@@ -220,27 +263,6 @@ async function killContainer(containerId: string): Promise<void> {
 }
 
 /**
- * AFPS §7.6 (CC-5) — materialise a `delivery.files` entry into the
- * runner container. Writes the decoded bytes to a sidecar-local temp file
- * with the requested POSIX mode, then `docker cp`'s it into the container
- * at the absolute manifest path. Returns the host temp file path so the
- * caller can clean up after spawn.
- *
- * Security:
- *   - The container path is the manifest-declared key. The platform-side
- *     resolver enforces absolute-POSIX + no `..` + non-root (see
- *     `isSafeDeliveryFilePath`) before this code ever runs, so the value
- *     reaching us is structurally safe.
- *   - The host temp file lives in `os.tmpdir()/appstrate-files-<random>/`
- *     and is unlinked after the cp completes (the per-integration
- *     `materializeFileMounts` collector handles cleanup).
- *   - `docker cp` does NOT create parent directories on the destination
- *     side. We pre-create the parent inside the container via
- *     `docker exec mkdir -p` so manifest paths like
- *     `/run/creds/cert.pem` work without operators having to image the
- *     full directory tree.
- */
-/**
  * R8a — reject container destination paths that escape the runner's safe
  * writable area. The platform-side resolver (`isSafeDeliveryFilePath`)
  * already rejects relative + `..` traversal + NUL bytes + pure root, so by
@@ -266,22 +288,56 @@ export function isContainerPathSafeForMount(containerPath: string): boolean {
   });
 }
 
-async function materializeFileMountsInContainer(
-  containerId: string,
+/**
+ * AFPS §7.6 (CC-5) — stage every `delivery.files` entry into a host-side
+ * MIRROR of the runner's filesystem: an entry declared at
+ * `/run/creds/cert.pem` is written to `<tempDir>/run/creds/cert.pem`. The
+ * caller ships the whole mirror with a single `docker cp <tempDir>/. <id>:/`.
+ *
+ * Why a mirror rather than one flat file per `docker cp`: `docker cp` does not
+ * create parent directories on the destination side, and at this point in the
+ * spawn the container is still in `Created` state — the daemon answers 409 to
+ * `docker exec` against a container that was never started, so the
+ * `mkdir -p` pre-create this code used to attempt could never have run. The
+ * mirror puts the directory entries in the tar instead, which is the only
+ * mechanism available before `docker start`.
+ *
+ * Naming: the host filename IS the container-relative path. The previous flat
+ * `f-<n>` scheme derived `<n>` from a counter pushed to exactly once, before
+ * the loop — so EVERY entry wrote to `f-1`. The first iteration chmod'ed it to
+ * the manifest mode (typically 0400) and the second iteration's `writeFile`
+ * died with `EACCES`: the sidecar runs as `nobody:nobody` (see the image's
+ * `USER` line) with no `CAP_DAC_OVERRIDE` to ignore its own file's mode. Any
+ * integration declaring two or more `delivery.files` entries could not boot.
+ *
+ * Security:
+ *   - The container path is manifest-declared. The platform-side resolver
+ *     (`isSafeDeliveryFilePath`) rejects relative paths, `..` segments and NUL
+ *     bytes; `isContainerPathSafeForMount` adds the kernel-managed /
+ *     privilege-escalation floor. The containment check below is a third floor
+ *     and the one the mirror specifically needs: a `..` that got past the first
+ *     two would now escape `tempDir` on the HOST, which the flat scheme could
+ *     not do.
+ *   - `mkdtemp` yields a 0700 directory owned by the sidecar uid and the whole
+ *     tree is removed on shutdown. Mirroring puts a manifest PATH on the host
+ *     fs (it is not secret — it is in the manifest); the credential BYTES keep
+ *     the manifest-declared mode.
+ *   - Staged DIRECTORIES are 0777 deliberately. `docker cp` applies the
+ *     archive's directory mode to a destination directory that already exists,
+ *     so a restrictive staged mode would silently narrow the runner's `/tmp`
+ *     (1777) and break every runtime that writes there. Widening is the safe
+ *     direction here: the runner is `--cap-drop ALL --security-opt
+ *     no-new-privileges` in a per-run ephemeral container, and only the files
+ *     carry credentials.
+ *
+ * Throws (after wiping the partial staging directory) on an unsafe path or an
+ * I/O failure, so the per-spec try/catch in `integrations-boot.ts` records it.
+ */
+export async function stageFileMountsOnHost(
   fileMounts: Record<string, { content_b64: string; mode: string }>,
-): Promise<string[]> {
-  const hostTempFiles: string[] = [];
-  // One temp dir per spawn, cleaned up by the caller after cp completes.
+): Promise<string> {
   const tempDir = await mkdtemp(join(tmpdir(), "appstrate-files-"));
-  hostTempFiles.push(tempDir);
-
-  // The temp dir holds decoded (decrypted) credential bytes on the host fs
-  // (not tmpfs). The caller only registers it for cleanup AFTER we return
-  // successfully — so if any `writeFile` / `docker exec` / `docker cp`
-  // throws mid-way, we must remove it here before re-throwing, otherwise
-  // the decrypted bytes leak on disk for good. The happy-path cleanup
-  // contract is unchanged: on success we return the dir and the caller
-  // owns its lifecycle.
+  const root = resolve(tempDir);
   try {
     for (const [containerPath, entry] of Object.entries(fileMounts)) {
       // R8a — refuse paths into kernel-managed / privilege-escalation
@@ -292,52 +348,84 @@ async function materializeFileMountsInContainer(
           `integration-runtime-adapter-docker: refused to mount credential file at unsafe container path ${containerPath}`,
         );
       }
+      const hostFile = resolve(root, containerPath.replace(/^\/+/, ""));
+      if (hostFile === root || !hostFile.startsWith(root + sep)) {
+        throw new Error(
+          `integration-runtime-adapter-docker: delivery.files path escapes the staging root: ${containerPath}`,
+        );
+      }
+      await mkdirStagedParents(dirname(hostFile), root);
       // Decode bytes from the base64 wire form.
-      const bytes = Buffer.from(entry.content_b64, "base64");
-      // Random host-side filename — the container path is reconstructed
-      // separately, so we don't leak the manifest path into the host fs.
-      const hostFile = join(tempDir, `f-${hostTempFiles.length}`);
-      await writeFile(hostFile, bytes);
+      await writeFile(hostFile, Buffer.from(entry.content_b64, "base64"));
       // chmod on the host side so the runner reads the file with the
       // requested mode after `docker cp` (cp preserves perms from source).
       const modeOctal = parseInt(entry.mode, 8);
       if (!Number.isNaN(modeOctal)) {
         await chmod(hostFile, modeOctal);
       }
-      // R8a — pre-create the parent dir inside the container so `docker cp`
-      // succeeds when the manifest path goes deeper than the runner image's
-      // baked-in tree (e.g. `/etc/appstrate/certs/`). The container is in
-      // `Created` state before `docker start`; `docker exec` against it works
-      // since Docker 1.13 (exec runs `runc exec` which doesn't require the
-      // PID 1 process to be live — it creates a new process namespace
-      // member). We swallow errors (some older runtimes refuse exec on a
-      // not-yet-started container) and fall back to the historical behaviour
-      // where `docker cp` itself errors out — the run boot then fails fast
-      // with a clear message that surfaces in the boot report.
-      const parent = posix.dirname(containerPath);
-      if (parent !== "/" && parent !== ".") {
-        // `mkdir -p` is idempotent and works on every base image
-        // (busybox/alpine/slim). Using `--user 0` would require an
-        // elevated runner; we accept the default user (`node` / `python`
-        // / `nobody` depending on image) — the runner has write
-        // permissions to its own writable layer regardless.
-        await dockerExec(["exec", containerId, "mkdir", "-p", parent]).catch(() => {
-          // Older docker / not-yet-started container: ignore. The
-          // subsequent `docker cp` will surface the missing-parent error
-          // itself if the directory truly doesn't exist.
-        });
-      }
-      await dockerExec(["cp", hostFile, `${containerId}:${containerPath}`]);
     }
   } catch (err) {
-    // Failed before returning the dir to the caller's collector — wipe the
-    // decrypted credential bytes ourselves, then re-throw so the per-spec
-    // try/catch in `integrations-boot.ts` records the failure.
+    // The staging dir holds decoded (decrypted) credential bytes on the host
+    // fs. It is not registered with the caller's collector yet, so wipe it
+    // here before re-throwing — otherwise those bytes leak on disk for good.
     await rm(tempDir, { recursive: true, force: true }).catch(() => {});
     throw err;
   }
+  return tempDir;
+}
 
-  return hostTempFiles;
+/**
+ * `mkdir -p` from `root` down to `dir`, forcing 0777 on every level. The
+ * explicit chmod is required because `mkdir`'s `mode` is masked by the process
+ * umask; the mode itself is explained on {@link stageFileMountsOnHost}.
+ */
+async function mkdirStagedParents(dir: string, root: string): Promise<void> {
+  if (dir === root) return;
+  await mkdir(dir, { recursive: true });
+  let current = root;
+  for (const segment of relative(root, dir).split(sep)) {
+    current = join(current, segment);
+    await chmod(current, 0o777);
+  }
+}
+
+/**
+ * Refuse anything that would let an env entry break out of its own
+ * `KEY=VALUE` line in a `docker --env-file`.
+ *
+ * This is not a formatting nicety. Docker parses the file line by line and,
+ * for a line with NO `=`, resolves the bare name against the **docker CLI
+ * process's own environment**. So a single `\n` inside a credential value —
+ * routine in a GCP service-account `private_key`, an SSH key, or a token
+ * pasted with a trailing newline, all of which reach us through
+ * `delivery.env` — makes docker copy a variable of the attacker's choosing out
+ * of the sidecar's environment and into a third-party container that has
+ * network egress. Quoting is NOT a fix: docker does not unquote env-file
+ * values, so `KEY="a\nB"` still ends the line at the newline.
+ *
+ * `\r` is refused for the same reason (docker's scanner splits on `\n` and
+ * leaves a stray `\r` attached to the value; other readers treat a lone `\r`
+ * as a line break). A leading `#` makes the line a comment, so the credential
+ * silently never arrives; a leading `=` is a docker parse error. The rule is
+ * applied identically to the key and the value: no integration credential
+ * legitimately needs any of these bytes, and a single predicate cannot drift
+ * between the two halves.
+ *
+ * The thrown message names the KEY only. The value is the credential.
+ */
+function assertEnvFileLineSafe(key: string, value: string): void {
+  for (const [half, text] of [
+    ["name", key],
+    ["value", value],
+  ] as const) {
+    if (/[\r\n]/.test(text) || text.startsWith("#") || text.startsWith("=")) {
+      throw new Error(
+        `integration-runtime-adapter-docker: refusing to deliver env var "${key}" — its ${half} ` +
+          `contains a line break or starts with '#'/'=', which docker's --env-file format cannot ` +
+          `represent without letting the entry escape its own line`,
+      );
+    }
+  }
 }
 
 /**
@@ -350,20 +438,21 @@ async function materializeFileMountsInContainer(
  * env-file keeps the values off argv; the caller reads it once (create bakes
  * the env into the container config) and deletes it immediately after.
  *
- * The file uses docker's `KEY=VALUE`-per-line format. Values are written
- * verbatim; docker parses each line up to the first newline, so a credential
- * value must not itself contain a newline (integration credentials are tokens/
- * keys — single-line by construction). Created with mode 0600 (+ explicit
- * chmod, defeating a permissive umask) so only the sidecar uid can read it.
+ * The file uses docker's `KEY=VALUE`-per-line format, one line per entry, and
+ * every entry is checked by {@link assertEnvFileLineSafe} first — see there for
+ * why a newline in a value is an exfiltration primitive rather than a
+ * formatting nuisance. Created with mode 0600 (+ explicit chmod, defeating a
+ * permissive umask) so only the sidecar uid can read it.
  */
-async function writeSecretEnvFile(
+export async function writeSecretEnvFile(
   env: Record<string, string>,
 ): Promise<{ path: string; dir: string }> {
+  const entries = Object.entries(env);
+  // Validate BEFORE mkdtemp so a rejected spec leaves nothing on disk.
+  for (const [k, v] of entries) assertEnvFileLineSafe(k, v);
   const dir = await mkdtemp(join(tmpdir(), "appstrate-env-"));
   const path = join(dir, "integration.env");
-  const body = Object.entries(env)
-    .map(([k, v]) => `${k}=${v}`)
-    .join("\n");
+  const body = entries.map(([k, v]) => `${k}=${v}`).join("\n");
   await writeFile(path, body, { mode: 0o600 });
   // Explicit chmod in case the process umask stripped bits at create time.
   await chmod(path, 0o600);
@@ -624,13 +713,17 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
         await dockerExec(["cp", egress.caCertHostPath, `${containerId}:${CA_CONTAINER_PATH}`]);
       }
 
-      // AFPS §7.6 (CC-5) — materialise `delivery.files` entries into
-      // the runner container BEFORE `docker start -ai` so the entrypoint
-      // observes them at boot. The host temp dir is cleaned up by
-      // `shutdown()` (we keep the reference so cleanup is exception-safe).
+      // AFPS §7.6 (CC-5) — materialise `delivery.files` entries into the
+      // runner container BEFORE `docker start -ai` so the entrypoint observes
+      // them at boot. Staged host-side as a mirror of the runner's filesystem
+      // and shipped in ONE `docker cp`, whose tar carries the parent
+      // directories (see `stageFileMountsOnHost`). The staging dir is
+      // registered for cleanup BEFORE the copy, so `shutdown()` reclaims the
+      // decrypted bytes even when the copy throws.
       if (spec.fileMounts && Object.keys(spec.fileMounts).length > 0) {
-        const hostTempDirs = await materializeFileMountsInContainer(containerId, spec.fileMounts);
-        hostTempDirsByContainer.set(containerId, hostTempDirs);
+        const stagedDir = await stageFileMountsOnHost(spec.fileMounts);
+        hostTempDirsByContainer.set(containerId, [stagedDir]);
+        await dockerExec(["cp", `${stagedDir}/.`, `${containerId}:/`]);
       }
 
       // `docker start -ai <id>` starts the entrypoint AND attaches stdio.
@@ -643,9 +736,9 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
         args: ["start", "-ai", containerId],
         // `env` is NOT passed to the docker CLI — credentials were baked
         // into the container at create-time via the (now-deleted) 0600
-        // `--env-file`. The CLI only needs PATH/HOME/DOCKER_HOST to find
-        // the daemon socket.
-        envPassthrough: ["PATH", "HOME", "DOCKER_HOST"],
+        // `--env-file`. The CLI only needs the daemon-socket lookup vars;
+        // same allowlist `dockerExec` applies, from one constant.
+        envPassthrough: [...DOCKER_CLI_ENV_KEYS],
         onStderrLine,
       });
 
