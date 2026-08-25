@@ -16,6 +16,44 @@
   //
   // `CONSUMER_DRIFT_POLICY` is deliberately absent: `check-consumer-versions.ts`
   // runs from `publish-core.yml` directly, never through a turbo task.
+  //
+  // `CI` is deliberately absent too, and for the OPPOSITE reason — turbo already
+  // forwards it. The two `verify:*` gates pin `POLICY = "fail"` under CI so a
+  // green pipeline cannot be bought with `…_POLICY=off`, and that pin is only
+  // worth anything if `CI` survives strict mode. Probed 2026-08-25, printing
+  // `process.env` from inside the task: `CI=true APPSTRATE_PROBE_UNLISTED=yes
+  // GITHUB_ACTIONS=true turbo run '//#verify:module-isolation' --force` yields
+  // `CI="true" GITHUB_ACTIONS="true" RANDOM=undefined` — turbo drops the
+  // unlisted variable and keeps `CI`, which is in its built-in system set.
+  // Adding it here would be a no-op that implies the pin was broken.
+
+  // ── globalDependencies ────────────────────────────────────────────────
+  // Files outside every workspace whose content changes what a task VERIFIES.
+  // Task `inputs` are workspace-relative, so a root file can only enter a
+  // workspace task's hash from here.
+  //
+  // `tsconfig.base.json` is the whole of it, and it is not decorative: the 22
+  // tsconfigs in this repo `extends` it, and it is where `strict`,
+  // `noUncheckedIndexedAccess`, `noUnusedLocals`, `noImplicitOverride` and
+  // `noFallthroughCasesInSwitch` are set. Measured before this entry existed: a
+  // one-line edit flipping `"strict": true` → `false` moved NONE of the 21
+  // `typecheck` hashes (`turbo run typecheck --dry=json`, byte-identical
+  // output), so turbo printed `Cached: 21`, tsc never ran, and `bun run check`
+  // reported green over a codebase whose type discipline had just been switched
+  // off — with `.turbo/cache` restored across CI runs via `restore-keys`, that
+  // green survives the merge. The CI cache key in
+  // `.github/workflows/check.yml` hashes this file for the same reason.
+  //
+  // Two ROOT tasks (`//#typecheck:scripts`, `//#verify:type-coverage`) already
+  // listed it in their own `inputs` — those resolve against the repo root, so
+  // they could. This entry generalises that to the workspace tasks, and the two
+  // local listings stay: harmless, and they document the dependency where the
+  // task is defined.
+  //
+  // Probe when changing it: `turbo run typecheck --dry=json`, EDIT
+  // tsconfig.base.json (turbo hashes content — `touch` moves nothing and reads
+  // as a false negative), run again — every hash must move.
+  "globalDependencies": ["tsconfig.base.json"],
   "globalPassThroughEnv": [
     "BETTER_AUTH_SECRET",
     "CONNECTION_ENCRYPTION_KEY",
@@ -110,22 +148,24 @@
     // it. They must therefore track that config, not the other way round:
     // a zone eslint newly covers but this list omits is a zone whose findings
     // arrive once and are then cached away.
+    //
+    // Which is why this is now the same shape as the config's own `ALL_TS`
+    // rather than a parallel directory roster. The roster this replaces
+    // (`apps/*/src/**`, `packages/*/test/**`, …) had already fallen behind: it
+    // did not reach `apps/web/vite.config.ts`, `packages/db/drizzle.config.ts`,
+    // `packages/afps-runtime/bin/afps.ts` or either `examples/` file. Those
+    // were outside eslint's `files` too, so the two lists were consistently
+    // wrong together — the moment the config was widened to cover them, an
+    // unwidened list here would have handed them one real run and then a cache
+    // hit forever. Two supersets that cannot drift beats two rosters that
+    // agreed by accident.
+    //
+    // turbo hashes only non-ignored files, so `**` costs nothing for
+    // `node_modules` / `dist` — they are gitignored and never enter the hash.
+    // `eslint.config.mjs` is the sole tracked non-TS file eslint reads, and it
+    // is the config itself: a rule change must invalidate every verdict.
     "//#lint": {
-      "inputs": [
-        "apps/*/src/**",
-        "apps/*/test/**",
-        "apps/*/scripts/**",
-        "packages/*/src/**",
-        "packages/*/test/**",
-        "packages/*/scripts/**",
-        "runtime-pi/**/*.{ts,tsx,js,jsx,mjs,cjs}",
-        "e2e/**/*.ts",
-        "scripts/**/*.ts",
-        "test/**/*.ts",
-        "*.ts",
-        "*.mjs",
-        "package.json"
-      ]
+      "inputs": ["**/*.{ts,tsx}", "eslint.config.mjs", "package.json"]
     },
     // No `inputs` on purpose. The root `format:check` script is now a bare
     // `prettier --check .`, whose scope is "every file in the repo minus
@@ -165,10 +205,35 @@
     // EDIT packages/core/src/naming.ts (append a line — turbo hashes content,
     // so `touch` moves nothing and reads as a false negative), run again — the
     // hash must move.
+    //
+    // The script itself (root package.json) had a second, unrelated defect
+    // worth recording here because this is where the task is documented:
+    // `--ignore-files` resolves its pattern against the CWD, which for a root
+    // script is the repo root, and the pattern read `src/api/schema.d.ts` —
+    // a path that exists nowhere. Measured three ways: as written 99.14%
+    // (106896/107817), with the flag DELETED ENTIRELY 99.14% (106896/107817,
+    // byte-identical — the exclusion was doing nothing), and with the path
+    // corrected to `apps/web/src/api/schema.d.ts` 99.04% (95538/96459). The
+    // 11 328-identifier generated OpenAPI client is perfectly typed, so it
+    // padded both sides of the ratio and every hand-written `any` was being
+    // measured against an inflated denominator.
+    //
+    // The floor moved with it: `--at-least 98` was set against that inflated
+    // figure and had never measured anything, so re-using it would have kept
+    // ~1 000 identifiers of dead slack. It is now 99, against a true 99.04%.
+    // That is ~40 identifiers of headroom on purpose — when it trips, type the
+    // `any` that tripped it. Do not lower the floor; the whole point of this
+    // pass was that a floor nobody re-derived is not a floor.
     "//#verify:type-coverage": {
       "inputs": [
         "apps/web/src/**",
         "apps/web/tsconfig.json",
+        // `apps/web/tsconfig.json` now includes `vite.config.ts`, so it is in
+        // the measured PROGRAM — and an input list that stops at `src/**` is
+        // blind to it in exactly the way this comment block is about. Measured:
+        // before this line, appending to `vite.config.ts` left this task's hash
+        // byte-identical.
+        "apps/web/vite.config.ts",
         "packages/*/src/**",
         "packages/*/package.json",
         "packages/*/tsconfig.json",

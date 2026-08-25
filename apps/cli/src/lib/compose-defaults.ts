@@ -22,12 +22,25 @@
  *
  * ─── Why a hand-maintained table (not parsed from the Zod schema) ────
  *
- * The schema's `.default(...)` calls in `packages/env/src/index.ts` are
- * interleaved with transforms and refinements that are non-trivial to
- * extract statically. A hand list paired with the CI guard's coverage
- * is enough to catch the regression — a typo in the table just fails to
- * catch one duplication, it never introduces one. Keep this list in
- * sync with `packages/env/src/index.ts` when adding new vars.
+ * The default VALUES in `packages/env/src/index.ts` are interleaved with
+ * transforms and refinements that do not extract cleanly, so the values
+ * below stay hand-written. That much is unchanged.
+ *
+ * What is no longer true is the old claim that a gap in this table is
+ * harmless — "it just fails to catch one duplication". It fails SILENTLY,
+ * and `analyzeComposeDefaults` below is where: a variable absent from
+ * `CODE_DEFAULTS` hits `codeDefault === undefined` and is skipped, so the
+ * gate's coverage was this table's length rather than the schema's. It was
+ * short by 14, among them `WORKSPACE_TMPFS_SIZE_MB` and `FILE_MAX_BYTES`
+ * — a compose file pinning either at exactly its schema default passed
+ * clean, which is #513 verbatim.
+ *
+ * So the SET of defaulted variable names — a far weaker thing to extract
+ * than their values — is now derived from the schema source by
+ * `readSchemaDefaults()` in `scripts/verify-compose-defaults.ts`, and a
+ * compose file naming a defaulted variable this table does not cover is a
+ * hard failure there. Keeping this list in sync is still the job; it is no
+ * longer a job you can silently not do.
  */
 
 /** Source-of-truth file the defaults mirror — referenced in messages. */
@@ -344,7 +357,12 @@ export function analyzeComposeDefaults(content: string): ComposeFinding[] {
 
   for (const match of extractComposeDefaults(content)) {
     const codeDefault = CODE_DEFAULTS[match.varName];
-    if (codeDefault === undefined) continue; // not tracked, skip
+    // Not in the table → nothing to compare against, so no finding here. This
+    // skip is the gate's blind spot, and it is covered one level up:
+    // `verify-compose-defaults.ts` fails when the skipped variable turns out to
+    // carry a `.default()` in the schema. Do not "fix" it by guessing a default
+    // — this function is pure and value-comparing; the missing entry is.
+    if (codeDefault === undefined) continue;
 
     const allowed = ALLOWLIST[match.varName];
     if (allowed) {

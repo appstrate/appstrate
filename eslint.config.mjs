@@ -19,6 +19,31 @@ const API_BARREL_BAN = {
   message:
     "Use the typed OpenAPI client from src/api/client.ts ($api / client) — the legacy fetch helpers are gone.",
 };
+// Every TypeScript file in the repo, minus the top-level `ignores` block below
+// (`**/dist`, `**/node_modules`, `.claude/`, the generated OpenAPI types).
+//
+// This is deliberately a SUPERSET, not a roster. The roster it replaces —
+// `**/src/**`, `**/test/**`, `**/scripts/**`, `e2e/**`, `runtime-pi/**`, `*.ts`
+// — read as exhaustive and was not: five tracked `.ts` files matched none of
+// its six globs, so `eslint .` reported nothing about them and only naming one
+// explicitly revealed `File ignored because no matching configuration was
+// supplied`. They were not marginal files — `apps/web/vite.config.ts` builds
+// the SPA that ships in the Docker image, `packages/afps-runtime/bin/afps.ts`
+// is a manifest `bin` entry, `packages/db/drizzle.config.ts` drives
+// `db:generate`, and `examples/custom-skill/skill.ts` is published example
+// code. A directory roster cannot survive the next config file somebody drops
+// at a workspace root; a superset can.
+//
+// The two blocks that use it (the general TS config and the Zod 4 guard) held
+// byte-identical copies of that roster, which is the other half of the same
+// problem — widening one and not the other is a silent asymmetry. One constant,
+// no drift.
+//
+// `//#lint`'s turbo `inputs` mirror this so the CACHE KEY matches the real
+// scope; a file eslint covers but turbo does not hash gets its findings once
+// and then replayed away forever.
+const ALL_TS = ["**/*.{ts,tsx}"];
+
 // Zod 4 string-format bans (single source of truth). Declared here because the
 // CLI and test blocks below re-declare `no-restricted-syntax` for subsets of
 // the same files — flat config replaces (not merges) a rule's options across
@@ -218,14 +243,7 @@ export default tseslint.config(
     // `scripts/**` or `**/test/**`, which this block does cover. See that block
     // for why.
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
-    files: [
-      "**/src/**/*.{ts,tsx}",
-      "**/test/**/*.ts",
-      "**/scripts/**/*.ts",
-      "e2e/**/*.ts",
-      "runtime-pi/**/*.ts",
-      "*.ts",
-    ],
+    files: ALL_TS,
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.node,
@@ -292,14 +310,7 @@ export default tseslint.config(
     // `**/test/**` and `apps/cli/src/**` blocks that re-declare
     // `no-restricted-syntax`, so those still win (with the bans re-spread) for
     // the files they cover — including `scripts/test/**`.
-    files: [
-      "**/src/**/*.{ts,tsx}",
-      "**/test/**/*.ts",
-      "**/scripts/**/*.ts",
-      "e2e/**/*.ts",
-      "runtime-pi/**/*.ts",
-      "*.ts",
-    ],
+    files: ALL_TS,
     rules: {
       "no-restricted-syntax": ["error", ...ZOD4_STRING_FORMAT_BANS],
     },

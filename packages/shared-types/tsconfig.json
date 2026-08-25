@@ -1,4 +1,8 @@
 {
   "extends": "../../tsconfig.base.json",
-  "include": ["src"]
+  // `test` is not optional: `bun test` executes tests without typechecking
+  // them, so a test directory absent from `include` is compiled by nothing.
+  // This workspace's sibling packages have always listed it; the omission here
+  // was an oversight, not a policy.
+  "include": ["src", "test"]
 }

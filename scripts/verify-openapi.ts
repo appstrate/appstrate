@@ -950,6 +950,13 @@ function resolveLocalImportFile(currentFile: string, source: string): string | n
   const importedFull = normalize(join(dirname(currentFull), sourceWithExt));
   const rel = relative(apiSrcRoot, importedFull);
   if (rel.startsWith("..") || rel.startsWith("/") || !rel.endsWith(".ts")) return null;
+  // The specifier has to name a file that EXISTS. Without this, a `./foo`
+  // resolving to a directory index, a `.tsx`, or a moved module produced a
+  // plausible-looking relative path that `readRouteFile` then read as "" — the
+  // silent-empty-source path this pass closed. Returning null here is the
+  // honest answer ("not a local .ts module"), and it is what lets
+  // `readRouteFile` throw on a genuinely missing file instead of shrugging.
+  if (!existsSync(importedFull)) return null;
   return rel.slice(0, -3).replace(/\\/g, "/");
 }
 
@@ -1174,11 +1181,20 @@ const indexPath = join(REPO_ROOT, "apps/api/src/index.ts");
 const indexSrc = readFileSync(indexPath, "utf8");
 
 // 1. Build the import map for `./routes/<file>` imports in index.ts
-//    - Named: `import { createXRouter } from "./routes/x.ts"`
+//    - Named:   `import { createXRouter } from "./routes/x.ts"`
 //    - Default: `import xRouter from "./routes/x.ts"`
+//    - Mixed:   `import xRouter, { helper } from "./routes/x.ts"`
+//
+// The mixed form is in both patterns because omitting it cost real coverage:
+// `import healthRouter, { bootGate, markServerReady } from "./routes/health.ts"`
+// matched NEITHER pattern (the named one needs `import {` immediately, the
+// default one needed `<ident> from`), so `healthRouter` resolved to no file and
+// `app.route("/", healthRouter)` was dropped — every route health.ts declares
+// was invisible to §5. It dropped in silence until the mount resolver below
+// started throwing; that is the whole reason it now throws.
 const importToFile = new Map<string, string>(); // identifier → relative file path
 for (const m of indexSrc.matchAll(
-  /import\s+\{([^}]+)\}\s+from\s+["']\.\/(routes\/[^"']+?)(?:\.ts)?["']/g,
+  /import\s+(?:\w+\s*,\s*)?\{([^}]+)\}\s+from\s+["']\.\/(routes\/[^"']+?)(?:\.ts)?["']/g,
 )) {
   const file = m[2]!;
   for (const raw of m[1]!.split(",")) {
@@ -1190,7 +1206,7 @@ for (const m of indexSrc.matchAll(
   }
 }
 for (const m of indexSrc.matchAll(
-  /import\s+(\w+)\s+from\s+["']\.\/(routes\/[^"']+?)(?:\.ts)?["']/g,
+  /import\s+(\w+)\s*(?:,\s*\{[^}]*\})?\s+from\s+["']\.\/(routes\/[^"']+?)(?:\.ts)?["']/g,
 )) {
   importToFile.set(m[1]!, m[2]!);
 }
@@ -1239,7 +1255,20 @@ for (const m of indexSrc.matchAll(
     }
   }
 
-  if (file) mounts.push({ prefix, file, factory });
+  if (!file) {
+    // An `app.route("/api/x", somethingUnresolvable)` used to be dropped here in
+    // silence, taking every endpoint that router declares with it — the same
+    // whole-mount hole `readRouteFile` had, one step earlier. There is no honest
+    // fallback: without the file this gate cannot know what `/api/x` serves, so
+    // it must not report on it.
+    throw new Error(
+      `verify-openapi: app.route("${prefix}", ${exprRaw}) — cannot resolve "${ident}" to a ` +
+        `route file from index.ts's imports. Every route mounted at "${prefix}" would be ` +
+        `invisible to the Code ⊆ Spec check. If the mount is legitimate, teach the resolver ` +
+        `its shape (see the three forms documented above); do not leave it unresolved.`,
+    );
+  }
+  mounts.push({ prefix, file, factory });
 }
 
 // 4. Discovered code endpoints
@@ -1332,19 +1361,46 @@ if (SKIP_FILES.size !== SANCTIONED_SKIP_COUNT) {
 }
 
 const routeFileCache = new Map<string, string>();
+
+/**
+ * Read a route file, or fail.
+ *
+ * This used to be `existsSync(full) ? readFileSync(full, "utf8") : ""`, and the
+ * empty string travelled: a mount whose route file had moved contributed ZERO
+ * endpoints to `codeEndpoints` and said nothing, so §5's "every code route is
+ * in the spec" passed over a file it had never opened. That is precisely the
+ * defect `SKIP_FILES` thirty lines above exists to bound — a whole-file skip
+ * removes every route in that file from the check — except this one needed no
+ * entry and no `SANCTIONED_SKIP_COUNT` review to happen.
+ *
+ * Every caller reaches here with a path that something already claimed is a
+ * real module: `mounts` from a resolved `app.route(...)` import, and
+ * `lookupIdentLiterals` from a specifier `resolveLocalImportFile` has confirmed
+ * exists. A miss is therefore a broken assumption, not a normal case.
+ */
 function readRouteFile(relPath: string): string {
   const cached = routeFileCache.get(relPath);
   if (cached !== undefined) return cached;
   const full = join(REPO_ROOT, "apps/api/src", relPath + ".ts");
-  const src = existsSync(full) ? readFileSync(full, "utf8") : "";
+  if (!existsSync(full)) {
+    throw new Error(
+      `verify-openapi: route file apps/api/src/${relPath}.ts does not exist, but something ` +
+        `mounts or imports it. Skipping it would drop every route it declares from the ` +
+        `Code ⊆ Spec check with no message — fix the path, or if the file is genuinely gone, ` +
+        `remove the mount.`,
+    );
+  }
+  const src = readFileSync(full, "utf8");
   routeFileCache.set(relPath, src);
   return src;
 }
 
 for (const mount of mounts) {
   if (SKIP_FILES.has(mount.file)) continue;
+  // No `if (!src) continue` here any more: `readRouteFile` throws rather than
+  // handing back an empty string, so an unreadable mount can no longer pass for
+  // a mount with no routes.
   const src = readRouteFile(mount.file);
-  if (!src) continue;
 
   let scope: string;
   if (mount.factory === "__default__") {
