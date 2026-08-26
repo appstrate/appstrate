@@ -8,7 +8,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { Spinner } from "./spinner";
-import { useCreateApplication } from "../hooks/use-applications";
+import { useCreateSpace } from "../hooks/use-spaces";
 import { getErrorMessage } from "@appstrate/core/errors";
 
 interface Props {
@@ -18,9 +18,9 @@ interface Props {
 
 type FormData = { name: string };
 
-export function ApplicationCreateModal({ open, onClose }: Props) {
+export function SpaceCreateModal({ open, onClose }: Props) {
   const { t } = useTranslation(["settings", "common"]);
-  const createMutation = useCreateApplication();
+  const createMutation = useCreateSpace();
 
   const {
     register,
@@ -55,7 +55,7 @@ export function ApplicationCreateModal({ open, onClose }: Props) {
     <Modal
       open={open}
       onClose={handleClose}
-      title={t("applications.createTitle")}
+      title={t("spaces.createTitle")}
       actions={
         <>
           <Button type="button" variant="outline" onClick={handleClose}>
@@ -63,8 +63,8 @@ export function ApplicationCreateModal({ open, onClose }: Props) {
           </Button>
           <Button
             type="submit"
-            form="create-application-form"
-            data-testid="app-create-submit"
+            form="create-space-form"
+            data-testid="space-create-submit"
             disabled={createMutation.isPending}
           >
             {createMutation.isPending ? <Spinner /> : t("btn.create")}
@@ -72,17 +72,13 @@ export function ApplicationCreateModal({ open, onClose }: Props) {
         </>
       }
     >
-      <form
-        id="create-application-form"
-        onSubmit={handleSubmit(onFormSubmit)}
-        className="space-y-4"
-      >
+      <form id="create-space-form" onSubmit={handleSubmit(onFormSubmit)} className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="app-create-name">{t("applications.nameLabel")}</Label>
+          <Label htmlFor="space-create-name">{t("spaces.nameLabel")}</Label>
           <Input
-            id="app-create-name"
+            id="space-create-name"
             type="text"
-            placeholder={t("applications.namePlaceholder")}
+            placeholder={t("spaces.namePlaceholder")}
             autoFocus
             aria-invalid={showError("name") ? true : undefined}
             className={cn(showError("name") && "border-destructive")}

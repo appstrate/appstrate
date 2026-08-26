@@ -2,8 +2,8 @@
 
 import { useTranslation } from "react-i18next";
 import { Check, ChevronsUpDown, Star } from "lucide-react";
-import { useApplications } from "../hooks/use-applications";
-import { useCurrentApplicationId, useAppSwitcher } from "../hooks/use-current-application";
+import { useSpaces } from "../hooks/use-spaces";
+import { useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -12,23 +12,23 @@ import {
   DropdownMenuTrigger,
 } from "@appstrate/ui/components/dropdown-menu";
 
-export function AppSettingsSwitcher() {
+export function SpaceSettingsSwitcher() {
   const { t } = useTranslation();
-  const { data: applications } = useApplications();
-  const currentAppId = useCurrentApplicationId();
-  const { switchApp } = useAppSwitcher();
+  const { data: spaces } = useSpaces();
+  const currentSpaceId = useCurrentSpaceId();
+  const { switchSpace } = useSpaceSwitcher();
 
-  const currentApp = applications?.find((a) => a.id === currentAppId) ?? null;
+  const currentSpace = spaces?.find((s) => s.id === currentSpaceId) ?? null;
 
-  if (!currentApp) return null;
+  if (!currentSpace) return null;
 
-  const hasMultipleApps = (applications?.length ?? 0) > 1;
+  const hasMultipleSpaces = (spaces?.length ?? 0) > 1;
 
-  if (!hasMultipleApps) {
+  if (!hasMultipleSpaces) {
     return (
       <span className="text-foreground inline-flex items-center gap-1.5 text-sm font-normal">
-        {currentApp.name}
-        {currentApp.isDefault && (
+        {currentSpace.name}
+        {currentSpace.isDefault && (
           <Star size={12} className="shrink-0 fill-amber-500 text-amber-500" />
         )}
       </span>
@@ -38,12 +38,12 @@ export function AppSettingsSwitcher() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        aria-label={t("switcher.appAriaLabel")}
+        aria-label={t("switcher.spaceAriaLabel")}
         className="text-foreground hover:text-foreground focus-visible:ring-ring data-[state=open]:bg-accent inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-sm outline-none focus-visible:ring-2"
       >
         <span className="inline-flex items-center gap-1.5 truncate">
-          {currentApp.name}
-          {currentApp.isDefault && (
+          {currentSpace.name}
+          {currentSpace.isDefault && (
             <Star size={12} className="shrink-0 fill-amber-500 text-amber-500" />
           )}
         </span>
@@ -56,22 +56,22 @@ export function AppSettingsSwitcher() {
         sideOffset={4}
       >
         <DropdownMenuLabel className="text-muted-foreground text-xs">
-          {t("switcher.appAriaLabel")}
+          {t("switcher.spaceAriaLabel")}
         </DropdownMenuLabel>
-        {(applications ?? []).map((app) => {
-          const isActive = app.id === currentAppId;
+        {(spaces ?? []).map((space) => {
+          const isActive = space.id === currentSpaceId;
           return (
             <DropdownMenuItem
-              key={app.id}
-              data-testid={`app-settings-item-${app.id}`}
+              key={space.id}
+              data-testid={`space-settings-item-${space.id}`}
               className="flex items-center justify-between gap-2"
               onSelect={() => {
-                if (!isActive) switchApp(app.id);
+                if (!isActive) switchSpace(space.id);
               }}
             >
               <span className="flex items-center gap-1.5 truncate">
-                {app.name}
-                {app.isDefault && (
+                {space.name}
+                {space.isDefault && (
                   <Star size={12} className="shrink-0 fill-amber-500 text-amber-500" />
                 )}
               </span>

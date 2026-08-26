@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Per-application authentication settings tab.
+ * Per-space authentication settings tab.
  *
  * Exposes CRUD for:
  *  - SMTP transport (verification emails, magic-link, password reset for
- *    `level=application` OAuth clients referencing this app)
+ *    `level=space` OAuth clients referencing this space)
  *  - Google OAuth App credentials (per-tenant Google sign-in)
  *  - GitHub OAuth App credentials (per-tenant GitHub sign-in)
  *
- * Row absent → feature disabled for this app's OIDC clients. No fallback to
+ * Row absent → feature disabled for this space's OIDC clients. No fallback to
  * instance-level env creds. Secrets are write-only: the backend never
  * returns `pass` / `clientSecret`.
  */
@@ -44,9 +44,9 @@ import {
   type SocialProviderId,
   type SmtpConfigView,
   type SocialProviderView,
-} from "../hooks/use-app-auth-config";
+} from "../hooks/use-space-auth-config";
 
-export function AppAuthTab() {
+export function SpaceAuthTab() {
   const { t } = useTranslation(["settings", "common"]);
   const { isAdmin } = usePermissions();
   if (!isAdmin) return null;
@@ -54,8 +54,8 @@ export function AppAuthTab() {
   return (
     <div className="max-w-2xl space-y-10">
       <SmtpSection />
-      <SocialSection provider="google" title={t("settings:appAuth.googleTitle")} icon="google" />
-      <SocialSection provider="github" title={t("settings:appAuth.githubTitle")} icon="github" />
+      <SocialSection provider="google" title={t("settings:spaceAuth.googleTitle")} icon="google" />
+      <SocialSection provider="github" title={t("settings:spaceAuth.githubTitle")} icon="github" />
     </div>
   );
 }
@@ -96,7 +96,7 @@ function SmtpSection() {
       },
       {
         onSuccess: () => {
-          toast.success(t("settings:appAuth.smtpSaved"));
+          toast.success(t("settings:spaceAuth.smtpSaved"));
           setForm((f) => ({ ...f, pass: "" }));
         },
         onError: (err) => toast.error(err.message),
@@ -109,19 +109,19 @@ function SmtpSection() {
       <header className="space-y-1">
         <h2 className="flex items-center gap-2 text-lg font-semibold">
           <Mail className="h-5 w-5" />
-          {t("settings:appAuth.smtpTitle")}
+          {t("settings:spaceAuth.smtpTitle")}
           {initial ? (
-            <Badge variant="running">{t("settings:appAuth.configured")}</Badge>
+            <Badge variant="running">{t("settings:spaceAuth.configured")}</Badge>
           ) : (
-            <Badge variant="secondary">{t("settings:appAuth.notConfigured")}</Badge>
+            <Badge variant="secondary">{t("settings:spaceAuth.notConfigured")}</Badge>
           )}
         </h2>
-        <p className="text-muted-foreground text-sm">{t("settings:appAuth.smtpHint")}</p>
+        <p className="text-muted-foreground text-sm">{t("settings:spaceAuth.smtpHint")}</p>
       </header>
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
-          <Field label={t("settings:appAuth.smtpHost")} required>
+          <Field label={t("settings:spaceAuth.smtpHost")} required>
             <Input
               value={form.host}
               onChange={(e) => setForm({ ...form, host: e.target.value })}
@@ -129,7 +129,7 @@ function SmtpSection() {
               required
             />
           </Field>
-          <Field label={t("settings:appAuth.smtpPort")} required>
+          <Field label={t("settings:spaceAuth.smtpPort")} required>
             <Input
               type="number"
               min={1}
@@ -139,7 +139,7 @@ function SmtpSection() {
               required
             />
           </Field>
-          <Field label={t("settings:appAuth.smtpUsername")} required>
+          <Field label={t("settings:spaceAuth.smtpUsername")} required>
             <Input
               value={form.username}
               onChange={(e) => setForm({ ...form, username: e.target.value })}
@@ -147,9 +147,9 @@ function SmtpSection() {
             />
           </Field>
           <Field
-            label={t("settings:appAuth.smtpPass")}
+            label={t("settings:spaceAuth.smtpPass")}
             required={!initial}
-            hint={initial ? t("settings:appAuth.smtpPassReuploadHint") : undefined}
+            hint={initial ? t("settings:spaceAuth.smtpPassReuploadHint") : undefined}
           >
             <Input
               type="password"
@@ -159,7 +159,7 @@ function SmtpSection() {
               required={!initial}
             />
           </Field>
-          <Field label={t("settings:appAuth.smtpFromAddress")} required>
+          <Field label={t("settings:spaceAuth.smtpFromAddress")} required>
             <Input
               type="email"
               value={form.fromAddress}
@@ -168,14 +168,14 @@ function SmtpSection() {
               required
             />
           </Field>
-          <Field label={t("settings:appAuth.smtpFromName")}>
+          <Field label={t("settings:spaceAuth.smtpFromName")}>
             <Input
               value={form.fromName}
               onChange={(e) => setForm({ ...form, fromName: e.target.value })}
-              placeholder={t("settings:appAuth.smtpFromNamePlaceholder")}
+              placeholder={t("settings:spaceAuth.smtpFromNamePlaceholder")}
             />
           </Field>
-          <Field label={t("settings:appAuth.smtpSecureMode")}>
+          <Field label={t("settings:spaceAuth.smtpSecureMode")}>
             <Select
               value={form.secureMode}
               onValueChange={(v) =>
@@ -186,10 +186,10 @@ function SmtpSection() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="auto">{t("settings:appAuth.secureModeAuto")}</SelectItem>
+                <SelectItem value="auto">{t("settings:spaceAuth.secureModeAuto")}</SelectItem>
                 <SelectItem value="tls">TLS</SelectItem>
                 <SelectItem value="starttls">STARTTLS</SelectItem>
-                <SelectItem value="none">{t("settings:appAuth.secureModeNone")}</SelectItem>
+                <SelectItem value="none">{t("settings:spaceAuth.secureModeNone")}</SelectItem>
               </SelectContent>
             </Select>
           </Field>
@@ -203,7 +203,7 @@ function SmtpSection() {
             <>
               <Button type="button" variant="outline" onClick={() => setTestOpen(true)}>
                 <Send className="h-4 w-4" />
-                {t("settings:appAuth.smtpTest")}
+                {t("settings:spaceAuth.smtpTest")}
               </Button>
               <Button
                 type="button"
@@ -222,14 +222,14 @@ function SmtpSection() {
       <ConfirmModal
         open={confirmDelete}
         onClose={() => setConfirmDelete(false)}
-        title={t("settings:appAuth.smtpDeleteTitle")}
-        description={t("settings:appAuth.smtpDeleteConfirm")}
+        title={t("settings:spaceAuth.smtpDeleteTitle")}
+        description={t("settings:spaceAuth.smtpDeleteConfirm")}
         isPending={del.isPending}
         onConfirm={() =>
           del.mutate(undefined, {
             onSuccess: () => {
               setConfirmDelete(false);
-              toast.success(t("settings:appAuth.smtpDeleted"));
+              toast.success(t("settings:spaceAuth.smtpDeleted"));
             },
           })
         }
@@ -244,7 +244,7 @@ function SmtpSection() {
             // A failed SMTP send is a non-2xx response (the server surfaces
             // the SMTP error verbatim), so it lands in onError.
             onSuccess: () => {
-              toast.success(t("settings:appAuth.smtpTestOk"));
+              toast.success(t("settings:spaceAuth.smtpTestOk"));
               setTestOpen(false);
             },
             onError: (err) => toast.error(err.message),
@@ -272,20 +272,20 @@ function SmtpTestModal({
     <Modal
       open={open}
       onClose={onClose}
-      title={t("settings:appAuth.smtpTestTitle")}
+      title={t("settings:spaceAuth.smtpTestTitle")}
       actions={
         <>
           <Button variant="outline" onClick={onClose} disabled={isPending}>
             {t("common:btn.cancel")}
           </Button>
           <Button onClick={() => onSend(to)} disabled={isPending || !to}>
-            {isPending ? <Spinner /> : t("settings:appAuth.smtpTest")}
+            {isPending ? <Spinner /> : t("settings:spaceAuth.smtpTest")}
           </Button>
         </>
       }
     >
       <div className="space-y-2">
-        <Label>{t("settings:appAuth.smtpTestTo")}</Label>
+        <Label>{t("settings:spaceAuth.smtpTestTo")}</Label>
         <Input
           type="email"
           value={to}
@@ -331,7 +331,7 @@ function SocialSection({
       },
       {
         onSuccess: () => {
-          toast.success(t("settings:appAuth.socialSaved"));
+          toast.success(t("settings:spaceAuth.socialSaved"));
           setForm((f) => ({ ...f, clientSecret: "" }));
         },
         onError: (err) => toast.error(err.message),
@@ -346,13 +346,13 @@ function SocialSection({
           {icon === "github" ? <GithubIcon /> : <GoogleIcon />}
           {title}
           {config ? (
-            <Badge variant="running">{t("settings:appAuth.configured")}</Badge>
+            <Badge variant="running">{t("settings:spaceAuth.configured")}</Badge>
           ) : (
-            <Badge variant="secondary">{t("settings:appAuth.notConfigured")}</Badge>
+            <Badge variant="secondary">{t("settings:spaceAuth.notConfigured")}</Badge>
           )}
         </h2>
         <p className="text-muted-foreground text-sm">
-          {t("settings:appAuth.socialHint", { provider: title })}
+          {t("settings:spaceAuth.socialHint", { provider: title })}
         </p>
       </header>
 
@@ -367,7 +367,7 @@ function SocialSection({
         <Field
           label="Client Secret"
           required={!config}
-          hint={config ? t("settings:appAuth.socialSecretReuploadHint") : undefined}
+          hint={config ? t("settings:spaceAuth.socialSecretReuploadHint") : undefined}
         >
           <Input
             type="password"
@@ -378,8 +378,8 @@ function SocialSection({
           />
         </Field>
         <Field
-          label={t("settings:appAuth.socialScopes")}
-          hint={t("settings:appAuth.socialScopesHint")}
+          label={t("settings:spaceAuth.socialScopes")}
+          hint={t("settings:spaceAuth.socialScopesHint")}
         >
           <Input
             value={form.scopes}
@@ -409,14 +409,14 @@ function SocialSection({
       <ConfirmModal
         open={confirmDelete}
         onClose={() => setConfirmDelete(false)}
-        title={t("settings:appAuth.socialDeleteTitle")}
-        description={t("settings:appAuth.socialDeleteConfirm", { provider: title })}
+        title={t("settings:spaceAuth.socialDeleteTitle")}
+        description={t("settings:spaceAuth.socialDeleteConfirm", { provider: title })}
         isPending={del.isPending}
         onConfirm={() =>
           del.mutate(undefined, {
             onSuccess: () => {
               setConfirmDelete(false);
-              toast.success(t("settings:appAuth.socialDeleted"));
+              toast.success(t("settings:spaceAuth.socialDeleted"));
             },
           })
         }

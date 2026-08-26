@@ -5,7 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { WebhookDelivery } from "@appstrate/shared-types";
 import { $api, client, type components, type paths } from "@/api/client";
 import { useCurrentOrgId } from "@/hooks/use-org";
-import { useCurrentApplicationId } from "@/hooks/use-current-application";
+import { useCurrentSpaceId } from "@/hooks/use-current-space";
 
 /** Wire shape from the OpenAPI spec (components.schemas.WebhookObject). */
 export type WebhookInfo = components["schemas"]["WebhookObject"];
@@ -15,7 +15,7 @@ type CreateWebhookBody =
   paths["/api/webhooks"]["post"]["requestBody"]["content"]["application/json"];
 
 /** Wire enum for webhook events, derived from the create body. */
-export type WebhookEvent = Extract<CreateWebhookBody, { level: "application" }>["events"][number];
+export type WebhookEvent = Extract<CreateWebhookBody, { level: "space" }>["events"][number];
 
 /** Toggle an event in a state setter — shared by create and edit forms. */
 export function toggleEvent(event: string, setter: Dispatch<SetStateAction<string[]>>) {
@@ -31,24 +31,24 @@ export const WEBHOOK_EVENTS = [
 ] as const;
 
 /**
- * Org/app context for queries. The spec-declared `X-Org-Id` header is passed
+ * Org/space context for queries. The spec-declared `X-Org-Id` header is passed
  * explicitly so it is part of the React Query key — switching org refetches
  * instead of serving another org's cached page.
  */
 function useWebhookScope() {
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   return {
-    enabled: !!orgId && !!applicationId,
+    enabled: !!orgId && !!spaceId,
     header: { "X-Org-Id": orgId ?? undefined },
-    applicationId,
+    spaceId,
   };
 }
 
 /**
- * List webhooks for the current application — org-level webhooks plus those
- * pinned to the current application (the only kind this UI creates), via the
- * spec-declared `applicationId` filter.
+ * List webhooks for the current space — org-level webhooks plus those
+ * pinned to the current space (the only kind this UI creates), via the
+ * spec-declared `spaceId` filter.
  */
 export function useWebhooks() {
   const scope = useWebhookScope();
@@ -57,7 +57,7 @@ export function useWebhooks() {
     "/api/webhooks",
     {
       params: {
-        query: { applicationId: scope.applicationId ?? undefined },
+        query: { spaceId: scope.spaceId ?? undefined },
         header: scope.header,
       },
     },
@@ -91,7 +91,7 @@ function useInvalidateWebhooks() {
 
 export function useCreateWebhook() {
   const invalidate = useInvalidateWebhooks();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   return useMutation({
     mutationFn: async (data: {
       url: string;
@@ -101,12 +101,12 @@ export function useCreateWebhook() {
       enabled?: boolean;
     }) => {
       // Webhooks created from this UI are always pinned to the current
-      // application — the level discriminator comes from context, not the
+      // space — the level discriminator comes from context, not the
       // call site. Form state holds plain strings; the wire enum cast is the
       // same trust boundary as the legacy untyped helper.
       const body: CreateWebhookBody = {
-        level: "application",
-        applicationId: applicationId!,
+        level: "space",
+        spaceId: spaceId!,
         ...data,
         events: data.events as WebhookEvent[],
       };

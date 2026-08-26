@@ -118,7 +118,7 @@ import { useIntegrations } from "../hooks/use-integrations";
 import { useDisconnectIntegrationConnection } from "../hooks/use-me-connections";
 import { useCurrentOrgId } from "../hooks/use-org";
 import { useAuth } from "../hooks/use-auth";
-import { useCurrentApplicationId } from "../hooks/use-current-application";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { InlineConnectButton } from "../components/integration-connect/inline-connect-button";
 import {
   connectionDisplayLabel,
@@ -1198,7 +1198,7 @@ function ConnectionTableRow({
   const updateConnection = useUpdateIntegrationConnection();
   const disconnect = useDisconnectIntegrationConnection();
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   const { user } = useAuth();
   const { isAdmin } = usePermissions();
   const [editing, setEditing] = useState(false);
@@ -1241,7 +1241,7 @@ function ConnectionTableRow({
     );
   };
   const onDelete = () => {
-    if (!orgId || !applicationId) return;
+    if (!orgId || !spaceId) return;
     setConfirmDelete(true);
   };
   return (
@@ -1445,7 +1445,7 @@ function ConnectionTableRow({
 /**
  * Inline prompt shown inside the Connexions tab when the integration is not
  * yet active — connecting and governance are meaningless until the
- * integration is activated for this application.
+ * integration is activated for this space.
  */
 function ActivationHint({ onActivate, pending }: { onActivate: () => void; pending: boolean }) {
   const { t } = useTranslation("settings");

@@ -39,7 +39,7 @@ import { ModelGenerationFields } from "../model-generation-fields";
 // ─── Input Settings Section ─────────────────────────────────────────
 
 /**
- * The editor layer of input resolution, for one application: the value each
+ * The editor layer of input resolution, for one space: the value each
  * parameter takes when the caller does not supply one, and whether the caller
  * may supply one at all.
  *

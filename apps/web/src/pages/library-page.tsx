@@ -8,7 +8,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { useLibrary, useTogglePackageInstall } from "../hooks/use-library";
-import type { LibraryPackageItem, LibraryApp } from "../hooks/use-library";
+import type { LibraryPackageItem, LibrarySpace } from "../hooks/use-library";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@appstrate/ui/components/tabs";
 import {
@@ -64,7 +64,7 @@ export function LibraryPage() {
           <TabsContent key={tab} value={tab}>
             <LibraryMatrix
               packages={data.packages[TYPE_MAP[tab]] ?? []}
-              applications={data.applications}
+              spaces={data.spaces}
               type={TYPE_MAP[tab]}
             />
           </TabsContent>
@@ -76,28 +76,28 @@ export function LibraryPage() {
 
 function LibraryMatrix({
   packages: pkgs,
-  applications,
+  spaces,
   type,
 }: {
   packages: LibraryPackageItem[];
-  applications: LibraryApp[];
+  spaces: LibrarySpace[];
   type: string;
 }) {
   const { t } = useTranslation();
   const toggle = useTogglePackageInstall();
   // Agents/skills treat a "system" package as globally available (locked on,
   // can't toggle). Integrations are different: they must be activated per
-  // application even when system-sourced, so their system rows stay toggleable.
+  // space even when system-sourced, so their system rows stay toggleable.
   const lockSystem = type !== "integration";
 
   if (pkgs.length === 0) {
     return <EmptyState message={t("library.empty")} icon={Package} />;
   }
 
-  const handleToggle = (pkg: LibraryPackageItem, applicationId: string, installed: boolean) => {
+  const handleToggle = (pkg: LibraryPackageItem, spaceId: string, installed: boolean) => {
     if (lockSystem && pkg.source === "system") return;
     toggle.mutate(
-      { applicationId, packageId: pkg.id, installed },
+      { spaceId, packageId: pkg.id, installed },
       {
         onError: (err) => {
           toast.error(err instanceof Error ? err.message : t("error.generic"));
@@ -113,10 +113,10 @@ function LibraryMatrix({
       <TableHeader>
         <TableRow>
           <TableHead className="min-w-[200px]">{t("library.column.package")}</TableHead>
-          {applications.map((app) => (
-            <TableHead key={app.id} className="text-center">
-              <span className="text-xs">{app.name}</span>
-              {app.isDefault && (
+          {spaces.map((space) => (
+            <TableHead key={space.id} className="text-center">
+              <span className="text-xs">{space.name}</span>
+              {space.isDefault && (
                 <Badge variant="outline" className="ml-1 px-1 py-0 text-[0.6rem]">
                   default
                 </Badge>
@@ -145,16 +145,16 @@ function LibraryMatrix({
                 </p>
               )}
             </TableCell>
-            {applications.map((app) => {
-              const installed = pkg.installed_in.includes(app.id);
+            {spaces.map((space) => {
+              const installed = pkg.installed_in.includes(space.id);
               const locked = lockSystem && pkg.source === "system";
               return (
-                <TableCell key={app.id} className="text-center">
+                <TableCell key={space.id} className="text-center">
                   <Checkbox
                     checked={locked || installed}
                     disabled={locked}
                     title={locked ? t("library.systemAlwaysActive") : undefined}
-                    onCheckedChange={() => handleToggle(pkg, app.id, installed)}
+                    onCheckedChange={() => handleToggle(pkg, space.id, installed)}
                   />
                 </TableCell>
               );

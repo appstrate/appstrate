@@ -30,5 +30,5 @@
   "preview.unavailable": "Ce fichier ne peut pas être prévisualisé.",
   "storage.usedUnlimited": "{{used}} utilisés",
   "storage.usedOfLimit": "{{used}} utilisés sur {{limit}}",
-  "storage.limitReached": "Limite de stockage atteinte. Les nouveaux envois et sorties d'agent sont bloqués jusqu'à ce que vous libériez de l'espace ; les fichiers existants ne sont pas affectés."
+  "storage.limitReached": "Limite de stockage atteinte. Les nouveaux envois et sorties d'agent sont bloqués jusqu'à ce que vous libériez du stockage ; les fichiers existants ne sont pas affectés."
 }

@@ -4,27 +4,27 @@ import { lazy, Suspense } from "react";
 import { Navigate } from "react-router-dom";
 import { usePermissions } from "../../../hooks/use-permissions";
 import { useAppConfig } from "../../../hooks/use-app-config";
-import { useCurrentApplicationId } from "../../../hooks/use-current-application";
+import { useCurrentSpaceId } from "../../../hooks/use-current-space";
 import { LoadingState } from "../../../components/page-states";
 
-const AppAuthTab = lazy(() =>
-  import("../../../modules/oidc/components/app-auth-tab").then((m) => ({
-    default: m.AppAuthTab,
+const SpaceAuthTab = lazy(() =>
+  import("../../../modules/oidc/components/space-auth-tab").then((m) => ({
+    default: m.SpaceAuthTab,
   })),
 );
 
-export function OrgSettingsAppAuthPage() {
+export function OrgSettingsSpaceAuthPage() {
   const { isAdmin } = usePermissions();
   const { features } = useAppConfig();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
 
-  if (!isAdmin || !applicationId || !features.oidc) {
-    return <Navigate to="/org-settings/app/general" replace />;
+  if (!isAdmin || !spaceId || !features.oidc) {
+    return <Navigate to="/org-settings/space/general" replace />;
   }
 
   return (
     <Suspense fallback={<LoadingState />}>
-      <AppAuthTab />
+      <SpaceAuthTab />
     </Suspense>
   );
 }

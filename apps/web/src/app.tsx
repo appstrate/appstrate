@@ -24,7 +24,7 @@ import { useAuth } from "./hooks/use-auth";
 import { useAppConfig } from "./hooks/use-app-config";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalRunSync } from "./hooks/use-global-run-sync";
-import { useApplicationResolver } from "./hooks/use-current-application";
+import { useSpaceResolver } from "./hooks/use-current-space";
 import { useSidebarStore } from "./stores/sidebar-store";
 import { Spinner } from "./components/spinner";
 import { HostedConnectPage } from "./pages/hosted-connect";
@@ -141,21 +141,23 @@ const OrgSettingsCliSessionsPage = lazy(() =>
     default: m.OrgSettingsCliSessionsPage,
   })),
 );
-const OrgSettingsApplicationsPage = lazy(() =>
-  import("./pages/org-settings/applications").then((m) => ({
-    default: m.OrgSettingsApplicationsPage,
+const OrgSettingsSpacesPage = lazy(() =>
+  import("./pages/org-settings/spaces").then((m) => ({
+    default: m.OrgSettingsSpacesPage,
   })),
 );
-const OrgSettingsAppGeneralPage = lazy(() =>
-  import("./pages/org-settings/app/general").then((m) => ({
-    default: m.OrgSettingsAppGeneralPage,
+const OrgSettingsSpaceGeneralPage = lazy(() =>
+  import("./pages/org-settings/space/general").then((m) => ({
+    default: m.OrgSettingsSpaceGeneralPage,
   })),
 );
-const OrgSettingsAppAuthPage = lazy(() =>
-  import("./pages/org-settings/app/auth").then((m) => ({ default: m.OrgSettingsAppAuthPage })),
+const OrgSettingsSpaceAuthPage = lazy(() =>
+  import("./pages/org-settings/space/auth").then((m) => ({ default: m.OrgSettingsSpaceAuthPage })),
 );
-const OrgSettingsAppOauthPage = lazy(() =>
-  import("./pages/org-settings/app/oauth").then((m) => ({ default: m.OrgSettingsAppOauthPage })),
+const OrgSettingsSpaceOauthPage = lazy(() =>
+  import("./pages/org-settings/space/oauth").then((m) => ({
+    default: m.OrgSettingsSpaceOauthPage,
+  })),
 );
 const PreferencesLayout = lazy(() =>
   import("./pages/preferences/layout").then((m) => ({ default: m.PreferencesLayout })),
@@ -202,7 +204,7 @@ function BootScreen() {
 
 function MainLayout() {
   const { open: sidebarOpen, setOpen: setSidebarOpen } = useSidebarStore();
-  useApplicationResolver();
+  useSpaceResolver();
 
   return (
     <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen}>
@@ -763,10 +765,7 @@ export function App() {
                 </LazyRoute>
               }
             />
-            <Route
-              path="/applications"
-              element={<Navigate to="/org-settings/applications" replace />}
-            />
+            <Route path="/spaces" element={<Navigate to="/org-settings/spaces" replace />} />
             <Route
               path="/preferences"
               element={
@@ -822,7 +821,7 @@ export function App() {
                 />
               </>
             )}
-            {/* App-scoped routes (read applicationId from store, like orgId) */}
+            {/* Space-scoped routes (read spaceId from store, like orgId) */}
             <Route
               path="/end-users"
               element={
@@ -832,8 +831,8 @@ export function App() {
               }
             />
             <Route
-              path="/app-settings"
-              element={<Navigate to="/org-settings/app/general" replace />}
+              path="/space-settings"
+              element={<Navigate to="/org-settings/space/general" replace />}
             />
             <Route
               path="/org-settings"
@@ -846,16 +845,16 @@ export function App() {
               <Route index element={<Navigate to="general" replace />} />
               <Route path="general" element={<OrgSettingsGeneralPage />} />
               <Route path="members" element={<OrgSettingsMembersPage />} />
-              <Route path="applications" element={<OrgSettingsApplicationsPage />} />
+              <Route path="spaces" element={<OrgSettingsSpacesPage />} />
               <Route path="models" element={<OrgSettingsModelsPage />} />
               <Route path="proxies" element={<OrgSettingsProxiesPage />} />
               <Route path="oauth" element={<OrgSettingsOAuthPage />} />
               <Route path="cli-sessions" element={<OrgSettingsCliSessionsPage />} />
               <Route path="billing" element={<OrgSettingsBillingPage />} />
-              <Route path="app/general" element={<OrgSettingsAppGeneralPage />} />
-              <Route path="app/api-keys" element={<ApiKeysPage />} />
-              <Route path="app/auth" element={<OrgSettingsAppAuthPage />} />
-              <Route path="app/oauth" element={<OrgSettingsAppOauthPage />} />
+              <Route path="space/general" element={<OrgSettingsSpaceGeneralPage />} />
+              <Route path="space/api-keys" element={<ApiKeysPage />} />
+              <Route path="space/auth" element={<OrgSettingsSpaceAuthPage />} />
+              <Route path="space/oauth" element={<OrgSettingsSpaceOauthPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

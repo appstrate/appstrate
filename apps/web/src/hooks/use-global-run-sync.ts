@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useCurrentOrgId } from "./use-org";
-import { useCurrentApplicationId } from "./use-current-application";
+import { useCurrentSpaceId } from "./use-current-space";
 import { invalidateIntegrationQueries } from "./use-integrations";
 import { invalidateNotificationQueries } from "./use-notifications";
 import { parseSseFrames } from "@appstrate/core/sse";
@@ -118,7 +118,7 @@ function handleSSEMessage(
   qc: QueryClient,
   broad: BroadInvalidator,
   orgId: string,
-  applicationId: string,
+  spaceId: string,
   raw: string,
 ) {
   let json: unknown;
@@ -135,14 +135,14 @@ function handleSSEMessage(
   // completed_at are snake there) so the spread actually overwrites them.
   const patch = runUpdateToRunPatch(evt);
 
-  qc.setQueryData<EnrichedRun>(runKeys.detail(orgId, applicationId, runId), (prev) =>
+  qc.setQueryData<EnrichedRun>(runKeys.detail(orgId, spaceId, runId), (prev) =>
     prev ? { ...prev, ...patch } : prev,
   );
 
   // Only the per-agent run list is keyed by packageId (nullable on the wire
   // once a run's package is deleted — ON DELETE SET NULL).
   if (packageId) {
-    const listKey = runsKeys.forAgent(orgId, applicationId, packageId);
+    const listKey = runsKeys.forAgent(orgId, spaceId, packageId);
     const list = qc.getQueryData<EnrichedRun[]>(listKey);
     if (list) {
       if (list.some((ex) => ex.id === runId)) {
@@ -160,8 +160,8 @@ function handleSSEMessage(
   // Broad invalidations are debounced (trailing ~2s) — the in-place cache
   // patches above keep the visible run data live in the meantime.
   broad.schedule(agentsKeys.inOrg(orgId));
-  // Agent detail caches are keyed ["packages","agents",orgId,applicationId,id]
-  // (plural path, applicationId before id) — invalidate by the org-scoped
+  // Agent detail caches are keyed ["packages","agents",orgId,spaceId,id]
+  // (plural path, spaceId before id) — invalidate by the org-scoped
   // prefix so a run status change refreshes the agent's config/model tabs.
   broad.schedule(packageKeys.familyInOrg("agents", orgId));
   broad.schedule(paginatedRunsKeys.all);
@@ -171,9 +171,9 @@ function handleSSEMessage(
 
   // Invalidate schedule-specific caches
   if (scheduleId) {
-    qc.invalidateQueries({ queryKey: scheduleKeys.runs(orgId, applicationId, scheduleId) });
-    qc.invalidateQueries({ queryKey: scheduleKeys.detail(orgId, applicationId, scheduleId) });
-    qc.invalidateQueries({ queryKey: scheduleKeys.list(orgId, applicationId) });
+    qc.invalidateQueries({ queryKey: scheduleKeys.runs(orgId, spaceId, scheduleId) });
+    qc.invalidateQueries({ queryKey: scheduleKeys.detail(orgId, spaceId, scheduleId) });
+    qc.invalidateQueries({ queryKey: scheduleKeys.list(orgId, spaceId) });
   }
 
   if (TERMINAL_RUN_STATUSES.has(status)) {
@@ -198,12 +198,12 @@ function handleSSEMessage(
 export function useGlobalRunSync() {
   const qc = useQueryClient();
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   const qcRef = useRef(qc);
   qcRef.current = qc;
 
   useEffect(() => {
-    if (!orgId || !applicationId) return;
+    if (!orgId || !spaceId) return;
 
     const controller = new AbortController();
     const broad = createBroadInvalidator(() => qcRef.current);
@@ -238,11 +238,11 @@ export function useGlobalRunSync() {
       const res = await fetch(
         // Declare the three channels this hook actually dispatches on. Without
         // it the server fans the whole `run_log` firehose (every log line of
-        // every run in the application) into this stream just for the reader
+        // every run in the space) into this stream just for the reader
         // loop to drop it — and admins/owners got the `debug` level too.
         // `verbose` is deliberately absent: it only affects `run_log`, which
         // we no longer subscribe to.
-        `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&applicationId=${encodeURIComponent(applicationId)}&channels=run_update,connection_update,chat_session_update`,
+        `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}&channels=run_update,connection_update,chat_session_update`,
         {
           credentials: "include",
           signal: controller.signal,
@@ -286,7 +286,7 @@ export function useGlobalRunSync() {
 
         for (const { event, data } of frames) {
           if (event === "run_update" && data) {
-            handleSSEMessage(qcRef.current, broad, orgId, applicationId, data);
+            handleSSEMessage(qcRef.current, broad, orgId, spaceId, data);
           } else if (event === "connection_update" && data) {
             handleConnectionUpdate(qcRef.current);
           } else if (event === "chat_session_update" && data) {
@@ -314,5 +314,5 @@ export function useGlobalRunSync() {
       controller.abort();
       broad.dispose();
     };
-  }, [orgId, applicationId]);
+  }, [orgId, spaceId]);
 }

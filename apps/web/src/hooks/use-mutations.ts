@@ -66,7 +66,7 @@ export function onMutationError(err: Error) {
 }
 
 /**
- * Persist the editor layer of input resolution for this application.
+ * Persist the editor layer of input resolution for this space.
  *
  * Both members are FULL replacements — an omitted key is cleared, never left
  * unchanged — so the caller always sends the complete pair.

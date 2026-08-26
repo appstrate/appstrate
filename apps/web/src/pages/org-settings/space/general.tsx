@@ -10,12 +10,8 @@ import { ConfirmModal } from "../../../components/confirm-modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import {
-  useApplication,
-  useUpdateApplication,
-  useDeleteApplication,
-} from "../../../hooks/use-applications";
-import { useCurrentApplicationId } from "../../../hooks/use-current-application";
+import { useSpace, useUpdateSpace, useDeleteSpace } from "../../../hooks/use-spaces";
+import { useCurrentSpaceId } from "../../../hooks/use-current-space";
 import { LoadingState, ErrorState, EmptyState } from "../../../components/page-states";
 import { Spinner } from "../../../components/spinner";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -24,28 +20,27 @@ interface SettingsFormData {
   name: string;
 }
 
-export function OrgSettingsAppGeneralPage() {
+export function OrgSettingsSpaceGeneralPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { isAdmin } = usePermissions();
-  const applicationId = useCurrentApplicationId();
-  const { data: application, isLoading, error } = useApplication(applicationId ?? "");
+  const spaceId = useCurrentSpaceId();
+  const { data: space, isLoading, error } = useSpace(spaceId ?? "");
 
   if (!isAdmin) return null;
-  if (!applicationId)
-    return <EmptyState message={t("applications.noAppSelected")} icon={AppWindow} />;
+  if (!spaceId) return <EmptyState message={t("spaces.noSpaceSelected")} icon={AppWindow} />;
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={getErrorMessage(error)} />;
-  if (!application) return <ErrorState />;
+  if (!space) return <ErrorState />;
 
-  return <GeneralForm applicationId={applicationId} application={application} />;
+  return <GeneralForm spaceId={spaceId} space={space} />;
 }
 
 function GeneralForm({
-  applicationId,
-  application,
+  spaceId,
+  space,
 }: {
-  applicationId: string;
-  application: {
+  spaceId: string;
+  space: {
     name: string;
     isDefault: boolean;
     settings?: { allowedRedirectDomains?: string[] };
@@ -53,21 +48,21 @@ function GeneralForm({
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const navigate = useNavigate();
-  const updateMutation = useUpdateApplication();
-  const deleteMutation = useDeleteApplication();
+  const updateMutation = useUpdateSpace();
+  const deleteMutation = useDeleteSpace();
 
-  const domains = application.settings?.allowedRedirectDomains ?? [];
+  const domains = space.settings?.allowedRedirectDomains ?? [];
   const [editedDomains, setEditedDomains] = useState<string[] | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const activeDomains = editedDomains ?? domains;
 
   const { register, handleSubmit, showError } = useAppForm<SettingsFormData>({
-    values: { name: application.name },
+    values: { name: space.name },
   });
 
   const onSubmit = (data: SettingsFormData) => {
     updateMutation.mutate({
-      params: { path: { id: applicationId } },
+      params: { path: { id: spaceId } },
       body: { name: data.name.trim(), settings: { allowedRedirectDomains: activeDomains } },
     });
   };
@@ -76,12 +71,12 @@ function GeneralForm({
     <>
       <form onSubmit={handleSubmit(onSubmit)} className="max-w-xl space-y-6">
         <div className="space-y-2">
-          <Label htmlFor="app-name">{t("applications.nameLabel")}</Label>
+          <Label htmlFor="space-name">{t("spaces.nameLabel")}</Label>
           <Input
-            id="app-name"
+            id="space-name"
             type="text"
             {...register("name", { required: true })}
-            placeholder={t("applications.namePlaceholder")}
+            placeholder={t("spaces.namePlaceholder")}
           />
           {showError("name") && (
             <p className="text-destructive text-sm">{t("validation.required", { ns: "common" })}</p>
@@ -89,8 +84,8 @@ function GeneralForm({
         </div>
 
         <div className="space-y-2">
-          <Label>{t("applications.redirectDomains")}</Label>
-          <p className="text-muted-foreground text-sm">{t("applications.redirectDomainsHint")}</p>
+          <Label>{t("spaces.redirectDomains")}</Label>
+          <p className="text-muted-foreground text-sm">{t("spaces.redirectDomainsHint")}</p>
           <div className="flex flex-col gap-2">
             {activeDomains.map((domain, index) => (
               <div key={index} className="flex items-center gap-2">
@@ -123,7 +118,7 @@ function GeneralForm({
               onClick={() => setEditedDomains((prev) => [...(prev ?? domains), ""])}
             >
               <Plus size={14} className="mr-1.5" />
-              {t("applications.addDomain")}
+              {t("spaces.addDomain")}
             </Button>
           </div>
         </div>
@@ -133,25 +128,23 @@ function GeneralForm({
         </Button>
       </form>
 
-      {!application.isDefault && (
+      {!space.isDefault && (
         <>
           <div className="text-muted-foreground mt-8 mb-4 text-sm font-medium">
-            {t("applications.dangerZone")}
+            {t("spaces.dangerZone")}
           </div>
           <div className="border-destructive bg-card max-w-xl rounded-lg border p-5">
             <div className="flex items-center gap-3">
               <div className="flex-1">
-                <h3 className="text-sm font-semibold">{t("applications.deleteTitle")}</h3>
-                <span className="text-muted-foreground text-sm">
-                  {t("applications.deleteDesc")}
-                </span>
+                <h3 className="text-sm font-semibold">{t("spaces.deleteTitle")}</h3>
+                <span className="text-muted-foreground text-sm">{t("spaces.deleteDesc")}</span>
               </div>
               <Button
                 variant="destructive"
                 disabled={deleteMutation.isPending}
                 onClick={() => setConfirmOpen(true)}
               >
-                {deleteMutation.isPending ? t("applications.deleting") : t("btn.delete")}
+                {deleteMutation.isPending ? t("spaces.deleting") : t("btn.delete")}
               </Button>
             </div>
           </div>
@@ -162,15 +155,15 @@ function GeneralForm({
         open={confirmOpen}
         onClose={() => setConfirmOpen(false)}
         title={t("btn.confirm", { ns: "common" })}
-        description={t("applications.deleteConfirm", { name: application.name })}
+        description={t("spaces.deleteConfirm", { name: space.name })}
         isPending={deleteMutation.isPending}
         onConfirm={() => {
           deleteMutation.mutate(
-            { params: { path: { id: applicationId } } },
+            { params: { path: { id: spaceId } } },
             {
               onSuccess: () => {
                 setConfirmOpen(false);
-                navigate("/org-settings/applications");
+                navigate("/org-settings/spaces");
               },
             },
           );

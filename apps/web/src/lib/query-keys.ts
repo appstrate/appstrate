@@ -5,7 +5,7 @@
  *
  * These families are special: they are PRODUCED in one place (a fetch hook)
  * but PATCHED / INVALIDATED from another — the SSE stream in
- * `use-global-run-sync`, mutation `onSuccess` handlers, and org/app-switch
+ * `use-global-run-sync`, mutation `onSuccess` handlers, and org/space-switch
  * resets. When the producer and a remote patcher hand-write the key array
  * independently they can silently drift (the `["packages","agent"]` vs
  * `["packages","agents"]` singular/plural no-op was exactly this). Building
@@ -34,10 +34,8 @@ export const runKeys = {
    * {@link invalidateRunLogs}.
    */
   all: ["run"] as const,
-  detail: (orgId: Id, applicationId: Id, runId: Id) =>
-    ["run", orgId, applicationId, runId] as const,
-  logs: (orgId: Id, applicationId: Id, runId: Id) =>
-    ["run-logs", orgId, applicationId, runId] as const,
+  detail: (orgId: Id, spaceId: Id, runId: Id) => ["run", orgId, spaceId, runId] as const,
+  logs: (orgId: Id, spaceId: Id, runId: Id) => ["run-logs", orgId, spaceId, runId] as const,
 };
 
 /**
@@ -55,8 +53,8 @@ export const runKeys = {
  * good, leaving a run that peaked at 187k reporting whatever the last surviving
  * turn said — or, with no window left in the cache, no gauge at all.
  */
-export function invalidateRunLogs(qc: QueryClient, orgId: Id, applicationId: Id, runId: Id) {
-  return qc.invalidateQueries({ queryKey: runKeys.logs(orgId, applicationId, runId) });
+export function invalidateRunLogs(qc: QueryClient, orgId: Id, spaceId: Id, runId: Id) {
+  return qc.invalidateQueries({ queryKey: runKeys.logs(orgId, spaceId, runId) });
 }
 
 /**
@@ -74,8 +72,7 @@ export function invalidateRunDetails(qc: QueryClient) {
 export const runsKeys = {
   /** Prefix — every per-agent run list. */
   all: ["runs"] as const,
-  forAgent: (orgId: Id, applicationId: Id, packageId: Id) =>
-    ["runs", orgId, applicationId, packageId] as const,
+  forAgent: (orgId: Id, spaceId: Id, packageId: Id) => ["runs", orgId, spaceId, packageId] as const,
 };
 
 /** Cursor/offset-paginated run tables (runs page, agent runs tab). */
@@ -84,15 +81,14 @@ export const paginatedRunsKeys = {
   all: ["paginated-runs"] as const,
   list: (
     orgId: Id,
-    applicationId: Id,
+    spaceId: Id,
     endpoint: string,
     user: string | null | undefined,
     kind: string | null | undefined,
     status: string | null | undefined,
     limit: number,
     offset: number,
-  ) =>
-    ["paginated-runs", orgId, applicationId, endpoint, user, kind, status, limit, offset] as const,
+  ) => ["paginated-runs", orgId, spaceId, endpoint, user, kind, status, limit, offset] as const,
 };
 
 /**
@@ -106,10 +102,10 @@ export const packageKeys = {
   family: (path: string) => ["packages", path] as const,
   /** Org-scoped family prefix (`["packages","agents",orgId]`). */
   familyInOrg: (path: string, orgId: Id) => ["packages", path, orgId] as const,
-  list: (path: string, orgId: Id, applicationId: Id, filter: string) =>
-    ["packages", path, orgId, applicationId, filter] as const,
-  detail: (path: string, orgId: Id, applicationId: Id, id: string, version: string = "draft") =>
-    ["packages", path, orgId, applicationId, id, version] as const,
+  list: (path: string, orgId: Id, spaceId: Id, filter: string) =>
+    ["packages", path, orgId, spaceId, filter] as const,
+  detail: (path: string, orgId: Id, spaceId: Id, id: string, version: string = "draft") =>
+    ["packages", path, orgId, spaceId, id, version] as const,
 };
 
 /**
@@ -134,7 +130,7 @@ export const agentsKeys = {
   all: ["agents"] as const,
   /** Org-scoped prefix (`["agents",orgId]`). */
   inOrg: (orgId: Id) => ["agents", orgId] as const,
-  list: (orgId: Id, applicationId: Id) => ["agents", orgId, applicationId] as const,
+  list: (orgId: Id, spaceId: Id) => ["agents", orgId, spaceId] as const,
 };
 
 /** Schedule caches. Patched by the run SSE stream when a run carries a scheduleId. */
@@ -143,27 +139,27 @@ export const scheduleKeys = {
   listAll: ["schedules"] as const,
   /** Prefix — every single-schedule query. */
   detailAll: ["schedule"] as const,
-  list: (orgId: Id, applicationId: Id) => ["schedules", orgId, applicationId] as const,
-  listForAgent: (orgId: Id, applicationId: Id, packageId: Id) =>
-    ["schedules", orgId, applicationId, packageId] as const,
-  detail: (orgId: Id, applicationId: Id, scheduleId: Id) =>
-    ["schedule", orgId, applicationId, scheduleId] as const,
-  runs: (orgId: Id, applicationId: Id, scheduleId: Id) =>
-    ["schedule-runs", orgId, applicationId, scheduleId] as const,
+  list: (orgId: Id, spaceId: Id) => ["schedules", orgId, spaceId] as const,
+  listForAgent: (orgId: Id, spaceId: Id, packageId: Id) =>
+    ["schedules", orgId, spaceId, packageId] as const,
+  detail: (orgId: Id, spaceId: Id, scheduleId: Id) =>
+    ["schedule", orgId, spaceId, scheduleId] as const,
+  runs: (orgId: Id, spaceId: Id, scheduleId: Id) =>
+    ["schedule-runs", orgId, spaceId, scheduleId] as const,
 };
 
 /** Per-agent effective model resolution. */
 export const agentModelKeys = {
   all: ["agent-model"] as const,
-  detail: (orgId: Id, applicationId: Id, packageId: Id) =>
-    ["agent-model", orgId, applicationId, packageId] as const,
+  detail: (orgId: Id, spaceId: Id, packageId: Id) =>
+    ["agent-model", orgId, spaceId, packageId] as const,
 };
 
 /** Per-agent effective proxy resolution. */
 export const agentProxyKeys = {
   all: ["agent-proxy"] as const,
-  detail: (orgId: Id, applicationId: Id, packageId: Id) =>
-    ["agent-proxy", orgId, applicationId, packageId] as const,
+  detail: (orgId: Id, spaceId: Id, packageId: Id) =>
+    ["agent-proxy", orgId, spaceId, packageId] as const,
 };
 
 /** Cloud billing summary (org-scoped). */
@@ -179,6 +175,6 @@ export const orgKeys = {
 /** Per-actor agent persistence (memories + pinned slots). */
 export const persistenceKeys = {
   all: ["agent-persistence"] as const,
-  list: (scopeTag: string, orgId: Id, applicationId: Id, packageId: Id, query: unknown) =>
-    ["agent-persistence", scopeTag, orgId, applicationId, packageId, query] as const,
+  list: (scopeTag: string, orgId: Id, spaceId: Id, packageId: Id, query: unknown) =>
+    ["agent-persistence", scopeTag, orgId, spaceId, packageId, query] as const,
 };

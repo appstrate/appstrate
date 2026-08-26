@@ -7,7 +7,7 @@ import { usePermissions } from "../hooks/use-permissions";
 import { ConfirmModal } from "../components/confirm-modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
-import { useCurrentApplicationId } from "../hooks/use-current-application";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
 import {
   useApiKeys,
   useAvailableScopes,
@@ -26,7 +26,7 @@ function isExpired(expiresAt: string | null | undefined): boolean {
 export function ApiKeysPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { isAdmin } = usePermissions();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   const { data: apiKeys, isLoading, error } = useApiKeys();
   const { data: availableScopes } = useAvailableScopes();
   const revokeApiKeyMutation = useRevokeApiKey();
@@ -34,8 +34,7 @@ export function ApiKeysPage() {
   const [confirmState, setConfirmState] = useState<{ id: string; label: string } | null>(null);
 
   if (!isAdmin) return null;
-  if (!applicationId)
-    return <EmptyState message={t("applications.noAppSelected")} icon={KeyRound} />;
+  if (!spaceId) return <EmptyState message={t("spaces.noSpaceSelected")} icon={KeyRound} />;
 
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={getErrorMessage(error)} />;

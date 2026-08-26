@@ -2,8 +2,8 @@
 
 /**
  * Files gallery. Paginated (keyset "load more") list of every file
- * visible to the caller in the current application, with a purpose filter.
- * Visibility is the API's (container-inherited ACL): members see the app's
+ * visible to the caller in the current space, with a purpose filter.
+ * Visibility is the API's (container-inherited ACL): members see the space's
  * files, end-users see only their own.
  */
 
@@ -14,7 +14,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { formatBytes } from "@appstrate/core/format";
 import { useOrgStorage } from "../hooks/use-org-storage";
-import { useCurrentApplicationId } from "../hooks/use-current-application";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { useFiles, type FileDto } from "../hooks/use-files";
 import { PageHeader } from "../components/page-header";
 import { FileListPanel, type PurposeFilter } from "../components/file-list-panel";
@@ -53,9 +53,9 @@ function StorageUsageLine() {
 }
 
 export function FilesPage() {
-  // Remount on application switch so the cursor + accumulated pages reset.
-  const applicationId = useCurrentApplicationId();
-  return <FilesPageContent key={applicationId ?? "none"} />;
+  // Remount on space switch so the cursor + accumulated pages reset.
+  const spaceId = useCurrentSpaceId();
+  return <FilesPageContent key={spaceId ?? "none"} />;
 }
 
 function FilesPageContent() {

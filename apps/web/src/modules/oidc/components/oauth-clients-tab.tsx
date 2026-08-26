@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * OAuth clients admin tab for org/app settings pages.
+ * OAuth clients admin tab for org/space settings pages.
  * Lists registered clients and lets admins register, edit, rotate secrets
  * for, disable, and delete them.
  *
@@ -31,7 +31,7 @@ import { OAuthClientFormModal } from "./oauth-client-form-modal";
 import { getErrorMessage } from "@appstrate/core/errors";
 
 interface OAuthClientsTabProps {
-  level?: "org" | "application";
+  level?: "org" | "space";
 }
 
 export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
@@ -59,8 +59,8 @@ export function OAuthClientsTab({ level }: OAuthClientsTabProps) {
       <div className="flex items-center justify-between">
         <p className="text-muted-foreground max-w-xl text-sm">
           {t(
-            level === "application"
-              ? "settings:oauthClients.introApp"
+            level === "space"
+              ? "settings:oauthClients.introSpace"
               : "settings:oauthClients.introOrg",
           )}
         </p>

@@ -18,7 +18,7 @@ import type { AgentDetail, OrgPackageItemDetail, PackageType } from "@appstrate/
 import type { SchemaWrapper } from "@appstrate/core/form";
 import { usePermissions } from "../hooks/use-permissions";
 import { usePackageInstallState, useTogglePackageInstall } from "../hooks/use-library";
-import { useCurrentApplicationId } from "../hooks/use-current-application";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { LoadingState } from "../components/page-states";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
 import { packageDetailPath } from "../lib/package-paths";
@@ -198,8 +198,8 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const downloadBundle = useAgentBundleExport(scope, name);
   const deletePkgMutation = useDeletePackage(type);
   const uninstallMutation = useTogglePackageInstall();
-  const currentAppId = useCurrentApplicationId();
-  const { installedAppNames, isInstalledInCurrentApp } = usePackageInstallState(packageId);
+  const currentSpaceId = useCurrentSpaceId();
+  const { installedSpaceNames, isInstalledInCurrentSpace } = usePackageInstallState(packageId);
   const [forkOpen, setForkOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{
     type: "deletePackage" | "uninstallPackage";
@@ -385,11 +385,11 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                   setConfirmAction({
                     type: "deletePackage",
                     description:
-                      installedAppNames.length > 0
-                        ? t("packages.deleteConfirmWithApps", {
+                      installedSpaceNames.length > 0
+                        ? t("packages.deleteConfirmWithSpaces", {
                             type: typeLabel,
                             name: nameStr,
-                            apps: installedAppNames.join(", "),
+                            spaces: installedSpaceNames.join(", "),
                             ns: "settings",
                           })
                         : t("packages.deleteConfirm", {
@@ -399,7 +399,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
                           }),
                   });
                 }}
-                canUninstall={isInstalledInCurrentApp && source !== "system"}
+                canUninstall={isInstalledInCurrentSpace && source !== "system"}
                 onUninstall={() => {
                   setConfirmAction({
                     type: "uninstallPackage",
@@ -562,9 +562,9 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
           if (!confirmAction) return;
           const close = () => setConfirmAction(null);
           if (confirmAction.type === "uninstallPackage") {
-            if (!currentAppId) return;
+            if (!currentSpaceId) return;
             uninstallMutation.mutate(
-              { applicationId: currentAppId, packageId, installed: true },
+              { spaceId: currentSpaceId, packageId, installed: true },
               {
                 onSuccess: close,
                 onError: (err) =>

@@ -29,7 +29,7 @@
   "context.info.idle": "Inactive",
   "upload.tooLarge": "Fichier trop volumineux ({{max}} Mo maximum).",
   "upload.failed": "Échec de l'envoi du fichier.",
-  "upload.storageLimit": "Espace de stockage insuffisant pour cette organisation.",
+  "upload.storageLimit": "Stockage insuffisant pour cette organisation.",
   "upload.stagingLimit": "Trop d'envois en attente. Réessayez dans quelques minutes.",
   "run.fallbackLabel": "Run",
   "run.starting": "Lancement",

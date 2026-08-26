@@ -10,7 +10,7 @@ import {
   type RunMetricEvent,
 } from "@appstrate/shared-types";
 import { getCurrentOrgId } from "../stores/org-store";
-import { getCurrentApplicationId } from "./use-current-application";
+import { getCurrentSpaceId } from "./use-current-space";
 
 // Re-export so existing consumers (run-detail.tsx) keep importing the metric
 // event type from here; the source of truth is the shared Zod schema.
@@ -46,8 +46,8 @@ export function useRunRealtime(runId: string | null | undefined, handlers: RunRe
   useEffect(() => {
     if (!runId) return;
     const orgId = getCurrentOrgId();
-    const applicationId = getCurrentApplicationId();
-    if (!orgId || !applicationId) return;
+    const spaceId = getCurrentSpaceId();
+    if (!orgId || !spaceId) return;
 
     // Only the three run channels are dispatched below, so declare them: the
     // per-run stream would otherwise also carry `connection_update` (every
@@ -55,7 +55,7 @@ export function useRunRealtime(runId: string | null | undefined, handlers: RunRe
     // that listens to neither. `verbose=true` is still required — it is what
     // keeps `run_log.data` in the payload.
     const es = new EventSource(
-      `/api/realtime/runs/${runId}?orgId=${encodeURIComponent(orgId)}&applicationId=${encodeURIComponent(applicationId)}&verbose=true&channels=run_update,run_log,run_metric`,
+      `/api/realtime/runs/${runId}?orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}&verbose=true&channels=run_update,run_log,run_metric`,
       { withCredentials: true },
     );
 

@@ -14,7 +14,7 @@ import {
   useRunAgent,
 } from "../../hooks/use-mutations";
 import { usePackageInstallState, useTogglePackageInstall } from "../../hooks/use-library";
-import { useCurrentApplicationId } from "../../hooks/use-current-application";
+import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { PackageActionsDropdown } from "./package-actions-dropdown";
 import { ConfirmModal } from "../confirm-modal";
 import { RunWithOptionsModal } from "../run-with-options-modal";
@@ -49,8 +49,8 @@ export function AgentActions({
   const deleteAllMemories = useDeleteAllMemories(packageId);
   const uninstallMutation = useTogglePackageInstall();
   const runAgent = useRunAgent(packageId);
-  const currentAppId = useCurrentApplicationId();
-  const { installedAppNames, isInstalledInCurrentApp } = usePackageInstallState(packageId);
+  const currentSpaceId = useCurrentSpaceId();
+  const { installedSpaceNames, isInstalledInCurrentSpace } = usePackageInstallState(packageId);
 
   const [confirmState, setConfirmState] = useState<{
     type: "deleteAgent" | "clearRuns" | "clearMemories" | "uninstallAgent";
@@ -76,9 +76,9 @@ export function AgentActions({
         deleteAllMemories.mutate(undefined, { onSuccess });
         break;
       case "uninstallAgent":
-        if (!currentAppId) return;
+        if (!currentSpaceId) return;
         uninstallMutation.mutate(
-          { applicationId: currentAppId, packageId, installed: true },
+          { spaceId: currentSpaceId, packageId, installed: true },
           { onSuccess },
         );
         break;
@@ -107,15 +107,15 @@ export function AgentActions({
           setConfirmState({
             type: "deleteAgent",
             label:
-              installedAppNames.length > 0
-                ? t("detail.deleteConfirmWithApps", {
+              installedSpaceNames.length > 0
+                ? t("detail.deleteConfirmWithSpaces", {
                     name: detail.display_name,
-                    apps: installedAppNames.join(", "),
+                    spaces: installedSpaceNames.join(", "),
                   })
                 : t("detail.deleteConfirm", { name: detail.display_name }),
           })
         }
-        canUninstall={isInstalledInCurrentApp && detail.source !== "system"}
+        canUninstall={isInstalledInCurrentSpace && detail.source !== "system"}
         onUninstall={() =>
           setConfirmState({
             type: "uninstallAgent",

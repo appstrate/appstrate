@@ -7,26 +7,26 @@ import { AppWindow, Settings } from "lucide-react";
 import { usePermissions } from "../../hooks/use-permissions";
 import { Button } from "@appstrate/ui/components/button";
 import { Badge } from "@appstrate/ui/components/badge";
-import { useApplications } from "../../hooks/use-applications";
-import { useAppSwitcher } from "../../hooks/use-current-application";
+import { useSpaces } from "../../hooks/use-spaces";
+import { useSpaceSwitcher } from "../../hooks/use-current-space";
 import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
-import { ApplicationCreateModal } from "../../components/application-create-modal";
+import { SpaceCreateModal } from "../../components/space-create-modal";
 import { formatDateField } from "../../lib/format-date";
 import { getErrorMessage } from "@appstrate/core/errors";
 
-export function OrgSettingsApplicationsPage() {
+export function OrgSettingsSpacesPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { isAdmin } = usePermissions();
-  const { data: applications, isLoading, error } = useApplications();
+  const { data: spaces, isLoading, error } = useSpaces();
   const [createOpen, setCreateOpen] = useState(false);
   const navigate = useNavigate();
-  const { switchApp } = useAppSwitcher();
+  const { switchSpace } = useSpaceSwitcher();
 
   if (!isAdmin) return null;
 
-  const handleAppClick = (applicationId: string) => {
-    switchApp(applicationId);
-    navigate("/org-settings/app/general");
+  const handleSpaceClick = (spaceId: string) => {
+    switchSpace(spaceId);
+    navigate("/org-settings/space/general");
   };
 
   if (isLoading) return <LoadingState />;
@@ -35,42 +35,38 @@ export function OrgSettingsApplicationsPage() {
   return (
     <>
       <div className="mb-4 flex justify-end">
-        <Button data-testid="create-application-button" onClick={() => setCreateOpen(true)}>
-          {t("applications.create")}
+        <Button data-testid="create-space-button" onClick={() => setCreateOpen(true)}>
+          {t("spaces.create")}
         </Button>
       </div>
 
-      {!applications || applications.length === 0 ? (
-        <EmptyState
-          message={t("applications.empty")}
-          hint={t("applications.emptyHint")}
-          icon={AppWindow}
-        >
-          <Button onClick={() => setCreateOpen(true)}>{t("applications.create")}</Button>
+      {!spaces || spaces.length === 0 ? (
+        <EmptyState message={t("spaces.empty")} hint={t("spaces.emptyHint")} icon={AppWindow}>
+          <Button onClick={() => setCreateOpen(true)}>{t("spaces.create")}</Button>
         </EmptyState>
       ) : (
         <div className="flex flex-col gap-3">
-          {applications.map((app) => (
+          {spaces.map((space) => (
             <div
-              key={app.id}
-              data-testid={`application-card-${app.id}`}
+              key={space.id}
+              data-testid={`space-card-${space.id}`}
               className="border-border bg-card rounded-lg border p-5"
             >
               <div className="flex items-center gap-3">
                 <div className="flex-1">
-                  <h3 className="text-[0.95rem] font-semibold">{app.name}</h3>
+                  <h3 className="text-[0.95rem] font-semibold">{space.name}</h3>
                   <span className="text-muted-foreground text-sm">
-                    {t("applications.createdAt", {
-                      date: formatDateField(app.createdAt, "date"),
+                    {t("spaces.createdAt", {
+                      date: formatDateField(space.createdAt, "date"),
                     })}
                   </span>
                 </div>
-                {app.isDefault && <Badge variant="running">{t("applications.default")}</Badge>}
+                {space.isDefault && <Badge variant="running">{t("spaces.default")}</Badge>}
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => handleAppClick(app.id)}
-                  title={t("nav.appSettings", { ns: "common" })}
+                  onClick={() => handleSpaceClick(space.id)}
+                  title={t("nav.spaceSettings", { ns: "common" })}
                 >
                   <Settings size={16} />
                 </Button>
@@ -80,7 +76,7 @@ export function OrgSettingsApplicationsPage() {
         </div>
       )}
 
-      <ApplicationCreateModal open={createOpen} onClose={() => setCreateOpen(false)} />
+      <SpaceCreateModal open={createOpen} onClose={() => setCreateOpen(false)} />
     </>
   );
 }

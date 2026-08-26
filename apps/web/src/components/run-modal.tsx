@@ -68,7 +68,7 @@ function RunModalForm({
   initialInput?: Record<string, unknown>;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  // `agent.input` carries both halves: the AFPS wrapper and this application's
+  // `agent.input` carries both halves: the AFPS wrapper and this space's
   // stored values + locks.
   const [inputData, setInputData] = useState<Record<string, unknown>>(() =>
     initialInputValues(agent.input, agent.input, initialInput),

@@ -4,10 +4,10 @@
  * R1 — user-scope connection mutations.
  *
  * The unified `/preferences/connections` page (now backed by
- * `useMyConnections()`) lists a user's connections across every org/app
- * they belong to. The mutation endpoints are app-scoped (X-Application-Id
+ * `useMyConnections()`) lists a user's connections across every org/space
+ * they belong to. The mutation endpoints are space-scoped (X-Space-Id
  * is part of every connection write path) so each mutation here passes
- * the entry's own org/application as explicit headers — overriding the
+ * the entry's own org/space as explicit headers — overriding the
  * SPA's currently-active context for that single request.
  */
 
@@ -22,22 +22,22 @@ import { invalidateIntegrationQueries } from "./use-integrations";
 /**
  * Unified user-scope connection list (integration connections), grouped by
  * source package. Backs the `/preferences/connections` page. Crosses
- * orgs/applications: no header context required (the `/api/me/*` routes are
+ * orgs/spaces: no header context required (the `/api/me/*` routes are
  * deliberately org-context-free).
  */
 export function useMyConnections() {
   return $api.useQuery("get", "/api/me/connections", {}, { select: (e) => e.data });
 }
 
-interface OrgAppHeaders {
+interface OrgSpaceHeaders {
   orgId: string;
-  applicationId: string;
+  spaceId: string;
 }
 
-function scopedHeaders({ orgId, applicationId }: OrgAppHeaders) {
+function scopedHeaders({ orgId, spaceId }: OrgSpaceHeaders) {
   return {
     "X-Org-Id": orgId,
-    "X-Application-Id": applicationId,
+    "X-Space-Id": spaceId,
   };
 }
 
@@ -67,7 +67,7 @@ export function useDisconnectIntegrationConnection() {
 
 /**
  * Update an integration connection's label and/or `sharedWithOrg` flag from
- * the user-scope page. The entry's own org/app context is passed as explicit
+ * the user-scope page. The entry's own org/space context is passed as explicit
  * headers, overriding the SPA's active context for this single request.
  */
 export function useUpdateMeIntegrationConnection() {
@@ -78,10 +78,10 @@ export function useUpdateMeIntegrationConnection() {
       packageId,
       connectionId,
       orgId,
-      applicationId,
+      spaceId,
       label,
       sharedWithOrg,
-    }: OrgAppHeaders & {
+    }: OrgSpaceHeaders & {
       packageId: string;
       connectionId: string;
       label?: string | null;
@@ -92,7 +92,7 @@ export function useUpdateMeIntegrationConnection() {
         {
           params: {
             path: { packageId, connectionId },
-            header: scopedHeaders({ orgId, applicationId }),
+            header: scopedHeaders({ orgId, spaceId }),
           },
           body: {
             ...(label !== undefined ? { label } : {}),

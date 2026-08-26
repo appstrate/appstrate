@@ -15,7 +15,7 @@ import {
   TooltipTrigger,
 } from "@appstrate/ui/components/tooltip";
 import { useEndUsers, type EndUserInfo } from "../hooks/use-end-users";
-import { useCurrentApplicationId } from "../hooks/use-current-application";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { PageHeader } from "../components/page-header";
 import { LoadingState, ErrorState, EmptyState } from "../components/page-states";
 import { EndUserCreateModal } from "../components/end-user-create-modal";
@@ -65,17 +65,17 @@ function EndUserAvatar({ user }: { user: EndUserInfo }) {
 }
 
 export function EndUsersPage() {
-  // Remount on application switch so cursor + loadedPages (and the rest of the
-  // page state) reset — otherwise app A's accumulated "Load more" pages would
-  // bleed into app B's list.
-  const applicationId = useCurrentApplicationId();
-  return <EndUsersPageContent key={applicationId ?? "none"} />;
+  // Remount on space switch so cursor + loadedPages (and the rest of the
+  // page state) reset — otherwise space A's accumulated "Load more" pages would
+  // bleed into space B's list.
+  const spaceId = useCurrentSpaceId();
+  return <EndUsersPageContent key={spaceId ?? "none"} />;
 }
 
 function EndUsersPageContent() {
   const { t } = useTranslation(["settings", "common"]);
   const { isAdmin } = usePermissions();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
 
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -122,7 +122,7 @@ function EndUsersPageContent() {
   }, [endUsers, search]);
 
   if (!isAdmin) return null;
-  if (!applicationId) return <EmptyState message={t("applications.noAppSelected")} icon={Users} />;
+  if (!spaceId) return <EmptyState message={t("spaces.noSpaceSelected")} icon={Users} />;
   if (error) return <ErrorState message={getErrorMessage(error)} />;
 
   return (
@@ -134,9 +134,7 @@ function EndUsersPageContent() {
           { label: t("nav.orgSection", { ns: "common" }), href: "/" },
           { label: t("endUsers.pageTitle") },
         ]}
-        actions={
-          <Button onClick={() => setCreateOpen(true)}>{t("applications.newEndUser")}</Button>
-        }
+        actions={<Button onClick={() => setCreateOpen(true)}>{t("spaces.newEndUser")}</Button>}
       />
 
       <div className="relative mb-4">
@@ -148,7 +146,7 @@ function EndUsersPageContent() {
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder={t("applications.searchEndUsers")}
+          placeholder={t("spaces.searchEndUsers")}
           className="pl-9"
         />
       </div>
@@ -156,12 +154,8 @@ function EndUsersPageContent() {
       {isLoading ? (
         <LoadingState />
       ) : filtered.length === 0 ? (
-        <EmptyState
-          message={t("applications.noEndUsers")}
-          hint={t("applications.noEndUsersHint")}
-          icon={Users}
-        >
-          <Button onClick={() => setCreateOpen(true)}>{t("applications.newEndUser")}</Button>
+        <EmptyState message={t("spaces.noEndUsers")} hint={t("spaces.noEndUsersHint")} icon={Users}>
+          <Button onClick={() => setCreateOpen(true)}>{t("spaces.newEndUser")}</Button>
         </EmptyState>
       ) : (
         <TooltipProvider delayDuration={300}>
@@ -184,7 +178,7 @@ function EndUsersPageContent() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span className="truncate text-sm font-semibold">
-                          {user.name || user.email || t("applications.anonymousUser")}
+                          {user.name || user.email || t("spaces.anonymousUser")}
                         </span>
                         {user.email && user.name && (
                           <span className="text-muted-foreground truncate text-sm">
@@ -213,7 +207,7 @@ function EndUsersPageContent() {
                         )}
                         {metaCount > 0 && (
                           <Badge variant="outline" className="px-1.5 py-0 text-[0.65rem]">
-                            {t("applications.metadataCount", { count: metaCount })}
+                            {t("spaces.metadataCount", { count: metaCount })}
                           </Badge>
                         )}
                       </div>
@@ -238,7 +232,7 @@ function EndUsersPageContent() {
                 }}
                 className="mt-2"
               >
-                {t("applications.loadMore")}
+                {t("spaces.loadMore")}
               </Button>
             )}
           </div>

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * React Query hooks for per-application SMTP + social auth configuration.
- * Mirrors `/api/applications/:id/smtp-config` and
- * `/api/applications/:id/social-providers/:provider` routes.
+ * React Query hooks for per-space SMTP + social auth configuration.
+ * Mirrors `/api/spaces/:id/smtp-config` and
+ * `/api/spaces/:id/social-providers/:provider` routes.
  *
  * Inputs are Zod-validated client-side before hitting the API so the form
  * gets immediate feedback on obvious errors (bad port range, malformed
@@ -14,7 +14,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { client, ApiError, type components } from "@/api/client";
 import { useCurrentOrgId } from "@/hooks/use-org";
-import { useCurrentApplicationId } from "@/hooks/use-current-application";
+import { useCurrentSpaceId } from "@/hooks/use-current-space";
 
 /** Wire shapes from the OpenAPI spec. */
 export type SmtpConfigView = components["schemas"]["SmtpConfigView"];
@@ -43,20 +43,20 @@ type UpsertSocialInput = z.infer<typeof upsertSocialSchema>;
 
 export function useSmtpConfig() {
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   return useQuery({
     // Same [method, path, init] shape as the $api hooks so the typed
     // path-string invalidations below hit this query too.
     queryKey: [
       "get",
-      "/api/applications/{id}/smtp-config",
-      { params: { path: { id: applicationId } } },
+      "/api/spaces/{id}/smtp-config",
+      { params: { path: { id: spaceId } } },
     ] as const,
-    enabled: !!orgId && !!applicationId,
+    enabled: !!orgId && !!spaceId,
     queryFn: async (): Promise<SmtpConfigView | null> => {
       try {
-        const { data } = await client.GET("/api/applications/{id}/smtp-config", {
-          params: { path: { id: applicationId! } },
+        const { data } = await client.GET("/api/spaces/{id}/smtp-config", {
+          params: { path: { id: spaceId! } },
         });
         return data ?? null;
       } catch (err) {
@@ -70,12 +70,12 @@ export function useSmtpConfig() {
 
 export function useUpsertSmtpConfig() {
   const qc = useQueryClient();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   return useMutation({
     mutationFn: async (data: UpsertSmtpInput) => {
       const parsed = upsertSmtpSchema.parse(data);
-      const { data: saved } = await client.PUT("/api/applications/{id}/smtp-config", {
-        params: { path: { id: applicationId! } },
+      const { data: saved } = await client.PUT("/api/spaces/{id}/smtp-config", {
+        params: { path: { id: spaceId! } },
         // The wire format has no `null` — an empty fromName is omitted.
         body: { ...parsed, fromName: parsed.fromName ?? undefined },
       });
@@ -83,34 +83,34 @@ export function useUpsertSmtpConfig() {
       return saved;
     },
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["get", "/api/applications/{id}/smtp-config"] });
+      void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}/smtp-config"] });
     },
   });
 }
 
 export function useDeleteSmtpConfig() {
   const qc = useQueryClient();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   return useMutation({
     mutationFn: async () => {
-      await client.DELETE("/api/applications/{id}/smtp-config", {
-        params: { path: { id: applicationId! } },
+      await client.DELETE("/api/spaces/{id}/smtp-config", {
+        params: { path: { id: spaceId! } },
       });
     },
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["get", "/api/applications/{id}/smtp-config"] });
+      void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}/smtp-config"] });
     },
   });
 }
 
 export function useTestSmtp() {
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   const toSchema = z.email("Invalid email address");
   return useMutation({
     mutationFn: async (to: string) => {
       const parsed = toSchema.parse(to);
-      const { data } = await client.POST("/api/applications/{id}/smtp-config/test", {
-        params: { path: { id: applicationId! } },
+      const { data } = await client.POST("/api/spaces/{id}/smtp-config/test", {
+        params: { path: { id: spaceId! } },
         body: { to: parsed },
       });
       if (!data) throw new Error("empty response");
@@ -121,20 +121,20 @@ export function useTestSmtp() {
 
 export function useSocialProvider(provider: SocialProviderId) {
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   return useQuery({
     // Same [method, path, init] shape as the $api hooks so the typed
     // path-string invalidations below hit this query too.
     queryKey: [
       "get",
-      "/api/applications/{id}/social-providers/{provider}",
-      { params: { path: { id: applicationId, provider } } },
+      "/api/spaces/{id}/social-providers/{provider}",
+      { params: { path: { id: spaceId, provider } } },
     ] as const,
-    enabled: !!orgId && !!applicationId,
+    enabled: !!orgId && !!spaceId,
     queryFn: async (): Promise<SocialProviderView | null> => {
       try {
-        const { data } = await client.GET("/api/applications/{id}/social-providers/{provider}", {
-          params: { path: { id: applicationId!, provider } },
+        const { data } = await client.GET("/api/spaces/{id}/social-providers/{provider}", {
+          params: { path: { id: spaceId!, provider } },
         });
         return data ?? null;
       } catch (err) {
@@ -148,24 +148,21 @@ export function useSocialProvider(provider: SocialProviderId) {
 
 export function useUpsertSocialProvider(provider: SocialProviderId) {
   const qc = useQueryClient();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   return useMutation({
     mutationFn: async (data: UpsertSocialInput) => {
       const parsed = upsertSocialSchema.parse(data);
-      const { data: saved } = await client.PUT(
-        "/api/applications/{id}/social-providers/{provider}",
-        {
-          params: { path: { id: applicationId!, provider } },
-          // The wire format has no `null` — empty scopes are omitted.
-          body: { ...parsed, scopes: parsed.scopes ?? undefined },
-        },
-      );
+      const { data: saved } = await client.PUT("/api/spaces/{id}/social-providers/{provider}", {
+        params: { path: { id: spaceId!, provider } },
+        // The wire format has no `null` — empty scopes are omitted.
+        body: { ...parsed, scopes: parsed.scopes ?? undefined },
+      });
       if (!saved) throw new Error("empty response");
       return saved;
     },
     onSuccess: () => {
       void qc.invalidateQueries({
-        queryKey: ["get", "/api/applications/{id}/social-providers/{provider}"],
+        queryKey: ["get", "/api/spaces/{id}/social-providers/{provider}"],
       });
     },
   });
@@ -173,16 +170,16 @@ export function useUpsertSocialProvider(provider: SocialProviderId) {
 
 export function useDeleteSocialProvider(provider: SocialProviderId) {
   const qc = useQueryClient();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   return useMutation({
     mutationFn: async () => {
-      await client.DELETE("/api/applications/{id}/social-providers/{provider}", {
-        params: { path: { id: applicationId!, provider } },
+      await client.DELETE("/api/spaces/{id}/social-providers/{provider}", {
+        params: { path: { id: spaceId!, provider } },
       });
     },
     onSuccess: () => {
       void qc.invalidateQueries({
-        queryKey: ["get", "/api/applications/{id}/social-providers/{provider}"],
+        queryKey: ["get", "/api/spaces/{id}/social-providers/{provider}"],
       });
     },
   });
