@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **`PUBLISHED_FILE_LOG_EVENTS`** (`./file-uri`) — a one-element array whose
+  only element was `PUBLISHED_FILE_LOG_EVENT`, which is exported beside it. It
+  existed to hold two spellings, the current `"file"` and the pre-#1177
+  `"document"`, so a reader could filter `run_logs` rows without knowing which
+  era each row was written in. The `"document"` arm went with the rest of that
+  rename and no row carries it any more, which left a list deriving its single
+  value from the constant next to it and no in-repo consumer for it: both
+  readers (the web shell's run page, the chat module's run card) compare
+  against `PUBLISHED_FILE_LOG_EVENT`, and so does the sink that writes the tag.
+  Consumers matching against the array should compare against
+  **`PUBLISHED_FILE_LOG_EVENT`** — same value, `"file"`, so nothing on the wire
+  moves and no row starts or stops being recognised.
+
 ### Changed
 
 - **`CreateUploadUrlOptions.maxSize` is required, and `Storage.createUploadUrl`

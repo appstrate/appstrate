@@ -44,34 +44,15 @@
 export const FILE_URI_PREFIX = "appfile://";
 
 /**
- * The `run_logs.event` tag the sink WRITES to announce a published file
+ * The `run_logs.event` tag that announces a published file
  * (`type='result' event='file'`).
  *
- * Exported separately from the reader-side set below so the writer consumes the
- * same value instead of spelling the literal: the set called itself "the
- * agreement point three readers share", but the one party that produces the tag
- * was not reading it. A shared list the writer does not consume is two copies
- * wearing one name.
+ * The single agreement point between the sink that WRITES the tag and the two
+ * readers that filter on it (the web shell's run page, the chat module's run
+ * card), so the literal is spelled once and none of the three can drift from
+ * the others.
  */
 export const PUBLISHED_FILE_LOG_EVENT = "file";
-
-/**
- * Every `run_logs.event` tag that announces a published file — the set readers
- * filter on. Derived from {@link PUBLISHED_FILE_LOG_EVENT}, so writer and
- * readers cannot disagree.
- *
- * It used to carry the pre-#1177 `"document"` spelling as well, because a
- * `run_logs` row is immutable once written and every release up to
- * `v1.0.0-beta.51` wrote that tag. It is gone with the rest of the rename: no
- * row carrying it exists any more. A deployment that somehow held one would
- * render that row without its file attachment — not an error, just an absence.
- *
- * @deprecated One tag remains, so every reader now compares against
- * {@link PUBLISHED_FILE_LOG_EVENT} directly and this list has no in-repo
- * consumer. It stays exported only because `@appstrate/core` is published:
- * removing it is a breaking change. Delete at the next major.
- */
-export const PUBLISHED_FILE_LOG_EVENTS: readonly string[] = [PUBLISHED_FILE_LOG_EVENT];
 
 /**
  * `files.purpose` of a file an agent published from a run. The other purposes
