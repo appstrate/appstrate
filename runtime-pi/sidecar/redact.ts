@@ -304,7 +304,7 @@ const ASSIGN_CHAR = String.raw`(?:["'=:]|%22|%27|%3D|%3A)`;
  * replace it. `NAME = value` and `"name": "value"` both pass; `NAME word` does
  * not. See {@link BARE_KEYWORD} for why tier 2 no longer has one of its own.
  *
- * The padding is ALL whitespace, line breaks included. An earlier revision
+ * The padding admits AT MOST ONE line break, never a blank line. An earlier revision
  * padded with `[ \t]` alone, which looked equivalent and was not: two of the
  * three sinks this scrubber guards hand it MULTI-LINE text — a whole HTTP
  * response body sample (`app.ts`) and a whole `docker` stderr capture — where a
@@ -316,12 +316,34 @@ const ASSIGN_CHAR = String.raw`(?:["'=:]|%22|%27|%3D|%3A)`;
  * `KEYWORD_VALUE` admitted the separator's own `:` as if it were the value.
  *
  * Whitespace still cannot REPLACE the assignment: `NAME word` and `NAME\nword`
- * are both prose and both stay intact. That is the whole distinction, and it is
- * why the padding can be this permissive.
+ * are both prose and both stay intact.
+ *
+ * And the line break is capped at ONE, which the first attempt at this fix got
+ * wrong by reaching for `\s*`: unbounded whitespace walks past a blank line into
+ * whatever the log printed next. `api_key:\n\nStarting server` lost `Starting`,
+ * a stack frame lost its `at`, and worst of all `api_key:\nnotion_token: ntn_…`
+ * redacted the SECOND key's NAME and left its value in clear — a leak created
+ * by the fix for a leak. A key and its value may sit on adjacent lines; they
+ * cannot sit either side of a blank one.
  */
-const ASSIGNMENT_SEP = String.raw`(?:\s|%20)*${ASSIGN_CHAR}(?:${ASSIGN_CHAR}|\s|%20)*`;
+const HSPACE = String.raw`(?:[ \t]|%20)`;
+/** At most ONE line break, and never a blank line. See the note above. */
+const SEP_PAD = String.raw`${HSPACE}*(?:\r?\n)?${HSPACE}*`;
+const ASSIGNMENT_SEP = String.raw`${SEP_PAD}${ASSIGN_CHAR}(?:${ASSIGN_CHAR}|${HSPACE})*${SEP_PAD}(?:${ASSIGN_CHAR}|${HSPACE})*`;
 /** The value a separator introduces, up to the next item boundary. */
-const KEYWORD_VALUE = String.raw`[^\s"',&]+`;
+/**
+ * The value a separator introduces, up to the next item boundary — and never
+ * another KEY.
+ *
+ * The lookahead is not decoration. Allowing a line break in the separator means
+ * `api_key:` can reach the next line, and the next line is very often the next
+ * key. Without the guard the first rule consumed `notion_token:` AS ITS VALUE,
+ * which advanced the match position past it, so the rule never ran on the
+ * second key at all and `ntn_…` shipped in clear. A fix for a leak that created
+ * one. A candidate value that is itself `&lt;keyword&gt;&lt;assignment&gt;` is refused, so
+ * the first key simply does not match and the second one does.
+ */
+const KEYWORD_VALUE = String.raw`(?![A-Za-z0-9_-]*(?:${BARE_KEYWORD})[A-Za-z0-9_-]*${SEP_PAD}${ASSIGN_CHAR})[^\s"',&]+`;
 
 /**
  * Percent triplets that END an ENCODED userinfo rather than belong to it.

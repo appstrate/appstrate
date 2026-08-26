@@ -106,6 +106,30 @@ describe("scrubSecretMaterial — generated credential corpus", () => {
     ).toEqual([]);
   });
 
+  it("control: a separator's line break does not reach past a blank line", () => {
+    // The first attempt at admitting line breaks reached for `\s*`, which walks
+    // through a blank line into whatever the log printed next. Both of these
+    // lost their first word to a `[redacted]`.
+    for (const prose of [
+      "api_key:\n\nStarting server on port 3000",
+      "client_secret =\n\n  at handleRequest (server.ts:42)",
+    ]) {
+      expect(scrubSecretMaterial(prose)).toBe(prose);
+    }
+  });
+
+  it("masks the SECOND key when two sit on adjacent lines", () => {
+    // The subtlest failure the line-break widening produced, and the reason
+    // `KEYWORD_VALUE` carries a negative lookahead: the first key's separator
+    // reached the next line and consumed `notion_token:` AS ITS VALUE, which
+    // advanced the match position past it — so the rule never ran on the second
+    // key and its secret shipped in clear. A value that is itself a key is
+    // refused, so the first key does not match and the second one does.
+    const out = scrubSecretMaterial("api_key:\nnotion_token: ntn_9fJ2kQwLmZ0p");
+    expect(out).not.toContain("ntn_9fJ2kQwLmZ0p");
+    expect(out).toContain("notion_token");
+  });
+
   it("control: whitespace alone still does not introduce a value", () => {
     // The other half, and the reason the rule is not simply "any separator":
     // bare whitespace between a keyword and a word is PROSE. This is the stated
