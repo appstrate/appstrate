@@ -33,11 +33,11 @@ import {
   buildEventEnvelope,
   webhookEventSchema,
 } from "./service.ts";
-import { forbidden, invalidRequest } from "../../lib/errors.ts";
+import { forbidden } from "../../lib/errors.ts";
 import { readJsonBody } from "../../lib/request-body.ts";
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { getOrgScope, type SpaceScope, type OrgScope } from "../../lib/scope.ts";
-import { SPACE_ID_RE } from "../../lib/ids.ts";
+import { assertSpaceId } from "../../lib/ids.ts";
 import { parseListPagination } from "../../lib/list-query.ts";
 
 /**
@@ -66,7 +66,13 @@ const createOrgWebhookSchema = z.object({
 
 const createSpaceWebhookSchema = z.object({
   level: z.literal("space"),
-  spaceId: z.string().regex(SPACE_ID_RE, "spaceId must start with 'spc_' prefix"),
+  // Shape deliberately NOT re-encoded here: `assertSpaceId` (called by the
+  // handler right after parse) is the single implementation of the space-id
+  // shape check AND of its two diagnostics — a retired `app_` id must say "run
+  // the `app_` → `spc_` migration" on this route exactly as it does on
+  // `X-Space-Id`. A `.regex()` here would win the race and answer with a
+  // generic message instead.
+  spaceId: z.string(),
   url: z.url("url must be a valid URL"),
   events: z.array(webhookEventSchema).min(1, "events is required"),
   packageId: z.string().nullable().optional(),
@@ -117,6 +123,10 @@ export function createWebhooksRouter() {
     async (c) => {
       const orgId = c.get("orgId");
       const data = await readJsonBody(c, createWebhookSchema);
+
+      if (data.level === "space") {
+        assertSpaceId(data.spaceId, "spaceId");
+      }
 
       // API keys cannot create org-level webhooks (would span foreign spaces)
       // and cannot create space-level webhooks targeting another space.
@@ -183,9 +193,7 @@ export function createWebhooksRouter() {
       const all = c.req.query("all") === "true";
       const spaceId = c.req.query("spaceId") || undefined;
       if (spaceId) {
-        if (!SPACE_ID_RE.test(spaceId)) {
-          throw invalidRequest("spaceId must start with 'spc_' prefix", "spaceId");
-        }
+        assertSpaceId(spaceId, "spaceId");
         await assertSpaceBelongsToOrg(spaceId, scope.orgId);
       }
       const result = await listWebhooks(scope, { spaceId, all });

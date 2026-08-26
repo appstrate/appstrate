@@ -53,7 +53,7 @@ Instead of `mock.module()` (banned, see root `CLAUDE.md`), use dependency inject
 | `db.ts`           | `truncateAll()` — DELETE FROM all tables in FK-safe order                                                                                             |
 | `seed.ts`         | Factories: `seedPackage()`, `seedInstalledPackage()`, `seedRun()`, `seedApiKey()`, `seedSpace()`, `seedEndUser()`, … (space-scoped require `spaceId`) |
 | `assertions.ts`   | `assertDbHas/Missing/Count()`, `getDbRow()`                                                                                                           |
-| `redis.ts`        | `getRedis()`, `flushRedis()`                                                                                                                          |
+| `redis.ts`        | `flushRedis()`, `closeRedis()`                                                                                                                        |
 | `sse.ts`          | SSE stream parsing                                                                                                                                    |
 | `oauth-server.ts` | Mock OAuth2 provider                                                                                                                                  |
 

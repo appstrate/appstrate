@@ -61,9 +61,17 @@ export interface SpaceContextRow {
 /**
  * Validate that a space belongs to the given org.
  * Returns the full `SpaceContextRow` or null if not found.
- * Shared by the space-context middleware, SSE auth and the MCP router — every
- * path on which a space id enters a request funnels through here, which is why
- * the id-shape guard lives here rather than at each call site.
+ * Shared by the space-context middleware, SSE auth and the MCP router — this is
+ * where a CLIENT-SUPPLIED space id enters, which is why the id-shape guard
+ * lives here rather than at each of those call sites.
+ *
+ * It is NOT the only entry point, and the guard is not only here. Three paths
+ * take a space id from a row instead of from the request and so skip this
+ * function entirely; each asserts the shape itself, and each says so at the
+ * call site:
+ *   - `requireSpaceContext`'s default-space fallback (below)
+ *   - `resolveMcpSpaceScope`'s default-space fallback (`modules/mcp/router.ts`)
+ *   - `validateSSEAuth`'s API-key branch (`routes/realtime.ts`)
  *
  * The shape check runs BEFORE the SELECT on purpose. A `spc_` id that does not
  * exist is a 404 (`null`); a retired `app_` id is not a missing row, it is
@@ -161,9 +169,11 @@ export function requireSpaceContext() {
     if (isInternalDispatch(c.req.raw.headers)) {
       const active = await defaultSpaceForOrg(orgId);
       if (active) {
-        // The one path that never passes through `validateSpaceInOrg`: the id
-        // comes straight off the row, so this is where an un-migrated `spaces`
-        // table would otherwise slip in unnoticed.
+        // One of the three paths that never pass through `validateSpaceInOrg`
+        // (the others: the MCP router's default-space fallback and the SSE
+        // API-key branch — see the note on `validateSpaceInOrg`). The id comes
+        // straight off the row, so this is where an un-migrated `spaces` table
+        // would otherwise slip in unnoticed.
         assertSpaceId(active.id);
         c.set("spaceId", active.id);
         c.set("space", active);

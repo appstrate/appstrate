@@ -17,7 +17,15 @@ import {
   deleteSmtpConfig,
 } from "../../../services/smtp.ts";
 
-async function seedSpace(): Promise<string> {
+/**
+ * Seed a throwaway owner + org + space and return the SPACE ID (not the row).
+ *
+ * Deliberately NOT named `seedSpace`: the shared factory
+ * (`test/helpers/seed.ts`) already owns that name with a different signature
+ * and return type, and a local shadow of it reads like the shared one at the
+ * call site.
+ */
+async function seedOrgWithSpace(): Promise<string> {
   const ownerId = `user-${crypto.randomUUID()}`;
   await db.insert(userTable).values({
     id: ownerId,
@@ -51,7 +59,7 @@ describe("resolveSmtpForClient", () => {
   });
 
   it("returns null for level=space when no config exists", async () => {
-    const spaceId = await seedSpace();
+    const spaceId = await seedOrgWithSpace();
     const resolved = await resolveSmtpForClient({
       level: "space",
       referencedSpaceId: spaceId,
@@ -60,7 +68,7 @@ describe("resolveSmtpForClient", () => {
   });
 
   it("returns a transport + from metadata when per-space config exists", async () => {
-    const spaceId = await seedSpace();
+    const spaceId = await seedOrgWithSpace();
     await upsertSmtpConfig(spaceId, {
       host: "__test_json__",
       port: 587,
@@ -80,7 +88,7 @@ describe("resolveSmtpForClient", () => {
   });
 
   it("is cached across calls and invalidated on upsert/delete", async () => {
-    const spaceId = await seedSpace();
+    const spaceId = await seedOrgWithSpace();
     // First call: null, cached.
     expect(await resolveSmtpForClient({ level: "space", referencedSpaceId: spaceId })).toBeNull();
     // Upsert invalidates the cache → next call picks up the row.
@@ -106,7 +114,7 @@ describe("resolveSmtpForClient", () => {
   });
 
   it("treats a row whose ciphertext cannot be decrypted as unconfigured", async () => {
-    const spaceId = await seedSpace();
+    const spaceId = await seedOrgWithSpace();
     // Envelope with a kid absent from the keyring — decryption must fail and
     // the resolver must surface "not configured" instead of throwing.
     await db.insert(spaceSmtpConfigs).values({
@@ -134,7 +142,7 @@ describe("resolveSmtpForClient", () => {
   });
 
   it("invalidateSmtpCache forces a DB re-read", async () => {
-    const spaceId = await seedSpace();
+    const spaceId = await seedOrgWithSpace();
     await upsertSmtpConfig(spaceId, {
       host: "__test_json__",
       port: 587,

@@ -18,6 +18,7 @@ import {
   deleteProfile,
   listProfiles,
   resolveProfileName,
+  resolveActiveProfileOrNull,
   type Config,
 } from "../src/lib/config.ts";
 import { useTempConfigHome } from "./helpers/auth-fixture.ts";
@@ -394,5 +395,50 @@ describe("TOML file format", () => {
     const raw = await readFile(join(configHome.dir(), "appstrate", "config.toml"), "utf-8");
     expect(raw).toContain("[profile.prod]");
     expect(raw).toContain('instance = "https://a"');
+  });
+});
+
+describe("resolveActiveProfileOrNull", () => {
+  async function writeConfigFile(body: string): Promise<void> {
+    const fs = await import("node:fs/promises");
+    const dir = join(configHome.dir(), "appstrate");
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(join(dir, "config.toml"), body);
+  }
+
+  it("returns the resolution (profile undefined) when there is no config file at all", async () => {
+    // The invariant `appstrate run --api-key` depends on: no profile is not an
+    // error, so the resolution still comes back and the caller reads
+    // `profile === undefined`.
+    const resolved = await resolveActiveProfileOrNull(undefined);
+    expect(resolved).toEqual({ profileName: "default", profile: undefined });
+  });
+
+  it("degrades an unparseable config file to null", async () => {
+    await writeConfigFile("this is not [ valid toml");
+    expect(await resolveActiveProfileOrNull(undefined)).toBeNull();
+  });
+
+  it("re-throws the retired-key refusal instead of degrading it to null", async () => {
+    // The one error this helper must NOT hide. `null` here would make the
+    // caller report "no profile" at a user who has one — see
+    // `test/run-resolver-inputs.test.ts`.
+    await writeConfigFile(
+      [
+        'defaultProfile = "prod"',
+        "[profile.prod]",
+        'instance = "https://a.example"',
+        'userId = "u"',
+        'email = "x@y.z"',
+        'applicationId = "app_1"',
+      ].join("\n"),
+    );
+
+    const message = await resolveActiveProfileOrNull(undefined).then(
+      () => undefined,
+      (err: unknown) => (err as Error).message,
+    );
+    expect(message).toContain('"applicationId"');
+    expect(message).toContain("appstrate space switch");
   });
 });

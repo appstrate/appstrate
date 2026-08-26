@@ -42,7 +42,9 @@ The row itself is deliberately thin (`packages/db/src/schema/spaces.ts:17`): `id
 
 > Space id 'app_…' uses the retired `app_` prefix. Space ids are `spc_` + a UUID; this deployment still holds pre-rename data — run the `app_` → `spc_` id migration.
 
-**`app_` is rejected, never accepted-and-warned** (`docs/NO_TRANSITIONAL_CODE.md` §1). There is no alias, no widening, no fallback. The CLI applies the same doctrine one layer out: a `config.toml` profile still pinning the retired `applicationId` key raises rather than being silently dropped by the allow-list parse, because a silent drop would let the next `writeConfig` erase the user's pin from disk (`apps/cli/src/lib/config.ts:124`).
+**`app_` is rejected, never accepted-and-warned** (`docs/NO_TRANSITIONAL_CODE.md` §1). There is no alias, no widening, no fallback.
+
+The CLI applies the same doctrine one layer out. A `config.toml` profile still pinning the retired `applicationId` key raises from `readConfig` rather than being silently dropped by the allow-list parse, because a silent drop would let the next `writeConfig` erase the user's pin from disk (`apps/cli/src/lib/config.ts:149`). `readConfig` is the **only** place that refusal exists, and reaching every command took one more step than putting it there: the commands that tolerate a missing profile — `appstrate run`, which must work from an `ask_…` API key with no profile at all — used to wrap the call in `.catch(() => null)` and so reported "requires a logged-in profile or an API key" at a user who was logged in. They now call `resolveActiveProfileOrNull` (`:248`), which degrades an unreadable file to `null` but re-throws the module-local typed `RetiredProfileKeyError` (`:52`). The check carries a hard expiry date, not a "once no profile still has it" condition nobody can observe.
 
 ## Resolving the space on the wire
 
@@ -97,7 +99,7 @@ Mounted at `/api/spaces` (`apps/api/src/index.ts:356`). All CRUD is gated by the
 | `GET`/`PUT`/`DELETE` | `/api/spaces/{id}/packages/{scope}/{name}`            | — / `spaces:write` | model, proxy, generation config, version pin               |
 | `GET`                | `/api/spaces/{id}/packages/{scope}/{name}/run-config` | `agents:read`      | Resolved per-space config + overrides + pin, in one call   |
 
-**Wire shape.** The object discriminator is `object: "space"` (and `object: "space_package"` on the install rows). Per `docs/CASING_CONVENTIONS.md`, `spaceId` is on the universal DB-convention carve-out and stays **camelCase** on the wire, as do `id`, `isDefault` and `allowedRedirectDomains` (Carve-out 4n); the domain fields on the space-package DTO are snake_case (`version_id`, `installed_at`, `package_type`, `package_source`). The one projection the route does by hand is `created_by`: the Drizzle field is `createdBy` but `*By` is an actor reference, not a carve-out, so `toSpaceWire` renames it (`apps/api/src/routes/spaces.ts:46`).
+**Wire shape.** The object discriminator is `object: "space"` (and `object: "space_package"` on the install rows). Per `docs/CASING_CONVENTIONS.md`, four fields stay **camelCase** on the wire, under two different carve-outs: `id` and `spaceId` are universal DB-convention names (Carve-out 4b), while `isDefault` and `allowedRedirectDomains` are headless-platform DTO fields (Carve-out 4n). The domain fields on the space-package DTO are snake_case (`version_id`, `installed_at`, `package_type`, `package_source`). The one projection the route does by hand is `created_by`: the Drizzle field is `createdBy` but `*By` is an actor reference, not a carve-out, so `toSpaceWire` renames it (`apps/api/src/routes/spaces.ts:46`).
 
 Mutations record audit events with `resourceType: "space"` and actions `space.created` / `space.updated` / `space.deleted` (`apps/api/src/routes/spaces.ts:118`, `:165`, `:189`).
 
@@ -140,19 +142,9 @@ Two of those columns are nullable because the row can be scoped at either level,
 
 ## Deploying the rename
 
-The rename ships as **two files that are one deploy**:
+The rename ships as **two files that are one deploy**, and neither is a deploy on its own:
 
-- `packages/db/drizzle/0053_applications_to_spaces.sql` — the **catalog** half. Four table renames (`applications` → `spaces`, `application_packages` → `space_packages`, `application_smtp_configs` → `space_smtp_configs`, `application_social_providers` → `space_social_providers`), eighteen column renames, and every constraint, index and `notify.ts` PL/pgSQL function body that spells the retired word. `ALTER … RENAME` throughout — never drop-and-recreate, because the table holds live rows and eighteen foreign keys must survive with no window in which a constraint is absent. It rewrites **no row values**.
-- `scripts/migration/0003-application-ids-to-space-ids.sql` — the **row-value** half, run by an operator in the same window (`docs/NO_TRANSITIONAL_CODE.md` §2 keeps one-off content rewrites out of drizzle). It re-mints `spaces.id` and the eighteen referencing columns from `app_…` to `spc_…`, rewrites persisted `applications:*` permission scope strings to `spaces:*`, and rewrites `user.realm` / `session.realm` (`end_user:<app_…>` → `end_user:<spc_…>`), the `'application'` → `'space'` level literals, and every storage key whose leading segment is a space id.
+- `packages/db/drizzle/0053_applications_to_spaces.sql` — the **catalog** half. Table, column, constraint, index and `notify.ts` function renames. It rewrites no row value.
+- `scripts/migration/0003-application-ids-to-space-ids.sql` — the **row-value** half, run by an operator in the same window (`docs/NO_TRANSITIONAL_CODE.md` §2 keeps one-off content rewrites out of drizzle). It re-mints `spaces.id` and every column that references it, plus the values that encode a space id or the retired word.
 
-They are one rewrite rather than five because a space id is quoted inside `runs.input`, `runs.result`, `run_logs`, chat message payloads and `audit_events.after`, and is embedded again in the realm and in `files.storage_key`. Splitting one field of it out would make the operator's script partial and unverifiable — the exact failure mode the previous rename shipped.
-
-**Three CHECK constraints are added `NOT VALID`** and must be promoted afterwards. A column rename carries CHECK bodies along on its own (Postgres stores them as parsed trees keyed on attnum), but a **string literal** inside the body is data and is not rewritten — so `webhooks_level_values`, `webhooks_level_check` and `oauth_clients_level_check` are dropped and re-added spelling `'space'`. At that moment the rows still say `'application'`, so a validating `ADD CONSTRAINT` would scan and fail. `NOT VALID` skips only the initial full-table verification; the constraint is enforced on every INSERT and UPDATE from the instant it exists, so the platform can write `'space'` immediately while the un-rewritten rows are tolerated until the operator's script reaches them. After the row rewrite:
-
-```sql
-ALTER TABLE "webhooks"      VALIDATE CONSTRAINT "webhooks_level_values";
-ALTER TABLE "webhooks"      VALIDATE CONSTRAINT "webhooks_level_check";
-ALTER TABLE "oauth_clients" VALIDATE CONSTRAINT "oauth_clients_level_check";
-```
-
-**Applying the catalog half alone is not a deploy.** The platform boots reading `app_` ids through `assertSpaceId`, which rejects them by design and says so in the 400 — which is the guard doing its job, not a bug.
+**Their headers are the authority on how, in what order, and what is deliberately left alone** — the eighteen foreign keys and why the drop/restore is catalog-driven, why the `level` rewrite must precede the id rewrite, which triggers are disabled and why, what is verified before and after, and the promotion of the three CHECK constraints `0053` was forced to add `NOT VALID` (which `0003` performs itself, guarded, inside its own transaction — there is no manual post-deploy step). Read them there, not here: this page describes the space model, which outlives the rename, while those two files describe a migration that stops being true the moment it is applied. Restating any of it here would make a third source that can disagree with the other two, and has.

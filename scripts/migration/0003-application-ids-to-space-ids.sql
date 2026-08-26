@@ -33,13 +33,9 @@
 --      anchored on a whole array ELEMENT / whole whitespace-delimited TOKEN
 --      starting with `applications:`.
 --   3. `user.realm` and `session.realm` — anchored `LIKE 'end\_user:app\_%'`.
---   4. `files.storage_key`, `uploads.storage_key` — anchored on the SEGMENT
---      the space id occupies, by position, via a regex pinned to `^`.
---      `storage_deletion_jobs.storage_key` — anchored on segment 1 AND on
---      `bucket IN ('files','uploads')`.
---   5. `storage_deletion_jobs.reason` — `'application_deleted'` → `'space_deleted'`,
+--   4. `storage_deletion_jobs.reason` — `'application_deleted'` → `'space_deleted'`,
 --      EXACT equality, never a substring rewrite.
---   6. `webhooks.level`, `oauth_clients.level` — `'application'` → `'space'`,
+--   5. `webhooks.level`, `oauth_clients.level` — `'application'` → `'space'`,
 --      exact equality, plus the three `VALIDATE CONSTRAINT` promotions `0053`
 --      deferred to this script.
 --
@@ -59,6 +55,29 @@
 -- than an oversight: it is a live FOREIGN KEY into `spaces`, not a record of
 -- the past. Leaving it behind does not preserve history, it breaks the
 -- reference — and the FK re-add in step 4 would refuse to validate.
+--
+-- `files.storage_key`, `uploads.storage_key` and
+-- `storage_deletion_jobs.storage_key` keep their `app_` path segment. This is
+-- the SAME decision `0001` took for the same column, and it wrote it down:
+-- "nothing derives it from the id and nothing parses the id back out
+-- (parseStorageKey returns the bucket only). No storage object moved."
+--
+-- It still holds, and it was re-verified for this rename:
+--   * `parseStorageKey` (`services/files.ts`) returns `{ bucket, path }` and
+--     nothing else — the space segment is never read back out of a key.
+--   * a key is BUILT from a space id, never parsed back into one:
+--     `fileStoragePath()` (`services/files.ts`) has exactly two callers, both
+--     on the WRITE path. Reads pass the stored `storage_key` through verbatim.
+--   * scoping and listing filter on the `space_id` COLUMN, not on the key.
+--     Nothing in `apps/` or `packages/` compares `storage_key` to `space_id`.
+--
+-- The segment is an opaque historical path component, exactly as `doc_` still
+-- is in `files.storage_key` today. Rewriting it would point every row at an
+-- object that does not exist — this script moves no bytes — so every download
+-- would 404 on a file that is there, and the delete outbox would target keys
+-- that are not. Making it correct would mean an out-of-band object move inside
+-- the deploy window, undone on rollback, bought for nothing any code reads.
+-- THIS IS NOT AN OVERSIGHT. Do not add it back.
 --
 -- Also untouched, for the record:
 --   * `runs.input`, `runs.result`, `run_logs`, `chat_messages.content` — a
@@ -219,7 +238,6 @@
 --   --      `spaces:`-anchored pass warned against above. Restrict it to the
 --   --      seven columns below; never let it near a manifest.
 --   -- realm: 'end_user:app_' || substring(realm FROM 14) WHERE realm LIKE 'end\_user:spc\_%'
---   -- storage keys: regexp_replace(…, '^([^/]+)/spc_', '\1/app_') etc.
 --   -- reason: 'application_deleted' WHERE reason = 'space_deleted'
 --   -- level: 'application' WHERE level = 'space'  (disable
 --   --      `oauth_clients_level_immutable`; and re-add the three CHECKs
@@ -346,41 +364,12 @@
 --   And the realms that are NOT end-user realms must not move at all:
 --   SELECT realm, count(*) FROM "user" WHERE realm NOT LIKE 'end\_user:%' GROUP BY 1 ORDER BY 1;
 --
--- ── G. storage keys — the cross-check is the whole point ─────────────────────
---   Before: legacy = N, renamed = 0.   After: legacy = 0, renamed = N.
---
---   SELECT 'files'   AS rel, count(*) FILTER (WHERE storage_key ~ '^[^/]+/app_') AS legacy,
---                            count(*) FILTER (WHERE storage_key ~ '^[^/]+/spc_') AS renamed, count(*) AS total FROM files
---   UNION ALL
---   SELECT 'uploads',        count(*) FILTER (WHERE storage_key ~ '^[^/]+/app_'),
---                            count(*) FILTER (WHERE storage_key ~ '^[^/]+/spc_'), count(*) FROM uploads;
---
---   CROSS-CHECK — the key's space segment against the row's own `space_id`.
---   MUST be 0 BEFORE AND AFTER. This is the discriminator: it holds in both
---   consistent states and is non-zero in exactly the mangled one (key rewritten
---   but id not, id rewritten but key not, or a filename that happened to be
---   caught). A single-number "legacy = 0" check cannot see any of that.
---
---   SELECT (SELECT count(*) FROM files   WHERE split_part(storage_key, '/', 2) <> space_id),
---          (SELECT count(*) FROM uploads WHERE split_part(storage_key, '/', 2) <> space_id);
---
---   The outbox has no `space_id` to join against, so it gets both halves plus a
---   leak check on the buckets the anchor must NOT reach:
---
---   SELECT count(*) FILTER (WHERE storage_key LIKE 'app\_%') AS legacy,
---          count(*) FILTER (WHERE storage_key LIKE 'spc\_%') AS renamed,
---          count(*)                                          AS total
---     FROM storage_deletion_jobs WHERE bucket IN ('files', 'uploads');
---   SELECT bucket, count(*) FROM storage_deletion_jobs
---    WHERE bucket NOT IN ('files', 'uploads') AND storage_key LIKE 'spc\_%'
---    GROUP BY 1;   -- zero rows before AND after
---
--- ── H. the deletion reason ───────────────────────────────────────────────────
+-- ── G. the deletion reason ───────────────────────────────────────────────────
 --   Before: N, 0.   After: 0, N.
 --   SELECT (SELECT count(*) FROM storage_deletion_jobs WHERE reason = 'application_deleted'),
 --          (SELECT count(*) FROM storage_deletion_jobs WHERE reason = 'space_deleted');
 --
--- ── I. the `level` vocabulary, and the constraints it gates ──────────────────
+-- ── H. the `level` vocabulary, and the constraints it gates ──────────────────
 --   Before: A, x, B, y.   After: 0, x + A, 0, y + B.
 --   SELECT (SELECT count(*) FROM webhooks      WHERE level = 'application'),
 --          (SELECT count(*) FROM webhooks      WHERE level = 'space'),
@@ -396,7 +385,7 @@
 --    WHERE conname IN ('webhooks_level_values', 'webhooks_level_check', 'oauth_clients_level_check')
 --    ORDER BY 1;
 --
--- ── J. the append-only record was NOT rewritten ──────────────────────────────
+-- ── I. the append-only record was NOT rewritten ──────────────────────────────
 --   Both must be IDENTICAL before and after, and both are expected to be > 0 on
 --   any deployment with history. A zero here after the run means someone
 --   "finished the job" — see WHAT THIS DELIBERATELY DOES NOT REWRITE.
@@ -404,7 +393,7 @@
 --   SELECT (SELECT count(*) FROM audit_events WHERE resource_type = 'application'),
 --          (SELECT count(*) FROM audit_events WHERE action LIKE 'application.%');
 --
--- ── K. the triggers are back on ──────────────────────────────────────────────
+-- ── J. the triggers are back on ──────────────────────────────────────────────
 --   `tgenabled` must be `O` for all four, before AND after.
 --   SELECT tgname, tgenabled FROM pg_trigger
 --    WHERE tgname IN ('oauth_clients_level_immutable', 'runs_notify_update_trigger',
@@ -693,40 +682,7 @@ SET "realm" = 'end_user:spc_' || substring("realm" FROM 14)
 WHERE "realm" LIKE 'end\_user:app\_%';
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- Step 9 — storage keys.
---
--- `files.storage_key`   = `files/{spaceId}/{fileId}/{safeName}`
--- `uploads.storage_key` = `uploads/{spaceId}/{uploadId}/{safeName}`
---
--- Both are written as `${BUCKET}/${path}` and split back apart by
--- `parseStorageKey` (`services/files.ts:108,171`; `services/uploads.ts:71,255`),
--- so the space id is the SECOND segment. Anchored by POSITION with a regex
--- pinned to `^` — the same shape `0044` used for `^([^/]+)/documents/` — so a
--- file whose NAME contains `app_` can never be rewritten. `[^/]+` rather than a
--- hardcoded bucket: the position is what makes the match correct, not the
--- bucket's spelling.
--- ─────────────────────────────────────────────────────────────────────────────
-UPDATE "files"
-SET "storage_key" = regexp_replace("storage_key", '^([^/]+)/app_', '\1/spc_')
-WHERE "storage_key" ~ '^[^/]+/app_';
-
-UPDATE "uploads"
-SET "storage_key" = regexp_replace("storage_key", '^([^/]+)/app_', '\1/spc_')
-WHERE "storage_key" ~ '^[^/]+/app_';
-
--- The outbox stores the key WITHIN the bucket (no bucket prefix — see the
--- column comment in `schema/storage-deletion-jobs.ts`), so the space id is
--- segment ONE, not two. Restricted to the two buckets whose keys begin with a
--- space id: `run-workspace` keys begin with a RUN id, and `agent-packages` /
--- `library-packages` keys begin with an owner namespace. Without the bucket
--- filter this anchor would reach all three.
-UPDATE "storage_deletion_jobs"
-SET "storage_key" = 'spc_' || substring("storage_key" FROM 5)
-WHERE "bucket" IN ('files', 'uploads')
-  AND "storage_key" LIKE 'app\_%';
-
--- ─────────────────────────────────────────────────────────────────────────────
--- Step 10 — the deletion reason. A free-text audit/metric label; the only cost
+-- Step 9 — the deletion reason. A free-text audit/metric label; the only cost
 -- of leaving it would be an operator's `GROUP BY reason` split across two
 -- spellings of one event. EXACT equality, never a substring rewrite — `0044`
 -- step 4, same table, same argument.
@@ -736,7 +692,7 @@ SET "reason" = 'space_deleted'
 WHERE "reason" = 'application_deleted';
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- Step 11 — promote the three CHECK constraints `0053` was forced to add
+-- Step 10 — promote the three CHECK constraints `0053` was forced to add
 -- NOT VALID. Their tables now hold no legacy literal, so the deferred
 -- full-table verification can finally run. `VALIDATE CONSTRAINT` on an
 -- already-valid constraint is a no-op, so a replay costs one catalog lookup.

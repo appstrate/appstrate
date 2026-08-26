@@ -300,7 +300,7 @@ export function formatCallerContext(raw: unknown, opts?: { locale?: string; now?
  * platform app (auth + RBAC re-run on the dispatched Request), with a loopback
  * `fetch` fallback inside `deps.dispatch` for OSS/test wiring.
  *
- * The endpoint is space-scoped: without a space id `requireAppContext`
+ * The endpoint is space-scoped: without a space id `requireSpaceContext`
  * would 400, so we skip straight to an identity-only block built from the
  * already-authenticated request context (name/email/role/org). A 400 from the
  * dispatch degrades to that same identity-only block; any other failure
@@ -344,7 +344,7 @@ export async function buildCallerContextBlock(
       new Request(new URL("/api/me/context", origin).toString(), { headers: ctxHeaders }),
     );
     if (res.ok) return formatCallerContext((await res.json()) as CallerContext, { locale });
-    // No space context (e.g. requireAppContext rejected) — keep the
+    // No space context (e.g. requireSpaceContext rejected) — keep the
     // identity/role block rather than dropping context entirely.
     if (res.status === 400) return identityOnly();
     return "";

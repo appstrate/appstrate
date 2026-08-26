@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+
+import { SPACE_ID_RE } from "../../../lib/ids.ts";
 export const webhooksSchemas = {
   WebhookObject: {
     type: "object",
@@ -27,6 +29,7 @@ export const webhooksSchemas = {
       },
       spaceId: {
         type: ["string", "null"],
+        pattern: SPACE_ID_RE.source,
         description: "Space ID (spc_ prefix) when `level = 'space'`, otherwise null.",
       },
       url: { type: "string", format: "uri" },

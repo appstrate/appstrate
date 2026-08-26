@@ -2,6 +2,7 @@
 
 import { orgRoleEnum } from "@appstrate/db/schema";
 import { ACCEPTED_RUNTIME_TOOL_IDS } from "@appstrate/core/runtime-tools-catalog";
+import { SPACE_ID_RE } from "../lib/ids.ts";
 
 const ORG_ROLES = [...orgRoleEnum.enumValues];
 
@@ -858,6 +859,7 @@ export const schemas = {
       },
       spaceId: {
         type: "string",
+        pattern: SPACE_ID_RE.source,
         description: "Space ID (spc_ prefix) that owns this run",
       },
       metadata: {
@@ -1071,6 +1073,7 @@ export const schemas = {
       orgId: { type: "string" },
       spaceId: {
         type: "string",
+        pattern: SPACE_ID_RE.source,
         description: "Space ID (spc_ prefix) that owns this schedule",
       },
       name: { type: ["string", "null"] },
@@ -1636,7 +1639,7 @@ export const schemas = {
       "updatedAt",
     ],
     properties: {
-      id: { type: "string", description: "Space ID (spc_ prefix)" },
+      id: { type: "string", pattern: SPACE_ID_RE.source, description: "Space ID (spc_ prefix)" },
       object: { type: "string", enum: ["space"], description: "Object type" },
       orgId: { type: "string", description: "Organization ID" },
       name: { type: "string", description: "Human-readable space name" },

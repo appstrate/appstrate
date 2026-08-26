@@ -16,6 +16,7 @@ import * as jose from "jose";
 import { _resetCacheForTesting } from "@appstrate/env";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../../../../../test/helpers/auth.ts";
+import { prefixedId } from "../../../../../lib/ids.ts";
 
 const originalAppUrl = process.env.APP_URL;
 let jwksServer: ReturnType<typeof Bun.serve> | null = null;
@@ -149,7 +150,12 @@ describe("deferOrgResolution in auth pipeline", () => {
       headers: {
         Authorization: `Bearer ${token}`,
         "X-Org-Id": otherOrg.id,
-        "X-Space-Id": "spc_fake",
+        // Canonical id on purpose: `assertSpaceId` would reject a lookalike,
+        // and this test is about org resolution, not the space-id guard. It
+        // passes today only because `requireOrgContext` runs before
+        // `requireSpaceContext`; a fixture that depends on that ordering would
+        // fail on the fixture the day the order changes.
+        "X-Space-Id": prefixedId("spc"),
       },
     });
     // Not a member → org context middleware rejects

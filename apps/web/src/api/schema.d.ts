@@ -6935,7 +6935,7 @@ export interface operations {
                      *       "endUserId": null,
                      *       "apiKeyId": null,
                      *       "orgId": "org_r3t5w8y1z6",
-                     *       "spaceId": "spc_m4n5o6p7",
+                     *       "spaceId": "spc_1d4e7a90-3c21-4b6f-8e05-6a9c2f7b1d38",
                      *       "scheduleId": null,
                      *       "status": "pending",
                      *       "input": {
@@ -7280,7 +7280,7 @@ export interface operations {
                      *       "userId": "usr_r3t5w8y1z6",
                      *       "endUserId": null,
                      *       "orgId": "org_r3t5w8y1z6",
-                     *       "spaceId": "spc_r3t5w8y1z6",
+                     *       "spaceId": "spc_9c1f4a2e-7b30-4d58-9a61-2e5c8f0b3d47",
                      *       "name": "Weekday morning sort",
                      *       "enabled": true,
                      *       "cron_expression": "0 9 * * 1-5",
@@ -9120,7 +9120,7 @@ export interface operations {
                      *         {
                      *           "id": "eu_cm4jkl012",
                      *           "object": "end_user",
-                     *           "spaceId": "spc_cm4jkl013",
+                     *           "spaceId": "spc_2c5d8f1a-4b70-4e63-9d18-3a7f5c9e0b24",
                      *           "name": "Alice Martin",
                      *           "email": "alice@example.com",
                      *           "externalId": "usr_12345",
@@ -9212,7 +9212,7 @@ export interface operations {
                      * @example {
                      *       "id": "eu_cm4jkl012",
                      *       "object": "end_user",
-                     *       "spaceId": "spc_cm4jkl013",
+                     *       "spaceId": "spc_2c5d8f1a-4b70-4e63-9d18-3a7f5c9e0b24",
                      *       "name": "Alice Martin",
                      *       "email": "alice@example.com",
                      *       "externalId": "usr_12345",
@@ -9272,7 +9272,7 @@ export interface operations {
                      * @example {
                      *       "id": "eu_cm4jkl012",
                      *       "object": "end_user",
-                     *       "spaceId": "spc_cm4jkl013",
+                     *       "spaceId": "spc_2c5d8f1a-4b70-4e63-9d18-3a7f5c9e0b24",
                      *       "name": "Alice Martin",
                      *       "email": "alice@example.com",
                      *       "externalId": "usr_12345",
@@ -9369,7 +9369,7 @@ export interface operations {
                      * @example {
                      *       "id": "eu_cm4jkl012",
                      *       "object": "end_user",
-                     *       "spaceId": "spc_cm4jkl013",
+                     *       "spaceId": "spc_2c5d8f1a-4b70-4e63-9d18-3a7f5c9e0b24",
                      *       "name": "Alice Martin Updated",
                      *       "email": "alice@example.com",
                      *       "externalId": "usr_12345",
@@ -11370,12 +11370,12 @@ export interface operations {
                      *       "object": "library",
                      *       "spaces": [
                      *         {
-                     *           "id": "spc_default",
+                     *           "id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                      *           "name": "Default",
                      *           "isDefault": true
                      *         },
                      *         {
-                     *           "id": "spc_staging",
+                     *           "id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
                      *           "name": "Staging",
                      *           "isDefault": false
                      *         }
@@ -11389,7 +11389,7 @@ export interface operations {
                      *             "name": "Inbox Triage",
                      *             "description": "Sorts incoming Gmail threads into priority buckets.",
                      *             "installed_in": [
-                     *               "spc_default"
+                     *               "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"
                      *             ]
                      *           }
                      *         ],
@@ -11403,8 +11403,8 @@ export interface operations {
                      *             "name": "Gmail",
                      *             "description": "Google Mail OAuth integration.",
                      *             "installed_in": [
-                     *               "spc_default",
-                     *               "spc_staging"
+                     *               "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                     *               "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1"
                      *             ]
                      *           }
                      *         ]
@@ -17394,7 +17394,7 @@ export interface operations {
                      *       "endUserId": null,
                      *       "apiKeyId": null,
                      *       "orgId": "org_r3t5w8y1z6",
-                     *       "spaceId": "spc_m4n5o6p7",
+                     *       "spaceId": "spc_1d4e7a90-3c21-4b6f-8e05-6a9c2f7b1d38",
                      *       "scheduleId": null,
                      *       "status": "pending",
                      *       "input": {
@@ -17745,7 +17745,7 @@ export interface operations {
                      *       "endUserId": null,
                      *       "apiKeyId": null,
                      *       "orgId": "org_r3t5w8y1z6",
-                     *       "spaceId": "spc_m4n5o6p7",
+                     *       "spaceId": "spc_1d4e7a90-3c21-4b6f-8e05-6a9c2f7b1d38",
                      *       "scheduleId": "sched_cm1abc456def789",
                      *       "status": "success",
                      *       "input": {
@@ -17871,7 +17871,7 @@ export interface operations {
                      *       "endUserId": null,
                      *       "apiKeyId": null,
                      *       "orgId": "org_r3t5w8y1z6",
-                     *       "spaceId": "spc_m4n5o6p7",
+                     *       "spaceId": "spc_1d4e7a90-3c21-4b6f-8e05-6a9c2f7b1d38",
                      *       "scheduleId": null,
                      *       "status": "cancelled",
                      *       "input": {
@@ -18585,7 +18585,7 @@ export interface operations {
                      *       "userId": "usr_r3t5w8y1z6",
                      *       "endUserId": null,
                      *       "orgId": "org_r3t5w8y1z6",
-                     *       "spaceId": "spc_r3t5w8y1z6",
+                     *       "spaceId": "spc_9c1f4a2e-7b30-4d58-9a61-2e5c8f0b3d47",
                      *       "name": "Weekday morning sort",
                      *       "enabled": true,
                      *       "cron_expression": "0 9 * * 1-5",
@@ -18782,7 +18782,7 @@ export interface operations {
                      *       "object": "list",
                      *       "data": [
                      *         {
-                     *           "id": "spc_default001",
+                     *           "id": "spc_0a2b4c6d-8e10-4f32-9a54-b6c8d0e2f416",
                      *           "object": "space",
                      *           "orgId": "550e8400-e29b-41d4-a716-446655440000",
                      *           "name": "Default",
@@ -18795,7 +18795,7 @@ export interface operations {
                      *           "updatedAt": "2026-01-10T08:00:00Z"
                      *         },
                      *         {
-                     *           "id": "spc_cm1xyz789ghi012",
+                     *           "id": "spc_5b8c0e13-4f7a-4d92-b3c6-71e0a4d9f582",
                      *           "object": "space",
                      *           "orgId": "550e8400-e29b-41d4-a716-446655440000",
                      *           "name": "My SaaS App",
@@ -18860,7 +18860,7 @@ export interface operations {
                 content: {
                     /**
                      * @example {
-                     *       "id": "spc_cm1xyz789ghi012",
+                     *       "id": "spc_5b8c0e13-4f7a-4d92-b3c6-71e0a4d9f582",
                      *       "object": "space",
                      *       "orgId": "550e8400-e29b-41d4-a716-446655440000",
                      *       "name": "My SaaS App",
@@ -19692,7 +19692,7 @@ export interface operations {
                      *           "id": "wh_cm1abc123",
                      *           "object": "webhook",
                      *           "level": "space",
-                     *           "spaceId": "spc_cm4jkl013",
+                     *           "spaceId": "spc_8a3b6d9f-1e42-4c07-b5d8-6f0a2c4e8b13",
                      *           "url": "https://example.com/webhooks/appstrate",
                      *           "events": [
                      *             "run.success",
@@ -19785,7 +19785,7 @@ export interface operations {
                      *       "id": "wh_cm1abc123",
                      *       "object": "webhook",
                      *       "level": "space",
-                     *       "spaceId": "spc_cm4jkl013",
+                     *       "spaceId": "spc_8a3b6d9f-1e42-4c07-b5d8-6f0a2c4e8b13",
                      *       "url": "https://example.com/webhooks/appstrate",
                      *       "events": [
                      *         "run.success",
@@ -19840,7 +19840,7 @@ export interface operations {
                      *       "id": "wh_cm1abc123",
                      *       "object": "webhook",
                      *       "level": "space",
-                     *       "spaceId": "spc_cm4jkl013",
+                     *       "spaceId": "spc_8a3b6d9f-1e42-4c07-b5d8-6f0a2c4e8b13",
                      *       "url": "https://example.com/webhooks/appstrate",
                      *       "events": [
                      *         "run.success",
@@ -19901,7 +19901,7 @@ export interface operations {
                      *       "id": "wh_cm1abc123",
                      *       "object": "webhook",
                      *       "level": "space",
-                     *       "spaceId": "spc_cm4jkl013",
+                     *       "spaceId": "spc_8a3b6d9f-1e42-4c07-b5d8-6f0a2c4e8b13",
                      *       "url": "https://example.com/webhooks/appstrate",
                      *       "events": [
                      *         "run.success",

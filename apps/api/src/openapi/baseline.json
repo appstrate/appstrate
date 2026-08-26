@@ -1769,7 +1769,7 @@
                   "endUserId": null,
                   "apiKeyId": null,
                   "orgId": "org_r3t5w8y1z6",
-                  "spaceId": "spc_m4n5o6p7",
+                  "spaceId": "spc_1d4e7a90-3c21-4b6f-8e05-6a9c2f7b1d38",
                   "scheduleId": null,
                   "status": "pending",
                   "input": {
@@ -2216,7 +2216,7 @@
                   "endUserId": null,
                   "apiKeyId": null,
                   "orgId": "org_r3t5w8y1z6",
-                  "spaceId": "spc_m4n5o6p7",
+                  "spaceId": "spc_1d4e7a90-3c21-4b6f-8e05-6a9c2f7b1d38",
                   "scheduleId": null,
                   "status": "pending",
                   "input": {
@@ -2695,7 +2695,7 @@
                   "endUserId": null,
                   "apiKeyId": null,
                   "orgId": "org_r3t5w8y1z6",
-                  "spaceId": "spc_m4n5o6p7",
+                  "spaceId": "spc_1d4e7a90-3c21-4b6f-8e05-6a9c2f7b1d38",
                   "scheduleId": "sched_cm1abc456def789",
                   "status": "success",
                   "input": {
@@ -2954,7 +2954,7 @@
                   "endUserId": null,
                   "apiKeyId": null,
                   "orgId": "org_r3t5w8y1z6",
-                  "spaceId": "spc_m4n5o6p7",
+                  "spaceId": "spc_1d4e7a90-3c21-4b6f-8e05-6a9c2f7b1d38",
                   "scheduleId": null,
                   "status": "cancelled",
                   "input": {
@@ -4510,7 +4510,7 @@
                   "userId": "usr_r3t5w8y1z6",
                   "endUserId": null,
                   "orgId": "org_r3t5w8y1z6",
-                  "spaceId": "spc_r3t5w8y1z6",
+                  "spaceId": "spc_9c1f4a2e-7b30-4d58-9a61-2e5c8f0b3d47",
                   "name": "Weekday morning sort",
                   "enabled": true,
                   "cron_expression": "0 9 * * 1-5",
@@ -4604,7 +4604,7 @@
                   "userId": "usr_r3t5w8y1z6",
                   "endUserId": null,
                   "orgId": "org_r3t5w8y1z6",
-                  "spaceId": "spc_r3t5w8y1z6",
+                  "spaceId": "spc_9c1f4a2e-7b30-4d58-9a61-2e5c8f0b3d47",
                   "name": "Weekday morning sort",
                   "enabled": true,
                   "cron_expression": "0 9 * * 1-5",
@@ -17339,7 +17339,7 @@
                   "$ref": "#/components/schemas/SpaceObject"
                 },
                 "example": {
-                  "id": "spc_cm1xyz789ghi012",
+                  "id": "spc_5b8c0e13-4f7a-4d92-b3c6-71e0a4d9f582",
                   "object": "space",
                   "orgId": "550e8400-e29b-41d4-a716-446655440000",
                   "name": "My SaaS App",
@@ -17412,7 +17412,7 @@
                   "object": "list",
                   "data": [
                     {
-                      "id": "spc_default001",
+                      "id": "spc_0a2b4c6d-8e10-4f32-9a54-b6c8d0e2f416",
                       "object": "space",
                       "orgId": "550e8400-e29b-41d4-a716-446655440000",
                       "name": "Default",
@@ -17425,7 +17425,7 @@
                       "updatedAt": "2026-01-10T08:00:00Z"
                     },
                     {
-                      "id": "spc_cm1xyz789ghi012",
+                      "id": "spc_5b8c0e13-4f7a-4d92-b3c6-71e0a4d9f582",
                       "object": "space",
                       "orgId": "550e8400-e29b-41d4-a716-446655440000",
                       "name": "My SaaS App",
@@ -18136,7 +18136,7 @@
                 "example": {
                   "id": "eu_cm4jkl012",
                   "object": "end_user",
-                  "spaceId": "spc_cm4jkl013",
+                  "spaceId": "spc_2c5d8f1a-4b70-4e63-9d18-3a7f5c9e0b24",
                   "name": "Alice Martin",
                   "email": "alice@example.com",
                   "externalId": "usr_12345",
@@ -18318,7 +18318,7 @@
                     {
                       "id": "eu_cm4jkl012",
                       "object": "end_user",
-                      "spaceId": "spc_cm4jkl013",
+                      "spaceId": "spc_2c5d8f1a-4b70-4e63-9d18-3a7f5c9e0b24",
                       "name": "Alice Martin",
                       "email": "alice@example.com",
                       "externalId": "usr_12345",
@@ -18391,7 +18391,7 @@
                 "example": {
                   "id": "eu_cm4jkl012",
                   "object": "end_user",
-                  "spaceId": "spc_cm4jkl013",
+                  "spaceId": "spc_2c5d8f1a-4b70-4e63-9d18-3a7f5c9e0b24",
                   "name": "Alice Martin",
                   "email": "alice@example.com",
                   "externalId": "usr_12345",
@@ -18494,7 +18494,7 @@
                 "example": {
                   "id": "eu_cm4jkl012",
                   "object": "end_user",
-                  "spaceId": "spc_cm4jkl013",
+                  "spaceId": "spc_2c5d8f1a-4b70-4e63-9d18-3a7f5c9e0b24",
                   "name": "Alice Martin Updated",
                   "email": "alice@example.com",
                   "externalId": "usr_12345",
@@ -21154,12 +21154,12 @@
                   "object": "library",
                   "spaces": [
                     {
-                      "id": "spc_default",
+                      "id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                       "name": "Default",
                       "isDefault": true
                     },
                     {
-                      "id": "spc_staging",
+                      "id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
                       "name": "Staging",
                       "isDefault": false
                     }
@@ -21172,7 +21172,7 @@
                         "source": "local",
                         "name": "Inbox Triage",
                         "description": "Sorts incoming Gmail threads into priority buckets.",
-                        "installed_in": ["spc_default"]
+                        "installed_in": ["spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"]
                       }
                     ],
                     "skill": [],
@@ -21184,7 +21184,10 @@
                         "source": "system",
                         "name": "Gmail",
                         "description": "Google Mail OAuth integration.",
-                        "installed_in": ["spc_default", "spc_staging"]
+                        "installed_in": [
+                          "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                          "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1"
+                        ]
                       }
                     ]
                   }
@@ -22520,6 +22523,7 @@
           },
           "spaceId": {
             "type": "string",
+            "pattern": "^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
             "description": "Space ID (spc_ prefix) that owns this run"
           },
           "metadata": {
@@ -22757,6 +22761,7 @@
           },
           "spaceId": {
             "type": "string",
+            "pattern": "^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
             "description": "Space ID (spc_ prefix) that owns this schedule"
           },
           "name": {
@@ -23636,6 +23641,7 @@
         "properties": {
           "id": {
             "type": "string",
+            "pattern": "^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
             "description": "Space ID (spc_ prefix)"
           },
           "object": {

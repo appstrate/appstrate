@@ -343,13 +343,13 @@ All four subcommands respect the global `--profile <name>` flag and talk to `GET
 | `org current`           | Print the pinned org id to stdout. Exits 1 with a hint when no org is pinned — designed for `if` / shell prompts.                        |
 | `org create [name]`     | Create a new org and pin it. With no argument, prompt for name + optional slug. Use `--slug <slug>` for an explicit kebab-case override. |
 
-**Cascade — the space pin follows the org pin.** Every `org switch` / `org create` clears the current `spaceId` and re-pins the new org's default space in the same atomic operation. This keeps `appstrate api GET /api/agents` working immediately after switching — without the cascade the next call would return `404 Space not found in this organization`.
+**Cascade — the space pin follows the org pin.** Every `org switch` / `org create` clears the current `spaceId` and re-pins the new org's default space in the same atomic operation. This keeps `appstrate api GET /api/agents` working immediately after switching — without the cascade the next call would return `404 Space '<id>' not found in this organization` (`apps/api/src/middleware/space-context.ts:159`) — the message the Troubleshooting section below indexes by.
 
 ---
 
 ### `appstrate space`
 
-Manage the space pinned on the active profile. `login` auto-pins the default space in the pinned org (see above); `space switch` / `space create` let you change the pin without re-running the device flow. The pinned space id is sent as `X-Space-Id` on every `appstrate api` call — required for space-scoped routes (agents, runs, schedules, webhooks, api-keys, notifications, packages, integrations, end-users).
+Manage the space pinned on the active profile. `login` auto-pins the default space in the pinned org (see above); `space switch` / `space create` let you change the pin without re-running the device flow. The pinned space id is sent as `X-Space-Id` on every `appstrate api` call — required for space-scoped routes (agents, runs, schedules, api-keys, notifications, packages, integrations, end-users, uploads, files). `/api/webhooks` is not one of them — it takes an explicit `spaceId` field instead.
 
 ```sh
 appstrate space list            # enumerate spaces in the pinned org; pinned row is marked *, default row tagged [default]

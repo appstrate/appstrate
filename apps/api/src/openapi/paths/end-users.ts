@@ -72,7 +72,7 @@ export const endUsersPaths = {
               example: {
                 id: "eu_cm4jkl012",
                 object: "end_user",
-                spaceId: "spc_cm4jkl013",
+                spaceId: "spc_2c5d8f1a-4b70-4e63-9d18-3a7f5c9e0b24",
                 name: "Alice Martin",
                 email: "alice@example.com",
                 externalId: "usr_12345",
@@ -210,7 +210,7 @@ export const endUsersPaths = {
                   {
                     id: "eu_cm4jkl012",
                     object: "end_user",
-                    spaceId: "spc_cm4jkl013",
+                    spaceId: "spc_2c5d8f1a-4b70-4e63-9d18-3a7f5c9e0b24",
                     name: "Alice Martin",
                     email: "alice@example.com",
                     externalId: "usr_12345",
@@ -253,7 +253,7 @@ export const endUsersPaths = {
               example: {
                 id: "eu_cm4jkl012",
                 object: "end_user",
-                spaceId: "spc_cm4jkl013",
+                spaceId: "spc_2c5d8f1a-4b70-4e63-9d18-3a7f5c9e0b24",
                 name: "Alice Martin",
                 email: "alice@example.com",
                 externalId: "usr_12345",
@@ -326,7 +326,7 @@ export const endUsersPaths = {
               example: {
                 id: "eu_cm4jkl012",
                 object: "end_user",
-                spaceId: "spc_cm4jkl013",
+                spaceId: "spc_2c5d8f1a-4b70-4e63-9d18-3a7f5c9e0b24",
                 name: "Alice Martin Updated",
                 email: "alice@example.com",
                 externalId: "usr_12345",

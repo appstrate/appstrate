@@ -31,8 +31,10 @@ appstrate login --instance https://app.example.com
 appstrate org current
 
 # 3b. Confirm which space is pinned (X-Space-Id sent on every call).
-#     Space-scoped routes (agents, runs, schedules, webhooks, api-keys,
-#     notifications, packages, integrations, end-users) require this.
+#     Space-scoped routes (agents, runs, schedules, api-keys, notifications,
+#     packages, integrations, end-users, uploads, files) require this.
+#     Not webhooks: `/api/webhooks` carries its own `spaceId` field and is
+#     absent from SPACE_SCOPED_PREFIXES.
 #     `login` cascades into the default space
 #     automatically, so this usually already prints a value.
 appstrate space current
@@ -43,24 +45,29 @@ appstrate openapi list --tag runs --json
 # 5. Inspect the operation you want. --json returns the fully dereferenced
 #    schema (request body, responses, all $refs inlined) — ideal for
 #    building a request body without re-fetching the schema.
-appstrate openapi show createRun --json
+appstrate openapi show runAgent --json
 
-# 6. List existing agents, pick one
-appstrate api GET /api/agents | jq '.[] | {id, name, slug}'
+# 6. List existing agents, pick one. The response is a Stripe-style
+#    envelope — `{ object, data, hasMore }` — so iterate `.data[]`, not
+#    `.[]`. Each item carries `id` (already `@scope/name`), `display_name`
+#    and `scope`; there is no `name` or `slug` field.
+appstrate api GET /api/agents | jq '.data[] | {id, display_name, scope}'
 
-# 7. Trigger a run. -d @file / -d @- / -d '{"…"}' all work like curl.
+# 7. Trigger a run. The route is keyed by the scoped package name, NOT by
+#    an opaque id — `POST /api/agents/{scope}/{name}/run`, with the `@`
+#    part of the scope segment. -d @file / -d @- / -d '{"…"}' all work
+#    like curl.
 echo '{"input": {"query": "hello"}}' \
-  | appstrate api POST /api/agents/agt_123/run -d @-
+  | appstrate api POST '/api/agents/@acme/email-sorter/run' -d @-
 ```
 
-The server responds via Server-Sent Events. To consume the stream in an agent-friendly way:
+**That POST is fire-and-forget**: it returns `201` with the created run resource as JSON (`id`, `status`, `model_label`, …) and nothing streams from it. Progress is a separate GET on the realtime endpoint:
 
 ```sh
-# SSE stream — line-buffered, one JSON event per "data:" line
-appstrate api POST /api/agents/agt_123/run \
-  -d @input.json \
-  -H 'Accept: text/event-stream' \
-  -N                                 # disable output buffering
+# SSE stream — one JSON event per "data:" line, until the run finishes.
+# `appstrate api` writes response chunks through as they arrive; there is
+# no buffering flag to disable.
+appstrate api GET /api/realtime/runs/run_cm1abc123def456
 ```
 
 ## Rules of engagement

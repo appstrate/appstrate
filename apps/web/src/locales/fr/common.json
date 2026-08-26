@@ -71,7 +71,7 @@
   "validation.emailFormat": "Adresse email invalide",
   "validation.urlFormat": "URL invalide",
   "test.failed": "Échec du test",
-  "dashboard.welcome": "Bienvenue, {{name}} 👋",
+  "dashboard.welcome": "Bienvenue, {{name}} \ud83d\udc4b",
   "notifications.ariaLabel": "Notifications",
   "notifications.title": "Notifications",
   "notifications.empty": "Aucune notification",

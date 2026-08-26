@@ -38,6 +38,7 @@ import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { forbidden, invalidRequest, methodNotAllowed, notFound } from "../../lib/errors.ts";
 import { getActor } from "../../lib/actor.ts";
+import { assertSpaceId } from "../../lib/ids.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import { defaultSpaceForOrg, validateSpaceInOrg } from "../../middleware/space-context.ts";
 import { rateLimitMcp } from "../../middleware/rate-limit.ts";
@@ -203,6 +204,11 @@ async function resolveMcpSpaceScope(c: Context<AppEnv>, orgId: string): Promise<
   }
   const active = await defaultSpaceForOrg(orgId);
   if (!active) throw invalidRequest("No space available for this organization.");
+  // Default-space fallback: the id comes straight off the `spaces` row and
+  // never passes through `validateSpaceInOrg`, so the shape check happens
+  // here. Same reason as the twin fallback in `requireSpaceContext` — an
+  // un-migrated `spaces` table would otherwise slip in unnoticed.
+  assertSpaceId(active.id);
   return { orgId, spaceId: active.id };
 }
 

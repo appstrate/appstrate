@@ -13,6 +13,7 @@ import { forbidden, unauthorized } from "../lib/errors.ts";
 import { validateApiKey } from "../services/api-keys.ts";
 import { resolveApiKeyPermissions } from "../lib/permissions.ts";
 import { validateSpaceInOrg } from "../middleware/space-context.ts";
+import { assertSpaceId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
 import type { OrgRole } from "../types/index.ts";
 
@@ -116,6 +117,12 @@ async function validateSSEAuth(c: {
     if (!permissions.has("runs:read")) {
       throw forbidden("API key does not have the 'runs:read' scope");
     }
+
+    // The key's `spaceId` comes straight off the `api_keys` row and never
+    // reaches `validateSpaceInOrg` (the key already proves org+space binding),
+    // so this is the shape check for that path — an un-migrated `api_keys`
+    // table would otherwise open a stream on an `app_` id in silence.
+    assertSpaceId(keyInfo.spaceId);
 
     return {
       userId: keyInfo.userId,

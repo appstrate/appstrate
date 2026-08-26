@@ -513,6 +513,18 @@ Data access uses a **two-tier isolation model**: all resources are scoped by `or
 | `webhooks`          | Org + Space | Space admins  | Space admins            | Space admins            | Space admins            |
 | `api_keys`          | Org + Space | Space admins  | Space admins            | —                       | Space admins            |
 
+Credential connections carry the same model with a per-actor owner on top, so they get their own row:
+
+| Table                     | Scoping | SELECT                    | INSERT                  | UPDATE                        | DELETE |
+| ------------------------- | ------- | ------------------------- | ----------------------- | ----------------------------- | ------ |
+| `integration_connections` | Space   | Owner or shared, in space | Own user + space member | Owner (metadata: + org admin) | Owner  |
+
+Three things that row cannot say in a cell:
+
+- **`Scoping` is `Space`, not `Org + Space`, because the table has no `org_id` column** (`packages/db/src/schema/integrations.ts:49`) — `space_id` is `NOT NULL` with `ON DELETE CASCADE` (`:61`). The org tier is still enforced, procedurally rather than by a predicate: `/api/integrations` is in `SPACE_SCOPED_PREFIXES` (`middleware/space-context.ts:40`) so the space is validated against the org before a handler runs, and the service re-asserts it with `assertSpaceInScope` (`services/spaces.ts:81`) before every write. Same shape as `space_packages` above.
+- **Reads admit shared rows; writes never do.** A connection's owner is exactly one of `user_id` / `end_user_id` (DB CHECK `integration_conn_exactly_one_owner`), and `shared_with_org = true` widens **reads** to any actor in the same space — `actorOrSharedFilter` on SELECT vs `actorFilter` on UPDATE/DELETE (`apps/api/src/lib/actor.ts:44`, `:96`). Non-owned rows come back with `identity_claims: null` (`services/integration-connections.ts:2438`).
+- **The UPDATE cell has two answers.** A credential rewrite is owner-only in SQL (`services/integration-connections.ts:2204`). The metadata `PATCH` is SQL-unscoped and gated entirely at the route — owner **or** org admin, with `shared_with_org` itself restricted to the owner (`routes/integrations.ts:1183`–`:1223`). The system token-refresh write-back is keyed by id alone (`:2274`), reached only from a row already resolved through a scoped read.
+
 Space-context middleware resolves the space from the `X-Space-Id` header (session auth) or from the API key's own `spaceId`:
 
 ```typescript

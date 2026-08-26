@@ -511,7 +511,7 @@
   "onboarding.waitingSubtitle": "This Appstrate instance runs in invitation-only mode. Ask an administrator to invite you to an existing organization to access the platform.",
   "onboarding.waitingSignedInAs": "Signed in as {{email}}",
   "onboarding.waitingLogout": "Sign out",
-  "onboarding.backToSpace": "Back to space",
+  "onboarding.backToApp": "Back to app",
   "onboarding.createTitle": "Create your organization",
   "onboarding.createSubtitle": "An organization groups your agents, integrations, and members.",
   "onboarding.createAction": "Create",

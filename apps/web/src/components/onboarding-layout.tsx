@@ -132,7 +132,7 @@ export function OnboardingLayout({
           <div className="absolute right-0 flex items-center gap-1">
             {orgs.length > 0 && (
               <Button variant="ghost" size="sm" asChild>
-                <Link to="/">{t("onboarding.backToSpace")}</Link>
+                <Link to="/">{t("onboarding.backToApp")}</Link>
               </Button>
             )}
             <NavUser minimal />

@@ -39,6 +39,23 @@ export interface Config {
   profiles: Record<string, Profile>;
 }
 
+/**
+ * Raised by `readConfig` when a profile on disk still pins a key this CLI
+ * retired. Typed — and nothing else about it is special — so that
+ * `resolveActiveProfileOrNull` below can tell "this profile is unusable"
+ * apart from "there is no usable profile" without re-deriving the rule.
+ *
+ * Module-local on purpose. Those two functions are the whole surface; an
+ * exported class would invite a second `catch (e) { if (e instanceof …) }`
+ * elsewhere, which is exactly the parallel mechanism this shape avoids.
+ */
+class RetiredProfileKeyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RetiredProfileKeyError";
+  }
+}
+
 /** Fresh empty config. Always return a NEW object here — callers mutate
  * `profiles` in-place before calling `writeConfig`, so a shared module-
  * level literal would accumulate writes across calls and silently
@@ -112,17 +129,25 @@ export async function readConfig(): Promise<Config> {
     // from disk with no warning. The retired key is read only to raise this
     // error; its value never reaches any behaviour.
     //
-    // This sits in `readConfig` because every command path goes through it.
-    // That is also why the fix it names starts with a file edit: while the
-    // retired key is on disk, no command can run — `appstrate space switch`
-    // included. Deleting the line is the whole repair, not a workaround: the
-    // stored value is an `app_…` id, and spaces are `spc_…`, so it could not
-    // have been carried over even if this were a rename.
+    // This sits in `readConfig` because every command path goes through it,
+    // and it is the ONLY place the refusal is expressed. Commands that
+    // tolerate a missing profile must not swallow it: they call
+    // `resolveActiveProfileOrNull`, which re-throws `RetiredProfileKeyError`
+    // and returns `null` for everything else. That is why the fix this error
+    // names starts with a file edit — while the retired key is on disk, no
+    // command can run, `appstrate space switch` and `appstrate run` included.
+    // Deleting the line is the whole repair, not a workaround: the stored
+    // value is an `app_…` id, and spaces are `spc_…`, so it could not have
+    // been carried over even if this were a rename.
     //
-    // Delete this check once no profile on disk can still carry
-    // `applicationId` — i.e. one release after every user has re-pinned.
+    // EXPIRES 2027-03-01 — delete this check (and `RetiredProfileKeyError`,
+    // `resolveActiveProfileOrNull`'s re-throw and their tests) on or after
+    // that date, unconditionally. A date, not "once no profile still carries
+    // the key": nobody can observe what is on users' disks, so that condition
+    // never comes true and the check would live forever
+    // (`docs/NO_TRANSITIONAL_CODE.md` §1).
     if ("applicationId" in row) {
-      throw new Error(
+      throw new RetiredProfileKeyError(
         `Profile "${name}" in ${getConfigPath()} was written by an older Appstrate CLI: ` +
           `it pins the retired key "applicationId", replaced by "spaceId". ` +
           `Delete that line from the file, then re-pin with: appstrate space switch`,
@@ -204,6 +229,31 @@ export async function resolveActiveProfile(
   const config = await readConfig();
   const profileName = resolveProfileName(explicit, config);
   return { profileName, profile: config.profiles[profileName] };
+}
+
+/**
+ * `resolveActiveProfile` for callers that can proceed without a profile at
+ * all — `appstrate run` with an `ask_…` API key is the whole reason this
+ * exists. An unreadable or unparseable `config.toml` degrades to `null` so a
+ * corrupt file cannot block a run that never needed the file.
+ *
+ * `RetiredProfileKeyError` is deliberately NOT degraded. It is the one error
+ * here that says "the file is fine, but this CLI refuses it" — swallowing it
+ * turned a precise, fixable diagnosis into "requires a logged-in profile or
+ * an API key — run `appstrate login`", which is both wrong (the user IS
+ * logged in) and unactionable (`login` then hits the same refusal). The
+ * refusal itself still lives only in `readConfig`; this function just
+ * declines to hide it.
+ */
+export async function resolveActiveProfileOrNull(
+  explicit: string | undefined,
+): Promise<{ profileName: string; profile: Profile | undefined } | null> {
+  try {
+    return await resolveActiveProfile(explicit);
+  } catch (err) {
+    if (err instanceof RetiredProfileKeyError) throw err;
+    return null;
+  }
 }
 
 /**

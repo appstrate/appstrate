@@ -55,7 +55,17 @@ describe("Webhooks API", () => {
       expect(body.events).toContain("run.success");
     });
 
-    it("rejects space webhook with invalid spaceId prefix", async () => {
+    /**
+     * `spaceId` shape enforcement on this route goes through the same
+     * `assertSpaceId` as `X-Space-Id`, so the diagnostics must be the same
+     * two: "retired prefix, run the migration" vs "malformed".
+     *
+     * These assertions pin the CONSTRAINT, not the prefix. `toContain("spc_")`
+     * would pass for a rule that only checked the prefix, which is exactly the
+     * rule this route must NOT have — the id has to be `spc_` + a canonical
+     * UUID, and a `spc_`-prefixed id that isn't one has to be rejected.
+     */
+    it("rejects a space webhook whose spaceId is not a space id at all", async () => {
       const res = await app.request("/api/webhooks", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -68,7 +78,55 @@ describe("Webhooks API", () => {
       });
       expect(res.status).toBe(400);
       const body = (await res.json()) as any;
-      expect(body.detail).toContain("spc_");
+      expect(body.detail).toContain("Malformed space id");
+      expect(body.detail).toContain("canonical UUID");
+      expect(body.param).toBe("spaceId");
+    });
+
+    // `spc_` prefix, no canonical UUID. Rejected on shape, not on prefix.
+    for (const spaceId of [
+      "spc_1",
+      "spc_2f1c6d849a524f2bb1a70c9d3e5f7a10",
+      "spc_2F1C6D84-9A52-4F2B-B1A7-0C9D3E5F7A10",
+      "spc_2f1c6d84-9a52-4f2b-0c9d3e5f7a10",
+    ]) {
+      it(`rejects the malformed space id '${spaceId}'`, async () => {
+        const res = await app.request("/api/webhooks", {
+          method: "POST",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+          body: JSON.stringify({
+            level: "space",
+            spaceId,
+            url: "https://example.com/hook",
+            events: ["run.success"],
+          }),
+        });
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as any;
+        expect(body.detail).toContain("Malformed space id");
+        expect(body.detail).not.toContain("retired");
+      });
+    }
+
+    it("rejects a retired `app_` spaceId with the migration diagnostic", async () => {
+      const res = await app.request("/api/webhooks", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          level: "space",
+          spaceId: "app_2f1c6d84-9a52-4f2b-b1a7-0c9d3e5f7a10",
+          url: "https://example.com/hook",
+          events: ["run.success"],
+        }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as any;
+      expect(body.code).toBe("invalid_request");
+      expect(body.param).toBe("spaceId");
+      // Same diagnostic the `X-Space-Id` path gives — one implementation.
+      expect(body.detail).toContain("retired");
+      expect(body.detail).toContain("pre-rename data");
+      expect(body.detail).toContain("migration");
     });
 
     it("returns secret only at creation", async () => {
@@ -87,6 +145,31 @@ describe("Webhooks API", () => {
   });
 
   describe("GET /api/webhooks", () => {
+    // The `?spaceId=` filter shares `assertSpaceId` with the create body and
+    // with `X-Space-Id` — same shape, same two diagnostics, one implementation.
+    it("400s a malformed `?spaceId=` on shape, not on prefix", async () => {
+      const res = await app.request("/api/webhooks?spaceId=spc_1", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as any;
+      expect(body.detail).toContain("Malformed space id");
+      expect(body.detail).toContain("canonical UUID");
+      expect(body.param).toBe("spaceId");
+    });
+
+    it("400s a retired `app_` `?spaceId=` with the migration diagnostic", async () => {
+      const res = await app.request(
+        "/api/webhooks?spaceId=app_2f1c6d84-9a52-4f2b-b1a7-0c9d3e5f7a10",
+        { headers: authHeaders(ctx) },
+      );
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as any;
+      expect(body.detail).toContain("retired");
+      expect(body.detail).toContain("pre-rename data");
+      expect(body.detail).toContain("migration");
+    });
+
     it("lists space-level webhooks when spaceId is passed", async () => {
       await createWebhook();
       await createWebhook({ url: "https://example.com/webhook2" });

@@ -34,6 +34,7 @@
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { sql } from "drizzle-orm";
 import { db, toRows, getPGliteClient, reservePgConnection } from "@appstrate/db/client";
+import { SPACE_ID_RE } from "../../../src/lib/ids.ts";
 
 const SCRIPT = new URL(
   "../../../../../scripts/migration/0003-application-ids-to-space-ids.sql",
@@ -49,8 +50,6 @@ const APP_B = "app_2b2b2b2b-2222-4222-8222-222222222222";
 const SPC_A = "spc_1a1a1a1a-1111-4111-8111-111111111111";
 const SPC_B = "spc_2b2b2b2b-2222-4222-8222-222222222222";
 
-const SPACE_ID_RE = /^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
 /**
  * Run a multi-statement SQL script. `db.execute` speaks the extended protocol
  * (one statement per call) and the script is a `BEGIN … COMMIT` block full of
@@ -61,20 +60,85 @@ const SPACE_ID_RE = /^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
 async function execScript(source: string): Promise<void> {
   const pglite = getPGliteClient();
   if (pglite) {
-    await pglite.exec(source);
+    try {
+      await pglite.exec(source);
+    } catch (error) {
+      await endAbortedTransaction((s) => pglite.exec(s));
+      throw error;
+    }
     return;
   }
   const conn = await reservePgConnection();
   if (!conn) throw new Error("no raw database connection available");
   try {
     await conn.sql.unsafe(source);
+  } catch (error) {
+    await endAbortedTransaction((s) => conn.sql.unsafe(s));
+    throw error;
   } finally {
     conn.release();
   }
 }
 
+/**
+ * Clear an aborted transaction left behind by a failed script.
+ *
+ * Both backends abandon a multi-statement script at the FIRST error and never
+ * reach the statements after it — including the trailing `COMMIT`. A script that
+ * opens its own transaction (the operator script does, and so does anything
+ * fixture-shaped that borrows the idiom) therefore leaves the session inside an
+ * OPEN, ABORTED transaction. Every subsequent statement on it fails with
+ * `25P02 current transaction is aborted`, which in tier 0 is the single shared
+ * PGlite session and in tier 3 is a pooled connection handed straight to the
+ * next caller.
+ *
+ * That turns one broken script into a cascade of unrelated failures across the
+ * rest of the process — and, worse, would take this file's own catalog restore
+ * down with it, which is the one thing that must never fail. `ROLLBACK` outside
+ * a transaction is a no-op warning, so this is safe on the paths where the
+ * script never opened one.
+ */
+async function endAbortedTransaction(exec: (sql: string) => Promise<unknown>): Promise<void> {
+  try {
+    await exec("ROLLBACK");
+  } catch {
+    /* nothing to roll back */
+  }
+}
+
 async function replayScript(): Promise<void> {
   await execScript(await Bun.file(SCRIPT).text());
+}
+
+/**
+ * Restore the catalog no matter what the body did.
+ *
+ * This file is the only one in `test/integration/db/` that mutates the shared
+ * CATALOG rather than just rows — `legacy-permission-scope-migration` and
+ * `finish-file-rename-migration`, the precedents, are pure DML over
+ * `truncateAll()`. Catalog residue does not stop at the file boundary: the whole
+ * suite runs in ONE Bun process against ONE database, so anything left behind
+ * here is the baseline every later file sees.
+ *
+ * The dangerous shape is the setup below, which must DROP the three `level`
+ * CHECKs to insert pre-rename fixtures and then put them back. Run as a plain
+ * sequence, a failure anywhere between the two — a seed that collides, a fixture
+ * that trips a different constraint — leaves `webhooks` and `oauth_clients` with
+ * no `level` CHECK at all for the rest of the process. Nothing fails at that
+ * point: later files write only legal values, so the missing constraints are
+ * invisible and simply stop being enforced.
+ *
+ * `finally` closes that. Wrapping the pair in a SQL transaction does not: both
+ * backends abandon a multi-statement script at the first error, so the trailing
+ * `COMMIT` is never reached and the connection is left in an aborted
+ * transaction (`25P02`) that poisons every query after it.
+ */
+async function withCatalogRestored(body: () => Promise<void>, restore: string): Promise<void> {
+  try {
+    await body();
+  } finally {
+    await execScript(restore);
+  }
 }
 
 async function rows<T = Record<string, unknown>>(query: string): Promise<T[]> {
@@ -114,11 +178,87 @@ const READD_LEVEL_CHECKS_NOT_VALID = `
     NOT VALID;
 `;
 
+/**
+ * A stand-in for the two NOTIFY triggers the script disables in step 2 and
+ * re-enables in step 6.
+ *
+ * Those two triggers are NOT in this database. `createNotifyTriggers()` is
+ * called from exactly one place — `bootBackground()` in `apps/api/src/lib/
+ * boot.ts` — and the test harness never boots the API, so every `DISABLE` /
+ * `ENABLE` the script aims at them is a guarded no-op here. Deleting steps 2
+ * and 6 from the script outright therefore changed no test outcome: the whole
+ * fan-out suppression they exist for was untested.
+ *
+ * So install triggers under THE SAME NAMES, on the same tables, with the same
+ * firing conditions, bound to a function that records instead of notifying. The
+ * script disables by name, so it acts on these exactly as it would on the real
+ * ones, and the recording table answers the question `pg_notify` cannot be asked
+ * from here: did the trigger fire while the id rewrite was running?
+ *
+ * Nothing real is replaced — `notify_run_change()` and
+ * `notify_integration_connection_change()` are untouched, and the probe is
+ * installed and dropped inside one test.
+ *
+ * `runs_notify_update_trigger`'s WHEN clause is copied verbatim from
+ * `createNotifyTriggers()` rather than reduced to the one column the script
+ * writes: a guard that fires more narrowly than the real one would turn a real
+ * notification storm into a silent pass.
+ */
+const PROBE_INSTALL = `
+  CREATE TABLE _m0003_notify_probe (tgname text NOT NULL, op text NOT NULL);
+  CREATE FUNCTION _m0003_notify_probe_fn() RETURNS TRIGGER AS $fn$
+  BEGIN
+    INSERT INTO _m0003_notify_probe VALUES (TG_NAME, TG_OP);
+    IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+    RETURN NEW;
+  END;
+  $fn$ LANGUAGE plpgsql;
+  CREATE TRIGGER runs_notify_update_trigger
+    AFTER UPDATE ON runs
+    FOR EACH ROW
+    WHEN (
+      OLD.id IS DISTINCT FROM NEW.id
+      OR OLD.package_id IS DISTINCT FROM NEW.package_id
+      OR OLD.status IS DISTINCT FROM NEW.status
+      OR OLD.user_id IS DISTINCT FROM NEW.user_id
+      OR OLD.end_user_id IS DISTINCT FROM NEW.end_user_id
+      OR OLD.org_id IS DISTINCT FROM NEW.org_id
+      OR OLD.space_id IS DISTINCT FROM NEW.space_id
+      OR OLD.schedule_id IS DISTINCT FROM NEW.schedule_id
+      OR OLD.error IS DISTINCT FROM NEW.error
+      OR OLD.started_at IS DISTINCT FROM NEW.started_at
+      OR OLD.completed_at IS DISTINCT FROM NEW.completed_at
+      OR OLD.duration IS DISTINCT FROM NEW.duration
+    )
+    EXECUTE FUNCTION _m0003_notify_probe_fn();
+  CREATE TRIGGER integration_connections_notify_trigger
+    AFTER INSERT OR UPDATE OR DELETE ON integration_connections
+    FOR EACH ROW EXECUTE FUNCTION _m0003_notify_probe_fn();
+`;
+
+const PROBE_DROP = `
+  DROP TRIGGER IF EXISTS runs_notify_update_trigger ON runs;
+  DROP TRIGGER IF EXISTS integration_connections_notify_trigger ON integration_connections;
+  DROP FUNCTION IF EXISTS _m0003_notify_probe_fn();
+  DROP TABLE IF EXISTS _m0003_notify_probe;
+`;
+
+/** The names `createNotifyTriggers()` owns. See PROBE_INSTALL. */
+const NOTIFY_TRIGGER_NAMES = [
+  "runs_notify_insert_trigger",
+  "runs_notify_update_trigger",
+  "run_logs_notify_trigger",
+  "integration_connections_notify_trigger",
+];
+
 const CLEANUP = `
   DELETE FROM device_codes WHERE id LIKE 'dc_m0003%';
   DELETE FROM oauth_clients WHERE client_id LIKE 'cli_m0003%';
   DELETE FROM storage_deletion_jobs WHERE id LIKE 'sdj_m0003%';
   DELETE FROM audit_events WHERE org_id = '${ORG}';
+  DELETE FROM runs WHERE id LIKE 'run_m0003%';
+  DELETE FROM integration_connections WHERE account_id LIKE 'acct_m0003%';
+  DELETE FROM packages WHERE id = '@m0003/agent';
   DELETE FROM organizations WHERE id = '${ORG}';
   DELETE FROM "session" WHERE id LIKE 'sess_m0003%';
   DELETE FROM "user" WHERE id LIKE 'u_m0003%';
@@ -157,14 +297,40 @@ const SEED = `
   INSERT INTO end_users (id, space_id, org_id, email)
   VALUES ('eu_m0003', '${APP_A}', '${ORG}', 'eu.m0003@x.test');
 
+  -- runs and integration_connections are seeded for TWO reasons, both of
+  -- them about making an assertion mean something.
+  --
+  -- 1. The survivor sweep below iterates all eighteen columns that reference
+  --    spaces, but a column with no row trivially reports zero app_
+  --    survivors BEFORE the script has done anything. Only the seven tables
+  --    seeded above carried rows, so eleven of the eighteen were passing
+  --    vacuously. These two close the two that matter most: runs is the
+  --    largest table the rewrite touches in production, and
+  --    integration_connections is the other table whose NOTIFY trigger the
+  --    script disables.
+  -- 2. Steps 2 and 6 of the script disable and re-enable exactly those two
+  --    triggers so the id rewrite does not queue one pg_notify per historical
+  --    row. With no row on either table there was nothing for those steps to
+  --    suppress, so deleting both from the script changed no test outcome. The
+  --    trigger test below now watches them fire.
+  INSERT INTO packages (id, org_id, type, created_by)
+  VALUES ('@m0003/agent', '${ORG}', 'agent', 'u_m0003_platform');
+
+  INSERT INTO runs (id, org_id, space_id, package_id, user_id, status)
+  VALUES ('run_m0003_a', '${ORG}', '${APP_A}', '@m0003/agent', 'u_m0003_platform', 'success');
+
+  INSERT INTO integration_connections
+    (integration_package_id, auth_key, account_id, space_id, user_id, credentials_encrypted)
+  VALUES ('@m0003/agent', 'primary', 'acct_m0003', '${APP_A}', 'u_m0003_platform', 'enc_m0003');
+
   INSERT INTO audit_events (org_id, space_id, actor_type, actor_id, action, resource_type, resource_id)
   VALUES ('${ORG}', '${APP_A}', 'user', 'u_m0003_platform', 'application.created', 'application', '${APP_A}');
 
   INSERT INTO files (id, org_id, space_id, purpose, storage_key, name, mime, size, sha256) VALUES
     ('file_m0003_a', '${ORG}', '${APP_A}', 'agent_output',
      'files/${APP_A}/file_m0003_a/report.html', 'report.html', 'text/html', 1, 'x'),
-    -- NEGATIVE CONTROL: a FILENAME carrying the retired prefix. The rewrite is
-    -- pinned to the segment after the first slash, so this must survive.
+    -- A FILENAME carrying the retired prefix, alongside a space segment that
+    -- also carries it: no part of either is rewritten.
     ('file_m0003_b', '${ORG}', '${APP_B}', 'agent_output',
      'files/${APP_B}/file_m0003_b/app_notes.md', 'app_notes.md', 'text/markdown', 1, 'y');
 
@@ -175,12 +341,12 @@ const SEED = `
   INSERT INTO storage_deletion_jobs (id, bucket, storage_key, reason) VALUES
     ('sdj_m0003_1', 'files',        '${APP_A}/file_m0003_a/report.html', 'application_deleted'),
     ('sdj_m0003_2', 'uploads',      '${APP_A}/upl_m0003_a/a.txt',        'upload_expired'),
-    -- NEGATIVE CONTROL: a RUN-workspace key. Segment 1 is a run id, not a space
-    -- id, so the bucket filter — not the shape — is what must keep it out.
+    -- A RUN-workspace key whose segment 1 is a run id that looks exactly like
+    -- a space id.
     ('sdj_m0003_3', 'run-workspace', 'app_lookalike_run/files/brief.pdf', 'run_workspace_deleted'),
-    -- NEGATIVE CONTROL: an owner namespace in a third bucket.
+    -- An owner namespace in a third bucket.
     ('sdj_m0003_4', 'agent-packages', 'app_owner/pkg/1.0.0.afps',         'version_deleted'),
-    -- NEGATIVE CONTROL for the LIKE-escape, in a bucket the rewrite DOES reach.
+    -- A LIKE 'app_%' escape lookalike, in a bucket a rewrite would target.
     ('sdj_m0003_5', 'files',        'appXsentinel/file_x/a.txt',          'file_deleted');
 
   INSERT INTO webhooks (id, org_id, space_id, level, url, events, secret) VALUES
@@ -206,17 +372,23 @@ const SEED = `
 describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary become `space`", () => {
   beforeEach(async () => {
     await execScript(CLEANUP);
-    await execScript(DROP_LEVEL_CHECKS);
-    await execScript(SEED);
-    await execScript(READD_LEVEL_CHECKS_NOT_VALID);
+    // The three CHECKs must never be left dropped, whatever the seed does.
+    await withCatalogRestored(async () => {
+      await execScript(DROP_LEVEL_CHECKS);
+      await execScript(SEED);
+    }, READD_LEVEL_CHECKS_NOT_VALID);
   });
 
   afterAll(async () => {
-    await execScript(CLEANUP);
     // Leave the catalog as `0053` leaves it, so a later test file in the same
-    // process sees the migrated baseline rather than this file's residue.
-    await execScript(DROP_LEVEL_CHECKS);
-    await execScript(READD_LEVEL_CHECKS_NOT_VALID);
+    // process sees the migrated baseline rather than this file's residue: the
+    // three CHECKs present, and NOT VALID only where `0053` would have left them
+    // so (`replayScript` promotes them, which is this file's doing and must not
+    // outlive it).
+    await withCatalogRestored(async () => {
+      await execScript(CLEANUP);
+      await execScript(DROP_LEVEL_CHECKS);
+    }, READD_LEVEL_CHECKS_NOT_VALID);
   });
 
   // ── The id re-mint ─────────────────────────────────────────────────────────
@@ -393,37 +565,48 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
     expect(dangling).toEqual({ u: 0, s: 0 });
   });
 
-  // ── Storage keys ───────────────────────────────────────────────────────────
+  // ── Storage keys — deliberately NOT rewritten ──────────────────────────────
+  //
+  // The row's `space_id` moves; its `storage_key` does not, and the gap between
+  // the two is the intended end state, not a half-rewrite. Nothing parses a
+  // space id back out of a key (`parseStorageKey` returns the bucket only), the
+  // key is only ever BUILT from a space id on the write path, and scoping reads
+  // the `space_id` column — so the segment is an opaque historical path
+  // component, exactly as `doc_` still is in these same keys after
+  // `scripts/migration/0001`, which declined the identical rewrite for the
+  // identical reason. Rewriting it would point every row at an object that does
+  // not exist, because this script moves no bytes.
+  //
+  // These two tests are what makes that decision enforceable: re-add the
+  // rewrite and they fail.
 
-  it("rewrites the space-id segment of every storage key and nothing else", async () => {
+  it("leaves `files` / `uploads` storage keys on their `app_` path segment", async () => {
     await replayScript();
 
-    const files = await rows<{ id: string; storage_key: string }>(
-      `SELECT id, storage_key FROM files WHERE id LIKE 'file_m0003%' ORDER BY id`,
+    const files = await rows<{ id: string; space_id: string; storage_key: string }>(
+      `SELECT id, space_id, storage_key FROM files WHERE id LIKE 'file_m0003%' ORDER BY id`,
     );
     expect(files).toEqual([
-      { id: "file_m0003_a", storage_key: `files/${SPC_A}/file_m0003_a/report.html` },
-      // NEGATIVE CONTROL — the FILENAME keeps its `app_`. The rewrite is pinned
-      // to the segment after the first slash, so a later segment is out of reach.
-      { id: "file_m0003_b", storage_key: `files/${SPC_B}/file_m0003_b/app_notes.md` },
+      {
+        id: "file_m0003_a",
+        space_id: SPC_A,
+        storage_key: `files/${APP_A}/file_m0003_a/report.html`,
+      },
+      {
+        id: "file_m0003_b",
+        space_id: SPC_B,
+        storage_key: `files/${APP_B}/file_m0003_b/app_notes.md`,
+      },
     ]);
 
-    const upload = await one<{ storage_key: string }>(
-      `SELECT storage_key FROM uploads WHERE id = 'upl_m0003_a'`,
+    const upload = await one<{ space_id: string; storage_key: string }>(
+      `SELECT space_id, storage_key FROM uploads WHERE id = 'upl_m0003_a'`,
     );
-    expect(upload.storage_key).toBe(`uploads/${SPC_A}/upl_m0003_a/a.txt`);
-
-    // CROSS-CHECK — the key's space segment against the row's OWN `space_id`.
-    // This holds in BOTH consistent states and is non-zero in exactly the
-    // mangled one, which is why it is here and not just a "legacy = 0" count.
-    const drift = await one<{ f: number; u: number }>(`
-      SELECT (SELECT count(*)::int FROM files   WHERE split_part(storage_key, '/', 2) <> space_id) AS f,
-             (SELECT count(*)::int FROM uploads WHERE split_part(storage_key, '/', 2) <> space_id) AS u
-    `);
-    expect(drift).toEqual({ f: 0, u: 0 });
+    expect(upload.space_id).toBe(SPC_A);
+    expect(upload.storage_key).toBe(`uploads/${APP_A}/upl_m0003_a/a.txt`);
   });
 
-  it("rewrites outbox keys only in the buckets whose keys start with a space id", async () => {
+  it("rewrites the outbox `reason` and leaves every outbox key untouched", async () => {
     await replayScript();
 
     const jobs = await rows<{ id: string; bucket: string; storage_key: string; reason: string }>(
@@ -433,35 +616,35 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
     expect(jobs).toEqual([
       // The outbox stores the key WITHIN the bucket, so the space id is segment
       // ONE here — a different position from `files`/`uploads` above.
+      // `reason` IS rewritten (step 9); the KEY beside it is not — the two
+      // halves of this row are the whole point of the assertion.
       {
         id: "sdj_m0003_1",
         bucket: "files",
-        storage_key: `${SPC_A}/file_m0003_a/report.html`,
+        storage_key: `${APP_A}/file_m0003_a/report.html`,
         reason: "space_deleted",
       },
       {
         id: "sdj_m0003_2",
         bucket: "uploads",
-        storage_key: `${SPC_A}/upl_m0003_a/a.txt`,
+        storage_key: `${APP_A}/upl_m0003_a/a.txt`,
         reason: "upload_expired",
       },
-      // NEGATIVE CONTROL — segment 1 is a RUN id here, and it looks exactly
-      // like a space id. Only the bucket filter keeps it out.
+      // The remaining three rows span the other buckets and the `app_`
+      // lookalike shapes, so the assertion covers the whole column, not just
+      // the two buckets a rewrite would have targeted.
       {
         id: "sdj_m0003_3",
         bucket: "run-workspace",
         storage_key: "app_lookalike_run/files/brief.pdf",
         reason: "run_workspace_deleted",
       },
-      // NEGATIVE CONTROL — a third bucket, keyed by owner namespace.
       {
         id: "sdj_m0003_4",
         bucket: "agent-packages",
         storage_key: "app_owner/pkg/1.0.0.afps",
         reason: "version_deleted",
       },
-      // NEGATIVE CONTROL — the LIKE-escape, inside a bucket the rewrite DOES
-      // reach. `LIKE 'app_%'` unescaped would rewrite this.
       {
         id: "sdj_m0003_5",
         bucket: "files",
@@ -505,20 +688,101 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
   // ── Triggers ───────────────────────────────────────────────────────────────
 
   it("re-enables every trigger it disabled, and the immutability guard still bites", async () => {
-    await replayScript();
+    const triggerCatalog = () =>
+      rows<{ tgname: string; tbl: string; tgenabled: string }>(`
+        SELECT tgname, tgrelid::regclass::text AS tbl, tgenabled
+          FROM pg_trigger WHERE NOT tgisinternal ORDER BY 1, 2
+      `);
 
-    const triggers = await rows<{ tgname: string; tgenabled: string }>(`
-      SELECT tgname, tgenabled FROM pg_trigger
-       WHERE tgname IN ('oauth_clients_level_immutable', 'runs_notify_update_trigger',
-                        'runs_notify_insert_trigger', 'integration_connections_notify_trigger')
-       ORDER BY 1
-    `);
-    expect(triggers).toEqual([
-      { tgname: "integration_connections_notify_trigger", tgenabled: "O" },
-      { tgname: "oauth_clients_level_immutable", tgenabled: "O" },
-      { tgname: "runs_notify_insert_trigger", tgenabled: "O" },
-      { tgname: "runs_notify_update_trigger", tgenabled: "O" },
-    ]);
+    // GUARD, and a deliberate tripwire. The four `createNotifyTriggers()` names
+    // must be FREE here: they are a boot-time artifact installed from
+    // `bootBackground()`, and the harness never boots the API. If one of them is
+    // already present, something has turned it into a MIGRATION artifact — the
+    // exact regression that made `run_metric-streaming` and
+    // `run-metric-broadcaster` receive one extra `send` per assertion, because
+    // triggers a migration installs are in every database the drizzle chain
+    // touches and no `afterAll` can take them back. Fail here rather than
+    // letting the probe below clobber a real trigger.
+    const preexisting = await triggerCatalog();
+    expect(preexisting.filter((t) => NOTIFY_TRIGGER_NAMES.includes(t.tgname))).toEqual([]);
+
+    await execScript(PROBE_INSTALL);
+    try {
+      // CAPTURED, NOT HARDCODED — and this is the point of the test.
+      //
+      // The script disables three triggers by name. Only ONE is unconditionally
+      // present: `oauth_clients_level_immutable`, created by raw SQL in
+      // `0003_fold_oidc_tables.sql` and therefore replayed by every database.
+      // The other two are the probe's, installed a moment ago.
+      //
+      // A hardcoded four-row expectation asserted an environment fact rather
+      // than a property of the script — it could only pass where something else
+      // had installed those triggers, and silently became a check on that
+      // something else. The real invariant is symmetry: the script disables
+      // triggers and must put the catalog back exactly as it found it, whatever
+      // "as it found it" is. So snapshot and demand equality.
+      //
+      // `NOT tgisinternal` excludes the RI constraint triggers, whose generated
+      // names embed OIDs and would churn purely because the script drops and
+      // restores the eighteen foreign keys.
+      const before = await triggerCatalog();
+
+      // Non-vacuity: all three triggers the script actually disables are here,
+      // enabled. Without this the equality below could hold over two empty lists.
+      for (const [tgname, tbl] of [
+        ["oauth_clients_level_immutable", "oauth_clients"],
+        ["runs_notify_update_trigger", "runs"],
+        ["integration_connections_notify_trigger", "integration_connections"],
+      ] as const) {
+        expect(before).toContainEqual({ tgname, tbl, tgenabled: "O" });
+      }
+      // Nothing may start out disabled, or "unchanged" would not mean "enabled".
+      expect(before.filter((t) => t.tgenabled !== "O")).toEqual([]);
+
+      await replayScript();
+
+      const after = await triggerCatalog();
+      // Same triggers, same tables, same enable flags. A trigger the script left
+      // disabled shows up as an `O` → `D` diff; one it dropped or added shows up
+      // as a missing or extra row.
+      expect(after).toEqual(before);
+      // Stated separately so a failure names the symptom instead of making the
+      // reader diff two lists.
+      expect(after.filter((t) => t.tgenabled !== "O")).toEqual([]);
+
+      // THE OTHER HALF: `tgenabled = 'O'` afterwards proves the script put the
+      // flag back, not that it ever took it away. The script rewrote the seeded
+      // `runs.space_id` and `integration_connections.space_id` — both firing
+      // conditions — so if steps 2 and 6 were deleted, both triggers would have
+      // fired and, in production, queued one `pg_notify` per historical row to
+      // every live SSE subscriber. The probe must be empty.
+      const fired = await rows<{ tgname: string; op: string }>(
+        `SELECT tgname, op FROM _m0003_notify_probe ORDER BY 1, 2`,
+      );
+      expect(fired).toEqual([]);
+
+      // POSITIVE CONTROL for that emptiness. An empty probe proves suppression
+      // only if the probe can record at all — so make both triggers fire now,
+      // through the same firing conditions the rewrite used, and watch it fill.
+      await db.execute(sql.raw(`UPDATE runs SET status = 'failed' WHERE id = 'run_m0003_a'`));
+      await db.execute(
+        sql.raw(
+          `UPDATE integration_connections SET needs_reconnection = true WHERE account_id = 'acct_m0003'`,
+        ),
+      );
+      expect(
+        await rows<{ tgname: string; op: string }>(
+          `SELECT tgname, op FROM _m0003_notify_probe ORDER BY 1, 2`,
+        ),
+      ).toEqual([
+        { tgname: "integration_connections_notify_trigger", op: "UPDATE" },
+        { tgname: "runs_notify_update_trigger", op: "UPDATE" },
+      ]);
+    } finally {
+      // The probe must never outlive this test: triggers under the real names
+      // are precisely what breaks the `run_metric` suites downstream.
+      await execScript(PROBE_DROP);
+    }
 
     // `tgenabled = 'O'` says the catalog flag is back; this says the trigger
     // actually fires. The script's own level rewrite is the ONE change it is

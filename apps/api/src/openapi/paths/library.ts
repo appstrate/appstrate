@@ -71,8 +71,16 @@ export const libraryPaths = {
               example: {
                 object: "library",
                 spaces: [
-                  { id: "spc_default", name: "Default", isDefault: true },
-                  { id: "spc_staging", name: "Staging", isDefault: false },
+                  {
+                    id: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                    name: "Default",
+                    isDefault: true,
+                  },
+                  {
+                    id: "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                    name: "Staging",
+                    isDefault: false,
+                  },
                 ],
                 packages: {
                   agent: [
@@ -82,7 +90,7 @@ export const libraryPaths = {
                       source: "local",
                       name: "Inbox Triage",
                       description: "Sorts incoming Gmail threads into priority buckets.",
-                      installed_in: ["spc_default"],
+                      installed_in: ["spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"],
                     },
                   ],
                   skill: [],
@@ -94,7 +102,10 @@ export const libraryPaths = {
                       source: "system",
                       name: "Gmail",
                       description: "Google Mail OAuth integration.",
-                      installed_in: ["spc_default", "spc_staging"],
+                      installed_in: [
+                        "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                        "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+                      ],
                     },
                   ],
                 },

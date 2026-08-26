@@ -64,11 +64,19 @@ describe("Spaces API", () => {
       expect(body.id).toBeDefined();
     });
 
-    // The audit row's `action` and `resource_type` are PERSISTED vocabulary —
-    // rows written before the rename still say `application.created` and the
-    // operator rewrite script matches on these exact strings. Nothing else in
-    // the core suite pins them, so a silent drift here would only surface as an
-    // unrewritable audit trail long after the deploy.
+    // The audit row's `action` and `resource_type` are PERSISTED vocabulary,
+    // and `audit_events` is append-only: `scripts/migration/0003` deliberately
+    // does NOT rewrite these columns (see its `WHAT THIS DELIBERATELY DOES NOT
+    // REWRITE` section — rewriting them would falsify the history the table
+    // exists to keep). The trail is therefore permanently split at the deploy:
+    // `application.created` before it, `space.created` after it, by design.
+    //
+    // That split is exactly why these two strings have to be pinned HERE. They
+    // are the vocabulary NEW rows are written with, and nothing else in the
+    // core suite asserts on them. A silent drift would move the boundary to
+    // some unknown later commit and leave a third spelling in the trail, with
+    // no rewrite available to reconcile it and nothing that could detect when
+    // it started.
     it("records the audit event under the `space` vocabulary", async () => {
       const res = await app.request("/api/spaces", {
         method: "POST",

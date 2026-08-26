@@ -22,7 +22,15 @@ import {
   deleteSocialProvider,
 } from "../../../services/social.ts";
 
-async function seedSpace(): Promise<string> {
+/**
+ * Seed a throwaway owner + org + space and return the SPACE ID (not the row).
+ *
+ * Deliberately NOT named `seedSpace`: the shared factory
+ * (`test/helpers/seed.ts`) already owns that name with a different signature
+ * and return type, and a local shadow of it reads like the shared one at the
+ * call site.
+ */
+async function seedOrgWithSpace(): Promise<string> {
   const ownerId = `user-${crypto.randomUUID()}`;
   await db.insert(userTable).values({
     id: ownerId,
@@ -56,7 +64,7 @@ describe("resolveSocialProviderForClient", () => {
   });
 
   it("returns null for level=space when no row exists", async () => {
-    const spaceId = await seedSpace();
+    const spaceId = await seedOrgWithSpace();
     const resolved = await resolveSocialProviderForClient(
       { level: "space", referencedSpaceId: spaceId },
       "google",
@@ -65,7 +73,7 @@ describe("resolveSocialProviderForClient", () => {
   });
 
   it("returns decrypted creds when per-space config exists", async () => {
-    const spaceId = await seedSpace();
+    const spaceId = await seedOrgWithSpace();
     await upsertSocialProvider(spaceId, "google", {
       clientId: "tenant-google-client.apps.googleusercontent.com",
       clientSecret: "tenant-google-secret",
@@ -83,7 +91,7 @@ describe("resolveSocialProviderForClient", () => {
   });
 
   it("isolates providers per (app, provider) — google config does not leak to github", async () => {
-    const spaceId = await seedSpace();
+    const spaceId = await seedOrgWithSpace();
     await upsertSocialProvider(spaceId, "google", {
       clientId: "g",
       clientSecret: "gs",
@@ -96,7 +104,7 @@ describe("resolveSocialProviderForClient", () => {
   });
 
   it("is cached across calls and invalidated on upsert/delete", async () => {
-    const spaceId = await seedSpace();
+    const spaceId = await seedOrgWithSpace();
     expect(
       await resolveSocialProviderForClient(
         { level: "space", referencedSpaceId: spaceId },
@@ -121,7 +129,7 @@ describe("resolveSocialProviderForClient", () => {
   });
 
   it("treats a row whose ciphertext cannot be decrypted as unconfigured", async () => {
-    const spaceId = await seedSpace();
+    const spaceId = await seedOrgWithSpace();
     // Envelope with a kid absent from the keyring — decryption must fail and
     // the resolver must surface "not configured" instead of throwing.
     await db.insert(spaceSocialProviders).values({
@@ -147,7 +155,7 @@ describe("resolveSocialProviderForClient", () => {
   });
 
   it("invalidateSocialCache with provider arg clears only that provider", async () => {
-    const spaceId = await seedSpace();
+    const spaceId = await seedOrgWithSpace();
     await upsertSocialProvider(spaceId, "google", {
       clientId: "g1",
       clientSecret: "s1",

@@ -183,7 +183,7 @@ export async function initRealtime(): Promise<void> {
   // `run_metric` carries the running cumulative cost + token usage
   // emitted by the event sink after each `appstrate.metric` event,
   // throttled per run by the broadcaster. Routed to the same
-  // org/application/run filters as `run_update` and `run_log_insert`
+  // org/space/run filters as `run_update` and `run_log_insert`
   // — no new isolation rule. The scope filters here are the ONLY
   // tenant gate for this channel; do not relax without updating the
   // broadcaster payload contract.

@@ -380,7 +380,7 @@ For `level=space` OIDC clients, Google/GitHub sign-in routes through the **tenan
 3. `PUT /api/spaces/{spaceId}/social-providers/{google|github}` with `{ "clientId": "…", "clientSecret": "…", "scopes": ["openid","email","profile"] }` (scopes optional).
 4. The provider's button appears on the next login-page render (resolver cache: ≤60s).
 
-**Testing**: `services/social.ts` exposes `_setTestSocialSpy` so E2E tests can assert which per-space row a given request resolved against — mirrors `_setTestMailSpy` in `smtp-config.ts`.
+**Testing**: `services/social.ts` exposes `_setSocialSpy` (`:79`) so E2E tests can assert which per-space row a given request resolved against — mirrors `_setSmtpSpy` in `services/smtp.ts` (`:72`). Both throw unless `NODE_ENV === "test"`.
 
 ## Production deployment checklist
 

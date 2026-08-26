@@ -6,14 +6,14 @@ Standard Webhooks delivery for run lifecycle events.
 
 Lets spaces subscribe to run status changes (`run.started`, `run.success`, `run.failed`, `run.timeout`, `run.cancelled`) and receive signed HTTP callbacks. Implements the Standard Webhooks specification (HMAC-SHA256 signing, secret rotation, 8-attempt exponential backoff, delivery history).
 
-## Owned tables
+## Tables it reads and writes
 
 | Table                | Purpose                                                                                                        |
 | -------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `webhooks`           | Subscription rows (URL, event list, secret, optional package filter, payload mode, enabled flag, org + space). |
 | `webhook_deliveries` | One row per delivery attempt with status code, latency, error, attempt count.                                  |
 
-All FKs to core tables are declared via Drizzle `.references()` in `schema.ts`. On space delete, webhooks cascade; on package delete, the scoped filter is set to null.
+Both tables live in the **core** schema (`packages/db/src/schema/webhooks.ts`) and migrate with core — this module has no `schema.ts` and owns no tables, per the module contract in `../README.md`. Their FKs are declared there via Drizzle `.references()`. On space delete, webhooks cascade; on package delete, the scoped filter is set to null.
 
 ## Feature flags contributed
 

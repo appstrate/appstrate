@@ -190,7 +190,7 @@ type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
  * Fold `bytes` back off an org's `files_bytes_used` counter, clamped at 0
  * (`GREATEST`) so a drift or double-decrement can never drive it negative. The
  * single decrement primitive for every file-teardown path (single-doc
- * delete, expiry sweep, run/session detach, application/end-user cascade). Runs
+ * delete, expiry sweep, run/session detach, space/end-user cascade). Runs
  * inside the caller's transaction — each call site has already locked the org
  * row or is deleting the very rows whose bytes it folds back, so no lock is
  * taken here.

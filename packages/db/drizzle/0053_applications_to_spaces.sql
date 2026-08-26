@@ -30,8 +30,9 @@
 --   4. every index whose name carries it, in two passes (see TRAP 3);
 --   5. the three CHECK constraints whose BODY hardcodes the literal
 --      `'application'`;
---   6. the `notify.ts` PL/pgSQL functions, whose bodies are stored as TEXT and
---      therefore do NOT follow a column rename (see TRAP 4).
+--   6. the three `notify.ts` PL/pgSQL FUNCTION BODIES, which are stored as
+--      TEXT and therefore do NOT follow a column rename (see TRAP 4). Their
+--      TRIGGERS are deliberately left alone — see step 7.
 --
 -- ═══ WHAT THIS MIGRATION DELIBERATELY DOES NOT DO ═══
 --
@@ -44,16 +45,24 @@
 --   * `webhooks.level` and `oauth_clients.level` — the string `'application'`,
 --     now `'space'`;
 --   * `user.realm` — `end_user:<app_…>`, now `end_user:<spc_…>`;
---   * persisted permission scope strings naming the concept;
---   * `files.storage_key` and every other key whose leading segment is a
---     space id.
+--   * persisted permission scope strings naming the concept.
 --
--- Those are ONE rewrite, not five: a space id is quoted inside `runs.input`,
--- `runs.result`, `run_logs`, chat message payloads and `audit_events.after`,
--- the realm embeds the id, and the storage key embeds it again. Splitting any
--- one field of it into this file would make the operational script partial and
+-- Those are ONE rewrite, not four. The id move is the root of it: `spaces.id`
+-- cannot change without the eighteen foreign keys that point at it moving in
+-- the same transaction, and `user.realm` / `session.realm` embed the same id in
+-- a string no constraint protects. The `level` values have to move first — see
+-- TRAP 3 — and the scope strings share the deploy window because a credential
+-- that keeps the retired spelling silently grants less. Splitting any one of
+-- them into this file would make the operational script partial and
 -- unverifiable — the exact failure mode #1177 shipped (see §"Why this is
 -- written down" in `docs/NO_TRANSITIONAL_CODE.md`).
+--
+-- Storage keys are NOT in that set. `files.storage_key` and `uploads.storage_key`
+-- keep their `app_` path segment: nothing derives a key from the id and nothing
+-- parses the id back out, so the segment is an opaque historical path component.
+-- `scripts/migration/0001` declined the identical rewrite for `doc_` and said so.
+-- Leaving them alone is what keeps this deploy free of an out-of-band object
+-- move. Do not add it back.
 --
 -- ┌───────────────────────────────────────────────────────────────────────┐
 -- │ DEPLOYING THIS MIGRATION ALONE IS NOT A DEPLOY. It REQUIRES the row   │
@@ -75,9 +84,10 @@
 -- data inside the expression, and nothing rewrites it. So all three must be
 -- dropped and re-added with `'space'`.
 --
--- And at that moment the rows still say `'application'` — the rewrite above has
--- not run yet, and by §2 it cannot run from here. A plain `ADD CONSTRAINT`
--- scans the table and fails. Hence: **`NOT VALID`**.
+-- And at that moment the rows MAY still say `'application'` — the rewrite above
+-- has not run yet, and by §2 it cannot run from here. A plain `ADD CONSTRAINT`
+-- would scan the table and fail. Hence: **`NOT VALID`, BUT ONLY WHERE IT IS
+-- ACTUALLY NEEDED.**
 --
 -- `NOT VALID` is the right tool and not a dodge. It skips only the initial
 -- full-table verification; the constraint is enforced in full on every INSERT
@@ -85,6 +95,32 @@
 -- the moment this migration lands — which it must, since the code deploying
 -- alongside writes nothing else — while the un-rewritten rows are tolerated
 -- until the operator's script reaches them.
+--
+-- ═══ WHY EACH ADD IS CONDITIONAL RATHER THAN ALWAYS `NOT VALID` ═══
+--
+-- Each of the three blocks below asks `EXISTS (SELECT 1 FROM <t> WHERE level =
+-- 'application')` and adds the constraint VALID when the answer is no.
+--
+-- On a database with history the answer is yes and the behaviour is exactly as
+-- described above. On a BRAND-NEW database — a fresh self-host, a CI run, every
+-- tier-0 test database — the table is empty, there is no legacy row to tolerate,
+-- and an unconditional `NOT VALID` would leave `convalidated = false` FOREVER.
+-- Nothing on a fresh install ever promotes it: the only `VALIDATE CONSTRAINT`
+-- in the tree is step 11 of `scripts/migration/0003`, an operator script written
+-- for databases that have data to rewrite, which nobody runs on a new install.
+--
+-- That is not cosmetic. `convalidated = true` is precisely what `0003`'s own
+-- verification query and the migration test hold up as the STRUCTURAL proof that
+-- no legacy literal survives anywhere in the table — the one check that does not
+-- depend on guessing which rows to count. Leave it permanently false on fresh
+-- installs and that proof is permanently unavailable there. And as noted below,
+-- the drizzle snapshot records a check as `{name, value}` with no notion of
+-- validity, so drizzle-kit reports no drift either way: a forgotten promotion is
+-- invisible to every tool in this repo.
+--
+-- Conditioning the ADD costs one `EXISTS` on a table that is either empty (free)
+-- or about to be fully rewritten by the operator anyway, and it makes the
+-- fresh-install case correct by construction instead of by a step nobody runs.
 --
 -- The alternative was considered and rejected. §2's carve-out ("a backfill that
 -- is the precondition of a CHECK, on the same table") would arguably licence
@@ -104,8 +140,12 @@
 --   ALTER TABLE "oauth_clients"  VALIDATE CONSTRAINT "oauth_clients_level_check";
 --
 -- Until then a stale row is readable and re-writable only into a legal value.
+-- On a database that had no stale row to begin with, the blocks below already
+-- added all three VALID and these three statements are a no-op.
+--
 -- Note the snapshot records a check as `{name, value}` and has no notion of
--- validity, so `NOT VALID` produces no drizzle-kit drift either way.
+-- validity, so neither `NOT VALID` nor the conditional above produces any
+-- drizzle-kit drift.
 --
 -- ═══ FOUR TRAPS THIS MIGRATION IS WRITTEN AGAINST ═══
 --
@@ -138,32 +178,41 @@
 -- TRAP 4 — **A column rename does not touch a PL/pgSQL function body.** Trigger
 --   WHEN clauses are parsed trees and DO follow the rename (the
 --   `runs_notify_update_trigger` guard listing `OLD.application_id` fixes
---   itself). Function bodies are stored as TEXT: `notify_run_change` would keep
---   emitting `NEW.application_id`, and EVERY INSERT AND UPDATE ON `runs` would
---   error. Step 7 reinstalls all three functions and their triggers.
+--   itself), as does an `UPDATE OF <col>` list. Function bodies are stored as
+--   TEXT: `notify_run_change` would keep emitting `NEW.application_id`, and
+--   EVERY INSERT AND UPDATE ON `runs` would error. Step 7 replaces all three
+--   function bodies — and ONLY the bodies. It does not create a trigger; step 7
+--   says at length why adding one back would be a regression.
 --
---   Do NOT rely on the runtime reinstall for this. `boot.ts` calls
+--   Do NOT rely on the runtime reinstall for the BODIES. `boot.ts` calls
 --   `createNotifyTriggers()` from `bootBackground()` — after the port binds —
 --   and its failure is caught and only `logger.warn`ed. The window between the
 --   migration and that call is a window in which no run can start, and a failed
 --   call leaves the database permanently broken while `/health` reports green.
+--   The TRIGGERS carry no such window: they already exist, unbroken, because
+--   nothing in this migration invalidates them.
 --
 -- ═══ IDEMPOTENCY ═══
 --
 -- Every step is guarded by an EXISTS check on the catalog, so a partially
 -- applied environment converges and a re-run is a no-op. The three CHECK
--- constraints are re-created only while their stored definition still contains
+-- constraints are re-created only while their stored DEFINITION still contains
 -- the retired literal — a replay therefore cannot silently de-validate a
--- constraint an operator has already promoted with `VALIDATE CONSTRAINT`. The
--- function reinstalls are `CREATE OR REPLACE`; the trigger reinstalls drop by
--- name inside an existence check, exactly as `createNotifyTriggers` does.
+-- constraint an operator has already promoted with `VALIDATE CONSTRAINT`, and
+-- the validity chosen on the first pass (see the conditional above) is never
+-- revisited on a second. The
+-- function reinstalls are `CREATE OR REPLACE`, so a replay rewrites the same
+-- bytes. No trigger is created, so there is nothing there to replay either.
 --
 -- ═══ ROLLBACK ═══
 --
 -- This repo has no down migrations. The reverse is below; a database snapshot
 -- taken before the deploy remains the fast path.
 --
---   -- 1. the three CHECK bodies, back to the retired literal
+--   -- 1. the three CHECK bodies, back to the retired literal. `NOT VALID`
+--   --    unconditionally here: reversing means the rows are about to hold the
+--   --    retired spelling again, and the previous release is what promotes
+--   --    them. An empty table tolerates NOT VALID harmlessly.
 --   ALTER TABLE "webhooks" DROP CONSTRAINT IF EXISTS "webhooks_level_values";
 --   ALTER TABLE "webhooks" ADD CONSTRAINT "webhooks_level_values"
 --     CHECK (level IN ('org', 'application')) NOT VALID;
@@ -242,14 +291,18 @@
 --   ALTER TABLE "space_smtp_configs"      RENAME TO "application_smtp_configs";
 --   ALTER TABLE "space_social_providers"  RENAME TO "application_social_providers";
 --
---   -- 7. the PL/pgSQL bodies. Reinstalling the PREVIOUS release's spelling is
---   --    not optional — after step 5 the current bodies name a column that no
---   --    longer exists. Redeploying the previous release does it at boot
---   --    (`createNotifyTriggers`), but that runs in `bootBackground()` and only
---   --    warns on failure, so run that release's `createNotifyTriggers()`
---   --    deliberately, or re-apply the `notify_run_change` /
---   --    `notify_run_log_insert` / `notify_integration_connection_change`
---   --    bodies from `packages/db/src/notify.ts` at its commit.
+--   -- 7. the PL/pgSQL bodies — and ONLY the bodies. The forward migration
+--   --    creates no trigger, so there is no trigger to drop here; the four
+--   --    that exist have followed step 5's rename back on their own, exactly
+--   --    as they followed it forward. Reinstalling the PREVIOUS release's
+--   --    body spelling is not optional — after step 5 the current bodies name
+--   --    a column that no longer exists. Redeploying the previous release does
+--   --    it at boot (`createNotifyTriggers`), but that runs in
+--   --    `bootBackground()` and only warns on failure, so run that release's
+--   --    `createNotifyTriggers()` deliberately, or re-apply the
+--   --    `notify_run_change` / `notify_run_log_insert` /
+--   --    `notify_integration_connection_change` bodies from
+--   --    `packages/db/src/notify.ts` at its commit.
 --
 --   -- 8. AND THE ROW REWRITE IS YOURS TO UNDO TOO, in the same window, if the
 --   --    operator's `scripts/migration/` pass already ran. Reversing the
@@ -445,8 +498,13 @@ BEGIN
     AND c.conname = 'webhooks_level_values';
   IF d IS NULL OR d LIKE '%''application''%' THEN
     ALTER TABLE "webhooks" DROP CONSTRAINT IF EXISTS "webhooks_level_values";
-    ALTER TABLE "webhooks" ADD CONSTRAINT "webhooks_level_values"
-      CHECK (level IN ('org', 'space')) NOT VALID;
+    IF EXISTS (SELECT 1 FROM "webhooks" WHERE "level" = 'application') THEN
+      ALTER TABLE "webhooks" ADD CONSTRAINT "webhooks_level_values"
+        CHECK (level IN ('org', 'space')) NOT VALID;
+    ELSE
+      ALTER TABLE "webhooks" ADD CONSTRAINT "webhooks_level_values"
+        CHECK (level IN ('org', 'space'));
+    END IF;
   END IF;
 END $$;--> statement-breakpoint
 
@@ -462,9 +520,15 @@ BEGIN
     AND c.conname = 'webhooks_level_check';
   IF d IS NULL OR d LIKE '%''application''%' THEN
     ALTER TABLE "webhooks" DROP CONSTRAINT IF EXISTS "webhooks_level_check";
-    ALTER TABLE "webhooks" ADD CONSTRAINT "webhooks_level_check"
-      CHECK ((level = 'org' AND space_id IS NULL)
+    IF EXISTS (SELECT 1 FROM "webhooks" WHERE "level" = 'application') THEN
+      ALTER TABLE "webhooks" ADD CONSTRAINT "webhooks_level_check"
+        CHECK ((level = 'org' AND space_id IS NULL)
           OR (level = 'space' AND space_id IS NOT NULL)) NOT VALID;
+    ELSE
+      ALTER TABLE "webhooks" ADD CONSTRAINT "webhooks_level_check"
+        CHECK ((level = 'org' AND space_id IS NULL)
+          OR (level = 'space' AND space_id IS NOT NULL));
+    END IF;
   END IF;
 END $$;--> statement-breakpoint
 
@@ -480,11 +544,17 @@ BEGIN
     AND c.conname = 'oauth_clients_level_check';
   IF d IS NULL OR d LIKE '%''application''%' THEN
     ALTER TABLE "oauth_clients" DROP CONSTRAINT IF EXISTS "oauth_clients_level_check";
-    ALTER TABLE "oauth_clients" ADD CONSTRAINT "oauth_clients_level_check"
-      CHECK ((level = 'org' AND referenced_org_id IS NOT NULL AND referenced_space_id IS NULL)
+    IF EXISTS (SELECT 1 FROM "oauth_clients" WHERE "level" = 'application') THEN
+      ALTER TABLE "oauth_clients" ADD CONSTRAINT "oauth_clients_level_check"
+        CHECK ((level = 'org' AND referenced_org_id IS NOT NULL AND referenced_space_id IS NULL)
           OR (level = 'space' AND referenced_space_id IS NOT NULL AND referenced_org_id IS NULL)
-          OR (level = 'instance' AND referenced_org_id IS NULL AND referenced_space_id IS NULL))
-      NOT VALID;
+          OR (level = 'instance' AND referenced_org_id IS NULL AND referenced_space_id IS NULL)) NOT VALID;
+    ELSE
+      ALTER TABLE "oauth_clients" ADD CONSTRAINT "oauth_clients_level_check"
+        CHECK ((level = 'org' AND referenced_org_id IS NOT NULL AND referenced_space_id IS NULL)
+          OR (level = 'space' AND referenced_space_id IS NOT NULL AND referenced_org_id IS NULL)
+          OR (level = 'instance' AND referenced_org_id IS NULL AND referenced_space_id IS NULL));
+    END IF;
   END IF;
 END $$;--> statement-breakpoint
 
@@ -519,17 +589,60 @@ BEGIN
 END $$;--> statement-breakpoint
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- Step 7 (TRAP 4): reinstall the NOTIFY functions and triggers. Their bodies
--- are stored as TEXT and still emit `NEW.application_id`, which no longer
--- exists — without this, every INSERT and UPDATE on `runs`, every INSERT on
--- `run_logs` and every write to `integration_connections` raises.
+-- Step 7 (TRAP 4): replace the three NOTIFY FUNCTION BODIES. Nothing else.
+--
+-- A PL/pgSQL body is stored as TEXT (`pg_proc.prosrc`) and no rename rewrites
+-- it, so after step 2 these three still say `NEW.application_id` — a column
+-- that no longer exists. The failure is not cosmetic: the next UPDATE on `runs`
+-- raises `record "new" has no field "application_id"`, and every INSERT on
+-- `runs` / `run_logs` and every write to `integration_connections` raises with
+-- it. `CREATE OR REPLACE FUNCTION` is the whole remedy — a trigger binds its
+-- function by OID, so replacing the body is instantly live under the existing
+-- triggers.
 --
 -- The JSON payload KEY changes with the column: the SSE subscriber's
 -- snake-to-camel mapper reads `space_id` from this release on.
 --
--- Byte-identical to `createNotifyTriggers()` in `packages/db/src/notify.ts`, so
--- the boot-time reinstall that follows is a genuine no-op rather than a second
--- opinion. Keep the two in step.
+-- The three bodies are byte-identical to `createNotifyTriggers()` in
+-- `packages/db/src/notify.ts`, so the boot-time reinstall that follows is a
+-- genuine no-op rather than a second opinion. Keep the two in step.
+--
+-- ═══ THE TRIGGERS ARE DELIBERATELY NOT RE-CREATED HERE. DO NOT ADD THEM. ═══
+--
+-- Two independent reasons, either one sufficient.
+--
+-- 1. They do not need it. Every part of a trigger definition that could name a
+--    column is stored as a catalog reference, not as text, and therefore
+--    FOLLOWS `ALTER TABLE … RENAME COLUMN` on its own:
+--      * the WHEN clause (`pg_trigger.tgqual`) is a parsed node tree whose Vars
+--        key on attnum — `runs_notify_update_trigger`'s twelve-column guard
+--        re-reads as `OLD.space_id IS DISTINCT FROM NEW.space_id` with no
+--        statement from us;
+--      * an `UPDATE OF <col>` column list (`pg_trigger.tgattr`) is attnums too;
+--      * the function is bound by OID (`tgfoid`), the table by OID (`tgrelid`).
+--    The only text a trigger can carry is `tgargs`, and all four of ours are
+--    declared with zero arguments. Verified empirically: after a rename,
+--    `pg_get_triggerdef()` prints the NEW column name in both the WHEN clause
+--    and the `UPDATE OF` list, while `prosrc` still prints the old one.
+--
+-- 2. Creating them here would be actively wrong. `createNotifyTriggers()` is
+--    called from exactly one place — `bootBackground()` in `apps/api/src/lib/
+--    boot.ts` — and the triggers are therefore a BOOT-TIME artifact, present
+--    only where the platform has booted. A migration that installs them makes
+--    them a MIGRATION artifact instead, so they appear in every database the
+--    drizzle chain touches, the integration-test database included. There they
+--    duplicate deliveries the tests already exercise directly: a seeded `runs`
+--    INSERT or a `run_logs` write starts emitting real `run_update` /
+--    `run_log_insert` frames to subscribers that were only meant to see
+--    `run_metric`, and `toHaveBeenCalledTimes(N)` assertions receive N + 1.
+--    `apps/api/test/integration/services/notify-triggers.test.ts` drops all
+--    four in its `afterAll` for precisely this reason — a migration-installed
+--    trigger is one no `afterAll` can take back.
+--
+-- The convergence argument that used to justify the block ("an environment
+-- whose triggers were dropped by hand converges here") is not worth either
+-- cost: `bootBackground()` already reinstalls them idempotently on the very
+-- next boot, which is where an environment that lost them is meant to recover.
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION notify_run_change()
 RETURNS TRIGGER AS $$
@@ -610,60 +723,4 @@ BEGIN
     RETURN NEW;
   END IF;
 END;
-$$ LANGUAGE plpgsql;--> statement-breakpoint
-
--- The triggers themselves need no rewrite — a trigger binds its function by OID
--- and its WHEN clause is a parsed tree that followed step 2's column rename.
--- They are re-created anyway, identically to `createNotifyTriggers`, so that an
--- environment whose triggers were dropped by hand converges here rather than in
--- `bootBackground()`.
-DO $$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'runs_notify_trigger') THEN
-    DROP TRIGGER runs_notify_trigger ON runs;
-  END IF;
-  IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'runs_notify_insert_trigger') THEN
-    DROP TRIGGER runs_notify_insert_trigger ON runs;
-  END IF;
-  IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'runs_notify_update_trigger') THEN
-    DROP TRIGGER runs_notify_update_trigger ON runs;
-  END IF;
-  CREATE TRIGGER runs_notify_insert_trigger
-    AFTER INSERT ON runs
-    FOR EACH ROW EXECUTE FUNCTION notify_run_change();
-  CREATE TRIGGER runs_notify_update_trigger
-    AFTER UPDATE ON runs
-    FOR EACH ROW
-    WHEN (
-      OLD.id IS DISTINCT FROM NEW.id
-      OR OLD.package_id IS DISTINCT FROM NEW.package_id
-      OR OLD.status IS DISTINCT FROM NEW.status
-      OR OLD.user_id IS DISTINCT FROM NEW.user_id
-      OR OLD.end_user_id IS DISTINCT FROM NEW.end_user_id
-      OR OLD.org_id IS DISTINCT FROM NEW.org_id
-      OR OLD.space_id IS DISTINCT FROM NEW.space_id
-      OR OLD.schedule_id IS DISTINCT FROM NEW.schedule_id
-      OR OLD.error IS DISTINCT FROM NEW.error
-      OR OLD.started_at IS DISTINCT FROM NEW.started_at
-      OR OLD.completed_at IS DISTINCT FROM NEW.completed_at
-      OR OLD.duration IS DISTINCT FROM NEW.duration
-    )
-    EXECUTE FUNCTION notify_run_change();
-END $$;--> statement-breakpoint
-
-DO $$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'run_logs_notify_trigger') THEN
-    DROP TRIGGER run_logs_notify_trigger ON run_logs;
-  END IF;
-  CREATE TRIGGER run_logs_notify_trigger
-    AFTER INSERT ON run_logs
-    FOR EACH ROW EXECUTE FUNCTION notify_run_log_insert();
-END $$;--> statement-breakpoint
-
-DO $$ BEGIN
-  IF EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'integration_connections_notify_trigger') THEN
-    DROP TRIGGER integration_connections_notify_trigger ON integration_connections;
-  END IF;
-  CREATE TRIGGER integration_connections_notify_trigger
-    AFTER INSERT OR UPDATE OR DELETE ON integration_connections
-    FOR EACH ROW EXECUTE FUNCTION notify_integration_connection_change();
-END $$;
+$$ LANGUAGE plpgsql;

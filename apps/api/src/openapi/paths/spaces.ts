@@ -51,7 +51,7 @@ export const spacesPaths = {
             "application/json": {
               schema: { $ref: "#/components/schemas/SpaceObject" },
               example: {
-                id: "spc_cm1xyz789ghi012",
+                id: "spc_5b8c0e13-4f7a-4d92-b3c6-71e0a4d9f582",
                 object: "space",
                 orgId: "550e8400-e29b-41d4-a716-446655440000",
                 name: "My SaaS App",
@@ -102,7 +102,7 @@ export const spacesPaths = {
                 object: "list",
                 data: [
                   {
-                    id: "spc_default001",
+                    id: "spc_0a2b4c6d-8e10-4f32-9a54-b6c8d0e2f416",
                     object: "space",
                     orgId: "550e8400-e29b-41d4-a716-446655440000",
                     name: "Default",
@@ -113,7 +113,7 @@ export const spacesPaths = {
                     updatedAt: "2026-01-10T08:00:00Z",
                   },
                   {
-                    id: "spc_cm1xyz789ghi012",
+                    id: "spc_5b8c0e13-4f7a-4d92-b3c6-71e0a4d9f582",
                     object: "space",
                     orgId: "550e8400-e29b-41d4-a716-446655440000",
                     name: "My SaaS App",

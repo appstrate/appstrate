@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { SPACE_ID_RE } from "../../../lib/ids.ts";
+
 /** Shared webhook creation properties (DRY across oneOf variants). */
 const sharedCreateProps = {
   url: { type: "string", format: "uri" },
@@ -53,7 +55,11 @@ export const webhooksPaths = {
                   required: ["level", "spaceId", "url", "events"],
                   properties: {
                     level: { type: "string", enum: ["space"] },
-                    spaceId: { type: "string", description: "Space ID (spc_ prefix)" },
+                    spaceId: {
+                      type: "string",
+                      pattern: SPACE_ID_RE.source,
+                      description: "Space ID (spc_ prefix)",
+                    },
                     ...sharedCreateProps,
                   },
                 },
@@ -75,7 +81,7 @@ export const webhooksPaths = {
                 summary: "Space-level webhook (pinned to one space)",
                 value: {
                   level: "space",
-                  spaceId: "spc_cm4jkl013",
+                  spaceId: "spc_8a3b6d9f-1e42-4c07-b5d8-6f0a2c4e8b13",
                   url: "https://api.example.com/webhooks/appstrate",
                   events: ["run.success", "run.failed"],
                   packageId: null,
@@ -120,7 +126,7 @@ export const webhooksPaths = {
                 id: "wh_cm1abc123",
                 object: "webhook",
                 level: "space",
-                spaceId: "spc_cm4jkl013",
+                spaceId: "spc_8a3b6d9f-1e42-4c07-b5d8-6f0a2c4e8b13",
                 url: "https://example.com/webhooks/appstrate",
                 events: ["run.success", "run.failed"],
                 packageId: null,
@@ -190,7 +196,7 @@ export const webhooksPaths = {
                     id: "wh_cm1abc123",
                     object: "webhook",
                     level: "space",
-                    spaceId: "spc_cm4jkl013",
+                    spaceId: "spc_8a3b6d9f-1e42-4c07-b5d8-6f0a2c4e8b13",
                     url: "https://example.com/webhooks/appstrate",
                     events: ["run.success", "run.failed"],
                     packageId: null,
@@ -235,7 +241,7 @@ export const webhooksPaths = {
                 id: "wh_cm1abc123",
                 object: "webhook",
                 level: "space",
-                spaceId: "spc_cm4jkl013",
+                spaceId: "spc_8a3b6d9f-1e42-4c07-b5d8-6f0a2c4e8b13",
                 url: "https://example.com/webhooks/appstrate",
                 events: ["run.success", "run.failed"],
                 packageId: null,
@@ -306,7 +312,7 @@ export const webhooksPaths = {
                 id: "wh_cm1abc123",
                 object: "webhook",
                 level: "space",
-                spaceId: "spc_cm4jkl013",
+                spaceId: "spc_8a3b6d9f-1e42-4c07-b5d8-6f0a2c4e8b13",
                 url: "https://example.com/webhooks/appstrate",
                 events: ["run.success", "run.failed"],
                 packageId: null,

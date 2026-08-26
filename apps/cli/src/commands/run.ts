@@ -35,7 +35,7 @@ import {
   renderPlatformPrompt,
 } from "@appstrate/afps-runtime/bundle";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
-import { resolveActiveProfile } from "../lib/config.ts";
+import { resolveActiveProfileOrNull } from "../lib/config.ts";
 import { resolveAuthContext, AuthError } from "../lib/api.ts";
 import { exitWithError } from "../lib/ui.ts";
 import {
@@ -832,7 +832,7 @@ async function resolveLlmConfig(
 }
 
 async function resolveProfileNameForPreset(opts: RunCommandOptions): Promise<string> {
-  const resolved = await resolveActiveProfile(opts.profile).catch(() => null);
+  const resolved = await resolveActiveProfileOrNull(opts.profile);
   if (!resolved) {
     throw new ModelResolutionError(
       "--model-source preset requires a CLI profile for `GET /api/models`",
@@ -887,7 +887,7 @@ async function buildHeadlessRemoteInputs(
   let orgId = process.env.APPSTRATE_ORG_ID;
 
   if (!instance || !spaceId || !orgId) {
-    const resolved = await resolveActiveProfile(opts.profile).catch(() => null);
+    const resolved = await resolveActiveProfileOrNull(opts.profile);
     const profile = resolved?.profile;
     if (profile) {
       instance ??= profile.instance;
@@ -915,7 +915,7 @@ async function buildHeadlessRemoteInputs(
 async function buildInteractiveRemoteInputs(
   opts: RunCommandOptions,
 ): Promise<RemoteResolverInputs> {
-  const resolved = await resolveActiveProfile(opts.profile).catch(() => null);
+  const resolved = await resolveActiveProfileOrNull(opts.profile);
   const profile = resolved?.profile;
   if (!resolved || !profile) {
     throw new ResolverConfigError(ERR_REMOTE_REQUIRES_AUTH.message, ERR_REMOTE_REQUIRES_AUTH.hint);
