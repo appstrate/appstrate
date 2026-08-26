@@ -46,7 +46,7 @@ See [`examples/self-hosting/README.md`](../../examples/self-hosting/README.md#ve
 | `appstrate whoami`    | Print the identity attached to the active profile.                                                          |
 | `appstrate token`     | Print metadata about the stored access + refresh tokens (debug).                                            |
 | `appstrate org`       | List, switch, or create organizations pinned on the active profile.                                         |
-| `appstrate app`       | List, switch, or create applications pinned on the active profile.                                          |
+| `appstrate space`     | List, switch, or create spaces pinned on the active profile.                                                |
 | `appstrate api`       | Authenticated HTTP passthrough to the Appstrate API.                                                        |
 | `appstrate openapi`   | Explore the active profile's OpenAPI schema without flooding stdout.                                        |
 | `appstrate run`       | Execute an agent — a package id runs on the pinned instance, a `.afps`/`.afps-bundle` path runs in-process. |
@@ -146,38 +146,38 @@ appstrate login --profile prod --instance https://app.my.io
 
 **Flags**
 
-| Flag              | Values         | Description                                                                                                                                     |
-| ----------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--instance`      | URL            | Instance base URL. Skips the interactive prompt.                                                                                                |
-| `-p`, `--profile` | name           | Profile name to store credentials under (default: `default`).                                                                                   |
-| `--org`           | `<id-or-slug>` | After the token exchange, pin this organization on the profile non-interactively. Fails if the reference does not match any org.                |
-| `--create-org`    | `<name>`       | Create a new organization with this name and pin it. A default application + hello-world agent are provisioned server-side. Skips the prompt.   |
-| `--no-org`        | —              | Skip the post-login org-pinning step entirely. Subsequent calls must carry `-H 'X-Org-Id: …'`, or pin later via `appstrate org switch`.         |
-| `--app`           | `<id>`         | After the org pin, pin this application on the profile non-interactively. Fails if the reference does not match any app.                        |
-| `--create-app`    | `<name>`       | Create a new application with this name after login and pin it. Skips the cascade's default-app pick.                                           |
-| `--no-app`        | —              | Skip the post-login app-pinning step entirely. Subsequent calls must carry `-H 'X-Application-Id: …'`, or pin later via `appstrate app switch`. |
+| Flag              | Values         | Description                                                                                                                                   |
+| ----------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--instance`      | URL            | Instance base URL. Skips the interactive prompt.                                                                                              |
+| `-p`, `--profile` | name           | Profile name to store credentials under (default: `default`).                                                                                 |
+| `--org`           | `<id-or-slug>` | After the token exchange, pin this organization on the profile non-interactively. Fails if the reference does not match any org.              |
+| `--create-org`    | `<name>`       | Create a new organization with this name and pin it. A default space + hello-world agent are provisioned server-side. Skips the prompt.       |
+| `--no-org`        | —              | Skip the post-login org-pinning step entirely. Subsequent calls must carry `-H 'X-Org-Id: …'`, or pin later via `appstrate org switch`.       |
+| `--space`         | `<id>`         | After the org pin, pin this space on the profile non-interactively. Fails if the reference does not match any space.                          |
+| `--create-space`  | `<name>`       | Create a new space with this name after login and pin it. Skips the cascade's default-space pick.                                             |
+| `--no-space`      | —              | Skip the post-login space-pinning step entirely. Subsequent calls must carry `-H 'X-Space-Id: …'`, or pin later via `appstrate space switch`. |
 
 **Org pinning after login** (issue #209): on success, the CLI calls `GET /api/orgs` and branches:
 
 - **Exactly one org** → auto-pin. The success banner names it: `Logged in as … to "Acme" (org_xxx)`.
-- **Zero orgs** (fresh signup, dashboard onboarding skipped) → offer inline creation (`POST /api/orgs`) which also provisions a default application + hello-world agent server-side.
+- **Zero orgs** (fresh signup, dashboard onboarding skipped) → offer inline creation (`POST /api/orgs`) which also provisions a default space + hello-world agent server-side.
 - **≥2 orgs** → interactive picker.
 
 The pinned org id is written to `config.toml` and automatically sent as `X-Org-Id` on every subsequent `appstrate api` call, so `appstrate api GET /api/me` works immediately after a fresh login with no extra flags.
 
-**Application pinning after login** (issue #217): after the org pin succeeds, the CLI cascades into `GET /api/applications` and branches:
+**Space pinning after login** (issue #217): after the org pin succeeds, the CLI cascades into `GET /api/spaces` and branches:
 
-- **Exactly one app** → auto-pin.
-- **≥2 apps** → auto-pin the one with `isDefault: true` (the server provisions exactly one default per org). No interactive picker at login — use `appstrate app switch` afterwards for a different app.
-- **No default among ≥2 apps** (defensive — should never happen) → warn on stderr, leave unpinned.
+- **Exactly one space** → auto-pin.
+- **≥2 spaces** → auto-pin the one with `isDefault: true` (the server provisions exactly one default per org). No interactive picker at login — use `appstrate space switch` afterwards for a different space.
+- **No default among ≥2 spaces** (defensive — should never happen) → warn on stderr, leave unpinned.
 
-On success, the banner names both: `Logged in as … to "Acme" (org_xxx) / app "Default" (app_xxx)`. The pinned app id is sent as `X-Application-Id` on every `appstrate api` call, so app-scoped routes (`/api/agents`, `/api/runs`, `/api/schedules`, …) work with no extra flags.
+On success, the banner names both: `Logged in as … to "Acme" (org_xxx) / space "Default" (spc_xxx)`. The pinned space id is sent as `X-Space-Id` on every `appstrate api` call, so space-scoped routes (`/api/agents`, `/api/runs`, `/api/schedules`, …) work with no extra flags.
 
 **Flow** (what happens on the wire):
 
 1. `POST /api/auth/device/code` → receive `device_code`, `user_code`, `verification_uri_complete`, `expires_in` (10 min), `interval` (5s).
 2. CLI prints the code, opens the verification URI in the browser via the [`open`](https://www.npmjs.com/package/open) package (silent fallback on headless hosts — the URL is still displayed in the terminal).
-3. User authenticates on the instance's `/activate` SSR page and clicks "Autoriser". A realm guard on `/device/approve` rejects cross-audience approval attempts (e.g. an application-level end-user trying to approve a CLI session).
+3. User authenticates on the instance's `/activate` SSR page and clicks "Autoriser". A realm guard on `/device/approve` rejects cross-audience approval attempts (e.g. a space-level end-user trying to approve a CLI session).
 4. CLI polls `POST /api/auth/cli/token` every `interval` seconds (honoring `slow_down` backoff) until approval. On success: receives an `access_token` (15-minute signed JWT, ES256) + `refresh_token` (30-day opaque rotating token) pair — see issue #165.
 5. CLI decodes the JWT payload locally to extract `sub` (user id) and `email` from its claims. No second round-trip needed — the JWT is the authoritative identity source, and `/api/auth/get-session` does not understand Bearer JWTs (that endpoint is BA's cookie-based session reader).
 6. Tokens are stored in the OS keyring; profile is written to `config.toml`.
@@ -332,7 +332,7 @@ appstrate org create "Acme"   # non-interactive → auto-pin
 appstrate org create "Acme" --slug acme-prod
 ```
 
-All four subcommands respect the global `--profile <name>` flag and talk to `GET /api/orgs` / `POST /api/orgs`. Creating an org server-side also provisions a default application + a hello-world agent, so the CLI lands on a fully-working setup with no extra steps.
+All four subcommands respect the global `--profile <name>` flag and talk to `GET /api/orgs` / `POST /api/orgs`. Creating an org server-side also provisions a default space + a hello-world agent, so the CLI lands on a fully-working setup with no extra steps.
 
 **Subcommands**
 
@@ -343,33 +343,33 @@ All four subcommands respect the global `--profile <name>` flag and talk to `GET
 | `org current`           | Print the pinned org id to stdout. Exits 1 with a hint when no org is pinned — designed for `if` / shell prompts.                        |
 | `org create [name]`     | Create a new org and pin it. With no argument, prompt for name + optional slug. Use `--slug <slug>` for an explicit kebab-case override. |
 
-**Cascade — the app pin follows the org pin.** Every `org switch` / `org create` clears the current `applicationId` and re-pins the new org's default application in the same atomic operation. This keeps `appstrate api GET /api/agents` working immediately after switching — without the cascade the next call would return `404 Application not found in this organization`.
+**Cascade — the space pin follows the org pin.** Every `org switch` / `org create` clears the current `spaceId` and re-pins the new org's default space in the same atomic operation. This keeps `appstrate api GET /api/agents` working immediately after switching — without the cascade the next call would return `404 Space not found in this organization`.
 
 ---
 
-### `appstrate app`
+### `appstrate space`
 
-Manage the application pinned on the active profile. `login` auto-pins the default application in the pinned org (see above); `app switch` / `app create` let you change the pin without re-running the device flow. The pinned app id is sent as `X-Application-Id` on every `appstrate api` call — required for app-scoped routes (agents, runs, schedules, webhooks, api-keys, notifications, packages, integrations, end-users).
+Manage the space pinned on the active profile. `login` auto-pins the default space in the pinned org (see above); `space switch` / `space create` let you change the pin without re-running the device flow. The pinned space id is sent as `X-Space-Id` on every `appstrate api` call — required for space-scoped routes (agents, runs, schedules, webhooks, api-keys, notifications, packages, integrations, end-users).
 
 ```sh
-appstrate app list            # enumerate apps in the pinned org; pinned row is marked *, default row tagged [default]
-appstrate app switch          # interactive picker (current app pre-highlighted)
-appstrate app switch app_xxx  # non-interactive — by id
-appstrate app current         # print the pinned applicationId (scripts / shell prompts)
-appstrate app create          # interactive (name) → auto-pin
-appstrate app create "Staging"   # non-interactive → auto-pin
+appstrate space list            # enumerate spaces in the pinned org; pinned row is marked *, default row tagged [default]
+appstrate space switch          # interactive picker (current space pre-highlighted)
+appstrate space switch spc_xxx  # non-interactive — by id
+appstrate space current         # print the pinned spaceId (scripts / shell prompts)
+appstrate space create          # interactive (name) → auto-pin
+appstrate space create "Staging"   # non-interactive → auto-pin
 ```
 
-All four subcommands respect the global `--profile <name>` flag and talk to `GET /api/applications` / `POST /api/applications`. Applications are identified by `id` only (there is no slug column server-side).
+All four subcommands respect the global `--profile <name>` flag and talk to `GET /api/spaces` / `POST /api/spaces`. Spaces are identified by `id` only (there is no slug column server-side).
 
 **Subcommands**
 
-| Subcommand          | Purpose                                                                                                              |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `app list`          | List the applications in the pinned org. The pinned one is marked with `*`; the org's default is tagged `[default]`. |
-| `app switch [id]`   | Re-pin the active app on the profile. With no argument, show an interactive picker with the current one highlighted. |
-| `app current`       | Print the pinned app id to stdout. Exits 1 with a hint when no app is pinned — designed for `if` / shell prompts.    |
-| `app create [name]` | Create a new app and pin it. With no argument, prompt for a name interactively.                                      |
+| Subcommand            | Purpose                                                                                                                |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `space list`          | List the spaces in the pinned org. The pinned one is marked with `*`; the org's default is tagged `[default]`.         |
+| `space switch [id]`   | Re-pin the active space on the profile. With no argument, show an interactive picker with the current one highlighted. |
+| `space current`       | Print the pinned space id to stdout. Exits 1 with a hint when no space is pinned — designed for `if` / shell prompts.  |
+| `space create [name]` | Create a new space and pin it. With no argument, prompt for a name interactively.                                      |
 
 ---
 
@@ -434,7 +434,7 @@ Colors are suppressed when stdout is not a TTY, or when `NO_COLOR` is set in the
 
 ### `appstrate api`
 
-Curl-like authenticated HTTP passthrough. Purpose-built so coding agents (Claude Code, Cursor, Aider, …) can call the Appstrate API in a shell-one-liner without ever seeing the raw bearer — the CLI injects `Authorization: Bearer …` + `X-Org-Id` + `X-Application-Id` from the keyring-backed profile.
+Curl-like authenticated HTTP passthrough. Purpose-built so coding agents (Claude Code, Cursor, Aider, …) can call the Appstrate API in a shell-one-liner without ever seeing the raw bearer — the CLI injects `Authorization: Bearer …` + `X-Org-Id` + `X-Space-Id` from the keyring-backed profile.
 
 ```sh
 appstrate api GET /api/agents
@@ -475,7 +475,7 @@ Every row below is a direct drop-in: an agent can replace `curl` with `appstrate
 | `curl -e https://ref`           | `appstrate api -e https://ref`        | Referer shortcut                                  |
 | `curl -b 'k=v'`                 | `appstrate api -b 'k=v'`              | literal only; cookie-jar files rejected           |
 
-**About `-L`.** A `Location` is chosen by the server and is never re-validated against your profile origin, so following it is opt-in. On a cross-origin hop the runtime drops `Authorization` and `Cookie`, but every custom `-H` header you pass — plus `X-Org-Id` / `X-Application-Id` — is forwarded to that host. Don't pass a second credential via `-H` and assume `-L` is safe. Without `-L`, a 3xx is surfaced un-followed (usually an empty body, exit 0) and the CLI prints a hint on stderr naming the `Location`.
+**About `-L`.** A `Location` is chosen by the server and is never re-validated against your profile origin, so following it is opt-in. On a cross-origin hop the runtime drops `Authorization` and `Cookie`, but every custom `-H` header you pass — plus `X-Org-Id` / `X-Space-Id` — is forwarded to that host. Don't pass a second credential via `-H` and assume `-L` is safe. Without `-L`, a 3xx is surfaced un-followed (usually an empty body, exit 0) and the CLI prints a hint on stderr naming the `Location`.
 
 #### Write-out variables (`-w`)
 
@@ -547,12 +547,12 @@ appstrate run @scope/triage@beta
 appstrate run ./out/triage-1.2.0.afps-bundle --integrations local --creds-file ./creds.json
 ```
 
-Run-config inheritance (model, proxy, version pin) is fetched from `/api/applications/{applicationId}/packages/{scope}/{name}/run-config` and merged with flag/env overrides. Use `--no-inherit` to opt out (deterministic CI).
+Run-config inheritance (model, proxy, version pin) is fetched from `/api/spaces/{spaceId}/packages/{scope}/{name}/run-config` and merged with flag/env overrides. Use `--no-inherit` to opt out (deterministic CI).
 
 Agent parameters are supplied with `--input <json>` / `--input-file <path>`. Remote runs send your input verbatim — the instance resolves and validates it server-side. A **local** run reaches none of the server's code, so the CLI reproduces the same chain in-process:
 
 1. **Author defaults** — the `default` keywords in the agent's own `input` schema, always.
-2. **Stored per-application values** — `application_packages.input_settings.values`, i.e. what the dashboard's agent settings hold. Applied only when the target is a package id (`appstrate run @scope/agent`) and inheritance is on; a bundle read off disk has no application row behind it and stays on author defaults alone. `--no-inherit` skips this layer.
+2. **Stored per-space values** — `space_packages.input_settings.values`, i.e. what the dashboard's agent settings hold. Applied only when the target is a package id (`appstrate run @scope/agent`) and inheritance is on; a bundle read off disk has no space row behind it and stays on author defaults alone. `--no-inherit` skips this layer.
 3. **Your `--input` / `--input-file`** — wins over both, including an explicit `null` or `""`. Only an _absent_ key falls through to a lower layer.
 
 A field the editor **locked** cannot be set at launch: naming it in `--input` / `--input-file` is a hard error (`Field '<name>' is locked on this agent and cannot be set at launch`), not a silently dropped value — the same rule the server's `locked_input_field` enforces. Leave it out and the stored value applies.
@@ -581,9 +581,9 @@ Exit codes on the signal path are the conventional POSIX ones (128 + signal numb
 
 | Flag                    | Purpose                                                                                                                                                                                                                                                      |
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--proxy <id>`          | Proxy id to associate with the run (overrides the per-app inherited value).                                                                                                                                                                                  |
+| `--proxy <id>`          | Proxy id to associate with the run (overrides the per-space inherited value).                                                                                                                                                                                |
 | `--[no-]cancel-on-exit` | Remote runs only: whether SIGINT/SIGTERM/SIGHUP cancels the platform-side run. Default: on when stdin is a TTY and `--json` is not set (interactive Ctrl-C cancels), off otherwise — the CLI detaches and the run keeps going, like closing a dashboard tab. |
-| `--no-inherit`          | Skip per-application run-config inheritance — flags + env vars + defaults only.                                                                                                                                                                              |
+| `--no-inherit`          | Skip per-space run-config inheritance — flags + env vars + defaults only.                                                                                                                                                                                    |
 | `--json`                | Emit canonical RunEvents as JSONL on stdout.                                                                                                                                                                                                                 |
 | `-v, --verbose`         | Verbose tool-call output: pretty-print args + reveal full results (~2 KB). Honoured only in human mode (without `--json`). Env: `APPSTRATE_VERBOSE=1`.                                                                                                       |
 | `-q, --quiet`           | Suppress per-tool output lines (name, args, result). Errors and final summary still print. Mutually exclusive with `--verbose`.                                                                                                                              |
@@ -686,7 +686,7 @@ instance = "https://app.example.com"
 userId = "EWnC2cLyy88EpCGBa3WrIdS7uqI648BB"
 email = "alice@example.com"
 orgId = "org_123abc"
-applicationId = "app_abc123"
+spaceId = "spc_abc123"
 
 [profile.dev]
 instance = "http://localhost:3000"
@@ -694,18 +694,23 @@ userId = "SVAA9PSXrmqQmg95A3RzyydtlravhhJR"
 email = "dev@example.com"
 ```
 
-`orgId` and `applicationId` are both optional — when set, every `apiFetch` request sends `X-Org-Id: <orgId>` (and `X-Application-Id: <applicationId>`) so the instance scopes requests correctly. Unset `orgId` means the user's default org applies server-side; unset `applicationId` means app-scoped routes (`/api/agents`, `/api/runs`, …) return `400 Application context required` and the caller must pass `-H X-Application-Id: …` manually.
+`orgId` and `spaceId` are both optional — when set, every `apiFetch` request sends `X-Org-Id: <orgId>` (and `X-Space-Id: <spaceId>`) so the instance scopes requests correctly. Unset `orgId` means the user's default org applies server-side; unset `spaceId` means space-scoped routes (`/api/agents`, `/api/runs`, …) return `400 Space context required` and the caller must pass `-H X-Space-Id: …` manually.
+
+A profile written by an older CLI carries an `applicationId` key instead of `spaceId`. That name is retired: the CLI refuses to run rather than silently dropping the value on the next write. Delete the line and re-pin with `appstrate space switch` — the old value was an `app_…` id and spaces are `spc_…`, so it could not have been carried over anyway.
 
 ## Troubleshooting
 
 **`Unauthorized — your session may have been revoked`**
 Session expired or was revoked server-side. Re-run `appstrate login`.
 
-**`Application context required. Provide X-Application-Id header or use an API key.`**
-The pinned profile has no `applicationId`. Either the cascade at login skipped it (`--no-app`, zero apps in the org, or no default found), or a previous `org switch` cleared it and the re-pin fetch flaked. Run `appstrate app switch` to pick one, or pass `-H 'X-Application-Id: …'` on the call.
+**`Space context required. Provide X-Space-Id header or use an API key.`**
+The pinned profile has no `spaceId`. Either the cascade at login skipped it (`--no-space`, zero spaces in the org, or no default found), or a previous `org switch` cleared it and the re-pin fetch flaked. Run `appstrate space switch` to pick one, or pass `-H 'X-Space-Id: …'` on the call.
 
-**`Application '<id>' not found in this organization`**
-The pinned `applicationId` belongs to a different org than the currently pinned `orgId`. Happens when something mutates `config.toml` between an `org switch` and the next API call, or after a manual hand-edit. Run `appstrate app switch` to re-pin a valid app under the current org.
+**`Space '<id>' not found in this organization`**
+The pinned `spaceId` belongs to a different org than the currently pinned `orgId`. Happens when something mutates `config.toml` between an `org switch` and the next API call, or after a manual hand-edit. Run `appstrate space switch` to re-pin a valid space under the current org.
+
+**`Profile "<name>" in <path> was written by an older Appstrate CLI: it pins the retired key "applicationId" …`**
+`applicationId` was renamed to `spaceId`. The old key is refused rather than read, so the pin is never silently erased from `config.toml`. Delete the `applicationId = …` line from the profile section, then run `appstrate space switch` to re-pin. The refusal fires on any profile in the file, not just the active one — every command reads the whole config.
 
 **`This CLI is not registered on the target instance. The platform may be running an incompatible version.`**
 The instance's `appstrate-cli` OAuth client is missing. Boot the platform — `ensureCliClient()` auto-provisions it on startup. If the instance is much older than the CLI (pre-Phase-1 device flow), the CLI binary is incompatible — downgrade via `APPSTRATE_VERSION=<older-tag> curl get.appstrate.dev | bash`.

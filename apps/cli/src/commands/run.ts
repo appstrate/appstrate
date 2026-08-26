@@ -132,9 +132,9 @@ export interface RunCommandOptions {
    */
   proxy?: string;
   /**
-   * When true, ignore the per-app `run-config` (model / proxy /
+   * When true, ignore the per-space `run-config` (model / proxy /
    * versionPin) and rely only on flags + env vars + defaults. Useful
-   * for deterministic CI runs where the application's persisted state
+   * for deterministic CI runs where the space's persisted state
    * must not drift the run.
    */
   noInherit?: boolean;
@@ -218,7 +218,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
 
   // ─── 1a. Inherited run-config ────────────────────────────────────
   // When the user runs an agent by id with a remote integration context,
-  // pull the per-app run-config so flags + env vars cascade over the
+  // pull the per-space run-config so flags + env vars cascade over the
   // same persisted state the dashboard "Run" button uses. Skipped for
   // path-mode (local file, no platform handle) and for `--no-inherit`
   // (deterministic CI runs).
@@ -249,7 +249,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   //     instance (with deps inlined) into memory only. The bytes are
   //     verified against the server's integrity header and discarded
   //     when the run finishes — no on-disk cache. Requires a remote
-  //     integration mode so we already have the bearer token + applicationId in
+  //     integration mode so we already have the bearer token + spaceId in
   //     `resolverInputs`. The inherited `versionPin` is applied as the
   //     spec when the user did not type `@spec` themselves.
   const bundleTarget =
@@ -281,10 +281,10 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   // Layers 1-2 of the platform's input resolution, applied here because a
   // locally executed bundle never reaches the server's resolver: author
   // defaults (`default` in the manifest's `input` schema) always, plus the
-  // per-application stored values and locks when the target is a REMOTE
+  // per-space stored values and locks when the target is a REMOTE
   // package — that is what keeps `appstrate run @scope/agent` executing the
   // same agent with the same parameters the dashboard would. A bundle read
-  // off disk has no application row behind it, so it stays
+  // off disk has no space row behind it, so it stays
   // author-defaults-only; there is no inheritance to invent for it.
   //
   // Layers 3-4 stay server-owned: the remote execution path sends the
@@ -672,7 +672,7 @@ async function runCommandRemote(
     {
       instance: resolverInputs.instance,
       bearerToken: resolverInputs.bearerToken,
-      applicationId: resolverInputs.applicationId,
+      spaceId: resolverInputs.spaceId,
       orgId: resolverInputs.orgId,
       scope: target.scope,
       name: target.name,
@@ -861,12 +861,12 @@ async function buildResolverInputs(
   //
   //   1. Headless: an explicit `ask_…` API key via `--api-key` or
   //      `APPSTRATE_API_KEY`. Pair with `APPSTRATE_INSTANCE` /
-  //      `APPSTRATE_APP_ID` (or a profile for fallback). This is the
+  //      `APPSTRATE_SPACE_ID` (or a profile for fallback). This is the
   //      flow CI runners and the GitHub Action take.
   //   2. Interactive: a device-flow JWT from `appstrate login`, pulled
   //      from the keyring via `resolveAuthContext` (silent refresh
   //      against `/api/auth/cli/token` included). The profile also
-  //      supplies `instance` + `applicationId`.
+  //      supplies `instance` + `spaceId`.
   //
   // Mixing the two is rejected — an explicit env-var API key overrides
   // the profile credential entirely so there's no ambiguity about which
@@ -883,15 +883,15 @@ async function buildHeadlessRemoteInputs(
   opts: RunCommandOptions,
 ): Promise<RemoteResolverInputs> {
   let instance = process.env.APPSTRATE_INSTANCE;
-  let applicationId = process.env.APPSTRATE_APP_ID;
+  let spaceId = process.env.APPSTRATE_SPACE_ID;
   let orgId = process.env.APPSTRATE_ORG_ID;
 
-  if (!instance || !applicationId || !orgId) {
+  if (!instance || !spaceId || !orgId) {
     const resolved = await resolveActiveProfile(opts.profile).catch(() => null);
     const profile = resolved?.profile;
     if (profile) {
       instance ??= profile.instance;
-      applicationId ??= profile.applicationId;
+      spaceId ??= profile.spaceId;
       orgId ??= profile.orgId;
     }
   }
@@ -902,14 +902,14 @@ async function buildHeadlessRemoteInputs(
       "Set APPSTRATE_INSTANCE, or run `appstrate login` to pin a profile",
     );
   }
-  if (!applicationId) {
+  if (!spaceId) {
     throw new ResolverConfigError(
-      "No application id pinned",
-      "Set APPSTRATE_APP_ID, or run `appstrate app switch` from a logged-in profile",
+      "No space id pinned",
+      "Set APPSTRATE_SPACE_ID, or run `appstrate space switch` from a logged-in profile",
     );
   }
 
-  return { instance, bearerToken: apiKey, applicationId, orgId };
+  return { instance, bearerToken: apiKey, spaceId, orgId };
 }
 
 async function buildInteractiveRemoteInputs(
@@ -920,10 +920,10 @@ async function buildInteractiveRemoteInputs(
   if (!resolved || !profile) {
     throw new ResolverConfigError(ERR_REMOTE_REQUIRES_AUTH.message, ERR_REMOTE_REQUIRES_AUTH.hint);
   }
-  if (!profile.applicationId) {
+  if (!profile.spaceId) {
     throw new ResolverConfigError(
-      `Profile "${resolved.profileName}" has no application pinned`,
-      "Run `appstrate app switch` to select one",
+      `Profile "${resolved.profileName}" has no space pinned`,
+      "Run `appstrate space switch` to select one",
     );
   }
 
@@ -936,7 +936,7 @@ async function buildInteractiveRemoteInputs(
     return {
       instance: ctx.instance,
       bearerToken: ctx.accessToken,
-      applicationId: profile.applicationId,
+      spaceId: profile.spaceId,
       orgId: profile.orgId,
     };
   } catch (err) {
@@ -990,7 +990,7 @@ async function resolveReportSession(
       ? ({
           instance: resolverInputs.instance,
           bearerToken: resolverInputs.bearerToken,
-          applicationId: resolverInputs.applicationId,
+          spaceId: resolverInputs.spaceId,
           orgId: resolverInputs.orgId ?? null,
         } satisfies ReportContext)
       : null;
@@ -1099,7 +1099,7 @@ async function maybeFetchRunConfig(
   const payload = await fetchRunConfigPayload({
     instance: remoteInputs.instance,
     bearerToken: remoteInputs.bearerToken,
-    applicationId: remoteInputs.applicationId,
+    spaceId: remoteInputs.spaceId,
     orgId: remoteInputs.orgId,
     scope: idTarget.scope,
     name: idTarget.name,
@@ -1147,19 +1147,19 @@ async function resolveBundleSource(
     return { kind: "path", path: abs, label: path.basename(abs) };
   }
 
-  // id mode — needs remote integration context so we have a bearer + applicationId
+  // id mode — needs remote integration context so we have a bearer + spaceId
   // to authenticate the bundle download against the pinned instance.
   if (!resolverInputs || !("bearerToken" in resolverInputs)) {
     throw new PackageSpecError(
       `Running an agent by id requires a logged-in profile or an API key`,
-      `Run \`appstrate login\`, or set APPSTRATE_API_KEY + APPSTRATE_INSTANCE + APPSTRATE_APP_ID. To run a local file, prefix the path with ./`,
+      `Run \`appstrate login\`, or set APPSTRATE_API_KEY + APPSTRATE_INSTANCE + APPSTRATE_SPACE_ID. To run a local file, prefix the path with ./`,
     );
   }
 
   const fetched = await fetchBundleForRun({
     instance: resolverInputs.instance,
     bearerToken: resolverInputs.bearerToken,
-    applicationId: resolverInputs.applicationId,
+    spaceId: resolverInputs.spaceId,
     orgId: resolverInputs.orgId,
     packageId: target.packageId,
     spec: target.spec,

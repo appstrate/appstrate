@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `appstrate app` — manage the pinned application for the active CLI
- * profile. Counterpart to the `applicationId` written at `appstrate login` time
- * (issue #217): lets users re-pin, create, or inspect their application
+ * `appstrate space` — manage the pinned space for the active CLI
+ * profile. Counterpart to the `spaceId` written at `appstrate login` time
+ * (issue #217): lets users re-pin, create, or inspect their space
  * without re-running the device flow.
  *
  * Mirror of `./org.ts` — the command family, wiring conventions, and
@@ -16,87 +16,82 @@
  * reassigning the process-wide streams — issue #1180.
  *
  * Subcommands:
- *   app list          — enumerate apps in the pinned org
- *   app switch [ref]  — re-pin (interactive if no arg)
- *   app current       — print pinned app id (scripts / prompts)
- *   app create [name] — create + auto-pin
+ *   space list          — enumerate spaces in the pinned org
+ *   space switch [ref]  — re-pin (interactive if no arg)
+ *   space current       — print pinned space id (scripts / prompts)
+ *   space create [name] — create + auto-pin
  */
 
 import { resolveActiveProfile, requireLoggedIn, updateProfile } from "../lib/config.ts";
-import {
-  listApplications,
-  createApplication,
-  resolveApplicationRef,
-  type Application,
-} from "../lib/applications.ts";
+import { listSpaces, createSpace, resolveSpaceRef, type Space } from "../lib/spaces.ts";
 import { askText, select, exitWithError } from "../lib/ui.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 
-interface AppBaseOptions {
+interface SpaceBaseOptions {
   profile?: string;
 }
 
-interface AppSwitchOptions extends AppBaseOptions {
+interface SpaceSwitchOptions extends SpaceBaseOptions {
   /** Positional `[id]` — when absent, use interactive picker. */
   ref?: string;
 }
 
-interface AppCreateOptions extends AppBaseOptions {
+interface SpaceCreateOptions extends SpaceBaseOptions {
   /** Positional `[name]` — when absent, prompt interactively. */
   name?: string;
 }
 
-interface AppCommandDeps {
+interface SpaceCommandDeps {
   /** Return null when the picker cannot run (e.g. non-TTY). */
-  pickApp?: (apps: Application[], currentAppId?: string) => Promise<Application | null>;
+  pickSpace?: (spaces: Space[], currentSpaceId?: string) => Promise<Space | null>;
   /** Return null when the prompt cannot run. */
-  promptCreateApp?: () => Promise<{ name: string } | null>;
+  promptCreateSpace?: () => Promise<{ name: string } | null>;
 }
 
-const defaultDeps: Required<AppCommandDeps> = {
-  pickApp: async (apps: Application[], currentAppId?: string): Promise<Application | null> => {
+const defaultDeps: Required<SpaceCommandDeps> = {
+  pickSpace: async (spaces: Space[], currentSpaceId?: string): Promise<Space | null> => {
     if (!process.stdin.isTTY) return null;
-    const current = currentAppId ? apps.find((a) => a.id === currentAppId) : undefined;
-    return select<Application>(
-      "Select an application",
-      apps.map((a) => {
+    const current = currentSpaceId ? spaces.find((s) => s.id === currentSpaceId) : undefined;
+    return select<Space>(
+      "Select a space",
+      spaces.map((s) => {
         const suffixes: string[] = [];
-        if (a.isDefault) suffixes.push("default");
-        if (a.id === currentAppId) suffixes.push("current");
+        if (s.isDefault) suffixes.push("default");
+        if (s.id === currentSpaceId) suffixes.push("current");
         const suffix = suffixes.length > 0 ? ` (${suffixes.join(", ")})` : "";
         return {
-          value: a,
-          label: `${a.name}${suffix}`,
-          hint: a.id,
+          value: s,
+          label: `${s.name}${suffix}`,
+          hint: s.id,
         };
       }),
       current,
     );
   },
-  promptCreateApp: async (): Promise<{ name: string } | null> => {
+  promptCreateSpace: async (): Promise<{ name: string } | null> => {
     if (!process.stdin.isTTY) return null;
-    const name = await askText("Application name");
+    const name = await askText("Space name");
     return { name };
   },
 };
 
-export async function appListCommand(
-  opts: AppBaseOptions,
+export async function spaceListCommand(
+  opts: SpaceBaseOptions,
   io: CommandIO = DEFAULT_IO,
 ): Promise<void> {
   const { profileName, profile } = await resolveActiveProfile(opts.profile);
   requireLoggedIn(profileName, profile, io);
 
   try {
-    const apps = await listApplications(profileName);
-    if (apps.length === 0) {
-      io.stdout.write("(no applications)\n");
+    const spaces = await listSpaces(profileName);
+    if (spaces.length === 0) {
+      io.stdout.write("(no spaces)\n");
       return;
     }
-    for (const a of apps) {
-      const marker = a.id === profile.applicationId ? "*" : " ";
-      const def = a.isDefault ? " [default]" : "";
-      io.stdout.write(`${marker} ${a.name.padEnd(24)}  ${a.id}${def}\n`);
+    for (const s of spaces) {
+      const marker = s.id === profile.spaceId ? "*" : " ";
+      const def = s.isDefault ? " [default]" : "";
+      io.stdout.write(`${marker} ${s.name.padEnd(24)}  ${s.id}${def}\n`);
     }
   } catch (err) {
     // `io` is forwarded so the terminal error and the exit go to the
@@ -105,8 +100,8 @@ export async function appListCommand(
   }
 }
 
-export async function appCurrentCommand(
-  opts: AppBaseOptions,
+export async function spaceCurrentCommand(
+  opts: SpaceBaseOptions,
   io: CommandIO = DEFAULT_IO,
 ): Promise<void> {
   const { profile } = await resolveActiveProfile(opts.profile);
@@ -114,16 +109,16 @@ export async function appCurrentCommand(
     io.stderr.write("Not logged in. Run: appstrate login\n");
     io.exit(1);
   }
-  if (!profile.applicationId) {
-    io.stderr.write("No application pinned. Run: appstrate app switch\n");
+  if (!profile.spaceId) {
+    io.stderr.write("No space pinned. Run: appstrate space switch\n");
     io.exit(1);
   }
-  io.stdout.write(`${profile.applicationId}\n`);
+  io.stdout.write(`${profile.spaceId}\n`);
 }
 
-export async function appSwitchCommand(
-  opts: AppSwitchOptions,
-  deps: AppCommandDeps = {},
+export async function spaceSwitchCommand(
+  opts: SpaceSwitchOptions,
+  deps: SpaceCommandDeps = {},
   io: CommandIO = DEFAULT_IO,
 ): Promise<void> {
   const { profileName, profile } = await resolveActiveProfile(opts.profile);
@@ -131,34 +126,34 @@ export async function appSwitchCommand(
   const picker = { ...defaultDeps, ...deps };
 
   try {
-    const apps = await listApplications(profileName);
-    if (apps.length === 0) {
-      io.stderr.write("No applications — run `appstrate app create <name>` to create one.\n");
+    const spaces = await listSpaces(profileName);
+    if (spaces.length === 0) {
+      io.stderr.write("No spaces — run `appstrate space create <name>` to create one.\n");
       io.exit(1);
     }
 
-    let chosen: Application;
+    let chosen: Space;
     if (opts.ref !== undefined) {
-      chosen = resolveApplicationRef(apps, opts.ref);
+      chosen = resolveSpaceRef(spaces, opts.ref);
     } else {
-      const picked = await picker.pickApp(apps, profile.applicationId);
+      const picked = await picker.pickSpace(spaces, profile.spaceId);
       if (!picked) {
-        io.stderr.write("Cannot prompt in non-TTY — pass an id: `appstrate app switch <id>`.\n");
+        io.stderr.write("Cannot prompt in non-TTY — pass an id: `appstrate space switch <id>`.\n");
         io.exit(1);
       }
       chosen = picked;
     }
 
-    await updateProfile(profileName, { applicationId: chosen.id });
+    await updateProfile(profileName, { spaceId: chosen.id });
     io.stdout.write(`Pinned "${chosen.name}" (${chosen.id}) on profile "${profileName}".\n`);
   } catch (err) {
     exitWithError(err, io);
   }
 }
 
-export async function appCreateCommand(
-  opts: AppCreateOptions,
-  deps: AppCommandDeps = {},
+export async function spaceCreateCommand(
+  opts: SpaceCreateOptions,
+  deps: SpaceCommandDeps = {},
   io: CommandIO = DEFAULT_IO,
 ): Promise<void> {
   const { profileName, profile } = await resolveActiveProfile(opts.profile);
@@ -170,15 +165,17 @@ export async function appCreateCommand(
     if (opts.name !== undefined) {
       name = opts.name;
     } else {
-      const prompted = await picker.promptCreateApp();
+      const prompted = await picker.promptCreateSpace();
       if (!prompted) {
-        io.stderr.write("Cannot prompt in non-TTY — pass a name: `appstrate app create <name>`.\n");
+        io.stderr.write(
+          "Cannot prompt in non-TTY — pass a name: `appstrate space create <name>`.\n",
+        );
         io.exit(1);
       }
       name = prompted.name;
     }
-    const created = await createApplication(profileName, name);
-    await updateProfile(profileName, { applicationId: created.id });
+    const created = await createSpace(profileName, name);
+    await updateProfile(profileName, { spaceId: created.id });
     io.stdout.write(
       `Created "${created.name}" (${created.id}) and pinned it on profile "${profileName}".\n`,
     );

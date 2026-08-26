@@ -5,9 +5,9 @@
  *
  * File: `$XDG_CONFIG_HOME/appstrate/config.toml` (or `~/.config/appstrate/`
  * when `XDG_CONFIG_HOME` is unset). One `[profile.<name>]` section per
- * profile holds the non-secret state (`instance`, `user_id`, `email`,
- * `org_id`). Access tokens live in the OS keyring, not here — see
- * `./keyring.ts`.
+ * profile holds the non-secret state, keyed exactly as the `Profile`
+ * fields below (`instance`, `userId`, `email`, `orgId`, `spaceId`).
+ * Access tokens live in the OS keyring, not here — see `./keyring.ts`.
  *
  * Profile resolution order (same convention as AWS / gcloud / doctl):
  *   1. `--profile <name>` CLI flag  (caller passes explicitly)
@@ -31,7 +31,7 @@ export interface Profile {
   userId: string;
   email: string;
   orgId?: string;
-  applicationId?: string;
+  spaceId?: string;
 }
 
 export interface Config {
@@ -105,12 +105,35 @@ export async function readConfig(): Promise<Config> {
     ) {
       continue;
     }
+    // Retired-name refusal (`docs/NO_TRANSITIONAL_CODE.md` §1) — NOT a
+    // compatibility shim and NOT an alias: `applicationId` was renamed to
+    // `spaceId`, and this parse is an allow-list that drops unknown keys, so
+    // staying silent would let the next `writeConfig` erase the user's pin
+    // from disk with no warning. The retired key is read only to raise this
+    // error; its value never reaches any behaviour.
+    //
+    // This sits in `readConfig` because every command path goes through it.
+    // That is also why the fix it names starts with a file edit: while the
+    // retired key is on disk, no command can run — `appstrate space switch`
+    // included. Deleting the line is the whole repair, not a workaround: the
+    // stored value is an `app_…` id, and spaces are `spc_…`, so it could not
+    // have been carried over even if this were a rename.
+    //
+    // Delete this check once no profile on disk can still carry
+    // `applicationId` — i.e. one release after every user has re-pinned.
+    if ("applicationId" in row) {
+      throw new Error(
+        `Profile "${name}" in ${getConfigPath()} was written by an older Appstrate CLI: ` +
+          `it pins the retired key "applicationId", replaced by "spaceId". ` +
+          `Delete that line from the file, then re-pin with: appstrate space switch`,
+      );
+    }
     profiles[name] = {
       instance: row.instance,
       userId: row.userId,
       email: row.email,
       orgId: typeof row.orgId === "string" ? row.orgId : undefined,
-      applicationId: typeof row.applicationId === "string" ? row.applicationId : undefined,
+      spaceId: typeof row.spaceId === "string" ? row.spaceId : undefined,
     };
   }
   return { defaultProfile, profiles };
@@ -147,8 +170,8 @@ export async function getProfile(name: string): Promise<Profile | null> {
 
 /**
  * Merge a partial update into an existing profile. Used by the login
- * org→app cascade and the `org switch` / `app switch` commands to rewrite
- * a single field (`orgId`, `applicationId`) without re-reading the whole profile
+ * org→space cascade and the `org switch` / `space switch` commands to rewrite
+ * a single field (`orgId`, `spaceId`) without re-reading the whole profile
  * at each call site.
  *
  * `undefined` in the patch means "clear the key" — strip it before write
@@ -186,7 +209,7 @@ export async function resolveActiveProfile(
 /**
  * Narrow `profile` from `Profile | undefined` to `Profile`, hard-exiting
  * with an actionable hint when the resolved profile has no config entry.
- * Used by every `appstrate org …` / `appstrate app …` subcommand —
+ * Used by every `appstrate org …` / `appstrate space …` subcommand —
  * centralized so the phrasing stays in sync across the two command
  * families.
  *

@@ -245,7 +245,7 @@ export async function apiCommand(
     userHeaders: effectiveOpts.header,
     token: auth.accessToken,
     orgId: auth.orgId,
-    applicationId: auth.applicationId,
+    spaceId: auth.spaceId,
     userAgent: opts.userAgent,
     referer: opts.referer,
     cookie: opts.cookie,
@@ -391,7 +391,7 @@ export async function apiCommand(
           location ? ` (Location: ${location})` : ""
         }.\n` +
           `Re-run with -L to follow it. Cross-origin hops drop Authorization/Cookie, ` +
-          `but your -H headers and X-Org-Id/X-Application-Id are forwarded to that host.\n`,
+          `but your -H headers and X-Org-Id/X-Space-Id are forwarded to that host.\n`,
       );
     }
 
