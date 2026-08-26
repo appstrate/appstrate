@@ -8,7 +8,7 @@ import {
   authHeaders,
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
-import { seedApiKey, seedApplication } from "../../../../../../test/helpers/seed.ts";
+import { seedApiKey, seedSpace } from "../../../../../../test/helpers/seed.ts";
 
 const app = getTestApp();
 
@@ -22,8 +22,8 @@ describe("Webhooks API", () => {
 
   function webhookPayload(overrides?: Record<string, unknown>) {
     return {
-      level: "application" as const,
-      applicationId: ctx.defaultAppId,
+      level: "space" as const,
+      spaceId: ctx.defaultSpaceId,
       url: "https://example.com/webhook",
       events: ["run.success"],
       ...overrides,
@@ -55,20 +55,20 @@ describe("Webhooks API", () => {
       expect(body.events).toContain("run.success");
     });
 
-    it("rejects application webhook with invalid applicationId prefix", async () => {
+    it("rejects space webhook with invalid spaceId prefix", async () => {
       const res = await app.request("/api/webhooks", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
-          level: "application",
-          applicationId: "invalid-no-prefix",
+          level: "space",
+          spaceId: "invalid-no-prefix",
           url: "https://example.com/hook",
           events: ["run.success"],
         }),
       });
       expect(res.status).toBe(400);
       const body = (await res.json()) as any;
-      expect(body.detail).toContain("app_");
+      expect(body.detail).toContain("spc_");
     });
 
     it("returns secret only at creation", async () => {
@@ -87,11 +87,11 @@ describe("Webhooks API", () => {
   });
 
   describe("GET /api/webhooks", () => {
-    it("lists application-level webhooks when applicationId is passed", async () => {
+    it("lists space-level webhooks when spaceId is passed", async () => {
       await createWebhook();
       await createWebhook({ url: "https://example.com/webhook2" });
 
-      const res = await app.request(`/api/webhooks?applicationId=${ctx.defaultAppId}`, {
+      const res = await app.request(`/api/webhooks?spaceId=${ctx.defaultSpaceId}`, {
         headers: authHeaders(ctx),
       });
 
@@ -102,8 +102,8 @@ describe("Webhooks API", () => {
       expect(body.data.length).toBeGreaterThanOrEqual(2);
     });
 
-    it("lists org-level webhooks when applicationId is omitted", async () => {
-      // Create one org-level webhook + one app-level webhook, then list without applicationId.
+    it("lists org-level webhooks when spaceId is omitted", async () => {
+      // Create one org-level webhook + one space-level webhook, then list without spaceId.
       await app.request("/api/webhooks", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -120,7 +120,7 @@ describe("Webhooks API", () => {
       const body = (await res.json()) as any;
       expect(body.data.length).toBe(1);
       expect(body.data[0].level).toBe("org");
-      expect(body.data[0].applicationId).toBeNull();
+      expect(body.data[0].spaceId).toBeNull();
     });
 
     it("lists all webhooks in the org when all=true", async () => {
@@ -209,14 +209,14 @@ describe("Webhooks API", () => {
   });
 
   // Issue #172 (extension) — webhook routes filtered by orgId only, so a
-  // key bound to App A could read/mutate/rotate App B's webhooks (and
+  // key bound to Space A could read/mutate/rotate Space B's webhooks (and
   // org-level webhooks that span every app). The fix funnels API key
-  // calls through `applicationIdScope` and forces list/create to the
+  // calls through `spaceIdScope` and forces list/create to the
   // key's bound app.
-  describe("API key application scope (issue #172 extension)", () => {
-    async function setupCrossAppFixture() {
-      const otherApp = await seedApplication({ orgId: ctx.orgId, name: "Webhook Other App" });
-      // Org-level webhook (applicationId IS NULL) — created via session.
+  describe("API key space scope (issue #172 extension)", () => {
+    async function setupCrossSpaceFixture() {
+      const otherSpace = await seedSpace({ orgId: ctx.orgId, name: "Webhook Other Space" });
+      // Org-level webhook (spaceId IS NULL) — created via session.
       const orgWebhookRes = await app.request("/api/webhooks", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
@@ -234,8 +234,8 @@ describe("Webhooks API", () => {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
-          level: "application",
-          applicationId: otherApp.id,
+          level: "space",
+          spaceId: otherSpace.id,
           url: "https://example.com/other-hook",
           events: ["run.success"],
         }),
@@ -248,12 +248,12 @@ describe("Webhooks API", () => {
 
       const apiKey = await seedApiKey({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id,
         scopes: ["webhooks:read", "webhooks:write", "webhooks:delete"],
       });
       return {
-        otherApp,
+        otherSpace,
         orgWebhookId: orgWebhook.id,
         otherWebhookId: otherWebhook.id,
         ownWebhookId: (ownWebhook as { id: string }).id,
@@ -262,7 +262,7 @@ describe("Webhooks API", () => {
     }
 
     it("GET /api/webhooks lists only the key's own app webhooks (no org-level, no other app)", async () => {
-      const { ownWebhookId, otherWebhookId, orgWebhookId, bearer } = await setupCrossAppFixture();
+      const { ownWebhookId, otherWebhookId, orgWebhookId, bearer } = await setupCrossSpaceFixture();
       const res = await app.request("/api/webhooks", { headers: bearer });
       expect(res.status).toBe(200);
       const body = (await res.json()) as { data: { id: string }[] };
@@ -272,20 +272,20 @@ describe("Webhooks API", () => {
       expect(ids).not.toContain(orgWebhookId);
     });
 
-    it("GET /api/webhooks/:otherAppWebhookId returns 404", async () => {
-      const { otherWebhookId, bearer } = await setupCrossAppFixture();
+    it("GET /api/webhooks/:otherSpaceWebhookId returns 404", async () => {
+      const { otherWebhookId, bearer } = await setupCrossSpaceFixture();
       const res = await app.request(`/api/webhooks/${otherWebhookId}`, { headers: bearer });
       expect(res.status).toBe(404);
     });
 
     it("GET /api/webhooks/:orgWebhookId returns 404 (org-level invisible to api key)", async () => {
-      const { orgWebhookId, bearer } = await setupCrossAppFixture();
+      const { orgWebhookId, bearer } = await setupCrossSpaceFixture();
       const res = await app.request(`/api/webhooks/${orgWebhookId}`, { headers: bearer });
       expect(res.status).toBe(404);
     });
 
-    it("PUT /api/webhooks/:otherAppWebhookId returns 404", async () => {
-      const { otherWebhookId, bearer } = await setupCrossAppFixture();
+    it("PUT /api/webhooks/:otherSpaceWebhookId returns 404", async () => {
+      const { otherWebhookId, bearer } = await setupCrossSpaceFixture();
       const res = await app.request(`/api/webhooks/${otherWebhookId}`, {
         method: "PUT",
         headers: { ...bearer, "Content-Type": "application/json" },
@@ -294,8 +294,8 @@ describe("Webhooks API", () => {
       expect(res.status).toBe(404);
     });
 
-    it("DELETE /api/webhooks/:otherAppWebhookId returns 404", async () => {
-      const { otherWebhookId, bearer } = await setupCrossAppFixture();
+    it("DELETE /api/webhooks/:otherSpaceWebhookId returns 404", async () => {
+      const { otherWebhookId, bearer } = await setupCrossSpaceFixture();
       const res = await app.request(`/api/webhooks/${otherWebhookId}`, {
         method: "DELETE",
         headers: bearer,
@@ -303,8 +303,8 @@ describe("Webhooks API", () => {
       expect(res.status).toBe(404);
     });
 
-    it("POST /api/webhooks/:otherAppWebhookId/rotate returns 404", async () => {
-      const { otherWebhookId, bearer } = await setupCrossAppFixture();
+    it("POST /api/webhooks/:otherSpaceWebhookId/rotate returns 404", async () => {
+      const { otherWebhookId, bearer } = await setupCrossSpaceFixture();
       const res = await app.request(`/api/webhooks/${otherWebhookId}/rotate`, {
         method: "POST",
         headers: bearer,
@@ -312,8 +312,8 @@ describe("Webhooks API", () => {
       expect(res.status).toBe(404);
     });
 
-    it("GET /api/webhooks/:otherAppWebhookId/deliveries returns 404", async () => {
-      const { otherWebhookId, bearer } = await setupCrossAppFixture();
+    it("GET /api/webhooks/:otherSpaceWebhookId/deliveries returns 404", async () => {
+      const { otherWebhookId, bearer } = await setupCrossSpaceFixture();
       const res = await app.request(`/api/webhooks/${otherWebhookId}/deliveries`, {
         headers: bearer,
       });
@@ -321,7 +321,7 @@ describe("Webhooks API", () => {
     });
 
     it("POST /api/webhooks rejects org-level webhook for API keys", async () => {
-      const { bearer } = await setupCrossAppFixture();
+      const { bearer } = await setupCrossSpaceFixture();
       const res = await app.request("/api/webhooks", {
         method: "POST",
         headers: { ...bearer, "Content-Type": "application/json" },
@@ -334,14 +334,14 @@ describe("Webhooks API", () => {
       expect(res.status).toBe(403);
     });
 
-    it("POST /api/webhooks rejects application webhook targeting another app", async () => {
-      const { otherApp, bearer } = await setupCrossAppFixture();
+    it("POST /api/webhooks rejects space webhook targeting another app", async () => {
+      const { otherSpace, bearer } = await setupCrossSpaceFixture();
       const res = await app.request("/api/webhooks", {
         method: "POST",
         headers: { ...bearer, "Content-Type": "application/json" },
         body: JSON.stringify({
-          level: "application",
-          applicationId: otherApp.id,
+          level: "space",
+          spaceId: otherSpace.id,
           url: "https://example.com/pwn",
           events: ["run.success"],
         }),
@@ -350,7 +350,7 @@ describe("Webhooks API", () => {
     });
 
     it("API key can still operate on its own app webhook (regression guard)", async () => {
-      const { ownWebhookId, bearer } = await setupCrossAppFixture();
+      const { ownWebhookId, bearer } = await setupCrossSpaceFixture();
       const res = await app.request(`/api/webhooks/${ownWebhookId}`, { headers: bearer });
       expect(res.status).toBe(200);
     });

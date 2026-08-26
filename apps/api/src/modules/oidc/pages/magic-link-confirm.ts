@@ -28,13 +28,13 @@
 
 import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
-import type { ResolvedAppBranding } from "../services/branding.ts";
+import type { ResolvedSpaceBranding } from "../services/branding.ts";
 
 interface MagicLinkConfirmPageProps {
   /** Action URL for the POST form — `/api/oauth/magic-link/confirm?token=…&callbackURL=…&errorCallbackURL=…`. */
   action: string;
   csrfToken: string;
-  branding: ResolvedAppBranding;
+  branding: ResolvedSpaceBranding;
   /** User-facing email the link was sent to, if parseable from context. Optional display aid. */
   email?: string;
 }

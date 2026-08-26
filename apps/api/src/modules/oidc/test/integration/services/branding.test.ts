@@ -1,43 +1,43 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Integration test for `resolveAppBranding`.
+ * Integration test for `resolveSpaceBranding`.
  *
  * Exercises the full read path against real Postgres: the helper reads
- * `applications.settings.branding`, validates the shape against the
- * module-owned `AppBrandingSchema`, and falls back safely when the setting
+ * `spaces.settings.branding`, validates the shape against the
+ * module-owned `SpaceBrandingSchema`, and falls back safely when the setting
  * is missing, malformed, or only partially populated.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { applications } from "@appstrate/db/schema";
+import { spaces } from "@appstrate/db/schema";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../../../../../test/helpers/auth.ts";
 import {
-  resolveAppBranding,
+  resolveSpaceBranding,
   resolveBrandingForClient,
   PLATFORM_DEFAULT_BRANDING,
 } from "../../../services/branding.ts";
 
-async function seedAppWithSettings(settings: unknown): Promise<string> {
+async function seedSpaceWithSettings(settings: unknown): Promise<string> {
   const { id } = await createTestUser();
-  const { defaultAppId } = await createTestOrg(id, { slug: "brand" });
+  const { defaultSpaceId } = await createTestOrg(id, { slug: "brand" });
   await db
-    .update(applications)
+    .update(spaces)
     .set({ settings: settings as never })
-    .where(eq(applications.id, defaultAppId));
-  return defaultAppId;
+    .where(eq(spaces.id, defaultSpaceId));
+  return defaultSpaceId;
 }
 
-describe("resolveAppBranding", () => {
+describe("resolveSpaceBranding", () => {
   beforeEach(async () => {
     await truncateAll();
   });
 
   it("returns fully-populated branding from a valid settings.branding blob", async () => {
-    const applicationId = await seedAppWithSettings({
+    const spaceId = await seedSpaceWithSettings({
       branding: {
         name: "Mon Workspace",
         logoUrl: "https://cdn.example.com/logo.png",
@@ -47,7 +47,7 @@ describe("resolveAppBranding", () => {
         fromName: "Mon Workspace Support",
       },
     });
-    const resolved = await resolveAppBranding(applicationId);
+    const resolved = await resolveSpaceBranding(spaceId);
     expect(resolved.name).toBe("Mon Workspace");
     expect(resolved.logoUrl).toBe("https://cdn.example.com/logo.png");
     expect(resolved.primaryColor).toBe("#22c55e");
@@ -56,18 +56,18 @@ describe("resolveAppBranding", () => {
     expect(resolved.fromName).toBe("Mon Workspace Support");
   });
 
-  it("falls back to application.name when branding.name is missing", async () => {
-    const applicationId = await seedAppWithSettings({ branding: { primaryColor: "#abcdef" } });
-    const resolved = await resolveAppBranding(applicationId);
-    // applications.name defaults to "Default" (seeded by createTestOrg)
+  it("falls back to space.name when branding.name is missing", async () => {
+    const spaceId = await seedSpaceWithSettings({ branding: { primaryColor: "#abcdef" } });
+    const resolved = await resolveSpaceBranding(spaceId);
+    // spaces.name defaults to "Default" (seeded by createTestOrg)
     expect(resolved.name).toBe("Default");
     expect(resolved.primaryColor).toBe("#abcdef");
   });
 
   it("uses platform defaults when branding is absent entirely", async () => {
     const { id } = await createTestUser();
-    const { defaultAppId } = await createTestOrg(id, { slug: "noset" });
-    const resolved = await resolveAppBranding(defaultAppId);
+    const { defaultSpaceId } = await createTestOrg(id, { slug: "noset" });
+    const resolved = await resolveSpaceBranding(defaultSpaceId);
     expect(resolved.name).toBeTruthy();
     expect(resolved.logoUrl).toBeNull();
     expect(resolved.primaryColor).toBe("#4f46e5");
@@ -77,17 +77,17 @@ describe("resolveAppBranding", () => {
   it("safely falls back when branding has a malformed shape (Zod rejects)", async () => {
     // `primaryColor` must be #RRGGBB — a 3-char shorthand fails the regex
     // and the whole object is rejected; we fall back to defaults.
-    const applicationId = await seedAppWithSettings({
+    const spaceId = await seedSpaceWithSettings({
       branding: { name: "X", primaryColor: "#fff" },
     });
-    const resolved = await resolveAppBranding(applicationId);
+    const resolved = await resolveSpaceBranding(spaceId);
     expect(resolved.name).toBeTruthy();
     expect(resolved.primaryColor).toBe("#4f46e5");
   });
 
   it("safely falls back when branding is not an object", async () => {
-    const applicationId = await seedAppWithSettings({ branding: "not-an-object" });
-    const resolved = await resolveAppBranding(applicationId);
+    const spaceId = await seedSpaceWithSettings({ branding: "not-an-object" });
+    const resolved = await resolveSpaceBranding(spaceId);
     expect(resolved.primaryColor).toBe("#4f46e5");
   });
 
@@ -105,27 +105,27 @@ describe("resolveAppBranding", () => {
   ];
   for (const [label, logoUrl] of blockedLogoUrls) {
     it(`safely falls back when logoUrl is blocked (${label})`, async () => {
-      const applicationId = await seedAppWithSettings({
+      const spaceId = await seedSpaceWithSettings({
         branding: { name: "X", logoUrl },
       });
-      const resolved = await resolveAppBranding(applicationId);
+      const resolved = await resolveSpaceBranding(spaceId);
       expect(resolved.logoUrl).toBeNull();
     });
   }
 
   it("accepts a public https logoUrl", async () => {
-    const applicationId = await seedAppWithSettings({
+    const spaceId = await seedSpaceWithSettings({
       branding: { logoUrl: "https://cdn.example.com/logo.png" },
     });
-    const resolved = await resolveAppBranding(applicationId);
+    const resolved = await resolveSpaceBranding(spaceId);
     expect(resolved.logoUrl).toBe("https://cdn.example.com/logo.png");
   });
 
   it("accentColor inherits from primaryColor when primary is set and accent is not", async () => {
-    const applicationId = await seedAppWithSettings({
+    const spaceId = await seedSpaceWithSettings({
       branding: { primaryColor: "#22c55e" },
     });
-    const resolved = await resolveAppBranding(applicationId);
+    const resolved = await resolveSpaceBranding(spaceId);
     expect(resolved.primaryColor).toBe("#22c55e");
     // Resolver uses parsed.accentColor ?? parsed.primaryColor ?? DEFAULT_ACCENT
     expect(resolved.accentColor).toBe("#22c55e");
@@ -142,7 +142,7 @@ describe("resolveBrandingForClient — instance-level", () => {
       level: "instance",
       name: "Mon Admin Dashboard",
       referencedOrgId: null,
-      referencedApplicationId: null,
+      referencedSpaceId: null,
     });
     expect(resolved.name).toBe("Mon Admin Dashboard");
     expect(resolved.fromName).toBe("Mon Admin Dashboard");
@@ -155,7 +155,7 @@ describe("resolveBrandingForClient — instance-level", () => {
       level: "instance",
       name: null,
       referencedOrgId: null,
-      referencedApplicationId: null,
+      referencedSpaceId: null,
     });
     expect(resolved.name).toBe(PLATFORM_DEFAULT_BRANDING.name);
     expect(resolved.fromName).toBe(PLATFORM_DEFAULT_BRANDING.fromName);

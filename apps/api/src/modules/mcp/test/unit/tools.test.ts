@@ -49,7 +49,7 @@ function makeTools(
     permissions: new Set(permissions),
     dispatch,
     actor,
-    scope: { orgId: "org_1", applicationId: "app_1" },
+    scope: { orgId: "org_1", spaceId: "spc_1" },
     contextInjected,
   });
   const byName = new Map(tools.map((t) => [t.descriptor.name, t]));
@@ -102,7 +102,7 @@ describe("retired pre-#1177 tool names", () => {
       dispatch: async () =>
         new Response("{}", { status: 200, headers: { "content-type": "application/json" } }),
       actor: { type: "user", id: "user_1" },
-      scope: { orgId: "org_1", applicationId: "app_1" },
+      scope: { orgId: "org_1", spaceId: "spc_1" },
     });
     const registered = new Set(tools.map((t) => t.descriptor.name));
 
@@ -527,7 +527,7 @@ describe("buildMcpTools contextInjected", () => {
       dispatch,
       contextInjected: true,
       actor: { type: "user", id: "user_1" },
-      scope: { orgId: "org_1", applicationId: "app_1" },
+      scope: { orgId: "org_1", spaceId: "spc_1" },
     });
     // The whole registered surface IS the advertised surface: no retired name
     // is registered, listed or hidden — see "registers no retired name, listed

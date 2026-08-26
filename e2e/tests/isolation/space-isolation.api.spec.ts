@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Cross-app resource isolation E2E tests.
+ * Cross-space resource isolation E2E tests.
  *
- * Verifies that resources created in AppA (within the same org)
- * are NOT accessible from AppB.
+ * Verifies that resources created in SpaceA (within the same org)
+ * are NOT accessible from SpaceB.
  */
 
 import { test, expect } from "../../fixtures/api.fixture.ts";
@@ -13,65 +13,65 @@ import {
   createWebhook,
   createEndUser,
   createApiKey,
-  createApplication,
+  createSpace,
   createSchedule,
 } from "../../helpers/seed.ts";
 import { createApiClient } from "../../helpers/api-client.ts";
 
 // ═══════════════════════════════════════════════
-// Shared setup: 1 org with 2 apps
+// Shared setup: 1 org with 2 spaces
 // ═══════════════════════════════════════════════
 
-test.describe("Cross-app resource isolation", () => {
-  // appA = default app (from fixture), appB = custom app
-  // Agent is installed in both apps so we can create resources in both contexts
+test.describe("Cross-space resource isolation", () => {
+  // spaceA = default space (from fixture), spaceB = custom space
+  // Agent is installed in both spaces so we can create resources in both contexts
 
   // ─── Webhooks ──────────────────────────────
-  // Webhooks are org-scoped routes (not app-scoped). The `level` field in the
-  // request body determines event delivery scope (org vs application), and list
-  // filtering uses the `?applicationId=` query param. Individual webhook
+  // Webhooks are org-scoped routes (not space-scoped). The `level` field in the
+  // request body determines event delivery scope (org vs space), and list
+  // filtering uses the `?spaceId=` query param. Individual webhook
   // get/update/delete are accessible to any admin in the org.
 
-  test.describe("Webhook list filtering by application", () => {
-    test("App-level webhook does not appear in another app's filtered list", async ({
+  test.describe("Webhook list filtering by space", () => {
+    test("Space-level webhook does not appear in another space's filtered list", async ({
       request,
       apiClient: clientA,
       orgContext,
       orgOnlyClient,
     }) => {
-      const appB = await createApplication(orgOnlyClient, `AppB-wh-list-${Date.now()}`);
+      const spaceB = await createSpace(orgOnlyClient, `SpaceB-wh-list-${Date.now()}`);
       const clientB = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        applicationId: appB.id,
+        spaceId: spaceB.id,
       });
 
-      // Create app-level webhook scoped to AppA (default app)
+      // Create space-level webhook scoped to SpaceA (default space)
       const wh = await createWebhook(clientA, {
-        level: "application",
-        applicationId: orgContext.org.defaultAppId,
-        url: "https://appA.example.com/hook",
+        level: "space",
+        spaceId: orgContext.org.defaultSpaceId,
+        url: "https://spaceA.example.com/hook",
       });
 
-      // List filtered by AppB — should NOT contain AppA's app-level webhook
-      const res = await clientB.get(`/webhooks?applicationId=${appB.id}`);
+      // List filtered by SpaceB — should NOT contain SpaceA's space-level webhook
+      const res = await clientB.get(`/webhooks?spaceId=${spaceB.id}`);
       expect(res.status()).toBe(200);
       const body = await res.json();
       const ids = (body.data ?? []).map((w: { id: string }) => w.id);
       expect(ids).not.toContain(wh.id);
     });
 
-    test("App-level webhook does not appear in unfiltered list", async ({
+    test("Space-level webhook does not appear in unfiltered list", async ({
       apiClient: clientA,
       orgContext,
     }) => {
-      // Create app-level webhook
+      // Create space-level webhook
       const wh = await createWebhook(clientA, {
-        level: "application",
-        applicationId: orgContext.org.defaultAppId,
+        level: "space",
+        spaceId: orgContext.org.defaultSpaceId,
       });
 
-      // List without applicationId filter — returns only org-level webhooks
+      // List without spaceId filter — returns only org-level webhooks
       const res = await clientA.get("/webhooks");
       expect(res.status()).toBe(200);
       const body = await res.json();
@@ -79,35 +79,35 @@ test.describe("Cross-app resource isolation", () => {
       expect(ids).not.toContain(wh.id);
     });
 
-    test("App-level webhook appears when listing with correct applicationId", async ({
+    test("Space-level webhook appears when listing with correct spaceId", async ({
       apiClient: clientA,
       orgContext,
     }) => {
       const wh = await createWebhook(clientA, {
-        level: "application",
-        applicationId: orgContext.org.defaultAppId,
+        level: "space",
+        spaceId: orgContext.org.defaultSpaceId,
       });
 
-      const res = await clientA.get(`/webhooks?applicationId=${orgContext.org.defaultAppId}`);
+      const res = await clientA.get(`/webhooks?spaceId=${orgContext.org.defaultSpaceId}`);
       expect(res.status()).toBe(200);
       const body = await res.json();
       const ids = (body.data ?? []).map((w: { id: string }) => w.id);
       expect(ids).toContain(wh.id);
     });
 
-    test("Org-level webhook appears in all application-filtered lists", async ({
+    test("Org-level webhook appears in all space-filtered lists", async ({
       apiClient: clientA,
       orgOnlyClient,
     }) => {
-      const appB = await createApplication(orgOnlyClient, `AppB-wh-org-${Date.now()}`);
+      const spaceB = await createSpace(orgOnlyClient, `SpaceB-wh-org-${Date.now()}`);
 
       const wh = await createWebhook(clientA, {
         level: "org",
         url: "https://org.example.com/hook",
       });
 
-      // Org-level webhooks appear when filtering by any applicationId
-      const res = await clientA.get(`/webhooks?applicationId=${appB.id}`);
+      // Org-level webhooks appear when filtering by any spaceId
+      const res = await clientA.get(`/webhooks?spaceId=${spaceB.id}`);
       expect(res.status()).toBe(200);
       const body = await res.json();
       const ids = (body.data ?? []).map((w: { id: string }) => w.id);
@@ -118,22 +118,22 @@ test.describe("Cross-app resource isolation", () => {
   // ─── End-Users ─────────────────────────────
 
   test.describe("End-user isolation", () => {
-    test("End-users created in AppA are not listed from AppB", async ({
+    test("End-users created in SpaceA are not listed from SpaceB", async ({
       request,
       apiClient: clientA,
       orgContext,
       orgOnlyClient,
     }) => {
-      const appB = await createApplication(orgOnlyClient, `AppB-eu-list-${Date.now()}`);
+      const spaceB = await createSpace(orgOnlyClient, `SpaceB-eu-list-${Date.now()}`);
       const clientB = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        applicationId: appB.id,
+        spaceId: spaceB.id,
       });
 
-      const eu = await createEndUser(clientA, { name: "AppA User" });
+      const eu = await createEndUser(clientA, { name: "SpaceA User" });
 
-      // List from AppB context — AppA's end-user should not appear
+      // List from SpaceB context — SpaceA's end-user should not appear
       const res = await clientB.get("/end-users");
       expect(res.status()).toBe(200);
       const body = await res.json();
@@ -141,58 +141,58 @@ test.describe("Cross-app resource isolation", () => {
       expect(ids).not.toContain(eu.id);
     });
 
-    test("AppB cannot access AppA end-user by ID", async ({
+    test("SpaceB cannot access SpaceA end-user by ID", async ({
       request,
       apiClient: clientA,
       orgContext,
       orgOnlyClient,
     }) => {
-      const appB = await createApplication(orgOnlyClient, `AppB-eu-det-${Date.now()}`);
+      const spaceB = await createSpace(orgOnlyClient, `SpaceB-eu-det-${Date.now()}`);
       const clientB = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        applicationId: appB.id,
+        spaceId: spaceB.id,
       });
 
-      const eu = await createEndUser(clientA, { name: "AppA Detail User" });
+      const eu = await createEndUser(clientA, { name: "SpaceA Detail User" });
 
       const res = await clientB.get(`/end-users/${eu.id}`);
       expect(res.status()).toBe(404);
     });
 
-    test("AppB cannot update AppA end-user", async ({
+    test("SpaceB cannot update SpaceA end-user", async ({
       request,
       apiClient: clientA,
       orgContext,
       orgOnlyClient,
     }) => {
-      const appB = await createApplication(orgOnlyClient, `AppB-eu-upd-${Date.now()}`);
+      const spaceB = await createSpace(orgOnlyClient, `SpaceB-eu-upd-${Date.now()}`);
       const clientB = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        applicationId: appB.id,
+        spaceId: spaceB.id,
       });
 
-      const eu = await createEndUser(clientA, { name: "AppA Update Target" });
+      const eu = await createEndUser(clientA, { name: "SpaceA Update Target" });
 
       const res = await clientB.patch(`/end-users/${eu.id}`, { name: "Hijacked" });
       expect(res.status()).toBe(404);
     });
 
-    test("AppB cannot delete AppA end-user", async ({
+    test("SpaceB cannot delete SpaceA end-user", async ({
       request,
       apiClient: clientA,
       orgContext,
       orgOnlyClient,
     }) => {
-      const appB = await createApplication(orgOnlyClient, `AppB-eu-del-${Date.now()}`);
+      const spaceB = await createSpace(orgOnlyClient, `SpaceB-eu-del-${Date.now()}`);
       const clientB = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        applicationId: appB.id,
+        spaceId: spaceB.id,
       });
 
-      const eu = await createEndUser(clientA, { name: "AppA Delete Target" });
+      const eu = await createEndUser(clientA, { name: "SpaceA Delete Target" });
 
       const res = await clientB.delete(`/end-users/${eu.id}`);
       expect(res.status()).toBe(404);
@@ -202,28 +202,28 @@ test.describe("Cross-app resource isolation", () => {
   // ─── Schedules ─────────────────────────────
 
   test.describe("Schedule isolation", () => {
-    test("AppB cannot list AppA schedules", async ({
+    test("SpaceB cannot list SpaceA schedules", async ({
       request,
       apiClient: clientA,
       orgContext,
       orgOnlyClient,
     }) => {
-      const appB = await createApplication(orgOnlyClient, `AppB-sched-list-${Date.now()}`);
+      const spaceB = await createSpace(orgOnlyClient, `SpaceB-sched-list-${Date.now()}`);
       const clientB = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        applicationId: appB.id,
+        spaceId: spaceB.id,
       });
 
-      // Create an agent in the org catalog (visible from default app)
+      // Create an agent in the org catalog (visible from default space)
       const scope = `@${orgContext.org.orgSlug}`;
       const agentName = `sched-iso-${Date.now()}`;
       await createAgent(clientA, scope, agentName);
 
-      // Create connection profile and schedule in AppA
+      // Create connection profile and schedule in SpaceA
       const schedule = await createSchedule(clientA, scope, agentName);
 
-      // List from AppB
+      // List from SpaceB
       const res = await clientB.get("/schedules");
       expect(res.status()).toBe(200);
       const body = await res.json();
@@ -232,17 +232,17 @@ test.describe("Cross-app resource isolation", () => {
       expect(ids).not.toContain(schedule.id);
     });
 
-    test("AppB cannot access AppA schedule by ID", async ({
+    test("SpaceB cannot access SpaceA schedule by ID", async ({
       request,
       apiClient: clientA,
       orgContext,
       orgOnlyClient,
     }) => {
-      const appB = await createApplication(orgOnlyClient, `AppB-sched-det-${Date.now()}`);
+      const spaceB = await createSpace(orgOnlyClient, `SpaceB-sched-det-${Date.now()}`);
       const clientB = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        applicationId: appB.id,
+        spaceId: spaceB.id,
       });
 
       const scope = `@${orgContext.org.orgSlug}`;
@@ -254,17 +254,17 @@ test.describe("Cross-app resource isolation", () => {
       expect(res.status()).toBe(404);
     });
 
-    test("AppB cannot update AppA schedule", async ({
+    test("SpaceB cannot update SpaceA schedule", async ({
       request,
       apiClient: clientA,
       orgContext,
       orgOnlyClient,
     }) => {
-      const appB = await createApplication(orgOnlyClient, `AppB-sched-upd-${Date.now()}`);
+      const spaceB = await createSpace(orgOnlyClient, `SpaceB-sched-upd-${Date.now()}`);
       const clientB = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        applicationId: appB.id,
+        spaceId: spaceB.id,
       });
 
       const scope = `@${orgContext.org.orgSlug}`;
@@ -276,17 +276,17 @@ test.describe("Cross-app resource isolation", () => {
       expect(res.status()).toBe(404);
     });
 
-    test("AppB cannot delete AppA schedule", async ({
+    test("SpaceB cannot delete SpaceA schedule", async ({
       request,
       apiClient: clientA,
       orgContext,
       orgOnlyClient,
     }) => {
-      const appB = await createApplication(orgOnlyClient, `AppB-sched-del-${Date.now()}`);
+      const spaceB = await createSpace(orgOnlyClient, `SpaceB-sched-del-${Date.now()}`);
       const clientB = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        applicationId: appB.id,
+        spaceId: spaceB.id,
       });
 
       const scope = `@${orgContext.org.orgSlug}`;
@@ -301,11 +301,11 @@ test.describe("Cross-app resource isolation", () => {
 
   // ─── API Keys ──────────────────────────────
 
-  test.describe("API key app-scoping", () => {
-    test("API keys created in AppA are listed when querying from AppA context", async ({
+  test.describe("API key space-scoping", () => {
+    test("API keys created in SpaceA are listed when querying from SpaceA context", async ({
       apiClient: clientA,
     }) => {
-      const key = await createApiKey(clientA, `AppA Key ${Date.now()}`);
+      const key = await createApiKey(clientA, `SpaceA Key ${Date.now()}`);
 
       const res = await clientA.get("/api-keys");
       expect(res.status()).toBe(200);
@@ -314,22 +314,22 @@ test.describe("Cross-app resource isolation", () => {
       expect(ids).toContain(key.id);
     });
 
-    test("API keys created in AppA are filtered when querying with AppB applicationId", async ({
+    test("API keys created in SpaceA are filtered when querying with SpaceB spaceId", async ({
       request,
       apiClient: clientA,
       orgContext,
       orgOnlyClient,
     }) => {
-      const appB = await createApplication(orgOnlyClient, `AppB-key-${Date.now()}`);
+      const spaceB = await createSpace(orgOnlyClient, `SpaceB-key-${Date.now()}`);
       const clientB = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        applicationId: appB.id,
+        spaceId: spaceB.id,
       });
 
-      const key = await createApiKey(clientA, `AppA Key ${Date.now()}`);
+      const key = await createApiKey(clientA, `SpaceA Key ${Date.now()}`);
 
-      const res = await clientB.get(`/api-keys?applicationId=${appB.id}`);
+      const res = await clientB.get(`/api-keys?spaceId=${spaceB.id}`);
       expect(res.status()).toBe(200);
       const body = await res.json();
       const ids = (body.data ?? []).map((k: { id: string }) => k.id);
@@ -340,17 +340,17 @@ test.describe("Cross-app resource isolation", () => {
   // ─── Notifications ─────────────────────────
 
   test.describe("Notification isolation", () => {
-    test("Notification counts are independent per app", async ({
+    test("Notification counts are independent per space", async ({
       request,
       apiClient: clientA,
       orgContext,
       orgOnlyClient,
     }) => {
-      const appB = await createApplication(orgOnlyClient, `AppB-notif-${Date.now()}`);
+      const spaceB = await createSpace(orgOnlyClient, `SpaceB-notif-${Date.now()}`);
       const clientB = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        applicationId: appB.id,
+        spaceId: spaceB.id,
       });
 
       const resA = await clientA.get("/notifications/unread-count");
@@ -360,7 +360,7 @@ test.describe("Cross-app resource isolation", () => {
 
       const bodyA = await resA.json();
       const bodyB = await resB.json();
-      // Both fresh apps should start at 0
+      // Both fresh spaces should start at 0
       expect(bodyA.count).toBe(0);
       expect(bodyB.count).toBe(0);
     });
@@ -369,17 +369,17 @@ test.describe("Cross-app resource isolation", () => {
   // ─── End-user creation scoping ────────────
 
   test.describe("End-user creation scoping", () => {
-    test("POST /end-users rejects applicationId in body", async ({
+    test("POST /end-users rejects spaceId in body", async ({
       apiClient: clientA,
       orgOnlyClient,
     }) => {
-      const appB = await createApplication(orgOnlyClient, `AppB-eu-body-${Date.now()}`);
+      const spaceB = await createSpace(orgOnlyClient, `SpaceB-eu-body-${Date.now()}`);
 
-      // App scoping is taken from X-Application-Id; body-level applicationId is
+      // Space scoping is taken from X-Space-Id; body-level spaceId is
       // rejected so clients cannot rely on a silently ignored override.
       const res = await clientA.post("/end-users", {
         name: "Body Override Test",
-        applicationId: appB.id,
+        spaceId: spaceB.id,
       });
       expect(res.status()).toBe(400);
       const body = (await res.json()) as {
@@ -391,10 +391,10 @@ test.describe("Cross-app resource isolation", () => {
     });
   });
 
-  // ─── SSE cookie auth requires applicationId ───────
+  // ─── SSE cookie auth requires spaceId ───────
 
   test.describe("SSE authentication", () => {
-    test("SSE returns 401 without applicationId query param", async ({ request, orgContext }) => {
+    test("SSE returns 401 without spaceId query param", async ({ request, orgContext }) => {
       const res = await request.get(`/api/realtime/runs?orgId=${orgContext.org.orgId}`, {
         headers: {
           Cookie: orgContext.auth.cookie,

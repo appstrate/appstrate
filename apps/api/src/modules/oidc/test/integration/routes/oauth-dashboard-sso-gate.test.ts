@@ -9,7 +9,7 @@
  *   - Admin reads: GET list / GET detail (always allowed)
  *   - Admin delete: always allowed (cleanup path)
  *   - Interactive flow: /api/oauth/login renders an error page when off
- *   - Application-level clients are unaffected at every surface
+ *   - Space-level clients are unaffected at every surface
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -40,10 +40,10 @@ function orgBody(ctx: TestContext, overrides: Record<string, unknown> = {}) {
 
 function appBody(ctx: TestContext, overrides: Record<string, unknown> = {}) {
   return {
-    level: "application" as const,
+    level: "space" as const,
     name: "Customer App",
     redirectUris: ["https://app.example.com/cb"],
-    referencedApplicationId: ctx.defaultAppId,
+    referencedSpaceId: ctx.defaultSpaceId,
     ...overrides,
   };
 }
@@ -85,7 +85,7 @@ describe("Dashboard SSO gate (dashboardSsoEnabled)", () => {
       expect(res.status).toBe(201);
     });
 
-    it("app-level creation is always allowed regardless of flag", async () => {
+    it("space-level creation is always allowed regardless of flag", async () => {
       const res = await postClient(ctx, appBody(ctx));
       expect(res.status).toBe(201);
     });
@@ -127,7 +127,7 @@ describe("Dashboard SSO gate (dashboardSsoEnabled)", () => {
       expect(res.status).toBe(403);
     });
 
-    it("allows PATCH on app-level client regardless of flag", async () => {
+    it("allows PATCH on space-level client regardless of flag", async () => {
       const created = await postClient(ctx, appBody(ctx));
       const { clientId } = (await created.json()) as { clientId: string };
 
@@ -215,7 +215,7 @@ describe("Dashboard SSO gate (dashboardSsoEnabled)", () => {
       expect(html).toContain("SSO désactivé");
     });
 
-    it("renders normally for an app-level client regardless of org flag", async () => {
+    it("renders normally for a space-level client regardless of org flag", async () => {
       const created = await postClient(ctx, appBody(ctx));
       const { clientId } = (await created.json()) as { clientId: string };
 

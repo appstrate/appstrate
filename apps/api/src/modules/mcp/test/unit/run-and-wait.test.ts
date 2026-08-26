@@ -74,7 +74,7 @@ function makeRunAndWait(opts: {
 
   const tools = buildMcpTools({
     origin: "http://test.local",
-    authHeaders: new Headers({ "X-Org-Id": "org_1", "X-Application-Id": "app_1" }),
+    authHeaders: new Headers({ "X-Org-Id": "org_1", "X-Space-Id": "spc_1" }),
     // `runs:read` is in the default because the tool cannot function without
     // it: its second half polls `GET /api/runs/{id}` through the same dispatch,
     // under the caller's own scopes. A caller holding only `mcp:invoke` is
@@ -83,7 +83,7 @@ function makeRunAndWait(opts: {
     permissions: new Set(opts.permissions ?? ["mcp:invoke", "runs:read"]),
     dispatch,
     actor: { type: "user", id: "user_1" },
-    scope: { orgId: "org_1", applicationId: "app_1" },
+    scope: { orgId: "org_1", spaceId: "spc_1" },
   });
   const tool = tools.find((t) => t.descriptor.name === "run_and_wait");
   if (!tool) throw new Error("run_and_wait tool not built");

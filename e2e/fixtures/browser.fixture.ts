@@ -24,13 +24,13 @@ interface BrowserFixtures {
 }
 
 /**
- * Create an authenticated browser context with org/app localStorage set.
+ * Create an authenticated browser context with org/space localStorage set.
  */
 export async function createAuthedContext(
   browser: import("@playwright/test").Browser,
   auth: AuthResult,
   orgId: string,
-  applicationId: string,
+  spaceId: string,
 ): Promise<import("@playwright/test").BrowserContext> {
   const context = await browser.newContext();
   const sessionToken = auth.cookie.match(/better-auth\.session_token=([^;]+)/)?.[1];
@@ -45,11 +45,11 @@ export async function createAuthedContext(
     ]);
   }
   await context.addInitScript(
-    ({ orgId, applicationId }) => {
+    ({ orgId, spaceId }) => {
       localStorage.setItem("appstrate_current_org", orgId);
-      localStorage.setItem("appstrate_current_app", applicationId);
+      localStorage.setItem("appstrate_current_space", spaceId);
     },
-    { orgId, applicationId },
+    { orgId, spaceId },
   );
   return context;
 }
@@ -66,7 +66,7 @@ export const test = base.extend<BrowserFixtures>({
       browser,
       browserCtx.auth,
       browserCtx.org.orgId,
-      browserCtx.org.defaultAppId,
+      browserCtx.org.defaultSpaceId,
     );
     const page = await context.newPage();
     await use(page);
@@ -78,7 +78,7 @@ export const test = base.extend<BrowserFixtures>({
       createApiClient(request, {
         cookie: browserCtx.auth.cookie,
         orgId: browserCtx.org.orgId,
-        applicationId: browserCtx.org.defaultAppId,
+        spaceId: browserCtx.org.defaultSpaceId,
       }),
     );
   },

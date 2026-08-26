@@ -1,22 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * E2E matrix for per-app SMTP across OIDC flows (signup / magic-link /
+ * E2E matrix for per-space SMTP across OIDC flows (signup / magic-link /
  * forgot-password). Verifies the two invariants that the phase-5
  * routes.ts wiring guarantees:
  *
- *   1. `level=application` clients without a per-app `application_smtp_configs`
- *      row get NO per-app email transport (no fallback to env SMTP for tenant
+ *   1. `level=space` clients without a per-space `space_smtp_configs`
+ *      row get NO per-space email transport (no fallback to env SMTP for tenant
  *      mail). With instance SMTP on, signup renders the "check your email"
  *      interstitial and leaves `user.emailVerified=false` — it is NEVER
  *      auto-verified (that was an identity-squat hole). Magic-link and
  *      forgot-password return 404.
- *   2. `level=application` clients WITH a per-app config route every mail
- *      through the per-app transport (verified via the resolver spy). Signup
+ *   2. `level=space` clients WITH a per-space config route every mail
+ *      through the per-space transport (verified via the resolver spy). Signup
  *      renders the interstitial and leaves `user.emailVerified=false`.
  *
  * Env SMTP is enabled for the whole suite (via `enableSmtpForSuite`) so the
- * no-per-app-SMTP branch is actually exercised — it is gated on
+ * no-per-space-SMTP branch is actually exercised — it is gated on
  * `isInstanceSmtpEnabled()` to guarantee BA's `requireEmailVerification:
  * true` path (session withheld pending verification) is the one being
  * handled, not the trivial SMTP-off path.
@@ -30,7 +30,7 @@ import {
   user as userTable,
   organizations,
   organizationMembers,
-  applications,
+  spaces,
 } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
@@ -46,8 +46,8 @@ import oidcModule from "../../../index.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
 
-async function setupAppClient(opts: { smtp: boolean }): Promise<{
-  applicationId: string;
+async function setupSpaceClient(opts: { smtp: boolean }): Promise<{
+  spaceId: string;
   clientId: string;
 }> {
   const ownerId = `user-${crypto.randomUUID()}`;
@@ -60,16 +60,16 @@ async function setupAppClient(opts: { smtp: boolean }): Promise<{
   const [org] = await db
     .insert(organizations)
     .values({
-      name: "Per-App SMTP",
+      name: "Per-Space SMTP",
       slug: `smtp-e2e-${crypto.randomUUID().slice(0, 8)}`,
       createdBy: ownerId,
     })
     .returning();
   await db.insert(organizationMembers).values({ orgId: org!.id, userId: ownerId, role: "owner" });
 
-  const applicationId = `app_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
-  await db.insert(applications).values({
-    id: applicationId,
+  const spaceId = `spc_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  await db.insert(spaces).values({
+    id: spaceId,
     orgId: org!.id,
     name: "Default",
     isDefault: true,
@@ -77,27 +77,27 @@ async function setupAppClient(opts: { smtp: boolean }): Promise<{
   });
 
   const client = await createClient({
-    level: "application",
+    level: "space",
     name: "E2E Client",
     redirectUris: ["https://acme.example.com/oauth/callback"],
-    referencedApplicationId: applicationId,
+    referencedSpaceId: spaceId,
     // Signup tests exercise the happy path — opt in explicitly since
     // `allowSignup` is secure-by-default `false` on every level.
     allowSignup: true,
   });
 
   if (opts.smtp) {
-    await upsertSmtpConfig(applicationId, {
+    await upsertSmtpConfig(spaceId, {
       host: "__test_json__",
       port: 587,
       username: "u",
       pass: "p",
-      fromAddress: `no-reply@${applicationId}.test`,
+      fromAddress: `no-reply@${spaceId}.test`,
       fromName: "Tenant",
     });
   }
 
-  return { applicationId, clientId: client.clientId };
+  return { spaceId, clientId: client.clientId };
 }
 
 async function getCsrf(res: Response): Promise<{ csrfToken: string; cookie: string }> {
@@ -108,7 +108,7 @@ async function getCsrf(res: Response): Promise<{ csrfToken: string; cookie: stri
   return { csrfToken: match?.[1] ?? "", cookie };
 }
 
-describe("OIDC per-app SMTP — E2E matrix (app-level clients)", () => {
+describe("OIDC per-space SMTP — E2E matrix (space-level clients)", () => {
   enableSmtpForSuite();
 
   let mails: SpiedSmtpSend[] = [];
@@ -127,8 +127,8 @@ describe("OIDC per-app SMTP — E2E matrix (app-level clients)", () => {
 
   // ─── Signup ────────────────────────────────────────────────────────────────
 
-  it("signup (no per-app SMTP, instance SMTP on): renders interstitial, leaves user UNVERIFIED, sends zero per-app mail", async () => {
-    // SECURITY (identity squat): an app-level client with no per-app SMTP must
+  it("signup (no per-space SMTP, instance SMTP on): renders interstitial, leaves user UNVERIFIED, sends zero per-space mail", async () => {
+    // SECURITY (identity squat): a space-level client with no per-space SMTP must
     // NOT be auto-verified. Instance SMTP is on for this suite, so Better
     // Auth's `requireEmailVerification` withholds the session AND its
     // `sendOnSignUp` dispatches a verification email via the instance
@@ -136,7 +136,7 @@ describe("OIDC per-app SMTP — E2E matrix (app-level clients)", () => {
     // `emailVerified=false` — only the delivered-and-confirmed link may flip
     // it. (Previously this path force-set `emailVerified=true` with zero
     // possession proof, letting an attacker squat any identity.)
-    const { clientId } = await setupAppClient({ smtp: false });
+    const { clientId } = await setupSpaceClient({ smtp: false });
     const qs = `?client_id=${encodeURIComponent(clientId)}&state=s`;
     const getRes = await app.request(`/api/oauth/register${qs}`);
     const { csrfToken, cookie } = await getCsrf(getRes);
@@ -159,14 +159,14 @@ describe("OIDC per-app SMTP — E2E matrix (app-level clients)", () => {
       .limit(1);
     // Must stay false — no possession proof was ever provided.
     expect(row?.emailVerified).toBe(false);
-    // No PER-APP mail leaves (there is no per-app transport). BA's own
-    // instance-transport verification email is not routed through the per-app
-    // resolver, so the per-app spy legitimately observes zero sends.
+    // No PER-SPACE mail leaves (there is no per-space transport). BA's own
+    // instance-transport verification email is not routed through the per-space
+    // resolver, so the per-space spy legitimately observes zero sends.
     expect(mails.length).toBe(0);
   });
 
-  it("signup (with per-app SMTP): renders interstitial, leaves user unverified, sends one per-app mail", async () => {
-    const { clientId } = await setupAppClient({ smtp: true });
+  it("signup (with per-space SMTP): renders interstitial, leaves user unverified, sends one per-space mail", async () => {
+    const { clientId } = await setupSpaceClient({ smtp: true });
     const qs = `?client_id=${encodeURIComponent(clientId)}&state=s`;
     const getRes = await app.request(`/api/oauth/register${qs}`);
     const { csrfToken, cookie } = await getCsrf(getRes);
@@ -190,54 +190,66 @@ describe("OIDC per-app SMTP — E2E matrix (app-level clients)", () => {
     expect(row?.emailVerified).toBe(false);
 
     expect(mails.length).toBe(1);
-    expect(mails[0]!.source).toBe("per-app");
+    expect(mails[0]!.source).toBe("per-space");
     expect(mails[0]!.to).toContain(email);
   });
 
   // ─── Magic-link ────────────────────────────────────────────────────────────
 
-  it("magic-link (no per-app SMTP): 404", async () => {
-    const { clientId } = await setupAppClient({ smtp: false });
+  it("magic-link (no per-space SMTP): 404", async () => {
+    const { clientId } = await setupSpaceClient({ smtp: false });
     const qs = `?client_id=${encodeURIComponent(clientId)}&state=s`;
     const getRes = await app.request(`/api/oauth/magic-link${qs}`);
     expect(getRes.status).toBe(404);
     expect(mails.length).toBe(0);
   });
 
-  it("magic-link (with per-app SMTP): 200 + one per-app mail", async () => {
-    const { clientId } = await setupAppClient({ smtp: true });
+  it("magic-link (with per-space SMTP): 200 + one per-space mail", async () => {
+    const { clientId } = await setupSpaceClient({ smtp: true });
+
+    // Magic-link returns 200 HTML "check your email" regardless of whether the
+    // account exists (anti-enumeration) — a mail only goes out for a known
+    // account. Seed one first, otherwise `mails` stays empty and the
+    // per-space-transport assertion below iterates zero times (it used to,
+    // which made this test unable to fail).
+    const email = `ml-${Date.now()}@test.com`;
+    await getAuth().api.signUpEmail({
+      body: { email, password: "TestPassword123!", name: "ML" },
+      asResponse: true,
+    });
+    await db.update(userTable).set({ emailVerified: true }).where(eq(userTable.email, email));
+    // Signup above used the BA core path (outside OIDC routes), so it went
+    // through BA's boot-time env transport and is NOT captured by the spy.
+    mails.length = 0;
+
     const qs = `?client_id=${encodeURIComponent(clientId)}&state=s`;
     const getRes = await app.request(`/api/oauth/magic-link${qs}`);
     const { csrfToken, cookie } = await getCsrf(getRes);
 
-    const email = `ml-${Date.now()}@test.com`;
     const res = await app.request(`/api/oauth/magic-link${qs}`, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Cookie: cookie },
       body: `_csrf=${csrfToken}&email=${encodeURIComponent(email)}`,
     });
-    // Magic-link returns 200 HTML "check your email" regardless of whether
-    // the account exists (anti-enumeration) — but a mail only goes out if
-    // the account does. Create one first in a pre-step is not required
-    // since BA's magic-link plugin sends unconditionally on known emails.
     expect(res.status).toBe(200);
-    // Either 0 (unknown email, no send) or 1 per-app mail. Either way,
-    // nothing should leak through the instance transport.
-    for (const m of mails) expect(m.source).toBe("per-app");
+    // Exactly the magic-link mail, and it left through the per-space
+    // transport — nothing leaks through the instance transport.
+    expect(mails.length).toBeGreaterThanOrEqual(1);
+    for (const m of mails) expect(m.source).toBe("per-space");
   });
 
   // ─── Forgot password ───────────────────────────────────────────────────────
 
-  it("forgot-password (no per-app SMTP): 404", async () => {
-    const { clientId } = await setupAppClient({ smtp: false });
+  it("forgot-password (no per-space SMTP): 404", async () => {
+    const { clientId } = await setupSpaceClient({ smtp: false });
     const qs = `?client_id=${encodeURIComponent(clientId)}&state=s`;
     const getRes = await app.request(`/api/oauth/forgot-password${qs}`);
     expect(getRes.status).toBe(404);
     expect(mails.length).toBe(0);
   });
 
-  it("forgot-password (with per-app SMTP): 200 + per-app mail for existing user", async () => {
-    const { clientId } = await setupAppClient({ smtp: true });
+  it("forgot-password (with per-space SMTP): 200 + per-space mail for existing user", async () => {
+    const { clientId } = await setupSpaceClient({ smtp: true });
 
     // Create a verified user so BA will actually send the reset mail.
     const email = `reset-${Date.now()}@test.com`;
@@ -248,7 +260,7 @@ describe("OIDC per-app SMTP — E2E matrix (app-level clients)", () => {
     await db.update(userTable).set({ emailVerified: true }).where(eq(userTable.email, email));
     // Signup above used the BA core path (outside OIDC routes), so it went
     // through BA's boot-time env transport and is NOT captured by the spy.
-    // The subsequent forgot-password runs through OIDC routes → per-app.
+    // The subsequent forgot-password runs through OIDC routes → per-space.
 
     const qs = `?client_id=${encodeURIComponent(clientId)}&state=s`;
     const getRes = await app.request(`/api/oauth/forgot-password${qs}`);
@@ -260,8 +272,8 @@ describe("OIDC per-app SMTP — E2E matrix (app-level clients)", () => {
       body: `_csrf=${csrfToken}&email=${encodeURIComponent(email)}`,
     });
     expect(res.status).toBe(200);
-    // At least one mail, all through the per-app transport.
+    // At least one mail, all through the per-space transport.
     expect(mails.length).toBeGreaterThanOrEqual(1);
-    for (const m of mails) expect(m.source).toBe("per-app");
+    for (const m of mails) expect(m.source).toBe("per-space");
   });
 });

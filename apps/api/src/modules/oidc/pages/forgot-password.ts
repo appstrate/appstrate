@@ -15,14 +15,14 @@
 
 import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
-import type { ResolvedAppBranding } from "../services/branding.ts";
+import type { ResolvedSpaceBranding } from "../services/branding.ts";
 
 interface ForgotPasswordPageProps {
   queryString: string;
   error?: string;
   email?: string;
   csrfToken: string;
-  branding: ResolvedAppBranding;
+  branding: ResolvedSpaceBranding;
   sent?: boolean;
 }
 

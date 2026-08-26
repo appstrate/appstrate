@@ -12,29 +12,29 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { endUsers, applications } from "@appstrate/db/schema";
+import { endUsers, spaces } from "@appstrate/db/schema";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../../../../../test/helpers/auth.ts";
 import {
   resolveOrCreateEndUser,
   lookupEndUser,
   UnverifiedEmailConflictError,
-  AppSignupClosedError,
+  SpaceSignupClosedError,
 } from "../../../services/enduser-mapping.ts";
 import { oidcEndUserProfiles } from "@appstrate/db/schema";
 import { prefixedId } from "../../../../../lib/ids.ts";
 
 describe("resolveOrCreateEndUser", () => {
   let orgId: string;
-  let applicationId: string;
+  let spaceId: string;
   let authUserId: string;
 
   beforeEach(async () => {
     await truncateAll();
     const { id } = await createTestUser();
-    const { org, defaultAppId } = await createTestOrg(id, { slug: "oidctest" });
+    const { org, defaultSpaceId } = await createTestOrg(id, { slug: "oidctest" });
     orgId = org.id;
-    applicationId = defaultAppId;
+    spaceId = defaultSpaceId;
 
     // Create a second auth identity representing the end-user
     // (distinct from the owning member's identity — this simulates a real
@@ -54,11 +54,11 @@ describe("resolveOrCreateEndUser", () => {
         name: "End User One",
         emailVerified: true,
       },
-      applicationId,
+      spaceId,
       { allowSignup: true },
     );
     expect(resolved.endUserId).toStartWith("eu_");
-    expect(resolved.applicationId).toBe(applicationId);
+    expect(resolved.spaceId).toBe(spaceId);
     expect(resolved.orgId).toBe(orgId);
     expect(resolved.email).toBe("enduser1@example.com");
 
@@ -80,7 +80,7 @@ describe("resolveOrCreateEndUser", () => {
         email: "enduser1@example.com",
         emailVerified: true,
       },
-      applicationId,
+      spaceId,
       { allowSignup: true },
     );
     const second = await resolveOrCreateEndUser(
@@ -89,7 +89,7 @@ describe("resolveOrCreateEndUser", () => {
         email: "enduser1@example.com",
         emailVerified: true,
       },
-      applicationId,
+      spaceId,
       { allowSignup: true },
     );
     expect(second.endUserId).toBe(first.endUserId);
@@ -107,7 +107,7 @@ describe("resolveOrCreateEndUser", () => {
     const seededId = prefixedId("eu");
     await db.insert(endUsers).values({
       id: seededId,
-      applicationId,
+      spaceId,
       orgId,
       email: "enduser1@example.com",
       name: "API Created",
@@ -125,7 +125,7 @@ describe("resolveOrCreateEndUser", () => {
         email: "enduser1@example.com",
         emailVerified: true,
       },
-      applicationId,
+      spaceId,
       { allowSignup: true },
     );
     expect(resolved.endUserId).toBe(seededId);
@@ -144,7 +144,7 @@ describe("resolveOrCreateEndUser", () => {
     const seededId = prefixedId("eu");
     await db.insert(endUsers).values({
       id: seededId,
-      applicationId,
+      spaceId,
       orgId,
       email: "enduser1@example.com",
       name: "API Created",
@@ -156,7 +156,7 @@ describe("resolveOrCreateEndUser", () => {
           email: "enduser1@example.com",
           emailVerified: false,
         },
-        applicationId,
+        spaceId,
         { allowSignup: true },
       ),
     ).rejects.toBeInstanceOf(UnverifiedEmailConflictError);
@@ -166,7 +166,7 @@ describe("resolveOrCreateEndUser", () => {
     const seededId = prefixedId("eu");
     await db.insert(endUsers).values({
       id: seededId,
-      applicationId,
+      spaceId,
       orgId,
       email: "enduser1@example.com",
       name: "API Created",
@@ -178,7 +178,7 @@ describe("resolveOrCreateEndUser", () => {
           email: "enduser1@example.com",
           // emailVerified omitted → unverified → conflict.
         },
-        applicationId,
+        spaceId,
         { allowSignup: true },
       ),
     ).rejects.toBeInstanceOf(UnverifiedEmailConflictError);
@@ -192,46 +192,46 @@ describe("resolveOrCreateEndUser", () => {
         // No existing clash in this freshly-truncated DB → create succeeds.
         emailVerified: false,
       },
-      applicationId,
+      spaceId,
       { allowSignup: true },
     );
     expect(resolved.endUserId).toStartWith("eu_");
   });
 
-  it("isolates profiles per application", async () => {
-    // Two apps in the same org: authUserId gets a different end_users row in each.
-    const { org, defaultAppId: appA } = await createTestOrg((await createTestUser()).id, {
+  it("isolates profiles per space", async () => {
+    // Two spaces in the same org: authUserId gets a different end_users row in each.
+    const { org, defaultSpaceId: spaceA } = await createTestOrg((await createTestUser()).id, {
       slug: "orga",
     });
     expect(org).toBeDefined();
     const secondUser = await createTestUser({ email: "two@example.com" });
-    const { defaultAppId: appB } = await createTestOrg(secondUser.id, { slug: "orgb" });
+    const { defaultSpaceId: spaceB } = await createTestOrg(secondUser.id, { slug: "orgb" });
 
     const [inA, inB] = await Promise.all([
       resolveOrCreateEndUser(
         { id: authUserId, email: "enduser1@example.com", emailVerified: true },
-        appA,
+        spaceA,
         { allowSignup: true },
       ),
       resolveOrCreateEndUser(
         { id: authUserId, email: "enduser1@example.com", emailVerified: true },
-        appB,
+        spaceB,
         { allowSignup: true },
       ),
     ]);
     expect(inA.endUserId).not.toBe(inB.endUserId);
-    expect(inA.applicationId).toBe(appA);
-    expect(inB.applicationId).toBe(appB);
+    expect(inA.spaceId).toBe(spaceA);
+    expect(inB.spaceId).toBe(spaceB);
   });
 
-  it("rejects unknown application IDs with a clear error", async () => {
+  it("rejects unknown space IDs with a clear error", async () => {
     await expect(
       resolveOrCreateEndUser(
         { id: authUserId, email: "enduser1@example.com", emailVerified: true },
-        "app_does_not_exist",
+        "spc_does_not_exist",
         { allowSignup: true },
       ),
-    ).rejects.toThrow(/application 'app_does_not_exist' not found/);
+    ).rejects.toThrow(/space 'spc_does_not_exist' not found/);
   });
 
   describe("allowSignup policy", () => {
@@ -239,16 +239,13 @@ describe("resolveOrCreateEndUser", () => {
       await expect(
         resolveOrCreateEndUser(
           { id: authUserId, email: "enduser1@example.com", emailVerified: true },
-          applicationId,
+          spaceId,
           { allowSignup: false },
         ),
-      ).rejects.toBeInstanceOf(AppSignupClosedError);
+      ).rejects.toBeInstanceOf(SpaceSignupClosedError);
 
       // And no end_users / profile row was created as a side effect.
-      const rows = await db
-        .select()
-        .from(endUsers)
-        .where(eq(endUsers.applicationId, applicationId));
+      const rows = await db.select().from(endUsers).where(eq(endUsers.spaceId, spaceId));
       expect(rows.length).toBe(0);
     });
 
@@ -259,14 +256,14 @@ describe("resolveOrCreateEndUser", () => {
       const seededId = prefixedId("eu");
       await db.insert(endUsers).values({
         id: seededId,
-        applicationId,
+        spaceId,
         orgId,
         email: "enduser1@example.com",
         name: "Pre-created",
       });
       const resolved = await resolveOrCreateEndUser(
         { id: authUserId, email: "enduser1@example.com", emailVerified: true },
-        applicationId,
+        spaceId,
         { allowSignup: false },
       );
       expect(resolved.endUserId).toBe(seededId);
@@ -277,12 +274,12 @@ describe("resolveOrCreateEndUser", () => {
       // the existing profile row short-circuits at step 1 before the gate.
       const first = await resolveOrCreateEndUser(
         { id: authUserId, email: "enduser1@example.com", emailVerified: true },
-        applicationId,
+        spaceId,
         { allowSignup: true },
       );
       const second = await resolveOrCreateEndUser(
         { id: authUserId, email: "enduser1@example.com", emailVerified: true },
-        applicationId,
+        spaceId,
         { allowSignup: false },
       );
       expect(second.endUserId).toBe(first.endUserId);
@@ -301,34 +298,34 @@ describe("lookupEndUser", () => {
 
   it("returns the end-user plus profile status when it exists", async () => {
     const { id } = await createTestUser();
-    const { org, defaultAppId } = await createTestOrg(id, { slug: "lookup" });
+    const { org, defaultSpaceId } = await createTestOrg(id, { slug: "lookup" });
     const { id: euAuthId } = await createTestUser({ email: "lookup@example.com" });
     const resolved = await resolveOrCreateEndUser(
       { id: euAuthId, email: "lookup@example.com", emailVerified: true },
-      defaultAppId,
+      defaultSpaceId,
       { allowSignup: true },
     );
     const looked = await lookupEndUser(resolved.endUserId);
     expect(looked).not.toBeNull();
     expect(looked!.endUserId).toBe(resolved.endUserId);
-    expect(looked!.applicationId).toBe(defaultAppId);
+    expect(looked!.spaceId).toBe(defaultSpaceId);
     expect(looked!.orgId).toBe(org.id);
     expect(looked!.status).toBe("active");
   });
 
   it("returns active status when no profile row exists (LEFT JOIN fallback)", async () => {
     const { id } = await createTestUser();
-    const { defaultAppId } = await createTestOrg(id, { slug: "fallback" });
+    const { defaultSpaceId } = await createTestOrg(id, { slug: "fallback" });
     const [app] = await db
-      .select({ orgId: applications.orgId })
-      .from(applications)
-      .where(eq(applications.id, defaultAppId))
+      .select({ orgId: spaces.orgId })
+      .from(spaces)
+      .where(eq(spaces.id, defaultSpaceId))
       .limit(1);
 
     const seededId = prefixedId("eu");
     await db.insert(endUsers).values({
       id: seededId,
-      applicationId: defaultAppId,
+      spaceId: defaultSpaceId,
       orgId: app!.orgId,
       email: "no-profile@example.com",
     });

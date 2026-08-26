@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Resolver smoke tests — per-application social auth config.
+ * Resolver smoke tests — per-space social auth config.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -9,8 +9,8 @@ import { db } from "@appstrate/db/client";
 import {
   user as userTable,
   organizations,
-  applications,
-  applicationSocialProviders,
+  spaces,
+  spaceSocialProviders,
 } from "@appstrate/db/schema";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import {
@@ -21,7 +21,7 @@ import {
   deleteSocialProvider,
 } from "../../../services/social.ts";
 
-async function seedApp(): Promise<string> {
+async function seedSpace(): Promise<string> {
   const ownerId = `user-${crypto.randomUUID()}`;
   await db.insert(userTable).values({
     id: ownerId,
@@ -37,15 +37,15 @@ async function seedApp(): Promise<string> {
       createdBy: ownerId,
     })
     .returning();
-  const applicationId = `app_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
-  await db.insert(applications).values({
-    id: applicationId,
+  const spaceId = `spc_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  await db.insert(spaces).values({
+    id: spaceId,
     orgId: org!.id,
     name: "Default",
     isDefault: true,
     createdBy: ownerId,
   });
-  return applicationId;
+  return spaceId;
 }
 
 describe("resolveSocialProviderForClient", () => {
@@ -54,124 +54,118 @@ describe("resolveSocialProviderForClient", () => {
     _clearSocialCacheForTesting();
   });
 
-  it("returns null for level=application when no row exists", async () => {
-    const applicationId = await seedApp();
+  it("returns null for level=space when no row exists", async () => {
+    const spaceId = await seedSpace();
     const resolved = await resolveSocialProviderForClient(
-      { level: "application", referencedApplicationId: applicationId },
+      { level: "space", referencedSpaceId: spaceId },
       "google",
     );
     expect(resolved).toBeNull();
   });
 
-  it("returns decrypted creds when per-app config exists", async () => {
-    const applicationId = await seedApp();
-    await upsertSocialProvider(applicationId, "google", {
+  it("returns decrypted creds when per-space config exists", async () => {
+    const spaceId = await seedSpace();
+    await upsertSocialProvider(spaceId, "google", {
       clientId: "tenant-google-client.apps.googleusercontent.com",
       clientSecret: "tenant-google-secret",
       scopes: ["openid", "email", "profile"],
     });
     const resolved = await resolveSocialProviderForClient(
-      { level: "application", referencedApplicationId: applicationId },
+      { level: "space", referencedSpaceId: spaceId },
       "google",
     );
     expect(resolved).not.toBeNull();
     expect(resolved!.clientId).toBe("tenant-google-client.apps.googleusercontent.com");
     expect(resolved!.clientSecret).toBe("tenant-google-secret");
     expect(resolved!.scopes).toEqual(["openid", "email", "profile"]);
-    expect(resolved!.source).toBe("per-app");
+    expect(resolved!.source).toBe("per-space");
   });
 
   it("isolates providers per (app, provider) — google config does not leak to github", async () => {
-    const applicationId = await seedApp();
-    await upsertSocialProvider(applicationId, "google", {
+    const spaceId = await seedSpace();
+    await upsertSocialProvider(spaceId, "google", {
       clientId: "g",
       clientSecret: "gs",
     });
     const githubResolved = await resolveSocialProviderForClient(
-      { level: "application", referencedApplicationId: applicationId },
+      { level: "space", referencedSpaceId: spaceId },
       "github",
     );
     expect(githubResolved).toBeNull();
   });
 
   it("is cached across calls and invalidated on upsert/delete", async () => {
-    const applicationId = await seedApp();
+    const spaceId = await seedSpace();
     expect(
       await resolveSocialProviderForClient(
-        { level: "application", referencedApplicationId: applicationId },
+        { level: "space", referencedSpaceId: spaceId },
         "google",
       ),
     ).toBeNull();
-    await upsertSocialProvider(applicationId, "google", {
+    await upsertSocialProvider(spaceId, "google", {
       clientId: "g",
       clientSecret: "gs",
     });
     const afterUpsert = await resolveSocialProviderForClient(
-      { level: "application", referencedApplicationId: applicationId },
+      { level: "space", referencedSpaceId: spaceId },
       "google",
     );
     expect(afterUpsert).not.toBeNull();
-    await deleteSocialProvider(applicationId, "google");
+    await deleteSocialProvider(spaceId, "google");
     const afterDelete = await resolveSocialProviderForClient(
-      { level: "application", referencedApplicationId: applicationId },
+      { level: "space", referencedSpaceId: spaceId },
       "google",
     );
     expect(afterDelete).toBeNull();
   });
 
   it("treats a row whose ciphertext cannot be decrypted as unconfigured", async () => {
-    const applicationId = await seedApp();
+    const spaceId = await seedSpace();
     // Envelope with a kid absent from the keyring — decryption must fail and
     // the resolver must surface "not configured" instead of throwing.
-    await db.insert(applicationSocialProviders).values({
-      applicationId,
+    await db.insert(spaceSocialProviders).values({
+      spaceId,
       provider: "google",
       clientId: "tenant-google-client",
       clientSecretEncrypted: `v1:retired-unknown-kid:${Buffer.alloc(64).toString("base64")}`,
     });
     const resolved = await resolveSocialProviderForClient(
-      { level: "application", referencedApplicationId: applicationId },
+      { level: "space", referencedSpaceId: spaceId },
       "google",
     );
     expect(resolved).toBeNull();
   });
 
-  it("returns null for non-application clients (no env fallback here)", async () => {
+  it("returns null for non-space clients (no env fallback here)", async () => {
     // Env fallback is handled by the BA singleton getters, not this resolver.
     const resolved = await resolveSocialProviderForClient(
-      { level: "org", referencedApplicationId: null },
+      { level: "org", referencedSpaceId: null },
       "google",
     );
     expect(resolved).toBeNull();
   });
 
   it("invalidateSocialCache with provider arg clears only that provider", async () => {
-    const applicationId = await seedApp();
-    await upsertSocialProvider(applicationId, "google", {
+    const spaceId = await seedSpace();
+    await upsertSocialProvider(spaceId, "google", {
       clientId: "g1",
       clientSecret: "s1",
     });
-    await upsertSocialProvider(applicationId, "github", {
+    await upsertSocialProvider(spaceId, "github", {
       clientId: "gh1",
       clientSecret: "ghs1",
     });
     // Prime the cache.
-    await resolveSocialProviderForClient(
-      { level: "application", referencedApplicationId: applicationId },
-      "google",
-    );
-    await resolveSocialProviderForClient(
-      { level: "application", referencedApplicationId: applicationId },
-      "github",
-    );
+    await resolveSocialProviderForClient({ level: "space", referencedSpaceId: spaceId }, "google");
+    await resolveSocialProviderForClient({ level: "space", referencedSpaceId: spaceId }, "github");
     // Update google directly (bypass service to avoid its own cache invalidation).
-    await upsertSocialProvider(applicationId, "google", {
+    await upsertSocialProvider(spaceId, "google", {
       clientId: "g2",
       clientSecret: "s2",
     });
-    invalidateSocialCache(applicationId, "google");
+    invalidateSocialCache(spaceId, "google");
     const google = await resolveSocialProviderForClient(
-      { level: "application", referencedApplicationId: applicationId },
+      { level: "space", referencedSpaceId: spaceId },
       "google",
     );
     expect(google!.clientId).toBe("g2");

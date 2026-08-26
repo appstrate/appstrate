@@ -35,7 +35,7 @@ function makeTools(permissions: string[], status = 200) {
     dispatch,
     observe: (e) => events.push(e),
     actor: { type: "user", id: "user_1" },
-    scope: { orgId: "org_1", applicationId: "app_1" },
+    scope: { orgId: "org_1", spaceId: "spc_1" },
   });
   const byName = new Map(tools.map((t) => [t.descriptor.name, t]));
   return { byName, events };

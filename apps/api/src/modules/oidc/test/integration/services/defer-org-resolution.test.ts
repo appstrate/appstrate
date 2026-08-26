@@ -96,16 +96,16 @@ afterAll(() => {
 describe("deferOrgResolution in auth pipeline", () => {
   let authUserId: string;
   let orgId: string;
-  let defaultAppId: string;
+  let defaultSpaceId: string;
   let instanceClientId: string;
 
   beforeEach(async () => {
     await truncateAll();
     const { id: ownerId } = await createTestUser();
-    const { org, defaultAppId: applicationId } = await createTestOrg(ownerId, { slug: "deferorg" });
+    const { org, defaultSpaceId: spaceId } = await createTestOrg(ownerId, { slug: "deferorg" });
     orgId = org.id;
     authUserId = ownerId;
-    defaultAppId = applicationId;
+    defaultSpaceId = spaceId;
 
     const { ensureInstanceClient } = await import("../../../services/oauth-admin.ts");
     instanceClientId = await ensureInstanceClient("http://localhost:3000");
@@ -114,14 +114,14 @@ describe("deferOrgResolution in auth pipeline", () => {
   it("defers org resolution — instance token + X-Org-Id resolves org context", async () => {
     const token = await mintInstanceToken(authUserId, instanceClientId);
 
-    // Hit an app-scoped route with X-Org-Id + X-Application-Id.
+    // Hit a space-scoped route with X-Org-Id + X-Space-Id.
     // If deferOrgResolution works, the pipeline will resolve org via X-Org-Id
     // header (same as session auth) instead of requiring inline org context.
     const res = await app.request("/api/agents", {
       headers: {
         Authorization: `Bearer ${token}`,
         "X-Org-Id": orgId,
-        "X-Application-Id": defaultAppId,
+        "X-Space-Id": defaultSpaceId,
       },
     });
     // 200 means: auth passed, org resolved via X-Org-Id, permissions derived from orgRole
@@ -149,7 +149,7 @@ describe("deferOrgResolution in auth pipeline", () => {
       headers: {
         Authorization: `Bearer ${token}`,
         "X-Org-Id": otherOrg.id,
-        "X-Application-Id": "app_fake",
+        "X-Space-Id": "spc_fake",
       },
     });
     // Not a member → org context middleware rejects
@@ -161,7 +161,7 @@ describe("deferOrgResolution in auth pipeline", () => {
 
     // The test user is the org owner. The pipeline should derive owner
     // permissions from orgRole after X-Org-Id resolution.
-    const res = await app.request("/api/applications", {
+    const res = await app.request("/api/spaces", {
       headers: {
         Authorization: `Bearer ${token}`,
         "X-Org-Id": orgId,

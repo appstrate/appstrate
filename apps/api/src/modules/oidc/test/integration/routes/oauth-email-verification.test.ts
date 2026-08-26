@@ -37,7 +37,7 @@ import {
   user as userTable,
   organizations,
   organizationMembers,
-  applications,
+  spaces,
 } from "@appstrate/db/schema";
 import { getAuth } from "@appstrate/db/auth";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
@@ -51,7 +51,7 @@ import oidcModule from "../../../index.ts";
 const app = getTestApp({ modules: [oidcModule] });
 
 /**
- * Provision a fresh {user, org, application, oauth client} tuple without
+ * Provision a fresh {user, org, space, oauth client} tuple without
  * going through BA sign-up. BA in SMTP mode refuses to return a session,
  * which is exactly the behavior under test — but it also means we can't
  * use the default helpers to set up the admin context, so we insert the
@@ -62,7 +62,7 @@ const app = getTestApp({ modules: [oidcModule] });
  */
 async function setupSmtpFixture(): Promise<{
   orgId: string;
-  defaultAppId: string;
+  defaultSpaceId: string;
   clientId: string;
 }> {
   // Create a throwaway "owner" user row. No password — this user is only
@@ -85,9 +85,9 @@ async function setupSmtpFixture(): Promise<{
     .returning();
   await db.insert(organizationMembers).values({ orgId: org!.id, userId: ownerId, role: "owner" });
 
-  const applicationId = `app_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
-  await db.insert(applications).values({
-    id: applicationId,
+  const spaceId = `spc_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  await db.insert(spaces).values({
+    id: spaceId,
     orgId: org!.id,
     name: "Default",
     isDefault: true,
@@ -95,31 +95,31 @@ async function setupSmtpFixture(): Promise<{
   });
 
   const client = await createClient({
-    level: "application",
+    level: "space",
     name: "Verify Email Client",
     redirectUris: ["https://acme.example.com/oauth/callback"],
-    referencedApplicationId: applicationId,
+    referencedSpaceId: spaceId,
     // This suite exercises brand-new end-user sign-ups through the
     // OIDC verify-email / magic-link / password flows — JIT provisioning
     // must be ON for the happy-path tests to mint a token.
     allowSignup: true,
   });
 
-  // Per-app SMTP is now required for email features on level=application
+  // Per-space SMTP is now required for email features on level=space
   // clients (instance env SMTP is no longer used as fallback for tenant
   // flows — it would mix customer email traffic on the platform domain).
   // Wire a jsonTransport config here so the verify-email / magic-link /
   // forgot-password branches stay reachable under test.
-  await upsertSmtpConfig(applicationId, {
+  await upsertSmtpConfig(spaceId, {
     host: "__test_json__",
     port: 587,
     username: "test",
     pass: "test",
-    fromAddress: `no-reply@${applicationId}.test`,
+    fromAddress: `no-reply@${spaceId}.test`,
     fromName: "Verify Email App",
   });
 
-  return { orgId: org!.id, defaultAppId: applicationId, clientId: client.clientId };
+  return { orgId: org!.id, defaultSpaceId: spaceId, clientId: client.clientId };
 }
 
 async function getCsrfFromGet(res: Response): Promise<{ csrfToken: string; cookie: string }> {
@@ -142,7 +142,7 @@ async function signUpEmailPassword(email: string, password: string): Promise<voi
 describe("OIDC email verification flow — SMTP enabled", () => {
   enableSmtpForSuite();
 
-  let fixture: { orgId: string; defaultAppId: string; clientId: string };
+  let fixture: { orgId: string; defaultSpaceId: string; clientId: string };
 
   beforeEach(async () => {
     await truncateAll();

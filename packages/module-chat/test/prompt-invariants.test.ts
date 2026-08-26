@@ -99,7 +99,7 @@ describe("SYSTEM_PROMPT invariants", () => {
 
   it("routes integration_not_active to activation, never to a retry", () => {
     // Retrying the run or re-running the connect flow can never clear a 412:
-    // connecting is personal, activating is application-wide. Activation IS
+    // connecting is personal, activating is space-wide. Activation IS
     // reachable (`activateIntegration` is in the platform's operation surface),
     // and RBAC decides who may call it — an admin fixes it in one step, a member
     // gets a 403 and is told to ask one. Nothing in the chat pre-computes that

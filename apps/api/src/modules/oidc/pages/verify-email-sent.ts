@@ -17,11 +17,11 @@
 
 import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
-import type { ResolvedAppBranding } from "../services/branding.ts";
+import type { ResolvedSpaceBranding } from "../services/branding.ts";
 
 interface VerifyEmailSentPageProps {
   queryString: string;
-  branding: ResolvedAppBranding;
+  branding: ResolvedSpaceBranding;
   /** Email address the verification link was sent to (pre-filled for display). */
   email: string;
 }

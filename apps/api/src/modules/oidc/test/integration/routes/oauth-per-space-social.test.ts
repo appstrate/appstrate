@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * E2E — per-application social auth.
+ * E2E — per-space social auth.
  *
- * Verifies the two invariants that wire `application_social_providers` into
+ * Verifies the two invariants that wire `space_social_providers` into
  * the OIDC login surface:
  *
- *   1. **Button gating** — for `level=application` clients, the login /
+ *   1. **Button gating** — for `level=space` clients, the login /
  *      register pages render the Google/GitHub buttons ONLY when a matching
- *      per-app row exists. No fallback to env creds.
+ *      per-space row exists. No fallback to env creds.
  *   2. **Credential injection** — when the browser POSTs to BA's
  *      `/api/auth/sign-in/social` carrying the pending-client cookie for an
- *      app-level client, the resolved redirect URL uses the TENANT's
+ *      space-level client, the resolved redirect URL uses the TENANT's
  *      `client_id`, not the platform env's.
  *
  * We do NOT exchange a real Google code — the 302 Location header from
@@ -24,7 +24,7 @@ import {
   user as userTable,
   organizations,
   organizationMembers,
-  applications,
+  spaces,
 } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
@@ -42,10 +42,10 @@ const app = getTestApp({ modules: [oidcModule] });
 const TENANT_GOOGLE_CLIENT_ID = "tenant-acme.apps.googleusercontent.com";
 const TENANT_GOOGLE_SECRET = "tenant-acme-google-secret";
 
-async function setupAppClient(opts: {
+async function setupSpaceClient(opts: {
   google?: boolean;
   github?: boolean;
-}): Promise<{ applicationId: string; clientId: string }> {
+}): Promise<{ spaceId: string; clientId: string }> {
   const ownerId = `user-${crypto.randomUUID()}`;
   await db.insert(userTable).values({
     id: ownerId,
@@ -56,16 +56,16 @@ async function setupAppClient(opts: {
   const [org] = await db
     .insert(organizations)
     .values({
-      name: "Per-App Social",
+      name: "Per-Space Social",
       slug: `soc-e2e-${crypto.randomUUID().slice(0, 8)}`,
       createdBy: ownerId,
     })
     .returning();
   await db.insert(organizationMembers).values({ orgId: org!.id, userId: ownerId, role: "owner" });
 
-  const applicationId = `app_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
-  await db.insert(applications).values({
-    id: applicationId,
+  const spaceId = `spc_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  await db.insert(spaces).values({
+    id: spaceId,
     orgId: org!.id,
     name: "Default",
     isDefault: true,
@@ -73,32 +73,32 @@ async function setupAppClient(opts: {
   });
 
   const client = await createClient({
-    level: "application",
+    level: "space",
     name: "E2E Social Client",
     redirectUris: ["https://acme.example.com/oauth/callback"],
-    referencedApplicationId: applicationId,
+    referencedSpaceId: spaceId,
     // The "register page shows both buttons" test hits GET /register which
     // is now gated by `allowSignup` on every level — opt in.
     allowSignup: true,
   });
 
   if (opts.google) {
-    await upsertSocialProvider(applicationId, "google", {
+    await upsertSocialProvider(spaceId, "google", {
       clientId: TENANT_GOOGLE_CLIENT_ID,
       clientSecret: TENANT_GOOGLE_SECRET,
     });
   }
   if (opts.github) {
-    await upsertSocialProvider(applicationId, "github", {
+    await upsertSocialProvider(spaceId, "github", {
       clientId: "tenant-github-id",
       clientSecret: "tenant-github-secret",
     });
   }
 
-  return { applicationId, clientId: client.clientId };
+  return { spaceId, clientId: client.clientId };
 }
 
-describe("OIDC per-app social auth — E2E (app-level clients)", () => {
+describe("OIDC per-space social auth — E2E (space-level clients)", () => {
   let resolves: SpiedSocialResolve[] = [];
 
   beforeEach(async () => {
@@ -115,8 +115,8 @@ describe("OIDC per-app social auth — E2E (app-level clients)", () => {
 
   // ─── Button gating on login page ───────────────────────────────────────────
 
-  it("login page hides both social buttons when no per-app row exists", async () => {
-    const { clientId } = await setupAppClient({});
+  it("login page hides both social buttons when no per-space row exists", async () => {
+    const { clientId } = await setupSpaceClient({});
     const res = await app.request(
       `/api/oauth/login?client_id=${encodeURIComponent(clientId)}&state=s`,
     );
@@ -127,7 +127,7 @@ describe("OIDC per-app social auth — E2E (app-level clients)", () => {
   });
 
   it("login page shows ONLY Google when only Google is configured", async () => {
-    const { clientId } = await setupAppClient({ google: true });
+    const { clientId } = await setupSpaceClient({ google: true });
     const res = await app.request(
       `/api/oauth/login?client_id=${encodeURIComponent(clientId)}&state=s`,
     );
@@ -137,7 +137,7 @@ describe("OIDC per-app social auth — E2E (app-level clients)", () => {
   });
 
   it("register page shows both buttons when both providers are configured", async () => {
-    const { clientId } = await setupAppClient({ google: true, github: true });
+    const { clientId } = await setupSpaceClient({ google: true, github: true });
     const res = await app.request(
       `/api/oauth/register?client_id=${encodeURIComponent(clientId)}&state=s`,
     );
@@ -148,8 +148,8 @@ describe("OIDC per-app social auth — E2E (app-level clients)", () => {
 
   // ─── Credential injection via pending-client cookie ────────────────────────
 
-  it("POST /api/auth/sign-in/social routes through the resolver for app-level clients", async () => {
-    const { clientId } = await setupAppClient({ google: true });
+  it("POST /api/auth/sign-in/social routes through the resolver for space-level clients", async () => {
+    const { clientId } = await setupSpaceClient({ google: true });
 
     // Load the login page once to obtain the signed `oidc_pending_client` cookie.
     const loginRes = await app.request(
@@ -176,7 +176,7 @@ describe("OIDC per-app social auth — E2E (app-level clients)", () => {
     });
 
     // Best assertion we can make cheaply: the social-override plugin fired,
-    // and the resolver spy records the per-app lookup for the pending client.
+    // and the resolver spy records the per-space lookup for the pending client.
     const googleLookups = resolves.filter((e) => e.provider === "google" && e.hit);
     expect(googleLookups.length).toBeGreaterThanOrEqual(1);
 
@@ -194,7 +194,7 @@ describe("OIDC per-app social auth — E2E (app-level clients)", () => {
   });
 
   it("without a pending-client cookie, the resolver is NOT consulted", async () => {
-    await setupAppClient({ google: true });
+    await setupSpaceClient({ google: true });
     // Direct POST to /sign-in/social with no pending cookie — this is the
     // dashboard / instance flow that must keep using env creds.
     await app.request(`/api/auth/sign-in/social`, {

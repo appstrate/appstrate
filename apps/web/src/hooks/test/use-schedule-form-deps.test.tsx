@@ -31,7 +31,7 @@ const PACKAGE_ID = "@myorg/mailer";
 
 /**
  * Zustand's `useStore` reads the store's INITIAL state for its server snapshot,
- * so the org / application ids are `null` under `renderToStaticMarkup` — the
+ * so the org / space ids are `null` under `renderToStaticMarkup` — the
  * detail cache key carries those nulls verbatim.
  */
 const DETAIL_KEY = packageKeys.detail("agents", null, null, PACKAGE_ID, "draft");

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Admin routes — `/api/applications/:id/smtp-config[/test]`.
+ * Admin routes — `/api/spaces/:id/smtp-config[/test]`.
  * Smoke tests for CRUD + SSRF block + pass redaction.
  */
 
@@ -18,7 +18,7 @@ import { _clearSmtpCacheForTesting } from "../../../services/smtp.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
 
-describe("/api/applications/:id/smtp-config", () => {
+describe("/api/spaces/:id/smtp-config", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -28,7 +28,7 @@ describe("/api/applications/:id/smtp-config", () => {
   });
 
   it("PUT creates, GET returns without pass, DELETE removes", async () => {
-    const putRes = await app.request(`/api/applications/${ctx.defaultAppId}/smtp-config`, {
+    const putRes = await app.request(`/api/spaces/${ctx.defaultSpaceId}/smtp-config`, {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -46,7 +46,7 @@ describe("/api/applications/:id/smtp-config", () => {
     expect(created).not.toHaveProperty("pass");
     expect(created).not.toHaveProperty("passEncrypted");
 
-    const getRes = await app.request(`/api/applications/${ctx.defaultAppId}/smtp-config`, {
+    const getRes = await app.request(`/api/spaces/${ctx.defaultSpaceId}/smtp-config`, {
       headers: authHeaders(ctx),
     });
     expect(getRes.status).toBe(200);
@@ -54,20 +54,20 @@ describe("/api/applications/:id/smtp-config", () => {
     expect(got.host).toBe("smtp.sendgrid.net");
     expect(got).not.toHaveProperty("pass");
 
-    const delRes = await app.request(`/api/applications/${ctx.defaultAppId}/smtp-config`, {
+    const delRes = await app.request(`/api/spaces/${ctx.defaultSpaceId}/smtp-config`, {
       method: "DELETE",
       headers: authHeaders(ctx),
     });
     expect(delRes.status).toBe(204);
 
-    const notFound = await app.request(`/api/applications/${ctx.defaultAppId}/smtp-config`, {
+    const notFound = await app.request(`/api/spaces/${ctx.defaultSpaceId}/smtp-config`, {
       headers: authHeaders(ctx),
     });
     expect(notFound.status).toBe(404);
   });
 
   it("rejects SSRF hosts", async () => {
-    const res = await app.request(`/api/applications/${ctx.defaultAppId}/smtp-config`, {
+    const res = await app.request(`/api/spaces/${ctx.defaultSpaceId}/smtp-config`, {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -82,7 +82,7 @@ describe("/api/applications/:id/smtp-config", () => {
   });
 
   it("404s for an app that does not belong to the caller's org", async () => {
-    const res = await app.request(`/api/applications/app_doesnotexist/smtp-config`, {
+    const res = await app.request(`/api/spaces/spc_doesnotexist/smtp-config`, {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -97,7 +97,7 @@ describe("/api/applications/:id/smtp-config", () => {
   });
 
   it("POST /test delivers via the stored config (jsonTransport)", async () => {
-    await app.request(`/api/applications/${ctx.defaultAppId}/smtp-config`, {
+    await app.request(`/api/spaces/${ctx.defaultSpaceId}/smtp-config`, {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -109,7 +109,7 @@ describe("/api/applications/:id/smtp-config", () => {
       }),
     });
 
-    const res = await app.request(`/api/applications/${ctx.defaultAppId}/smtp-config/test`, {
+    const res = await app.request(`/api/spaces/${ctx.defaultSpaceId}/smtp-config/test`, {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({ to: "admin@tenant.example" }),

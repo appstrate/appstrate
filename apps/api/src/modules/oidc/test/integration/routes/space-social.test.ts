@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Admin routes — `/api/applications/:id/social-providers/:provider`.
+ * Admin routes — `/api/spaces/:id/social-providers/:provider`.
  * Smoke tests for CRUD + secret redaction + provider scoping.
  */
 
@@ -18,7 +18,7 @@ import { _clearSocialCacheForTesting } from "../../../services/social.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
 
-describe("/api/applications/:id/social-providers/:provider", () => {
+describe("/api/spaces/:id/social-providers/:provider", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -28,7 +28,7 @@ describe("/api/applications/:id/social-providers/:provider", () => {
   });
 
   it("PUT creates, GET returns without secret, DELETE removes", async () => {
-    const url = `/api/applications/${ctx.defaultAppId}/social-providers/google`;
+    const url = `/api/spaces/${ctx.defaultSpaceId}/social-providers/google`;
 
     const putRes = await app.request(url, {
       method: "PUT",
@@ -60,15 +60,14 @@ describe("/api/applications/:id/social-providers/:provider", () => {
   });
 
   it("rejects unknown provider with 404", async () => {
-    const res = await app.request(
-      `/api/applications/${ctx.defaultAppId}/social-providers/facebook`,
-      { headers: authHeaders(ctx) },
-    );
+    const res = await app.request(`/api/spaces/${ctx.defaultSpaceId}/social-providers/facebook`, {
+      headers: authHeaders(ctx),
+    });
     expect(res.status).toBe(404);
   });
 
   it("404s for an app that does not belong to the caller's org", async () => {
-    const res = await app.request(`/api/applications/app_doesnotexist/social-providers/google`, {
+    const res = await app.request(`/api/spaces/spc_doesnotexist/social-providers/google`, {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({ clientId: "x", clientSecret: "y" }),
@@ -77,24 +76,23 @@ describe("/api/applications/:id/social-providers/:provider", () => {
   });
 
   it("scopes rows by (app, provider) — google and github are independent", async () => {
-    await app.request(`/api/applications/${ctx.defaultAppId}/social-providers/google`, {
+    await app.request(`/api/spaces/${ctx.defaultSpaceId}/social-providers/google`, {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({ clientId: "g", clientSecret: "gs" }),
     });
-    const ghRes = await app.request(
-      `/api/applications/${ctx.defaultAppId}/social-providers/github`,
-      { headers: authHeaders(ctx) },
-    );
+    const ghRes = await app.request(`/api/spaces/${ctx.defaultSpaceId}/social-providers/github`, {
+      headers: authHeaders(ctx),
+    });
     expect(ghRes.status).toBe(404);
 
-    await app.request(`/api/applications/${ctx.defaultAppId}/social-providers/github`, {
+    await app.request(`/api/spaces/${ctx.defaultSpaceId}/social-providers/github`, {
       method: "PUT",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({ clientId: "gh", clientSecret: "ghs" }),
     });
     const ghGetRes = await app.request(
-      `/api/applications/${ctx.defaultAppId}/social-providers/github`,
+      `/api/spaces/${ctx.defaultSpaceId}/social-providers/github`,
       { headers: authHeaders(ctx) },
     );
     expect(ghGetRes.status).toBe(200);

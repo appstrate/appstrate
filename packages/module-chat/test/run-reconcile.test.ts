@@ -66,7 +66,7 @@ describe("orphaned chat run reconciliation", () => {
     const run = await seedRun({
       packageId,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "success",
       ...(chatSessionId ? { chatSessionId } : {}),
@@ -80,14 +80,14 @@ describe("orphaned chat run reconciliation", () => {
     await db.insert(files).values({
       id,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       purpose: "agent_output",
       runId,
       packageId,
       userId: ctx.user.id,
       // The leading segment is the bucket (`FILES_BUCKET`), which
       // `parseStorageKey` splits back off at read time.
-      storageKey: `files/${ctx.defaultAppId}/${id}/${name}`,
+      storageKey: `files/${ctx.defaultSpaceId}/${id}/${name}`,
       name,
       mime: "text/html",
       size,

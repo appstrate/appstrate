@@ -27,11 +27,11 @@
 
 import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
-import type { ResolvedAppBranding } from "../services/branding.ts";
+import type { ResolvedSpaceBranding } from "../services/branding.ts";
 
 /** Common props across the three renders — all of them need branding. */
 interface ActivateBaseProps {
-  branding: ResolvedAppBranding;
+  branding: ResolvedSpaceBranding;
   /** Optional error message displayed above the form. */
   error?: string;
 }

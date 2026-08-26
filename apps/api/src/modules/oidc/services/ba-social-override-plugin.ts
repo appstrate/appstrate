@@ -30,7 +30,7 @@
  *
  * No-op when the pending-client cookie is missing, the referenced client is
  * not `level=space`, or no per-space creds are configured. In that last
- * case the getters fall through to env — which, for an space-level client
+ * case the getters fall through to env — which, for a space-level client
  * that hasn't configured the provider, will be empty. The provider factory's
  * own `CLIENT_ID_AND_SECRET_REQUIRED` guard then rejects the request — but
  * that path should never execute because the login page's feature-flag

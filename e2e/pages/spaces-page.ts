@@ -3,13 +3,13 @@
 import { expect, type Page } from "@playwright/test";
 
 /**
- * Page Object for the Applications management page (/applications).
+ * Page Object for the Spaces management page (/spaces).
  */
-export class ApplicationsPage {
+export class SpacesPage {
   constructor(private page: Page) {}
 
   async goto() {
-    await this.page.goto("/applications");
+    await this.page.goto("/spaces");
   }
 
   async waitForLoaded() {
@@ -18,22 +18,22 @@ export class ApplicationsPage {
     });
   }
 
-  /** Click the create application button and wait for the modal to open. */
+  /** Click the create space button and wait for the modal to open. */
   async openCreateModal() {
-    await this.page.getByTestId("create-application-button").click();
+    await this.page.getByTestId("create-space-button").click();
     await expect(this.page.locator("[role='dialog']")).toBeVisible();
   }
 
-  /** Fill the name and submit the create application form. */
-  async createApplication(name: string) {
+  /** Fill the name and submit the create space form. */
+  async createSpace(name: string) {
     await this.openCreateModal();
-    await this.page.locator("#app-create-name").fill(name);
-    await this.page.getByTestId("app-create-submit").click();
+    await this.page.locator("#space-create-name").fill(name);
+    await this.page.getByTestId("space-create-submit").click();
     // Wait for modal to close (creation complete)
     await expect(this.page.locator("[role='dialog']")).not.toBeVisible();
   }
 
-  async expectAppVisible(name: string) {
+  async expectSpaceVisible(name: string) {
     await expect(this.page.getByText(name)).toBeVisible({ timeout: 5_000 });
   }
 

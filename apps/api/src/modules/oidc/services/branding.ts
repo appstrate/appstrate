@@ -10,7 +10,7 @@
  *
  * The module stays the sole owner of the shape. Core does not know anything
  * about branding, and a future non-OIDC consumer that wants the same field
- * should import `AppBrandingSchema` from here rather than widening core.
+ * should import `SpaceBrandingSchema` from here rather than widening core.
  *
  * Resolution is defensive: anything missing or malformed falls back to
  * defaults derived from `spaces.name` so the pages still render even
@@ -44,7 +44,7 @@ function isValidLogoUrl(raw: string): boolean {
   return !isBlockedUrl(raw);
 }
 
-const AppBrandingSchema = z
+const SpaceBrandingSchema = z
   .object({
     name: z.string().min(1).max(200).optional(),
     logoUrl: z.url().refine(isValidLogoUrl, "logoUrl must be a public HTTPS URL").optional(),
@@ -61,10 +61,10 @@ const AppBrandingSchema = z
   })
   .strict();
 
-type AppBranding = z.infer<typeof AppBrandingSchema>;
+type SpaceBranding = z.infer<typeof SpaceBrandingSchema>;
 
 /** Fully resolved branding — every field populated, ready to render. */
-export interface ResolvedAppBranding {
+export interface ResolvedSpaceBranding {
   name: string;
   logoUrl: string | null;
   primaryColor: string;
@@ -76,7 +76,7 @@ export interface ResolvedAppBranding {
 const DEFAULT_PRIMARY = "#4f46e5";
 const DEFAULT_ACCENT = "#4338ca";
 
-export const PLATFORM_DEFAULT_BRANDING: ResolvedAppBranding = {
+export const PLATFORM_DEFAULT_BRANDING: ResolvedSpaceBranding = {
   name: "Appstrate",
   logoUrl: "/logo-light.svg",
   primaryColor: DEFAULT_PRIMARY,
@@ -93,7 +93,7 @@ export const PLATFORM_DEFAULT_BRANDING: ResolvedAppBranding = {
  * renders with defaults so a bad branding config can't take down an
  * end-user flow.
  */
-export async function resolveAppBranding(spaceId: string): Promise<ResolvedAppBranding> {
+export async function resolveSpaceBranding(spaceId: string): Promise<ResolvedSpaceBranding> {
   const [row] = await db
     .select({ name: spaces.name, settings: spaces.settings })
     .from(spaces)
@@ -103,9 +103,9 @@ export async function resolveAppBranding(spaceId: string): Promise<ResolvedAppBr
   const appName = row?.name ?? "Appstrate";
   const raw = extractBrandingCandidate(row?.settings);
 
-  let parsed: AppBranding = {};
+  let parsed: SpaceBranding = {};
   if (raw !== null) {
-    const result = AppBrandingSchema.safeParse(raw);
+    const result = SpaceBrandingSchema.safeParse(raw);
     if (result.success) {
       parsed = result.data;
     } else {
@@ -144,7 +144,7 @@ export async function resolveBrandingForClient(client: {
   name: string | null;
   referencedOrgId: string | null;
   referencedSpaceId: string | null;
-}): Promise<ResolvedAppBranding> {
+}): Promise<ResolvedSpaceBranding> {
   if (client.level === "instance") {
     return {
       ...PLATFORM_DEFAULT_BRANDING,
@@ -153,7 +153,7 @@ export async function resolveBrandingForClient(client: {
     };
   }
   if (client.level === "space" && client.referencedSpaceId) {
-    return resolveAppBranding(client.referencedSpaceId);
+    return resolveSpaceBranding(client.referencedSpaceId);
   }
   if (client.level === "org" && client.referencedOrgId) {
     const [row] = await db
@@ -166,7 +166,7 @@ export async function resolveBrandingForClient(client: {
         }),
       )
       .limit(1);
-    if (row) return resolveAppBranding(row.id);
+    if (row) return resolveSpaceBranding(row.id);
   }
   return { ...PLATFORM_DEFAULT_BRANDING };
 }

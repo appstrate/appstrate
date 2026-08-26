@@ -42,7 +42,7 @@ getTestApp();
 
 /** Stage an upload row + write its bytes into the uploads bucket (FS). */
 async function stageUpload(
-  scope: { orgId: string; applicationId: string },
+  scope: { orgId: string; spaceId: string },
   createdBy: string,
   name: string,
   bytes: Uint8Array,
@@ -50,7 +50,7 @@ async function stageUpload(
 ): Promise<string> {
   const up = await createUpload({
     orgId: scope.orgId,
-    applicationId: scope.applicationId,
+    spaceId: scope.spaceId,
     createdBy,
     name,
     size: bytes.byteLength,
@@ -85,15 +85,11 @@ function fileMessage(id: string, uri: string, name: string, mime = "text/plain")
 }
 
 /** Bind the platform seam to a (user, session) — mirrors the chat-stream call. */
-function resolverFor(
-  scope: { orgId: string; applicationId: string },
-  userId: string,
-  sessionId: string,
-) {
+function resolverFor(scope: { orgId: string; spaceId: string }, userId: string, sessionId: string) {
   return (uri: string) =>
     resolveChatAttachment({
       orgId: scope.orgId,
-      applicationId: scope.applicationId,
+      spaceId: scope.spaceId,
       userId,
       chatSessionId: sessionId,
       uri,
@@ -102,13 +98,13 @@ function resolverFor(
 
 describe("chat attachments", () => {
   let ctx: TestContext;
-  let scope: { orgId: string; applicationId: string };
+  let scope: { orgId: string; spaceId: string };
 
   beforeEach(async () => {
     await truncateAll();
     _resetCacheForTesting();
     ctx = await createTestContext({ orgSlug: "chatattach" });
-    scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
   });
 
   it("materializes an upload:// part into a session-scoped file and rewrites it to appfile://", async () => {

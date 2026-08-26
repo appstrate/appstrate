@@ -13,10 +13,10 @@
  */
 
 import { html, type RawHtml } from "./html.ts";
-import type { ResolvedAppBranding } from "../services/branding.ts";
+import type { ResolvedSpaceBranding } from "../services/branding.ts";
 
 interface LayoutProps {
-  branding: ResolvedAppBranding;
+  branding: ResolvedSpaceBranding;
   /** Document title — typically "Connexion à {brand}" or "Autorisation — {brand}". */
   title: string;
   /** Form body — already escaped via the `html` helper. */

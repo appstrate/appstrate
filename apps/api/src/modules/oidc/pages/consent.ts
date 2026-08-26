@@ -16,7 +16,7 @@
 
 import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
-import type { ResolvedAppBranding } from "../services/branding.ts";
+import type { ResolvedSpaceBranding } from "../services/branding.ts";
 
 /**
  * Consent-screen descriptions, French (the hosted OAuth pages are FR-only).
@@ -67,7 +67,7 @@ interface ConsentPageProps {
   /** CSRF token injected into the form + paired cookie. */
   csrfToken: string;
   /** Resolved branding for the owning space. */
-  branding: ResolvedAppBranding;
+  branding: ResolvedSpaceBranding;
   /** Optional error message displayed above the form. */
   error?: string;
 }

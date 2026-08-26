@@ -9,7 +9,7 @@
  * had to clear cookies by hand. These tests assert the two exits:
  *
  *   - sign out from any onboarding step → back to `/login`;
- *   - once an org exists, "Retour à l'application" → back to the dashboard.
+ *   - once an org exists, "Retour à l'espace" → back to the dashboard.
  *
  * They also pin the reason the onboarding menu is `minimal`: `/preferences`
  * lives behind `OrgGate`, so offering it here would bounce an org-less user
@@ -26,7 +26,7 @@ const USER_MENU = "Menu utilisateur";
 
 /**
  * Browser context for a freshly registered user with NO organization: session
- * cookie only, no org/app localStorage. `OrgGate` sends it to onboarding.
+ * cookie only, no org/space localStorage. `OrgGate` sends it to onboarding.
  */
 async function orglessPage(browser: Browser, cookie: string): Promise<Page> {
   const context = await browser.newContext();
@@ -73,12 +73,14 @@ test.describe("Onboarding — account menu", () => {
     await page.context().close();
   });
 
-  test("a user who already has an org can leave onboarding for the app", async ({ authedPage }) => {
+  test("a user who already has an org can leave onboarding for the space", async ({
+    authedPage,
+  }) => {
     await authedPage.goto("/onboarding/model");
 
-    const backToApp = authedPage.getByRole("link", { name: "Retour à l'application" });
-    await expect(backToApp).toBeVisible({ timeout: 15_000 });
-    await backToApp.click();
+    const backToSpace = authedPage.getByRole("link", { name: "Retour à l'espace" });
+    await expect(backToSpace).toBeVisible({ timeout: 15_000 });
+    await backToSpace.click();
 
     await expect(authedPage).toHaveURL(/\/$/);
   });

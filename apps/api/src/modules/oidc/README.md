@@ -222,20 +222,20 @@ Plugin configuration highlights:
 
 ### Per-space branding
 
-Both pages accept a `branding: ResolvedAppBranding` prop, loaded at request time via `services/branding.ts → resolveAppBranding(spaceId)`. The helper reads `spaces.settings.branding` (shape defined by the module-owned `AppBrandingSchema` Zod schema) and falls back to the space's raw `name` field when the setting is missing or malformed. Fields supported:
+Both pages accept a `branding: ResolvedSpaceBranding` prop, loaded at request time via `services/branding.ts → resolveSpaceBranding(spaceId)`. The helper reads `spaces.settings.branding` (shape defined by the module-owned `SpaceBrandingSchema` Zod schema) and falls back to the space's raw `name` field when the setting is missing or malformed. Fields supported:
 
 ```ts
 {
   name?: string;           // Display name (defaults to spaces.name)
   logoUrl?: string;        // Header logo URL (escaped)
-  primaryColor?: string;   // Hex #RRGGBB — validated by AppBrandingSchema, defaults to #4f46e5
-  accentColor?: string;    // Hex #RRGGBB — validated by AppBrandingSchema
+  primaryColor?: string;   // Hex #RRGGBB — validated by SpaceBrandingSchema, defaults to #4f46e5
+  accentColor?: string;    // Hex #RRGGBB — validated by SpaceBrandingSchema
   supportEmail?: string;
   fromName?: string;       // Email sender display name
 }
 ```
 
-Colors are validated by `AppBrandingSchema` at resolve time, so a misconfigured branding JSONB is silently replaced with the platform default before reaching the render. The shell header, button colors, and `<title>` tags all reflect the resolved branding.
+Colors are validated by `SpaceBrandingSchema` at resolve time, so a misconfigured branding JSONB is silently replaced with the platform default before reaching the render. The shell header, button colors, and `<title>` tags all reflect the resolved branding.
 
 ## Enabling OAuth for a space
 
@@ -362,7 +362,7 @@ Support for public clients (CLI / desktop / pure-SPA) is tracked as a follow-up.
 
 ## Per-space social auth
 
-For `level=space` OIDC clients, Google/GitHub sign-in routes through the **tenant's** OAuth App — not the platform's. The tenant controls branding on the consent screen, requested scopes, and audit/revocation; the platform's env `GOOGLE_CLIENT_*` / `GITHUB_CLIENT_*` never touch an space-level flow. When a tenant hasn't configured credentials for a provider, that provider's button is hidden on the tenant's login/register pages (no fallback).
+For `level=space` OIDC clients, Google/GitHub sign-in routes through the **tenant's** OAuth App — not the platform's. The tenant controls branding on the consent screen, requested scopes, and audit/revocation; the platform's env `GOOGLE_CLIENT_*` / `GITHUB_CLIENT_*` never touch a space-level flow. When a tenant hasn't configured credentials for a provider, that provider's button is hidden on the tenant's login/register pages (no fallback).
 
 **Storage**: `space_social_providers` keyed on `(space_id, provider)` with `clientId` + AES-256-GCM-encrypted `clientSecret` + optional `scopes[]`. ON DELETE CASCADE with `spaces`.
 

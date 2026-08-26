@@ -18,7 +18,7 @@ import {
   isTerminalStatus,
   mergeLogs,
   mergeRunFiles,
-  orgAppFromHeaders,
+  orgSpaceFromHeaders,
   parseLogListResponse,
   parseRunLogFrame,
   parseRunResource,
@@ -268,20 +268,18 @@ describe("run-events helpers", () => {
   });
 
   it("builds SSE URLs from org/app headers", () => {
-    expect(buildRunSseUrl({ runId: "run a/b", orgId: "o", applicationId: "a" })).toBe(
-      "/api/realtime/runs/run%20a%2Fb?orgId=o&applicationId=a&verbose=true",
+    expect(buildRunSseUrl({ runId: "run a/b", orgId: "o", spaceId: "a" })).toBe(
+      "/api/realtime/runs/run%20a%2Fb?orgId=o&spaceId=a&verbose=true",
     );
-    expect(
-      buildRunSseUrl({ runId: "run_1", orgId: undefined, applicationId: "a" }),
-    ).toBeUndefined();
+    expect(buildRunSseUrl({ runId: "run_1", orgId: undefined, spaceId: "a" })).toBeUndefined();
 
-    expect(orgAppFromHeaders({ "X-Org-Id": "o", "X-Application-Id": "a" })).toEqual({
+    expect(orgSpaceFromHeaders({ "X-Org-Id": "o", "X-Space-Id": "a" })).toEqual({
       orgId: "o",
-      applicationId: "a",
+      spaceId: "a",
     });
-    expect(orgAppFromHeaders({ "x-org-id": "o2", "x-application-id": "a2" })).toEqual({
+    expect(orgSpaceFromHeaders({ "x-org-id": "o2", "x-space-id": "a2" })).toEqual({
       orgId: "o2",
-      applicationId: "a2",
+      spaceId: "a2",
     });
   });
 });

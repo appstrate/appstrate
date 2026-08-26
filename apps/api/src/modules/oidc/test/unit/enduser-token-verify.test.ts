@@ -86,7 +86,7 @@ describe("verifyEndUserAccessToken", () => {
       sub: "auth_user_1",
       actor_type: "end_user",
       end_user_id: "eu_abc",
-      application_id: "app_xyz",
+      space_id: "spc_xyz",
       email: "user@example.com",
       name: "User One",
       scope: "openid runs:read",
@@ -96,7 +96,7 @@ describe("verifyEndUserAccessToken", () => {
     expect(claims!.authUserId).toBe("auth_user_1");
     expect(claims!.actorType).toBe("end_user");
     expect(claims!.endUserId).toBe("eu_abc");
-    expect(claims!.applicationId).toBe("app_xyz");
+    expect(claims!.spaceId).toBe("spc_xyz");
     expect(claims!.email).toBe("user@example.com");
     expect(claims!.scope).toBe("openid runs:read");
   });
