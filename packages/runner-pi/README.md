@@ -41,10 +41,7 @@ From `.`:
 
 - **Running an agent** — `PiRunner` and its options (`PiRunnerOptions`,
   `PiModelConfig`), `derivePiCompactionSettings`,
-  `prepareRequestedThinkingLevel` / `preserveRequestedThinkingLevel`,
-  `setPiRuntimeCredential`.
-- **Observing a session** — `installSessionBridge` plus `BridgeableSession` and
-  `InternalSink`, for a host that wants to attach to a session it already owns.
+  `prepareRequestedThinkingLevel`, `setPiRuntimeCredential`.
 - **Provider mapping** — `deriveProviderFromApi`, `PROVIDER_BY_API`.
 - **Pi SDK import surface** — `Type`, `loadPiCodingAgentSdk`, and the SDK types
   (`Api`, `Model`, `Message`, `ExtensionAPI`, `ExtensionFactory`) re-exported so
@@ -52,8 +49,8 @@ From `.`:
 - **Bundles and extensions** — `prepareBundleForPi`,
   `buildApiCallExtensionFactory`.
 - **Container plumbing** (what Appstrate's own sandbox uses) —
-  `buildRuntimePiEnv`, `pickOperatorSidecarEnv`, `SIDECAR_OPERATOR_ENV_KEYS`,
-  `emitRuntimeReady`, `emitBootProgress`, `startSinkHeartbeat`.
+  `buildRuntimePiEnv`, `pickOperatorSidecarEnv`, `emitRuntimeReady`,
+  `emitBootProgress`, `startSinkHeartbeat`.
 - **Runtime tools** — `RUNTIME_INJECTED_TOOLS` and friends,
   `buildRuntimeToolFactories`, `callToolResultToPi`, `buildRuntimeToolExtensions`,
   `buildPublishFileExtension`, `spillResourcesToWorkspace`.
@@ -65,8 +62,9 @@ From `.`:
 - **Provider mapping** — resolves an API shape to its Pi provider
   (`deriveProviderFromApi`).
 - **Compaction** — derives the Pi context-compaction settings for a run.
-- **Session bridging** — `installSessionBridge` attaches an existing session so a
-  host application can observe or extend it.
+- **Session bridging** — `PiRunner` attaches to the Pi session it drives and
+  projects its events onto the sink. Internal to the package: the bridge is not
+  part of the `.` surface above.
 
 ## License
 
