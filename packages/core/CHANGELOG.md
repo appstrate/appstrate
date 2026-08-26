@@ -7,8 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Not yet on npm: `8.0.0` is the published version, and `package.json` /
-`CORE_VERSION` stay there until the next release tag moves them.
+Not yet on npm. `8.0.0` is the published version; `package.json` and
+`CORE_VERSION` are already at `9.0.0` because this window REMOVES an export,
+which is a major break — leaving them at `8.0.0` would ship a surface that
+differs from the `8.0.0` already on npm, under the same number.
+
+### Removed
+
+- **`syntheticAliasErrorMessage`** (`./model-swap`) — interpolated the
+  org-chosen alias into the string both retry classifiers read, so an alias
+  containing `500`, `502` or `overloaded` turned a terminal failure into a
+  retried one. Replaced by **`syntheticAliasClassifierMessage`**, which takes no
+  `ModelSwap` and so has nothing org-controlled to interpolate; see the entry
+  under Added. The alias moved to `error.model` on the wire body, so operators
+  keep the "which model" signal.
 
 ### Added
 

@@ -340,7 +340,7 @@ describe("scrubSecretMaterial", () => {
   // delimiter decomposes into bytes (`%`, `2`, `C`) the byte class admitted one
   // at a time. Both renderings of an authority now share one exclusion list.
   it("control: an ENCODED delimiter ends the encoded authority too", () => {
-    for (const sep of ["%2C", "%20", "%22", "%26", "%3B", "%3D", "%27x%2C"]) {
+    for (const sep of ["%2C", "%20", "%22", "%26", "%27x%2C"]) {
       const input = `see https%3A%2F%2Fdocs.example.com${sep}contact%3Aadmin%40example.com`;
       expect(scrubSecretMaterial(input)).toBe(input);
     }
@@ -371,16 +371,21 @@ describe("scrubSecretMaterial", () => {
   // `,` and `&` do, and admitting them reopened the comma defect verbatim —
   // host destroyed, nothing sensitive masked, the identical trade the comma
   // exclusion was written to undo.
-  it('control: `,`, `&`, `;`, `=`, `"` and whitespace end a raw authority', () => {
-    for (const sep of [",", "&", ";", "=", '"', " "]) {
+  it('control: `,`, `&`, `"` and whitespace end a raw authority', () => {
+    // `;` and `=` are NOT here, deliberately. Both are RFC 3986 sub-delims and
+    // both are legal userinfo bytes, and `=` is base64 padding: excluding it
+    // meant every `openssl rand -base64` password in a DSN shipped in clear.
+    // Measured at the time of the change: 500/500 base64 passwords leaked with
+    // them excluded, 0/500 with them admitted.
+    //
+    // The price, stated rather than hidden: a `;`- or `=`-separated list of
+    // URLs whose tail contains an `@` can span. `docs.example.com;contact:
+    // admin@example.com` loses its host. A leaked credential is worse than an
+    // unreadable host, so the trade goes this way.
+    for (const sep of [",", "&", '"', " "]) {
       const input = `see https://docs.example.com${sep}contact:admin@example.com`;
       expect(scrubSecretMaterial(input)).toBe(input);
     }
-    // The query-string shape the `=` exclusion is really about: a redirect
-    // target and the next parameter, both intact.
-    expect(scrubSecretMaterial("GET /v1?next=https://cb.example.com;user=a@b.com")).toBe(
-      "GET /v1?next=https://cb.example.com;user=a@b.com",
-    );
   });
 
   // LEAK: the encoded rendering's stop-triplet list was applied to the RAW rule
