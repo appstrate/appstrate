@@ -72,9 +72,11 @@ export function isBootstrapOwner(email: string): boolean {
 export type SignupBlockReason = "signup_disabled" | "signup_domain_not_allowed";
 
 /**
- * Return type of `evaluateSignupPolicy`; callers read it by inference.
- *
- * @typeContract
+ * Return type of `evaluateSignupPolicy`; callers read it by inference. It
+ * carried a `@typeContract` tag until knip 6, which counts a same-file
+ * signature use on its own — see `knip.config.ts` on what the tag still
+ * covers. (`SignupBlockReason` above still needs the tag: it is named only
+ * inside this type, not in the signature.)
  */
 export type SignupPolicyDecision =
   | { allowed: true; reason: "open" | "platform_admin" | "bootstrap" | "invitation" | "domain_ok" }

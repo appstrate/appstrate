@@ -22,9 +22,9 @@ import { organizationMembers } from "./schema/organizations.ts";
 
 /**
  * Return type of the exported `createBootstrapOrg`; callers read it by
- * inference and never name it — see `knip.config.ts` on `@typeContract`.
- *
- * @typeContract
+ * inference and never name it. It carried a `@typeContract` tag until knip 6,
+ * which counts a same-file signature use on its own — see `knip.config.ts` on
+ * what the tag still covers.
  */
 export type CreateBootstrapOrgResult =
   | {
