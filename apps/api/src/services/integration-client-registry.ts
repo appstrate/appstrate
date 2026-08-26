@@ -7,12 +7,12 @@
  * `SYSTEM_INTEGRATIONS` env var. Membership in that list is the "auto-active"
  * policy signal: a system integration is on by default — usable without any
  * prior user action — until an org explicitly opts out (a sticky
- * `application_packages.enabled = false`).
+ * `space_packages.enabled = false`).
  *
  * Membership is decoupled from credentials. An entry MAY ship one or more
  * shared OAuth clients (client_id/secret) for its `auths.{key}` — the standard
- * SaaS connector pattern: one vendor-registered, verified app (e.g. the
- * Appstrate Google app) used by every organization, so users connect out of the
+ * SaaS connector pattern: one vendor-registered, verified space (e.g. the
+ * Appstrate Google space) used by every organization, so users connect out of the
  * box without registering their own OAuth project. An entry MAY also ship NO
  * clients: remote MCP integrations that rely on Dynamic Client Registration
  * (RFC 7591) have no static client_id — they are still offered by default
@@ -32,9 +32,9 @@
  *   ]
  *
  * Tenant isolation lives at the token layer (per-connection encrypted tokens),
- * not at the client_id — a shared client only identifies the app to the IdP.
+ * not at the client_id — a shared client only identifies the space to the IdP.
  *
- * An org that registers its OWN per-application client (`integration_oauth_clients`,
+ * An org that registers its OWN per-space client (`integration_oauth_clients`,
  * "BYO-app") overrides the system client at connect time. Whichever client mints
  * a connection is pinned on the row via `client_ref` so token refresh resolves
  * the same credentials.
@@ -62,7 +62,7 @@ import {
 
 /**
  * The RFC 7591 §2 methods a system entry may declare — the same set the API's
- * per-application client body accepts (`oauthClientSchema`,
+ * per-space client body accepts (`oauthClientSchema`,
  * `routes/integrations.ts`), so the env-sourced and DB-sourced halves of the
  * same credential surface stay declarable in exactly the same terms.
  *
@@ -121,7 +121,7 @@ const rawSystemIntegrationClientSchema = z
     client_id: z.string().min(1),
     /**
      * OPTIONAL and never defaulted. `z.string().default("")` used to live here,
-     * and it is exactly the inference the per-application client body deleted
+     * and it is exactly the inference the per-space client body deleted
      * (`oauthClientSchema`, `routes/integrations.ts`): a blank secret cannot tell
      * "declared public" from "operator forgot the secret", so an entry missing
      * its `client_secret` became a silently PUBLIC client whose token request the
@@ -202,9 +202,9 @@ export function initSystemIntegrations(rawOverride?: unknown[]): void {
       // ENFORCED INVARIANT: every declared SYSTEM_INTEGRATIONS entry is valid.
       // Declared-but-invalid = boot crash (throw, not skip): silently dropping
       // the entry would leave the operator believing the integration is offered
-      // while every downstream failure blames application state instead of the
+      // while every downstream failure blames space state instead of the
       // env var — a dropped membership surfaces as "Integration 'X' is not
-      // installed in this application", a dropped client as "Administrator must
+      // installed in this space", a dropped client as "Administrator must
       // register OAuth client credentials for …". The entry schema embeds
       // `clients` and validates atomically, so ONE mistyped nested client takes
       // its integration's membership down with it: `describeIssues` names the
@@ -213,7 +213,7 @@ export function initSystemIntegrations(rawOverride?: unknown[]): void {
         `[integration-client-registry] SYSTEM_INTEGRATIONS entry #${index}${describeEntryId(entry)} ` +
           `is invalid: ${describeIssues(entry, parsed.error)}. Fix or remove it — a declared ` +
           `integration that was silently dropped fails later at connect time with an unrelated error ` +
-          `blaming application state. Entry (secrets redacted): ${JSON.stringify(redactEntry(entry))}`,
+          `blaming space state. Entry (secrets redacted): ${JSON.stringify(redactEntry(entry))}`,
       );
     }
     const { id, clients: rawClients } = parsed.data;
@@ -347,7 +347,7 @@ function ensureInitialized(): {
  * This is the "auto-active" predicate: a system integration is on by default —
  * usable out of the box — until an org explicitly opts out. Evaluated per
  * package id, not per auth key, because activation lives on
- * `application_packages` (per package). Boot-loaded, so present without any
+ * `space_packages` (per package). Boot-loaded, so present without any
  * prior user action (unlike DCR `auto_provisioned` clients, which only exist
  * after a first connect). DCR remote MCP integrations are offered with NO
  * client and still return `true` here.

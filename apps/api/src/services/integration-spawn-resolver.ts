@@ -7,7 +7,7 @@
  * For each integration the agent declares the resolver:
  *
  *   1. Verifies the integration package exists + is installed in the
- *      run's application (`application_packages`).
+ *      run's space (`space_packages`).
  *   2. Loads the integration's bundle bytes — system packages from the
  *      in-memory registry (loaded at boot), local packages from object
  *      storage via `downloadVersionZip`.
@@ -80,7 +80,7 @@ interface ResolveIntegrationsInput {
    * resolve packages the org owns or system packages.
    */
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   /** The actor whose connections to lookup — `null` skips integration resolution entirely. */
   actor: Actor | null;
   /**
@@ -161,7 +161,7 @@ function drop(reason: IntegrationDropReason, detail?: string): ResolveOneResult 
 
 /**
  * Return one `IntegrationSpawnSpec` per integration that's (a) declared
- * on the agent, (b) installed in the application, AND (c) connected by
+ * on the agent, (b) installed in the space, AND (c) connected by
  * the actor, ALONGSIDE one {@link DroppedIntegration} per integration that
  * failed any of those checks.
  *
@@ -176,7 +176,7 @@ function drop(reason: IntegrationDropReason, detail?: string): ResolveOneResult 
 export async function resolveIntegrationSpawns(
   input: ResolveIntegrationsInput,
 ): Promise<ResolveIntegrationSpawnsResult> {
-  const { orgId, applicationId, actor, agentManifest, resolvedConnections } = input;
+  const { orgId, spaceId, actor, agentManifest, resolvedConnections } = input;
   // No actor → no actor-scoped connections to resolve. Scheduled runs are
   // fail-fasted upstream when actor-less + integrations are declared (#735,
   // scheduler.ts `isScheduleActorValid`, which disables the schedule and
@@ -198,7 +198,7 @@ export async function resolveIntegrationSpawns(
         return await resolveOne(
           entry.id,
           orgId,
-          applicationId,
+          spaceId,
           actor,
           entry.tools,
           resolvedConnections?.[entry.id] ?? null,
@@ -214,13 +214,13 @@ export async function resolveIntegrationSpawns(
         // missing referenced package) stays a per-integration skip — now a
         // MARKED one: the reason travels back to the caller in `dropped`.
         if (err instanceof BundleError && err.code === "DEPENDENCY_UNRESOLVED") throw err;
-        // The server-side log stays: it carries `applicationId`, which the
+        // The server-side log stays: it carries `spaceId`, which the
         // run-visible marker does not, and it fires even for a caller that
         // ignores `dropped` — today only tests, `run-context-builder.ts` being
         // the sole production caller. The marker is additive, not a replacement.
         logger.warn("integration resolve failed; skipping", {
           integrationId: entry.id,
-          applicationId,
+          spaceId,
           error: err instanceof Error ? err.message : String(err),
         });
         return drop("resolve_error", err instanceof Error ? err.message : String(err));
@@ -248,7 +248,7 @@ export async function resolveIntegrationSpawns(
 async function resolveOne(
   integrationId: string,
   orgId: string,
-  applicationId: string,
+  spaceId: string,
   actor: Actor,
   agentToolSelection: readonly string[] | "*" | undefined,
   resolvedConnection: ResolvedConnection | null,
@@ -297,11 +297,11 @@ async function resolveOne(
   // default is honoured identically on both paths.
   const effectiveSelection = resolveEffectiveToolSelection(agentToolSelection, manifest);
 
-  // (b) Installed in the application
-  if (!(await isIntegrationActive(integrationId, applicationId))) {
-    logger.info("integration not installed in application; skipping", {
+  // (b) Installed in the space
+  if (!(await isIntegrationActive(integrationId, spaceId))) {
+    logger.info("integration not installed in space; skipping", {
       integrationId,
-      applicationId,
+      spaceId,
     });
     return drop("not_installed");
   }
@@ -507,7 +507,7 @@ async function resolveOne(
   // auth (no server-side injection) legitimately resolves no delivery.
   const deliveries = await resolveDeliveries(
     integrationId,
-    applicationId,
+    spaceId,
     actor,
     manifest,
     resolvedConnection,
@@ -727,7 +727,7 @@ interface ResolvedDeliveries {
  */
 async function resolveDeliveries(
   integrationId: string,
-  applicationId: string,
+  spaceId: string,
   actor: Actor,
   manifest: IntegrationManifest,
   resolvedConnection: ResolvedConnection | null,
@@ -750,7 +750,7 @@ async function resolveDeliveries(
     integrationId,
     Object.keys(auths),
     resolvedConnection?.connectionId ?? null,
-    { applicationId, actor, ...(requiredAuthKey ? { requiredAuthKey } : {}) },
+    { spaceId, actor, ...(requiredAuthKey ? { requiredAuthKey } : {}) },
   );
 
   if (!row) {

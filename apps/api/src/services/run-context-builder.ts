@@ -10,7 +10,7 @@ import {
   listPinnedSlots,
   scopeFromActor,
 } from "./state/package-persistence.ts";
-import { getInstalledPackageSettings } from "./application-packages.ts";
+import { getInstalledPackageSettings } from "./space-packages.ts";
 import type { Actor } from "../lib/actor.ts";
 import { buildAgentPackage } from "./package-storage.ts";
 import { getLatestVersionInfo } from "./package-versions.ts";
@@ -86,7 +86,7 @@ export async function buildRunContext(params: {
   runId: string;
   agent: LoadedPackage;
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   actor: Actor | null;
   input?: Record<string, unknown>;
   files?: FileReference[];
@@ -142,7 +142,7 @@ export async function buildRunContext(params: {
    */
   droppedIntegrations: DroppedIntegration[];
 }> {
-  const { runId, agent, orgId, applicationId, actor, input, files } = params;
+  const { runId, agent, orgId, spaceId, actor, input, files } = params;
 
   // Skip getInstalledPackageSettings when all values are already provided by the caller (from preflight)
   const skipSettingsFetch =
@@ -166,7 +166,7 @@ export async function buildRunContext(params: {
   // from `integrations_configuration[id]` (§4.4).
   const integrationSpawnsPromise = resolveIntegrationSpawns({
     orgId,
-    applicationId,
+    spaceId,
     actor,
     agentManifest: agent.manifest as Record<string, unknown>,
     resolvedConnections: params.resolvedConnections ?? null,
@@ -179,10 +179,10 @@ export async function buildRunContext(params: {
 
   // Step 1: load all independent data in parallel
   const persistenceScope = scopeFromActor(actor);
-  const [appSettings, previousCheckpoint, agentPackageResult, latestVersion, pinnedSlotRows] =
+  const [spaceSettings, previousCheckpoint, agentPackageResult, latestVersion, pinnedSlotRows] =
     await Promise.all([
-      skipSettingsFetch ? null : getInstalledPackageSettings(applicationId, agent.id),
-      getCheckpoint(agent.id, applicationId, persistenceScope),
+      skipSettingsFetch ? null : getInstalledPackageSettings(spaceId, agent.id),
+      getCheckpoint(agent.id, spaceId, persistenceScope),
       buildAgentPackage(agent, orgId, params.dependencyOverrides ?? null),
       params.overrideVersionLabel
         ? null
@@ -194,15 +194,15 @@ export async function buildRunContext(params: {
       // `## Pinned Slots` section so cross-run state under custom keys is
       // visible to the agent. Honors the documented contract: `pin({key, ...})`
       // with any key produces a slot rendered in this prompt on every run.
-      listPinnedSlots(agent.id, applicationId, persistenceScope),
+      listPinnedSlots(agent.id, spaceId, persistenceScope),
     ]);
 
   const agentPackage = agentPackageResult.zip;
   const { bundle } = agentPackageResult;
 
   // Step 2: resolve model and proxy with cascade
-  const effectiveModelId = params.modelId ?? appSettings?.modelId ?? null;
-  const effectiveProxyId = params.proxyId ?? appSettings?.proxyId ?? null;
+  const effectiveModelId = params.modelId ?? spaceSettings?.modelId ?? null;
+  const effectiveProxyId = params.proxyId ?? spaceSettings?.proxyId ?? null;
 
   const [proxyResult, modelResult] = await Promise.all([
     resolveProxy(orgId, agent.id, effectiveProxyId),
@@ -235,7 +235,7 @@ export async function buildRunContext(params: {
   // otherwise read as "free".
   const modelCost = modelResult.cost ?? null;
   const generationDefaults = reconcileModelGenerationSettings(
-    params.generationConfig ?? appSettings?.generationConfig ?? {},
+    params.generationConfig ?? spaceSettings?.generationConfig ?? {},
     modelResult.generation,
   );
   const generationConfig = resolveModelGenerationSettings({

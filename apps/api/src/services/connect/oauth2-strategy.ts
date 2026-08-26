@@ -164,7 +164,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
         : {}),
       redirectUri: effectiveRedirectUri,
       orgId: ctx.scope.orgId,
-      applicationId: ctx.scope.applicationId,
+      spaceId: ctx.scope.spaceId,
       actor: ctx.actor,
       forceAccountSelect: opts.forceAccountSelect ?? false,
       ...(ctx.connectionId ? { connectionId: ctx.connectionId } : {}),

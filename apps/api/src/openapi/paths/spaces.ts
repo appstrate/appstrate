@@ -2,14 +2,14 @@
 
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 
-export const applicationsPaths = {
-  "/api/applications": {
+export const spacesPaths = {
+  "/api/spaces": {
     post: {
-      operationId: "createApplication",
-      tags: ["Applications"],
-      summary: "Create an application",
+      operationId: "createSpace",
+      tags: ["Spaces"],
+      summary: "Create a space",
       description:
-        "Create a new application for the organization. Applications scope end-users and their sessions.",
+        "Create a new space for the organization. Spaces scope end-users and their sessions.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -23,7 +23,7 @@ export const applicationsPaths = {
                   type: "string",
                   minLength: 1,
                   maxLength: 100,
-                  description: "Human-readable application name",
+                  description: "Human-readable space name",
                 },
                 settings: {
                   type: "object",
@@ -36,7 +36,7 @@ export const applicationsPaths = {
                         "Allowed OAuth redirect domains (e.g. myapp.com, staging.myapp.com). Subdomains are matched automatically.",
                     },
                   },
-                  description: "Application settings",
+                  description: "Space settings",
                 },
               },
             },
@@ -45,14 +45,14 @@ export const applicationsPaths = {
       },
       responses: {
         "201": {
-          description: "Application created",
+          description: "Space created",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
-              schema: { $ref: "#/components/schemas/ApplicationObject" },
+              schema: { $ref: "#/components/schemas/SpaceObject" },
               example: {
-                id: "app_cm1xyz789ghi012",
-                object: "application",
+                id: "spc_cm1xyz789ghi012",
+                object: "space",
                 orgId: "550e8400-e29b-41d4-a716-446655440000",
                 name: "My SaaS App",
                 isDefault: false,
@@ -72,14 +72,14 @@ export const applicationsPaths = {
       },
     },
     get: {
-      operationId: "listApplications",
-      tags: ["Applications"],
-      summary: "List applications",
-      description: "List all applications for the organization.",
+      operationId: "listSpaces",
+      tags: ["Spaces"],
+      summary: "List spaces",
+      description: "List all spaces for the organization.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {
-          description: "Application list",
+          description: "Space list",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
@@ -90,7 +90,7 @@ export const applicationsPaths = {
                   object: { type: "string", enum: ["list"] },
                   data: {
                     type: "array",
-                    items: { $ref: "#/components/schemas/ApplicationObject" },
+                    items: { $ref: "#/components/schemas/SpaceObject" },
                   },
                   hasMore: {
                     type: "boolean",
@@ -102,8 +102,8 @@ export const applicationsPaths = {
                 object: "list",
                 data: [
                   {
-                    id: "app_default001",
-                    object: "application",
+                    id: "spc_default001",
+                    object: "space",
                     orgId: "550e8400-e29b-41d4-a716-446655440000",
                     name: "Default",
                     isDefault: true,
@@ -113,8 +113,8 @@ export const applicationsPaths = {
                     updatedAt: "2026-01-10T08:00:00Z",
                   },
                   {
-                    id: "app_cm1xyz789ghi012",
-                    object: "application",
+                    id: "spc_cm1xyz789ghi012",
+                    object: "space",
                     orgId: "550e8400-e29b-41d4-a716-446655440000",
                     name: "My SaaS App",
                     isDefault: false,
@@ -134,23 +134,23 @@ export const applicationsPaths = {
       },
     },
   },
-  "/api/applications/{id}": {
+  "/api/spaces/{id}": {
     get: {
-      operationId: "getApplication",
-      tags: ["Applications"],
-      summary: "Get an application",
-      description: "Get a single application by ID.",
+      operationId: "getSpace",
+      tags: ["Spaces"],
+      summary: "Get a space",
+      description: "Get a single space by ID.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "200": {
-          description: "Application detail",
+          description: "Space detail",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
-              schema: { $ref: "#/components/schemas/ApplicationObject" },
+              schema: { $ref: "#/components/schemas/SpaceObject" },
             },
           },
         },
@@ -160,10 +160,10 @@ export const applicationsPaths = {
       },
     },
     patch: {
-      operationId: "updateApplication",
-      tags: ["Applications"],
-      summary: "Update an application",
-      description: "Update application name or settings.",
+      operationId: "updateSpace",
+      tags: ["Spaces"],
+      summary: "Update a space",
+      description: "Update space name or settings.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -178,7 +178,7 @@ export const applicationsPaths = {
                   type: "string",
                   minLength: 1,
                   maxLength: 100,
-                  description: "Human-readable application name",
+                  description: "Human-readable space name",
                 },
                 settings: {
                   type: "object",
@@ -191,7 +191,7 @@ export const applicationsPaths = {
                         "Allowed OAuth redirect domains (e.g. myapp.com, staging.myapp.com). Subdomains are matched automatically.",
                     },
                   },
-                  description: "Application settings",
+                  description: "Space settings",
                 },
               },
             },
@@ -200,11 +200,11 @@ export const applicationsPaths = {
       },
       responses: {
         "200": {
-          description: "Application updated",
+          description: "Space updated",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
-              schema: { $ref: "#/components/schemas/ApplicationObject" },
+              schema: { $ref: "#/components/schemas/SpaceObject" },
             },
           },
         },
@@ -215,18 +215,18 @@ export const applicationsPaths = {
       },
     },
     delete: {
-      operationId: "deleteApplication",
-      tags: ["Applications"],
-      summary: "Delete an application",
+      operationId: "deleteSpace",
+      tags: ["Spaces"],
+      summary: "Delete a space",
       description:
-        "Delete an application and all associated end-users. The default application cannot be deleted.",
+        "Delete a space and all associated end-users. The default space cannot be deleted.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
         "204": {
-          description: "Application deleted",
+          description: "Space deleted",
           headers: REQUEST_ID_ONLY_HEADERS,
         },
         "400": { $ref: "#/components/responses/ValidationError" },
@@ -236,16 +236,16 @@ export const applicationsPaths = {
       },
     },
   },
-  "/api/applications/{applicationId}/packages": {
+  "/api/spaces/{spaceId}/packages": {
     get: {
       operationId: "listInstalledPackages",
-      tags: ["Application Packages"],
+      tags: ["Space Packages"],
       summary: "List installed packages",
       description:
-        "List all packages installed in this application, with their model/proxy/version overrides.",
+        "List all packages installed in this space, with their model/proxy/version overrides.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
+        { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
         {
           name: "type",
           in: "query",
@@ -267,7 +267,7 @@ export const applicationsPaths = {
                   object: { type: "string", enum: ["list"] },
                   data: {
                     type: "array",
-                    items: { $ref: "#/components/schemas/ApplicationPackage" },
+                    items: { $ref: "#/components/schemas/SpacePackage" },
                   },
                   hasMore: {
                     type: "boolean",
@@ -284,12 +284,12 @@ export const applicationsPaths = {
     },
     post: {
       operationId: "installPackage",
-      tags: ["Application Packages"],
+      tags: ["Space Packages"],
       summary: "Install a package",
-      description: "Install a package from the organization catalog into this application.",
+      description: "Install a package from the organization catalog into this space.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
+        { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
         required: true,
@@ -315,7 +315,7 @@ export const applicationsPaths = {
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/json": {
-              schema: { $ref: "#/components/schemas/ApplicationPackage" },
+              schema: { $ref: "#/components/schemas/SpacePackage" },
             },
           },
         },
@@ -324,7 +324,7 @@ export const applicationsPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
-          description: "Package already installed in this application",
+          description: "Package already installed in this space",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -334,15 +334,15 @@ export const applicationsPaths = {
       },
     },
   },
-  "/api/applications/{applicationId}/packages/{scope}/{name}": {
+  "/api/spaces/{spaceId}/packages/{scope}/{name}": {
     get: {
       operationId: "getInstalledPackage",
-      tags: ["Application Packages"],
+      tags: ["Space Packages"],
       summary: "Get installed package",
       description: "Get an installed package detail with its model/proxy/version overrides.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
+        { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -352,7 +352,7 @@ export const applicationsPaths = {
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/json": {
-              schema: { $ref: "#/components/schemas/ApplicationPackage" },
+              schema: { $ref: "#/components/schemas/SpacePackage" },
             },
           },
         },
@@ -362,13 +362,13 @@ export const applicationsPaths = {
     },
     put: {
       operationId: "updateInstalledPackage",
-      tags: ["Application Packages"],
+      tags: ["Space Packages"],
       summary: "Update installed package overrides",
       description:
         "Update the model/proxy overrides, generation settings, enabled flag, or version pinning for an installed package. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
+        { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -399,7 +399,7 @@ export const applicationsPaths = {
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/json": {
-              schema: { $ref: "#/components/schemas/ApplicationPackage" },
+              schema: { $ref: "#/components/schemas/SpacePackage" },
             },
           },
         },
@@ -411,12 +411,12 @@ export const applicationsPaths = {
     },
     delete: {
       operationId: "uninstallPackage",
-      tags: ["Application Packages"],
+      tags: ["Space Packages"],
       summary: "Uninstall a package",
-      description: "Remove a package from this application.",
+      description: "Remove a package from this space.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
+        { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -428,16 +428,16 @@ export const applicationsPaths = {
       },
     },
   },
-  "/api/applications/{applicationId}/packages/{scope}/{name}/run-config": {
+  "/api/spaces/{spaceId}/packages/{scope}/{name}/run-config": {
     get: {
-      operationId: "getApplicationPackageRunConfig",
-      tags: ["Application Packages"],
-      summary: "Get the resolved per-app run configuration",
+      operationId: "getSpacePackageRunConfig",
+      tags: ["Space Packages"],
+      summary: "Get the resolved per-space run configuration",
       description:
-        "Returns the configuration applied when this application runs the given package: model override, generation settings, proxy override, pinned version label, and the stored input layer (editor values plus locked fields). Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-app flow.",
+        "Returns the configuration applied when this space runs the given package: model override, generation settings, proxy override, pinned version label, and the stored input layer (editor values plus locked fields). Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-space flow.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { name: "applicationId", in: "path", required: true, schema: { type: "string" } },
+        { name: "spaceId", in: "path", required: true, schema: { type: "string" } },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -464,7 +464,7 @@ export const applicationsPaths = {
                     type: "object",
                     allOf: [{ $ref: "#/components/schemas/AgentInputSettings" }],
                     description:
-                      "Stored input layer for this application — the editor's values and the fields it locked. A locally executed run applies `values` under the caller's input and refuses a caller value naming a locked field.",
+                      "Stored input layer for this space — the editor's values and the fields it locked. A locally executed run applies `values` under the caller's input and refuses a caller value naming a locked field.",
                   },
                 },
               },

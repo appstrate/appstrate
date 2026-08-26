@@ -12,7 +12,7 @@ export const apiKeysPaths = {
         "List permission scopes available for API key creation, based on the current user's role.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
       ],
       responses: {
         "200": {
@@ -58,10 +58,10 @@ export const apiKeysPaths = {
       tags: ["API Keys"],
       summary: "List API keys",
       description:
-        "List active (non-revoked) API keys for the current application (scoped by X-Application-Id).",
+        "List active (non-revoked) API keys for the current space (scoped by X-Space-Id).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
       ],
       responses: {
         "200": {
@@ -114,7 +114,7 @@ export const apiKeysPaths = {
         "Create a new API key. The raw key is returned **once** in the response and cannot be retrieved later.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
       ],
       requestBody: {
         required: true,
@@ -123,8 +123,7 @@ export const apiKeysPaths = {
             schema: {
               type: "object",
               required: ["name"],
-              description:
-                "The API key is scoped to the application specified by the X-Application-Id header.",
+              description: "The API key is scoped to the space specified by the X-Space-Id header.",
               properties: {
                 name: {
                   type: "string",
@@ -198,7 +197,7 @@ export const apiKeysPaths = {
       description: "Revoke (soft-delete) an API key. The key will immediately stop working.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {

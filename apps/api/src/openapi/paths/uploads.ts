@@ -30,7 +30,7 @@ export const uploadsPaths = {
         "Rate-limited to 20/min.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
       ],
       requestBody: {
         required: true,

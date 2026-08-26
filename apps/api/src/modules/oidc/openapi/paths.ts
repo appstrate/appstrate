@@ -49,11 +49,11 @@ const orgLevelClientRequest = {
   },
 };
 
-const applicationLevelClientRequest = {
+const spaceLevelClientRequest = {
   type: "object",
-  required: ["level", "name", "redirectUris", "referencedApplicationId"],
+  required: ["level", "name", "redirectUris", "referencedSpaceId"],
   properties: {
-    level: { type: "string", enum: ["application"] },
+    level: { type: "string", enum: ["space"] },
     name: { type: "string", minLength: 1, maxLength: 200 },
     redirectUris: {
       type: "array",
@@ -66,7 +66,7 @@ const applicationLevelClientRequest = {
       description: "URIs allowed for post-logout redirects (OIDC RP-Initiated Logout).",
     },
     scopes: { type: "array", items: { type: "string" } },
-    referencedApplicationId: { type: "string" },
+    referencedSpaceId: { type: "string" },
     isFirstParty: { type: "boolean" },
     allowSignup: {
       type: "boolean",
@@ -80,10 +80,10 @@ const applicationLevelClientRequest = {
 // via `$ref`, so it is only meaningful when the `oneOf` branches are `$ref`s —
 // with inline branch schemas (as here) linters flag it as unresolvable. The
 // branches are already unambiguous without it: each declares a distinct
-// single-value `level` enum (`["org"]` vs `["application"]`), so exactly one
+// single-value `level` enum (`["org"]` vs `["space"]`), so exactly one
 // branch matches any given request body.
 const createClientRequest = {
-  oneOf: [orgLevelClientRequest, applicationLevelClientRequest],
+  oneOf: [orgLevelClientRequest, spaceLevelClientRequest],
 };
 
 const updateClientRequest = {
@@ -110,13 +110,13 @@ const updateClientRequest = {
     allowSignup: {
       type: "boolean",
       description:
-        "Unified signup opt-in. Instance: allows brand-new BA users platform-wide. Org: brand-new BA users + auto-join to the referenced org with `signupRole`. Application: brand-new BA users + JIT `end_users` provisioning.",
+        "Unified signup opt-in. Instance: allows brand-new BA users platform-wide. Org: brand-new BA users + auto-join to the referenced org with `signupRole`. Space: brand-new BA users + JIT `end_users` provisioning.",
     },
     signupRole: {
       type: "string",
       enum: ["admin", "member", "viewer"],
       description:
-        "Org-level only. Role assigned on auto-join. `owner` forbidden. Rejected with 400 on instance/application clients.",
+        "Org-level only. Role assigned on auto-join. `owner` forbidden. Rejected with 400 on instance/space clients.",
     },
   },
 };
@@ -135,7 +135,7 @@ export const oidcPaths = {
       tags: ["OAuth Clients"],
       summary: "Register an OAuth client",
       description:
-        "Register a new OAuth 2.1 client. Polymorphic across `org` (org-scoped, dashboard users) and `application` (app-scoped, end-users) levels. The plaintext `clientSecret` is returned exactly once.",
+        "Register a new OAuth 2.1 client. Polymorphic across `org` (org-scoped, dashboard users) and `space` (space-scoped, end-users) levels. The plaintext `clientSecret` is returned exactly once.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/IdempotencyKey" },
@@ -167,7 +167,7 @@ export const oidcPaths = {
       tags: ["OAuth Clients"],
       summary: "List OAuth clients",
       description:
-        "List every OAuth client visible to the current organization — both org-level clients pinned to the org and application-level clients pinned to any application the org owns.",
+        "List every OAuth client visible to the current organization — both org-level clients pinned to the org and space-level clients pinned to any space the org owns.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {
@@ -407,7 +407,7 @@ export const oidcPaths = {
                   access_token: {
                     type: "string",
                     description:
-                      "ES256-signed JWT carrying `sub`, `endUserId`, `applicationId`, `orgId`.",
+                      "ES256-signed JWT carrying `sub`, `endUserId`, `spaceId`, `orgId`.",
                   },
                   token_type: { type: "string", enum: ["Bearer"] },
                   expires_in: { type: "integer" },
@@ -477,7 +477,7 @@ export const oidcPaths = {
                 required: ["active"],
                 // RFC 7662 §2.2: an active-token response echoes the token's
                 // claims (sub, aud, iat, iss, sid, plus the platform's custom
-                // org_id/application_id/actor_type/end_user_id/email/name/azp).
+                // org_id/space_id/actor_type/end_user_id/email/name/azp).
                 // The claim set is open by spec, so document the common ones
                 // and allow the rest rather than enumerating an evolving list.
                 additionalProperties: true,
@@ -622,14 +622,14 @@ export const oidcPaths = {
       },
     },
   },
-  "/api/applications/{id}/smtp-config": {
+  "/api/spaces/{id}/smtp-config": {
     get: {
-      tags: ["Application Auth Config"],
-      operationId: "getApplicationSmtpConfig",
+      tags: ["Space Auth Config"],
+      operationId: "getSpaceSmtpConfig",
       parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
-      summary: "Get per-application SMTP configuration",
+      summary: "Get per-space SMTP configuration",
       description:
-        "Returns the SMTP configuration for an application. Password is NEVER returned. Drives email features (verification, magic-link, reset-password) for OAuth clients with `level: application` scoped to this app.",
+        "Returns the SMTP configuration for a space. Password is NEVER returned. Drives email features (verification, magic-link, reset-password) for OAuth clients with `level: space` scoped to this space.",
       security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
       responses: {
         "200": {
@@ -641,17 +641,17 @@ export const oidcPaths = {
           },
         },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { description: "Application or configuration not found" },
+        "404": { description: "Space or configuration not found" },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
     put: {
-      tags: ["Application Auth Config"],
-      operationId: "upsertApplicationSmtpConfig",
+      tags: ["Space Auth Config"],
+      operationId: "upsertSpaceSmtpConfig",
       parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
-      summary: "Upsert per-application SMTP configuration",
+      summary: "Upsert per-space SMTP configuration",
       description:
-        "Creates or replaces the SMTP configuration for an application. The `pass` field is encrypted at rest and never returned in any response.",
+        "Creates or replaces the SMTP configuration for a space. The `pass` field is encrypted at rest and never returned in any response.",
       security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
       requestBody: {
         required: true,
@@ -690,29 +690,29 @@ export const oidcPaths = {
         },
         "400": { description: "Validation error (invalid host / SSRF block)" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { description: "Application or configuration not found" },
+        "404": { description: "Space or configuration not found" },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
     delete: {
-      tags: ["Application Auth Config"],
-      operationId: "deleteApplicationSmtpConfig",
+      tags: ["Space Auth Config"],
+      operationId: "deleteSpaceSmtpConfig",
       parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
-      summary: "Delete per-application SMTP configuration",
+      summary: "Delete per-space SMTP configuration",
       security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
       responses: {
         "204": { description: "Deleted" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { description: "Application or configuration not found" },
+        "404": { description: "Space or configuration not found" },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
   },
-  "/api/applications/{id}/smtp-config/test": {
+  "/api/spaces/{id}/smtp-config/test": {
     post: {
-      tags: ["Application Auth Config"],
-      operationId: "testApplicationSmtpConfig",
-      summary: "Send a test email using the stored per-app SMTP configuration",
+      tags: ["Space Auth Config"],
+      operationId: "testSpaceSmtpConfig",
+      summary: "Send a test email using the stored per-space SMTP configuration",
       description:
         "Rate-limited. Uses the persisted config — upsert first, then test. SMTP server errors are surfaced verbatim so DKIM/SPF/auth issues reach the operator.",
       security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
@@ -747,15 +747,15 @@ export const oidcPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { description: "Application or configuration not found" },
+        "404": { description: "Space or configuration not found" },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
   },
-  "/api/applications/{id}/social-providers/{provider}": {
+  "/api/spaces/{id}/social-providers/{provider}": {
     get: {
-      tags: ["Application Auth Config"],
-      operationId: "getApplicationSocialProvider",
+      tags: ["Space Auth Config"],
+      operationId: "getSpaceSocialProvider",
       parameters: [
         { name: "id", in: "path", required: true, schema: { type: "string" } },
         {
@@ -765,9 +765,9 @@ export const oidcPaths = {
           schema: { type: "string", enum: ["google", "github"] },
         },
       ],
-      summary: "Get per-application social auth provider configuration",
+      summary: "Get per-space social auth provider configuration",
       description:
-        "Returns the stored OAuth App credentials for a given provider on this application. The client secret is NEVER returned. When absent, the provider's button is hidden on the tenant's login/register pages for `level: application` OAuth clients — no fallback to the instance env OAuth App.",
+        "Returns the stored OAuth App credentials for a given provider on this space. The client secret is NEVER returned. When absent, the provider's button is hidden on the tenant's login/register pages for `level: space` OAuth clients — no fallback to the instance env OAuth App.",
       security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
       responses: {
         "200": {
@@ -779,13 +779,13 @@ export const oidcPaths = {
           },
         },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { description: "Application or configuration not found" },
+        "404": { description: "Space or configuration not found" },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
     put: {
-      tags: ["Application Auth Config"],
-      operationId: "upsertApplicationSocialProvider",
+      tags: ["Space Auth Config"],
+      operationId: "upsertSpaceSocialProvider",
       parameters: [
         { name: "id", in: "path", required: true, schema: { type: "string" } },
         {
@@ -795,9 +795,9 @@ export const oidcPaths = {
           schema: { type: "string", enum: ["google", "github"] },
         },
       ],
-      summary: "Upsert per-application social auth provider configuration",
+      summary: "Upsert per-space social auth provider configuration",
       description:
-        "Creates or replaces the OAuth App credentials for a given provider on this application. The `clientSecret` field is encrypted at rest and never returned in any response.",
+        "Creates or replaces the OAuth App credentials for a given provider on this space. The `clientSecret` field is encrypted at rest and never returned in any response.",
       security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
       requestBody: {
         required: true,
@@ -835,13 +835,13 @@ export const oidcPaths = {
         },
         "400": { description: "Validation error" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { description: "Application or configuration not found" },
+        "404": { description: "Space or configuration not found" },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
     delete: {
-      tags: ["Application Auth Config"],
-      operationId: "deleteApplicationSocialProvider",
+      tags: ["Space Auth Config"],
+      operationId: "deleteSpaceSocialProvider",
       parameters: [
         { name: "id", in: "path", required: true, schema: { type: "string" } },
         {
@@ -851,12 +851,12 @@ export const oidcPaths = {
           schema: { type: "string", enum: ["google", "github"] },
         },
       ],
-      summary: "Delete per-application social auth provider configuration",
+      summary: "Delete per-space social auth provider configuration",
       security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
       responses: {
         "204": { description: "Deleted" },
         "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { description: "Application or configuration not found" },
+        "404": { description: "Space or configuration not found" },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -1250,7 +1250,7 @@ export const oidcPaths = {
       operationId: "listOrgCliSessions",
       summary: "List CLI sessions for org members (admin)",
       description:
-        "Admin oversight of every active CLI session belonging to a member of `orgId`. Returns the same per-device shape as the personal `/api/auth/cli/sessions` endpoint, plus the owning member's id/email/name. Visibility scoped to the org's CURRENT roster — a member who left no longer surfaces here. Owner/admin only.\n\nCLI sessions are user-scoped, NOT application-scoped: a session is created by `appstrate login` against a user account, and is reusable across every application the user can reach. This endpoint therefore returns every active session held by a member of the org, regardless of which application(s) that member operates in — an admin auditing one application surface still sees CLI sessions that the same human is using to drive a different application in the same org.",
+        "Admin oversight of every active CLI session belonging to a member of `orgId`. Returns the same per-device shape as the personal `/api/auth/cli/sessions` endpoint, plus the owning member's id/email/name. Visibility scoped to the org's CURRENT roster — a member who left no longer surfaces here. Owner/admin only.\n\nCLI sessions are user-scoped, NOT space-scoped: a session is created by `appstrate login` against a user account, and is reusable across every space the user can reach. This endpoint therefore returns every active session held by a member of the org, regardless of which space(s) that member operates in — an admin auditing one space surface still sees CLI sessions that the same human is using to drive a different space in the same org.",
       parameters: [
         {
           name: "orgId",

@@ -27,7 +27,7 @@ import { emitEvent } from "../lib/modules/module-loader.ts";
 interface AgentReadinessParams {
   agent: LoadedPackage;
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   /**
    * Actor whose integration connections we validate. Run kickoff paths
    * pass an actor so missing or under-scoped connections produce a 412
@@ -109,7 +109,7 @@ function manifestFailureError(
 export async function collectAgentReadinessErrors(
   params: AgentReadinessParams,
 ): Promise<ValidationFieldError[]> {
-  const { agent, orgId, applicationId, actor, runOverrides, scheduleOverrides } = params;
+  const { agent, orgId, spaceId, actor, runOverrides, scheduleOverrides } = params;
   const { manifest } = agent;
   const errors: ValidationFieldError[] = [];
 
@@ -138,8 +138,8 @@ export async function collectAgentReadinessErrors(
   }
 
   // Integration install/enable gate — runs regardless of actor (it is an
-  // app-level fact, not an actor-level one). Every integration the agent
-  // declares MUST be installed AND enabled on the application. Without this
+  // space-level fact, not an actor-level one). Every integration the agent
+  // declares MUST be installed AND enabled on the space. Without this
   // the run silently degrades: the runtime spawn resolver skips an inactive
   // integration (`isIntegrationActive` false) and the agent launches without
   // its tools. The connection resolver below does NOT catch this — it gates
@@ -147,7 +147,7 @@ export async function collectAgentReadinessErrors(
   // integration can still have lingering connections that resolve cleanly.
   // Checked before connections so an inactive integration fails fast with a
   // clear cause rather than a downstream `not_connected`.
-  // Batched: one SELECT over `application_packages` for every declared
+  // Batched: one SELECT over `space_packages` for every declared
   // integration instead of N serial single-row queries (run-kickoff hot path).
   const declaredIntegrations = parseManifestIntegrations(manifest as Record<string, unknown>);
   if (declaredIntegrations.length > 0) {
@@ -176,7 +176,7 @@ export async function collectAgentReadinessErrors(
     }
 
     // Install/enable gate — every declared integration MUST be installed AND
-    // enabled on the application. Without this the run silently degrades: the
+    // enabled on the space. Without this the run silently degrades: the
     // runtime spawn resolver skips an inactive integration (`isIntegrationActive`
     // false) and the agent launches without its tools. The connection resolver
     // below does NOT catch this — it gates on whether an accessible connection
@@ -188,7 +188,7 @@ export async function collectAgentReadinessErrors(
     // and the manifest error is the more precise cause (no double-report).
     const activeIds = await listActiveIntegrationIds(
       declaredIntegrations.map((entry) => entry.id),
-      applicationId,
+      spaceId,
     );
     for (const entry of declaredIntegrations) {
       if (manifestUnhealthy.has(entry.id)) continue;
@@ -197,7 +197,7 @@ export async function collectAgentReadinessErrors(
           field: `integrations.${entry.id}`,
           code: "integration_not_active",
           title: "Integration Not Enabled",
-          message: `Integration '${entry.id}' is not installed or is disabled in this application.`,
+          message: `Integration '${entry.id}' is not installed or is disabled in this space.`,
         });
       }
     }
@@ -220,7 +220,7 @@ export async function collectAgentReadinessErrors(
       agentManifest: manifest as Record<string, unknown>,
       packageId: agent.id,
       actor,
-      scope: { orgId, applicationId },
+      scope: { orgId, spaceId },
       ...(runOverrides ? { runOverrides } : {}),
       ...(scheduleOverrides ? { scheduleOverrides } : {}),
       ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
@@ -255,7 +255,7 @@ export async function validateAgentReadiness(params: AgentReadinessParams): Prom
     if (params.actor) {
       void emitEvent("onRunConnectionMissing", {
         orgId: params.orgId,
-        applicationId: params.applicationId,
+        spaceId: params.spaceId,
         packageId: params.agent.id,
         actor: { type: params.actor.type, id: params.actor.id },
         errors: integrationErrors.map((e) => ({

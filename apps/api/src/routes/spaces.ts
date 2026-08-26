@@ -10,19 +10,19 @@ import {
 } from "@appstrate/core/model-generation";
 import type { AppEnv } from "../types/index.ts";
 import { logger } from "../lib/logger.ts";
-import { apiKeyAppScopeGuard } from "../middleware/guards.ts";
+import { apiKeySpaceScopeGuard } from "../middleware/guards.ts";
 import { ApiError, forbidden, invalidRequest, internalError } from "../lib/errors.ts";
 import { readJsonBody } from "../lib/request-body.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { listResponse } from "../lib/list-response.ts";
 import {
-  createApplication,
-  listApplications,
-  getApplication,
-  updateApplication,
-  deleteApplication,
-  appSettingsSchema,
-} from "../services/applications.ts";
+  createSpace,
+  listSpaces,
+  getSpace,
+  updateSpace,
+  deleteSpace,
+  spaceSettingsSchema,
+} from "../services/spaces.ts";
 import {
   installPackage,
   uninstallPackage,
@@ -30,7 +30,7 @@ import {
   getInstalledPackage,
   updateInstalledPackage,
   getResolvedRunConfig,
-} from "../services/application-packages.ts";
+} from "../services/space-packages.ts";
 import { validateDomainList } from "../services/redirect-validation.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import type { PackageType } from "@appstrate/core/validation";
@@ -39,29 +39,29 @@ import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import { assertExplicitModelExists, resolveModel } from "../services/org-models.ts";
 
 /**
- * Project a Drizzle application row onto the wire shape. The DB column is
+ * Project a Drizzle space row onto the wire shape. The DB column is
  * `created_by` (snake_case) but the Drizzle TS field is `createdBy`; the wire
- * contract (ApplicationObject) is snake_case `created_by`, so rename here.
+ * contract (SpaceObject) is snake_case `created_by`, so rename here.
  */
-function toApplicationWire<T extends { createdBy: string | null }>(
-  app: T,
+function toSpaceWire<T extends { createdBy: string | null }>(
+  space: T,
 ): Omit<T, "createdBy"> & { created_by: string | null } {
-  const { createdBy, ...rest } = app;
+  const { createdBy, ...rest } = space;
   return { ...rest, created_by: createdBy };
 }
 
-export const createApplicationSchema = z.object({
+export const createSpaceSchema = z.object({
   name: z.string().min(1, "name is required").max(100, "name must be 100 characters or less"),
-  settings: appSettingsSchema.optional(),
+  settings: spaceSettingsSchema.optional(),
 });
 
-export const updateApplicationSchema = z.object({
+export const updateSpaceSchema = z.object({
   name: z
     .string()
     .min(1, "name is required")
     .max(100, "name must be 100 characters or less")
     .optional(),
-  settings: appSettingsSchema.optional(),
+  settings: spaceSettingsSchema.optional(),
 });
 
 // Neither body carries the agent's stored input values: `PUT
@@ -80,32 +80,32 @@ export const updatePackageSchema = z.object({
   enabled: z.boolean().optional(),
 });
 
-export function createApplicationsRouter() {
+export function createSpacesRouter() {
   const router = new Hono<AppEnv>();
 
-  router.use("/:id", apiKeyAppScopeGuard);
-  router.use("/:applicationId/*", apiKeyAppScopeGuard);
+  router.use("/:id", apiKeySpaceScopeGuard);
+  router.use("/:spaceId/*", apiKeySpaceScopeGuard);
 
-  // GET /api/applications — list applications for the org
-  router.get("/", requirePermission("applications", "read"), async (c) => {
+  // GET /api/spaces — list spaces for the org
+  router.get("/", requirePermission("spaces", "read"), async (c) => {
     const orgId = c.get("orgId");
-    const apps = await listApplications(orgId);
+    const spaces = await listSpaces(orgId);
     const authMethod = c.get("authMethod");
-    const keyAppId = c.get("applicationId");
-    const scoped = authMethod === "api_key" ? apps.filter((a) => a.id === keyAppId) : apps;
+    const keySpaceId = c.get("spaceId");
+    const scoped = authMethod === "api_key" ? spaces.filter((a) => a.id === keySpaceId) : spaces;
     return c.json(
-      listResponse(scoped.map((app) => ({ object: "application", ...toApplicationWire(app) }))),
+      listResponse(scoped.map((space) => ({ object: "space", ...toSpaceWire(space) }))),
     );
   });
 
-  // POST /api/applications — create a new application
-  router.post("/", requirePermission("applications", "write"), async (c) => {
+  // POST /api/spaces — create a new space
+  router.post("/", requirePermission("spaces", "write"), async (c) => {
     if (c.get("authMethod") === "api_key") {
-      throw forbidden("API keys cannot create applications");
+      throw forbidden("API keys cannot create spaces");
     }
     const orgId = c.get("orgId");
     const user = c.get("user");
-    const data = await readJsonBody(c, createApplicationSchema);
+    const data = await readJsonBody(c, createSpaceSchema);
 
     if (data.settings?.allowedRedirectDomains) {
       const validationError = validateDomainList(data.settings.allowedRedirectDomains);
@@ -113,46 +113,46 @@ export function createApplicationsRouter() {
     }
 
     try {
-      const app = await createApplication(orgId, data, user.id);
+      const space = await createSpace(orgId, data, user.id);
       await recordAuditFromContext(c, {
-        action: "application.created",
-        resourceType: "application",
-        resourceId: app.id,
-        after: { name: app.name },
+        action: "space.created",
+        resourceType: "space",
+        resourceId: space.id,
+        after: { name: space.name },
       });
-      return c.json({ object: "application", ...toApplicationWire(app) }, 201);
+      return c.json({ object: "space", ...toSpaceWire(space) }, 201);
     } catch (err) {
       if (err instanceof ApiError) throw err;
-      logger.error("Application creation failed", {
+      logger.error("Space creation failed", {
         error: getErrorMessage(err),
       });
       throw internalError();
     }
   });
 
-  // GET /api/applications/:id — get application detail
-  router.get("/:id", requirePermission("applications", "read"), async (c) => {
+  // GET /api/spaces/:id — get space detail
+  router.get("/:id", requirePermission("spaces", "read"), async (c) => {
     const orgId = c.get("orgId");
-    const applicationId = c.req.param("id")!;
+    const spaceId = c.req.param("id")!;
 
     try {
-      const app = await getApplication(orgId, applicationId);
-      return c.json({ object: "application", ...toApplicationWire(app) });
+      const space = await getSpace(orgId, spaceId);
+      return c.json({ object: "space", ...toSpaceWire(space) });
     } catch (err) {
       if (err instanceof ApiError) throw err;
-      logger.error("Failed to get application", {
-        applicationId,
+      logger.error("Failed to get space", {
+        spaceId,
         error: getErrorMessage(err),
       });
       throw internalError();
     }
   });
 
-  // PATCH /api/applications/:id — update application
-  router.patch("/:id", requirePermission("applications", "write"), async (c) => {
+  // PATCH /api/spaces/:id — update space
+  router.patch("/:id", requirePermission("spaces", "write"), async (c) => {
     const orgId = c.get("orgId");
-    const applicationId = c.req.param("id")!;
-    const data = await readJsonBody(c, updateApplicationSchema);
+    const spaceId = c.req.param("id")!;
+    const data = await readJsonBody(c, updateSpaceSchema);
 
     if (data.settings?.allowedRedirectDomains) {
       const validationError = validateDomainList(data.settings.allowedRedirectDomains);
@@ -160,105 +160,105 @@ export function createApplicationsRouter() {
     }
 
     try {
-      const app = await updateApplication(orgId, applicationId, data);
+      const space = await updateSpace(orgId, spaceId, data);
       await recordAuditFromContext(c, {
-        action: "application.updated",
-        resourceType: "application",
-        resourceId: app.id,
+        action: "space.updated",
+        resourceType: "space",
+        resourceId: space.id,
         after: data as unknown as Record<string, unknown>,
       });
-      return c.json({ object: "application", ...toApplicationWire(app) });
+      return c.json({ object: "space", ...toSpaceWire(space) });
     } catch (err) {
       if (err instanceof ApiError) throw err;
-      logger.error("Application update failed", {
-        applicationId,
+      logger.error("Space update failed", {
+        spaceId,
         error: getErrorMessage(err),
       });
       throw internalError();
     }
   });
 
-  // DELETE /api/applications/:id — delete application
-  router.delete("/:id", requirePermission("applications", "delete"), async (c) => {
+  // DELETE /api/spaces/:id — delete space
+  router.delete("/:id", requirePermission("spaces", "delete"), async (c) => {
     const orgId = c.get("orgId");
-    const applicationId = c.req.param("id")!;
+    const spaceId = c.req.param("id")!;
 
     try {
-      await deleteApplication(orgId, applicationId);
+      await deleteSpace(orgId, spaceId);
       await recordAuditFromContext(c, {
-        action: "application.deleted",
-        resourceType: "application",
-        resourceId: applicationId,
+        action: "space.deleted",
+        resourceType: "space",
+        resourceId: spaceId,
       });
       return c.body(null, 204);
     } catch (err) {
       if (err instanceof ApiError) throw err;
-      logger.error("Application deletion failed", {
-        applicationId,
+      logger.error("Space deletion failed", {
+        spaceId,
         error: getErrorMessage(err),
       });
       throw internalError();
     }
   });
 
-  // ─── Application Packages (install/uninstall/config) ─────────────────────
+  // ─── Space Packages (install/uninstall/config) ─────────────────────
 
-  // Guard: validate that the application belongs to the org (once for all /:applicationId/packages/* routes)
-  router.use("/:applicationId/packages/*", async (c, next) => {
-    await getApplication(c.get("orgId"), c.req.param("applicationId")!);
+  // Guard: validate that the space belongs to the org (once for all /:spaceId/packages/* routes)
+  router.use("/:spaceId/packages/*", async (c, next) => {
+    await getSpace(c.get("orgId"), c.req.param("spaceId")!);
     return next();
   });
-  router.use("/:applicationId/packages", async (c, next) => {
-    await getApplication(c.get("orgId"), c.req.param("applicationId")!);
+  router.use("/:spaceId/packages", async (c, next) => {
+    await getSpace(c.get("orgId"), c.req.param("spaceId")!);
     return next();
   });
 
-  // GET /api/applications/:applicationId/packages — list installed packages
-  router.get("/:applicationId/packages", async (c) => {
-    const applicationId = c.req.param("applicationId")!;
+  // GET /api/spaces/:spaceId/packages — list installed packages
+  router.get("/:spaceId/packages", async (c) => {
+    const spaceId = c.req.param("spaceId")!;
     const orgId = c.get("orgId");
     const type = c.req.query("type") as PackageType | undefined;
-    const rows = await listInstalledPackages({ orgId, applicationId: applicationId }, type);
-    return c.json(listResponse(rows.map((row) => ({ object: "application_package", ...row }))));
+    const rows = await listInstalledPackages({ orgId, spaceId: spaceId }, type);
+    return c.json(listResponse(rows.map((row) => ({ object: "space_package", ...row }))));
   });
 
-  // POST /api/applications/:applicationId/packages — install a package
-  router.post("/:applicationId/packages", requirePermission("applications", "write"), async (c) => {
+  // POST /api/spaces/:spaceId/packages — install a package
+  router.post("/:spaceId/packages", requirePermission("spaces", "write"), async (c) => {
     const orgId = c.get("orgId");
-    const applicationId = c.req.param("applicationId")!;
+    const spaceId = c.req.param("spaceId")!;
 
     const data = await readJsonBody(c, installPackageSchema);
 
-    await installPackage({ orgId, applicationId: applicationId }, data.packageId);
-    const row = await getInstalledPackage({ orgId, applicationId: applicationId }, data.packageId);
-    return c.json({ object: "application_package", ...row }, 201);
+    await installPackage({ orgId, spaceId: spaceId }, data.packageId);
+    const row = await getInstalledPackage({ orgId, spaceId: spaceId }, data.packageId);
+    return c.json({ object: "space_package", ...row }, 201);
   });
 
-  // GET /api/applications/:applicationId/packages/:packageId — get installed package detail
-  router.get(`/:applicationId/packages/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
-    const applicationId = c.req.param("applicationId")!;
+  // GET /api/spaces/:spaceId/packages/:packageId — get installed package detail
+  router.get(`/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
+    const spaceId = c.req.param("spaceId")!;
     const orgId = c.get("orgId");
     const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
-    const row = await getInstalledPackage({ orgId, applicationId: applicationId }, packageId);
+    const row = await getInstalledPackage({ orgId, spaceId: spaceId }, packageId);
     if (!row) {
       throw new ApiError({
         status: 404,
         code: "package_not_installed",
         title: "Package Not Installed",
-        detail: `Package '${packageId}' is not installed in this application`,
+        detail: `Package '${packageId}' is not installed in this space`,
       });
     }
-    return c.json({ object: "application_package", ...row });
+    return c.json({ object: "space_package", ...row });
   });
 
-  // PUT /api/applications/:applicationId/packages/:packageId — update config
+  // PUT /api/spaces/:spaceId/packages/:packageId — update config
   router.put(
-    `/:applicationId/packages/${SCOPED_PACKAGE_ROUTE}`,
-    requirePermission("applications", "write"),
+    `/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`,
+    requirePermission("spaces", "write"),
     async (c) => {
-      const applicationId = c.req.param("applicationId")!;
+      const spaceId = c.req.param("spaceId")!;
       const orgId = c.get("orgId");
-      const scope = { orgId, applicationId: applicationId };
+      const scope = { orgId, spaceId: spaceId };
       const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
       const data = await readJsonBody(c, updatePackageSchema);
 
@@ -316,41 +316,41 @@ export function createApplicationsRouter() {
         { requireInstalled: true },
       );
       const updated = await getInstalledPackage(scope, packageId);
-      return c.json({ object: "application_package", ...updated });
+      return c.json({ object: "space_package", ...updated });
     },
   );
 
-  // DELETE /api/applications/:applicationId/packages/:packageId — uninstall
+  // DELETE /api/spaces/:spaceId/packages/:packageId — uninstall
   router.delete(
-    `/:applicationId/packages/${SCOPED_PACKAGE_ROUTE}`,
-    requirePermission("applications", "write"),
+    `/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`,
+    requirePermission("spaces", "write"),
     async (c) => {
-      const applicationId = c.req.param("applicationId")!;
+      const spaceId = c.req.param("spaceId")!;
       const orgId = c.get("orgId");
       const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
-      await uninstallPackage({ orgId, applicationId: applicationId }, packageId);
+      await uninstallPackage({ orgId, spaceId: spaceId }, packageId);
       return c.body(null, 204);
     },
   );
 
-  // GET /api/applications/:applicationId/packages/:scope/:name/run-config —
-  // single source of truth for the per-app config, model/proxy override,
+  // GET /api/spaces/:spaceId/packages/:scope/:name/run-config —
+  // single source of truth for the per-space config, model/proxy override,
   // and version pin. Consumed by the CLI to reproduce a UI run without
   // hand-stitching three separate calls.
   router.get(
-    `/:applicationId/packages/${SCOPED_PACKAGE_ROUTE}/run-config`,
+    `/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}/run-config`,
     requirePermission("agents", "read"),
     async (c) => {
-      const applicationId = c.req.param("applicationId")!;
+      const spaceId = c.req.param("spaceId")!;
       const orgId = c.get("orgId");
       const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
-      const resolved = await getResolvedRunConfig({ orgId, applicationId }, packageId);
+      const resolved = await getResolvedRunConfig({ orgId, spaceId }, packageId);
       if (!resolved) {
         throw new ApiError({
           status: 404,
           code: "package_not_installed",
           title: "Package Not Installed",
-          detail: `Package '${packageId}' is not installed in this application`,
+          detail: `Package '${packageId}' is not installed in this space`,
         });
       }
       return c.json(resolved);

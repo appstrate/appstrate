@@ -17,7 +17,7 @@ const oauthClientObject: Record<string, unknown> = {
     "name",
     "level",
     "referencedOrgId",
-    "referencedApplicationId",
+    "referencedSpaceId",
     "redirectUris",
     "postLogoutRedirectUris",
     "scopes",
@@ -32,9 +32,9 @@ const oauthClientObject: Record<string, unknown> = {
     id: { type: "string" },
     clientId: { type: "string" },
     name: { type: ["string", "null"] },
-    level: { type: "string", enum: ["instance", "org", "application"] },
+    level: { type: "string", enum: ["instance", "org", "space"] },
     referencedOrgId: { type: ["string", "null"] },
-    referencedApplicationId: { type: ["string", "null"] },
+    referencedSpaceId: { type: ["string", "null"] },
     redirectUris: { type: "array", items: { type: "string", format: "uri" } },
     postLogoutRedirectUris: { type: "array", items: { type: "string", format: "uri" } },
     scopes: { type: "array", items: { type: "string" } },
@@ -48,7 +48,7 @@ const oauthClientObject: Record<string, unknown> = {
 };
 
 /**
- * `application_smtp_configs` row as returned by the admin API.
+ * `space_smtp_configs` row as returned by the admin API.
  * Kept in lockstep with `SmtpConfigView` in `@appstrate/shared-types` —
  * the encrypted password column is intentionally omitted (never returned).
  */
@@ -56,7 +56,7 @@ const smtpConfigView: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
   required: [
-    "applicationId",
+    "spaceId",
     "host",
     "port",
     "username",
@@ -67,7 +67,7 @@ const smtpConfigView: Record<string, unknown> = {
     "updatedAt",
   ],
   properties: {
-    applicationId: { type: "string" },
+    spaceId: { type: "string" },
     host: { type: "string" },
     port: { type: "integer", minimum: 1, maximum: 65535 },
     username: { type: "string" },
@@ -80,16 +80,16 @@ const smtpConfigView: Record<string, unknown> = {
 };
 
 /**
- * `application_social_providers` row as returned by the admin API.
+ * `space_social_providers` row as returned by the admin API.
  * Kept in lockstep with `SocialProviderView` in `@appstrate/shared-types`
  * — the encrypted client secret is intentionally omitted (never returned).
  */
 const socialProviderView: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
-  required: ["applicationId", "provider", "clientId", "scopes", "createdAt", "updatedAt"],
+  required: ["spaceId", "provider", "clientId", "scopes", "createdAt", "updatedAt"],
   properties: {
-    applicationId: { type: "string" },
+    spaceId: { type: "string" },
     provider: { type: "string", enum: ["google", "github"] },
     clientId: { type: "string" },
     scopes: {

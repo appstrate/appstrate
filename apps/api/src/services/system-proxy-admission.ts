@@ -118,7 +118,7 @@ export async function enforceSystemProxyAdmission(args: {
   // rejected)
   // could keep spending indefinitely by stamping `X-Run-Id` of ANY still-alive
   // platform system run onto its proxy calls. `assertRunAttributable` only
-  // binds an API-key principal to org + application, so any key in the app can
+  // binds an API-key principal to org + space, so any key in the space can
   // borrow any live run as a billing context.
   //
   // The one-gate-per-unit invariant is preserved on the legitimate paths:

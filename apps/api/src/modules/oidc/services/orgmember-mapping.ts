@@ -178,7 +178,7 @@ async function findMembership(
  *     env-declared satellites default to `false`.
  *   - `org` — `allowSignup=true` lets a brand-new BA user sign up AND be
  *     auto-joined to `orgId` with `signupRole` by `oidcAfterSignupHandler`.
- *   - `application` — `allowSignup=true` lets a brand-new BA user sign up
+ *   - `space` — `allowSignup=true` lets a brand-new BA user sign up
  *     AND triggers JIT creation of the matching `end_users` row at
  *     token-mint time (see `enduser-mapping.ts`). When `false`, the signup
  *     guard blocks BA user creation and `resolveOrCreateEndUser` refuses to
@@ -190,12 +190,12 @@ async function findMembership(
  */
 interface ClientSignupPolicy {
   clientId: string;
-  level: "org" | "application" | "instance";
+  level: "org" | "space" | "instance";
   allowSignup: boolean;
   /** Set only when `level === "org"`. */
   orgId: string | null;
-  /** Set only when `level === "application"`. */
-  applicationId: string | null;
+  /** Set only when `level === "space"`. */
+  spaceId: string | null;
   signupRole: Exclude<OrgRole, "owner">;
 }
 
@@ -207,7 +207,7 @@ export async function loadClientSignupPolicy(clientId: string): Promise<ClientSi
     level: client.level,
     allowSignup: client.allowSignup,
     orgId: client.level === "org" ? (client.referencedOrgId ?? null) : null,
-    applicationId: client.level === "application" ? (client.referencedApplicationId ?? null) : null,
+    spaceId: client.level === "space" ? (client.referencedSpaceId ?? null) : null,
     signupRole: client.signupRole,
   };
 }

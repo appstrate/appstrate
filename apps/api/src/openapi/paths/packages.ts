@@ -7,9 +7,9 @@ import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
  * integrations / mcp-servers) — only the leading noun differs.
  */
 const listPackagesSharedDescription =
-  "system packages, plus organization packages installed in this application. " +
+  "system packages, plus organization packages installed in this space. " +
   "Organization packages that exist but are not installed here are NOT returned — for " +
-  "the organization-wide catalogue with per-application install state, use " +
+  "the organization-wide catalogue with per-space install state, use " +
   "`GET /api/library`.";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -70,10 +70,10 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Import a multi-package .afps-bundle",
       description:
-        "Import a multi-package `.afps-bundle` archive (exported via `GET /api/agents/:scope/:name/bundle`). Also accepts a raw `.afps` archive, which is promoted to a bundle-of-one by resolving its transitive dependencies against the org registry. Every embedded package is registered in the org (or reused if a byte-identical version already exists), and the root is installed in the current application. Rate-limited to 10 requests/minute. Returns 409 with a `bundle_conflict` code if any embedded package conflicts with an existing one (same identity, different bytes, or owned by another org).",
+        "Import a multi-package `.afps-bundle` archive (exported via `GET /api/agents/:scope/:name/bundle`). Also accepts a raw `.afps` archive, which is promoted to a bundle-of-one by resolving its transitive dependencies against the org registry. Every embedded package is registered in the org (or reused if a byte-identical version already exists), and the root is installed in the current space. Rate-limited to 10 requests/minute. Returns 409 with a `bundle_conflict` code if any embedded package conflicts with an existing one (same identity, different bytes, or owned by another org).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
       ],
       requestBody: {
         required: true,
@@ -147,7 +147,7 @@ export const packagesPaths = {
                   root_installed: {
                     type: "boolean",
                     description:
-                      "Whether the root was installed in the calling application (false if it was already installed).",
+                      "Whether the root was installed in the calling space (false if it was already installed).",
                   },
                   root_package_id: { type: "string" },
                   root_version: { type: "string" },
@@ -195,7 +195,7 @@ export const packagesPaths = {
         "Import a package (agent, skill, or integration) from a ZIP file. The ZIP must contain a valid manifest.json. The package scope does not need to match your organization; imported packages are owned by your org and remain editable regardless of their scope name. Rate-limited to 10 requests/minute. Returns 409 if the target package has unpublished draft changes — re-submit with ?force=true to overwrite.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         {
           name: "force",
           in: "query",
@@ -288,7 +288,7 @@ export const packagesPaths = {
         "Import a package (agent, skill, or integration) from a public GitHub repository URL. The URL must point to a directory containing a valid manifest.json. The package scope does not need to match your organization; imported packages are owned by your org and remain editable regardless of their scope name. Rate-limited to 10 requests/minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
       ],
       requestBody: {
         required: true,
@@ -376,7 +376,7 @@ export const packagesPaths = {
         "Read-only. Rate-limited to 50 requests/minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
@@ -407,12 +407,12 @@ export const packagesPaths = {
             },
             "Cache-Control": {
               description:
-                "Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Always `private`: the response is tenant-scoped. Never a fresh window and never `immutable`: this index is RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the application. `no-cache` still permits the `304` round-trip, which a version pin answers from a single database read.",
+                "Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Always `private`: the response is tenant-scoped. Never a fresh window and never `immutable`: this index is RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the space. `no-cache` still permits the `304` round-trip, which a version pin answers from a single database read.",
               schema: { type: "string" },
             },
             Vary: {
               description:
-                "Always `X-Org-Id, X-Application-Id` — access depends on both, so a cache must not reuse this body across organizations or applications.",
+                "Always `X-Org-Id, X-Space-Id` — access depends on both, so a cache must not reuse this body across organizations or spaces.",
               schema: { type: "string" },
             },
             "X-Yanked": {
@@ -438,7 +438,7 @@ export const packagesPaths = {
               schema: { type: "string" },
             },
             Vary: {
-              description: "Always `X-Org-Id, X-Application-Id`, as on the `200`.",
+              description: "Always `X-Org-Id, X-Space-Id`, as on the `200`.",
               schema: { type: "string" },
             },
             "X-Yanked": {
@@ -478,7 +478,7 @@ export const packagesPaths = {
         "anything else is a `404`. Read-only. Rate-limited to 50 requests/minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
@@ -516,12 +516,12 @@ export const packagesPaths = {
             },
             "Cache-Control": {
               description:
-                "Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Never a fresh window and never `immutable`: these bytes are RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the application.",
+                "Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Never a fresh window and never `immutable`: these bytes are RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the space.",
               schema: { type: "string" },
             },
             Vary: {
               description:
-                "Always `X-Org-Id, X-Application-Id` — access depends on both, so a cache must not reuse these bytes across organizations or applications.",
+                "Always `X-Org-Id, X-Space-Id` — access depends on both, so a cache must not reuse these bytes across organizations or spaces.",
               schema: { type: "string" },
             },
             "X-Yanked": {
@@ -564,7 +564,7 @@ export const packagesPaths = {
               schema: { type: "string" },
             },
             Vary: {
-              description: "Always `X-Org-Id, X-Application-Id`, as on the `200`.",
+              description: "Always `X-Org-Id, X-Space-Id`, as on the `200`.",
               schema: { type: "string" },
             },
             "X-Yanked": {
@@ -600,7 +600,7 @@ export const packagesPaths = {
         "Download a specific version of a package as a ZIP file. Supports exact version, dist-tag, or semver range resolution. Rate-limited to 50 requests/minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
@@ -655,11 +655,11 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "List skills",
       description:
-        "List the skills available to the current application (`X-Application-Id`): " +
+        "List the skills available to the current space (`X-Space-Id`): " +
         listPackagesSharedDescription,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageActiveFilter" },
       ],
       responses: {
@@ -713,7 +713,7 @@ export const packagesPaths = {
       description: "Create a new skill in the organization packages.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
       ],
       requestBody: {
         required: true,
@@ -766,7 +766,7 @@ export const packagesPaths = {
         "Returns the latest published version and the current draft version from the manifest.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -801,7 +801,7 @@ export const packagesPaths = {
       description: "List all published versions for a skill.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -837,7 +837,7 @@ export const packagesPaths = {
         "Create an immutable version snapshot from the current skill draft. Version is determined by the manifest version field unless overridden.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -892,7 +892,7 @@ export const packagesPaths = {
         "Restore a previously published version into the skill draft. Does not create a new version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
@@ -936,7 +936,7 @@ export const packagesPaths = {
         "Resolve a version query and return versioned skill data including content extracted from ZIP.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
@@ -970,7 +970,7 @@ export const packagesPaths = {
         "Permanently delete a skill version. Reassigns affected dist-tags to the next best stable version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
@@ -994,7 +994,7 @@ export const packagesPaths = {
       description: "Get a skill's full details including content.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -1021,7 +1021,7 @@ export const packagesPaths = {
         "Update a skill in the organization packages. Built-in skills cannot be modified.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -1069,7 +1069,7 @@ export const packagesPaths = {
         "Delete a skill from the organization packages. Built-in skills cannot be deleted.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -1099,11 +1099,11 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "List agent packages",
       description:
-        "List the agent packages available to the current application (`X-Application-Id`): " +
+        "List the agent packages available to the current space (`X-Space-Id`): " +
         listPackagesSharedDescription,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageActiveFilter" },
       ],
       responses: {
@@ -1139,7 +1139,7 @@ export const packagesPaths = {
         "Create a new user agent from manifest and content. Creates an initial version automatically.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
       ],
       requestBody: {
         required: true,
@@ -1185,7 +1185,7 @@ export const packagesPaths = {
       description: "Returns agent detail including integrations, config, state, and skills.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
@@ -1219,7 +1219,7 @@ export const packagesPaths = {
       description: "Update manifest and content of a user agent with optimistic locking.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -1271,7 +1271,7 @@ export const packagesPaths = {
       description: "Delete a user agent. Built-in agents cannot be deleted.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -1302,7 +1302,7 @@ export const packagesPaths = {
       description: "Returns the latest published version and current draft version for an agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -1336,7 +1336,7 @@ export const packagesPaths = {
       description: "Returns all published versions for an agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -1372,7 +1372,7 @@ export const packagesPaths = {
         "Create an immutable version snapshot. Version is determined by the manifest version field unless overridden. Requires no running runs.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -1426,7 +1426,7 @@ export const packagesPaths = {
       description: "Restore a published version into the draft. Requires no runs in progress.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
@@ -1464,7 +1464,7 @@ export const packagesPaths = {
       description: "Returns the detail of a specific agent version including manifest and content.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
@@ -1492,7 +1492,7 @@ export const packagesPaths = {
         "Permanently delete an agent version. Reassigns affected dist-tags to the next best stable version. Blocked if runs are in progress.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
@@ -1526,7 +1526,7 @@ export const packagesPaths = {
         "Create a copy of a package the org does not already own (e.g. a read-only system package) under the current organization's scope. Org-owned packages are editable in place regardless of their scope name, so forking is only needed for packages the org does not own. The fork is based on the latest published version of the source package — the version manifest, content, and ZIP are copied. A local published version is automatically created. Returns 400 if the source has no published version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -1611,12 +1611,12 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "List integration packages",
       description:
-        "List the integration packages available to the current application " +
-        "(`X-Application-Id`): " +
+        "List the integration packages available to the current space " +
+        "(`X-Space-Id`): " +
         listPackagesSharedDescription,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageActiveFilter" },
       ],
       responses: {
@@ -1652,7 +1652,7 @@ export const packagesPaths = {
         'Create a new integration package in the organization packages. An upstream-hosted MCP endpoint belongs here as an integration with `source.kind: "remote"`; use an MCP-server package only for a local executable referenced by `source.kind: "local"`.',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
       ],
       requestBody: {
         required: true,
@@ -1702,7 +1702,7 @@ export const packagesPaths = {
         "Returns the latest published version and the current draft version from the manifest.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -1737,7 +1737,7 @@ export const packagesPaths = {
       description: "List all published versions for an integration package.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -1773,7 +1773,7 @@ export const packagesPaths = {
         "Create an immutable version snapshot from the current integration package draft. Version is determined by the manifest version field unless overridden.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -1828,7 +1828,7 @@ export const packagesPaths = {
         "Restore a previously published version into the integration package draft. Does not create a new version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
@@ -1872,7 +1872,7 @@ export const packagesPaths = {
         "Resolve a version query and return versioned integration package data including content extracted from ZIP.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
@@ -1906,7 +1906,7 @@ export const packagesPaths = {
         "Permanently delete an integration package version. Reassigns affected dist-tags to the next best stable version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
@@ -1930,7 +1930,7 @@ export const packagesPaths = {
       description: "Get an integration package's full details including content.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -1957,7 +1957,7 @@ export const packagesPaths = {
         "Update an integration package in the organization packages. Built-in integration packages cannot be modified.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -2005,7 +2005,7 @@ export const packagesPaths = {
         "Delete an integration package from the organization packages. Built-in integration packages cannot be deleted.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -2037,12 +2037,12 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "List MCP-server packages",
       description:
-        "List the MCP-server packages available to the current application " +
-        "(`X-Application-Id`): " +
+        "List the MCP-server packages available to the current space " +
+        "(`X-Space-Id`): " +
         listPackagesSharedDescription,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageActiveFilter" },
       ],
       responses: {
@@ -2078,7 +2078,7 @@ export const packagesPaths = {
         'Create a local executable MCP-server package referenced by an integration with `source.kind: "local"`. For an upstream-hosted MCP endpoint, create an integration package with `source.kind: "remote"` instead.',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
       ],
       requestBody: {
         required: true,
@@ -2127,7 +2127,7 @@ export const packagesPaths = {
         "Returns the latest published version and the current draft version from the manifest.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -2162,7 +2162,7 @@ export const packagesPaths = {
       description: "List all published versions for an MCP-server package.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -2198,7 +2198,7 @@ export const packagesPaths = {
         "Create an immutable version snapshot from the current MCP-server package draft. Version is determined by the manifest version field unless overridden.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -2253,7 +2253,7 @@ export const packagesPaths = {
         "Restore a previously published version into the MCP-server package draft. Does not create a new version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
@@ -2297,7 +2297,7 @@ export const packagesPaths = {
         "Resolve a version query and return versioned MCP-server package data including content extracted from ZIP.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
@@ -2331,7 +2331,7 @@ export const packagesPaths = {
         "Permanently delete an MCP-server package version. Reassigns affected dist-tags to the next best stable version.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         { name: "version", in: "path", required: true, schema: { type: "string" } },
@@ -2355,7 +2355,7 @@ export const packagesPaths = {
       description: "Get an MCP-server package's full details including content.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -2382,7 +2382,7 @@ export const packagesPaths = {
         "Update an MCP-server package in the organization packages. Built-in MCP-server packages cannot be modified.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -2430,7 +2430,7 @@ export const packagesPaths = {
         "Delete an MCP-server package from the organization packages. Built-in MCP-server packages cannot be deleted.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],

@@ -4,11 +4,11 @@
  * Webhooks API — CRUD + test ping + secret rotation + delivery history.
  *
  * Polymorphic across scoping level (mirrors the OIDC oauth_clients model):
- *   - `level: "org"`: fires for any application in the org
- *   - `level: "application"`: pinned to a single app via `applicationId`
+ *   - `level: "org"`: fires for any space in the org
+ *   - `level: "space"`: pinned to a single space via `spaceId`
  *
  * Routes are org-scoped — the body discriminates on `level` at create time.
- * `GET /api/webhooks?applicationId=` filters the list by pinned app.
+ * `GET /api/webhooks?spaceId=` filters the list by pinned space.
  */
 
 import { Hono } from "hono";
@@ -16,7 +16,7 @@ import type { Context } from "hono";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { applications } from "@appstrate/db/schema";
+import { spaces } from "@appstrate/db/schema";
 import type { AppEnv } from "../../types/index.ts";
 import { rateLimit } from "../../middleware/rate-limit.ts";
 import { idempotency } from "../../middleware/idempotency.ts";
@@ -36,21 +36,22 @@ import {
 import { forbidden, invalidRequest } from "../../lib/errors.ts";
 import { readJsonBody } from "../../lib/request-body.ts";
 import { requireModulePermission } from "@appstrate/core/permissions";
-import { getOrgScope, type AppScope, type OrgScope } from "../../lib/scope.ts";
+import { getOrgScope, type SpaceScope, type OrgScope } from "../../lib/scope.ts";
+import { SPACE_ID_RE } from "../../lib/ids.ts";
 import { parseListPagination } from "../../lib/list-query.ts";
 
 /**
- * Assert that an application belongs to the given org.
- * Throws `forbidden` if the app doesn't exist or belongs to another org.
+ * Assert that a space belongs to the given org.
+ * Throws `forbidden` if the space does not exist or belongs to another org.
  */
-async function assertAppBelongsToOrg(applicationId: string, orgId: string): Promise<void> {
-  const [app] = await db
-    .select({ orgId: applications.orgId })
-    .from(applications)
-    .where(eq(applications.id, applicationId))
+async function assertSpaceBelongsToOrg(spaceId: string, orgId: string): Promise<void> {
+  const [space] = await db
+    .select({ orgId: spaces.orgId })
+    .from(spaces)
+    .where(eq(spaces.id, spaceId))
     .limit(1);
-  if (!app || app.orgId !== orgId) {
-    throw forbidden("applicationId must belong to the current organization");
+  if (!space || space.orgId !== orgId) {
+    throw forbidden("spaceId must belong to the current organization");
   }
 }
 
@@ -63,9 +64,9 @@ const createOrgWebhookSchema = z.object({
   enabled: z.boolean().optional(),
 });
 
-const createApplicationWebhookSchema = z.object({
-  level: z.literal("application"),
-  applicationId: z.string().startsWith("app_", "applicationId must start with 'app_' prefix"),
+const createSpaceWebhookSchema = z.object({
+  level: z.literal("space"),
+  spaceId: z.string().regex(SPACE_ID_RE, "spaceId must start with 'spc_' prefix"),
   url: z.url("url must be a valid URL"),
   events: z.array(webhookEventSchema).min(1, "events is required"),
   packageId: z.string().nullable().optional(),
@@ -75,7 +76,7 @@ const createApplicationWebhookSchema = z.object({
 
 export const createWebhookSchema = z.discriminatedUnion("level", [
   createOrgWebhookSchema,
-  createApplicationWebhookSchema,
+  createSpaceWebhookSchema,
 ]);
 
 export const updateWebhookSchema = z.object({
@@ -94,15 +95,15 @@ export const rotateSecretSchema = z.object({
 export function createWebhooksRouter() {
   const router = new Hono<AppEnv>();
 
-  // Issue #172 (extension) — webhooks are application-scoped (or org-level
-  // and span every app). API keys must never reach a webhook outside their
-  // bound application, so we narrow their scope to `AppScope`; sessions
+  // Issue #172 (extension) — webhooks are space-scoped (or org-level
+  // and span every space). API keys must never reach a webhook outside their
+  // bound space, so we narrow their scope to `SpaceScope`; sessions
   // keep `OrgScope` (full org reach) and decide filtering via query params.
   // Building the scope here (rather than passing two strings) is what makes
-  // it impossible at the type level to forget the app-scoping downstream.
-  function webhookScope(c: Context<AppEnv>): OrgScope | AppScope {
+  // it impossible at the type level to forget the space-scoping downstream.
+  function webhookScope(c: Context<AppEnv>): OrgScope | SpaceScope {
     if (c.get("authMethod") === "api_key") {
-      return { orgId: c.get("orgId"), applicationId: c.get("applicationId") };
+      return { orgId: c.get("orgId"), spaceId: c.get("spaceId") };
     }
     return getOrgScope(c);
   }
@@ -117,20 +118,20 @@ export function createWebhooksRouter() {
       const orgId = c.get("orgId");
       const data = await readJsonBody(c, createWebhookSchema);
 
-      // API keys cannot create org-level webhooks (would span foreign apps)
-      // and cannot create app-level webhooks targeting another application.
+      // API keys cannot create org-level webhooks (would span foreign spaces)
+      // and cannot create space-level webhooks targeting another space.
       const isApiKey = c.get("authMethod") === "api_key";
       if (isApiKey) {
-        if (data.level !== "application") {
+        if (data.level !== "space") {
           throw forbidden("API keys cannot create org-level webhooks");
         }
-        if (data.applicationId !== c.get("applicationId")) {
-          throw forbidden("API key scope does not include this application");
+        if (data.spaceId !== c.get("spaceId")) {
+          throw forbidden("API key scope does not include this space");
         }
       }
 
-      if (data.level === "application") {
-        await assertAppBelongsToOrg(data.applicationId, orgId);
+      if (data.level === "space") {
+        await assertSpaceBelongsToOrg(data.spaceId, orgId);
       }
 
       const result = await createWebhook(
@@ -145,8 +146,8 @@ export function createWebhooksRouter() {
               enabled: data.enabled,
             }
           : {
-              level: "application",
-              scope: { orgId, applicationId: data.applicationId },
+              level: "space",
+              scope: { orgId, spaceId: data.spaceId },
               url: data.url,
               events: data.events,
               packageId: data.packageId,
@@ -164,7 +165,7 @@ export function createWebhooksRouter() {
     },
   );
 
-  // GET /api/webhooks[?applicationId=...&all=true] — list webhooks visible to the caller
+  // GET /api/webhooks[?spaceId=...&all=true] — list webhooks visible to the caller
   router.get(
     "/api/webhooks",
     rateLimit(300),
@@ -172,22 +173,22 @@ export function createWebhooksRouter() {
     async (c) => {
       const scope = webhookScope(c);
 
-      // AppScope callers (API keys) are fully narrowed inside listWebhooks —
-      // it ignores `opts` and returns only webhooks pinned to the key's app.
-      if ("applicationId" in scope) {
+      // SpaceScope callers (API keys) are fully narrowed inside listWebhooks —
+      // it ignores `opts` and returns only webhooks pinned to the key's space.
+      if ("spaceId" in scope) {
         const result = await listWebhooks(scope);
         return c.json(listResponse(result));
       }
 
       const all = c.req.query("all") === "true";
-      const applicationId = c.req.query("applicationId") || undefined;
-      if (applicationId) {
-        if (!applicationId.startsWith("app_")) {
-          throw invalidRequest("applicationId must start with 'app_' prefix", "applicationId");
+      const spaceId = c.req.query("spaceId") || undefined;
+      if (spaceId) {
+        if (!SPACE_ID_RE.test(spaceId)) {
+          throw invalidRequest("spaceId must start with 'spc_' prefix", "spaceId");
         }
-        await assertAppBelongsToOrg(applicationId, scope.orgId);
+        await assertSpaceBelongsToOrg(spaceId, scope.orgId);
       }
-      const result = await listWebhooks(scope, { applicationId, all });
+      const result = await listWebhooks(scope, { spaceId, all });
       return c.json(listResponse(result));
     },
   );

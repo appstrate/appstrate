@@ -286,7 +286,7 @@ export async function removeMember(orgId: string, userId: string): Promise<void>
   // stay in the org for history, so their notifications are not cascaded away
   // — and since notifications carry the recipient as a polymorphic
   // (recipientType, recipientId) tuple with NO foreign key, nothing else would
-  // clean them up (org/application FK cascades only fire on org/app deletion).
+  // clean them up (org/space FK cascades only fire on org/space deletion).
   // Schedules similarly only cascade on user-ACCOUNT or org deletion, and a
   // removed member's user row survives (multi-org) — without the disable here
   // their schedules would keep firing under the revoked identity (CRIT-13).
@@ -494,9 +494,9 @@ export async function deleteOrganization(orgId: string): Promise<void> {
     // Org-scoped tables (package_schedules, org_models, model_provider_credentials,
     // and module-owned tables like webhooks) cascade via their orgId FK —
     // no explicit delete needed.
-    // applicationPackages cascade through applications → orgId
+    // spacePackages cascade through spaces → orgId
     await tx.delete(packages).where(eq(packages.orgId, orgId));
-    // integration_connections cascade through applications → orgId — no explicit delete needed
+    // integration_connections cascade through spaces → orgId — no explicit delete needed
     await tx.delete(orgInvitations).where(eq(orgInvitations.orgId, orgId));
     // org_members cascades from organizations (onDelete: "cascade")
 

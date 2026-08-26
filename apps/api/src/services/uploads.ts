@@ -19,7 +19,7 @@
  * the window elapses.
  *
  * Security layers:
- *  - Auth + app context on POST /api/uploads (middleware)
+ *  - Auth + space context on POST /api/uploads (middleware)
  *  - Pre-signed URL or HMAC token on PUT
  *  - Magic-byte MIME sniffing on consumption (rejects mismatch, every consume)
  *  - Expiry window (default 15 min) for the PUT, post-consume reuse window
@@ -196,7 +196,7 @@ export function parseUploadUri(uri: string): string | null {
 
 interface CreateUploadParams {
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   /** Dashboard/API-key user who created the upload (null for end-user flows). */
   createdBy: string | null;
   /** End-user who created the upload (null for dashboard/API-key flows). */
@@ -252,7 +252,7 @@ export async function createUpload(params: CreateUploadParams): Promise<CreateUp
   const expiresIn = Math.min(Math.max(params.expiresIn ?? DEFAULT_EXPIRY_SECONDS, 60), 3600);
   const uploadId = prefixedId("upl");
   const safeName = sanitizeFilename(params.name);
-  const storagePath = `${params.applicationId}/${uploadId}/${safeName}`;
+  const storagePath = `${params.spaceId}/${uploadId}/${safeName}`;
   const createdBy = params.createdBy ?? null;
   const endUserId = params.endUserId ?? null;
 
@@ -338,7 +338,7 @@ export async function createUpload(params: CreateUploadParams): Promise<CreateUp
     await tx.insert(uploads).values({
       id: uploadId,
       orgId: params.orgId,
-      applicationId: params.applicationId,
+      spaceId: params.spaceId,
       createdBy,
       endUserId,
       storageKey: `${UPLOAD_BUCKET}/${storagePath}`,
@@ -380,7 +380,7 @@ export async function createUpload(params: CreateUploadParams): Promise<CreateUp
  */
 interface UploadAccessContext {
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   actor: Actor;
 }
 
@@ -440,7 +440,7 @@ export async function peekUploads(
     if (
       !row ||
       row.orgId !== ctx.orgId ||
-      row.applicationId !== ctx.applicationId ||
+      row.spaceId !== ctx.spaceId ||
       !actorOwnsUpload(row, ctx.actor)
     ) {
       throw notFound(`Upload '${id}' not found`);
@@ -507,7 +507,7 @@ export async function consumeUploadStream(
       and(
         eq(uploads.id, uploadId),
         eq(uploads.orgId, ctx.orgId),
-        eq(uploads.applicationId, ctx.applicationId),
+        eq(uploads.spaceId, ctx.spaceId),
         ownershipClaimFilter(ctx.actor),
         isNull(uploads.consumedAt),
         sql`${uploads.expiresAt} >= now()`,
@@ -526,7 +526,7 @@ export async function consumeUploadStream(
     if (
       !existing ||
       existing.orgId !== ctx.orgId ||
-      existing.applicationId !== ctx.applicationId ||
+      existing.spaceId !== ctx.spaceId ||
       !actorOwnsUpload(existing, ctx.actor)
     ) {
       throw notFound(`Upload '${uploadId}' not found`);

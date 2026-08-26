@@ -3,7 +3,7 @@
 import { eq, and, or, ne, desc, sql, isNotNull } from "drizzle-orm";
 import { unionAll } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
-import { applicationPackages, packages } from "@appstrate/db/schema";
+import { spacePackages, packages } from "@appstrate/db/schema";
 import type { Package } from "@appstrate/db/schema";
 import { type PackageTypeConfig } from "./config.ts";
 import { buildStoredManifest } from "./manifest.ts";
@@ -273,22 +273,22 @@ export async function reinstallOrgItem(
   );
 }
 
-/** List items of a type accessible to an application (system + installed). */
+/** List items of a type accessible to a space (system + installed). */
 export async function listOrgItems(
   orgId: string,
   cfg: PackageTypeConfig,
-  applicationId: string,
+  spaceId: string,
   opts?: { activeOnly?: boolean },
 ) {
   // Default: catalogue view — system packages (always visible) + org packages
-  // installed in this app. `activeOnly` narrows to packages that are actually
-  // active in THIS app: an enabled `application_packages` row, dropping the
+  // installed in this space. `activeOnly` narrows to packages that are actually
+  // active in THIS space: an enabled `space_packages` row, dropping the
   // "system always shows" branch. Used by the agent editor's integration
   // picker so it only offers usable integrations (server-side filter — the
   // full catalogue can be large).
   const installFilter = opts?.activeOnly
-    ? and(isNotNull(applicationPackages.packageId), eq(applicationPackages.enabled, true))
-    : or(eq(packages.source, "system"), isNotNull(applicationPackages.packageId));
+    ? and(isNotNull(spacePackages.packageId), eq(spacePackages.enabled, true))
+    : or(eq(packages.source, "system"), isNotNull(spacePackages.packageId));
   // `draftContent` (the whole SKILL.md / prompt.md body) is deliberately NOT
   // projected: the list mapper never reads it, and it is by far the largest
   // column on the row.
@@ -308,11 +308,8 @@ export async function listOrgItems(
     })
     .from(packages)
     .leftJoin(
-      applicationPackages,
-      and(
-        eq(applicationPackages.packageId, packages.id),
-        eq(applicationPackages.applicationId, applicationId),
-      ),
+      spacePackages,
+      and(eq(spacePackages.packageId, packages.id), eq(spacePackages.spaceId, spaceId)),
     )
     .where(
       and(

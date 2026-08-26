@@ -66,19 +66,19 @@ export const parameters = {
     required: false,
     description:
       "Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, " +
-      "scoped to the organization and application: a repeat with the same body replays the original response with " +
+      "scoped to the organization and space: a repeat with the same body replays the original response with " +
       "`Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate " +
       "is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that " +
       "do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the " +
       "“Idempotency” section of the API description).",
     schema: { type: "string", maxLength: 255 },
   },
-  SseAppId: {
-    name: "applicationId",
+  SseSpaceId: {
+    name: "spaceId",
     in: "query" as const,
     required: false,
     description:
-      "Application ID. Required for cookie auth (SSE cannot send X-Application-Id header). Not needed for API key auth (app resolved from key).",
+      "Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key).",
     schema: { type: "string" },
   },
   SseToken: {
@@ -89,11 +89,11 @@ export const parameters = {
       "API key (ask_ prefix) for SSE authentication. EventSource cannot send Authorization headers, so API key auth uses this query parameter instead.",
     schema: { type: "string" },
   },
-  XAppId: {
-    name: "X-Application-Id",
+  XSpaceId: {
+    name: "X-Space-Id",
     in: "header" as const,
     description:
-      "Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key).",
+      "Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key).",
     schema: { type: "string" },
   },
   PackageScope: {
@@ -116,7 +116,7 @@ export const parameters = {
     required: false,
     description:
       "When `true`, narrows the list to packages installed and enabled in the current " +
-      "application — system packages with no install row drop out. Integrations are the one " +
+      "space — system packages with no install row drop out. Integrations are the one " +
       "exception: they are filtered on effective activation, so an environment-provided " +
       "system integration stays listed even though it has no install row.",
     schema: { type: "string", enum: ["true"] as const },

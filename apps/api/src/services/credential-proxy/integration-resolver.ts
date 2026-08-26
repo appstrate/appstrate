@@ -58,7 +58,7 @@ export class IntegrationCredentialNotFoundError extends Error {
 interface ResolveIntegrationProxyInput {
   /** Integration package id from `X-Integration-Id` (`@scope/name`). */
   integrationId: string;
-  applicationId: string;
+  spaceId: string;
   actor: Actor;
   /** Optional connection id pin (from `X-Connection-Id`). */
   connectionId?: string;
@@ -81,7 +81,7 @@ export async function resolveIntegrationProxyCredentials(
   input: ResolveIntegrationProxyInput,
 ): Promise<ResolvedIntegrationProxyCredentials> {
   const manifest = await loadManifest(input.integrationId);
-  await assertIntegrationActive(input.integrationId, input.applicationId);
+  await assertIntegrationActive(input.integrationId, input.spaceId);
 
   const auths = manifest.auths ?? {};
   const declaredAuthKeys = Object.keys(auths);
@@ -94,7 +94,7 @@ export async function resolveIntegrationProxyCredentials(
   const connection = await resolveConnection(input, declaredAuthKeys);
   if (!connection) {
     throw new IntegrationCredentialNotFoundError(
-      `No credentials configured for integration '${input.integrationId}' in application ${input.applicationId}`,
+      `No credentials configured for integration '${input.integrationId}' in space ${input.spaceId}`,
     );
   }
 
@@ -140,7 +140,7 @@ export async function forceRefreshIntegrationProxyCredentials(
       input.integrationId,
       connection.authKey,
       authDef,
-      input.applicationId,
+      input.spaceId,
       connection.clientRef,
     );
   } catch (err) {
@@ -281,7 +281,7 @@ async function resolveConnection(
     input.integrationId,
     declaredAuthKeys,
     input.connectionId ?? null,
-    { applicationId: input.applicationId, actor: input.actor },
+    { spaceId: input.spaceId, actor: input.actor },
   );
 }
 

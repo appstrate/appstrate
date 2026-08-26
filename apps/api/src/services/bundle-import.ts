@@ -4,7 +4,7 @@
  * Platform-side bundle import — takes a parsed multi-package {@link Bundle}
  * and registers every embedded package (one packages row + one
  * packageVersions row + stored ZIP) in the current org, then installs
- * the root in the current application.
+ * the root in the current space.
  *
  * Conflict semantics (spec §9.2):
  *   - Per-version identity is `(packageId, version, zipIntegrity)`.
@@ -52,7 +52,7 @@ import {
 import { isSystemPackage } from "./system-packages.ts";
 import { postInstallPackage } from "./post-install-package.ts";
 import { buildBundleFromUploadedAfps, type BundleAssemblyScope } from "./bundle-assembly.ts";
-import { installPackage } from "./application-packages.ts";
+import { installPackage } from "./space-packages.ts";
 import { downloadVersionZip } from "./package-storage.ts";
 import { logger } from "../lib/logger.ts";
 import {
@@ -284,7 +284,7 @@ interface BundleImportPreflight {
 
 /**
  * Import every package in {@link bundle} into the org registry, then
- * install the root in the calling application. Callers SHOULD run
+ * install the root in the calling space. Callers SHOULD run
  * {@link detectBundleConflicts} first for a complete conflict report, but
  * correctness does not depend on it: ownership is re-checked here,
  * atomically with each write, so a concurrent cross-org race resolves to a
@@ -518,7 +518,7 @@ export async function importBundle(
     });
   }
 
-  // Install root in the application (idempotent — no-op if already there).
+  // Install root in the space (idempotent — no-op if already there).
   const rootParsed = parsePackageIdentity(bundle.root);
   if (!rootParsed) {
     throw invalidRequest("Bundle root identity is invalid");

@@ -78,13 +78,13 @@ import {
   createVersionBodySchema,
 } from "../routes/packages.ts";
 
-// --- Application schemas (routes/applications.ts) ---
+// --- Space schemas (routes/spaces.ts) ---
 import {
-  createApplicationSchema,
-  updateApplicationSchema,
+  createSpaceSchema,
+  updateSpaceSchema,
   installPackageSchema,
   updatePackageSchema,
-} from "../routes/applications.ts";
+} from "../routes/spaces.ts";
 
 // --- Run launch schemas (routes/runs.ts) ---
 import { runAgentBodySchema } from "../routes/runs.ts";
@@ -390,30 +390,30 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     description: "Set/replace the caller's password",
   },
 
-  // ─── Applications ──────────────────────────────────────────────────────
+  // ─── Spaces ────────────────────────────────────────────────────────────
   {
     method: "POST",
-    path: "/api/applications",
-    jsonSchema: toJsonSchema(createApplicationSchema),
-    description: "Create application",
+    path: "/api/spaces",
+    jsonSchema: toJsonSchema(createSpaceSchema),
+    description: "Create space",
   },
   {
     method: "PATCH",
-    path: "/api/applications/{id}",
-    jsonSchema: toJsonSchema(updateApplicationSchema),
-    description: "Update application",
+    path: "/api/spaces/{id}",
+    jsonSchema: toJsonSchema(updateSpaceSchema),
+    description: "Update space",
   },
 
-  // ─── Application Packages ──────────────────────────────────────────────
+  // ─── Space Packages ────────────────────────────────────────────────────
   {
     method: "POST",
-    path: "/api/applications/{applicationId}/packages",
+    path: "/api/spaces/{spaceId}/packages",
     jsonSchema: toJsonSchema(installPackageSchema),
-    description: "Install package in application",
+    description: "Install package in space",
   },
   {
     method: "PUT",
-    path: "/api/applications/{applicationId}/packages/{scope}/{name}",
+    path: "/api/spaces/{spaceId}/packages/{scope}/{name}",
     jsonSchema: toJsonSchema(updatePackageSchema),
     description: "Update installed package config",
   },

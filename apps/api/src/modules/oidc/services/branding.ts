@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Per-application branding resolution for OIDC end-user flows.
+ * Per-space branding resolution for OIDC end-user flows.
  *
- * Core `applications.settings` is a free-form jsonb column — this module
+ * Core `spaces.settings` is a free-form jsonb column — this module
  * imposes a shape on the `branding` subkey so every OIDC-owned surface
  * (emails, login + consent pages) renders with the satellite app's name,
  * logo and accent color instead of the platform default.
@@ -13,7 +13,7 @@
  * should import `AppBrandingSchema` from here rather than widening core.
  *
  * Resolution is defensive: anything missing or malformed falls back to
- * defaults derived from `applications.name` so the pages still render even
+ * defaults derived from `spaces.name` so the pages still render even
  * before the admin has configured branding.
  */
 
@@ -21,7 +21,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { isBlockedUrl } from "@appstrate/core/ssrf";
 import { db } from "@appstrate/db/client";
-import { applications } from "@appstrate/db/schema";
+import { spaces } from "@appstrate/db/schema";
 import { logger } from "../../../lib/logger.ts";
 import { scopedWhere } from "../../../lib/db-helpers.ts";
 
@@ -86,18 +86,18 @@ export const PLATFORM_DEFAULT_BRANDING: ResolvedAppBranding = {
 };
 
 /**
- * Read `applications.settings.branding` for the given app, validate it,
+ * Read `spaces.settings.branding` for the given space, validate it,
  * and return a fully-resolved branding with sensible fallbacks.
  *
  * Validation failures are logged (warn) but never throw — the page still
  * renders with defaults so a bad branding config can't take down an
  * end-user flow.
  */
-export async function resolveAppBranding(applicationId: string): Promise<ResolvedAppBranding> {
+export async function resolveAppBranding(spaceId: string): Promise<ResolvedAppBranding> {
   const [row] = await db
-    .select({ name: applications.name, settings: applications.settings })
-    .from(applications)
-    .where(eq(applications.id, applicationId))
+    .select({ name: spaces.name, settings: spaces.settings })
+    .from(spaces)
+    .where(eq(spaces.id, spaceId))
     .limit(1);
 
   const appName = row?.name ?? "Appstrate";
@@ -109,9 +109,9 @@ export async function resolveAppBranding(applicationId: string): Promise<Resolve
     if (result.success) {
       parsed = result.data;
     } else {
-      logger.warn("oidc: invalid applications.settings.branding — falling back to defaults", {
+      logger.warn("oidc: invalid spaces.settings.branding — falling back to defaults", {
         module: "oidc",
-        applicationId,
+        spaceId,
         issues: result.error.issues as unknown as Record<string, unknown>[],
       });
     }
@@ -130,10 +130,10 @@ export async function resolveAppBranding(applicationId: string): Promise<Resolve
 /**
  * Resolve branding for a polymorphic OAuth client.
  *
- * - **application-level clients**: branding comes from the pinned
- *   `applications.settings.branding`.
- * - **org-level clients**: branding comes from the org's default application
- *   (where `applications.isDefault = true` for the given org). This avoids
+ * - **space-level clients**: branding comes from the pinned
+ *   `spaces.settings.branding`.
+ * - **org-level clients**: branding comes from the org's default space
+ *   (where `spaces.isDefault = true` for the given org). This avoids
  *   introducing a new `organizations.branding` column while still giving the
  *   org a consistent brand identity on its dashboard login page.
  *
@@ -143,7 +143,7 @@ export async function resolveBrandingForClient(client: {
   level: string;
   name: string | null;
   referencedOrgId: string | null;
-  referencedApplicationId: string | null;
+  referencedSpaceId: string | null;
 }): Promise<ResolvedAppBranding> {
   if (client.level === "instance") {
     return {
@@ -152,17 +152,17 @@ export async function resolveBrandingForClient(client: {
       fromName: client.name ?? PLATFORM_DEFAULT_BRANDING.fromName,
     };
   }
-  if (client.level === "application" && client.referencedApplicationId) {
-    return resolveAppBranding(client.referencedApplicationId);
+  if (client.level === "space" && client.referencedSpaceId) {
+    return resolveAppBranding(client.referencedSpaceId);
   }
   if (client.level === "org" && client.referencedOrgId) {
     const [row] = await db
-      .select({ id: applications.id })
-      .from(applications)
+      .select({ id: spaces.id })
+      .from(spaces)
       .where(
-        scopedWhere(applications, {
+        scopedWhere(spaces, {
           orgId: client.referencedOrgId,
-          extra: [eq(applications.isDefault, true)],
+          extra: [eq(spaces.isDefault, true)],
         }),
       )
       .limit(1);

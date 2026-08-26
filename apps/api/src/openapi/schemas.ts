@@ -189,9 +189,9 @@ export const schemas = {
       email: { type: "string" },
     },
   },
-  ApplicationPackage: {
+  SpacePackage: {
     type: "object",
-    description: "A package installed in an application with its model/proxy/version overrides.",
+    description: "A package installed in a space with its model/proxy/version overrides.",
     // The installedPackageSelect projection emits every field unconditionally
     // (package_type/package_source come from the join). `object` is spec-only
     // (not on the InstalledPackage type). Stored input values and their locks
@@ -199,7 +199,7 @@ export const schemas = {
     // (`AgentDetail.input`), where the schema and the locks travel with them.
     //
     // CASING: this object deliberately mixes cases and the spec matches the
-    // runtime serializer (`services/application-packages.ts:installedPackageSelect`)
+    // runtime serializer (`services/space-packages.ts:installedPackageSelect`)
     // field-for-field — spec==runtime is the hard invariant, so do NOT "normalize".
     //   - `packageId`/`modelId`/`proxyId`/`updatedAt` are camelCase per the
     //     universal *Id / timestamp carve-out (docs/CASING_CONVENTIONS.md).
@@ -225,13 +225,13 @@ export const schemas = {
       "draft_manifest",
     ],
     properties: {
-      object: { type: "string", enum: ["application_package"] },
+      object: { type: "string", enum: ["space_package"] },
       packageId: { type: "string", description: "Package ID from org catalog" },
       generationConfig: {
         oneOf: [{ $ref: "#/components/schemas/ModelGenerationSettings" }, { type: "null" }],
       },
-      modelId: { type: ["string", "null"], description: "Model override for this app" },
-      proxyId: { type: ["string", "null"], description: "Proxy override for this app" },
+      modelId: { type: ["string", "null"], description: "Model override for this space" },
+      proxyId: { type: ["string", "null"], description: "Proxy override for this space" },
       version_id: { type: ["integer", "null"], description: "Pinned version (null = latest)" },
       enabled: { type: "boolean" },
       installed_at: { type: "string", format: "date-time" },
@@ -256,7 +256,7 @@ export const schemas = {
       dashboard_sso_enabled: {
         type: "boolean",
         description:
-          "When true, org-level (dashboard) OAuth clients can be created and the SSO tab is exposed in the org settings UI. Defaults to false — most orgs only need application-level SSO for their end-users.",
+          "When true, org-level (dashboard) OAuth clients can be created and the SSO tab is exposed in the org settings UI. Defaults to false — most orgs only need space-level SSO for their end-users.",
       },
     },
   },
@@ -416,12 +416,12 @@ export const schemas = {
     type: "object",
     required: ["values", "locked_fields"],
     description:
-      "The agent's stored input settings for one application: the values the editor set once (layer 2 of the input resolution) and the fields it froze. Both are full replacements — an omitted key means cleared, never unchanged.",
+      "The agent's stored input settings for one space: the values the editor set once (layer 2 of the input resolution) and the fields it froze. Both are full replacements — an omitted key means cleared, never unchanged.",
     properties: {
       values: {
         type: "object",
         description:
-          "Values stored for this application. Validated against the manifest `input.schema` with `required` dropped: leaving a required field empty here means it is asked at launch.",
+          "Values stored for this space. Validated against the manifest `input.schema` with `required` dropped: leaving a required field empty here means it is asked at launch.",
         additionalProperties: true,
       },
       locked_fields: {
@@ -491,7 +491,7 @@ export const schemas = {
             type: "object",
             // The detail serializer always emits `schema` (falls back to an
             // empty object schema when the manifest declares no input wrapper),
-            // on top of the two per-application layers the launch form needs.
+            // on top of the two per-space layers the launch form needs.
             required: ["schema"],
             properties: {
               schema: { type: "object", description: "Pure JSON Schema 2020-12 object" },
@@ -506,7 +506,7 @@ export const schemas = {
           },
         ],
         description:
-          "AFPS schema wrapper for the agent's parameters, plus the per-application stored values and field locks. Resolution order at launch: author default (JSON Schema `default`) < stored value (`values`) < schedule value < caller input. A field named in `locked_fields` is not asked at launch and a caller that sets it is refused with 400 `locked_input_field`.",
+          "AFPS schema wrapper for the agent's parameters, plus the per-space stored values and field locks. Resolution order at launch: author default (JSON Schema `default`) < stored value (`values`) < schedule value < caller input. A field named in `locked_fields` is not asked at launch and a caller that sets it is refused with 400 `locked_input_field`.",
       },
       output: {
         type: "object",
@@ -697,7 +697,7 @@ export const schemas = {
       "endUserId",
       "apiKeyId",
       "orgId",
-      "applicationId",
+      "spaceId",
       "scheduleId",
       "status",
       "input",
@@ -856,9 +856,9 @@ export const schemas = {
         type: ["string", "null"],
         description: "API key ID that triggered the run (null for dashboard/schedule runs)",
       },
-      applicationId: {
+      spaceId: {
         type: "string",
-        description: "Application ID (app_ prefix) that owns this run",
+        description: "Space ID (spc_ prefix) that owns this run",
       },
       metadata: {
         type: ["object", "null"],
@@ -1041,7 +1041,7 @@ export const schemas = {
       "userId",
       "endUserId",
       "orgId",
-      "applicationId",
+      "spaceId",
       "name",
       "enabled",
       "cron_expression",
@@ -1069,9 +1069,9 @@ export const schemas = {
       userId: { type: ["string", "null"], description: "Member actor the schedule runs as" },
       endUserId: { type: ["string", "null"], description: "End-user actor the schedule runs as" },
       orgId: { type: "string" },
-      applicationId: {
+      spaceId: {
         type: "string",
-        description: "Application ID (app_ prefix) that owns this schedule",
+        description: "Space ID (spc_ prefix) that owns this schedule",
       },
       name: { type: ["string", "null"] },
       enabled: { type: "boolean" },
@@ -1622,7 +1622,7 @@ export const schemas = {
       updatedAt: { type: "string", format: "date-time" },
     },
   },
-  ApplicationObject: {
+  SpaceObject: {
     type: "object",
     required: [
       "id",
@@ -1636,11 +1636,11 @@ export const schemas = {
       "updatedAt",
     ],
     properties: {
-      id: { type: "string", description: "Application ID (app_ prefix)" },
-      object: { type: "string", enum: ["application"], description: "Object type" },
+      id: { type: "string", description: "Space ID (spc_ prefix)" },
+      object: { type: "string", enum: ["space"], description: "Object type" },
       orgId: { type: "string", description: "Organization ID" },
-      name: { type: "string", description: "Human-readable application name" },
-      isDefault: { type: "boolean", description: "Whether this is the default application" },
+      name: { type: "string", description: "Human-readable space name" },
+      isDefault: { type: "boolean", description: "Whether this is the default space" },
       settings: {
         type: "object",
         properties: {
@@ -1653,7 +1653,7 @@ export const schemas = {
       },
       created_by: {
         type: ["string", "null"],
-        description: "ID of the user who created the application",
+        description: "ID of the user who created the space",
       },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
@@ -1666,7 +1666,7 @@ export const schemas = {
     required: [
       "id",
       "object",
-      "applicationId",
+      "spaceId",
       "name",
       "email",
       "externalId",
@@ -1677,7 +1677,7 @@ export const schemas = {
     properties: {
       id: { type: "string", description: "End-user ID (eu_ prefix)" },
       object: { type: "string", enum: ["end_user"], description: "Object type" },
-      applicationId: { type: "string", description: "ID of the parent application" },
+      spaceId: { type: "string", description: "ID of the parent space" },
       name: { type: ["string", "null"], description: "Display name" },
       email: { type: ["string", "null"], format: "email", description: "Email address" },
       externalId: { type: ["string", "null"], description: "External system identifier" },
@@ -1753,8 +1753,8 @@ export const schemas = {
     type: "array",
     description:
       "Packages of a single type visible to the org. Each entry carries an " +
-      "`installed_in` array listing the caller-org applications where the package " +
-      "is currently installed (empty array = not installed in any of the caller's apps).",
+      "`installed_in` array listing the caller-org spaces where the package " +
+      "is currently installed (empty array = not installed in any of the caller's spaces).",
     items: {
       type: "object",
       required: ["id", "type", "source", "name", "description", "installed_in"],
@@ -1779,7 +1779,7 @@ export const schemas = {
         installed_in: {
           type: "array",
           description:
-            "Application ids (`app_…`) belonging to the caller's org where this package is installed.",
+            "Space ids (`spc_…`) belonging to the caller's org where this package is installed.",
           items: { type: "string" },
         },
       },

@@ -61,7 +61,7 @@ const canonicalRunsPaths = {
         "entirely from stored values.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/AppstrateUser" },
         { $ref: "#/components/parameters/AppstrateVersion" },
         { $ref: "#/components/parameters/IdempotencyKey" },
@@ -93,7 +93,7 @@ const canonicalRunsPaths = {
                 rerun_from: {
                   type: "string",
                   description:
-                    "Run id whose persisted `input` to replay on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + application scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). Staged `upload://` inputs are materialized on the original run and rewritten in its persisted input as durable `appfile://` references, so later reruns reuse the same files without depending on upload retention. Existing `appfile://` inputs remain unchanged. **Limitation:** inline `data:` inputs are NOT replayable — their bytes are materialized into the original run's workspace and stripped from the stored input (only a payload-less marker is persisted), so replaying a run whose input carried an inline file returns 409 `rerun_inline_input_unavailable`. Stage the file with `createUpload` when the input must be replayable.",
+                    "Run id whose persisted `input` to replay on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + space scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). Staged `upload://` inputs are materialized on the original run and rewritten in its persisted input as durable `appfile://` references, so later reruns reuse the same files without depending on upload retention. Existing `appfile://` inputs remain unchanged. **Limitation:** inline `data:` inputs are NOT replayable — their bytes are materialized into the original run's workspace and stripped from the stored input (only a payload-less marker is persisted), so replaying a run whose input carried an inline file returns 409 `rerun_inline_input_unavailable`. Stage the file with `createUpload` when the input must be replayable.",
                 },
                 modelId: {
                   type: "string",
@@ -156,7 +156,7 @@ const canonicalRunsPaths = {
                 endUserId: null,
                 apiKeyId: null,
                 orgId: "org_r3t5w8y1z6",
-                applicationId: "app_m4n5o6p7",
+                spaceId: "spc_m4n5o6p7",
                 scheduleId: null,
                 status: "pending",
                 input: { message: "Summarize my latest emails" },
@@ -295,7 +295,7 @@ const canonicalRunsPaths = {
       description: "List runs for a specific agent (org-scoped, default limit 50).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
         {
@@ -332,9 +332,9 @@ const canonicalRunsPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         // requireAgent() 404s when the agent is not visible in the caller's
-        // org+application scope; the org/app-context middleware 403s on an
-        // org/app mismatch (org-context.ts / app-context.ts). Both are
-        // reachable on this app-scoped read.
+        // org+space scope; the org/space-context middleware 403s on an
+        // org/space mismatch (org-context.ts / space-context.ts). Both are
+        // reachable on this space-scoped read.
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
       },
@@ -347,7 +347,7 @@ const canonicalRunsPaths = {
         "Delete all completed runs for an agent. Bulk mutation — returns a documented operation result ({ deleted_count }), not a 204 (issue #657).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -373,7 +373,7 @@ const canonicalRunsPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         // requireAgent() 404s when the agent is not visible in the caller's
-        // org+application scope (guards.ts:requireAgent → agent_not_found).
+        // org+space scope (guards.ts:requireAgent → agent_not_found).
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description: "Running runs exist",
@@ -403,7 +403,7 @@ const canonicalRunsPaths = {
         "Run an agent defined entirely in the request body. The platform creates a shadow `packages` row (ephemeral = true), runs it through the standard pipeline, and returns `201` + the created run resource (same shape as `GET /runs/{id}`; the shadow package id is the resource's `packageId`). Stream progress via `GET /api/realtime/runs/{id}`. See `docs/specs/INLINE_RUNS.md`. The body is closed: an unknown field is a `400`, never a silently dropped value — `dependency_overrides` in particular is NOT honoured on this surface and is refused rather than ignored.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/AppstrateUser" },
         { $ref: "#/components/parameters/AppstrateVersion" },
         { $ref: "#/components/parameters/IdempotencyKey" },
@@ -519,7 +519,7 @@ const canonicalRunsPaths = {
                 endUserId: null,
                 apiKeyId: null,
                 orgId: "org_r3t5w8y1z6",
-                applicationId: "app_m4n5o6p7",
+                spaceId: "spc_m4n5o6p7",
                 scheduleId: null,
                 status: "pending",
                 input: { audience: "engineering" },
@@ -650,7 +650,7 @@ const canonicalRunsPaths = {
         "Dry-run validator. Runs the same preflight as `POST /api/runs/inline` — manifest shape, input against the manifest schema, and integration readiness — but never inserts a shadow package, never fires the pipeline, and never consumes run credits. Returns `200 { valid: true }` on success, `400` problem+json (with the accumulated validation errors) otherwise. Lets developers iterate on a manifest without leaving run history behind.\n\n**Rate limit:** shares the same per-user bucket as `POST /api/runs/inline` (`INLINE_RUN_LIMITS.rate_per_min`). Iterative validation calls count against the same quota as actual runs — tight loops can trigger `429`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/AppstrateUser" },
         { $ref: "#/components/parameters/AppstrateVersion" },
       ],
@@ -746,12 +746,12 @@ const canonicalRunsPaths = {
     get: {
       operationId: "listRuns",
       tags: ["Runs"],
-      summary: "List runs across the application (global view)",
+      summary: "List runs across the space (global view)",
       description:
-        "Org + application scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, a date range, and the chat session that launched the run. Inline runs surface via `package_ephemeral: true` on each row. Note: global filters are ignored when `user=me` (self-view uses a simpler path).",
+        "Org + space scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, a date range, and the chat session that launched the run. Inline runs surface via `package_ephemeral: true` on each row. Note: global filters are ignored when `user=me` (self-view uses a simpler path).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/AppstrateUser" },
         {
           name: "user",
@@ -839,7 +839,7 @@ const canonicalRunsPaths = {
         "Get run details including status, result, input, and duration.\n\nPass `?wait=<seconds>` (or `?wait=true` for the maximum) to long-poll: the server holds the request until the run reaches a terminal status (`success`, `failed`, `timeout`, `cancelled`) or the wait elapses, then returns the current run object exactly as the plain call does. The wait is capped at **55 seconds** — deliberately below the 60 s idle timeouts that ship as defaults in common reverse proxies (nginx `proxy_read_timeout`, ALB idle timeout) so the long poll always completes with a real response instead of a proxy 504; values above the cap are clamped. A response with a non-terminal `status` simply means the wait timed out — issue the same call again to keep waiting. One long poll replaces N sleep+getRun round-trips, which is the recommended completion-wait pattern for MCP clients (the SSE stream is not reachable through the MCP server).\n\n**Concurrency bound:** each identity (user or API key) may hold at most **10** concurrent waits across all runs. Beyond the cap the request degrades to the immediate no-wait response (`wait` is ignored) — a non-terminal `status` means poll again, and capacity self-heals as earlier waits resolve.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
         {
           name: "wait",
@@ -873,7 +873,7 @@ const canonicalRunsPaths = {
                 endUserId: null,
                 apiKeyId: null,
                 orgId: "org_r3t5w8y1z6",
-                applicationId: "app_m4n5o6p7",
+                spaceId: "spc_m4n5o6p7",
                 scheduleId: "sched_cm1abc456def789",
                 status: "success",
                 input: { folder: "inbox", maxEmails: 50 },
@@ -958,7 +958,7 @@ const canonicalRunsPaths = {
         'Get persisted log entries for a run, wrapped in the standard list envelope `{ object: "list", data, hasMore }`. Pass `?since=<id>` to receive only entries with `id > since` — the cursor used by the CLI\'s polling tail to bound per-poll payload growth, and the pagination cursor when combined with `?limit=`. Pass `?level=` to filter by minimum severity (`level=info` skips debug breadcrumbs). `limit` defaults to 1000 when omitted — the response is never unbounded; when more entries follow, `hasMore` is `true` and an RFC 5988 `Link: <…?since=<lastId>>; rel="next"` response header points at the next page. `id` is a monotonic BIGSERIAL; invalid `since`/`level`/`limit` values fall back to the default rather than 400 so a stale cursor never breaks a polling tail. Rate-limited to 120/min per identity. Note: tool-result payloads inside `data` are truncated at write time by the runner (default 2048 bytes, operator-tunable via `TOOL_RESULT_BYTE_LIMIT`) — entries already persisted truncated cannot be recovered by this endpoint.',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
         {
           name: "since",
@@ -1031,7 +1031,7 @@ const canonicalRunsPaths = {
         "Cancel a running or pending run. Returns the updated run resource — same shape as `GET /runs/{id}` — read after the terminal pipeline ran, so `status` is `cancelled` and cost/duration reflect the final state.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -1048,7 +1048,7 @@ const canonicalRunsPaths = {
                 endUserId: null,
                 apiKeyId: null,
                 orgId: "org_r3t5w8y1z6",
-                applicationId: "app_m4n5o6p7",
+                spaceId: "spc_m4n5o6p7",
                 scheduleId: null,
                 status: "cancelled",
                 input: { folder: "inbox", maxEmails: 50 },
@@ -1135,7 +1135,7 @@ const canonicalRunsPaths = {
               // Mirrors the `.strict()` envelope in `routes/runs-remote.ts` —
               // an unknown key at the body root is a 400, not a silent strip.
               additionalProperties: false,
-              required: ["source", "applicationId"],
+              required: ["source", "spaceId"],
               properties: {
                 source: {
                   description:
@@ -1183,7 +1183,7 @@ const canonicalRunsPaths = {
                         spec: {
                           type: "string",
                           description:
-                            "Version, semver range, or dist-tag. Only valid with `stage: published`. Resolution falls back to the version installed in the application, then to the `latest` dist-tag.",
+                            "Version, semver range, or dist-tag. Only valid with `stage: published`. Resolution falls back to the version installed in the space, then to the `latest` dist-tag.",
                         },
                         integrity: {
                           type: "string",
@@ -1194,7 +1194,7 @@ const canonicalRunsPaths = {
                     },
                   ],
                 },
-                applicationId: { type: "string", minLength: 1 },
+                spaceId: { type: "string", minLength: 1 },
                 input: {
                   type: "object",
                   description:

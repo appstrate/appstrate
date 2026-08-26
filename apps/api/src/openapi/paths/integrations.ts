@@ -5,8 +5,8 @@ import { STD_RESPONSE_HEADERS } from "../headers.ts";
 /**
  * OpenAPI paths for the AFPS integration marketplace.
  *
- * Endpoints are app-scoped — `X-Application-Id` is enforced by the
- * platform-level `requireAppContext()` middleware.
+ * Endpoints are space-scoped — `X-Space-Id` is enforced by the
+ * platform-level `requireSpaceContext()` middleware.
  */
 
 const packageIdParam = {
@@ -49,11 +49,11 @@ const agentPackageIdParam = {
   schema: { type: "string", pattern: "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$" },
 } as const;
 
-// The org default is keyed by (application, integration) ONLY — a single row
+// The org default is keyed by (space, integration) ONLY — a single row
 // per integration, NOT one per (integration, auth_key). The unique index in
 // `integrationOrgDefaults` and the `onConflictDoUpdate` in
 // `integration-org-defaults-service.ts:upsertOrgDefault` both target
-// [applicationId, integrationId], so PUT overwrites the one existing default
+// [spaceId, integrationId], so PUT overwrites the one existing default
 // wholesale. `auth_key` below is a DERIVED read-only projection of the chosen
 // connection's own auth (joined from `integration_connections` at read time) —
 // it does NOT partition the default. Picking a connection of a different auth
@@ -74,7 +74,7 @@ const integrationOrgDefaultSchema = {
     auth_key: {
       type: "string",
       description:
-        "Auth type of the chosen connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default per (application, integration) regardless of auth_key; this field just tells you which auth the current default connection uses.",
+        "Auth type of the chosen connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default per (space, integration) regardless of auth_key; this field just tells you which auth the current default connection uses.",
     },
     enforce: { type: "boolean" },
     createdAt: { type: "string", format: "date-time" },
@@ -199,7 +199,7 @@ const oauthClientSchema = {
   type: "object",
   required: [
     "id",
-    "applicationId",
+    "spaceId",
     "integration_package_id",
     "auth_key",
     "client_id",
@@ -216,7 +216,7 @@ const oauthClientSchema = {
       description:
         "Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes.",
     },
-    applicationId: { type: "string" },
+    spaceId: { type: "string" },
     integration_package_id: { type: "string" },
     auth_key: { type: "string" },
     client_id: { type: "string" },
@@ -335,7 +335,7 @@ const integrationDetailSchema = {
     // the agent editor MAY offer the "all upstream tools" toggle that sets
     // `integrations_configuration.<id>.tools = "*"`. Default `false`.
     allow_undeclared_tools: { type: "boolean" },
-    // Activation state in the current application — resource state shared
+    // Activation state in the current space — resource state shared
     // with the list endpoint, returned by every detail-shaped response
     // (GET detail, POST activate, PATCH settings).
     active: { type: "boolean" },
@@ -409,10 +409,10 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "List available integrations",
       description:
-        "List every AFPS integration accessible to the current org (own + system), enriched with `active` + `block_user_connections` flags for the current application. Supports offset pagination (`limit`/`offset`) and a `fields` projection selector — request `?fields=id,source` to drop the heavy per-row `manifest` and fetch only what you need.",
+        "List every AFPS integration accessible to the current org (own + system), enriched with `active` + `block_user_connections` flags for the current space. Supports offset pagination (`limit`/`offset`) and a `fields` projection selector — request `?fields=id,source` to drop the heavy per-row `manifest` and fetch only what you need.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         {
           name: "limit",
           in: "query",
@@ -497,7 +497,7 @@ export const integrationsPaths = {
       summary: "Get integration detail + per-auth status",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
       ],
       responses: {
@@ -523,10 +523,10 @@ export const integrationsPaths = {
     post: {
       operationId: "activateIntegration",
       tags: ["Integrations"],
-      summary: "Activate an integration in the current application",
+      summary: "Activate an integration in the current space",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
       ],
       requestBody: {
@@ -570,10 +570,10 @@ export const integrationsPaths = {
     delete: {
       operationId: "deactivateIntegration",
       tags: ["Integrations"],
-      summary: "Deactivate an integration in the current application (non-destructive)",
+      summary: "Deactivate an integration in the current space (non-destructive)",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
       ],
       responses: {
@@ -613,7 +613,7 @@ export const integrationsPaths = {
         "(DCR/CIMD) auths. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
         authKeyParam,
       ],
@@ -666,7 +666,7 @@ export const integrationsPaths = {
         "(DCR/CIMD) clients are machine-managed and rejected. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
         clientIdParam,
       ],
@@ -716,7 +716,7 @@ export const integrationsPaths = {
         "falls to the system client (no auto-promotion). Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
         clientIdParam,
       ],
@@ -742,7 +742,7 @@ export const integrationsPaths = {
         "always use the default (no per-connect picker).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
         authKeyParam,
       ],
@@ -771,7 +771,7 @@ export const integrationsPaths = {
         "clients list. Admin only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
         authKeyParam,
       ],
@@ -813,7 +813,7 @@ export const integrationsPaths = {
         "Porte B (programmatic/headless): the backend already holds the credential and submits it directly to create the connection — the server-to-server analogue of the hosted Connect portal. Use for api_key / basic / custom auths. For OAuth2 auths use the headless OAuth start (`initiateIntegrationOAuth`); for interactive/human flows where the secret should never transit the caller, use the hosted Connect portal (`initiateIntegrationConnect`).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
         authKeyParam,
       ],
@@ -862,7 +862,7 @@ export const integrationsPaths = {
         "Porte B (programmatic/headless): returns an `auth_url` the caller redirects the user to itself, then handles completion via the shared `/callback`. For an interactive, platform-hosted flow that also covers non-OAuth auths and keeps the secret off the caller, mint a hosted Connect portal session (`initiateIntegrationConnect`) instead.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
         authKeyParam,
       ],
@@ -913,7 +913,7 @@ export const integrationsPaths = {
         "Porte A — the hosted **Connect** portal (issue #769), the primary interactive surface. Returns a single `connect_url` the caller opens; the server dispatches to the provider's OAuth screen or the platform-hosted credential form by auth type. The end-user enters the secret on the hosted form — it never transits the caller, the model, or the chat bundle. For server-to-server provisioning where the backend already holds the credential, use the programmatic surface instead (`importIntegrationConnection` / `initiateIntegrationOAuth`).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
         authKeyParam,
       ],
@@ -1090,10 +1090,10 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "List the connections the caller can use for an integration",
       description:
-        "Returns the caller's own connections **plus** every connection in the application opted into org-wide sharing (`shared_with_org: true`), whoever owns it — the same set the runtime resolver picks from. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`.",
+        "Returns the caller's own connections **plus** every connection in the space opted into org-wide sharing (`shared_with_org: true`), whoever owns it — the same set the runtime resolver picks from. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
       ],
       responses: {
@@ -1125,7 +1125,7 @@ export const integrationsPaths = {
       summary: "Update an integration connection's label and/or shared_with_org flag",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
         connectionIdParam,
       ],
@@ -1175,10 +1175,10 @@ export const integrationsPaths = {
     patch: {
       operationId: "updateIntegrationSettings",
       tags: ["Integrations"],
-      summary: "Toggle the per-(app, integration) block_user_connections gate (admin)",
+      summary: "Toggle the per-(space, integration) block_user_connections gate (admin)",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
       ],
       requestBody: {
@@ -1216,10 +1216,10 @@ export const integrationsPaths = {
     get: {
       operationId: "listIntegrationPins",
       tags: ["Integrations"],
-      summary: "List admin pins for this integration in this application",
+      summary: "List admin pins for this integration in this space",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
       ],
       responses: {
@@ -1257,7 +1257,7 @@ export const integrationsPaths = {
         "(R2): admins pick an installed-agent target without leaving the integration view.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
       ],
       responses: {
@@ -1299,7 +1299,7 @@ export const integrationsPaths = {
       summary: "Pin an admin-shared connection to an agent for all members (admin)",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
         agentPackageIdParam,
       ],
@@ -1334,7 +1334,7 @@ export const integrationsPaths = {
       summary: "Remove an admin pin (admin)",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
         agentPackageIdParam,
       ],
@@ -1353,12 +1353,12 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Get the org-wide default connection for this integration",
       description:
-        "The cross-agent governance baseline: one default connection per (application, " +
+        "The cross-agent governance baseline: one default connection per (space, " +
         "integration) used by every consuming agent. `enforce: true` locks every member; " +
         "`enforce: false` is overridable by a member pin. Returns 204 when unset.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
       ],
       responses: {
@@ -1383,14 +1383,14 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Set the org-wide default connection for this integration (admin)",
       description:
-        "Upsert the single (application, integration) default. Keyed per-integration, " +
+        "Upsert the single (space, integration) default. Keyed per-integration, " +
         "NOT per-auth: this overwrites the one existing default wholesale (atomic " +
-        "onConflictDoUpdate on [applicationId, integrationId]). Selecting a connection " +
+        "onConflictDoUpdate on [spaceId, integrationId]). Selecting a connection " +
         "of a different auth type replaces the current default rather than adding a " +
         "second one. The response `auth_key` reflects the chosen connection's auth (derived).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
       ],
       requestBody: {
@@ -1427,7 +1427,7 @@ export const integrationsPaths = {
       summary: "Remove the org-wide default connection (admin)",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         packageIdParam,
       ],
       responses: {

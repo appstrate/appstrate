@@ -12,7 +12,7 @@ import { db } from "@appstrate/db/client";
 import { listResponse } from "../lib/list-response.ts";
 import { postInstallPackage } from "../services/post-install-package.ts";
 import { bundleImportAuditRecords, handleImportBundle } from "../services/bundle-import.ts";
-import { installPackage, hasPackageAccess } from "../services/application-packages.ts";
+import { installPackage, hasPackageAccess } from "../services/space-packages.ts";
 import { resolveIntegrationActivations } from "../services/integration-connections.ts";
 import { parseManifestFromFiles } from "../lib/manifest-parser.ts";
 import { getAllPackageIds } from "../services/package-catalog.ts";
@@ -496,7 +496,7 @@ interface PackageRouteConfig {
     packageId: string;
     orgId: string;
     manifest: Record<string, unknown>;
-    applicationId?: string;
+    spaceId?: string;
   }) => Promise<void>;
   /** Hook called after a package is updated. */
   afterUpdate?: (params: {
@@ -557,7 +557,7 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
     getHandler: agentDetailHandler,
     // Mutating endpoints echo the full Agent detail (same serializer as the
     // GET). `requireAccess: false` — the caller just wrote this agent in their
-    // org, so the app-install gate must not 404 a successful write.
+    // org, so the space-install gate must not 404 a successful write.
     detailDto: (c, itemId) => buildAgentDetailDto(c, { itemId, requireAccess: false }),
   },
   // Integrations are authored via a JSON-body manifest editor (parity with
@@ -595,10 +595,10 @@ const ROUTE_CONFIGS: Partial<Record<PackageType, PackageRouteConfig>> = {
 function makeListHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
-    const applicationId = c.get("applicationId");
-    // `?active=true` narrows to packages active in this app (agent-editor
+    const spaceId = c.get("spaceId");
+    // `?active=true` narrows to packages active in this space (agent-editor
     // integration picker). For most types "active" means an installed +
-    // enabled `application_packages` row (generic SQL narrowing in
+    // enabled `space_packages` row (generic SQL narrowing in
     // `listOrgItems`). INTEGRATIONS additionally auto-activate env-backed
     // SYSTEM integrations that have no row — so they resolve through the
     // canonical activation rule (`resolveIntegrationActivations`), the single
@@ -606,14 +606,14 @@ function makeListHandler(rcfg: PackageRouteConfig) {
     // than the generic SQL filter (which would hide them).
     const wantActive = c.req.query("active") === "true";
     const isIntegration = rcfg.cfg.type === "integration";
-    const items = await listOrgItems(orgId, rcfg.cfg, applicationId, {
+    const items = await listOrgItems(orgId, rcfg.cfg, spaceId, {
       activeOnly: wantActive && !isIntegration,
     });
     let visible = items;
     if (wantActive && isIntegration) {
       const activations = await resolveIntegrationActivations(
         items.map((i) => i.id),
-        applicationId,
+        spaceId,
       );
       visible = items.filter((i) => activations.get(i.id)?.active);
     }
@@ -705,7 +705,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
           packageId,
           orgId,
           manifest: validatedManifest,
-          applicationId: c.get("applicationId"),
+          spaceId: c.get("spaceId"),
         });
       }
 
@@ -730,11 +730,11 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         normalizedFiles,
       });
 
-      // Auto-install in the current application (non-fatal)
-      const applicationId = c.get("applicationId");
-      if (applicationId && versionCreated) {
-        await installPackage({ orgId, applicationId }, packageId).catch((e: unknown) =>
-          logger.debug("auto-install skipped", { packageId, applicationId, err: String(e) }),
+      // Auto-install in the current space (non-fatal)
+      const spaceId = c.get("spaceId");
+      if (spaceId && versionCreated) {
+        await installPackage({ orgId, spaceId }, packageId).catch((e: unknown) =>
+          logger.debug("auto-install skipped", { packageId, spaceId, err: String(e) }),
         );
       }
 
@@ -834,7 +834,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         packageId: item.id,
         orgId,
         manifest: finalManifest,
-        applicationId: c.get("applicationId"),
+        spaceId: c.get("spaceId"),
       });
     }
 
@@ -848,11 +848,11 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
       normalizedFiles: parsed.normalizedFiles ?? {},
     });
 
-    // Auto-install in the current application (non-fatal)
-    const applicationId = c.get("applicationId");
-    if (applicationId && versionCreated) {
-      await installPackage({ orgId, applicationId }, item.id).catch((e: unknown) =>
-        logger.debug("auto-install skipped", { packageId: item.id, applicationId, err: String(e) }),
+    // Auto-install in the current space (non-fatal)
+    const spaceId = c.get("spaceId");
+    if (spaceId && versionCreated) {
+      await installPackage({ orgId, spaceId }, item.id).catch((e: unknown) =>
+        logger.debug("auto-install skipped", { packageId: item.id, spaceId, err: String(e) }),
       );
     }
 
@@ -904,7 +904,7 @@ async function loadOrgItemOr404(rcfg: PackageRouteConfig, orgId: string, itemId:
 /**
  * Build the canonical package detail DTO for skills / integrations / mcp-servers
  * — the exact object the `GET` detail endpoint serializes (`OrgPackageItemDetail`).
- * Org-scoped (no app-install gate): the GET handler applies that gate before
+ * Org-scoped (no space-install gate): the GET handler applies that gate before
  * calling this, while mutating endpoints (create / update / fork) reuse this
  * directly to echo what the caller just wrote (issue #646). Returns `null` when
  * the package is not found in the org.
@@ -954,11 +954,11 @@ function loadPackageDetailDto(
 function makeGetHandler(rcfg: PackageRouteConfig) {
   return async (c: Context<AppEnv>) => {
     const orgId = c.get("orgId");
-    const applicationId = c.get("applicationId");
+    const spaceId = c.get("spaceId");
     const itemId = getItemId(c);
 
-    // Enforce app-level access: all apps can only access installed packages
-    if (!(await hasPackageAccess({ orgId, applicationId }, itemId))) {
+    // Enforce space-level access: all spaces can only access installed packages
+    if (!(await hasPackageAccess({ orgId, spaceId }, itemId))) {
       throw notFound(`${rcfg.labelSingular} '${itemId}' not found`);
     }
 
@@ -1123,7 +1123,7 @@ function makeUpdateHandler(rcfg: PackageRouteConfig) {
  * types that don't gate version/delete ops on running runs (skills/tools, where
  * `requireMutableForVersionOps` is unset). Shared by the delete / create-version
  * / restore-version / delete-version handlers so the conflict message + the
- * `(orgId, applicationId)` scoping stay identical across all four.
+ * `(orgId, spaceId)` scoping stay identical across all four.
  */
 async function assertNoRunningRuns(
   c: Context<AppEnv>,
@@ -1132,7 +1132,7 @@ async function assertNoRunningRuns(
 ): Promise<void> {
   if (!rcfg.requireMutableForVersionOps) return;
   const running = await getRunningRunsForPackage(
-    { orgId: c.get("orgId"), applicationId: c.get("applicationId") },
+    { orgId: c.get("orgId"), spaceId: c.get("spaceId") },
     itemId,
   );
   if (running > 0) {
@@ -1509,7 +1509,7 @@ function parseFileQuery<T extends z.ZodType>(c: Context<AppEnv>, schema: T): z.i
  * Two gates that answer different questions, both required:
  *
  * - `hasPackageAccess` is VISIBILITY: "is this a system package, or installed
- *   in THIS application?" (it also excludes ephemeral shadows). It says
+ *   in THIS space?" (it also excludes ephemeral shadows). It says
  *   nothing about what the caller is ALLOWED to do — a credential with
  *   `scopes: []` passes it. Believing otherwise is exactly the mistake #1124
  *   had to undo across the rest of the package surface.
@@ -1536,9 +1536,9 @@ function parseFileQuery<T extends z.ZodType>(c: Context<AppEnv>, schema: T): z.i
 async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileSource> {
   const packageId = getItemId(c);
   const orgId = c.get("orgId");
-  const applicationId = c.get("applicationId");
+  const spaceId = c.get("spaceId");
 
-  if (!(await hasPackageAccess({ orgId, applicationId }, packageId))) {
+  if (!(await hasPackageAccess({ orgId, spaceId }, packageId))) {
     throw notFound("Package not found");
   }
 
@@ -1574,7 +1574,7 @@ async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileS
  * one, and that round-trip is what keeps authorization live. Any fresh window,
  * however short, is served by the browser with ZERO server contact: revoke
  * `<type>:read`, remove the member from the org, or uninstall the package from
- * the application, and the cached 200 keeps being handed out until it expires.
+ * the space, and the cached 200 keeps being handed out until it expires.
  * `Vary` cannot rescue that — revocation changes no request header. Forcing the
  * round-trip re-enters `loadFileExplorerPackage`, so `hasPackageAccess` and
  * `requirePackageReadPermission` run on every hit.
@@ -1584,16 +1584,16 @@ async function loadFileExplorerPackage(c: Context<AppEnv>): Promise<PackageFileS
  * That is the entire reason it is split out from `readPackageSnapshot`.
  *
  * `Vary` is NOT optional here. The response body depends on `X-Org-Id` /
- * `X-Application-Id` (via `hasPackageAccess`) while the URL does not mention
- * either. Without it, switching applications in the SPA re-issues an identical
- * URL and the browser answers from cache — showing application B an artifact
- * that is only installed in application A.
+ * `X-Space-Id` (via `hasPackageAccess`) while the URL does not mention
+ * either. Without it, switching spaces in the SPA re-issues an identical
+ * URL and the browser answers from cache — showing space B an artifact
+ * that is only installed in space A.
  */
 function fileCacheHeaders(etag: string, yanked: boolean): Record<string, string> {
   const headers: Record<string, string> = {
     ETag: etag,
     "Cache-Control": "private, no-cache",
-    Vary: "X-Org-Id, X-Application-Id",
+    Vary: "X-Org-Id, X-Space-Id",
   };
   if (yanked) headers["X-Yanked"] = "true";
   return headers;
@@ -1670,7 +1670,7 @@ export function createPackagesRouter() {
 
     // `readGuard` on every GET: the install/system visibility check inside the
     // handlers (`hasPackageAccess`) answers "is this package reachable from
-    // this application", never "may this caller read it". Without the guard a
+    // this space", never "may this caller read it". Without the guard a
     // credential scoped without `<type>:read` still gets the manifest and, on
     // the detail route, the full `content` (SKILL.md / prompt.md).
     router.get(`/${path}`, readGuard, makeListHandler(rcfg));
@@ -1782,13 +1782,13 @@ export function createPackagesRouter() {
       }
     }
 
-    // Auto-install the forked package in the current application (non-fatal)
-    const applicationId = c.get("applicationId");
-    if (applicationId) {
-      await installPackage({ orgId, applicationId }, result.packageId).catch((e: unknown) =>
+    // Auto-install the forked package in the current space (non-fatal)
+    const spaceId = c.get("spaceId");
+    if (spaceId) {
+      await installPackage({ orgId, spaceId }, result.packageId).catch((e: unknown) =>
         logger.debug("auto-install skipped", {
           packageId: result.packageId,
-          applicationId,
+          spaceId,
           err: String(e),
         }),
       );
@@ -2056,15 +2056,15 @@ export function createPackagesRouter() {
         packageId,
         orgId,
         manifest: manifest as Record<string, unknown>,
-        applicationId: c.get("applicationId"),
+        spaceId: c.get("spaceId"),
       });
     }
 
-    // Auto-install in the current application (non-fatal, skip if already installed)
-    const applicationId = c.get("applicationId");
-    if (applicationId) {
-      await installPackage({ orgId, applicationId }, packageId).catch((e: unknown) =>
-        logger.debug("auto-install skipped", { packageId, applicationId, err: String(e) }),
+    // Auto-install in the current space (non-fatal, skip if already installed)
+    const spaceId = c.get("spaceId");
+    if (spaceId) {
+      await installPackage({ orgId, spaceId }, packageId).catch((e: unknown) =>
+        logger.debug("auto-install skipped", { packageId, spaceId, err: String(e) }),
       );
     }
 
@@ -2146,12 +2146,12 @@ export function createPackagesRouter() {
 
     const bytes = new Uint8Array(await file.arrayBuffer());
     const orgId = c.get("orgId");
-    const applicationId = c.get("applicationId");
+    const spaceId = c.get("spaceId");
     const userId = c.get("user").id;
 
     let result: Awaited<ReturnType<typeof handleImportBundle>>;
     try {
-      result = await handleImportBundle(bytes, { orgId, applicationId }, userId);
+      result = await handleImportBundle(bytes, { orgId, spaceId }, userId);
     } catch (err) {
       // Typed errors (ApiError — conflicts, invalid request) propagate as-is.
       // A raw post-install/version-creation failure becomes the same clean 4xx
@@ -2331,14 +2331,14 @@ export function createPackagesRouter() {
   router.get(`/${SCOPED_PACKAGE_ROUTE}/:version/download`, rateLimit(50), async (c) => {
     const packageId = getItemId(c);
     const orgId = c.get("orgId");
-    const applicationId = c.get("applicationId");
+    const spaceId = c.get("spaceId");
     const versionSpec = c.req.param("version")!;
 
-    // Visibility first — "system package OR installed in THIS application",
+    // Visibility first — "system package OR installed in THIS space",
     // the same gate the rest of the package surface applies. Without it this
     // route served the artifact bytes of packages that are merely owned by the
     // org and installed nowhere the caller can reach.
-    if (!(await hasPackageAccess({ orgId, applicationId }, packageId))) {
+    if (!(await hasPackageAccess({ orgId, spaceId }, packageId))) {
       throw notFound("Package not found");
     }
 

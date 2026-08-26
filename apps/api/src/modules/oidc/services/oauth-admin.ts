@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * OAuth client admin service — polymorphic org + application clients.
+ * OAuth client admin service — polymorphic org + space clients.
  *
  * Direct CRUD against `oauth_clients`. Each client is scoped at one of three
  * levels:
  *
- *   - `instance`: platform-wide, no org/app FK (the platform dashboard SPA)
+ *   - `instance`: platform-wide, no org/space FK (the platform dashboard SPA)
  *   - `org`: pinned to an organization via `referenced_org_id` (dashboard
  *     users are the actors)
- *   - `application`: pinned to an application via `referenced_application_id`
+ *   - `space`: pinned to a space via `referenced_space_id`
  *     (end-users are the actors)
  *
  * A DB-level CHECK constraint guarantees exactly one of the two FKs is set
@@ -25,9 +25,9 @@
  *
  * `metadata` shape (single source of truth readable by the plugin):
  *   {
- *     level: "instance" | "org" | "application",
+ *     level: "instance" | "org" | "space",
  *     referencedOrgId?: string,
- *     referencedApplicationId?: string,
+ *     referencedSpaceId?: string,
  *   }
  *
  * The same values are also persisted in dedicated SQL columns for query
@@ -40,7 +40,7 @@
 
 import { eq, or, inArray, asc, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { applications } from "@appstrate/db/schema";
+import { spaces } from "@appstrate/db/schema";
 import { oauthClient } from "@appstrate/db/schema";
 import { prefixedId } from "../../../lib/ids.ts";
 import { logger } from "../../../lib/logger.ts";
@@ -63,7 +63,7 @@ import { isValidRedirectUri } from "./redirect-uri.ts";
 //     if (!owning || owning !== orgId) throw notFound("OAuth client not found");
 //     await deleteClient(clientId); // safe only after the guard above
 //
-// Why this shape: the multi-level (instance / org / application) model makes
+// Why this shape: the multi-level (instance / org / space) model makes
 // a single Drizzle predicate awkward — routes already know the authenticated
 // org, so a post-fetch check is both simpler and more obviously correct than
 // a compound WHERE clause. But it means a new caller that forgets the guard
@@ -71,13 +71,13 @@ import { isValidRedirectUri } from "./redirect-uri.ts";
 // OAuth client by id, the `getClientOwningOrg` check is REQUIRED.
 //
 // The only exception is the scoped list helper (`listClientsForOrgAndApps`)
-// which filters by the caller's org/applications at query time and is safe
+// which filters by the caller's org/spaces at query time and is safe
 // to expose directly.
 
-export type OAuthClientLevel = "instance" | "org" | "application";
+export type OAuthClientLevel = "instance" | "org" | "space";
 
 type OAuthAdminValidationField =
-  "scopes" | "redirectUris" | "referencedOrgId" | "referencedApplicationId" | "signupPolicy";
+  "scopes" | "redirectUris" | "referencedOrgId" | "referencedSpaceId" | "signupPolicy";
 
 export class OAuthAdminValidationError extends Error {
   readonly field: OAuthAdminValidationField;
@@ -184,7 +184,7 @@ export interface OAuthClientRecord {
   name: string | null;
   level: OAuthClientLevel;
   referencedOrgId: string | null;
-  referencedApplicationId: string | null;
+  referencedSpaceId: string | null;
   redirectUris: string[];
   postLogoutRedirectUris: string[];
   scopes: string[];
@@ -195,7 +195,7 @@ export interface OAuthClientRecord {
    * Keycloak "User Registration", Okta JIT toggle):
    *   - `instance`: brand-new Better Auth user may be created platform-wide.
    *   - `org`: brand-new BA user + auto-join to `referencedOrgId` with `signupRole`.
-   *   - `application`: brand-new BA user + JIT `end_users` provisioning.
+   *   - `space`: brand-new BA user + JIT `end_users` provisioning.
    * Defaults to `false` (secure-by-default) on every level.
    */
   allowSignup: boolean;
@@ -210,7 +210,7 @@ interface OAuthClientWithSecret extends OAuthClientRecord {
 }
 
 function mapRow(row: typeof oauthClient.$inferSelect): OAuthClientRecord {
-  if (row.level !== "instance" && row.level !== "org" && row.level !== "application") {
+  if (row.level !== "instance" && row.level !== "org" && row.level !== "space") {
     throw new Error(`OIDC: unexpected oauth_client.level value: ${String(row.level)}`);
   }
   return {
@@ -219,7 +219,7 @@ function mapRow(row: typeof oauthClient.$inferSelect): OAuthClientRecord {
     name: row.name,
     level: row.level,
     referencedOrgId: row.referencedOrgId ?? null,
-    referencedApplicationId: row.referencedApplicationId ?? null,
+    referencedSpaceId: row.referencedSpaceId ?? null,
     redirectUris: row.redirectUris ?? [],
     postLogoutRedirectUris: row.postLogoutRedirectUris ?? [],
     scopes: row.scopes ?? [],
@@ -326,17 +326,17 @@ export function _resetClientCache(): void {
 
 // ─── Scope-filter helpers ─────────────────────────────────────────────────────
 //
-// Org-level clients are visible to any admin of the org. Application-level
-// clients are visible to any admin of the org that owns the application.
+// Org-level clients are visible to any admin of the org. Space-level
+// clients are visible to any admin of the org that owns the space.
 
 /** Combined list for the admin UI — returns every client the caller's org can see in a single query. */
 export async function listClientsForOrgAndApps(
   orgId: string,
-  applicationIds: string[],
+  spaceIds: string[],
 ): Promise<OAuthClientRecord[]> {
   const conditions = [eq(oauthClient.referencedOrgId, orgId)];
-  if (applicationIds.length > 0) {
-    conditions.push(inArray(oauthClient.referencedApplicationId, applicationIds));
+  if (spaceIds.length > 0) {
+    conditions.push(inArray(oauthClient.referencedSpaceId, spaceIds));
   }
   const rows = await db
     .select()
@@ -370,13 +370,13 @@ interface CreateOrgClientInput {
   signupRole?: SignupRole;
 }
 
-interface CreateApplicationClientInput {
-  level: "application";
+interface CreateSpaceClientInput {
+  level: "space";
   name: string;
   redirectUris: string[];
   postLogoutRedirectUris?: string[];
   scopes?: string[];
-  referencedApplicationId: string;
+  referencedSpaceId: string;
   isFirstParty?: boolean;
   /** Defaults to `false`. When `true`, a first OIDC login JIT-creates a BA user + `end_users` row. */
   allowSignup?: boolean;
@@ -393,8 +393,7 @@ interface CreateInstanceClientInput {
   allowSignup?: boolean;
 }
 
-type CreateClientInput =
-  CreateInstanceClientInput | CreateOrgClientInput | CreateApplicationClientInput;
+type CreateClientInput = CreateInstanceClientInput | CreateOrgClientInput | CreateSpaceClientInput;
 
 export async function createClient(input: CreateClientInput): Promise<OAuthClientWithSecret> {
   assertValidRedirectUris(input.redirectUris);
@@ -415,13 +414,13 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
   const metadata: Record<string, unknown> = { level: input.level, clientId };
   if (input.level === "org") {
     metadata.referencedOrgId = input.referencedOrgId;
-  } else if (input.level === "application") {
-    metadata.referencedApplicationId = input.referencedApplicationId;
+  } else if (input.level === "space") {
+    metadata.referencedSpaceId = input.referencedSpaceId;
   }
   // instance: no FK fields in metadata
 
   // `signupRole` is only meaningful on org-level clients (role assigned on
-  // auto-join). Application clients have no org membership to attach to;
+  // auto-join). Space clients have no org membership to attach to;
   // instance clients have no fixed org to attach to either. Reject loudly
   // on the non-org levels to surface configuration mistakes.
   if (input.level !== "org" && (input as { signupRole?: unknown }).signupRole !== undefined) {
@@ -448,7 +447,7 @@ export async function createClient(input: CreateClientInput): Promise<OAuthClien
       scopes: input.scopes ?? ["openid", "profile", "email"],
       level: input.level,
       referencedOrgId: input.level === "org" ? input.referencedOrgId : null,
-      referencedApplicationId: input.level === "application" ? input.referencedApplicationId : null,
+      referencedSpaceId: input.level === "space" ? input.referencedSpaceId : null,
       metadata: JSON.stringify(metadata),
       skipConsent: input.isFirstParty ?? false,
       allowSignup,
@@ -569,7 +568,7 @@ interface UpdateClientInput {
   isFirstParty?: boolean;
   /** Honored on every level (unified semantic). */
   allowSignup?: boolean;
-  /** Honored only on org-level clients; rejected on instance/application. `owner` forbidden. */
+  /** Honored only on org-level clients; rejected on instance/space. `owner` forbidden. */
   signupRole?: SignupRole;
 }
 
@@ -585,7 +584,7 @@ export async function updateClient(
   }
 
   // `signupRole` is only meaningful on org-level clients — reject updates
-  // targeting instance/application levels loudly so configuration mistakes
+  // targeting instance/space levels loudly so configuration mistakes
   // surface. `allowSignup` is valid on every level.
   if (input.signupRole !== undefined) {
     const existing = await getClient(clientId);
@@ -628,14 +627,14 @@ export async function updateClient(
 
 /**
  * Resolve the effective "owning entity" for a client — the org id for
- * org-level clients, or the org id derived from the application FK for
- * application-level clients. Used by route-level permission checks that
+ * org-level clients, or the org id derived from the space FK for
+ * space-level clients. Used by route-level permission checks that
  * need to ensure the caller is an admin of the org that owns the client.
  *
  * Single `LEFT JOIN` so we never issue two sequential round-trips for
- * application-level clients — this function runs on every CRUD route
+ * space-level clients — this function runs on every CRUD route
  * (`GET /:id`, `PATCH /:id`, `DELETE /:id`, `POST /:id/rotate`) and is
- * latency-sensitive. The join is cheap: `applications.id` is the primary
+ * latency-sensitive. The join is cheap: `spaces.id` is the primary
  * key and the FK is covered by an index from the initial migration.
  */
 export async function getClientOwningOrg(clientId: string): Promise<string | null> {
@@ -643,17 +642,17 @@ export async function getClientOwningOrg(clientId: string): Promise<string | nul
     .select({
       level: oauthClient.level,
       referencedOrgId: oauthClient.referencedOrgId,
-      appOrgId: applications.orgId,
+      spaceOrgId: spaces.orgId,
     })
     .from(oauthClient)
-    .leftJoin(applications, eq(applications.id, oauthClient.referencedApplicationId))
+    .leftJoin(spaces, eq(spaces.id, oauthClient.referencedSpaceId))
     .where(eq(oauthClient.clientId, clientId))
     .limit(1);
   if (!row) return null;
   // Instance clients are system-level — they have no owning org.
   if (row.level === "instance") return null;
   if (row.level === "org") return row.referencedOrgId;
-  if (row.level === "application") return row.appOrgId ?? null;
+  if (row.level === "space") return row.spaceOrgId ?? null;
   return null;
 }
 
@@ -762,7 +761,7 @@ function sameStringSet(a: readonly string[], b: readonly string[]): boolean {
  * The platform auto-provisioned instance client also opts into open
  * signup at boot so a fresh Appstrate install can register its first
  * user. Every other client (env-declared satellites, org tenants,
- * application clients) keeps the closed `allowSignup: false` default.
+ * space clients) keeps the closed `allowSignup: false` default.
  */
 export async function ensureInstanceClient(appUrl: string): Promise<string> {
   // Normalize: strip trailing slash(es) so `APP_URL=https://x.com/` does
@@ -865,7 +864,7 @@ export async function ensureInstanceClient(appUrl: string): Promise<string> {
       scopes: ["openid", "profile", "email", "offline_access"],
       level: "instance",
       referencedOrgId: null,
-      referencedApplicationId: null,
+      referencedSpaceId: null,
       metadata: JSON.stringify(metadata),
       skipConsent: true,
       allowSignup: true,
@@ -954,7 +953,7 @@ export async function createInstanceClientFromEnv(
       scopes: input.scopes,
       level: "instance",
       referencedOrgId: null,
-      referencedApplicationId: null,
+      referencedSpaceId: null,
       metadata: JSON.stringify(metadata),
       skipConsent: input.skipConsent,
       allowSignup: input.allowSignup,
@@ -999,7 +998,7 @@ function setEquals(a: readonly string[], b: readonly string[]): boolean {
  *
  * - `not-found`: no row with this `clientId` exists.
  * - `wrong-level`: a row exists but its `level` is not `"instance"` — caller
- *   should refuse to operate on it (it belongs to an org/application client
+ *   should refuse to operate on it (it belongs to an org/space client
  *   with the same `clientId`, which is an authorization-critical collision).
  * - `match`: every managed field matches.
  * - `drift`: managed fields differ — caller should fail boot with the list.

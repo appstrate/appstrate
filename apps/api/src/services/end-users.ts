@@ -3,7 +3,7 @@
 /**
  * End-Users API — CRUD operations for end-users managed via API.
  *
- * End-users belong to an application and represent external users of the platform.
+ * End-users belong to a space and represent external users of the platform.
  */
 
 import { eq, and, or, ilike, desc, lt, gt } from "drizzle-orm";
@@ -16,14 +16,14 @@ import { listResponse } from "../lib/list-response.ts";
 import { prefixedId } from "../lib/ids.ts";
 import { buildUpdateSet } from "../lib/db-helpers.ts";
 import { toISORequired } from "../lib/date-helpers.ts";
-import type { AppScope } from "../lib/scope.ts";
-import { assertApplicationInScope } from "./applications.ts";
+import type { SpaceScope } from "../lib/scope.ts";
+import { assertSpaceInScope } from "./spaces.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
 import { detachOrDeleteContainedFiles, storageKeyToDeletionJob } from "./files.ts";
 
 function toEndUserResponse(row: {
   id: string;
-  applicationId: string;
+  spaceId: string;
   name: string | null;
   email: string | null;
   externalId: string | null;
@@ -34,7 +34,7 @@ function toEndUserResponse(row: {
   return {
     id: row.id,
     object: "end_user",
-    applicationId: row.applicationId,
+    spaceId: row.spaceId,
     name: row.name,
     email: row.email,
     externalId: row.externalId,
@@ -49,7 +49,7 @@ function toEndUserResponse(row: {
 // ---------------------------------------------------------------------------
 
 export async function createEndUser(
-  scope: AppScope,
+  scope: SpaceScope,
   params: {
     name?: string;
     email?: string;
@@ -60,17 +60,17 @@ export async function createEndUser(
   const endUserId = prefixedId("eu");
   const now = new Date();
 
-  await assertApplicationInScope(scope);
+  await assertSpaceInScope(scope);
 
-  // Validate externalId uniqueness within application
+  // Validate externalId uniqueness within space
   if (params.externalId) {
-    const existing = await findByExternalId(scope.applicationId, params.externalId);
+    const existing = await findByExternalId(scope.spaceId, params.externalId);
     if (existing) {
       throw new ApiError({
         status: 409,
         code: "external_id_taken",
         title: "Conflict",
-        detail: `externalId '${params.externalId}' is already in use in this application`,
+        detail: `externalId '${params.externalId}' is already in use in this space`,
         param: "externalId",
       });
     }
@@ -81,7 +81,7 @@ export async function createEndUser(
     .insert(endUsers)
     .values({
       id: endUserId,
-      applicationId: scope.applicationId,
+      spaceId: scope.spaceId,
       orgId: scope.orgId,
       name: params.name ?? null,
       email: params.email ?? null,
@@ -95,14 +95,14 @@ export async function createEndUser(
   logger.info("End-user created via API", {
     endUserId,
     orgId: scope.orgId,
-    applicationId: scope.applicationId,
+    spaceId: scope.spaceId,
   });
 
   return toEndUserResponse(created!);
 }
 
 export async function listEndUsers(
-  scope: AppScope,
+  scope: SpaceScope,
   params: {
     externalId?: string;
     email?: string;
@@ -116,7 +116,7 @@ export async function listEndUsers(
   // this clamp is defence-in-depth for direct service callers. Drizzle's pg
   // dialect emits the `limit` clause only for a `number >= 0`, so a `NaN` or a
   // negative arriving here would not error: the clause would be dropped and the
-  // query would run UNBOUNDED over the application's whole `end_users` table.
+  // query would run UNBOUNDED over the space's whole `end_users` table.
   //
   // Three guards, one per way in, because `Math.max` does not do what it looks
   // like it does here: `Math.max(NaN, 1)` is `NaN`, and `Math.min(NaN, 100)` is
@@ -127,10 +127,7 @@ export async function listEndUsers(
   const limit = Math.min(Math.max(Number.isFinite(requested) ? requested : 20, 1), 100);
   const fetchLimit = limit + 1; // Fetch one extra to detect hasMore
 
-  const conditions = [
-    eq(endUsers.orgId, scope.orgId),
-    eq(endUsers.applicationId, scope.applicationId),
-  ];
+  const conditions = [eq(endUsers.orgId, scope.orgId), eq(endUsers.spaceId, scope.spaceId)];
 
   if (params.externalId) {
     conditions.push(eq(endUsers.externalId, params.externalId));
@@ -184,7 +181,7 @@ export async function listEndUsers(
   const rows = await db
     .select({
       id: endUsers.id,
-      applicationId: endUsers.applicationId,
+      spaceId: endUsers.spaceId,
       name: endUsers.name,
       email: endUsers.email,
       externalId: endUsers.externalId,
@@ -203,11 +200,11 @@ export async function listEndUsers(
   return { ...listResponse(data, { hasMore }), limit };
 }
 
-export async function getEndUser(scope: AppScope, endUserId: string): Promise<EndUserInfo> {
+export async function getEndUser(scope: SpaceScope, endUserId: string): Promise<EndUserInfo> {
   const [row] = await db
     .select({
       id: endUsers.id,
-      applicationId: endUsers.applicationId,
+      spaceId: endUsers.spaceId,
       name: endUsers.name,
       email: endUsers.email,
       externalId: endUsers.externalId,
@@ -220,20 +217,20 @@ export async function getEndUser(scope: AppScope, endUserId: string): Promise<En
       and(
         eq(endUsers.id, endUserId),
         eq(endUsers.orgId, scope.orgId),
-        eq(endUsers.applicationId, scope.applicationId),
+        eq(endUsers.spaceId, scope.spaceId),
       ),
     )
     .limit(1);
 
   if (!row) {
-    throw notFound(`End-user '${endUserId}' not found in this application`);
+    throw notFound(`End-user '${endUserId}' not found in this space`);
   }
 
   return toEndUserResponse(row);
 }
 
 export async function updateEndUser(
-  scope: AppScope,
+  scope: SpaceScope,
   endUserId: string,
   params: {
     name?: string;
@@ -242,18 +239,18 @@ export async function updateEndUser(
     metadata?: Record<string, unknown>;
   },
 ): Promise<EndUserInfo> {
-  // Verify end-user exists and belongs to app
+  // Verify end-user exists and belongs to space
   const existing = await getEndUser(scope, endUserId);
 
   // Validate externalId uniqueness if changing
   if (params.externalId !== undefined) {
-    const found = await findByExternalId(existing.applicationId, params.externalId);
+    const found = await findByExternalId(existing.spaceId, params.externalId);
     if (found && found.id !== endUserId) {
       throw new ApiError({
         status: 409,
         code: "external_id_taken",
         title: "Conflict",
-        detail: `externalId '${params.externalId}' is already in use in this application`,
+        detail: `externalId '${params.externalId}' is already in use in this space`,
         param: "externalId",
       });
     }
@@ -272,7 +269,7 @@ export async function updateEndUser(
         and(
           eq(endUsers.id, endUserId),
           eq(endUsers.orgId, scope.orgId),
-          eq(endUsers.applicationId, scope.applicationId),
+          eq(endUsers.spaceId, scope.spaceId),
         ),
       )
       .limit(1);
@@ -289,7 +286,7 @@ export async function updateEndUser(
       and(
         eq(endUsers.id, endUserId),
         eq(endUsers.orgId, scope.orgId),
-        eq(endUsers.applicationId, scope.applicationId),
+        eq(endUsers.spaceId, scope.spaceId),
       ),
     )
     .returning();
@@ -297,11 +294,11 @@ export async function updateEndUser(
   return toEndUserResponse(updated!);
 }
 
-export async function deleteEndUser(scope: AppScope, endUserId: string): Promise<void> {
+export async function deleteEndUser(scope: SpaceScope, endUserId: string): Promise<void> {
   // Notifications carry the recipient as a polymorphic (recipientType,
   // recipientId) tuple with NO foreign key, so deleting the end-user does not
   // cascade them. Delete every notification for that recipient explicitly,
-  // scoped to the app for tenant safety.
+  // scoped to the space for tenant safety.
   await db.transaction(async (tx) => {
     // Follow the org-first lock order used by file/upload writes, then lock
     // the parent end-user before enumerating cascade-owned children. Runs are
@@ -322,7 +319,7 @@ export async function deleteEndUser(scope: AppScope, endUserId: string): Promise
         and(
           eq(endUsers.id, endUserId),
           eq(endUsers.orgId, scope.orgId),
-          eq(endUsers.applicationId, scope.applicationId),
+          eq(endUsers.spaceId, scope.spaceId),
         ),
       )
       .limit(1)
@@ -357,7 +354,7 @@ export async function deleteEndUser(scope: AppScope, endUserId: string): Promise
           eq(notifications.recipientType, "end_user"),
           eq(notifications.recipientId, endUserId),
           eq(notifications.orgId, scope.orgId),
-          eq(notifications.applicationId, scope.applicationId),
+          eq(notifications.spaceId, scope.spaceId),
         ),
       );
 
@@ -368,7 +365,7 @@ export async function deleteEndUser(scope: AppScope, endUserId: string): Promise
         and(
           eq(endUsers.id, endUserId),
           eq(endUsers.orgId, scope.orgId),
-          eq(endUsers.applicationId, scope.applicationId),
+          eq(endUsers.spaceId, scope.spaceId),
         ),
       )
       .returning({ id: endUsers.id });
@@ -378,7 +375,7 @@ export async function deleteEndUser(scope: AppScope, endUserId: string): Promise
   logger.info("End-user deleted via API", {
     endUserId,
     orgId: scope.orgId,
-    applicationId: scope.applicationId,
+    spaceId: scope.spaceId,
   });
 }
 
@@ -388,12 +385,12 @@ export async function deleteEndUser(scope: AppScope, endUserId: string): Promise
 
 /**
  * Resolve a keyset cursor (an end-user id) to its `(createdAt, id)` tuple,
- * scoped to the app for tenant safety. Returns `null` when the id is unknown
+ * scoped to the space for tenant safety. Returns `null` when the id is unknown
  * in this scope, so the caller can drop the boundary clause instead of paging
  * against a phantom cursor.
  */
 async function getEndUserCursor(
-  scope: AppScope,
+  scope: SpaceScope,
   id: string,
 ): Promise<{ createdAt: Date; id: string } | null> {
   const [row] = await db
@@ -403,7 +400,7 @@ async function getEndUserCursor(
       and(
         eq(endUsers.id, id),
         eq(endUsers.orgId, scope.orgId),
-        eq(endUsers.applicationId, scope.applicationId),
+        eq(endUsers.spaceId, scope.spaceId),
       ),
     )
     .limit(1);
@@ -411,39 +408,39 @@ async function getEndUserCursor(
 }
 
 async function findByExternalId(
-  applicationId: string,
+  spaceId: string,
   externalId: string,
 ): Promise<{ id: string } | null> {
   const [row] = await db
     .select({ id: endUsers.id })
     .from(endUsers)
-    .where(and(eq(endUsers.applicationId, applicationId), eq(endUsers.externalId, externalId)))
+    .where(and(eq(endUsers.spaceId, spaceId), eq(endUsers.externalId, externalId)))
     .limit(1);
   return row ?? null;
 }
 
 /**
- * Check if an end-user belongs to a specific application. Used by auth middleware
+ * Check if an end-user belongs to a specific space. Used by auth middleware
  * for Appstrate-User header resolution when authenticating via API key.
  */
-export async function isEndUserInApp(
-  applicationId: string,
+export async function isEndUserInSpace(
+  spaceId: string,
   endUserId: string,
 ): Promise<import("@appstrate/core/module").EndUserContext | null> {
   const [row] = await db
     .select({
       id: endUsers.id,
-      applicationId: endUsers.applicationId,
+      spaceId: endUsers.spaceId,
       name: endUsers.name,
       email: endUsers.email,
     })
     .from(endUsers)
-    .where(and(eq(endUsers.id, endUserId), eq(endUsers.applicationId, applicationId)))
+    .where(and(eq(endUsers.id, endUserId), eq(endUsers.spaceId, spaceId)))
     .limit(1);
   if (!row) return null;
   return {
     id: row.id,
-    applicationId: row.applicationId,
+    spaceId: row.spaceId,
     ...(row.name != null ? { name: row.name } : {}),
     ...(row.email != null ? { email: row.email } : {}),
   };

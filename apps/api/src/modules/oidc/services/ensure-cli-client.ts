@@ -59,7 +59,7 @@ export async function ensureCliClient(): Promise<string> {
   // Metadata mirrors `createClient`'s contract so the OIDC hook pipeline
   // (`oidcGuardsPlugin` on `/device/approve`) can read `level` + `clientId`
   // without ad-hoc branches. For an instance client there is no
-  // `referencedOrgId` or `referencedApplicationId`.
+  // `referencedOrgId` or `referencedSpaceId`.
   const metadata = {
     level: "instance" as const,
     clientId: APPSTRATE_CLI_CLIENT_ID,
@@ -84,7 +84,7 @@ export async function ensureCliClient(): Promise<string> {
       scopes: ["openid", "profile", "email", "offline_access"],
       level: "instance",
       referencedOrgId: null,
-      referencedApplicationId: null,
+      referencedSpaceId: null,
       metadata: JSON.stringify(metadata),
       skipConsent: false,
       // CLI does not self-provision users — a platform operator authenticates

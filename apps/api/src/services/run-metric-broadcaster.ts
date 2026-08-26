@@ -7,7 +7,7 @@
  * SSE service relays to UI subscribers).
  *
  * Why a separate module — the broadcaster reads
- * `runs (org_id, application_id, package_id)` and aggregates the run's
+ * `runs (org_id, space_id, package_id)` and aggregates the run's
  * ledger spend via {@link computeRunSpend}. Doing that inline in
  * `persistRunEvent` would couple the metric write-through to the broadcast
  * read path (two extra queries inside the ingestion hot path) and force the
@@ -240,7 +240,7 @@ async function loadRunMetricPayload(runId: string): Promise<RunMetricNotifyPaylo
   const [runRow] = await db
     .select({
       orgId: runs.orgId,
-      applicationId: runs.applicationId,
+      spaceId: runs.spaceId,
       packageId: runs.packageId,
       tokenUsage: runs.tokenUsage,
     })
@@ -270,7 +270,7 @@ async function loadRunMetricPayload(runId: string): Promise<RunMetricNotifyPaylo
   return {
     run_id: runId,
     org_id: runRow.orgId,
-    application_id: runRow.applicationId,
+    space_id: runRow.spaceId,
     package_id: runRow.packageId,
     token_usage: (runRow.tokenUsage as RunMetricNotifyPayload["token_usage"]) ?? null,
     cost_so_far: costUsd,

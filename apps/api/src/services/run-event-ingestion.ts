@@ -133,7 +133,7 @@ export async function getRunSinkContext(runId: string): Promise<RunSinkContext |
     .select({
       id: runs.id,
       orgId: runs.orgId,
-      applicationId: runs.applicationId,
+      spaceId: runs.spaceId,
       packageId: runs.packageId,
       agentScope: runs.agentScope,
       agentName: runs.agentName,
@@ -334,7 +334,7 @@ export async function finalizeRun(input: FinalizeRunInput): Promise<void> {
 
 async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   const { run, result } = input;
-  const scope = { orgId: run.orgId, applicationId: run.applicationId };
+  const scope = { orgId: run.orgId, spaceId: run.spaceId };
 
   // 1. Flush any buffered events before we close the sink.
   await drainBufferedEvents(run, { allowGaps: true });
@@ -519,7 +519,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   const terminalCost = typeof result.cost === "number" ? result.cost : null;
   if (terminalCost !== null || tokenUsageIsNonZero(validatedUsage)) {
     await writeRunnerLedgerRow(
-      { orgId: run.orgId, applicationId: run.applicationId },
+      { orgId: run.orgId, spaceId: run.spaceId },
       run.id,
       {
         cost: terminalCost,
@@ -558,7 +558,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     orgId: run.orgId,
     runId: run.id,
     packageId: run.packageId,
-    applicationId: run.applicationId,
+    spaceId: run.spaceId,
     status,
     packageEphemeral,
     duration: resolvedDurationMs,
@@ -712,7 +712,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
       if (actorContent.length > 0) {
         await addUnifiedMemories(
           run.packageId,
-          run.applicationId,
+          run.spaceId,
           run.orgId,
           persistenceScope,
           actorContent,
@@ -722,7 +722,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
       if (sharedContent.length > 0) {
         await addUnifiedMemories(
           run.packageId,
-          run.applicationId,
+          run.spaceId,
           run.orgId,
           { type: "shared" },
           sharedContent,
@@ -741,7 +741,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
         const slotScope = slot.scope === "shared" ? { type: "shared" as const } : persistenceScope;
         await upsertPinned(
           run.packageId,
-          run.applicationId,
+          run.spaceId,
           run.orgId,
           slotScope,
           key,
@@ -1056,7 +1056,7 @@ async function persistEventAndAdvance(
   // back. Otherwise we could leave `runs.last_event_sequence` advanced
   // with no `run_logs` row to back it — a silent loss that the next
   // event's CAS would tolerate without retrying the dropped one.
-  const scope = { orgId: run.orgId, applicationId: run.applicationId };
+  const scope = { orgId: run.orgId, spaceId: run.spaceId };
   const firstEvent = run.lastEventSequence === 0;
   const claimed = await db.transaction(async (tx) => {
     const rows = await tx
@@ -1122,7 +1122,7 @@ async function persistEventAndAdvance(
       orgId: run.orgId,
       runId: run.id,
       packageId: run.packageId,
-      applicationId: run.applicationId,
+      spaceId: run.spaceId,
       status: "started",
       packageEphemeral: isInlineShadowPackageId(run.packageId),
       ...(run.modelSource !== null ? { modelSource: run.modelSource } : {}),

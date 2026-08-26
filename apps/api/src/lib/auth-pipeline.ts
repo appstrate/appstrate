@@ -26,7 +26,7 @@ import { getAuth } from "@appstrate/db/auth";
 import { validateApiKey } from "../services/api-keys.ts";
 import { requireOrgContext } from "../middleware/org-context.ts";
 import { requirePlatformRealm } from "../middleware/realm-guard.ts";
-import { isEndUserInApp } from "../services/end-users.ts";
+import { isEndUserInSpace } from "../services/end-users.ts";
 import { ApiError, unauthorized } from "./errors.ts";
 import { clearStaleAuthCookies } from "./auth-cookies.ts";
 import { authChallengeResponder } from "./auth-challenges.ts";
@@ -140,8 +140,8 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
           c.set("permissions", new Set(resolution.permissions));
         }
         c.set("authMethod", resolution.authMethod);
-        if (resolution.applicationId !== undefined) {
-          c.set("applicationId", resolution.applicationId);
+        if (resolution.spaceId !== undefined) {
+          c.set("spaceId", resolution.spaceId);
         }
         if (resolution.endUser) {
           c.set("endUser", resolution.endUser);
@@ -179,7 +179,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
       c.set("permissions", resolveApiKeyPermissions(keyInfo.scopes, keyInfo.creatorRole));
       c.set("authMethod", "api_key");
       c.set("apiKeyId", keyInfo.keyId);
-      c.set("applicationId", keyInfo.applicationId);
+      c.set("spaceId", keyInfo.spaceId);
 
       // Appstrate-User header: resolve end-user context (API key only)
       const targetEndUserId = c.req.header("Appstrate-User");
@@ -193,13 +193,13 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
             param: "Appstrate-User",
           });
         }
-        const endUser = await isEndUserInApp(keyInfo.applicationId, targetEndUserId);
+        const endUser = await isEndUserInSpace(keyInfo.spaceId, targetEndUserId);
         if (!endUser) {
           throw new ApiError({
             status: 403,
             code: "invalid_end_user",
             title: "Invalid End-User",
-            detail: `End-user '${targetEndUserId}' does not exist or does not belong to this application`,
+            detail: `End-user '${targetEndUserId}' does not exist or does not belong to this space`,
             param: "Appstrate-User",
           });
         }
@@ -208,7 +208,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
           apiKeyId: keyInfo.keyId,
           authenticatedMember: keyInfo.userId,
           endUserId: endUser.id,
-          applicationId: endUser.applicationId,
+          spaceId: endUser.spaceId,
           method: c.req.method,
           path: c.req.path,
           ip: getClientIp(c),
@@ -362,7 +362,7 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
  * core allowlist.
  *
  * Exported so call sites that need to gate downstream middleware on the
- * same rule (e.g. app-context, api-version) can share this function.
+ * same rule (e.g. space-context, api-version) can share this function.
  *
  * `headers` carries the request-scoped bypasses (e.g. pairing-token bearer
  * auth on /pair/redeem) that would otherwise have to be encoded as
@@ -490,12 +490,12 @@ function skipOrgContext(path: string): boolean {
   // require org context and are intentionally not listed here.
   if (path === "/api/me/orgs" || path === "/api/me/orgs/") return true;
   // `/api/me/connections` is the unified user-scope connection view: it
-  // crosses orgs/applications by design, so requiring `X-Org-Id` would be
+  // crosses orgs/spaces by design, so requiring `X-Org-Id` would be
   // both wrong (no single org represents the caller's full inventory) and
   // user-hostile (would force the SPA to pick one before showing the list).
   if (path === "/api/me/connections" || path === "/api/me/connections/") return true;
   // `DELETE /api/me/connections/:id` — destructive global delete, derives
-  // applicationId from the row itself. Same rationale as the list above.
+  // spaceId from the row itself. Same rationale as the list above.
   if (/^\/api\/me\/connections\/[^/]+\/?$/.test(path)) return true;
   return false;
 }

@@ -19,13 +19,13 @@ import {
   computeHasUnpublishedChanges,
 } from "../services/package-versions.ts";
 import { getLastRun, getRunningRunsForPackage } from "../services/state/runs.ts";
-import { getInstalledPackageSettings } from "../services/application-packages.ts";
+import { getInstalledPackageSettings } from "../services/space-packages.ts";
 import { resolveRunTimeout } from "../services/run-limits.ts";
 import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { parseScopedName } from "@appstrate/core/naming";
 import { getItemId } from "./packages.ts";
 import { notFound } from "../lib/errors.ts";
-import { getAppScope } from "../lib/scope.ts";
+import { getSpaceScope } from "../lib/scope.ts";
 
 /**
  * Build the canonical Agent detail DTO — the exact object the `GET` agent
@@ -34,8 +34,8 @@ import { getAppScope } from "../lib/scope.ts";
  * (issue #646), reusing the single GET serializer.
  *
  * `requireAccess` defaults to `true` (the GET semantics: agent must be installed
- * in the current app). Mutation responses pass `false` — the caller just wrote
- * the agent within their org, so org-scope is the right gate and the app-install
+ * in the current space). Mutation responses pass `false` — the caller just wrote
+ * the agent within their org, so org-scope is the right gate and the space-install
  * gate must not 404 a successful write that was not auto-installed.
  *
  * Returns `null` when the agent is not found (or not accessible under
@@ -46,13 +46,13 @@ export async function buildAgentDetailDto(
   c: Context<AppEnv>,
   opts: { itemId?: string; requireAccess?: boolean; version?: string } = {},
 ): Promise<Record<string, unknown> | null> {
-  const scope = getAppScope(c);
-  const { orgId, applicationId } = scope;
+  const scope = getSpaceScope(c);
+  const { orgId, spaceId } = scope;
   const itemId = opts.itemId ?? getItemId(c);
   const requireAccess = opts.requireAccess !== false;
 
   const [agent, rawItem, versionCount, latestVersionDate] = await Promise.all([
-    requireAccess ? getPackageWithAccess(itemId, orgId, applicationId) : getPackage(itemId, orgId),
+    requireAccess ? getPackageWithAccess(itemId, orgId, spaceId) : getPackage(itemId, orgId),
     getOrgItem(orgId, itemId, CONFIG_BY_TYPE.agent),
     getVersionCount(itemId),
     getLatestVersionCreatedAt(itemId),
@@ -97,7 +97,7 @@ export async function buildAgentDetailDto(
         }));
 
   const { values: storedValues, locked: lockedFields } = await getInstalledPackageSettings(
-    applicationId,
+    spaceId,
     agent.id,
   );
 
@@ -145,7 +145,7 @@ export async function buildAgentDetailDto(
         ...(e.scopes !== undefined ? { scopes: [...e.scopes] } : {}),
       })),
     },
-    // The agent's ONE parameter schema, plus the per-application layers the
+    // The agent's ONE parameter schema, plus the per-space layers the
     // launch form needs: `values` are the editor's stored defaults and
     // `locked_fields` the fields it froze (not asked at launch, not
     // overridable). Emitted unconditionally — a manifest with no `input`

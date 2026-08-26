@@ -46,7 +46,7 @@ import {
  * The deletion-outbox jobs that purge every object of a run's workspace: the
  * bundle plus the manifest, which the worker expands into the run's file
  * objects. Two bounded rows per run, no storage I/O — so ANY caller (run
- * finalize, org/application cascade) can enqueue them inside the very
+ * finalize, org/space cascade) can enqueue them inside the very
  * transaction that makes the run's deletion durable.
  */
 export function runWorkspaceDeletionJobs(runId: string, reason: string): StorageDeletionJobInput[] {

@@ -3,7 +3,7 @@
 /**
  * Uploads API — direct-upload creation + proxy-upload sink.
  *
- *   POST /api/uploads            → create upload (auth + app context)
+ *   POST /api/uploads            → create upload (auth + space context)
  *   PUT  /api/uploads/_content   → proxy sink (public, HMAC token-authenticated)
  *
  * The sink serves BOTH storage backends: filesystem always PUTs here, and
@@ -49,7 +49,7 @@ export function createUploadsRouter() {
   // catches up.
   router.post("/", rateLimit(20), async (c) => {
     const orgId = c.get("orgId");
-    const applicationId = c.get("applicationId");
+    const spaceId = c.get("spaceId");
     // Record BOTH creator identities (dashboard/API-key user OR end-user) so the
     // ownership gate on peek/consume can enforce that only the uploading
     // principal reads its own staged bytes. `actorInsert` produces the exact
@@ -58,7 +58,7 @@ export function createUploadsRouter() {
     const data = await readJsonBody(c, createUploadSchema, { allowEmpty: true });
     const upload = await createUpload({
       orgId,
-      applicationId,
+      spaceId,
       createdBy: userId,
       endUserId,
       name: data.name,

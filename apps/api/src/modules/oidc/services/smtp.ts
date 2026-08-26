@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Per-application SMTP: resolver + admin CRUD + test-send helper.
+ * Per-space SMTP: resolver + admin CRUD + test-send helper.
  *
  * Resolver:
- *  - `level=application` → reads `application_smtp_configs` for the referenced
- *    app. Absent → `null` (email features disabled, no fallback to env SMTP).
+ *  - `level=space` → reads `space_smtp_configs` for the referenced
+ *    space. Absent → `null` (email features disabled, no fallback to env SMTP).
  *  - `level=org` / `level=instance` → falls back to the env SMTP transport
  *    managed by `@appstrate/db/auth`. Still `null` when env SMTP is absent.
  *
  * Admin:
- *  - CRUD on the same row, keyed by `applicationId`.
+ *  - CRUD on the same row, keyed by `spaceId`.
  *  - Views never expose the password column (`SmtpConfigView` omits it by
  *    construction).
  *  - Mutations invalidate the resolver cache so admins see changes within
@@ -35,7 +35,7 @@ import { decryptCredentials, encryptCredentials } from "@appstrate/connect";
 import { resolveAndCheckHost } from "@appstrate/core/ssrf";
 import { getEnv } from "@appstrate/env";
 import type { SmtpConfigView } from "@appstrate/shared-types";
-import { applicationSmtpConfigs } from "@appstrate/db/schema";
+import { spaceSmtpConfigs } from "@appstrate/db/schema";
 import type { OAuthClientRecord } from "./oauth-admin.ts";
 import { createTtlCache } from "./ttl-cache.ts";
 import { logger } from "../../../lib/logger.ts";
@@ -45,7 +45,7 @@ export interface ResolvedSmtpConfig {
   transport: Transporter;
   fromAddress: string;
   fromName: string | null;
-  source: "per-app" | "instance";
+  source: "per-space" | "instance";
 }
 
 interface UpsertSmtpConfigInput {
@@ -62,7 +62,7 @@ const INSTANCE_CACHE_KEY = "__instance__";
 const cache = createTtlCache<ResolvedSmtpConfig>("oidc:smtp-cache-invalidate");
 
 export interface SpiedSmtpSend {
-  source: "per-app" | "instance";
+  source: "per-space" | "instance";
   to: string;
   from: string;
   subject: string;
@@ -74,7 +74,7 @@ export function _setSmtpSpy(fn: ((e: SpiedSmtpSend) => void) | null): void {
   smtpSpy = fn;
 }
 
-function wrapForSpy(transport: Transporter, source: "per-app" | "instance"): Transporter {
+function wrapForSpy(transport: Transporter, source: "per-space" | "instance"): Transporter {
   const originalSendMail = transport.sendMail.bind(transport);
   transport.sendMail = async (mail: Parameters<Transporter["sendMail"]>[0]) => {
     const result = await originalSendMail(mail);
@@ -100,12 +100,12 @@ function resolveSecure(mode: "auto" | "tls" | "starttls" | "none", port: number)
   return port === 465;
 }
 
-type SmtpRow = typeof applicationSmtpConfigs.$inferSelect;
+type SmtpRow = typeof spaceSmtpConfigs.$inferSelect;
 
 // CASING: `SmtpConfigView` is wire-facing (returned by the admin SMTP-config
 // routes) but carries camelCase members (`fromAddress`, `fromName`,
 // `secureMode`) where the snake_case wire convention would want
-// `from_address` / `from_name` / `secure_mode`. `applicationId`, `createdAt`,
+// `from_address` / `from_name` / `secure_mode`. `spaceId`, `createdAt`,
 // `updatedAt` are legitimate universal-field carve-outs; the three others are
 // a genuine drift. NOT fixed here: the shape is defined by `SmtpConfigView` in
 // `@appstrate/shared-types` (outside this module) and consumed by the SPA, so
@@ -113,7 +113,7 @@ type SmtpRow = typeof applicationSmtpConfigs.$inferSelect;
 // note only — see docs/CASING_CONVENTIONS.md.
 function mapRow(row: SmtpRow): SmtpConfigView {
   return {
-    applicationId: row.applicationId,
+    spaceId: row.spaceId,
     host: row.host,
     port: row.port,
     username: row.username,
@@ -133,8 +133,8 @@ async function buildTransport(row: SmtpRow): Promise<Transporter | null> {
   try {
     pass = decryptCredentials<{ pass: string }>(row.passEncrypted).pass;
   } catch (err) {
-    logger.error("oidc smtp: decryption failed for per-app config, treating as unconfigured", {
-      applicationId: row.applicationId,
+    logger.error("oidc smtp: decryption failed for per-space config, treating as unconfigured", {
+      spaceId: row.spaceId,
       error: getErrorMessage(err),
     });
     return null;
@@ -158,7 +158,7 @@ async function buildTransport(row: SmtpRow): Promise<Transporter | null> {
   const hostCheck = await resolveAndCheckHost(row.host);
   if (hostCheck.blocked) {
     logger.error("oidc smtp: host failed SSRF check, treating as unconfigured", {
-      applicationId: row.applicationId,
+      spaceId: row.spaceId,
       host: row.host,
       reason: hostCheck.reason,
     });
@@ -173,21 +173,21 @@ async function buildTransport(row: SmtpRow): Promise<Transporter | null> {
   });
 }
 
-async function resolvePerAppSmtp(applicationId: string): Promise<ResolvedSmtpConfig | null> {
-  return cache.getOrLoad(applicationId, async () => {
+async function resolvePerAppSmtp(spaceId: string): Promise<ResolvedSmtpConfig | null> {
+  return cache.getOrLoad(spaceId, async () => {
     const [row] = await db
       .select()
-      .from(applicationSmtpConfigs)
-      .where(eq(applicationSmtpConfigs.applicationId, applicationId))
+      .from(spaceSmtpConfigs)
+      .where(eq(spaceSmtpConfigs.spaceId, spaceId))
       .limit(1);
     if (!row) return null;
     const transport = await buildTransport(row);
     if (!transport) return null;
     return {
-      transport: wrapForSpy(transport, "per-app"),
+      transport: wrapForSpy(transport, "per-space"),
       fromAddress: row.fromAddress,
       fromName: row.fromName,
-      source: "per-app",
+      source: "per-space",
     };
   });
 }
@@ -225,18 +225,18 @@ function resolveInstanceSmtp(): ResolvedSmtpConfig | null {
 
 /** Resolve the SMTP transport for an OIDC flow. Returns `null` when unconfigured. */
 export async function resolveSmtpForClient(
-  client: Pick<OAuthClientRecord, "level" | "referencedApplicationId">,
+  client: Pick<OAuthClientRecord, "level" | "referencedSpaceId">,
 ): Promise<ResolvedSmtpConfig | null> {
-  if (client.level === "application") {
-    if (!client.referencedApplicationId) return null;
-    return resolvePerAppSmtp(client.referencedApplicationId);
+  if (client.level === "space") {
+    if (!client.referencedSpaceId) return null;
+    return resolvePerAppSmtp(client.referencedSpaceId);
   }
   return resolveInstanceSmtp();
 }
 
-/** Evict the cached per-app transport (call on upsert/delete). Publishes to pub/sub. */
-export async function invalidateSmtpCache(applicationId: string): Promise<void> {
-  await cache.delete(applicationId);
+/** Evict the cached per-space transport (call on upsert/delete). Publishes to pub/sub. */
+export async function invalidateSmtpCache(spaceId: string): Promise<void> {
+  await cache.delete(spaceId);
 }
 
 /** Test-only: clear the entire cache. */
@@ -246,23 +246,23 @@ export function _clearSmtpCacheForTesting(): void {
 
 // ───────────────────────── Admin CRUD ─────────────────────────
 
-export async function getSmtpConfig(applicationId: string): Promise<SmtpConfigView | null> {
+export async function getSmtpConfig(spaceId: string): Promise<SmtpConfigView | null> {
   const [row] = await db
     .select()
-    .from(applicationSmtpConfigs)
-    .where(eq(applicationSmtpConfigs.applicationId, applicationId))
+    .from(spaceSmtpConfigs)
+    .where(eq(spaceSmtpConfigs.spaceId, spaceId))
     .limit(1);
   return row ? mapRow(row) : null;
 }
 
 export async function upsertSmtpConfig(
-  applicationId: string,
+  spaceId: string,
   input: UpsertSmtpConfigInput,
 ): Promise<SmtpConfigView> {
   const passEncrypted = encryptCredentials({ pass: input.pass });
   const now = new Date();
   const values = {
-    applicationId,
+    spaceId,
     host: input.host,
     port: input.port,
     username: input.username,
@@ -273,37 +273,34 @@ export async function upsertSmtpConfig(
     updatedAt: now,
   };
   const [row] = await db
-    .insert(applicationSmtpConfigs)
+    .insert(spaceSmtpConfigs)
     .values({ ...values, createdAt: now })
     .onConflictDoUpdate({
-      target: applicationSmtpConfigs.applicationId,
+      target: spaceSmtpConfigs.spaceId,
       set: values,
     })
     .returning();
-  await invalidateSmtpCache(applicationId);
+  await invalidateSmtpCache(spaceId);
   return mapRow(row!);
 }
 
-export async function deleteSmtpConfig(applicationId: string): Promise<boolean> {
+export async function deleteSmtpConfig(spaceId: string): Promise<boolean> {
   const deleted = await db
-    .delete(applicationSmtpConfigs)
-    .where(eq(applicationSmtpConfigs.applicationId, applicationId))
-    .returning({ id: applicationSmtpConfigs.applicationId });
-  await invalidateSmtpCache(applicationId);
+    .delete(spaceSmtpConfigs)
+    .where(eq(spaceSmtpConfigs.spaceId, spaceId))
+    .returning({ id: spaceSmtpConfigs.spaceId });
+  await invalidateSmtpCache(spaceId);
   return deleted.length > 0;
 }
 
 /** Send a test email via the persisted config. Errors are re-raised verbatim. */
-export async function sendTestEmail(
-  applicationId: string,
-  to: string,
-): Promise<{ messageId: string }> {
+export async function sendTestEmail(spaceId: string, to: string): Promise<{ messageId: string }> {
   const resolved = await resolveSmtpForClient({
-    level: "application",
-    referencedApplicationId: applicationId,
+    level: "space",
+    referencedSpaceId: spaceId,
   });
   if (!resolved) {
-    throw new Error("SMTP configuration not found for this application");
+    throw new Error("SMTP configuration not found for this space");
   }
   const info = await resolved.transport.sendMail({
     from: resolved.fromName
@@ -312,10 +309,10 @@ export async function sendTestEmail(
     to,
     subject: "Appstrate — Test SMTP",
     text:
-      "This is a test email sent from your per-application SMTP configuration. " +
+      "This is a test email sent from your per-space SMTP configuration. " +
       "If you received it, your SMTP settings are correctly wired up.",
     html:
-      "<p>This is a test email sent from your per-application SMTP configuration.</p>" +
+      "<p>This is a test email sent from your per-space SMTP configuration.</p>" +
       "<p>If you received it, your SMTP settings are correctly wired up.</p>",
   });
   return { messageId: info.messageId ?? "" };

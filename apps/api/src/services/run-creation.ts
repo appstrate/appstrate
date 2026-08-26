@@ -45,7 +45,7 @@ interface SinkRequest {
 interface CreateRunInput {
   runId: string;
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   actor: Actor | null;
   agent: LoadedPackage;
   input?: Record<string, unknown> | null;
@@ -95,7 +95,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   const {
     runId,
     orgId,
-    applicationId,
+    spaceId,
     actor,
     input: runInput,
     apiKeyId,
@@ -105,7 +105,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
 
   // Readiness (`validateAgentReadiness`) is NOT re-run here. The single
   // caller — `POST /api/runs/remote` — already validates the
-  // (agent, input, applicationId, actor) tuple before it gets here: the
+  // (agent, input, spaceId, actor) tuple before it gets here: the
   // `registry` branch calls `validateAgentReadiness` directly, the `inline`
   // branch runs it inside `runInlinePreflight`. Neither passes
   // `runOverrides`, and neither can: `CreateRemoteRunBodySchema` is
@@ -188,7 +188,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
       agentManifest: agent.manifest as Record<string, unknown>,
       packageId: agent.id,
       actor,
-      scope: { orgId, applicationId },
+      scope: { orgId, spaceId },
       runOverrides: null,
       // Remote runs are never scheduled, so there is no frozen schedule
       // override on this path (mechanism #3 applies to platform runs only).
@@ -226,7 +226,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   });
 
   // --- Insert run row via the state-layer helper (single source of truth
-  //     for runs inserts — covers runNumber allocation, app-scoping, and
+  //     for runs inserts — covers runNumber allocation, space-scoping, and
   //     sink bookkeeping consistently across both origins).
   const agentDenorm = extractRunAgentDenorm(agent);
 
@@ -241,7 +241,7 @@ export async function createRun(input: CreateRunInput): Promise<CreateRunResult>
   // runner row is the un-attributed mirror. (The platform path resolves a model
   // at creation and stamps `modelSource` — see `run-context-builder.ts`.)
   await createRunRow(
-    { orgId, applicationId },
+    { orgId, spaceId },
     {
       id: runId,
       packageId: agent.id,

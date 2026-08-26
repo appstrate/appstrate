@@ -48,7 +48,7 @@ function normalizeAudiences(aud: unknown): string[] {
  * Polymorphic access-token claim shape. Every OIDC-minted token carries
  * `actor_type` as the discriminant. Dashboard-user tokens additionally
  * carry `org_id` + `org_role`; end-user tokens additionally carry
- * `application_id` + `end_user_id`. `sub` is always present (Better Auth
+ * `space_id` + `end_user_id`. `sub` is always present (Better Auth
  * `user.id`).
  */
 export interface AccessTokenClaims {
@@ -69,8 +69,8 @@ export interface AccessTokenClaims {
   orgId?: string;
   /** Dashboard flow: `owner` / `admin` / `member` / `viewer`. */
   orgRole?: OrgRole;
-  /** End-user flow: owning application id. */
-  applicationId?: string;
+  /** End-user flow: owning space id. */
+  spaceId?: string;
   /** End-user flow: `eu_…` id of the impersonated end-user. */
   endUserId?: string;
   /** CLI flow: refresh-token family id this access token was issued
@@ -252,7 +252,7 @@ export async function verifyEndUserAccessToken(
     scope: typeof extra.scope === "string" ? extra.scope : undefined,
     orgId: typeof extra.org_id === "string" ? extra.org_id : undefined,
     orgRole,
-    applicationId: typeof extra.application_id === "string" ? extra.application_id : undefined,
+    spaceId: typeof extra.space_id === "string" ? extra.space_id : undefined,
     endUserId: typeof extra.end_user_id === "string" ? extra.end_user_id : undefined,
     cliFamilyId: typeof extra.cli_family_id === "string" ? extra.cli_family_id : undefined,
   };

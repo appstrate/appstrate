@@ -66,7 +66,7 @@ interface ConsentPageProps {
   action: string;
   /** CSRF token injected into the form + paired cookie. */
   csrfToken: string;
-  /** Resolved branding for the owning application. */
+  /** Resolved branding for the owning space. */
   branding: ResolvedAppBranding;
   /** Optional error message displayed above the form. */
   error?: string;
@@ -83,7 +83,7 @@ export function renderConsentPage(props: ConsentPageProps): RawHtml {
       <span class="client">${props.clientName}</span> souhaite accéder à votre compte
       ${props.branding.name}.
     </p>
-    <p>Cette application aura accès à :</p>
+    <p>Cette space aura accès à :</p>
     <ul class="scopes">
       ${scopeItems}
     </ul>

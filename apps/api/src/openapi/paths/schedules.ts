@@ -11,7 +11,7 @@ export const schedulesPaths = {
       description: "List all schedules across all agents for the organization.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
       ],
       responses: {
         "200": {
@@ -47,7 +47,7 @@ export const schedulesPaths = {
       description: "List all cron schedules configured for a specific agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -83,7 +83,7 @@ export const schedulesPaths = {
       description: "Create a cron schedule for an agent.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/PackageScope" },
         { $ref: "#/components/parameters/PackageName" },
       ],
@@ -138,7 +138,7 @@ export const schedulesPaths = {
                 actor: {
                   type: "object",
                   description:
-                    "Execution identity for runs this schedule fires (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this application). Omit to default to the calling identity. Requires `schedules:write`.",
+                    "Execution identity for runs this schedule fires (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this space). Omit to default to the calling identity. Requires `schedules:write`.",
                   properties: {
                     user_id: { type: "string" },
                     end_user_id: { type: "string" },
@@ -168,7 +168,7 @@ export const schedulesPaths = {
                 userId: "usr_r3t5w8y1z6",
                 endUserId: null,
                 orgId: "org_r3t5w8y1z6",
-                applicationId: "app_r3t5w8y1z6",
+                spaceId: "spc_r3t5w8y1z6",
                 name: "Weekday morning sort",
                 enabled: true,
                 cron_expression: "0 9 * * 1-5",
@@ -217,7 +217,7 @@ export const schedulesPaths = {
       description: "Get a single schedule by ID.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -233,7 +233,7 @@ export const schedulesPaths = {
                 userId: "usr_r3t5w8y1z6",
                 endUserId: null,
                 orgId: "org_r3t5w8y1z6",
-                applicationId: "app_r3t5w8y1z6",
+                spaceId: "spc_r3t5w8y1z6",
                 name: "Weekday morning sort",
                 enabled: true,
                 cron_expression: "0 9 * * 1-5",
@@ -267,7 +267,7 @@ export const schedulesPaths = {
       description: "Update a cron schedule (expression, timezone, enabled state, or input).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       requestBody: {
@@ -312,7 +312,7 @@ export const schedulesPaths = {
                 actor: {
                   type: "object",
                   description:
-                    "Re-point the schedule's execution identity (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this application). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`.",
+                    "Re-point the schedule's execution identity (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this space). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`.",
                   properties: {
                     user_id: { type: "string" },
                     end_user_id: { type: "string" },
@@ -366,7 +366,7 @@ export const schedulesPaths = {
       description: "Permanently delete a cron schedule.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -388,7 +388,7 @@ export const schedulesPaths = {
       description: "List recent runs triggered by a specific schedule.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
         {
           name: "limit",

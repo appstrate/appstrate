@@ -18,7 +18,7 @@ import {
   revokeApiKey,
 } from "../services/api-keys.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { getAppScope, getOrgScope } from "../lib/scope.ts";
+import { getSpaceScope, getOrgScope } from "../lib/scope.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 
 export const createApiKeySchema = z.object({
@@ -43,16 +43,16 @@ export function createApiKeysRouter() {
     return c.json(listResponse(available));
   });
 
-  // GET /api/api-keys — list active keys for the current application
+  // GET /api/api-keys — list active keys for the current space
   router.get("/", requirePermission("api-keys", "read"), async (c) => {
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     const keys = await listApiKeys(scope);
     return c.json(listResponse(keys));
   });
 
   // POST /api/api-keys — create a new key (returns raw key ONCE)
   router.post("/", requirePermission("api-keys", "create"), async (c) => {
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     const user = c.get("user");
     const data = await readJsonBody(c, createApiKeySchema);
 
@@ -102,10 +102,10 @@ export function createApiKeysRouter() {
   router.delete("/:id", requirePermission("api-keys", "revoke"), async (c) => {
     const keyId = c.req.param("id")!;
     // Issue #172 (extension): API keys may only revoke keys within their
-    // own bound application. Sessions retain org-wide reach (admins manage
-    // all apps from the dashboard) — the scope's shape encodes the intent
+    // own bound space. Sessions retain org-wide reach (admins manage
+    // all spaces from the dashboard) — the scope's shape encodes the intent
     // at the type level.
-    const scope = c.get("authMethod") === "api_key" ? getAppScope(c) : getOrgScope(c);
+    const scope = c.get("authMethod") === "api_key" ? getSpaceScope(c) : getOrgScope(c);
 
     try {
       const revoked = await revokeApiKey(scope, keyId);

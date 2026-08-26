@@ -8,7 +8,7 @@ import { recordProcessAnomaly } from "@appstrate/core/telemetry";
 import { logger } from "./lib/logger.ts";
 import { bootCritical, bootBackground, probeUsercontentReachability } from "./lib/boot.ts";
 import { createShutdownHandler } from "./lib/shutdown.ts";
-import { isAppScopedPath, requireAppContext } from "./middleware/app-context.ts";
+import { isSpaceScopedPath, requireSpaceContext } from "./middleware/space-context.ts";
 import { requestId } from "./middleware/request-id.ts";
 import { telemetry } from "./middleware/telemetry.ts";
 import { clientIp } from "./middleware/client-ip.ts";
@@ -26,7 +26,7 @@ import { createModelsRouter } from "./routes/models.ts";
 import { createModelProviderCredentialsRouter } from "./routes/model-provider-credentials.ts";
 import { createModelProvidersOAuthRouter } from "./routes/model-providers-oauth.ts";
 import { createInternalRouter } from "./routes/internal.ts";
-import { createApplicationsRouter } from "./routes/applications.ts";
+import { createSpacesRouter } from "./routes/spaces.ts";
 import { createNotificationsRouter } from "./routes/notifications.ts";
 import { createPackagesRouter } from "./routes/packages.ts";
 import { createRealtimeRouter } from "./routes/realtime.ts";
@@ -164,7 +164,7 @@ Install the CLI (\`curl -fsSL https://get.appstrate.dev | bash\` or \`bunx appst
 app.get("/llms.txt", (c) => c.text(LLMS_TXT));
 
 // Cookie-less HTML file preview — mounted BEFORE the auth pipeline so no
-// cookie/API-key/org/app middleware ever runs on it. Authorized solely by the
+// cookie/API-key/org/space middleware ever runs on it. Authorized solely by the
 // short-lived signed token in the URL; serves untrusted agent HTML under a
 // strict CSP + injected meta CSP. Dedicated `/preview/*` namespace, so it never
 // collides with the `/files` SPA page route below.
@@ -208,15 +208,15 @@ applyAuthPipeline(app, {
   authStrategies: getModuleAuthStrategies,
 });
 
-// App context middleware: resolve X-Application-Id for app-scoped routes.
-// The prefix list itself lives in `middleware/app-context.ts` so this wiring
+// Space context middleware: resolve X-Space-Id for space-scoped routes.
+// The prefix list itself lives in `middleware/space-context.ts` so this wiring
 // and the test harness read the same one.
-const appContextMiddleware = requireAppContext();
+const spaceContextMiddleware = requireSpaceContext();
 app.use("*", async (c, next) => {
   if (skipAuth(c.req.path, getModulePublicPaths(), c.req.raw.headers)) return next();
   if (!c.get("user")) return next();
-  if (!isAppScopedPath(c.req.path)) return next();
-  return appContextMiddleware(c, next);
+  if (!isSpaceScopedPath(c.req.path)) return next();
+  return spaceContextMiddleware(c, next);
 });
 
 // API versioning: resolve Appstrate-Version header > org setting > default.
@@ -237,7 +237,7 @@ app.use("*", async (c, next) => {
 
 // `Idempotency-Key` honesty guard — refuse the header on mutating routes that
 // do not honour it, rather than ignoring it. Mounted last in the pipeline so
-// auth/org/app failures still answer 401/403 first, and before every router
+// auth/org/space failures still answer 401/403 first, and before every router
 // below so it covers all of `routes/` and the module routers.
 app.use("*", idempotencyGuard());
 
@@ -325,7 +325,7 @@ app.route("/api/orgs", orgsRouter);
 
 // User-scoped identity routes — `/api/me/orgs` skips `requireOrgContext`
 // (it is the prerequisite to setting `X-Org-Id`); the other routes run
-// inside org (or application) context.
+// inside org (or space) context.
 app.route("/api/me", meRouter);
 
 app.route("/api/agents", userAgentsRouter); // Must be before agentsRouter (import/delete routes)
@@ -353,7 +353,7 @@ app.route("/api/proxies", createProxiesRouter());
 app.route("/api/models", createModelsRouter());
 app.route("/api/model-provider-credentials", createModelProviderCredentialsRouter());
 app.route("/api/model-providers-oauth", createModelProvidersOAuthRouter());
-app.route("/api/applications", createApplicationsRouter());
+app.route("/api/spaces", createSpacesRouter());
 app.route("/api/library", createLibraryRouter());
 app.route("/api", profileRouter);
 app.route("/api/realtime", createRealtimeRouter());

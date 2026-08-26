@@ -8,7 +8,7 @@
  *  - single-use consumption of the token's `jti` (atomic SET-NX on the KV cache)
  *  - the page-cookie variant (httpOnly, SameSite=Strict) that carries context
  *    across the standalone hosted form, plus its double-submit CSRF nonce
- *  - reconstruct `AppScope` / `Actor` from token claims (no request auth)
+ *  - reconstruct `SpaceScope` / `Actor` from token claims (no request auth)
  *
  * The token is the ONLY context source for the unauthenticated hosted surface;
  * the credential secret never rides the token or the query string.
@@ -24,7 +24,7 @@ import {
 import { getEnv } from "@appstrate/env";
 import { getCache } from "../../infra/index.ts";
 import type { AppEnv } from "../../types/index.ts";
-import type { AppScope } from "../../lib/scope.ts";
+import type { SpaceScope } from "../../lib/scope.ts";
 import type { Actor } from "../../lib/actor.ts";
 
 /** Cookie carrying the page-scoped session token across the hosted form. */
@@ -161,9 +161,9 @@ export function csrfMatches(claims: ConnectSessionClaims, header: string | undef
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-/** Build an `AppScope` from token claims. */
-export function scopeFromClaims(claims: ConnectSessionClaims): AppScope {
-  return { orgId: claims.org_id, applicationId: claims.application_id };
+/** Build a `SpaceScope` from token claims. */
+export function scopeFromClaims(claims: ConnectSessionClaims): SpaceScope {
+  return { orgId: claims.org_id, spaceId: claims.space_id };
 }
 
 /** Build an `Actor` from token claims (exactly one of user/end-user is set). */

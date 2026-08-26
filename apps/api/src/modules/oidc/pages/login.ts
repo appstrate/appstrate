@@ -26,7 +26,7 @@ interface LoginPageProps {
   email?: string;
   /** CSRF token injected into the form + paired cookie. */
   csrfToken: string;
-  /** Resolved branding for the owning application. */
+  /** Resolved branding for the owning space. */
   branding: ResolvedAppBranding;
   /** Available social auth providers. */
   socialProviders?: { google?: boolean; github?: boolean };

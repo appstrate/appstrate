@@ -3,12 +3,12 @@
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 
 /**
- * Library — consolidated package list across the org's applications.
+ * Library — consolidated package list across the org's spaces.
  *
  * Single endpoint that powers the dashboard library view: returns every
  * package visible to the org (org-owned + system) grouped by type, with
  * a per-package `installed_in` array indicating which of the caller's
- * applications already have the package installed.
+ * spaces already have the package installed.
  */
 
 export const libraryPaths = {
@@ -16,16 +16,16 @@ export const libraryPaths = {
     get: {
       operationId: "getLibrary",
       tags: ["Library"],
-      summary: "List all packages visible to the org with per-app install state",
+      summary: "List all packages visible to the org with per-space install state",
       description:
         "Returns every package available to the caller's organization (org-owned + system) " +
         "grouped by type (`agent`, `skill`, `mcp-server`, `integration`). Each package carries an " +
-        "`installed_in` array of application ids — the applications belonging to the caller's " +
+        "`installed_in` array of space ids — the spaces belonging to the caller's " +
         "org where the package is currently installed. Ephemeral packages are excluded.\n\n" +
-        "The response also includes the org's applications (id, name, isDefault) so the UI " +
-        "can render a single grid keyed by app without an additional `/api/applications` call.",
+        "The response also includes the org's spaces (id, name, isDefault) so the UI " +
+        "can render a single grid keyed by space without an additional `/api/spaces` call.",
       parameters: [
-        // `/api/library` is org-scoped, not app-scoped — no X-Application-Id.
+        // `/api/library` is org-scoped, not space-scoped — no X-Space-Id.
         { $ref: "#/components/parameters/XOrgId" },
       ],
       responses: {
@@ -36,19 +36,19 @@ export const libraryPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["object", "applications", "packages"],
+                required: ["object", "spaces", "packages"],
                 properties: {
                   object: { type: "string", enum: ["library"] },
-                  applications: {
+                  spaces: {
                     type: "array",
                     description:
-                      "Applications belonging to the caller's organization. The default " +
-                      "application (if any) is listed first.",
+                      "Spaces belonging to the caller's organization. The default " +
+                      "space (if any) is listed first.",
                     items: {
                       type: "object",
                       required: ["id", "name", "isDefault"],
                       properties: {
-                        id: { type: "string", description: "Application id (`app_…`)." },
+                        id: { type: "string", description: "Space id (`spc_…`)." },
                         name: { type: "string" },
                         isDefault: { type: "boolean" },
                       },
@@ -70,9 +70,9 @@ export const libraryPaths = {
               },
               example: {
                 object: "library",
-                applications: [
-                  { id: "app_default", name: "Default", isDefault: true },
-                  { id: "app_staging", name: "Staging", isDefault: false },
+                spaces: [
+                  { id: "spc_default", name: "Default", isDefault: true },
+                  { id: "spc_staging", name: "Staging", isDefault: false },
                 ],
                 packages: {
                   agent: [
@@ -82,7 +82,7 @@ export const libraryPaths = {
                       source: "local",
                       name: "Inbox Triage",
                       description: "Sorts incoming Gmail threads into priority buckets.",
-                      installed_in: ["app_default"],
+                      installed_in: ["spc_default"],
                     },
                   ],
                   skill: [],
@@ -94,7 +94,7 @@ export const libraryPaths = {
                       source: "system",
                       name: "Gmail",
                       description: "Google Mail OAuth integration.",
-                      installed_in: ["app_default", "app_staging"],
+                      installed_in: ["spc_default", "spc_staging"],
                     },
                   ],
                 },

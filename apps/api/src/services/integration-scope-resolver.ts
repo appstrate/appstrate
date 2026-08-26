@@ -3,7 +3,7 @@
 /**
  * Phase 2 — OAuth scope inference for integration connect flows.
  *
- * `computeRequiredScopes` walks every agent installed in the application,
+ * `computeRequiredScopes` walks every agent installed in the space,
  * reads its `integrations_configuration[id]` selection (§4.4), and
  * unions the scopes contributed by each:
  *
@@ -34,13 +34,13 @@
 
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { applicationPackages, integrationConnections, packages } from "@appstrate/db/schema";
+import { spacePackages, integrationConnections, packages } from "@appstrate/db/schema";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { requiredScopesForAgent, resolveEffectiveToolSelection } from "@appstrate/core/integration";
 
 import type { Actor } from "../lib/actor.ts";
 import { actorFilter } from "../lib/actor.ts";
-import type { AppScope } from "../lib/scope.ts";
+import type { SpaceScope } from "../lib/scope.ts";
 import { getIntegration } from "./integration-service.ts";
 
 interface ComputeRequiredScopesResult {
@@ -49,7 +49,7 @@ interface ComputeRequiredScopesResult {
 }
 
 interface ScopeResolverInput {
-  scope: AppScope;
+  scope: SpaceScope;
   integrationId: string;
   /** Auth key on the integration manifest — selects the `required_scopes[authKey]` slice. */
   authKey: string;
@@ -57,7 +57,7 @@ interface ScopeResolverInput {
 
 /**
  * Compute the OAuth scope set required by every agent installed in the
- * application that depends on this integration's auth. Returns an empty
+ * space that depends on this integration's auth. Returns an empty
  * `required` array when no installed agent uses the integration (callers
  * should fall back to the manifest defaults).
  *
@@ -84,14 +84,9 @@ export async function computeRequiredScopes(
   // column the runtime resolver reads at spawn time.
   const installed = await db
     .select({ draftManifest: packages.draftManifest })
-    .from(applicationPackages)
-    .innerJoin(packages, eq(packages.id, applicationPackages.packageId))
-    .where(
-      and(
-        eq(applicationPackages.applicationId, input.scope.applicationId),
-        eq(packages.type, "agent"),
-      ),
-    );
+    .from(spacePackages)
+    .innerJoin(packages, eq(packages.id, spacePackages.packageId))
+    .where(and(eq(spacePackages.spaceId, input.scope.spaceId), eq(packages.type, "agent")));
 
   const required = new Set<string>();
 
@@ -139,7 +134,7 @@ export async function computeRequiredScopes(
  * scopes by guessing a connection id.
  */
 export async function getCurrentScopesGranted(input: {
-  scope: AppScope;
+  scope: SpaceScope;
   integrationId: string;
   authKey: string;
   actor: Actor;
@@ -153,7 +148,7 @@ export async function getCurrentScopesGranted(input: {
         eq(integrationConnections.id, input.connectionId),
         eq(integrationConnections.integrationId, input.integrationId),
         eq(integrationConnections.authKey, input.authKey),
-        eq(integrationConnections.applicationId, input.scope.applicationId),
+        eq(integrationConnections.spaceId, input.scope.spaceId),
         actorFilter(input.actor, {
           userId: integrationConnections.userId,
           endUserId: integrationConnections.endUserId,

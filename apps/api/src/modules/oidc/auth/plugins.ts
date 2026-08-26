@@ -11,13 +11,13 @@
  *   1. **Org-level** (`level: "org"`): dashboard users (org operators) scoped
  *      to a single organization pinned at client creation. Tokens carry
  *      `actor_type: "dashboard_user"` + `org_id` + `org_role`.
- *   2. **Application-level** (`level: "application"`): application end-users
- *      scoped to a single application. Tokens carry `actor_type: "end_user"`
- *      + `application_id` + `end_user_id`.
+ *   2. **Space-level** (`level: "space"`): space end-users
+ *      scoped to a single space. Tokens carry `actor_type: "end_user"`
+ *      + `space_id` + `end_user_id`.
  *
  * `customAccessTokenClaims` reads the parsed `metadata` JSON column for the
  * active OAuth client and dispatches to `buildOrgLevelClaims` or
- * `buildApplicationLevelClaims` accordingly. All claim names are RFC 9068 / OIDC Core
+ * `buildSpaceLevelClaims` accordingly. All claim names are RFC 9068 / OIDC Core
  * snake_case.
  *
  * The JWT plugin is bundled automatically by oauth-provider
@@ -44,8 +44,8 @@ import { getOrgSettings } from "../../../services/organizations.ts";
 import {
   resolveOrCreateEndUser,
   UnverifiedEmailConflictError,
-  AppSignupClosedError,
-  loadAppById,
+  SpaceSignupClosedError,
+  loadSpaceById,
 } from "../services/enduser-mapping.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import {
@@ -65,9 +65,9 @@ import { markClientSelfService } from "../services/oauth-admin.ts";
 import { mcpValidAudiences, initMcpValidAudiences } from "../../../lib/audiences.ts";
 
 interface ClientMetadata {
-  level?: "org" | "application" | "instance";
+  level?: "org" | "space" | "instance";
   referencedOrgId?: string;
-  referencedApplicationId?: string;
+  referencedSpaceId?: string;
   /**
    * The OAuth client id — stashed by `createClient` so the
    * `customAccessTokenClaims` closure can recover the client identity and
@@ -306,7 +306,7 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
           return {
             ...base,
             org_id: strOrNull(claims.org_id),
-            application_id: strOrNull(claims.application_id),
+            space_id: strOrNull(claims.space_id),
             end_user_id: strOrNull(claims.end_user_id),
           };
         }
@@ -447,8 +447,8 @@ async function buildClaimsForClient(
   if (level === "org") {
     return buildOrgLevelClaims(user, metadata!);
   }
-  if (level === "application") {
-    return buildApplicationLevelClaims(user, metadata!);
+  if (level === "space") {
+    return buildSpaceLevelClaims(user, metadata!);
   }
   logger.warn("oidc: oauth_client metadata missing level — rejecting token", {
     module: "oidc",
@@ -467,9 +467,9 @@ async function buildInstanceLevelClaims(user: {
 }): Promise<Record<string, unknown>> {
   // Instance clients serve platform audiences — dashboard SPA + satellite
   // admin tools. Reject end-user realm sessions so an OIDC token minted
-  // under app A's scope cannot be replayed to mint an instance token.
+  // under space A's scope cannot be replayed to mint an instance token.
   await assertUserRealm(user.id, "platform", { clientLevel: "instance" });
-  // Instance tokens carry NO org or application context. The user is a
+  // Instance tokens carry NO org or space context. The user is a
   // Better Auth user who may belong to multiple organizations — org is
   // resolved per-request via X-Org-Id after authentication.
   return {
@@ -513,7 +513,7 @@ async function buildOrgLevelClaims(
   }
 
   // Org-level clients serve platform audiences (dashboard users mapped to
-  // org_members). Reject end-user realm sessions — an end-user of app A
+  // org_members). Reject end-user realm sessions — an end-user of space A
   // cannot become a dashboard user of org X by OIDC replay.
   await assertUserRealm(user.id, "platform", { clientLevel: "org", orgId });
 
@@ -566,67 +566,61 @@ async function buildOrgLevelClaims(
       throw new APIError("FORBIDDEN", {
         error: "access_denied",
         error_description:
-          "Registration is disabled for this application. Contact your administrator to be added to the organization.",
+          "Registration is disabled for this space. Contact your administrator to be added to the organization.",
       });
     }
     throw err;
   }
 }
 
-async function buildApplicationLevelClaims(
+async function buildSpaceLevelClaims(
   user: { id: string; email: string; name?: string | null; emailVerified?: boolean },
   metadata: ClientMetadata,
 ): Promise<Record<string, unknown>> {
-  const applicationId = metadata.referencedApplicationId;
-  if (!applicationId) {
-    logger.warn(
-      "oidc: application-level client missing referencedApplicationId — rejecting token",
-      {
-        module: "oidc",
-        userId: user.id,
-      },
-    );
+  const spaceId = metadata.referencedSpaceId;
+  if (!spaceId) {
+    logger.warn("oidc: space-level client missing referencedSpaceId — rejecting token", {
+      module: "oidc",
+      userId: user.id,
+    });
     // Structured OAuth2 error (like the org-level path) so the caller gets a
     // diagnosable body instead of a bare Error that BA surfaces as an opaque
     // 500. The client's server-side config is broken, not the request.
     throw new APIError("INTERNAL_SERVER_ERROR", {
       error: "server_error",
       error_description:
-        "This application client is misconfigured (no application is bound to it). Contact the administrator.",
+        "This space client is misconfigured (no space is bound to it). Contact the administrator.",
     });
   }
-  const app = await loadAppById(applicationId);
-  if (!app) {
-    logger.warn("oidc: application referenced by oauth_client has been deleted", {
+  const space = await loadSpaceById(spaceId);
+  if (!space) {
+    logger.warn("oidc: space referenced by oauth_client has been deleted", {
       module: "oidc",
       userId: user.id,
-      applicationId,
+      spaceId,
     });
     throw new APIError("INTERNAL_SERVER_ERROR", {
       error: "server_error",
       error_description:
-        "The application bound to this client no longer exists. Contact the administrator.",
+        "The space bound to this client no longer exists. Contact the administrator.",
     });
   }
 
-  // Application-level tokens are end-user tokens. Enforce that the
-  // authenticating BA user was provisioned for THIS application — reject
-  // platform admins (realm="platform") and end-users of a different app
+  // Space-level tokens are end-user tokens. Enforce that the
+  // authenticating BA user was provisioned for THIS space — reject
+  // platform admins (realm="platform") and end-users of a different space
   // (realm="end_user:B"). Per decision #2 (no cross-audience sharing),
-  // a platform admin wanting to test their own app as an end-user must
+  // a platform admin wanting to test their own space as an end-user must
   // re-signup with a separate account.
-  await assertUserRealm(user.id, `end_user:${applicationId}`, {
-    clientLevel: "application",
-    applicationId,
+  await assertUserRealm(user.id, `end_user:${spaceId}`, {
+    clientLevel: "space",
+    spaceId,
   });
   // Load the signup policy via the short-TTL cache — closed default on any
   // lookup failure. Same rationale as `buildOrgLevelClaims`.
   const loaded = metadata.clientId ? await loadClientSignupPolicy(metadata.clientId) : null;
   const signupPolicy = {
-    allowSignup:
-      loaded?.level === "application" &&
-      loaded.applicationId === applicationId &&
-      loaded.allowSignup,
+    allowSignup: loaded?.level === "space" && loaded.spaceId === spaceId && loaded.allowSignup,
   };
 
   // NOTE: this call may be the SECOND invocation for a given login —
@@ -644,7 +638,7 @@ async function buildApplicationLevelClaims(
         name: user.name ?? null,
         emailVerified: user.emailVerified === true,
       },
-      app,
+      space,
       signupPolicy,
     );
     return {
@@ -652,22 +646,22 @@ async function buildApplicationLevelClaims(
       email: resolved.email ?? user.email,
       name: resolved.name ?? user.name ?? user.email,
       org_id: resolved.orgId,
-      application_id: resolved.applicationId,
+      space_id: resolved.spaceId,
       end_user_id: resolved.endUserId,
     };
   } catch (err) {
     if (err instanceof UnverifiedEmailConflictError) {
       logger.warn("oidc: unverified-email conflict during token issuance", {
         module: "oidc",
-        applicationId: err.applicationId,
+        spaceId: err.spaceId,
         email: err.email,
       });
       throw err;
     }
-    if (err instanceof AppSignupClosedError) {
+    if (err instanceof SpaceSignupClosedError) {
       logger.warn("oidc: end-user signup blocked by client policy", {
         module: "oidc",
-        applicationId: err.applicationId,
+        spaceId: err.spaceId,
         authUserId: err.authUserId,
       });
       // Map to a structured OAuth2 error so downstream satellites (portal)
@@ -675,13 +669,13 @@ async function buildApplicationLevelClaims(
       throw new APIError("FORBIDDEN", {
         error: "access_denied",
         error_description:
-          "Sign-up is disabled for this application. Ask your administrator to create your account before signing in.",
+          "Sign-up is disabled for this space. Ask your administrator to create your account before signing in.",
       });
     }
     logger.error("oidc: end-user resolution failed during token issuance", {
       module: "oidc",
       userId: user.id,
-      applicationId,
+      spaceId,
       error: getErrorMessage(err),
     });
     throw err;

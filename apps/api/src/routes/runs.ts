@@ -17,7 +17,7 @@ import {
 import { listUserRuns } from "../services/state/notifications.ts";
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import { parseRequestInput } from "../services/input-parser.ts";
-import { getInstalledPackageSettings } from "../services/application-packages.ts";
+import { getInstalledPackageSettings } from "../services/space-packages.ts";
 import { deleteRunWorkspace } from "../services/run-workspace-storage.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { abortRun } from "../services/run-tracker.ts";
@@ -37,7 +37,7 @@ import type { IntegrationManifestCache } from "../services/integration-service.t
 import { assertExplicitModelExists } from "../services/org-models.ts";
 import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { getActor } from "../lib/actor.ts";
-import { getAppScope } from "../lib/scope.ts";
+import { getSpaceScope } from "../lib/scope.ts";
 import { getInlineRunLimits } from "../services/run-limits.ts";
 import {
   assertContextFilesFieldAvailable,
@@ -245,10 +245,10 @@ export function createRunsRouter() {
       // (e.g. the read-back below) must NOT delete a live run's input files.
       let launched = false;
       try {
-        // Per-application settings first: they carry the editor defaults and
+        // Per-space settings first: they carry the editor defaults and
         // the locked-field list the input resolution needs, and the readiness
         // preflight below reuses this same row (one read per trigger).
-        const packageSettings = await getInstalledPackageSettings(c.get("applicationId"), agent.id);
+        const packageSettings = await getInstalledPackageSettings(c.get("spaceId"), agent.id);
 
         const inputResult = await parseRequestInput(
           c,
@@ -302,7 +302,7 @@ export function createRunsRouter() {
 
         await resolveRunPreflight({
           agent: effectiveAgent,
-          applicationId: c.get("applicationId"),
+          spaceId: c.get("spaceId"),
           orgId,
           actor,
           connectionOverrides: connectionOverrides ?? null,
@@ -336,7 +336,7 @@ export function createRunsRouter() {
           proxyId: proxyIdOverride ?? packageSettings.proxyId,
           overrideVersionLabel,
           dependencyOverrides: dependencyOverrides ?? null,
-          applicationId: c.get("applicationId"),
+          spaceId: c.get("spaceId"),
           apiKeyId: c.get("apiKeyId") ?? undefined,
           connectionOverrides: connectionOverrides ?? null,
           traceparent: runTraceparent(c),
@@ -364,7 +364,7 @@ export function createRunsRouter() {
         // #635, plus status, version_ref, agent_scope, …) without a follow-up
         // GET. The run row exists once `prepareAndExecuteRun` resolves.
         // No legacy `runId` alias (#657): the run id is `id`.
-        const row = await getRunFull(getAppScope(c), runId, getActor(c));
+        const row = await getRunFull(getSpaceScope(c), runId, getActor(c));
         if (!row) {
           // The run row was inserted by `prepareAndExecuteRun` above and is
           // read back on the same scope, so a miss means it was deleted out
@@ -395,7 +395,7 @@ export function createRunsRouter() {
     requireAgent(),
     async (c) => {
       const agent = c.get("package");
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       const { limit, offset } = parseListPagination(c, { defaultLimit: 50 });
       const endUser = c.get("endUser");
       const result = await listPackageRuns(scope, agent.id, {
@@ -409,7 +409,7 @@ export function createRunsRouter() {
     },
   );
 
-  // GET /api/runs — global paginated run list across the application.
+  // GET /api/runs — global paginated run list across the space.
   // Supports filtering by ?user=me (self-owned runs), ?kind=inline|package|all
   // for inline-run filtering, ?status, ?start_date/?end_date, and
   // ?chat_session_id for the conversation context sidebar.
@@ -421,7 +421,7 @@ export function createRunsRouter() {
   // paging by `Link` headers never construct them by hand.
   router.get("/runs", requirePermission("runs", "read"), async (c) => {
     const actor = getActor(c);
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     const { limit, offset } = parseListPagination(c, { defaultLimit: 20 });
     // `user` is a closed set of one: `me`. Validated BEFORE the end-user branch
     // below so the param means the same thing for every caller, instead of a
@@ -477,7 +477,7 @@ export function createRunsRouter() {
   // ownership is verified BEFORE any waiting starts.
   router.get("/runs/:id", requirePermission("runs", "read"), async (c) => {
     const runId = c.req.param("id")!;
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     // Validate the wait param before touching the DB so a malformed value
     // 400s even for runs the caller could not read.
     const waitMs = parseWaitQuery(c.req.query("wait"));
@@ -547,7 +547,7 @@ export function createRunsRouter() {
   // loop, so an unmetered caller could turn this read into a DB hammer.
   router.get("/runs/:id/logs", requirePermission("runs", "read"), rateLimit(120), async (c) => {
     const runId = c.req.param("id")!;
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     const exec = await getRun(scope, runId);
     if (!exec) {
       throw notFound("Run not found");
@@ -604,7 +604,7 @@ export function createRunsRouter() {
   // credits for cancelled runs that had already burned LLM tokens.
   router.post("/runs/:id/cancel", requirePermission("runs", "cancel"), async (c) => {
     const runId = c.req.param("id")!;
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
 
     const run = await getRun(scope, runId);
     if (!run) {
@@ -613,7 +613,7 @@ export function createRunsRouter() {
 
     // End-user boundary: `runs:cancel` is an OIDC-grantable end-user scope, but
     // an end-user must only cancel their OWN runs — mirror the ownership guard
-    // the read paths (`GET /runs/:id`, `/logs`) apply. Scope alone (org+app) is
+    // the read paths (`GET /runs/:id`, `/logs`) apply. Scope alone (org+space) is
     // not enough here.
     const endUser = c.get("endUser");
     if (endUser && run.endUserId !== endUser.id) {
@@ -680,7 +680,7 @@ export function createRunsRouter() {
     requirePermission("agents", "run"),
     async (c) => {
       const orgId = c.get("orgId");
-      const applicationId = c.get("applicationId");
+      const spaceId = c.get("spaceId");
       const actor = getActor(c);
 
       // `rerun_from` is rejected by `inlineRunBodySchema` itself — see the field
@@ -689,7 +689,7 @@ export function createRunsRouter() {
 
       // Preflight BEFORE any input file streams — a bad manifest or
       // readiness problem 4xxes without touching storage.
-      const preflight = await runInlinePreflight({ orgId, applicationId, actor, body });
+      const preflight = await runInlinePreflight({ orgId, spaceId, actor, body });
 
       // ----- Context files (fan-in by reference) -----
       // Both entry paths land on ONE synthesized reserved input field, and the
@@ -735,7 +735,7 @@ export function createRunsRouter() {
 
         const { packageId } = await triggerInlineRun({
           orgId,
-          applicationId,
+          spaceId,
           actor,
           runId,
           preflight: effectivePreflight,
@@ -759,7 +759,7 @@ export function createRunsRouter() {
         // to read from the `packageId` envelope field is the resource's own
         // `packageId`. The run row exists once `triggerInlineRun` resolves
         // (`prepareAndExecuteRun` inserts it before returning).
-        const row = await getRunFull(getAppScope(c), runId, getActor(c));
+        const row = await getRunFull(getSpaceScope(c), runId, getActor(c));
         if (!row) {
           // The shadow run was inserted by `triggerInlineRun` and read back on
           // the same scope; a miss means a concurrent teardown deleted it. The
@@ -798,11 +798,11 @@ export function createRunsRouter() {
     requirePermission("agents", "run"),
     async (c) => {
       const orgId = c.get("orgId");
-      const applicationId = c.get("applicationId");
+      const spaceId = c.get("spaceId");
       const actor = getActor(c);
       const body = await readJsonBody(c, inlineRunBodySchema);
 
-      await runInlinePreflight({ orgId, applicationId, actor, body, mode: "accumulate" });
+      await runInlinePreflight({ orgId, spaceId, actor, body, mode: "accumulate" });
       // Same reserved-name rule as the run endpoint — a manifest that validates
       // here must be runnable there.
       assertContextFilesFieldAvailable(body.manifest, body.input);
@@ -823,7 +823,7 @@ export function createRunsRouter() {
     requirePermission("runs", "delete"),
     async (c) => {
       const agent = c.get("package");
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
 
       // No pre-check here: `deletePackageRuns` counts active runs inside its
       // own transaction, under the per-org run-admission advisory lock, and

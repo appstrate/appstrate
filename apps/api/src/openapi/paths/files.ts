@@ -3,7 +3,7 @@
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 
 // Shared File object schema (mirrors FileDto in services/files.ts).
-// Field casing follows CASING_CONVENTIONS.md carve-out 4b: `applicationId`,
+// Field casing follows CASING_CONVENTIONS.md carve-out 4b: `spaceId`,
 // `packageId`, `createdAt`, `expiresAt` are on the universal DB-convention list
 // (camelCase everywhere); `run_id` / `chat_session_id` are NOT on it, so they
 // stay snake_case domain fields (matching the `notification` DTO's `run_id`).
@@ -14,7 +14,7 @@ const fileSchema = {
     "id",
     "uri",
     "purpose",
-    "applicationId",
+    "spaceId",
     "run_id",
     "chat_session_id",
     "packageId",
@@ -36,7 +36,7 @@ const fileSchema = {
       description: "Stable `appfile://file_…` reference — pass in a run's file input field.",
     },
     purpose: { type: "string", enum: ["user_upload", "agent_output"] },
-    applicationId: { type: "string" },
+    spaceId: { type: "string" },
     run_id: { type: ["string", "null"], description: "Run container, or null." },
     chat_session_id: { type: ["string", "null"], description: "Chat-session container, or null." },
     packageId: { type: ["string", "null"], description: "Producing agent package id, or null." },
@@ -151,10 +151,10 @@ const fileWithPreviewSchema = {
  * ever runs — all three come from the shared pipeline, not from the handler,
  * and were previously undocumented:
  *
- *  - `400` — `requireAppContext()` with no resolvable `X-Application-Id`.
- *  - `403` — the RBAC guard without `files:read`, or `requireAppContext()`
- *    when the header contradicts the application the credential is pinned to.
- *  - `404` — `requireAppContext()` when the application id is not in the
+ *  - `400` — `requireSpaceContext()` with no resolvable `X-Space-Id`.
+ *  - `403` — the RBAC guard without `files:read`, or `requireSpaceContext()`
+ *    when the header contradicts the space the credential is pinned to.
+ *  - `404` — `requireSpaceContext()` when the space id is not in the
  *    caller's organization (same status the handlers use for an unreadable
  *    file, deliberately indistinguishable).
  */
@@ -171,7 +171,7 @@ export const filesPaths = {
       tags: ["Files"],
       summary: "List files",
       description:
-        "List the files visible to the caller in the current application. Requires the " +
+        "List the files visible to the caller in the current space. Requires the " +
         "`files:read` permission (the family gate — mirrors `runs:read`); on top of it, " +
         "each row is filtered by its own container ACL, so members see their own files " +
         "(and system-owned ones) and end-users see only their own. Filter by `purpose`, " +
@@ -179,7 +179,7 @@ export const filesPaths = {
         "paginate with `startingAfter` + `limit`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         {
           name: "purpose",
           in: "query",
@@ -268,7 +268,7 @@ export const filesPaths = {
         "the caller cannot read returns 404.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -292,7 +292,7 @@ export const filesPaths = {
         "A file referenced by a run cannot be deleted until those consumer runs are removed.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -335,7 +335,7 @@ export const filesPaths = {
         "An id the caller cannot read returns 404.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {
@@ -365,7 +365,7 @@ export const filesPaths = {
         "— a user upload is served only to its creator (403 otherwise).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
       ],
       responses: {

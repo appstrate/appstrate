@@ -66,12 +66,12 @@ type Mode = "fail-fast" | "accumulate";
 
 export async function runInlinePreflight(params: {
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   actor: Actor | null;
   body: InlineRunBody;
   mode?: Mode;
 }): Promise<InlineRunPreflightResult> {
-  const { orgId, applicationId, actor, body, mode = "fail-fast" } = params;
+  const { orgId, spaceId, actor, body, mode = "fail-fast" } = params;
 
   // In accumulate mode we gather problems from every independent stage and
   // throw once at the end. In fail-fast mode stages throw as soon as they
@@ -123,7 +123,7 @@ export async function runInlinePreflight(params: {
   // Prompt validation is delegated entirely to agent readiness (stage 3).
   // Only `input` is validated here, since readiness has no notion of run
   // input. An inline agent runs on an ephemeral shadow package with no
-  // `application_packages` row, so the only layer below the caller's input
+  // `space_packages` row, so the only layer below the caller's input
   // is the manifest's own author defaults.
   const callerInput =
     body.input && typeof body.input === "object" && !Array.isArray(body.input)
@@ -175,7 +175,7 @@ export async function runInlinePreflight(params: {
       await validateAgentReadiness({
         agent: probeAgent,
         orgId,
-        applicationId,
+        spaceId,
         actor,
         ...(runOverrides ? { runOverrides } : {}),
       });
@@ -184,7 +184,7 @@ export async function runInlinePreflight(params: {
         await collectAgentReadinessErrors({
           agent: probeAgent,
           orgId,
-          applicationId,
+          spaceId,
           actor,
           ...(runOverrides ? { runOverrides } : {}),
         }),
@@ -204,7 +204,7 @@ export async function runInlinePreflight(params: {
   if (!manifest) {
     logger.error("preflight invariant broken: reached return without a parsed manifest", {
       orgId,
-      applicationId,
+      spaceId,
       mode,
       accumulated: accumulated.length,
     });

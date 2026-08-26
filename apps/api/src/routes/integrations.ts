@@ -3,10 +3,10 @@
 /**
  * AFPS integration marketplace REST surface.
  *
- * Routes (all mounted under `/api/integrations`, app-scoped):
+ * Routes (all mounted under `/api/integrations`, space-scoped):
  *
  *   - `GET    /`                                     — list available + active status
- *   - `POST   /:packageId/activate`                  — activate in current app
+ *   - `POST   /:packageId/activate`                  — activate in current space
  *   - `DELETE /:packageId/deactivate`                — deactivate (non-destructive)
  *   - `GET    /:packageId`                           — manifest + per-auth status for caller
  *   - `GET    /:packageId/auths/:authKey/clients`    — admin: list available OAuth clients
@@ -61,9 +61,9 @@ import { popupHtmlClose, popupHtmlError } from "../lib/oauth-popup-html.ts";
 import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-error-diagnostic.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor, type Actor } from "../lib/actor.ts";
-import { getAppScope } from "../lib/scope.ts";
+import { getSpaceScope } from "../lib/scope.ts";
 import { recordAuditFromContext } from "./../services/audit.ts";
-import { updateInstalledPackage } from "../services/application-packages.ts";
+import { updateInstalledPackage } from "../services/space-packages.ts";
 import { listIntegrations } from "../services/integration-service.ts";
 import {
   assertIsIntegration,
@@ -275,7 +275,7 @@ export const oauthClientUpdateSchema = oauthClientSchema
 // ─────────────────────────────────────────────
 
 /**
- * Refuse a connection-creation attempt when the (application, integration)
+ * Refuse a connection-creation attempt when the (space, integration)
  * has `block_user_connections=true` and the caller is not an org admin.
  *
  * Workflow this enables: admin toggles the gate → connects → marks the
@@ -289,12 +289,12 @@ export const oauthClientUpdateSchema = oauthClientSchema
  */
 async function assertConnectionCreationAllowed(
   c: import("hono").Context<AppEnv>,
-  applicationId: string,
+  spaceId: string,
   integrationId: string,
 ): Promise<void> {
   const role = c.get("orgRole");
   if (role === "owner" || role === "admin") return;
-  const blocked = await isUserConnectionCreationBlocked(applicationId, integrationId);
+  const blocked = await isUserConnectionCreationBlocked(spaceId, integrationId);
   if (blocked) {
     throw new ApiError({
       status: 403,
@@ -309,20 +309,20 @@ async function assertConnectionCreationAllowed(
  * Guard a client-supplied reconnect target (`connection_id`) against IDOR: the
  * connect flows honor an arbitrary connection id to renew a credential in
  * place, so before that id is trusted we must confirm it is a connection the
- * caller actually owns in THIS application. Without this a caller could pass
- * another actor's (or another app's) connection id and overwrite its
+ * caller actually owns in THIS space. Without this a caller could pass
+ * another actor's (or another space's) connection id and overwrite its
  * credentials through the single-writer persist path. A miss surfaces as a
  * plain 404 so cross-scope existence is never disclosed.
  */
 async function assertConnectionBelongsToActor(
   connectionId: string,
-  applicationId: string,
+  spaceId: string,
   actor: Actor,
 ): Promise<void> {
   const owner = await loadConnectionOwnership(connectionId);
   const ownedByActor =
     owner !== null &&
-    owner.applicationId === applicationId &&
+    owner.spaceId === spaceId &&
     (actor.type === "user" ? owner.userId === actor.id : owner.endUserId === actor.id);
   if (!ownedByActor) {
     throw notFound("Connection not found");
@@ -351,17 +351,17 @@ export function createIntegrationsRouter() {
   ] as const;
 
   router.get("/", requirePermission("integrations", "read"), async (c) => {
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     const fields = parseFieldSelection(c, INTEGRATION_FIELDS);
     const pagination = parseListPagination(c, { defaultLimit: 100 });
     const summaries = await listIntegrations(scope.orgId);
     // Decorate with `active` + `block_user_connections` flags for the current
-    // application via the shared resolver — the single source of truth, also
+    // space via the shared resolver — the single source of truth, also
     // used by the agent-editor detail endpoint, so the two surfaces can never
     // diverge (env-backed SYSTEM integrations stay active on both).
     const activations = await resolveIntegrationActivations(
       summaries.map((s) => s.id),
-      scope.applicationId,
+      scope.spaceId,
     );
     const enriched = summaries.map((s) => {
       const a = activations.get(s.id)!;
@@ -434,7 +434,7 @@ export function createIntegrationsRouter() {
     // extraction (token response + id_token + userinfo) + persist through the
     // single credential writer.
     try {
-      const scope = { orgId: result.orgId, applicationId: result.applicationId };
+      const scope = { orgId: result.orgId, spaceId: result.spaceId };
       const { auth } = await readIntegrationAuth(scope, result.packageId, result.authKey);
       const strategy = resolveStrategy(auth);
       await strategy.complete(
@@ -470,7 +470,7 @@ export function createIntegrationsRouter() {
 
   router.get("/:packageId{@[^/]+/[^/]+}", requirePermission("integrations", "read"), async (c) => {
     const packageId = c.req.param("packageId")!;
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     const actor = getActor(c);
     await assertIsIntegration(scope, packageId);
     const status = await getIntegrationAuthStatuses(scope, packageId, actor);
@@ -479,7 +479,7 @@ export function createIntegrationsRouter() {
 
   // ─── Activate / deactivate ─────────────────
   //
-  // Activation is the `application_packages.enabled` flag, NOT row presence.
+  // Activation is the `space_packages.enabled` flag, NOT row presence.
   // Both routes upsert the flag (never delete the row) so the rule holds
   // uniformly for every integration — including a SYSTEM integration that is
   // auto-active with no row: deleting the row there would re-trigger the
@@ -487,7 +487,7 @@ export function createIntegrationsRouter() {
   // false` opt-out (sticky across runs). For a plain integration the observable
   // result is unchanged (active ⇄ inactive). Deactivation stays non-destructive:
   // connections, OAuth clients, pins and org defaults FK to (package,
-  // application) — not to application_packages — so they survive and are reused
+  // space) — not to space_packages — so they survive and are reused
   // on reactivation (mirrors how disabling a provider keeps its credentials).
 
   router.post(
@@ -495,7 +495,7 @@ export function createIntegrationsRouter() {
     requirePermission("integrations", "install"),
     async (c) => {
       const packageId = c.req.param("packageId")!;
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       const actor = getActor(c);
       await assertIsIntegration(scope, packageId);
       await updateInstalledPackage(scope, packageId, { enabled: true });
@@ -517,7 +517,7 @@ export function createIntegrationsRouter() {
     requirePermission("integrations", "uninstall"),
     async (c) => {
       const packageId = c.req.param("packageId")!;
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       await assertIsIntegration(scope, packageId);
       await updateInstalledPackage(scope, packageId, { enabled: false });
       await recordAuditFromContext(c, {
@@ -547,7 +547,7 @@ export function createIntegrationsRouter() {
     async (c) => {
       const packageId = c.req.param("packageId")!;
       const authKey = c.req.param("authKey")!;
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       // Resolve the integration + auth first so an unknown integration/auth 404s
       // (the spec declares 404 here) instead of leaking an empty client list.
       await readIntegrationAuth(scope, packageId, authKey);
@@ -567,7 +567,7 @@ export function createIntegrationsRouter() {
     async (c) => {
       const packageId = c.req.param("packageId")!;
       const authKey = c.req.param("authKey")!;
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       const body = await readJsonBody(c, setDefaultClientSchema);
       await setDefaultIntegrationClient(scope, packageId, authKey, body.client_ref);
       await recordAuditFromContext(c, {
@@ -590,7 +590,7 @@ export function createIntegrationsRouter() {
     async (c) => {
       const packageId = c.req.param("packageId")!;
       const authKey = c.req.param("authKey")!;
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       const body = await readJsonBody(c, oauthClientCreateSchema);
       // Reject a manual client on an auto-provisioned (remote MCP) auth. Its
       // token endpoint only accepts a DCR/CIMD-acquired public client, so a
@@ -636,7 +636,7 @@ export function createIntegrationsRouter() {
       if (!z.uuid().safeParse(clientId).success) {
         throw notFound(`OAuth client '${clientId}' not found`);
       }
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       const body = await readJsonBody(c, oauthClientUpdateSchema);
       const client = await updateIntegrationOAuthClient(scope, clientId, {
         clientId: body.client_id,
@@ -669,7 +669,7 @@ export function createIntegrationsRouter() {
       if (!z.uuid().safeParse(clientId).success) {
         throw notFound(`OAuth client '${clientId}' not found`);
       }
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       const { deletedConnections } = await deleteIntegrationOAuthClient(scope, clientId);
       await recordAuditFromContext(c, {
         action: "integration.oauth_client.deleted",
@@ -693,15 +693,15 @@ export function createIntegrationsRouter() {
     async (c) => {
       const packageId = c.req.param("packageId")!;
       const authKey = c.req.param("authKey")!;
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       const actor = getActor(c);
-      await assertConnectionCreationAllowed(c, scope.applicationId, packageId);
+      await assertConnectionCreationAllowed(c, scope.spaceId, packageId);
       const body = await readJsonBody(c, importConnectionSchema);
-      // A reconnect target must be the caller's own connection in this app —
+      // A reconnect target must be the caller's own connection in this space —
       // otherwise the credential write below would overwrite an arbitrary
       // (possibly another actor's) connection (IDOR).
       if (body.connection_id) {
-        await assertConnectionBelongsToActor(body.connection_id, scope.applicationId, actor);
+        await assertConnectionBelongsToActor(body.connection_id, scope.spaceId, actor);
       }
       try {
         const { auth } = await readIntegrationAuth(scope, packageId, authKey);
@@ -747,14 +747,14 @@ export function createIntegrationsRouter() {
     async (c) => {
       const packageId = c.req.param("packageId")!;
       const authKey = c.req.param("authKey")!;
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       const actor = getActor(c);
-      await assertConnectionCreationAllowed(c, scope.applicationId, packageId);
+      await assertConnectionCreationAllowed(c, scope.spaceId, packageId);
       const body = await readJsonBody(c, connectOAuthSchema, { allowEmpty: true });
       // Same reconnect-target IDOR guard as connect/fields: the connection_id is
       // carried into the OAuth state and honored at callback-time write.
       if (body.connection_id) {
-        await assertConnectionBelongsToActor(body.connection_id, scope.applicationId, actor);
+        await assertConnectionBelongsToActor(body.connection_id, scope.spaceId, actor);
       }
 
       const { auth } = await readIntegrationAuth(scope, packageId, authKey);
@@ -825,20 +825,20 @@ export function createIntegrationsRouter() {
     async (c) => {
       const packageId = c.req.param("packageId")!;
       const authKey = c.req.param("authKey")!;
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       const actor = getActor(c);
-      await assertConnectionCreationAllowed(c, scope.applicationId, packageId);
+      await assertConnectionCreationAllowed(c, scope.spaceId, packageId);
       const body = await readJsonBody(c, connectSessionSchema, { allowEmpty: true });
       // Same reconnect-target IDOR guard as connect/fields: the connection_id is
       // minted into the hosted-connect capability token and honored at write.
       if (body.connection_id) {
-        await assertConnectionBelongsToActor(body.connection_id, scope.applicationId, actor);
+        await assertConnectionBelongsToActor(body.connection_id, scope.spaceId, actor);
       }
       // Validate the auth exists (404/409 surfaced now, not after the redirect).
       await readIntegrationAuth(scope, packageId, authKey);
       const { connectUrl, expiresAt } = buildConnectUrl({
         org_id: scope.orgId,
-        application_id: scope.applicationId,
+        space_id: scope.spaceId,
         ...(actor.type === "user" ? { user_id: actor.id } : { end_user_id: actor.id }),
         package_id: packageId,
         auth_key: authKey,
@@ -1007,7 +1007,7 @@ export function createIntegrationsRouter() {
     requirePermission("integrations", "read"),
     async (c) => {
       const packageId = c.req.param("packageId")!;
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       const actor = getActor(c);
       const items = await listIntegrationConnections(scope, packageId, actor);
       return c.json(listResponse(items));
@@ -1025,7 +1025,7 @@ export function createIntegrationsRouter() {
     async (c) => {
       assertOrgAdmin(c);
       const packageId = c.req.param("packageId")!;
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       const actor = getActor(c);
       await assertIsIntegration(scope, packageId);
       const body = await readJsonBody(c, updateSettingsSchema);
@@ -1049,14 +1049,14 @@ export function createIntegrationsRouter() {
     requirePermission("integrations", "read"),
     async (c) => {
       const packageId = c.req.param("packageId")!;
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       const items = await listIntegrationPins(scope, packageId);
       return c.json(listResponse(items));
     },
   );
 
   /**
-   * R2 — installed agents in the application that declare this integration
+   * R2 — installed agents in the space that declare this integration
    * in their dependencies. Drives the "pin a new agent" picker on the
    * integration detail page so admins can manage pins from one place.
    */
@@ -1065,7 +1065,7 @@ export function createIntegrationsRouter() {
     requirePermission("integrations", "read"),
     async (c) => {
       const packageId = c.req.param("packageId")!;
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       const items = await listAgentsConsumingIntegration(scope, packageId);
       return c.json(listResponse(items));
     },
@@ -1078,7 +1078,7 @@ export function createIntegrationsRouter() {
       assertOrgAdmin(c);
       const packageId = c.req.param("packageId")!;
       const agentPackageId = c.req.param("agentPackageId")!;
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       const body = await readJsonBody(c, setPinSchema);
       const userId = c.get("user")?.id ?? null;
       const pin = await upsertIntegrationPin(scope, packageId, {
@@ -1103,7 +1103,7 @@ export function createIntegrationsRouter() {
       assertOrgAdmin(c);
       const packageId = c.req.param("packageId")!;
       const agentPackageId = c.req.param("agentPackageId")!;
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       const result = await deleteIntegrationPin(scope, packageId, agentPackageId);
       if (result.deleted) {
         await recordAuditFromContext(c, {
@@ -1118,7 +1118,7 @@ export function createIntegrationsRouter() {
   );
 
   // ─── Org default connection (cross-agent governance) ─────────────────────
-  // One default connection per (application, integration) — the resolver
+  // One default connection per (space, integration) — the resolver
   // baseline for every consuming agent (enforce → org-wide lock; soft →
   // overridable by member pins). Admin-only.
 
@@ -1127,7 +1127,7 @@ export function createIntegrationsRouter() {
     requirePermission("integrations", "read"),
     async (c) => {
       const packageId = c.req.param("packageId")!;
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       const item = await getOrgDefault(scope, packageId);
       // Bare resource, or 204 when no default is set — same contract as
       // PUT (bare resource) and the models/proxies default endpoints (#657).
@@ -1142,7 +1142,7 @@ export function createIntegrationsRouter() {
     async (c) => {
       assertOrgAdmin(c);
       const packageId = c.req.param("packageId")!;
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       const body = await readJsonBody(c, setOrgDefaultSchema);
       const userId = c.get("user")?.id ?? null;
       const def = await upsertOrgDefault(scope, packageId, {
@@ -1166,7 +1166,7 @@ export function createIntegrationsRouter() {
     async (c) => {
       assertOrgAdmin(c);
       const packageId = c.req.param("packageId")!;
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       const result = await deleteOrgDefault(scope, packageId);
       if (result.deleted) {
         await recordAuditFromContext(c, {
@@ -1185,7 +1185,7 @@ export function createIntegrationsRouter() {
     requirePermission("integrations", "connect"),
     async (c) => {
       const connectionId = c.req.param("connectionId")!;
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       const actor = getActor(c);
       // `connectionId` hits a `uuid` column — a non-UUID raises PG `22P02` and
       // surfaces as a 500. Validate first and collapse to the same `notFound`
@@ -1194,7 +1194,7 @@ export function createIntegrationsRouter() {
         throw notFound(`Connection '${connectionId}' not found`);
       }
       const ownership = await loadConnectionOwnership(connectionId);
-      if (!ownership || ownership.applicationId !== scope.applicationId) {
+      if (!ownership || ownership.spaceId !== scope.spaceId) {
         throw notFound(`Connection '${connectionId}' not found`);
       }
       // Owner OR org admin can edit metadata. Sharing the connection

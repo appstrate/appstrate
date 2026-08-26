@@ -50,7 +50,7 @@
  * Observability:
  *   - `X-Run-Id` request header (optional; Phase 4 populates it) pins
  *     a call to a specific `runs` row so cost rolls up per-run. The id is
- *     validated against the principal (org + application + actor for JWT
+ *     validated against the principal (org + space + actor for JWT
  *     users) before the upstream call — see {@link assertRunAttributable}.
  *   - Audit log on every call (authMethod, principalId, preset, status,
  *     duration).
@@ -128,20 +128,20 @@ export function createLlmProxyRouter() {
  *   1. The run exists inside the principal's org (`getRunAttribution` is
  *      org-scoped) — unknown and cross-org ids both map to the same 404 so
  *      a foreign tenant's run id cannot be probed for existence.
- *   2. The run belongs to the same application as the auth context, when the
- *      context carries one (always true for API keys — they are app-bound;
- *      JWT strategies may resolve without an application, in which case the
+ *   2. The run belongs to the same space as the auth context, when the
+ *      context carries one (always true for API keys — they are space-bound;
+ *      JWT strategies may resolve without a space, in which case the
  *      org boundary plus the actor check below is the enforced scope).
  *   3. For an actor-bound identity (`jwt_user`), the run must belong to that
  *      same user — a JWT user cannot attribute spend to another actor's run.
- *      API-key principals are app-scoped infrastructure identities (the run
+ *      API-key principals are space-scoped infrastructure identities (the run
  *      may legitimately carry a user/end-user actor or a sibling key), so the
- *      org + application boundary is their enforcement line.
+ *      org + space boundary is their enforcement line.
  *   4. The run is still active. A terminal run id must not become a reusable
  *      billing context for arbitrary post-run system-model calls.
  *
  * Because check 3 leaves an API key free to reference any live run of its own
- * application, this validation alone does NOT bound platform-paid spend — it
+ * space, this validation alone does NOT bound platform-paid spend — it
  * bounds cost *attribution*. Admission is enforced separately, per call, by
  * `enforceSystemProxyAdmission`, which gates every run-context call —
  * platform-supplied or BYOK — regardless of the referenced run's origin.
@@ -155,8 +155,8 @@ async function assertRunAttributable(
   if (!run) {
     throw notFound(`run ${runId} not found`);
   }
-  const applicationId = c.get("applicationId");
-  if (applicationId && run.applicationId !== applicationId) {
+  const spaceId = c.get("spaceId");
+  if (spaceId && run.spaceId !== spaceId) {
     throw notFound(`run ${runId} not found`);
   }
   if (principal.kind === "jwt_user" && run.userId !== principal.userId) {

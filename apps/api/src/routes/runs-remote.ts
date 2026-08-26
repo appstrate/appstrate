@@ -41,10 +41,10 @@ import { createRun } from "../services/run-creation.ts";
 import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { resolveRegistryAgent } from "../services/registry-run-resolver.ts";
 import { validateInput } from "../services/schema.ts";
-import { getInstalledPackageSettings } from "../services/application-packages.ts";
+import { getInstalledPackageSettings } from "../services/space-packages.ts";
 import { resolveEffectiveInput } from "../services/input-resolution.ts";
 import { validateAgentReadiness } from "../services/agent-readiness.ts";
-import { assertApplicationInScope } from "../services/applications.ts";
+import { assertSpaceInScope } from "../services/spaces.ts";
 import { asJSONSchemaObject, type JSONSchemaObject } from "@appstrate/core/form";
 import type { LoadedPackage } from "../types/index.ts";
 import type { AppEnv } from "../types/index.ts";
@@ -109,7 +109,7 @@ export const CreateRemoteRunBodySchema = z
         })
         .strict(),
     ]),
-    applicationId: z.string().min(1),
+    spaceId: z.string().min(1),
     input: z.record(z.string(), z.unknown()).optional().default({}),
     // Per-run dependency version overrides (#666/#686) — run-level, applies to
     // both source shapes. `"draft"` opts a declared skill/integration into its
@@ -184,29 +184,29 @@ export function createRunsRemoteRouter() {
 
       const orgId = c.get("orgId");
       const actor = getActor(c);
-      // The caller binds the run to one of their applications. The body value
+      // The caller binds the run to one of their spaces. The body value
       // is authoritative for this write surface, but it MUST be proven to
       // belong to the caller's org BEFORE any credential-bearing resolution
       // runs against it — otherwise a principal in org A could name an
-      // application owned by org B and receive org B's decrypted connection
+      // space owned by org B and receive org B's decrypted connection
       // credentials. Assert org membership up front (404 on mismatch); every
-      // downstream resolver keys on this applicationId.
-      const applicationId = body.applicationId;
-      // The caller's authenticated application context (`c.get("applicationId")`,
-      // resolved by `requireAppContext` from a credential pin — API key, OIDC
-      // bearer, any module auth strategy — or the X-Application-Id header) is
-      // the app-scope boundary for this write. The org-scope assertion below
-      // only proves app∈org, so without this check a credential pinned to app
-      // A could name a sibling app B in the body and escape its app scope (the
-      // path-param `apiKeyAppScopeGuard` doesn't cover the body). Enforced for
+      // downstream resolver keys on this spaceId.
+      const spaceId = body.spaceId;
+      // The caller's authenticated space context (`c.get("spaceId")`,
+      // resolved by `requireSpaceContext` from a credential pin — API key, OIDC
+      // bearer, any module auth strategy — or the X-Space-Id header) is
+      // the space-scope boundary for this write. The org-scope assertion below
+      // only proves space∈org, so without this check a credential pinned to space
+      // A could name a sibling space B in the body and escape its space scope (the
+      // path-param `apiKeySpaceScopeGuard` doesn't cover the body). Enforced for
       // EVERY auth method — gating on `authMethod === "api_key"` would leave
-      // the same escape open to any module strategy that pins an application
+      // the same escape open to any module strategy that pins a space
       // (e.g. oauth2-end-user bearers).
-      const pinnedAppId = c.get("applicationId");
-      if (pinnedAppId && applicationId !== pinnedAppId) {
-        throw forbidden("Caller's application scope does not include this application");
+      const pinnedSpaceId = c.get("spaceId");
+      if (pinnedSpaceId && spaceId !== pinnedSpaceId) {
+        throw forbidden("Caller's space scope does not include this space");
       }
-      await assertApplicationInScope({ orgId, applicationId });
+      await assertSpaceInScope({ orgId, spaceId });
 
       const src = body.source;
 
@@ -223,7 +223,7 @@ export function createRunsRemoteRouter() {
         // reconciliation, no shadow row, no "Inline" badge.
         const resolved = await resolveRegistryAgent({
           orgId,
-          applicationId,
+          spaceId,
           packageId: src.packageId,
           stage: src.stage,
           spec: src.spec,
@@ -233,12 +233,12 @@ export function createRunsRemoteRouter() {
         overrideVersionLabel = resolved.versionLabel;
         attributionPath = "registry";
 
-        // A cataloged agent has per-application settings, so the run's input
+        // A cataloged agent has per-space settings, so the run's input
         // resolves through the same four layers as a platform run: author
         // defaults < editor defaults < caller input, with locked fields
         // refused (400 `locked_input_field`). There is no schedule layer here.
         const { values: storedValues, locked: lockedFields } = await getInstalledPackageSettings(
-          applicationId,
+          spaceId,
           agentForRun.id,
         );
         const inputSchema = agentForRun.manifest.input?.schema;
@@ -275,7 +275,7 @@ export function createRunsRemoteRouter() {
         await validateAgentReadiness({
           agent: agentForRun,
           orgId,
-          applicationId,
+          spaceId,
           actor,
         });
       } else {
@@ -285,7 +285,7 @@ export function createRunsRemoteRouter() {
         // callers who want deterministic attribution use kind=registry.
         const preflight = await runInlinePreflight({
           orgId,
-          applicationId,
+          spaceId,
           actor,
           body: {
             manifest: src.manifest,
@@ -326,7 +326,7 @@ export function createRunsRemoteRouter() {
       const result = await createRun({
         runId,
         orgId,
-        applicationId,
+        spaceId,
         actor,
         agent: agentForRun,
         ...(overrideVersionLabel ? { overrideVersionLabel } : {}),
@@ -356,7 +356,7 @@ export function createRunsRemoteRouter() {
       logger.info("runs.remote.attribution", {
         runId: result.runId,
         orgId,
-        applicationId,
+        spaceId,
         path: attributionPath,
         packageId: agentForRun.id,
         versionLabel: overrideVersionLabel ?? null,
@@ -387,7 +387,7 @@ export function createRunsRemoteRouter() {
 
   // PATCH /api/runs/:runId/sink/extend — push out sink_expires_at for a
   // long-running remote run. Same auth as creation: agents:run. Runs are
-  // app-scoped but this route resolves the run by id (not app path) so the
+  // space-scoped but this route resolves the run by id (not space path) so the
   // handler checks ownership explicitly.
   router.patch(
     "/runs/:runId/sink/extend",
@@ -404,8 +404,8 @@ export function createRunsRemoteRouter() {
       const newExpiresAt = new Date(Date.now() + ttl * 1000);
 
       // Update only open sinks (not closed, not already expired) owned by
-      // the caller's org AND application. Filtering on `applicationId` too
-      // stops an app-A principal from extending an app-B run's sink within
+      // the caller's org AND space. Filtering on `spaceId` too
+      // stops a space-A principal from extending a space-B run's sink within
       // the same org. Mismatched ownership or closed sink → 404, which
       // avoids leaking whether a run exists across tenancies.
       const orgId = c.get("orgId");
@@ -422,7 +422,7 @@ export function createRunsRemoteRouter() {
           and(
             eq(runs.id, runId),
             eq(runs.orgId, orgId),
-            eq(runs.applicationId, c.get("applicationId")),
+            eq(runs.spaceId, c.get("spaceId")),
             sql`sink_closed_at IS NULL`,
             sql`sink_expires_at IS NOT NULL`,
           ),

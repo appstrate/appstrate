@@ -17,16 +17,16 @@
  *   - `stage: "draft"`     → `getPackage` reads `draftManifest`/`draftContent`.
  *                            `versionLabel = "draft"`. `spec` is rejected.
  *   - `stage: "published"` → `resolveExportVersion` (explicit `spec` →
- *                            pinned-in-app version → `latest` dist-tag).
+ *                            pinned-in-space version → `latest` dist-tag).
  *                            Manifest + prompt loaded from `package_versions`.
  *
  * Access control: the package must exist in the org's catalog AND be
- * installed in the calling application — same 404 semantics the bundle
+ * installed in the calling space — same 404 semantics the bundle
  * route already enforces.
  */
 
 import { getPackage } from "./package-catalog.ts";
-import { hasPackageAccess } from "./application-packages.ts";
+import { hasPackageAccess } from "./space-packages.ts";
 import { getVersionDetail } from "./package-versions.ts";
 import { resolveExportVersion } from "./bundle-assembly.ts";
 import { ApiError } from "../lib/errors.ts";
@@ -36,7 +36,7 @@ import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 
 interface RegistrySourceInput {
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   packageId: string;
   stage: "draft" | "published";
   spec?: string | undefined;
@@ -59,7 +59,7 @@ interface ResolvedRegistryAgent {
 export async function resolveRegistryAgent(
   input: RegistrySourceInput,
 ): Promise<ResolvedRegistryAgent> {
-  const { orgId, applicationId, packageId, stage, spec, integrityHint } = input;
+  const { orgId, spaceId, packageId, stage, spec, integrityHint } = input;
 
   if (stage === "draft" && spec) {
     throw new ApiError({
@@ -80,14 +80,14 @@ export async function resolveRegistryAgent(
     });
   }
 
-  if (!(await hasPackageAccess({ orgId, applicationId }, packageId))) {
+  if (!(await hasPackageAccess({ orgId, spaceId }, packageId))) {
     throw new ApiError({
       status: 404,
-      code: "package_not_installed_in_app",
+      code: "package_not_installed_in_space",
       title: "Package Not Installed",
       detail:
-        `Package '${packageId}' exists in this organization but is not installed in application '${applicationId}'. ` +
-        `Install it via POST /api/applications/${applicationId}/packages, or pick a different application.`,
+        `Package '${packageId}' exists in this organization but is not installed in space '${spaceId}'. ` +
+        `Install it via POST /api/spaces/${spaceId}/packages, or pick a different space.`,
     });
   }
 
@@ -136,9 +136,9 @@ export async function resolveRegistryAgent(
   }
 
   // Published path. `resolveExportVersion` handles three resolution
-  // shapes: explicit spec, pinned-in-app version, "latest" dist-tag.
+  // shapes: explicit spec, pinned-in-space version, "latest" dist-tag.
   // It throws `notFound` if nothing resolves — let it bubble.
-  const version = await resolveExportVersion(packageId, { orgId, applicationId }, spec ?? null);
+  const version = await resolveExportVersion(packageId, { orgId, spaceId }, spec ?? null);
   const detail = await getVersionDetail(packageId, version);
   if (!detail) {
     throw new ApiError({

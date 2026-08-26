@@ -31,7 +31,7 @@ type Subscriber = {
     runId?: string;
     packageId?: string;
     orgId: string;
-    applicationId: string;
+    spaceId: string;
     isAdmin?: boolean;
     /**
      * Channels the subscriber declared interest in. `undefined` means "every
@@ -44,7 +44,7 @@ type Subscriber = {
     channels?: ReadonlySet<RealtimeChannel>;
     /**
      * Actor identity for the `connection_update` channel. The trigger
-     * fires for every connection on the application; the subscriber
+     * fires for every connection on the space; the subscriber
      * forwards a row when it belongs to this actor (own connection).
      * Cross-actor shared-connection invalidations rely on the consumer
      * refetching from the server, so we don't need the shared/owner
@@ -61,7 +61,7 @@ let initialized = false;
 
 /**
  * Channel gate — the cheapest possible check, so it runs FIRST in every
- * fan-out loop (before the org/app/run comparisons and, critically, before
+ * fan-out loop (before the org/space/run comparisons and, critically, before
  * `JSON.stringify` in the subscriber's `send`).
  *
  * A subscriber with no declared channel set accepts everything.
@@ -121,14 +121,14 @@ export async function initRealtime(): Promise<void> {
       for (const sub of subscribers.values()) {
         if (!accepts(sub, "run_update")) continue;
         if (sub.filter.orgId !== raw.org_id) continue;
-        if (sub.filter.applicationId !== raw.application_id) continue;
+        if (sub.filter.spaceId !== raw.space_id) continue;
         if (sub.filter.runId && sub.filter.runId !== raw.id) continue;
         if (sub.filter.packageId && sub.filter.packageId !== raw.package_id) continue;
         // Actor gate: an end-user subscription (endUserId set) receives ONLY
-        // its own runs — org+application scope alone would leak every other
+        // its own runs — org+space scope alone would leak every other
         // end-user's runs on a non-pinned SSE. Dashboard members / API keys
-        // (endUserId undefined) legitimately see every run in the app, so they
-        // keep the org/app gate above. The `run_update` NOTIFY payload carries
+        // (endUserId undefined) legitimately see every run in the space, so they
+        // keep the org/space gate above. The `run_update` NOTIFY payload carries
         // `end_user_id` (packages/db/src/notify.ts), so the match is exact.
         // Mirrors the `connection_update` channel's actor filter below.
         if (sub.filter.endUserId !== undefined && raw.end_user_id !== sub.filter.endUserId) {
@@ -159,12 +159,12 @@ export async function initRealtime(): Promise<void> {
       for (const sub of subscribers.values()) {
         if (!accepts(sub, "run_log")) continue;
         if (sub.filter.orgId !== raw.org_id) continue;
-        if (sub.filter.applicationId !== raw.application_id) continue;
+        if (sub.filter.spaceId !== raw.space_id) continue;
         if (sub.filter.runId && sub.filter.runId !== raw.run_id) continue;
         if (!sub.filter.isAdmin && raw.level === "debug") continue;
         // Actor gate: the `run_log_insert` NOTIFY payload carries no
         // `end_user_id` (packages/db/src/notify.ts — notify_run_log_insert()
-        // emits only org/app/run scope), so an end-user subscription cannot be
+        // emits only org/space/run scope), so an end-user subscription cannot be
         // proven to own this log row. Skip rather than leak another end-user's
         // logs (same "skip rather than leak" posture as `connection_update`).
         // Dashboard members / API keys (endUserId undefined) are unaffected.
@@ -201,11 +201,11 @@ export async function initRealtime(): Promise<void> {
       for (const sub of subscribers.values()) {
         if (!accepts(sub, "run_metric")) continue;
         if (sub.filter.orgId !== raw.org_id) continue;
-        if (sub.filter.applicationId !== raw.application_id) continue;
+        if (sub.filter.spaceId !== raw.space_id) continue;
         if (sub.filter.runId && sub.filter.runId !== raw.run_id) continue;
         if (sub.filter.packageId && sub.filter.packageId !== raw.package_id) continue;
         // Actor gate: the `run_metric` NOTIFY payload carries no `end_user_id`
-        // (packages/db/src/notify.ts — RunMetricNotifyPayload has org/app/run/
+        // (packages/db/src/notify.ts — RunMetricNotifyPayload has org/space/run/
         // package scope only), so an end-user subscription cannot be proven to
         // own this metric row. Skip rather than leak another end-user's cost /
         // token metrics. Dashboard members / API keys (endUserId undefined) are
@@ -227,11 +227,11 @@ export async function initRealtime(): Promise<void> {
   // page's member picker verdict, the integration detail's connection
   // row all read off React Query keys that this event invalidates.
   //
-  // Filter is per-application; the subscriber owns its actor identity
+  // Filter is per-space; the subscriber owns its actor identity
   // (set at SSE auth time) so a member only sees their own rows. The
   // payload deliberately omits `org_id` (the table has none) — tenant
   // isolation is bound to the upstream SSE auth gate proving
-  // `applicationId ∈ orgId`.
+  // `spaceId ∈ orgId`.
   await listenClient.listen("connection_update", (payload) => {
     try {
       if (!anyAccepts("connection_update")) return;
@@ -246,9 +246,9 @@ export async function initRealtime(): Promise<void> {
       const data = parsed.data;
       for (const sub of subscribers.values()) {
         if (!accepts(sub, "connection_update")) continue;
-        if (sub.filter.applicationId !== raw.application_id) continue;
+        if (sub.filter.spaceId !== raw.space_id) continue;
         // Actor filter: only fan out rows the subscriber owns. Without
-        // this, every member of an app would receive every other
+        // this, every member of a space would receive every other
         // member's connection events (org-wide cache pollution).
         if (sub.filter.userId !== undefined) {
           if (raw.user_id !== sub.filter.userId) continue;
@@ -267,10 +267,10 @@ export async function initRealtime(): Promise<void> {
     }
   });
 
-  // `chat_session_update` is an application-emitted change SIGNAL from the
+  // `chat_session_update` is a space-emitted change SIGNAL from the
   // chat module (packages/module-chat/src/realtime.ts): the payload carries
   // only the owner identity, and the client refetches the session list.
-  // Chat sessions are strictly user-owned (org+user scoped, no application
+  // Chat sessions are strictly user-owned (org+user scoped, no space
   // dimension), so fan-out gates on org + exact user match. End-user
   // subscriptions never receive chat frames (chat has no end-user surface);
   // subscriptions without an actor are skipped rather than leaked to.

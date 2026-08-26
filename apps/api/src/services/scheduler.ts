@@ -23,7 +23,7 @@ import {
   resolveRunPreflight,
   extractRunAgentDenorm,
 } from "./run-pipeline.ts";
-import { getInstalledPackageSettings } from "./application-packages.ts";
+import { getInstalledPackageSettings } from "./space-packages.ts";
 import { resolveAndValidateScheduleInput } from "./input-resolution.ts";
 import { withoutLockedFields } from "@appstrate/core/input-resolution";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -35,7 +35,7 @@ import { ApiError, internalError } from "../lib/errors.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
 import { computeNextRun } from "../lib/cron.ts";
 import { actorMatch, type Actor } from "../lib/actor.ts";
-import type { AppScope } from "../lib/scope.ts";
+import type { SpaceScope } from "../lib/scope.ts";
 import { setQueueDepthSource } from "@appstrate/core/telemetry";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
@@ -49,7 +49,7 @@ interface ScheduleJobData {
   /** Actor the scheduled run executes as. */
   actor: Actor;
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   input?: Record<string, unknown>;
   modelIdOverride?: string;
   generationConfigOverride?: ModelGenerationSettings;
@@ -87,7 +87,7 @@ function toSchedule(row: typeof schedules.$inferSelect): ScheduleWireDto {
     userId: row.userId,
     endUserId: row.endUserId,
     orgId: row.orgId,
-    applicationId: row.applicationId,
+    spaceId: row.spaceId,
     name: row.name,
     enabled: row.enabled,
     cron_expression: row.cronExpression,
@@ -137,7 +137,7 @@ async function upsertScheduleJob(row: typeof schedules.$inferSelect): Promise<vo
     packageId: row.packageId,
     actor,
     orgId: row.orgId,
-    applicationId: row.applicationId,
+    spaceId: row.spaceId,
     input: asRecordOrNull(row.input) ?? undefined,
     modelIdOverride: row.modelIdOverride ?? undefined,
     generationConfigOverride: row.generationConfigOverride ?? undefined,
@@ -189,12 +189,12 @@ export async function removeScheduleJobs(scheduleIds: readonly string[]): Promis
  * `user` row (multi-org), so their schedules would otherwise keep firing as
  * them. Re-check on EVERY fire that the frozen actor still holds the
  * identity the schedule runs as: a member must still belong to the
- * schedule's org, an end-user must still exist in the schedule's application.
+ * schedule's org, an end-user must still exist in the schedule's space.
  */
 async function isScheduleActorValid(
   actor: Actor,
   orgId: string,
-  applicationId: string,
+  spaceId: string,
 ): Promise<boolean> {
   if (actor.type === "user") {
     const [row] = await db
@@ -207,7 +207,7 @@ async function isScheduleActorValid(
   const [row] = await db
     .select({ id: endUsers.id })
     .from(endUsers)
-    .where(and(eq(endUsers.id, actor.id), eq(endUsers.applicationId, applicationId)))
+    .where(and(eq(endUsers.id, actor.id), eq(endUsers.spaceId, spaceId)))
     .limit(1);
   return row !== undefined;
 }
@@ -276,7 +276,7 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
     packageId,
     actor,
     orgId,
-    applicationId,
+    spaceId,
     input,
     modelIdOverride,
     generationConfigOverride,
@@ -313,7 +313,7 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
       return;
     }
 
-    await triggerScheduledRun(scheduleId, packageId, actor, orgId, applicationId, input, {
+    await triggerScheduledRun(scheduleId, packageId, actor, orgId, spaceId, input, {
       modelIdOverride,
       generationConfigOverride,
       proxyIdOverride,
@@ -325,7 +325,7 @@ async function handleScheduleJob(job: QueueJob<ScheduleJobData>): Promise<void> 
     // Update schedule timestamps. `enabled` is re-read here because the
     // trigger may have just disabled the schedule (invalid actor) — a
     // disabled schedule must not get a fresh nextRunAt re-armed onto it.
-    const schedule = await getSchedule(scheduleId, { orgId, applicationId });
+    const schedule = await getSchedule(scheduleId, { orgId, spaceId });
     const nextRun = schedule?.enabled
       ? computeNextRun(schedule.cron_expression, schedule.timezone ?? "UTC")
       : null;
@@ -433,7 +433,7 @@ export async function triggerScheduledRun(
   packageId: string,
   actor: Actor,
   orgId: string,
-  applicationId: string,
+  spaceId: string,
   input: Record<string, unknown> | undefined,
   overrides: {
     modelIdOverride?: string;
@@ -453,7 +453,7 @@ export async function triggerScheduledRun(
     const runId = `run_${crypto.randomUUID()}`;
     try {
       await createFailedRun(
-        { orgId, applicationId },
+        { orgId, spaceId },
         runId,
         packageId,
         actor,
@@ -465,7 +465,7 @@ export async function triggerScheduledRun(
         orgId,
         runId,
         packageId,
-        applicationId,
+        spaceId,
         status: "failed",
         extra: { error },
       });
@@ -486,12 +486,12 @@ export async function triggerScheduledRun(
     // job removed, and a VISIBLE failed run is recorded — never a silent
     // skip, and never a false-positive `success` (see the actor-less
     // schedule incident, issue #735).
-    if (!(await isScheduleActorValid(actor, orgId, applicationId))) {
+    if (!(await isScheduleActorValid(actor, orgId, spaceId))) {
       logger.warn("Schedule actor is no longer valid — disabling schedule", {
         scheduleId,
         packageId,
         orgId,
-        applicationId,
+        spaceId,
         actorType: actor.type,
         actorId: actor.id,
       });
@@ -499,7 +499,7 @@ export async function triggerScheduledRun(
       await failSchedule(
         actor.type === "user"
           ? "Schedule disabled: its actor is no longer a member of this organization"
-          : "Schedule disabled: its end-user actor no longer exists in this application",
+          : "Schedule disabled: its end-user actor no longer exists in this space",
       );
       return;
     }
@@ -542,15 +542,15 @@ export async function triggerScheduledRun(
       throw err;
     }
 
-    // Per-application settings: editor defaults + locked fields for the input
+    // Per-space settings: editor defaults + locked fields for the input
     // resolution below, and the model/proxy this fire launches with.
-    const packageSettings = await getInstalledPackageSettings(applicationId, packageId);
+    const packageSettings = await getInstalledPackageSettings(spaceId, packageId);
 
     // Shared preflight: validate readiness
     try {
       await resolveRunPreflight({
         agent,
-        applicationId,
+        spaceId,
         orgId,
         actor,
         // Schedule freezes per-integration picks at create time; forward
@@ -651,7 +651,7 @@ export async function triggerScheduledRun(
         proxyId: finalProxyId,
         overrideVersionLabel,
         scheduleId,
-        applicationId,
+        spaceId,
         scheduleConnectionOverrides: overrides.connectionOverrides ?? null,
         dependencyOverrides: overrides.dependencyOverrides ?? null,
       });
@@ -690,19 +690,19 @@ export async function triggerScheduledRun(
 // ---------------------------------------------------------------------------
 
 export async function listSchedules(
-  scope: AppScope,
+  scope: SpaceScope,
   viewer: Actor | null,
 ): Promise<EnrichedSchedule[]> {
   const rows = await db
     .select()
     .from(schedules)
-    .where(scopedWhere(schedules, { orgId: scope.orgId, applicationId: scope.applicationId }))
+    .where(scopedWhere(schedules, { orgId: scope.orgId, spaceId: scope.spaceId }))
     .orderBy(asc(schedules.createdAt));
   return enrichSchedules(rows.map(toSchedule), scope.orgId, viewer);
 }
 
 export async function listPackageSchedules(
-  scope: AppScope,
+  scope: SpaceScope,
   packageId: string,
   viewer: Actor | null,
 ): Promise<EnrichedSchedule[]> {
@@ -712,7 +712,7 @@ export async function listPackageSchedules(
     .where(
       scopedWhere(schedules, {
         orgId: scope.orgId,
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         extra: [eq(schedules.packageId, packageId)],
       }),
     )
@@ -722,7 +722,7 @@ export async function listPackageSchedules(
 
 export async function getSchedule(
   id: string,
-  scope?: AppScope,
+  scope?: SpaceScope,
   viewer: Actor | null = null,
 ): Promise<EnrichedSchedule | null> {
   const rows = await db
@@ -731,7 +731,7 @@ export async function getSchedule(
     .where(
       scopedWhere(schedules, {
         orgId: scope?.orgId,
-        applicationId: scope?.applicationId,
+        spaceId: scope?.spaceId,
         extra: [eq(schedules.id, id)],
       }),
     )
@@ -900,7 +900,7 @@ async function enrichSchedules(
 }
 
 export async function createSchedule(
-  scope: AppScope,
+  scope: SpaceScope,
   packageId: string,
   actor: Actor,
   data: {
@@ -930,7 +930,7 @@ export async function createSchedule(
       userId: actor.type === "user" ? actor.id : null,
       endUserId: actor.type === "end_user" ? actor.id : null,
       orgId: scope.orgId,
-      applicationId: scope.applicationId,
+      spaceId: scope.spaceId,
       name: data.name ?? null,
       enabled: true,
       cronExpression: data.cronExpression,
@@ -962,7 +962,7 @@ export async function createSchedule(
 }
 
 export async function updateSchedule(
-  scope: AppScope,
+  scope: SpaceScope,
   id: string,
   data: {
     name?: string;
@@ -1025,7 +1025,7 @@ export async function updateSchedule(
     .where(
       scopedWhere(schedules, {
         orgId: scope.orgId,
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         extra: [eq(schedules.id, id)],
       }),
     )
@@ -1050,7 +1050,7 @@ export async function updateSchedule(
 
 /**
  * Drop the locked input fields from every schedule of one agent in one
- * application.
+ * space.
  *
  * Called when the agent's lock set is written. A schedule froze its `input`
  * before the lock existed, and the fire path refuses a schedule that answers a
@@ -1076,7 +1076,7 @@ export async function updateSchedule(
  * @returns the ids of the schedules that were rewritten.
  */
 export async function dropLockedFieldsFromSchedules(
-  scope: AppScope,
+  scope: SpaceScope,
   packageId: string,
   lockedFields: readonly string[],
 ): Promise<string[]> {
@@ -1088,7 +1088,7 @@ export async function dropLockedFieldsFromSchedules(
     .where(
       scopedWhere(schedules, {
         orgId: scope.orgId,
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         extra: [eq(schedules.packageId, packageId)],
       }),
     );
@@ -1107,7 +1107,7 @@ export async function dropLockedFieldsFromSchedules(
   return rewritten;
 }
 
-export async function deleteSchedule(scope: AppScope, id: string): Promise<boolean> {
+export async function deleteSchedule(scope: SpaceScope, id: string): Promise<boolean> {
   await removeScheduleJob(id);
 
   const deleted = await db
@@ -1115,7 +1115,7 @@ export async function deleteSchedule(scope: AppScope, id: string): Promise<boole
     .where(
       scopedWhere(schedules, {
         orgId: scope.orgId,
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         extra: [eq(schedules.id, id)],
       }),
     )

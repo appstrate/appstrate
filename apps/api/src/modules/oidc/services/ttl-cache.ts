@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * TTL cache with cross-instance invalidation — shared by the per-app
+ * TTL cache with cross-instance invalidation — shared by the per-space
  * resolvers (`smtp.ts`, `social.ts`).
  *
  * Features:
@@ -13,7 +13,7 @@
  *    locally. The null TTL bounds the worst-case staleness window when
  *    pub/sub is unavailable.
  *
- * Deliberately *not* included: in-flight promise dedup. Per-app SMTP/social
+ * Deliberately *not* included: in-flight promise dedup. Per-space SMTP/social
  * config is admin-reconfigured rarely; the occasional duplicate DB round-trip
  * on a cold-cache burst is not worth the extra state machine.
  */
@@ -63,7 +63,7 @@ export function createTtlCache<V>(channel: string): TtlCache<V> {
         bumpEpoch(message);
       });
     } catch (err) {
-      logger.warn("oidc per-app cache: pub/sub subscribe failed, running single-instance", {
+      logger.warn("oidc per-space cache: pub/sub subscribe failed, running single-instance", {
         channel,
         error: getErrorMessage(err),
       });
@@ -91,7 +91,7 @@ export function createTtlCache<V>(channel: string): TtlCache<V> {
         const pubsub = await getPubSub();
         await pubsub.publish(channel, key);
       } catch (err) {
-        logger.warn("oidc per-app cache: pub/sub publish failed", {
+        logger.warn("oidc per-space cache: pub/sub publish failed", {
           channel,
           key,
           error: getErrorMessage(err),

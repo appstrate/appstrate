@@ -27,7 +27,7 @@ import { DraftPackageCatalog } from "./run-launcher/draft-package-catalog.ts";
 import { downloadVersionZip } from "./package-storage.ts";
 import { resolveVersion } from "./package-versions.ts";
 import { db } from "@appstrate/db/client";
-import { packageVersions, applicationPackages } from "@appstrate/db/schema";
+import { packageVersions, spacePackages } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
 import { ApiError, notFound } from "../lib/errors.ts";
 import { formatPackageIdentity } from "@appstrate/afps-runtime/bundle";
@@ -35,7 +35,7 @@ import type { LoadedPackage } from "../types/index.ts";
 
 export interface BundleAssemblyScope {
   orgId: string;
-  applicationId: string;
+  spaceId: string;
 }
 
 /**
@@ -76,7 +76,7 @@ export async function buildBundleFromUploadedAfps(
  * Resolution order:
  *   1. Explicit `versionSpec` (exact / dist-tag / semver range) — fails
  *      with 404 if unresolvable.
- *   2. The version currently installed in the app (`application_packages.version_id`).
+ *   2. The version currently installed in the space (`space_packages.version_id`).
  *   3. The `"latest"` dist-tag of the package.
  *
  * Returns the resolved `version` string. Throws `notFound` if no version
@@ -104,14 +104,9 @@ export async function resolveExportVersion(
   // Installed version pin
   const [installed] = await db
     .select({ version: packageVersions.version })
-    .from(applicationPackages)
-    .innerJoin(packageVersions, eq(packageVersions.id, applicationPackages.versionId))
-    .where(
-      and(
-        eq(applicationPackages.applicationId, scope.applicationId),
-        eq(applicationPackages.packageId, packageId),
-      ),
-    )
+    .from(spacePackages)
+    .innerJoin(packageVersions, eq(packageVersions.id, spacePackages.versionId))
+    .where(and(eq(spacePackages.spaceId, scope.spaceId), eq(spacePackages.packageId, packageId)))
     .limit(1);
   if (installed) return installed.version;
 
