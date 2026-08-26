@@ -179,8 +179,8 @@ const oidcModule: AppstrateModule = {
     return oidcBetterAuthPlugins({ cachedTrustedClientIds });
   },
 
-  // No `drizzleSchemas()`: the OIDC tables (jwks, oauth_clients, …) live in the
-  // core schema barrel, which the Better Auth adapter resolves directly.
+  // The OIDC tables (jwks, oauth_clients, …) live in the core schema barrel —
+  // modules own no tables; the Better Auth adapter resolves them from there.
 
   openApiPaths() {
     return oidcPaths;

@@ -223,8 +223,8 @@ interface PageContext {
    * `renderSocialButtons` on every OIDC page. For `level=application`
    * clients, reflects `application_social_providers` rows — buttons appear
    * only when the tenant has configured creds for that provider. For
-   * `level=org` / `level=instance`, falls back to env presence (legacy
-   * shared-OAuth-App behavior for non-app clients).
+   * `level=org` / `level=instance`, reflects env presence — those flows
+   * authenticate against the platform's own shared OAuth App.
    */
   socialProviders: { google: boolean; github: boolean };
 }
@@ -295,11 +295,11 @@ async function loadPageContext(
   if (opts.requireSmtp && !smtp) {
     return c.html(renderErrorPage(opts.requireSmtp).value, 404);
   }
-  // Per-client social provider availability. Application-level clients read
-  // from `application_social_providers` (tenant-owned OAuth App). Org and
-  // instance clients keep the legacy env-based fallback — the platform's
-  // shared Google/GitHub OAuth App is the appropriate identity issuer for
-  // dashboard / satellite flows.
+  // Per-client social provider availability, split by client level.
+  // Application-level clients read from `application_social_providers`
+  // (tenant-owned OAuth App). Org and instance clients read env presence —
+  // the platform's shared Google/GitHub OAuth App is the appropriate identity
+  // issuer for dashboard / satellite flows.
   let socialGoogle: boolean;
   let socialGithub: boolean;
   if (record.level === "application") {

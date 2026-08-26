@@ -277,9 +277,8 @@ export interface IntegrationSpawnSpec {
        * runnable BYTES come from the SAME version as the manifest the
        * spawn-resolver read — eliminating the manifest/bytes version skew and
        * the "publish ≠ deploy" footgun (issue #588). Omitted for system
-       * mcp-servers (single version served from the boot registry) and for
-       * remote/serverless integrations. When absent, the byte route falls back
-       * to the latest non-yanked published version (back-compat).
+       * mcp-servers — the byte route serves those from the in-memory boot
+       * registry by id alone — and for remote/serverless integrations.
        */
       version?: string;
       /**

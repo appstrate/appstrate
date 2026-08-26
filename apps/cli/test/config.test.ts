@@ -62,14 +62,16 @@ describe("readConfig", () => {
     expect(read).toEqual(input);
   });
 
-  it("round-trips a profile without applicationId unchanged (forward-compat)", async () => {
-    // Legacy profiles predating #217 have `orgId` but no `applicationId`. They
-    // must parse cleanly and write back without materializing a phantom
-    // `applicationId = ""` entry in the TOML file.
+  it("round-trips a profile without applicationId unchanged", async () => {
+    // A profile that has never pinned an application has `orgId` but no
+    // `applicationId` — `login` writes the field only when it carries one over,
+    // and `app current` handles the unpinned case. It must parse cleanly and
+    // write back without materializing a phantom `applicationId = ""` entry in
+    // the TOML file.
     const input: Config = {
-      defaultProfile: "legacy",
+      defaultProfile: "unpinned",
       profiles: {
-        legacy: {
+        unpinned: {
           instance: "https://app.example.com",
           userId: "u1",
           email: "a@b.c",
@@ -80,7 +82,7 @@ describe("readConfig", () => {
     await writeConfig(input);
     const read = await readConfig();
     expect(read).toEqual(input);
-    expect(read.profiles.legacy!.applicationId).toBeUndefined();
+    expect(read.profiles.unpinned!.applicationId).toBeUndefined();
     const { readFile } = await import("node:fs/promises");
     const raw = await readFile(join(configHome.dir(), "appstrate", "config.toml"), "utf-8");
     expect(raw).not.toContain("applicationId");

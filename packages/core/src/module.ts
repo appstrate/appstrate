@@ -409,10 +409,7 @@ export type ModulePermissionContribution = {
 // ---------------------------------------------------------------------------
 
 /**
- * Context passed alongside the `beforeSignup` hook's `email` argument. The
- * second argument is optional for backward compatibility: existing modules
- * that declare `async (email) => {...}` continue to work unchanged
- * (JavaScript silently drops extra arguments).
+ * Context passed alongside the `beforeSignup` hook's `email` argument.
  *
  * Modules that need to read request-scoped state (e.g. a signed cookie
  * pinning an OAuth client for the in-flight signup) should read from
