@@ -157,7 +157,18 @@ export function sanitizeFilename(name: string): string {
     .replace(/\.\.+/g, ".")
     .trim();
   if (!cleaned) return "file";
-  return cleaned.slice(0, MAX_FILENAME_LEN);
+  if (cleaned.length <= MAX_FILENAME_LEN) return cleaned;
+  // `slice` counts UTF-16 code units, so a cut landing between the two halves
+  // of a surrogate pair emits a LONE high surrogate — a string that is not
+  // valid UTF-16 and that `encodeURIComponent` throws `URIError` on. That name
+  // is not transient: it becomes `files.name`, and therefore part of the
+  // `(run_id, sha256, name)` dedup identity, so every later download of the
+  // file 500s on both serving branches via {@link attachmentDisposition}.
+  // Drop the orphaned half rather than the whole tail — the name loses one
+  // character it could not have rendered anyway.
+  const cut = cleaned.slice(0, MAX_FILENAME_LEN);
+  const last = cut.charCodeAt(MAX_FILENAME_LEN - 1);
+  return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, MAX_FILENAME_LEN - 1) : cut;
 }
 
 /**
@@ -177,15 +188,41 @@ const MAX_ENCODED_FILENAME_HEADER_LEN = 4096;
 const ENCODED_FILENAME_RE = /^[A-Za-z0-9\-_.!~*'()%]+$/;
 
 /**
+ * A surrogate with no partner: a high one not followed by a low, or a low one
+ * not preceded by a high.
+ */
+const LONE_SURROGATE_RE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+/**
+ * Make a name encodable.
+ *
+ * `encodeURIComponent` THROWS `URIError` on a lone surrogate — it has no UTF-8
+ * byte sequence to emit — and the two encoders below sit on the last line
+ * before a response header is written, where a throw is a 500 on a download
+ * that would otherwise have worked. Substituting U+FFFD is the standard
+ * WHATWG/Unicode replacement for an unpaired half; it is lossy only for input
+ * that was already not valid UTF-16, and it leaves every well-formed name —
+ * emoji and CJK included — byte-identical.
+ */
+function toWellFormedName(name: string): string {
+  return name.replace(LONE_SURROGATE_RE, "\uFFFD");
+}
+
+/**
  * Encode a filename for transport in an HTTP header value. HTTP field values
  * are ISO-8859-1 by spec, so a non-ASCII name sent raw is either REFUSED by the
  * sender (Bun's `Headers` throws on a CJK filename) or silently mojibaked (an
  * accented name written UTF-8, read back Latin-1). Percent-encoding always
  * lands inside {@link ENCODED_FILENAME_RE}, round-trips byte-for-byte, and
  * leaves a plain ASCII name unchanged so logs stay readable.
+ *
+ * Total: {@link toWellFormedName} runs first, so a name carrying an unpaired
+ * surrogate encodes to a U+FFFD instead of throwing. Only such a name fails to
+ * round-trip through {@link decodeFilenameHeader} — it had no UTF-8 form to
+ * come back from.
  */
 export function encodeFilenameHeader(name: string): string {
-  return encodeURIComponent(name);
+  return encodeURIComponent(toWellFormedName(name));
 }
 
 /**
@@ -293,9 +330,13 @@ export function attachmentDisposition(name: string): string {
  * charset and language are the first two apostrophes, so a name like `don't.md`
  * puts a third one in the value region and invites a parser to split there.
  * `!` IS in `attr-char`, so it stays raw.
+ *
+ * Total for the same reason as {@link encodeFilenameHeader}: this is the last
+ * call before the `Content-Disposition` value reaches the response, on BOTH
+ * serving branches, so it must not throw on a name the store already holds.
  */
 function encodeExtValue(name: string): string {
-  return encodeURIComponent(name).replace(
+  return encodeURIComponent(toWellFormedName(name)).replace(
     /['()*]/g,
     (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`,
   );

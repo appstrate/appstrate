@@ -17,6 +17,7 @@ import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import type { IntegrationSpawnSpec, IntegrationBootReport } from "@appstrate/core/sidecar-types";
 import { buildRuntimeToolDefs } from "@appstrate/core/runtime-tool-defs";
 import { RuntimeEventJournal, journalRuntimeToolDefs } from "./runtime-event-journal.ts";
+import { scrubSecretMaterial } from "./redact.ts";
 
 /** Parse the agent-selected runtime tools forwarded as `RUNTIME_TOOLS_JSON`. */
 function readRuntimeToolsFromEnv(): string[] {
@@ -176,7 +177,11 @@ if (process.env.CONNECT_LOGIN_JSON) {
     process.stdout.write(`APPSTRATE_CONNECT_RESULT:${payload}\n`);
     process.exit(0);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    // `runConnectOnce` surfaces the third-party login tool's own error prose
+    // verbatim (see `parseLoginToolResult`), and this line goes to stdout,
+    // which the platform reads and stores. Scrub credential shapes out of it —
+    // the diagnostic value is in the wording, never in a token it echoed.
+    const message = scrubSecretMaterial(err instanceof Error ? err.message : String(err));
     process.stdout.write(`APPSTRATE_CONNECT_ERROR:${message}\n`);
     process.exit(1);
   }
@@ -266,7 +271,10 @@ const integrationBootPromise =
           // A throw here (vs. a per-integration failure) means the whole boot
           // pass blew up — surface it as a non-OK report so the agent aborts
           // the run rather than running with a silently empty toolset.
-          const error = err instanceof Error ? err.message : String(err);
+          // Same sink as the per-integration `failed[]` entries: the
+          // unauthenticated `GET /integrations/boot-report`. Scrub for the
+          // same reason (see `integrations-boot.ts`' per-spec catch).
+          const error = scrubSecretMaterial(err instanceof Error ? err.message : String(err));
           logger.error("Integration boot raised", { error });
           integrationBootReport = {
             ok: false,

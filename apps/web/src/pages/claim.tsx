@@ -20,6 +20,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { MIN_PASSWORD_LENGTH } from "@appstrate/shared-types";
 import { client } from "../api/client";
 
 export function ClaimPage() {
@@ -114,11 +115,13 @@ export function ClaimPage() {
               type="password"
               required
               autoComplete="new-password"
-              minLength={8}
+              minLength={MIN_PASSWORD_LENGTH}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
-            <p className="text-muted-foreground text-xs">{t("claim.passwordHelp")}</p>
+            <p className="text-muted-foreground text-xs">
+              {t("claim.passwordHelp", { min: MIN_PASSWORD_LENGTH })}
+            </p>
           </div>
 
           {errorMsg && (

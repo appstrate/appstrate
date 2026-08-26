@@ -25,6 +25,7 @@ import { validateManifest } from "@appstrate/core/validation";
 import { mcpServerManifestSchema } from "@appstrate/core/mcp-server";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import { bootIntegrations } from "../integrations-boot.ts";
+import { installPassthroughRunnerExec } from "./helpers/runner-exec.ts";
 
 const FIXTURE_DIR = path.join(import.meta.dir, "fixtures/bun-toolkit");
 const INTEG_ID = "@appstrate/bun-toolkit";
@@ -89,6 +90,10 @@ describe("@appstrate/bun-toolkit — complex bun integration (e2e)", () => {
   it("boots as a bun subprocess (process mode) and exercises Bun-native tools", async () => {
     const prevAdapter = process.env.INTEGRATION_RUNTIME_ADAPTER;
     process.env.INTEGRATION_RUNTIME_ADAPTER = "process";
+    // The process adapter refuses a local runner it cannot drop privilege
+    // for; this e2e wants the real bun subprocess, so it supplies the
+    // wrapper the Firecracker guest supervisor supplies in production.
+    const runnerExec = await installPassthroughRunnerExec();
 
     let boot: Awaited<ReturnType<typeof bootIntegrations>> | null = null;
     try {
@@ -141,6 +146,7 @@ describe("@appstrate/bun-toolkit — complex bun integration (e2e)", () => {
       expect(uuids).toHaveLength(3);
     } finally {
       if (boot) await boot.shutdown();
+      await runnerExec.restore();
       if (prevAdapter === undefined) delete process.env.INTEGRATION_RUNTIME_ADAPTER;
       else process.env.INTEGRATION_RUNTIME_ADAPTER = prevAdapter;
     }

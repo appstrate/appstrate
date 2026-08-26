@@ -139,7 +139,14 @@ describe("@appstrate/core published export surface", () => {
       }
     }
 
-    expect(claimed.size, "no Removed entries parsed — the bullet shape changed").toBeGreaterThan(0);
+    // The canary only says something when there IS a Removed section. Right
+    // after a release the unreleased window legitimately removes nothing, and
+    // an empty window is not the same failure as a regex that stopped matching.
+    if (removedHeading !== -1) {
+      expect(claimed.size, "no Removed entries parsed — the bullet shape changed").toBeGreaterThan(
+        0,
+      );
+    }
 
     const stillThere = [...claimed].filter((name) => name in current).sort();
     expect(

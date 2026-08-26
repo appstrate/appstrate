@@ -34,7 +34,7 @@ import * as nodePath from "node:path";
 
 import { z } from "zod";
 import { isTextShapedMime, normalizeMime } from "@appstrate/afps-shared/mime";
-import type { JSONSchema, Tool, ToolContext, ToolResult } from "./types.ts";
+import type { JSONSchema, Tool, ToolContext, ToolResult } from "@afps-spec/types";
 import { AuthorizedUrisError, ResolverError } from "../errors.ts";
 
 /**

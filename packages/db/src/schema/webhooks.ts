@@ -52,9 +52,9 @@ export const webhooks = pgTable(
     // passes, the delivery worker promotes `secret_next` → `secret` and
     // clears these columns inline. Null on both = no rotation in flight.
     secretNext: text("secret_next"),
-    secretNextExpiresAt: timestamp("secret_next_expires_at"),
-    createdAt: timestamp("created_at").notNull().defaultNow(),
-    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    secretNextExpiresAt: timestamp("secret_next_expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index("idx_webhooks_org_id").on(table.orgId),
@@ -65,6 +65,11 @@ export const webhooks = pgTable(
       "webhooks_level_check",
       sql`(level = 'org' AND application_id IS NULL) OR (level = 'application' AND application_id IS NOT NULL)`,
     ),
+    // Closed vocabulary (migration 0051). The routes validate the INPUT with
+    // `z.enum(["full", "summary"])` and then narrow the OUTPUT again on the way
+    // back out — a defensive read is the tell that the column could not promise
+    // what the write already required.
+    check("webhooks_payload_mode_valid", sql`payload_mode IN ('full', 'summary')`),
   ],
 );
 
@@ -82,7 +87,12 @@ export const webhookDeliveries = pgTable(
     latency: integer("latency"), // ms
     attempt: integer("attempt").notNull().default(1),
     error: text("error"), // error message if failed
-    createdAt: timestamp("created_at").notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("idx_webhook_deliveries_webhook_id").on(table.webhookId)],
+  (table) => [
+    index("idx_webhook_deliveries_webhook_id").on(table.webhookId),
+    // Closed vocabulary (migration 0051). One worker writes all three values;
+    // the reader used to cast (`row.status as …`) rather than check.
+    check("webhook_deliveries_status_valid", sql`status IN ('pending', 'success', 'failed')`),
+  ],
 );

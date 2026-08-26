@@ -38,11 +38,12 @@ interface PiToolResult {
   details: unknown;
   /**
    * Typed connect offer for the UI card; pi-ai never serializes it upstream.
-   * CONTRACT: pi-agent-core forwards the execute return REFERENCE into
-   * `tool_execution_end` only while no `afterToolCall` hook is configured —
-   * that hook rebuilds the result as `{content, details, terminate}` and would
-   * silently strip this field (and `details` is redacted, so nothing would
-   * fall back). If a hook is ever added, it must carry `connectOffer` through.
+   * CONTRACT: pi-agent-core preserves unknown result fields across the
+   * `afterToolCall` hook — `finalizeExecutedToolCall` SPREADS the original
+   * result (`{...result, content, details, usage, terminate}`, `agent-loop.js`),
+   * so a configured hook can no longer strip this field. Verified against the
+   * pinned `@earendil-works/pi-agent-core@0.84.2`; re-check on an SDK bump,
+   * because `details` is redacted and nothing would fall back.
    */
   connectOffer?: ConnectOffer;
 }
@@ -196,6 +197,12 @@ export async function buildPlatformMcpTools(
   const client = await createMcpHttpClient(opts.url, {
     clientInfo: { name: "appstrate-chat-pi", version: "1.0" },
     extraHeaders: opts.headers,
+    // The HANDSHAKE, not only the `listTools` below. In production `opts.fetch`
+    // is the platform's in-process dispatch, so `initialize` re-enters the same
+    // process — a DB pool exhausted by concurrent runs or a module hook that
+    // never settles wedges it, and without the signal the turn's stop button
+    // and its deadline are both inert for the SDK's full 60 s request timeout.
+    signal: opts.signal,
     ...(opts.fetch ? { fetch: opts.fetch } : {}),
   });
 

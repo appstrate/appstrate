@@ -204,52 +204,223 @@ export function resolveBundleEntry(bundleRoot: string, entryPoint: string): stri
 }
 
 /**
+ * Canonical spelling of a `delivery.files` mount path — the ONE form both the
+ * floor below and the adapters' writers operate on.
+ *
+ * Every check in {@link isPathSafeForMount} is a string comparison, and the
+ * kernel does not compare strings. `/./usr/local/bin/gh`, `//usr/local/bin/gh`
+ * and `/a/../usr/local/bin/gh` all name `/usr/local/bin/gh` to `open(2)`, so a
+ * floor that knew only the canonical spelling was defeated by one leading
+ * `/.`. The platform-side resolver (`isSafeDeliveryFilePath`) does not close
+ * that either: it rejects `..` and keeps `.` and `//`.
+ *
+ * The writers call this too, and write to what it returns. That is the point:
+ * a check and a write that canonicalize differently is the same defect one
+ * layer down — `docker cp`'s staging `resolve()` already normalized while the
+ * check did not, which is exactly how the bypass landed inside the container.
+ *
+ * Returns "" for an empty / non-string input, which is never safe.
+ */
+export function normalizeMountPath(path: string): string {
+  if (typeof path !== "string" || path.length === 0) return "";
+  const normalized = posix.normalize(path);
+  // `normalize` preserves a trailing slash; the exact-file comparisons below
+  // and the writers both want the slash-free spelling.
+  return normalized.length > 1 && normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
+}
+
+/**
+ * Directories the system searches BY NAME, so a file dropped in one is chosen
+ * by a later `execve`/`dlopen` that asked for a name, not for this path:
+ * every entry of the runner images' default PATH plus the dynamic loader's own
+ * search directories.
+ */
+const SYSTEM_LOOKUP_PREFIXES = [
+  "/bin/",
+  "/sbin/",
+  "/usr/",
+  "/lib/",
+  "/lib32/",
+  "/lib64/",
+  "/libexec/",
+];
+
+/**
+ * Subtrees whose CONTENTS are executed, sourced or consulted by something that
+ * was never told about this file: the loader's config drop-ins, shell login
+ * drop-ins, the cron spools, the auth stack, and root's home (whose dotfiles
+ * and `authorized_keys` are all of the above at once).
+ */
+const AUTO_CONSUMED_PREFIXES = [
+  "/etc/ld.so.conf.d/",
+  "/etc/profile.d/",
+  "/etc/cron.d/",
+  "/etc/cron.hourly/",
+  "/etc/cron.daily/",
+  "/etc/cron.weekly/",
+  "/etc/cron.monthly/",
+  "/etc/periodic/",
+  "/var/spool/cron/",
+  "/etc/pam.d/",
+  "/etc/ssh/",
+  "/etc/sudoers.d/",
+  "/root/",
+  // The system trust store: a cert landing here is honoured by every TLS
+  // client that starts afterwards, which is the CA-shaped form of the same
+  // hazard. An integration's OWN client cert or private CA belongs under
+  // `/etc/<vendor>/`, which is what the manifests are told to use.
+  "/etc/ssl/certs/",
+  "/etc/ca-certificates/",
+  "/etc/pki/",
+];
+
+/**
+ * Individual files read on the system's own initiative. `/etc/ld.so.preload`
+ * is the sharpest of them and strictly worse than a PATH plant: it injects
+ * into EVERY process spawned afterwards, whatever its name or path.
+ */
+const AUTO_CONSUMED_FILES = [
+  // Privilege escalation: the passwd/shadow/sudoers/group families.
+  "/etc/passwd",
+  "/etc/passwd-",
+  "/etc/shadow",
+  "/etc/shadow-",
+  "/etc/sudoers",
+  "/etc/gshadow",
+  "/etc/group",
+  "/etc/group-",
+  // Dynamic loader.
+  "/etc/ld.so.preload",
+  "/etc/ld.so.conf",
+  // Shell / login startup.
+  "/etc/profile",
+  "/etc/bashrc",
+  "/etc/bash.bashrc",
+  "/etc/zshenv",
+  "/etc/zprofile",
+  "/etc/zshrc",
+  "/etc/zlogin",
+  "/etc/environment",
+  // Scheduler.
+  "/etc/crontab",
+  // Name resolution and trust-store bundles.
+  "/etc/nsswitch.conf",
+  "/etc/ca-certificates.conf",
+  "/etc/ssl/cert.pem",
+];
+
+/**
+ * Path SEGMENTS that carry the hazard wherever they appear, because "the
+ * system reads it unbidden" is a property of the name, not of the location:
+ * `~/.ssh` is consulted for every login and every outbound `ssh`, in root's
+ * home and in an unprivileged runner's alike.
+ */
+const AUTO_CONSUMED_SEGMENTS = [".ssh"];
+
+/**
+ * Basenames sourced or consulted by name, in whatever home directory they
+ * land — the per-user half of the shell-startup and authorized-keys classes.
+ */
+const AUTO_CONSUMED_BASENAMES = [
+  ".bashrc",
+  ".bash_profile",
+  ".bash_login",
+  ".bash_logout",
+  ".profile",
+  ".zshrc",
+  ".zshenv",
+  ".zprofile",
+  ".zlogin",
+  ".kshrc",
+  ".cshrc",
+  ".login",
+  "authorized_keys",
+  "authorized_keys2",
+];
+
+/**
  * R8a — shared safe-path floor for `delivery.files` credential mounts,
  * used by every spawning adapter (process, docker, future VM backends).
  *
- * Refuses kernel-managed surfaces (`/dev`, `/proc`, `/sys`) and the
- * well-known privilege-escalation files (the passwd/shadow/sudoers/group
- * families + the `/etc/sudoers.d/` subtree). The platform-side resolver
- * (`isSafeDeliveryFilePath`) already strips relative paths + `..`
- * traversal + NUL bytes + pure root before any of this runs; this is a
- * second floor enforced at spawn time.
+ * THE RULE: a credential file may land only where its ONLY reader is the
+ * integration that declared it. Refuse anywhere the system reads on its own
+ * initiative — where something later opens the file without having been told
+ * this path, because writing there is not delivering a credential, it is
+ * reconfiguring the machine every later process runs on. In one class that
+ * covers what the kernel exposes rather than stores (`/dev`, `/proc`, `/sys`),
+ * what a lookup finds by NAME (the PATH and loader search directories), what
+ * the loader reads before `main()`, what a shell sources at startup, what cron
+ * runs on a timer, what the auth stack consults to decide who may log in or
+ * become root, and what every TLS client trusts.
  *
- * Adapters extend the floor with their own surfaces via `extraForbidden*`
- * — the docker adapter adds `/.docker/` (prefix) and `/.dockerenv` (file)
- * for Docker-private paths. Matching semantics are preserved exactly:
- * a prefix matches when the path equals the prefix without its trailing
- * slash OR starts with the prefix; a file matches on exact equality.
+ * It is one rule, not two: `/usr/local/bin/gh` was refused for planting an
+ * executable on the PATH, while `/bin/gh` and `/sbin/x` — the rest of that same
+ * PATH — were accepted, and `/etc/ld.so.preload` (worse: injected into every
+ * later process) and `/etc/profile.d/x.sh` (sourced by every login shell) with
+ * them. The rationale had been applied to one of its instances.
+ *
+ * WHAT STAYS ALLOWED, because nothing reads them unbidden: `/run/`, `/tmp/`,
+ * `/var/tmp/`, `/var/lib/<vendor>/`, and vendor subtrees of `/etc/` —
+ * `/etc/appstrate/certs/client.pem` and `/etc/<vendor>/service-account.json`
+ * are the destinations `delivery.files` exists for, and the docker adapter
+ * documents them as supported. `/etc` is therefore refused file-by-file and
+ * subtree-by-subtree, never wholesale.
+ *
+ * The platform-side resolver (`isSafeDeliveryFilePath`) already strips relative
+ * paths + `..` traversal + NUL bytes + pure root before any of this runs; this
+ * is a second floor enforced at spawn time, and it judges the
+ * {@link normalizeMountPath} spelling so an alias of a refused path is refused
+ * with it.
+ *
+ * Adapters extend the floor via `extraForbidden*`. Only the docker adapter
+ * uses that now, for `/.docker/` (prefix) and `/.dockerenv` (file), which are
+ * Docker-private and meaningless on a host filesystem. `/usr/` and
+ * `/workspace/` used to be extras that BOTH adapters passed and are shared
+ * floor now: PATH is not one adapter's business, and `/workspace/` is the
+ * per-run tree shared with the agent container, where a credential mount
+ * collides with run artifacts on every backend.
+ *
+ * Matching semantics: a prefix matches when the path equals the prefix without
+ * its trailing slash OR starts with the prefix; a file matches on exact
+ * equality; a segment matches anywhere in the path; a basename matches the
+ * final segment.
  */
 export function isPathSafeForMount(
-  path: string,
+  rawPath: string,
   {
     extraForbiddenPrefixes = [],
     extraForbiddenFiles = [],
   }: { extraForbiddenPrefixes?: string[]; extraForbiddenFiles?: string[] } = {},
 ): boolean {
+  if (typeof rawPath !== "string" || rawPath.includes("\0")) return false;
+  const path = normalizeMountPath(rawPath);
   if (!path.startsWith("/")) return false;
-  // Forbidden top-level dirs (shared floor + adapter extras).
-  const forbiddenPrefixes = ["/dev/", "/proc/", "/sys/", ...extraForbiddenPrefixes];
+  // Pure root: normalization collapses `/`, `//`, `/.` and `/..` onto it, and
+  // none of them names a file to write.
+  if (path === "/") return false;
+  // Forbidden subtrees: kernel-managed, name-lookup, auto-consumed, the
+  // per-run workspace, and the adapter's own.
+  const forbiddenPrefixes = [
+    "/dev/",
+    "/proc/",
+    "/sys/",
+    "/workspace/",
+    ...SYSTEM_LOOKUP_PREFIXES,
+    ...AUTO_CONSUMED_PREFIXES,
+    ...extraForbiddenPrefixes,
+  ];
   for (const p of forbiddenPrefixes) {
     if (path === p.replace(/\/$/, "") || path.startsWith(p)) {
       return false;
     }
   }
-  // Forbidden specific files (passwd/shadow/sudoers/group families + extras).
-  const forbiddenFiles = [
-    "/etc/passwd",
-    "/etc/passwd-",
-    "/etc/shadow",
-    "/etc/shadow-",
-    "/etc/sudoers",
-    "/etc/gshadow",
-    "/etc/group",
-    "/etc/group-",
-    ...extraForbiddenFiles,
-  ];
-  if (forbiddenFiles.includes(path)) return false;
-  // Forbidden sudoers subtree.
-  if (path.startsWith("/etc/sudoers.d/")) return false;
+  // Forbidden specific files (privilege escalation, loader, shell, cron, trust
+  // store + adapter extras).
+  if (AUTO_CONSUMED_FILES.includes(path) || extraForbiddenFiles.includes(path)) return false;
+  // Name-carried hazards, at any depth.
+  const segments = path.split("/");
+  if (segments.some((segment) => AUTO_CONSUMED_SEGMENTS.includes(segment))) return false;
+  if (AUTO_CONSUMED_BASENAMES.includes(segments[segments.length - 1] ?? "")) return false;
   return true;
 }
 

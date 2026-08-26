@@ -37,7 +37,7 @@ import {
 } from "./token-budget.ts";
 import { OAuthTokenCache, NeedsReconnectionError, type CachedToken } from "./oauth-token-cache.ts";
 import { logger } from "./logger.ts";
-import { filterSensitiveHeaders, scrubSecretMaterial } from "./redact.ts";
+import { filterSensitiveHeaders, scrubSecretMaterial, truncateForScrub } from "./redact.ts";
 
 export type { SidecarConfig } from "./helpers.ts";
 
@@ -288,6 +288,33 @@ async function passUpstream(
   return new Response(observed, { status: upstream.status, headers: responseHeaders });
 }
 
+/** Chars of the upstream body kept in the operator log. */
+const BODY_SAMPLE_MAX_CHARS = 200;
+/**
+ * Extra chars handed to the scrubber beyond the preview.
+ *
+ * The slice must happen BEFORE the scrub, not after. The body is
+ * upstream-controlled and unbounded, this sidecar is single-threaded, and
+ * `scrubSecretMaterial` is a pass of ~10 global regexes: scrubbing a 1 MB
+ * error body to produce a 200-char log line blocked the event loop for 2.5 s
+ * (measured, adversarial body) where the slice-first form costs ~0.05 ms.
+ * `scrubStderrLine` in `integrations-boot.ts` is the sibling that already gets
+ * this right.
+ *
+ * The margin covers the rules that match a credential from its START: cutting
+ * at exactly the preview length would still mask the visible prefix of a
+ * straddling token, EXCEPT where a rule carries a minimum length (`AKIA` + 12,
+ * `eyJ` + 10) that the cut takes it below. 64 chars clears every such minimum.
+ *
+ * It does NOT cover the two rules that need a TERMINATOR — the userinfo pair,
+ * which must see the `@`/`%40` before it can match anything. No margin can:
+ * raising it moves the cut, it does not remove one. That case is closed by
+ * `truncateForScrub`, which masks an authority the cut left unterminated; see
+ * its docstring. The margin is therefore sized for the minimum-length rules
+ * alone, which is all it was ever able to promise.
+ */
+const BODY_SAMPLE_SCRUB_MARGIN = 64;
+
 /**
  * On non-2xx upstream responses, clone the body for the operator-facing
  * warn log (the agent still consumes the original stream). 2xx is silent —
@@ -312,8 +339,13 @@ async function logOauthLlmResponse(
   // we still scrub bearer/api-key patterns from the sample so the no-leak
   // guarantee holds independent of upstream behavior.
   const responseHeaders = filterSensitiveHeaders(upstream.headers);
-  const scrubbed = scrubSecretMaterial(bodySample);
-  const truncated = scrubbed.length > 200 ? scrubbed.slice(0, 200) + "…" : scrubbed;
+  const scrubbed = scrubSecretMaterial(
+    truncateForScrub(bodySample, BODY_SAMPLE_MAX_CHARS + BODY_SAMPLE_SCRUB_MARGIN),
+  );
+  const truncated =
+    bodySample.length > BODY_SAMPLE_MAX_CHARS
+      ? scrubbed.slice(0, BODY_SAMPLE_MAX_CHARS) + "…"
+      : scrubbed;
   logger.warn("oauth llm: upstream response non-2xx", {
     credentialId,
     targetUrl,

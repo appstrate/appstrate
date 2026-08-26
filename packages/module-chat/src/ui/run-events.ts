@@ -24,7 +24,7 @@ import {
   fileUri,
   isFileProducedByRun,
   parseFileUri,
-  PUBLISHED_FILE_LOG_EVENTS,
+  PUBLISHED_FILE_LOG_EVENT,
 } from "@appstrate/core/file-uri";
 import { asRecord, unwrapResult } from "./tool-result.ts";
 
@@ -408,7 +408,7 @@ export function extractRunFiles(result: unknown): ChatRunFile[] {
 export function publishedFilesFromLogs(logs: readonly RunLogLine[]): ChatRunFile[] {
   const out: ChatRunFile[] = [];
   for (const line of logs) {
-    if (!line.event || !PUBLISHED_FILE_LOG_EVENTS.includes(line.event)) continue;
+    if (line.event !== PUBLISHED_FILE_LOG_EVENT) continue;
     if (!line.data || typeof line.data !== "object") continue;
     const file = asChatRunFile(line.data);
     if (file) out.push(file);

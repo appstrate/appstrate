@@ -52,7 +52,7 @@ import { getOrchestrator } from "../services/orchestrator/index.ts";
 import { ensureBucket } from "@appstrate/db/storage";
 import { logInfraMode } from "../infra/index.ts";
 import { installPermissionAuditLogger } from "./permission-audit.ts";
-import { mapBounded } from "./map-bounded.ts";
+import { mapWithConcurrency } from "./map-with-concurrency.ts";
 
 /**
  * Max concurrent orphan stop+finalize pairs at boot. See the call site — kept
@@ -274,7 +274,13 @@ export async function bootBackground(): Promise<{ agentsHealthy: boolean }> {
       //
       // Concurrency is capped well under the postgres.js pool (`max: 20`)
       // because `synthesiseFinalize` writes.
-      await mapBounded(orphanIds, ORPHAN_CLEANUP_CONCURRENCY, async (runId) => {
+      // The pool aborts on the first rejection (no new orphan is picked up
+      // once one worker throws). That is a real change from the pool this used
+      // to call, which kept draining the queue regardless — but it cannot fire
+      // here: the callback body below catches everything it can raise and
+      // degrades to a `logger.warn`, so a boot with N orphans still attempts
+      // all N. The abort is the safety net for the day that stops being true.
+      await mapWithConcurrency(orphanIds, ORPHAN_CLEANUP_CONCURRENCY, async (runId) => {
         try {
           // An orphaned run may still have a live remote workload — a
           // firecracker microVM on the runner host keeps executing (and

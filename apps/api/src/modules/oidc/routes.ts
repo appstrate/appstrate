@@ -29,6 +29,7 @@ import { logger } from "../../lib/logger.ts";
 import { getClientIp } from "../../lib/client-ip.ts";
 import { getPublicAppOrigin } from "../../lib/public-url.ts";
 import { db } from "@appstrate/db/client";
+import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
 import { user, applications } from "@appstrate/db/schema";
 import { getOrgSettings, getOrgMember } from "../../services/organizations.ts";
 import { resolvePermissions } from "../../lib/permissions.ts";
@@ -1279,9 +1280,26 @@ export function createOidcRouter() {
     if (!name || !email || !password) {
       return renderRegError("Tous les champs sont requis.", 400, email ?? undefined, name);
     }
-    if (password.length < 8) {
+    // Same constants `pages/register.ts` stamps into this form's `minlength=` /
+    // `maxlength=`. Both halves of one page read one number: the attribute that
+    // TELLS the user and the branch that ENFORCES it
+    // (`@appstrate/db/password-policy`).
+    if (password.length < MIN_PASSWORD_LENGTH) {
       return renderRegError(
-        "Le mot de passe doit contenir au moins 8 caractères.",
+        `Le mot de passe doit contenir au moins ${MIN_PASSWORD_LENGTH} caractères.`,
+        400,
+        email,
+        name,
+      );
+    }
+    // The maximum needs its own branch for the same reason the minimum does:
+    // `maxlength=` is client-side only (a scripted POST bypasses it), and
+    // Better Auth refuses an over-length password without saying so — the
+    // signup below would surface as this page's generic failure instead of the
+    // one sentence that names the bound.
+    if (password.length > MAX_PASSWORD_LENGTH) {
+      return renderRegError(
+        `Le mot de passe ne doit pas dépasser ${MAX_PASSWORD_LENGTH} caractères.`,
         400,
         email,
         name,
@@ -1911,8 +1929,25 @@ export function createOidcRouter() {
         status,
       );
 
-    if (password.length < 8) {
-      return renderFormError("Le mot de passe doit contenir au moins 8 caractères.", 400);
+    // Same constants `pages/reset-password.ts` stamps into this form's
+    // `minlength=` / `maxlength=` — see the register handler above for why both
+    // halves of a page have to read the one number.
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      return renderFormError(
+        `Le mot de passe doit contenir au moins ${MIN_PASSWORD_LENGTH} caractères.`,
+        400,
+      );
+    }
+    // Load-bearing beyond stating the bound: the `!resetResponse.ok` branch
+    // below renders `renderInvalidTokenPage` for EVERY Better Auth refusal, so
+    // an over-length password told the user "this link is invalid or has
+    // expired" and their still-valid reset token looked burned. Refusing here
+    // keeps the token, the form and its error together.
+    if (password.length > MAX_PASSWORD_LENGTH) {
+      return renderFormError(
+        `Le mot de passe ne doit pas dépasser ${MAX_PASSWORD_LENGTH} caractères.`,
+        400,
+      );
     }
     if (password !== passwordConfirm) {
       return renderFormError("Les deux mots de passe ne correspondent pas.", 400);

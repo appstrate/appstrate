@@ -64,7 +64,7 @@ export function getOrgScope(c: Context<AppEnv>): OrgScope {
 /**
  * Read `orgId` + `applicationId` from the Hono context. Routes that call
  * this MUST be mounted behind `requireAppContext()` (or the path must
- * belong to `CORE_APP_SCOPED_PREFIXES` / a module's app-scoped paths) so
+ * satisfy `isAppScopedPath` / a module's app-scoped paths) so
  * `applicationId` is pinned before this runs. Throwing indicates a
  * misconfigured route — not something the caller should handle.
  */

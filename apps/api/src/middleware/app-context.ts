@@ -9,6 +9,44 @@ import { forbidden, invalidRequest, notFound } from "../lib/errors.ts";
 import { isInternalDispatch } from "../lib/internal-dispatch.ts";
 
 /**
+ * Core route prefixes that require an application context (`X-Application-Id`,
+ * or the API key's own `applicationId`).
+ *
+ * Core-only by design: modules own app-scoping for their own routes (the
+ * webhooks module, for instance, gates on an explicit `applicationId` body /
+ * query field), so a module never adds a row here.
+ *
+ * This list is read by the app-context middleware wiring in BOTH
+ * `apps/api/src/index.ts` and the test harness `apps/api/test/helpers/app.ts`.
+ * It lived as two hand-kept copies until they were reconciled here — a route
+ * family added to one and not the other gives a test app whose app-scoping
+ * differs from production, which is exactly the kind of gap tests exist to
+ * close.
+ *
+ * Deliberately NOT exported: `isAppScopedPath` below is the only reader, and
+ * it is what both call sites import. Handing out the array would let a caller
+ * re-derive the predicate (`.some(startsWith)`) its own way, which is the
+ * shape the drift took the first time.
+ */
+const APP_SCOPED_PREFIXES = [
+  "/api/agents",
+  "/api/runs",
+  "/api/schedules",
+  "/api/end-users",
+  "/api/api-keys",
+  "/api/notifications",
+  "/api/packages",
+  "/api/integrations",
+  "/api/uploads",
+  "/api/files",
+] as const;
+
+/** True when `path` belongs to a core app-scoped route family. */
+export function isAppScopedPath(path: string): boolean {
+  return APP_SCOPED_PREFIXES.some((prefix) => path.startsWith(prefix));
+}
+
+/**
  * Resolved application row exposed on the Hono context under `c.get("app")`.
  * Carries the fields every app-scoped route currently needs — keep the set
  * tight so downstream services can destructure without re-reading the row.

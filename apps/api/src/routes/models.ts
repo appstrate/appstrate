@@ -570,6 +570,27 @@ export function createModelsRouter() {
   router.post("/:id/test", rateLimit(5), requirePermission("models", "write"), async (c) => {
     const orgId = c.get("orgId");
     const modelId = c.req.param("id")!;
+
+    // A model alias must not be probed through this route (Threat A). The test
+    // issues a live `GET {realBaseUrl}/models` on the platform's own
+    // credential and answers `{ ok, latency, status }` — which reports the
+    // BACKING's round-trip time and its upstream HTTP status to a caller who is
+    // never told which vendor that is. Two distinct leaks (a timing signal and
+    // a status signal), plus an unmetered spend of a platform credential on a
+    // request the caller has no stake in.
+    //
+    // Refused before `testModelConnection` so no fetch is issued at all — a
+    // late refusal would still have spent the credential and still have taken
+    // the backing's round-trip time to answer.
+    //
+    // `aliased` is already public on the projection, so a 400 here discloses
+    // nothing new; the message names no binding detail. Non-aliased models are
+    // untouched — their contract is reaching the provider, not hiding it.
+    const existing = await getOrgModel(orgId, modelId);
+    if (existing?.aliased) {
+      throw invalidRequest("Connection testing is not available for a managed model.");
+    }
+
     try {
       const result = await testModelConnection(orgId, modelId);
       if (result.error === "MODEL_NOT_FOUND") {
@@ -694,10 +715,22 @@ export function createModelsRouter() {
         resourceId: modelId,
         after: data as unknown as Record<string, unknown>,
       });
-      // Return the bare updated resource (#657).
+      // Return the bare updated resource (#657), projected for a model alias
+      // (Threat A) — the same projection the list and effective-default paths
+      // apply.
+      //
+      // The asymmetry with POST is deliberate, not an oversight. A create
+      // response echoes a binding the operator just sent in the request body,
+      // so it discloses nothing the caller did not already hold. An update
+      // does not: `PUT {"enabled":true}` names no binding field, yet the raw
+      // row answers with `apiShape`, `providerId`, `baseUrl`, `modelId`,
+      // `contextWindow` and `cost`. `isSystemModel` above does not cover this
+      // — it rejects env-declared models, while an alias is an ordinary DB row
+      // — so without this projection the update route is a read oracle for
+      // every backing an org admin (or a `models:write` API key) can name.
       const model = await getOrgModel(orgId, modelId);
       if (!model) throw notFound("Model not found");
-      return c.json(model);
+      return c.json(projectAliasedModel(model));
     } catch (err) {
       if (err instanceof ApiError) throw err;
       logger.error("Model update failed", {

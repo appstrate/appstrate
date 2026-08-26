@@ -21,7 +21,7 @@
  * Schema 2020-12 is used via `customizeValidator({ AjvClass: Ajv2020 })`.
  */
 
-import { forwardRef, useMemo, type ReactNode } from "react";
+import { forwardRef, useMemo } from "react";
 import type { FormProps as RjsfFormProps } from "@rjsf/core";
 import RjsfForm from "@rjsf/core";
 import { mapAfpsToRjsf, type SchemaWrapper } from "@appstrate/core/form";
@@ -80,8 +80,6 @@ export interface SchemaFormProps extends Omit<
   wrapper: SchemaWrapper;
   /** Extra uiSchema merged on top of the AFPS-derived one. */
   uiSchema?: Record<string, unknown>;
-  /** When true, render the default RJSF submit button. Default: false. */
-  showSubmitButton?: boolean;
   /**
    * Uploader the `FileWidget` calls for direct uploads. Omit to disable
    * uploads (the widget shows an error if the user tries to attach a file).
@@ -89,42 +87,28 @@ export interface SchemaFormProps extends Omit<
   upload?: UploadFn;
   /** Translated strings for the FileWidget. Defaults are English. */
   labels?: FileWidgetLabels & { addItem?: string };
-  /** Extra formContext keys merged into what SchemaForm builds internally. */
-  formContext?: Record<string, unknown>;
-  children?: ReactNode;
 }
 
 /**
- * Submit-button rendering is controlled by a single signal:
- * `ui:submitButtonOptions.norender`. When `showSubmitButton` is false (default)
- * we set `norender: true` and let RJSF render whatever `children` the caller
- * passes as a footer (or nothing).
+ * The submit button never renders: `ui:submitButtonOptions.norender` is set
+ * unconditionally. Every caller drives submission from its own chrome via the
+ * forwarded ref, so RJSF's built-in button would only ever be a duplicate.
  */
 export const SchemaForm = forwardRef<RjsfForm, SchemaFormProps>(function SchemaForm(
-  {
-    wrapper,
-    showSubmitButton = false,
-    children,
-    uiSchema: extraUi,
-    upload,
-    labels,
-    formContext,
-    ...rest
-  },
+  { wrapper, uiSchema: extraUi, upload, labels, ...rest },
   ref,
 ) {
   const mapped = mapAfpsToRjsf(wrapper);
   const uiSchema = {
     ...mapped.uiSchema,
     ...(extraUi ?? {}),
-    ...(showSubmitButton ? {} : { "ui:submitButtonOptions": { norender: true } }),
+    "ui:submitButtonOptions": { norender: true },
   };
 
   // Stable identity so downstream `useMemo`s in FileWidget actually memoize.
   const ctx = useMemo(
-    () =>
-      ({ ...(formContext ?? {}), upload, labels }) as SchemaFormContext & Record<string, unknown>,
-    [formContext, upload, labels],
+    () => ({ upload, labels }) as SchemaFormContext & Record<string, unknown>,
+    [upload, labels],
   );
 
   return (
@@ -137,8 +121,6 @@ export const SchemaForm = forwardRef<RjsfForm, SchemaFormProps>(function SchemaF
       templates={templates}
       formContext={ctx}
       {...rest}
-    >
-      {children}
-    </RjsfForm>
+    />
   );
 });

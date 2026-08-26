@@ -24,52 +24,9 @@ import {
 import { seedAgent, seedRun, seedApplication, seedApiKey } from "../../helpers/seed.ts";
 import { sql } from "drizzle-orm";
 import { initRealtime, activeSubscriberCount } from "../../../src/services/realtime.ts";
-import { collectSSEEvents } from "../../helpers/sse.ts";
+import { collectSSEEvents, pgNotify } from "../../helpers/sse.ts";
 
 const app = getTestApp();
-
-/**
- * Per-channel required-field defaults so a NOTIFY payload matches the real
- * producer shape the realtime service validates against (the
- * `runUpdateEventSchema` / `runLogEventSchema` in @appstrate/shared-types — a
- * payload missing a required key fails `safeParse` and is silently dropped,
- * never reaching the SSE stream). Tests override only the fields they assert
- * on. Mirrors NOTIFY_DEFAULTS in services/realtime.test.ts.
- */
-const NOTIFY_DEFAULTS: Record<string, Record<string, unknown>> = {
-  run_update: {
-    operation: "UPDATE",
-    id: "exec-default",
-    package_id: null,
-    status: "running",
-    user_id: null,
-    end_user_id: null,
-    org_id: "org-default",
-    application_id: "app-default",
-    schedule_id: null,
-    error: null,
-    started_at: null,
-    completed_at: null,
-    duration: null,
-  },
-  run_log_insert: {
-    id: 1,
-    run_id: "exec-default",
-    org_id: "org-default",
-    application_id: "app-default",
-    type: "progress",
-    level: "info",
-    event: null,
-    message: null,
-    created_at: "2026-01-01T00:00:00.000Z",
-  },
-};
-
-/** Fire a PG NOTIFY on a channel with a JSON payload (required fields filled). */
-async function pgNotify(channel: string, payload: Record<string, unknown>) {
-  const full = { ...(NOTIFY_DEFAULTS[channel] ?? {}), ...payload };
-  await db.execute(sql`SELECT pg_notify(${channel}, ${JSON.stringify(full)})`);
-}
 
 /** Small delay to let PG LISTEN dispatch events to subscribers. */
 function wait(ms = 150): Promise<void> {
@@ -466,6 +423,52 @@ describe("realtime SSE routes (integration)", () => {
 
       const data = JSON.parse(frame!.data);
       expect(data.data).toEqual({ detail: "full-info" });
+    });
+
+    // `run_metric` is the live cost/token channel the run page reads. It was
+    // exercised at the service level only: the fixture defaults this file used
+    // to carry had no `run_metric` entry, so a metric NOTIFY fired from here
+    // was missing the required `cost_pricing_status` key, failed the service's
+    // `safeParse`, and was dropped before it ever reached an SSE frame — the
+    // test would have timed out rather than failed loudly. With the defaults
+    // shared, the channel's framing is asserted end to end.
+    it("receives run_metric events in SSE format", async () => {
+      const res = await sseRequest(`/api/realtime/runs/${run.id}`, ctx);
+      expect(res.status).toBe(200);
+      expect(res.body).not.toBeNull();
+
+      await wait();
+      await pgNotify("run_metric", {
+        org_id: ctx.orgId,
+        application_id: ctx.defaultAppId,
+        run_id: run.id,
+        package_id: agentPkg.id,
+        token_usage: { input_tokens: 10, output_tokens: 5 },
+        cost_so_far: 0.0042,
+      });
+
+      // Skip the initial run_update snapshot; assert on the injected metric.
+      const events = await collectSSEEvents(res.body!, 2, {
+        timeoutMs: 3000,
+        ignoreEvents: ["ping"],
+      });
+      const frame = events.find((e) => e.event === "run_metric");
+      expect(frame).toBeDefined();
+      // Every frame carries an `id:` — the metric channel is no exception.
+      expect(frame!.id).toMatch(/^.+:\d+$/);
+
+      // Wire shape: shallow-camelized by the service, `token_usage` inner keys
+      // deliberately left snake_case.
+      const data = JSON.parse(frame!.data);
+      expect(data).toEqual({
+        runId: run.id,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        packageId: agentPkg.id,
+        tokenUsage: { input_tokens: 10, output_tokens: 5 },
+        costSoFar: 0.0042,
+        costPricingStatus: null,
+      });
     });
   });
 

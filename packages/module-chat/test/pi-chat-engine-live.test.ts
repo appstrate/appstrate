@@ -348,6 +348,85 @@ describe("runPiChat against a stub provider", () => {
     }
   }, 30_000);
 
+  it("releases the slot when a WEDGED platform-MCP handshake is stopped", async () => {
+    // The turn's whole CONSTRUCTION phase used to observe nothing: `turnAbort`
+    // got its first listener only just before the prompt, ~180 lines after the
+    // handshake. A platform MCP that never answers `initialize` (a DB pool
+    // exhausted by concurrent runs, a module hook that never settles) therefore
+    // parked `execute` forever — `createUIMessageStream` never closed,
+    // `releaseOnClose` never ran, and this slot was held for the life of the
+    // process. Six such turns exhaust `CHAT_PI_MAX_CONCURRENCY` and every later
+    // chat 429s until restart; the user's own `POST …/stop` did nothing, since
+    // it sets exactly the controller nobody was listening to.
+    //
+    // Own timeout, deliberately short: on the unfixed engine this does not
+    // fail, it hangs (for the MCP SDK's 60 s default request timeout, which was
+    // the only bound that existed).
+    let releaseHandshake!: () => void;
+    mcpInitGate = new Promise<void>((resolve) => {
+      releaseHandshake = resolve;
+    });
+
+    const binding = createPiProxyModelBinding({
+      model: orgModel(),
+      origin: ORIGIN,
+      mintBearer: () => "never-minted",
+    })!;
+    const slot = acquirePiChatSlot();
+    expect(slot).not.toBeNull();
+    // Counting wrapper: `release()` is idempotent and the capacity counter is
+    // shared with every other suite in this process, so "a slot is available"
+    // proves nothing here. Observe the call itself.
+    let released = 0;
+    const counted = {
+      release: () => {
+        released += 1;
+        slot!.release();
+      },
+    };
+
+    const stopped = new AbortController();
+    try {
+      const res = runPiChat({
+        slot: counted,
+        modelBinding: binding,
+        presetId: "preset_live",
+        orgId: "org_live",
+        userId: "user_live",
+        chatSessionId: null,
+        messages: userTurn("dis bonjour"),
+        system: "You are a helpful assistant.",
+        generation: {},
+        platformMcp: { url: `${ORIGIN}/api/mcp/o/org_live?context=injected`, headers: {} },
+        abortSignal: stopped.signal,
+        onError: (error) => String(error),
+        recordUsage: () => {},
+      });
+
+      // Press stop once construction is genuinely parked on the handshake.
+      const stopTimer = setTimeout(() => stopped.abort(new Error("stopped by user")), 50);
+      const text = await res.text();
+      clearTimeout(stopTimer);
+
+      // The stream CLOSED — that is what `releaseOnClose` hangs off.
+      expect(released).toBeGreaterThan(0);
+
+      // And it closed as a well-formed turn, not as a bare truncation: the
+      // client still needs a start/finish envelope to reconstruct a message.
+      const chunks: Array<{ type: string }> = [];
+      for (const line of text.split("\n")) {
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice(5).trim();
+        if (data && data !== "[DONE]") chunks.push(JSON.parse(data) as { type: string });
+      }
+      expect(chunks.map((c) => c.type)).toEqual(["start", "finish"]);
+    } finally {
+      mcpInitGate = null;
+      releaseHandshake();
+      slot!.release();
+    }
+  }, 5_000);
+
   it("carries the caller's fetch all the way into the MCP transport", async () => {
     // The route→engine hop is asserted in `chat-stream-handler.test.ts`, which
     // probes `input.platformMcp.fetch`. The two hops AFTER it — engine →

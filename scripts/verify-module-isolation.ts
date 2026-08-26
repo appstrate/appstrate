@@ -23,13 +23,15 @@
 
 import { Glob } from "bun";
 import { resolve, dirname, relative, sep } from "node:path";
+import { readGatePolicy } from "./lib/policy-env.ts";
 
 // Under CI the override is ignored, so a green pipeline can never be bought
 // with `MODULE_ISOLATION_POLICY=off` — same pin `verify-module-contract.ts`
-// carries for the same reason.
-const POLICY = process.env.CI
-  ? "fail"
-  : ((process.env.MODULE_ISOLATION_POLICY ?? "fail") as "warn" | "fail" | "off");
+// carries for the same reason. `readGatePolicy` also REJECTS a value that is
+// neither `warn`, `fail` nor `off`; the cast this replaces accepted anything
+// and every non-`fail` value silently downgraded the exit below to 0 while the
+// `❌` lines still printed.
+const POLICY = readGatePolicy("MODULE_ISOLATION_POLICY");
 const ROOT = resolve(dirname(Bun.fileURLToPath(import.meta.url)), "..");
 
 /**

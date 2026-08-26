@@ -156,6 +156,132 @@ describe("createMcpHttpClient", () => {
   });
 });
 
+/**
+ * `options.signal` used to be read ONLY inside `connectWithRetry`, so the
+ * single-shot path — the one every in-process caller takes, chat included —
+ * ignored it outright. A wedged server then held the handshake for the SDK's
+ * full 60 s `DEFAULT_REQUEST_TIMEOUT_MSEC` with the caller's own deadline and
+ * its stop button both inert, and the caller had no way to tell it was stuck.
+ *
+ * Each case below gets its own short timeout: on the unfixed code they do not
+ * fail, they HANG, and a suite-length wedge buries the signal.
+ */
+describe("createMcpHttpClient — connect cancellation", () => {
+  /** A transport that accepts the request and never answers. */
+  function wedgedFetch(onRequest?: () => void): typeof fetch {
+    return ((_req: Request | string | URL, _init?: RequestInit): Promise<Response> => {
+      onRequest?.();
+      // No timer: a never-settling promise holds nothing open.
+      return new Promise<Response>(() => {});
+    }) as typeof fetch;
+  }
+
+  it("single-shot: an abort mid-handshake unwinds the connect", async () => {
+    const { url } = mountStandalone([echoTool()]);
+    const ac = new AbortController();
+    let reached = false;
+    const connecting = createMcpHttpClient(url, {
+      fetch: wedgedFetch(() => {
+        reached = true;
+      }),
+      signal: ac.signal,
+    });
+
+    // Abort only once the handshake is genuinely in flight, so this exercises
+    // the listener path rather than the `throwIfAborted` fast path below.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(reached).toBe(true);
+    ac.abort(new Error("caller gave up"));
+
+    let caught: unknown;
+    try {
+      await connecting;
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(Error);
+  }, 2_000);
+
+  it("single-shot: an already-aborted signal never opens the handshake", async () => {
+    const { url } = mountStandalone([echoTool()]);
+    const ac = new AbortController();
+    ac.abort(new Error("already gone"));
+    let reached = false;
+
+    let caught: unknown;
+    try {
+      await createMcpHttpClient(url, {
+        fetch: wedgedFetch(() => {
+          reached = true;
+        }),
+        signal: ac.signal,
+      });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(Error);
+    expect(reached).toBe(false);
+  }, 2_000);
+
+  it("retry path: an abort DURING an attempt does not wait the attempt out", async () => {
+    // The loop only ever checked `signal.aborted` between attempts, so a
+    // handshake that wedges made the retry deadline — not the caller's abort —
+    // the effective bound.
+    const { url } = mountStandalone([echoTool()]);
+    const ac = new AbortController();
+    const connecting = createMcpHttpClient(url, {
+      fetch: wedgedFetch(),
+      signal: ac.signal,
+      retry: { deadlineMs: 60_000, baseMs: 1, capMs: 5 },
+    });
+
+    await new Promise((r) => setTimeout(r, 20));
+    ac.abort(new Error("caller gave up"));
+
+    let caught: unknown;
+    try {
+      await connecting;
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(Error);
+  }, 2_000);
+});
+
+/**
+ * `client-connect-residual` — the documented gap in {@link connectWithSignal}'s
+ * bound, pinned so the docstring cannot drift back into claiming the signal
+ * covers the whole connect. `Client.connect` awaits a
+ * `notifications/initialized` POST AFTER the options-bounded `initialize`, and
+ * the SDK gives that call no options, hence no signal.
+ *
+ * This asserts CURRENT behaviour, not a fix: it passes before and after. Delete
+ * it only together with the residual paragraph it guards.
+ */
+describe("createMcpHttpClient — client-connect-residual", () => {
+  it("does not honour an abort landing after initialize settles", async () => {
+    const NOTIFY_DELAY_MS = 200;
+    const { fetch: base, url } = mountStandalone([echoTool()]);
+    const ac = new AbortController();
+    const fetcher: typeof fetch = (async (req: Request | string | URL, init?: RequestInit) => {
+      const request = req instanceof Request ? req : new Request(req as string, init);
+      if ((await request.clone().text()).includes("notifications/initialized")) {
+        // Exactly the window the docstring names: initialize has answered,
+        // the notification is in flight, the caller gives up.
+        ac.abort(new Error("caller gave up"));
+        await new Promise((r) => setTimeout(r, NOTIFY_DELAY_MS));
+      }
+      return base(request);
+    }) as typeof fetch;
+
+    const started = Date.now();
+    const client = await createMcpHttpClient(url, { fetch: fetcher, signal: ac.signal });
+    // Resolved despite the abort, and only after the POST came back.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(NOTIFY_DELAY_MS);
+    await client.close();
+  }, 5_000);
+});
+
 describe("wrapClient — cancellation", () => {
   it("aborts an in-flight call when the AbortSignal fires", async () => {
     const pair = await createInProcessPair([slowTool()]);

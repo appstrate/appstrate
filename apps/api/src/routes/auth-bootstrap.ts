@@ -59,13 +59,20 @@ import {
   verifyBootstrapToken,
 } from "../lib/bootstrap-token.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
 import { triggerPostBootstrapOrg } from "../lib/post-bootstrap-hook.ts";
 
 export const redeemSchema = z.object({
   token: z.string().min(1).max(128),
   email: z.email().toLowerCase().trim(),
   name: z.string().min(1).max(120).trim(),
-  password: z.string().min(8).max(256),
+  // Both bounds shared with Better Auth's own config. The cap used to be a
+  // local 256, above the 128 Better Auth actually enforced, so a 200-character
+  // password cleared this schema and was refused downstream — surfacing as the
+  // catch-all `bootstrap_signup_rejected` 400 below (or `bootstrap_signup_failed`
+  // 500 on the throw branch): RFC 9457 either way, but naming neither the length
+  // nor the bound. The Zod bound turns that into a 400 that does.
+  password: z.string().min(MIN_PASSWORD_LENGTH).max(MAX_PASSWORD_LENGTH),
 });
 
 // Stable bigint key for the cluster-wide advisory lock. Picked outside

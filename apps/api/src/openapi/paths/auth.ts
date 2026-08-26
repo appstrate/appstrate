@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
+
 export const authPaths = {
   "/api/auth/sign-up/email": {
     post: {
@@ -17,7 +19,11 @@ export const authPaths = {
               required: ["email", "password", "name"],
               properties: {
                 email: { type: "string", format: "email" },
-                password: { type: "string", minLength: 8 },
+                password: {
+                  type: "string",
+                  minLength: MIN_PASSWORD_LENGTH,
+                  maxLength: MAX_PASSWORD_LENGTH,
+                },
                 name: { type: "string" },
               },
             },
@@ -155,7 +161,15 @@ export const authPaths = {
                   description: "Bootstrap token from the install banner / .env.",
                 },
                 email: { type: "string", format: "email" },
-                password: { type: "string", minLength: 8, maxLength: 256 },
+                // BOTH bounds are shared: this endpoint sets the same
+                // credential `sign-up/email` does, so a ceiling of its own was
+                // a second source of truth (it said 256 while Better Auth
+                // enforced 128).
+                password: {
+                  type: "string",
+                  minLength: MIN_PASSWORD_LENGTH,
+                  maxLength: MAX_PASSWORD_LENGTH,
+                },
                 name: { type: "string", minLength: 1, maxLength: 120 },
               },
             },

@@ -19,6 +19,56 @@ const API_BARREL_BAN = {
   message:
     "Use the typed OpenAPI client from src/api/client.ts ($api / client) — the legacy fetch helpers are gone.",
 };
+// Every TypeScript file in the repo, minus the top-level `ignores` block below
+// (`**/dist`, `**/node_modules`, `.claude/`, the generated OpenAPI types).
+//
+// This is deliberately a SUPERSET, not a roster. The roster it replaces —
+// `**/src/**`, `**/test/**`, `**/scripts/**`, `e2e/**`, `runtime-pi/**`, `*.ts`
+// — read as exhaustive and was not: five tracked `.ts` files matched none of
+// its six globs, so `eslint .` reported nothing about them and only naming one
+// explicitly revealed `File ignored because no matching configuration was
+// supplied`. They were not marginal files — `apps/web/vite.config.ts` builds
+// the SPA that ships in the Docker image, `packages/afps-runtime/bin/afps.ts`
+// is a manifest `bin` entry, `packages/db/drizzle.config.ts` drives
+// `db:generate`, and `examples/custom-skill/skill.ts` is published example
+// code. A directory roster cannot survive the next config file somebody drops
+// at a workspace root; a superset can.
+//
+// The two blocks that use it (the general TS config and the Zod 4 guard) held
+// byte-identical copies of that roster, which is the other half of the same
+// problem — widening one and not the other is a silent asymmetry. One constant,
+// no drift.
+//
+// A superset of the working tree is NOT a superset the gate can run on,
+// though, and that is the other half of this change: a `files` glob is matched
+// against whatever `eslint <path>` walks, so `eslint .` under this config also
+// picks up untracked, non-gitignored scratch files. Measured: an untracked
+// `zz-probe/p.ts` holding `export const a: any = 1;` failed `bun run lint` →
+// `bun run check` → `.husky/pre-push`. So the entrypoint is now
+// `scripts/lint.ts`, which hands eslint the `git ls-files` list — the same
+// tracked-content rule `scripts/lint-manifest-casing.ts` and
+// `scripts/verify-compose-defaults.ts` already state. This file stays a
+// superset; the script decides which files it is applied to.
+//
+// `//#lint`'s turbo `inputs` mirror that scope so the CACHE KEY matches it;
+// a file eslint covers but turbo does not hash gets its findings once and then
+// replayed away forever.
+const ALL_TS = ["**/*.{ts,tsx}"];
+
+// The plain-JavaScript half, and it is not hypothetical bookkeeping: measured
+// 2026-08-25, `git ls-files -- '*.js' '*.jsx' '*.mjs' '*.cjs'` returns exactly
+// ONE path — `eslint.config.mjs`, the file that defines every rule this repo
+// gates on — and before the block that uses this glob existed, that file was
+// checked by nothing. `eslint --print-config eslint.config.mjs` reported 358
+// rules, 0 of them enabled, against 451/70 for `apps/api/src/index.ts`.
+//
+// The reason is worth stating because `scripts/lint.ts` used to state the
+// opposite: ESLint's `defaultConfig` gives `.js`/`.mjs`/`.cjs` their globbing
+// and `sourceType`, and ZERO rules. Every rule below is scoped to `ALL_TS`. So
+// "eslint's own defaults cover them" was true about parsing and false about
+// linting, which is the only half a gate cares about.
+const ALL_JS = ["**/*.{js,jsx,mjs,cjs}"];
+
 // Zod 4 string-format bans (single source of truth). Declared here because the
 // CLI and test blocks below re-declare `no-restricted-syntax` for subsets of
 // the same files — flat config replaces (not merges) a rule's options across
@@ -211,21 +261,17 @@ export default tseslint.config(
     //     as `//#lint` inputs while eslint answered "File ignored because no
     //     matching configuration was supplied" for every one of them: the gate
     //     was honest in intent and inert in fact.
-    //   - `*.ts` (no slash) matches root-level files only, so this does not
-    //     silently pull in arbitrary nested config files.
+    //   - `ALL_TS` deliberately DOES pull in nested config files —
+    //     `apps/web/vite.config.ts`, `packages/db/drizzle.config.ts` and the
+    //     rest are the files this widening exists for. What keeps that from
+    //     also meaning "somebody's untracked scratch file" is the entrypoint,
+    //     not this glob: `scripts/lint.ts` runs eslint over `git ls-files`.
     // Note on `console.*`: `no-console` is NOT set here. It is enabled in its
     // own block below, over application source only — deliberately not over
     // `scripts/**` or `**/test/**`, which this block does cover. See that block
     // for why.
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
-    files: [
-      "**/src/**/*.{ts,tsx}",
-      "**/test/**/*.ts",
-      "**/scripts/**/*.ts",
-      "e2e/**/*.ts",
-      "runtime-pi/**/*.ts",
-      "*.ts",
-    ],
+    files: ALL_TS,
     languageOptions: {
       ecmaVersion: 2020,
       globals: globals.node,
@@ -236,6 +282,43 @@ export default tseslint.config(
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
       "preserve-caught-error": "off",
+    },
+  },
+  {
+    // The plain-JS block. See `ALL_JS` above for the measurement that motivates
+    // it: without this object, `eslint.config.mjs` — the source of every rule
+    // in this repo — parsed cleanly under zero rules, so `no-undef`,
+    // `no-unused-vars` and `no-dupe-keys` had nothing to say about the file
+    // that decides what they say about everything else.
+    //
+    // `js.configs.recommended` and nothing more. The TypeScript rules above
+    // cannot apply (no TS parser, and `tseslint.configs.recommended` scopes
+    // itself to TS anyway), and the repo conventions the other blocks enforce
+    // — the `console.*` ban, the Zod 4 form bans, the Pi-SDK import guard —
+    // are all about application source, which is TypeScript here by policy.
+    //
+    // `.jsx` is in the glob although zero tracked files match it today. That is
+    // deliberate: `scripts/lint.ts` hands eslint every tracked `.jsx`, and a
+    // file matched by NO config object is skipped with a warning rather than
+    // linted. Covering the extension means the day one appears it is linted,
+    // not tolerated.
+    extends: [js.configs.recommended],
+    files: ALL_JS,
+    languageOptions: {
+      // `"latest"`, not a pinned year. The value here was copied from the TS
+      // block above, where it is inert — `@typescript-eslint/parser` ignores
+      // `ecmaVersion` and parses whatever TypeScript accepts. Espree does not:
+      // it uses this to decide the DIALECT, so a pinned `2020` reported valid
+      // modern JavaScript as broken syntax. Measured 2026-08-25 by appending
+      // `let zzA; zzA ??= 2;` to this very file:
+      // `665:7  error  Parsing error: Unexpected token =`. Logical assignment
+      // (ES2021), class fields (ES2022) and top-level await would each fail the
+      // gate here with a syntax error rather than a rule finding. `"latest"`
+      // tracks the espree the repo has installed, which is the same thing bun
+      // and every runtime in this repo already accept.
+      ecmaVersion: "latest",
+      globals: globals.node,
+      parserOptions: { ecmaFeatures: { jsx: true } },
     },
   },
   {
@@ -292,14 +375,7 @@ export default tseslint.config(
     // `**/test/**` and `apps/cli/src/**` blocks that re-declare
     // `no-restricted-syntax`, so those still win (with the bans re-spread) for
     // the files they cover — including `scripts/test/**`.
-    files: [
-      "**/src/**/*.{ts,tsx}",
-      "**/test/**/*.ts",
-      "**/scripts/**/*.ts",
-      "e2e/**/*.ts",
-      "runtime-pi/**/*.ts",
-      "*.ts",
-    ],
+    files: ALL_TS,
     rules: {
       "no-restricted-syntax": ["error", ...ZOD4_STRING_FORMAT_BANS],
     },

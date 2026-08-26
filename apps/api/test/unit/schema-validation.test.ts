@@ -363,6 +363,63 @@ describe("validateInput", () => {
     const result = validateInput({ topic: "AI" }, schema);
     expect(result.valid).toBe(true);
   });
+
+  /**
+   * The shared AJV is an Ajv2020 bound to one dialect, so a manifest declaring
+   * draft-07 — what most JSON Schema tooling emits — makes `ajv.compile` throw
+   * "no schema with key or ref …/draft-07/schema" rather than return a
+   * validator. That is a 500 on a path whose entire contract is a 400 with
+   * per-field errors. The effective schema must therefore drop `$schema`: it
+   * declares the document's dialect and asserts nothing about the value.
+   */
+  it("a schema declaring a foreign $schema dialect validates instead of throwing", () => {
+    const schema = {
+      $schema: "http://json-schema.org/draft-07/schema#",
+      type: "object",
+      properties: { topic: { type: "string" } },
+      required: ["topic"],
+    } as unknown as JSONSchemaObject;
+
+    expect(() => validateInput({ topic: "AI" }, schema)).not.toThrow();
+    expect(validateInput({ topic: "AI" }, schema).valid).toBe(true);
+
+    // …and it still REJECTS, rather than waving the input through.
+    const missing = validateInput({}, schema);
+    expect(missing.valid).toBe(false);
+    expect(JSON.stringify(missing.errors)).toContain("topic");
+  });
+
+  it("a file field does not resurrect the $schema throw", () => {
+    // The file-field branch is the one that started spreading the author's
+    // schema, so it is the branch that started forwarding `$schema`.
+    const schema = {
+      $schema: "http://json-schema.org/draft-07/schema#",
+      type: "object",
+      properties: {
+        doc: { type: "string", format: "uri", contentMediaType: "application/pdf" },
+        note: { type: "string" },
+      },
+      required: ["doc"],
+    } as unknown as JSONSchemaObject;
+
+    expect(() => validateInput({ note: "hi" }, schema)).not.toThrow();
+    expect(validateInput({ note: "hi" }, schema).valid).toBe(true);
+  });
+});
+
+describe("validateOutput dialect handling", () => {
+  it("a schema declaring a foreign $schema dialect validates instead of throwing", () => {
+    const schema = {
+      $schema: "http://json-schema.org/draft-07/schema#",
+      type: "object",
+      properties: { summary: { type: "string" } },
+      required: ["summary"],
+    } as unknown as JSONSchemaObject;
+
+    expect(() => validateOutput({ summary: "done" }, schema)).not.toThrow();
+    expect(validateOutput({ summary: "done" }, schema).valid).toBe(true);
+    expect(validateOutput({}, schema).valid).toBe(false);
+  });
 });
 
 // =====================================================
@@ -488,5 +545,99 @@ describe("compiled-validator cache — shared bound", () => {
     // reaches the same verdict.
     expect(validateInput({}, distinct(0)).valid).toBe(false);
     expect(validateAgainstSchema({}, distinct(0)).valid).toBe(false);
+  });
+});
+
+/**
+ * `runValidate` used to answer two questions with one test — "does this schema
+ * name a property?" standing in for "does this schema constrain anything?" —
+ * and then, past that gate, rebuild the input schema as a bare
+ * `{type, properties, required}`. Both discard rules the author wrote down.
+ *
+ * The verdicts below are the AUTHOR'S schema applied as written; every one of
+ * them was `valid: true` before.
+ */
+describe("the declared schema is applied as written", () => {
+  it("enforces a constraint that names no property (input)", () => {
+    const closed = {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    } as unknown as JSONSchemaObject;
+    expect(validateInput({ surprise: 1 }, closed).valid).toBe(false);
+
+    const requiresUnnamed = {
+      type: "object",
+      properties: {},
+      required: ["must_be_here"],
+    } as unknown as JSONSchemaObject;
+    expect(validateInput({}, requiresUnnamed).valid).toBe(false);
+  });
+
+  it("enforces a constraint that names no property (output)", () => {
+    // `additionalProperties` is deliberately relaxed on the output path, so the
+    // case that proves the short-circuit is `required`.
+    const requiresUnnamed = {
+      type: "object",
+      properties: {},
+      required: ["must_be_here"],
+    } as unknown as JSONSchemaObject;
+    expect(validateOutput({}, requiresUnnamed).valid).toBe(false);
+  });
+
+  it("enforces a constraint that names no property (connection credentials)", () => {
+    const requiresUnnamed = {
+      type: "object",
+      properties: {},
+      required: ["api_key"],
+    } as unknown as JSONSchemaObject;
+    expect(validateConnectionCredentials(requiresUnnamed, {}).valid).toBe(false);
+    // A genuinely loose `custom` auth is still waved through (control).
+    expect(
+      validateConnectionCredentials({ type: "object", properties: {} }, { whatever: 1 }).valid,
+    ).toBe(true);
+  });
+
+  it("keeps the keywords the three-key rebuild dropped from an input schema", () => {
+    const declared = {
+      type: "object",
+      properties: { topic: { type: "string" }, locale: { type: "string" } },
+      required: ["topic"],
+      additionalProperties: false,
+      $defs: { unused: { type: "string" } },
+      dependentRequired: { topic: ["locale"] },
+    } as unknown as JSONSchemaObject;
+
+    // `additionalProperties: false` — an undeclared key is refused.
+    expect(validateInput({ topic: "AI", locale: "fr", extra: 1 }, declared).valid).toBe(false);
+    // `dependentRequired` — `topic` present pulls `locale` in with it.
+    expect(validateInput({ topic: "AI" }, declared).valid).toBe(false);
+    // …and the body that satisfies all of it still passes (control).
+    expect(validateInput({ topic: "AI", locale: "fr" }, declared).valid).toBe(true);
+  });
+
+  it("still ignores a file field's own assertions, and still does not require it", () => {
+    // The file-field exclusion is why the rebuild existed. It must survive: the
+    // parser has already rewritten the value to an `appfile://…` URI that the
+    // declared `format: uri` + `contentMediaType` would reject, and whether a
+    // file was supplied is the upload pipeline's question, not AJV's.
+    const withFile = {
+      type: "object",
+      properties: {
+        topic: { type: "string" },
+        doc: { type: "string", format: "uri", contentMediaType: "application/pdf" },
+      },
+      required: ["topic", "doc"],
+      additionalProperties: false,
+    } as unknown as JSONSchemaObject;
+
+    // Required file field absent → still valid.
+    expect(validateInput({ topic: "AI" }, withFile).valid).toBe(true);
+    // Present as the resolved URI → accepted, and NOT read as an unexpected
+    // extra even though the object is closed (the reason the exclusion relaxes
+    // the property instead of deleting the key).
+    expect(validateInput({ topic: "AI", doc: "appfile://file_abc" }, withFile).valid).toBe(true);
+    // The non-file half of the schema is still enforced.
+    expect(validateInput({ doc: "appfile://file_abc" }, withFile).valid).toBe(false);
   });
 });

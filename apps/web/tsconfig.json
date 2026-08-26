@@ -12,5 +12,11 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src"]
+  // `vite.config.ts` is named explicitly: it BUILDS this SPA (and the Docker
+  // image ships what it emits), yet it sat in no tsc program and matched none
+  // of eslint's `files` globs — a build script for a shipped artefact checked
+  // by nothing. It is one file rather than a `*.ts` glob so nothing else at the
+  // workspace root joins the program by accident. Note it also enters the
+  // `verify:type-coverage` denominator, which reads this same project.
+  "include": ["src", "vite.config.ts"]
 }

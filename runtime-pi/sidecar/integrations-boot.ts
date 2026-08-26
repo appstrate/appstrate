@@ -83,7 +83,7 @@ import {
   type RuntimeAdapterRunContext,
   type RuntimeEgressContext,
 } from "./integration-runtime-adapter.ts";
-import { scrubSecretMaterial } from "./redact.ts";
+import { scrubSecretMaterial, truncateForScrub } from "./redact.ts";
 // Side-effect imports — each adapter module registers itself on load.
 // New adapters (firecracker, podman, …) plug in with one more import here.
 import "./integration-runtime-adapter-docker.ts";
@@ -737,9 +737,15 @@ const STDERR_LINE_MAX_CHARS = 500;
  * This is defence-in-depth, not a guarantee — the primary control remains
  * that runs are org-scoped to an actor who already holds the integration's
  * credentials.
+ *
+ * The cap is applied with `truncateForScrub` rather than a bare `.slice`. It is
+ * the TIGHTEST cut in the sidecar (500 chars, against 2 KB elsewhere), so it is
+ * the one most likely to land inside a `scheme://user:pass@host` — an ordinary
+ * shape for a runner printing a connection error — and the userinfo rule cannot
+ * fire without the `@` the cut would have removed.
  */
 export function scrubStderrLine(line: string): string {
-  return scrubSecretMaterial(line.slice(0, STDERR_LINE_MAX_CHARS));
+  return scrubSecretMaterial(truncateForScrub(line, STDERR_LINE_MAX_CHARS));
 }
 
 /**
@@ -924,10 +930,15 @@ async function spawnAndConnectLocalIntegration(params: {
     bundleRoot: root,
     egress: egressCtx,
     workspaceHandle: params.workspaceHandle,
-    onStderrLine: (line) => {
+    // Scrub ONCE, at the point third-party bytes enter the process, so both
+    // consumers get the same masked line. Scrubbing only the report copy left
+    // the operator's log aggregator holding the raw line — a wider audience,
+    // not a narrower one, than the report the scrub was written for.
+    onStderrLine: (raw) => {
+      const line = scrubStderrLine(raw);
       logger.info(`${logLabel} integration stderr`, { integrationId: spec.integrationId, line });
       if (params.stderrTail) {
-        params.stderrTail.push(scrubStderrLine(line));
+        params.stderrTail.push(line);
         if (params.stderrTail.length > STDERR_TAIL_MAX_LINES) params.stderrTail.shift();
       }
     },
@@ -1278,7 +1289,12 @@ export async function bootIntegrations(
       // below and land in `failed`, which aborts the run. We log + breadcrumb
       // the root cause here so the per-integration failures downstream are
       // attributable (typically openssl missing from the sidecar image).
-      const msg = err instanceof Error ? err.message : String(err);
+      //
+      // Scrubbed for the same reason the per-spec catch below is: this message
+      // is not all sidecar-authored — openssl's workdir errors quote the path
+      // they were handed — and it lands on the UNAUTHENTICATED
+      // `GET /integrations/boot-report`, verbatim, twice (crumb message + data).
+      const msg = scrubSecretMaterial(err instanceof Error ? err.message : String(err));
       logger.warn("integration MITM CA bring-up failed; HTTP-delivery integrations will skip", {
         runId,
         error: msg,
@@ -1619,7 +1635,16 @@ export async function bootIntegrations(
         },
       });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      // Scrub the failure message itself, not just the stderr tail appended
+      // below. `msg` is third-party text on several paths — a `connect.tool`
+      // login tool's own error prose (`parseLoginToolResult` surfaces it
+      // verbatim), a `docker`/runner diagnostic that quotes back what it was
+      // given, a platform error `detail`. All of it lands in `failed[].error`
+      // and on a breadcrumb, both served by the UNAUTHENTICATED
+      // `GET /integrations/boot-report` the agent container reads as its boot
+      // gate. Scrubbing one half of a string the caller reads whole was the
+      // bug.
+      const msg = scrubSecretMaterial(err instanceof Error ? err.message : String(err));
       const ms = Math.round(performance.now() - specStart);
       // #779 — append the runner's stderr tail so the boot report carries
       // the actual upstream cause, not just the transport-level symptom

@@ -277,6 +277,43 @@ describe("OAuth model providers — token-resolver hardening", () => {
       expect(blob.refreshToken).toBe("kept-refresh");
     });
 
+    it("refreshes even when the stored token is nowhere near expiry", async () => {
+      // "Force a refresh regardless of expiry" is this function's contract and
+      // the sidecar calls it precisely because the provider just answered 401.
+      // Every other test here seeds an expired/near-expired token, so the
+      // freshness short-circuit inside `dedupedRefresh` was never exercised:
+      // with an hour of remaining lifetime it returned the dead token, the
+      // provider was never contacted, and the sidecar retried the same 401.
+      const id = await seedOAuthCredential({
+        orgId,
+        userId,
+        providerId: "test-oauth",
+        accessToken: "revoked-but-unexpired",
+        refreshToken: "rt",
+        expiresAtMs: Date.now() + 60 * 60 * 1000,
+      });
+
+      let fetchCalled = false;
+      mockFetch(async () => {
+        fetchCalled = true;
+        return new Response(
+          JSON.stringify({
+            access_token: "rotated",
+            refresh_token: "rt2",
+            token_type: "Bearer",
+            expires_in: 3600,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      });
+
+      const result = await forceRefreshOAuthModelProviderToken(id);
+
+      expect(fetchCalled).toBe(true);
+      expect(result.accessToken).toBe("rotated");
+      expect((await readBlob(id)).accessToken).toBe("rotated");
+    });
+
     it("network error: surfaces as a non-fatal Error with descriptive message (does not flag credential)", async () => {
       const id = await seedOAuthCredential({
         orgId,

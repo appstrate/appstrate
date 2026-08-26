@@ -32,6 +32,7 @@ import {
   createSseModelSwapStream,
   syntheticAliasErrorBody,
   LLM_PASSTHROUGH_RESPONSE_HEADERS,
+  projectAliasUpstreamStatus,
 } from "@appstrate/core/model-swap";
 import {
   stripUpstreamResponseHeaders,
@@ -82,7 +83,16 @@ function syntheticAliasErrorResponse(
   const headers = buildClientHeaders(upstream, swap);
   // The synthesized body is JSON even when the upstream's wasn't.
   headers.set("content-type", "application/json");
-  return new Response(syntheticAliasErrorBody(swap, status), { status, headers });
+  // Project BEFORE disclosing. A vendor- or CDN-specific code (Anthropic's 529,
+  // Cloudflare's 520-526) fingerprints the backing as surely as its prose does,
+  // and here the status is disclosed twice over: in the body and as the HTTP
+  // status itself. The sidecar's re-originated error event calls the same
+  // helper, so the two boundaries cannot drift apart again.
+  const projected = projectAliasUpstreamStatus(status);
+  return new Response(syntheticAliasErrorBody(swap, projected), {
+    status: projected,
+    headers,
+  });
 }
 
 /**

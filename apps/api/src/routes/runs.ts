@@ -7,7 +7,6 @@ import type { AppEnv } from "../types/index.ts";
 import {
   getRun,
   getRunFull,
-  getRunningRunsForPackage,
   deletePackageRuns,
   listPackageRuns,
   listGlobalRuns,
@@ -826,11 +825,11 @@ export function createRunsRouter() {
       const agent = c.get("package");
       const scope = getAppScope(c);
 
-      const running = await getRunningRunsForPackage(scope, agent.id);
-      if (running > 0) {
-        throw conflict("run_in_progress", `${running} run(s) still running`);
-      }
-
+      // No pre-check here: `deletePackageRuns` counts active runs inside its
+      // own transaction, under the per-org run-admission advisory lock, and
+      // throws the same 409 `run_in_progress`. A count taken out here would be
+      // stale by the time the transaction opens — false assurance, and a
+      // second copy of the rule to keep in sync.
       const deleted = await deletePackageRuns(scope, agent.id);
       await recordAuditFromContext(c, {
         action: "agent.runs_bulk_deleted",

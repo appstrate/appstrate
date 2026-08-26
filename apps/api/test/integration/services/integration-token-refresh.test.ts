@@ -113,7 +113,7 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
     token.stop();
   });
 
-  async function seedConnection(initialScopes: string[]): Promise<string> {
+  async function seedConnection(initialScopes: string[], expiresAt?: Date): Promise<string> {
     const ciphertext = encryptCredentialEnvelope({
       outputs: {
         access_token: "old-access",
@@ -132,6 +132,7 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
         userId: ctx.user.id,
         credentialsEncrypted: ciphertext,
         scopesGranted: initialScopes,
+        ...(expiresAt ? { expiresAt } : {}),
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
@@ -209,6 +210,50 @@ describe("forceRefreshIntegrationConnection — Phase 6 scope-shrink awareness",
       .from(integrationConnections)
       .where(eq(integrationConnections.id, connId));
     expect(row!.scopesGranted.sort()).toEqual(["read", "send"]);
+  });
+
+  // ── The freshness short-circuit, both sides of it ──
+  //
+  // `dedupedRefresh` re-reads the row after winning the lock and may answer
+  // from it instead of spending the refresh_token. That short-circuit is
+  // correct for a PROACTIVE refresh and wrong for a FORCED one, so both
+  // directions are pinned here: removing it entirely would burn a peer's
+  // just-rotated token on every lead-window pass, and leaving it in the forced
+  // path is the bug it was masking.
+
+  it("force (default): refreshes a token that is nowhere near expiry", async () => {
+    const connId = await seedConnection(["read"], new Date(Date.now() + 50 * 60_000));
+    token.setResponse({ access_token: "rotated", expires_in: 3600 });
+
+    const result = await forceRefreshIntegrationConnection(
+      connId,
+      PACKAGE_ID,
+      "primary",
+      (await fetchEncrypted(connId))!,
+      { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
+    );
+
+    expect(result.fields.access_token).toBe("rotated");
+  });
+
+  it("force:false: serves the stored token when it is nowhere near expiry", async () => {
+    // CONTROL for the test above. The proactive caller has no evidence against
+    // the stored token, and a peer may have written it microseconds ago — so
+    // the exchange is skipped and the refresh_token is not double-spent. The
+    // token server is armed with a DIFFERENT token, so contacting it would show.
+    const connId = await seedConnection(["read"], new Date(Date.now() + 50 * 60_000));
+    token.setResponse({ access_token: "must-not-be-fetched", expires_in: 3600 });
+
+    const result = await forceRefreshIntegrationConnection(
+      connId,
+      PACKAGE_ID,
+      "primary",
+      (await fetchEncrypted(connId))!,
+      { tokenEndpoint: token.url, clientId: "cid", clientSecret: "csec" },
+      { force: false },
+    );
+
+    expect(result.fields.access_token).toBe("old-access");
   });
 
   it("treats scope creep (response wider than stored) as non-shrink", async () => {

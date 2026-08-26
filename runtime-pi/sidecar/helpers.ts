@@ -128,7 +128,7 @@ export const LLM_STREAM_IDLE_TIMEOUT_MS = readPositiveIntEnv(
  * DOMException, the `app.all("/llm/*")` handler's `catch` hands it to
  * `llmFetchErrorResponse` (`./app.ts`), which reads only `err.code` and answers
  * a generic `502 {"error":"LLM request failed…"}` — the message is dropped. On
- * the aliased `pi-messages` path it is replaced by `syntheticAliasErrorMessage`
+ * the aliased `pi-messages` path it is replaced by `syntheticAliasClassifierMessage`
  * for the same reason. It is worded for OUR logs.
  *
  * The retry still happens, by the status code: `502` is itself one of
@@ -361,7 +361,7 @@ export {
 
 // `matchesAuthorizedUri` (`(url, patterns[])` allowlist check, AFPS spec
 // `*`/`**` semantics) and `stripUserInfoAndFragment` (WHATWG-style URL
-// sanitisation used on redirect hops + the `finalUrl` envelope) are
+// sanitisation used on redirect hops) are
 // single-sourced from the shared outbound-HTTP engine in
 // `@appstrate/afps-runtime/resolvers` — the same module the sidecar's
 // `executeApiCall` redirect-follower uses, so allowlist matching can never

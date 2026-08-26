@@ -66,9 +66,10 @@ export const PUBLISHED_FILE_LOG_EVENT = "file";
  * row carrying it exists any more. A deployment that somehow held one would
  * render that row without its file attachment — not an error, just an absence.
  *
- * Stays a LIST rather than collapsing to the string, because the readers'
- * question is membership: a second tag would then be a data change here rather
- * than a predicate change in each reader.
+ * @deprecated One tag remains, so every reader now compares against
+ * {@link PUBLISHED_FILE_LOG_EVENT} directly and this list has no in-repo
+ * consumer. It stays exported only because `@appstrate/core` is published:
+ * removing it is a breaking change. Delete at the next major.
  */
 export const PUBLISHED_FILE_LOG_EVENTS: readonly string[] = [PUBLISHED_FILE_LOG_EVENT];
 
@@ -96,7 +97,7 @@ export const AGENT_OUTPUT_FILE_PURPOSE = "agent_output";
  *   (`apps/api/src/services/files.ts`), so matching the id alone would call the
  *   run's own input an output.
  *
- * Lives here, beside {@link PUBLISHED_FILE_LOG_EVENTS}, for the same reason:
+ * Lives here, beside {@link PUBLISHED_FILE_LOG_EVENT}, for the same reason:
  * three independent readers — the web shell's run page, the chat module's run
  * card, and the server-side `run_and_wait` payload — must answer this question
  * identically, and a package may not import from `apps/web`. Values are read

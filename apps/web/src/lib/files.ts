@@ -17,7 +17,7 @@ import {
   FileVideo,
   type LucideIcon,
 } from "lucide-react";
-import { isFileProducedByRun, PUBLISHED_FILE_LOG_EVENTS } from "@appstrate/core/file-uri";
+import { isFileProducedByRun, PUBLISHED_FILE_LOG_EVENT } from "@appstrate/core/file-uri";
 
 /** Minimal shape the helpers read — a structural subset of the `FileDto`. */
 export interface FileLike {
@@ -84,14 +84,14 @@ export function featuredRunFile<T extends Pick<FileLike, "purpose" | "run_id">>(
 }
 
 /**
- * Does this run-log `event` tag announce a published file? The accepted set
- * lives in `@appstrate/core/file-uri` and is built from the tag the sink
- * writes, shared with the chat module's run card: a tag one of them misses is
- * a file list that silently never refreshes, with no error anywhere. No
- * pre-#1177 spelling is accepted — none survives the rename.
+ * Does this run-log `event` tag announce a published file? The accepted tag
+ * lives in `@appstrate/core/file-uri` and is the one the sink writes, shared
+ * with the chat module's run card: a tag one of them misses is a file list
+ * that silently never refreshes, with no error anywhere. No pre-#1177 spelling
+ * is accepted — none survives the rename.
  */
 export function isPublishedFileLogEvent(event: string | null | undefined): boolean {
-  return !!event && PUBLISHED_FILE_LOG_EVENTS.includes(event);
+  return event === PUBLISHED_FILE_LOG_EVENT;
 }
 
 /**

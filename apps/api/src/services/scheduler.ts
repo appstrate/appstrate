@@ -24,7 +24,7 @@ import {
   extractRunAgentDenorm,
 } from "./run-pipeline.ts";
 import { getInstalledPackageSettings } from "./application-packages.ts";
-import { resolveEffectiveInput } from "./input-resolution.ts";
+import { resolveAndValidateScheduleInput } from "./input-resolution.ts";
 import { withoutLockedFields } from "@appstrate/core/input-resolution";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
@@ -33,8 +33,6 @@ import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import { ApiError, internalError } from "../lib/errors.ts";
 import { scopedWhere } from "../lib/db-helpers.ts";
-import { validateInput } from "./schema.ts";
-import { asJSONSchemaObject } from "@appstrate/core/form";
 import { computeNextRun } from "../lib/cron.ts";
 import { actorMatch, type Actor } from "../lib/actor.ts";
 import type { AppScope } from "../lib/scope.ts";
@@ -587,22 +585,41 @@ export async function triggerScheduledRun(
       return;
     }
 
-    // Resolve this fire's input through the same four layers as a request
-    // run — author defaults < editor defaults < the schedule's frozen values.
-    // Wrapped because both the layers and the schema can drift after the
-    // schedule was written (a field locked since, a tightened schema): the
-    // scheduler must `failSchedule` with a visible record instead of throwing
-    // into the worker.
-    const inputSchema = agent.manifest.input?.schema;
+    // Resolve this fire's input through the same layers as a request run —
+    // author defaults < editor defaults < the schedule's frozen values — and
+    // validate the result, because both the layers and the schema can drift
+    // after the schedule was written (a field locked since, a tightened
+    // schema).
+    //
+    // The pair comes from `resolveAndValidateScheduleInput`, which documents
+    // itself as existing for exactly three call sites — create, update and this
+    // one — and names the drift that writing it out per site produced. This
+    // site had re-inlined it anyway. What stays HERE is the only part that is
+    // the scheduler's own: the failure CHANNEL. A cron fire has no caller to
+    // answer, so a refusal becomes `failSchedule` + a visible failed run rather
+    // than a throw into the worker.
     let resolvedInput: Record<string, unknown>;
     try {
-      resolvedInput = resolveEffectiveInput({
-        ...(inputSchema ? { schema: asJSONSchemaObject(inputSchema) } : {}),
+      const resolution = resolveAndValidateScheduleInput({
+        inputSchema: agent.manifest.input?.schema,
         editorDefaults: packageSettings.values,
         lockedFields: packageSettings.locked,
-        overlay: { origin: "schedule input", values: input },
+        input,
       });
+      if (resolution.errors) {
+        logger.warn("Scheduled input validation failed, skipping run", {
+          scheduleId,
+          packageId,
+          errors: resolution.errors,
+        });
+        await failSchedule(
+          `Input validation failed: ${resolution.errors.map((e) => e.message).join(", ")}`,
+        );
+        return;
+      }
+      resolvedInput = resolution.resolved;
     } catch (err) {
+      // `locked_input_field` — the one refusal resolution itself raises.
       if (err instanceof ApiError) {
         logger.warn("Schedule input no longer resolvable", {
           scheduleId,
@@ -614,23 +631,6 @@ export async function triggerScheduledRun(
         return;
       }
       throw err;
-    }
-
-    // Validate the resolved input (the schema may have changed since the
-    // schedule was created).
-    if (inputSchema) {
-      const inputValidation = validateInput(resolvedInput, asJSONSchemaObject(inputSchema));
-      if (!inputValidation.valid) {
-        logger.warn("Scheduled input validation failed, skipping run", {
-          scheduleId,
-          packageId,
-          errors: inputValidation.errors,
-        });
-        await failSchedule(
-          `Input validation failed: ${inputValidation.errors?.map((e) => e.message).join(", ")}`,
-        );
-        return;
-      }
     }
 
     const runId = `run_${crypto.randomUUID()}`;

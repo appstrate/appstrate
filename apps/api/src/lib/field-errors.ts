@@ -29,18 +29,14 @@ interface PathMessageParseOptions {
    * path upstream (e.g. `validateInlineManifest`).
    */
   fieldPrefix?: string;
-  /**
-   * Field name to use when the raw string has no path-like prefix. Defaults
-   * to `"manifest"` — the common case for both callers today.
-   */
-  fallbackField?: string;
 }
 
 /** Parse a single `"path: message"` string into a structured field error. */
 export function parsePathMessage(raw: string, opts: PathMessageParseOptions): ValidationFieldError {
-  const { code, title, fieldPrefix = "", fallbackField = "manifest" } = opts;
+  const { code, title, fieldPrefix = "" } = opts;
   const match = PATH_PREFIX_RE.exec(raw);
-  if (!match) return { field: fallbackField, code, title, message: raw };
+  // No path-like prefix — the error is about the manifest as a whole.
+  if (!match) return { field: "manifest", code, title, message: raw };
   return { field: `${fieldPrefix}${match[1]!}`, code, title, message: match[2]! };
 }
 

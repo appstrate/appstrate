@@ -65,7 +65,6 @@ const CORE_TABLES = [
   "notifications",
   "audit_events",
   "llm_usage",
-  "credential_proxy_usage",
   "run_logs",
   // Chat tables (core schema, consumed by @appstrate/module-chat).
   // Children first: chat_messages → chat_sessions → (organizations, user).

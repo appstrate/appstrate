@@ -69,9 +69,14 @@ export interface McpHttpClientOptions extends AppstrateMcpClientOptions {
    */
   retry?: McpConnectRetryOptions;
   /**
-   * Cancellation signal for the entire connect (including all retries).
-   * Independent from the deadline budget — `signal.abort()` short-circuits
-   * the retry loop, while the deadline triggers a separate AbortError.
+   * Cancellation signal for the entire connect. Honoured on BOTH paths: it
+   * short-circuits the retry loop *and* unwinds the in-flight `initialize`
+   * handshake of every individual attempt (see {@link connectWithSignal}) —
+   * including the single-shot path, which has no loop to short-circuit and
+   * where this used to be read nowhere at all.
+   *
+   * Independent from the retry deadline budget: `signal.abort()` is the
+   * caller's own cancellation, the deadline triggers a separate AbortError.
    */
   signal?: AbortSignal;
 }
@@ -209,7 +214,7 @@ export async function createMcpHttpClient(
     });
     const client = new Client(options.clientInfo ?? DEFAULT_CLIENT_INFO);
     try {
-      await client.connect(transport);
+      await connectWithSignal(client, transport, options.signal);
     } catch (err) {
       await transport.close().catch(() => {});
       throw err;
@@ -218,6 +223,39 @@ export async function createMcpHttpClient(
   }
 
   return await connectWithRetry(targetUrl, headers, options, options.retry);
+}
+
+/**
+ * `client.connect`, with the caller's signal actually attached.
+ *
+ * This is the ONLY cancellation seam a connect has, and it bounds the phase
+ * that actually wedges. `Client.connect(transport, options)` forwards `options`
+ * to the `initialize` REQUEST, where the SDK's protocol layer both
+ * `throwIfAborted()`s up front and registers an abort listener that rejects the
+ * pending request; `transport.start()` opens no socket. A retry loop is
+ * therefore not an alternative bound — it wraps attempts, it cannot interrupt
+ * one — which is why the signal goes here rather than only around the loop.
+ *
+ * RESIDUAL, on purpose: `connect` does one more thing after `initialize`
+ * settles — it awaits a `notifications/initialized` POST, and the SDK passes
+ * that one no options, so no signal reaches it. An abort landing in that window
+ * is not honoured and the connect resolves normally once the POST returns. It
+ * is a single fire-and-forget round trip against a server that has just proved
+ * it answers, not the open-ended wait `initialize` is, so it is left alone
+ * rather than papered over with a second timer. `client-connect-residual` in
+ * the tests pins it, so this note cannot quietly become false.
+ *
+ * Without it a connect answers only to the SDK's 60 s
+ * `DEFAULT_REQUEST_TIMEOUT_MSEC`: a caller's own deadline (a chat turn's stop
+ * button, a run's cancellation) does nothing for a full minute while a wedged
+ * server sits on the handshake, and the caller cannot tell that it is waiting.
+ */
+async function connectWithSignal(
+  client: Client,
+  transport: Parameters<Client["connect"]>[0],
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  await client.connect(transport, signal ? { signal } : undefined);
 }
 
 /**
@@ -264,7 +302,10 @@ async function connectWithRetry(
     const client = new Client(options.clientInfo ?? DEFAULT_CLIENT_INFO);
 
     try {
-      await client.connect(transport);
+      // Per ATTEMPT, not just around the sleep below: without it an abort
+      // raised while one handshake is in flight waits out that handshake
+      // before the loop's own `externalSignal?.aborted` check can see it.
+      await connectWithSignal(client, transport, externalSignal);
       return wrapClient(client, transport, options.defaultTimeoutMs);
     } catch (err) {
       await transport.close().catch(() => {});

@@ -25,7 +25,7 @@ import { cors } from "hono/cors";
 import { requestId } from "../../src/middleware/request-id.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
 import { apiVersion } from "../../src/middleware/api-version.ts";
-import { requireAppContext } from "../../src/middleware/app-context.ts";
+import { isAppScopedPath, requireAppContext } from "../../src/middleware/app-context.ts";
 import { idempotencyGuard } from "../../src/middleware/idempotency-guard.ts";
 import { getOrgSettings } from "../../src/services/organizations.ts";
 import { initSystemProxies } from "../../src/services/proxy-registry.ts";
@@ -205,25 +205,12 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   });
 
   // App context middleware: resolve X-Application-Id for app-scoped routes.
-  // Core-only prefix list — modules own app-scoping for their own routes.
-  const APP_SCOPED_PREFIXES = [
-    "/api/agents",
-    "/api/runs",
-    "/api/schedules",
-    "/api/end-users",
-    "/api/api-keys",
-    "/api/notifications",
-    "/api/packages",
-    "/api/integrations",
-    "/api/uploads",
-    "/api/files",
-  ];
-
+  // The prefix list is imported, not re-listed — see `isAppScopedPath`.
   const appContextMiddleware = requireAppContext();
   app.use("*", async (c, next) => {
-    if (skipAuth(c.req.path, modulePublicPaths)) return next();
+    if (skipAuth(c.req.path, modulePublicPaths, c.req.raw.headers)) return next();
     if (!c.get("user")) return next();
-    if (!APP_SCOPED_PREFIXES.some((p) => c.req.path.startsWith(p))) return next();
+    if (!isAppScopedPath(c.req.path)) return next();
     return appContextMiddleware(c, next);
   });
 
@@ -235,7 +222,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
     return settings.api_version ?? null;
   });
   app.use("*", async (c, next) => {
-    if (skipAuth(c.req.path, modulePublicPaths)) return next();
+    if (skipAuth(c.req.path, modulePublicPaths, c.req.raw.headers)) return next();
     if (!c.get("user")) return next();
     return apiVersionMiddleware(c, next);
   });
