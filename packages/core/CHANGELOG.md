@@ -43,7 +43,10 @@ differs from the `8.0.0` already on npm, under the same number.
 
 - **`classifyModelError`** (`./model-error`) — behaviour change, name and
   signature unchanged. A known status now decides the verdict over the prose it
-  travelled with: any 4xx is `invalid_request` (terminal), any 5xx
+  travelled with — BELOW the two categories that are read first and are
+  unchanged: a dead credential (`401` `402` `403` → `credential_unavailable`)
+  and a throttle (`429` → `rate_limited`, which stays **retryable**). Under
+  those, a known 4xx is `invalid_request` (terminal) and a 5xx
   `upstream_unavailable` (retryable). Previously only `400` was named, and the
   generic `"Upstream model error"` this package emits at the alias boundary fell
   through to the transient branch — so `404` `405` `408` `409` `413` `415`, six
@@ -61,6 +64,40 @@ differs from the `8.0.0` already on npm, under the same number.
   declaring draft-04/06/07 or 2019-09 is validated on the 2020-12 dialect
   instead of failing to compile. The server had this workaround and core did
   not, which broke the server/CLI parity this module promises.
+
+- **`sanitizeFilename` truncates on whole code points** (`./naming`), and
+  `encodeFilenameHeader` / `attachmentDisposition` are now total. The cap was a
+  `slice` over UTF-16 code units, so a name whose 255th unit was the first half
+  of a surrogate pair became a LONE surrogate — a string `encodeURIComponent`
+  throws `URIError` on. That name is durable (`files.name`, part of the
+  `(run_id, sha256, name)` dedup identity), so every later download of the file
+  500'd on both serving branches. The orphaned half is now dropped, and an
+  unpaired surrogate reaching either encoder from any other producer becomes
+  U+FFFD instead of a throw. No signature changes; a well-formed name — emoji
+  and CJK included — encodes byte-identically to before.
+- **`PUBLISHED_FILE_LOG_EVENTS` is deprecated** (`./file-uri`) — both readers
+  (the web shell's run page, the chat module's run card) now compare against
+  the singular `PUBLISHED_FILE_LOG_EVENT` the sink writes, so the list has no
+  in-repo consumer left. It stays exported, unchanged and still `["file"]`,
+  because removing a published name is breaking; delete at the next major.
+  Nothing on the wire moves.
+- **`@appstrate/afps-shared` dependency range moved to `^0.5.0`.**
+  `@appstrate/core/zip`'s `stripWrapperPrefix` is now a verbatim re-export from
+  the new `@appstrate/afps-shared/archive-prefix` — the export, both overloads
+  and the identity-return behaviour are unchanged, so this is not a surface
+  change. It moved because `packages/afps-runtime` carried a token-for-token
+  copy of the same algorithm, each pointing at the other and asking a human to
+  keep them aligned, with no parity test. That is the shape that had already
+  drifted three times for the MIME set, one of those corrupting every OOXML
+  download.
+
+  **Publish `afps-shared@0.5.0` before this release.** The ordering is already
+  enforced — `verify-package-resolves.ts` packs the real tarball, installs it
+  outside the monorepo and typechecks every subpath, so an unpublished leaf
+  fails the publish rather than the first consumer's `npm install`. Declaring
+  `^0.5.0` rather than leaving `^0.4.0` only changes WHICH error it fails with:
+  `ETARGET / no matching version` at install, which names the missing artifact,
+  instead of a `TS2307` three layers down inside `node_modules`.
 
 ### Added
 
@@ -159,42 +196,6 @@ additionalProperties: false}` and `{allOf: [{required: [...]}]}` were all
   waits on a specific integration MUST correlate. `completionMatches` is a type
   guard narrowing `unknown` to `IntegrationConnectCompletion`, so it can be
   applied directly to a raw `event.data`.
-
-### Changed
-
-- **`sanitizeFilename` truncates on whole code points** (`./naming`), and
-  `encodeFilenameHeader` / `attachmentDisposition` are now total. The cap was a
-  `slice` over UTF-16 code units, so a name whose 255th unit was the first half
-  of a surrogate pair became a LONE surrogate — a string `encodeURIComponent`
-  throws `URIError` on. That name is durable (`files.name`, part of the
-  `(run_id, sha256, name)` dedup identity), so every later download of the file
-  500'd on both serving branches. The orphaned half is now dropped, and an
-  unpaired surrogate reaching either encoder from any other producer becomes
-  U+FFFD instead of a throw. No signature changes; a well-formed name — emoji
-  and CJK included — encodes byte-identically to before.
-- **`PUBLISHED_FILE_LOG_EVENTS` is deprecated** (`./file-uri`) — both readers
-  (the web shell's run page, the chat module's run card) now compare against
-  the singular `PUBLISHED_FILE_LOG_EVENT` the sink writes, so the list has no
-  in-repo consumer left. It stays exported, unchanged and still `["file"]`,
-  because removing a published name is breaking; delete at the next major.
-  Nothing on the wire moves.
-- **`@appstrate/afps-shared` dependency range moved to `^0.5.0`.**
-  `@appstrate/core/zip`'s `stripWrapperPrefix` is now a verbatim re-export from
-  the new `@appstrate/afps-shared/archive-prefix` — the export, both overloads
-  and the identity-return behaviour are unchanged, so this is not a surface
-  change. It moved because `packages/afps-runtime` carried a token-for-token
-  copy of the same algorithm, each pointing at the other and asking a human to
-  keep them aligned, with no parity test. That is the shape that had already
-  drifted three times for the MIME set, one of those corrupting every OOXML
-  download.
-
-  **Publish `afps-shared@0.5.0` before this release.** The ordering is already
-  enforced — `verify-package-resolves.ts` packs the real tarball, installs it
-  outside the monorepo and typechecks every subpath, so an unpublished leaf
-  fails the publish rather than the first consumer's `npm install`. Declaring
-  `^0.5.0` rather than leaving `^0.4.0` only changes WHICH error it fails with:
-  `ETARGET / no matching version` at install, which names the missing artifact,
-  instead of a `TS2307` three layers down inside `node_modules`.
 
 ## [8.0.0] — 2026-08-25
 

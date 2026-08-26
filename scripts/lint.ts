@@ -152,6 +152,71 @@ export async function partitionIgnored(
   return { lintable, ignored };
 }
 
+/**
+ * Rules whose absence is not a style regression but a boundary coming down.
+ *
+ * Named, not counted. A floor on the NUMBER of enabled rules was tried here and
+ * removed: it cost ~190 lines, and its counterfactual — disable everything —
+ * only ever passed because the handful of rules that carry an `eslint-disable`
+ * somewhere in the repo strand their directives when switched off, which
+ * `--max-warnings 0` then catches. Measured: of the 70 rules enabled for a
+ * `.ts` file, only five have such a directive. The other 65 can be turned off
+ * in silence, and `no-restricted-imports` — which carries BOTH the
+ * core-independence boundary and the `@earendil-works/pi-*` supply-chain ban —
+ * is one of them. Verified before writing this: disabling it with a real
+ * `import { getEnv } from "@appstrate/env"` seeded inside `packages/core/src`
+ * gave exit 0 and zero bytes of output.
+ *
+ * Counting rules answers "is linting still happening". This answers "are the
+ * rules that encode an architectural decision still in force", which is the
+ * question worth failing a build over. Add to it when a rule starts carrying a
+ * boundary rather than a preference.
+ */
+const LOAD_BEARING_RULES = [
+  // Package boundaries + the SDK import ban (`eslint.config.mjs`).
+  "no-restricted-imports",
+  // Zod 4 migration bans and the other syntax-level architectural rules.
+  "no-restricted-syntax",
+  // A dropped symbol after a refactor is how dead boundaries go unnoticed.
+  "@typescript-eslint/no-unused-vars",
+  // The escape hatch out of every other type-level guarantee.
+  "@typescript-eslint/no-explicit-any",
+] as const;
+
+/**
+ * A representative TypeScript source, taken from a package's `src` tree — not
+ * from `packages` at large, which this check itself caught the moment it ran:
+ * the first match there was `packages/afps-runtime/bin/afps.ts`, and a `bin`
+ * entrypoint sits outside the config blocks that carry these rules, so the
+ * guard failed on a healthy repo. Picked from the index rather than hardcoded,
+ * so a rename cannot leave it pointing at nothing — which would make the check
+ * pass over a file eslint never sees.
+ */
+async function assertLoadBearingRulesEnabled(api: ESLint): Promise<void> {
+  const subject = trackedIndexFiles(["packages/*/src/**/*.ts"], "representative source")[0];
+  if (subject === undefined) {
+    throw new Error("lint: no tracked `packages/**/*.ts` — this check cannot run.");
+  }
+  const config = (await api.calculateConfigForFile(subject)) as {
+    rules?: Record<string, unknown>;
+  };
+  const off = LOAD_BEARING_RULES.filter((name) => {
+    const entry = config.rules?.[name];
+    const severity = Array.isArray(entry) ? entry[0] : entry;
+    return severity !== 2 && severity !== "error";
+  });
+  if (off.length > 0) {
+    throw new Error(
+      `lint: ${off.length} rule(s) that carry an architectural boundary are no longer ` +
+        `errors for ${subject}:\n  - ${off.join("\n  - ")}\n` +
+        `Each encodes a decision, not a preference — turning one off removes the ` +
+        `boundary, silently, since a disabled rule reports nothing.\n` +
+        `If a boundary genuinely moved, remove the rule from LOAD_BEARING_RULES in ` +
+        `scripts/lint.ts in the same commit, so the removal is reviewable.`,
+    );
+  }
+}
+
 async function main(): Promise<number> {
   // The INDEX list, not the on-disk one: `assertIgnoredSetIsExact` below asks
   // whether each KNOWN_IGNORED entry is still an ignored TRACKED file, and a
@@ -163,8 +228,7 @@ async function main(): Promise<number> {
   const api = new ESLint({ cwd: REPO_ROOT });
   const { lintable, ignored } = await partitionIgnored(indexed, (file) => api.isPathIgnored(file));
   assertIgnoredSetIsExact(ignored);
-  // The floor's subject is `lintable` — the exact list about to be handed to
-  // eslint — so no glob can scope a disable around it.
+  await assertLoadBearingRulesEnabled(api);
 
   // eslint is handed paths it can open. A tracked file missing from the working
   // tree is a `git rm` not yet committed or a refactor in flight — not a lint

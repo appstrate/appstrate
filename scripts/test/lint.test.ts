@@ -98,6 +98,27 @@ describe("the live eslint config", () => {
  * that reads `eslint.config.mjs`.
  */
 describe("scripts/lint.ts as a process", () => {
+  it("fails when a rule carrying an architectural boundary is switched off", () => {
+    // The case a rule COUNT cannot see, and the reason this guard names its
+    // rules instead of counting them. Only five of the seventy rules enabled
+    // for a `.ts` file carry an `eslint-disable` anywhere in the repo; the
+    // other sixty-five can be turned off in total silence, because a disabled
+    // rule reports nothing and strands no directive for `--max-warnings 0` to
+    // catch. `no-restricted-imports` is one of the sixty-five, and it carries
+    // both the core-independence boundary and the `@earendil-works/pi-*`
+    // supply-chain ban. Measured before this guard existed: disabling it, with
+    // a real cross-boundary import seeded into `packages/core/src`, gave
+    // EXIT 0 and zero bytes of output.
+    const { code, output } = runGateWith((source) =>
+      source.replace(
+        "  eslintConfigPrettier,\n);",
+        `  eslintConfigPrettier,\n  { files: ["**/*.{ts,tsx}"], rules: { "no-restricted-imports": "off" } },\n);`,
+      ),
+    );
+    expect(code).not.toBe(0);
+    expect(output).toMatch(/no longer errors|no-restricted-imports/);
+  }, 120_000);
+
   const CONFIG = join(REPO_ROOT, "eslint.config.mjs");
 
   function runGateWith(mutate: (source: string) => string): { code: number; output: string } {
@@ -129,7 +150,7 @@ describe("scripts/lint.ts as a process", () => {
     // API and SPA.
     //
     // `packages/**` rather than `apps/**` on purpose. An ignored file resolves
-    // to ZERO rules, so ignoring `apps/**` also trips the rule-coverage floor
+    // to ZERO rules, so ignoring `apps/**` strands every eslint-disable written
     // below (its subject files live there) and this case would be proven by the
     // wrong assertion. `packages/**` is ~700 tracked sources that no floor
     // looks at, so only the ignored-set assertion can catch it.
@@ -167,7 +188,7 @@ describe("scripts/lint.ts as a process", () => {
   }
 
   it("fails when rules are switched off for a scope no sentinel file covers", async () => {
-    // DEFECT 1, run for real. The floors this replaces named three files —
+    // Run for real. A floor on the enabled-rule COUNT used to live here —
     // `apps/api/src/index.ts`, `apps/web/src/main.tsx`, `eslint.config.mjs` —
     // and one config object scoped AROUND all three walked straight past them.
     // Measured 2026-08-26 with a real seeded `any` in
@@ -198,7 +219,12 @@ describe("scripts/lint.ts as a process", () => {
     // only ever catch a DELIBERATE act by someone who can edit
     // `eslint.config.mjs` — who can edit `scripts/lint.ts` just as easily.
     expect(code).not.toBe(0);
-    expect(output).toMatch(/too many warnings|Unused eslint-disable directive/);
+    // Either mechanism is a pass: the named-rule guard runs before eslint and
+    // catches this mutation first, and `--max-warnings 0` catches it after.
+    // Asserting the message of ONE of them would make this test fail the day
+    // the other one gets there first — which is what happened when the guard
+    // was added.
+    expect(output).toMatch(/no longer errors|too many warnings|Unused eslint-disable directive/);
     // Lints the whole repo with a cold cache (the mutation changes the config
     // hash), measured ~4s — well past bunfig's default.
   }, 120_000);
@@ -218,10 +244,10 @@ describe("scripts/lint.ts as a process", () => {
         `  eslintConfigPrettier,\n  { files: ["**/*.ts"], plugins: { "@typescript-eslint": tseslint.plugin }, rules: ${allWarn} },\n);`,
       ),
     );
-    // Same mechanism as above: `"warn"` fires as a warning, and the flag
-    // refuses any warning at all.
+    // Caught by the named-rule guard (severity `"warn"` is not `"error"`), and
+    // by `--max-warnings 0` behind it. Either is a pass.
     expect(code).not.toBe(0);
-    expect(output).toMatch(/too many warnings/);
+    expect(output).toMatch(/no longer errors|too many warnings/);
     // Cold cache, whole repo — and a timeout here does not just fail THIS
     // test: `runGateWith`'s restore never runs, so the next case finds a
     // config whose anchor this mutation already consumed.

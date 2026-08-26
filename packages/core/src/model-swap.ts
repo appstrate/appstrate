@@ -203,7 +203,9 @@ const ALIAS_UPSTREAM_ERROR_MESSAGE = "Upstream model error";
  *     fixed on the pi-ai path and left live on the platform's own. It now
  *     classifies by the status: 4xx terminal, 5xx transient. Both classifiers
  *     are pinned to agree over all fourteen forwardable statuses by
- *     `packages/core/test/model-error.test.ts`.
+ *     `packages/runner-pi/test/model-error-divergence.test.ts` (this package may
+ * not import the SDK, so the table `packages/core/test/model-error.test.ts`
+ * hard-codes is checked against the real predicate there).
  *   - `402` — COLLAPSED. Anthropic, OpenAI and Mistral have no 402 in their
  *     error vocabulary; an aggregating gateway out of credit (OpenRouter) does,
  *     so the number names the backing. The failure is permanent and 400 keeps

@@ -60,6 +60,66 @@ const CARRIERS: Record<string, (pw: string) => string> = {
 };
 
 describe("scrubSecretMaterial — generated credential corpus", () => {
+  it("masks a value behind every separator that carries an assignment", () => {
+    // The dimension this rule is ABOUT is the separator, so the corpus
+    // enumerates separators instead of illustrating a few. A previous revision
+    // narrowed the padding to `[ \t]` and was measured against eight separators,
+    // none carrying a line break — it read as clean and leaked 43,200 generated
+    // credentials on the shapes it had not enumerated. Two of the three sinks
+    // scrub MULTI-LINE text, so `KEY:\n value` is the normal case, not an edge.
+    const SEPARATORS = [
+      "=",
+      ":",
+      ": ",
+      " = ",
+      "=\n",
+      ":\n",
+      ":\n ",
+      ":\n  ",
+      "\r\n=",
+      '="',
+      ':"',
+      '": "',
+      "%3D",
+      "%3A",
+      "=%20",
+      ":%20",
+      ": \t",
+      "\t=\t",
+      "=\r\n",
+      "=\n\t",
+    ];
+    const leaks: string[] = [];
+    for (const keyword of ["api_key", "notion_token", "AWS_SECRET_ACCESS_KEY", "client_secret"]) {
+      for (const sep of SEPARATORS) {
+        const value = `v${Math.random().toString(16).slice(2)}${Math.random().toString(16).slice(2)}`;
+        const line = `spawn failed:\n${keyword}${sep}${value}\nat boot`;
+        if (scrubSecretMaterial(line).includes(value))
+          leaks.push(`${keyword} + ${JSON.stringify(sep)}`);
+      }
+    }
+    expect(
+      leaks,
+      `A separator carrying an assignment character must reach the value, whatever\n` +
+        `whitespace surrounds it. These did not:\n  ` +
+        leaks.join("\n  "),
+    ).toEqual([]);
+  });
+
+  it("control: whitespace alone still does not introduce a value", () => {
+    // The other half, and the reason the rule is not simply "any separator":
+    // bare whitespace between a keyword and a word is PROSE. This is the stated
+    // cost — a `<keyword> <opaque value>` line with no assignment character is
+    // not masked — and it is what keeps `token budget exceeded` readable.
+    for (const prose of [
+      "token budget exceeded: 128000 of 120000",
+      "the access token has expired, refresh it",
+      "Redeem AUTH_BOOTSTRAP_TOKEN to claim instance ownership",
+    ]) {
+      expect(scrubSecretMaterial(prose)).toBe(prose);
+    }
+  });
+
   it("masks every generated password in every credential carrier", () => {
     const leaks: string[] = [];
     let checked = 0;

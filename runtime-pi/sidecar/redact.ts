@@ -303,8 +303,23 @@ const ASSIGN_CHAR = String.raw`(?:["'=:]|%22|%27|%3D|%3A)`;
  * The separator, in BOTH tiers: whitespace may surround an assignment, never
  * replace it. `NAME = value` and `"name": "value"` both pass; `NAME word` does
  * not. See {@link BARE_KEYWORD} for why tier 2 no longer has one of its own.
+ *
+ * The padding is ALL whitespace, line breaks included. An earlier revision
+ * padded with `[ \t]` alone, which looked equivalent and was not: two of the
+ * three sinks this scrubber guards hand it MULTI-LINE text — a whole HTTP
+ * response body sample (`app.ts`) and a whole `docker` stderr capture — where a
+ * key and its value are routinely on separate lines. Measured over a corpus
+ * that enumerates 30 separators rather than illustrating a few: `X-Api-Key:\n
+ * abcd…` and `api_key=\nvalue` were masked by both predecessors and leaked, and
+ * `{"access_token":\n"SECRET"}` produced the worst outcome available — a
+ * `[redacted]` marker planted next to the still-readable secret, because
+ * `KEYWORD_VALUE` admitted the separator's own `:` as if it were the value.
+ *
+ * Whitespace still cannot REPLACE the assignment: `NAME word` and `NAME\nword`
+ * are both prose and both stay intact. That is the whole distinction, and it is
+ * why the padding can be this permissive.
  */
-const ASSIGNMENT_SEP = String.raw`(?:[ \t]|%20)*${ASSIGN_CHAR}(?:${ASSIGN_CHAR}|[ \t]|%20)*`;
+const ASSIGNMENT_SEP = String.raw`(?:\s|%20)*${ASSIGN_CHAR}(?:${ASSIGN_CHAR}|\s|%20)*`;
 /** The value a separator introduces, up to the next item boundary. */
 const KEYWORD_VALUE = String.raw`[^\s"',&]+`;
 
