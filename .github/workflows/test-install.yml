@@ -356,7 +356,7 @@ jobs:
           echo "::group::APPSTRATE_AUTO_INSTALL= (empty) is a no-op"
           set +e
           EMPTY_OUT=$(APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-auto-empty" \
-            APPSTRATE_AUTO_INSTALL= \
+            APPSTRATE_AUTO_INSTALL='' \
             APPSTRATE_FORCE_DUAL=1 \
             bash /tmp/bootstrap.sh --yes 2>&1)
           rc=$?
