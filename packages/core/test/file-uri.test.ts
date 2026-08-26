@@ -6,9 +6,9 @@
  * {@link extractFileIds} keeps matching only whole-string leaf values inside
  * structured JSON (objects/arrays) and never scans embedded prose, and the
  * single-scheme contract: `appfile://` is the only spelling written AND the
- * only one read. The pre-#1177 `document://` scheme is refused, which the
- * third block below pins from both sides — a `doc_` id fails, and so does the
- * `document://file_…` pairing that no build has ever emitted. The last block
+ * only one read. The pre-#1177 `document://` SCHEME is refused — but the
+ * `doc_` ID it used to address is still live on every production row, and the
+ * third and fourth blocks below pin that split in both directions. The last block
  * covers the sibling `upload://` predicate, which every caller of the URI
  * helpers (the API parser, `packages/ui`'s `FileWidget`) shares.
  */
@@ -16,6 +16,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   FILE_URI_PREFIX,
+  FILE_ID_RE,
   extractFileIds,
   extractFileIdsFromText,
   fileUri,
@@ -84,16 +85,33 @@ describe("single-scheme contract (#1177)", () => {
     expect(fileUri(A)).toBe(`appfile://${A}`);
   });
 
-  it("parseFileUri refuses the retired document:// scheme", () => {
+  it("parseFileUri refuses the retired document:// scheme, on the SCHEME alone", () => {
     expect(parseFileUri(`appfile://${A}`)).toBe(A);
-    // The only form the retired accept-path could still have matched, and no
-    // build ever emitted it: `document://` was replaced by `appfile://` in the
-    // same issue that eventually re-minted the id prefix to `file_`.
     expect(parseFileUri(`document://${A}`)).toBeNull();
-    // The form that WAS written under the old scheme fails on the id, which is
-    // why the prefix had nothing left to address.
+    // The scheme is retired; the `doc_` ID it used to address is NOT. Both of
+    // these pin that split, and the second one is the production bug: an
+    // earlier revision rejected it, which 404'd every pre-rename file at once
+    // because `loadFileForPreview` tests the id regex before any SELECT.
     expect(parseFileUri("document://doc_aaaaaaaa")).toBeNull();
-    expect(parseFileUri("appfile://doc_aaaaaaaa")).toBeNull();
+    expect(parseFileUri("appfile://doc_aaaaaaaa")).toBe("doc_aaaaaaaa");
+  });
+
+  it("a legacy doc_ id survives every reader on the serving path", () => {
+    // 0043 renamed the table and 0044 rewrote storage_key; NEITHER touched
+    // files.id. Measured on production the day 0044 shipped: 521 rows `doc_`,
+    // 0 rows `file_`. So `doc_` is not a hypothetical — it is every row there.
+    const legacy = "doc_31c2435b-a7f8-41da-a82c-3b86ad59f8e6";
+    expect(FILE_ID_RE.test(legacy)).toBe(true);
+    expect(parseFileUri(fileUri(legacy))).toBe(legacy);
+    // The prose scan must see it too: `fileUri` is a bare concatenation, so a
+    // legacy row yields `appfile://doc_…`, and a `file_`-only scan would drop
+    // it from a prompt while the caller read "not found" as "not referenced".
+    expect(extractFileIdsFromText(`see ${fileUri(legacy)} for details`)).toEqual([legacy]);
+    expect(extractFileIds({ input: fileUri(legacy) })).toEqual([legacy]);
+    // Still minted as `file_`; `doc_` is read-only history, never written.
+    expect(FILE_ID_RE.test("file_aaaaaaaa")).toBe(true);
+    expect(FILE_ID_RE.test("doc_short")).toBe(false);
+    expect(FILE_ID_RE.test("upl_aaaaaaaa")).toBe(false);
   });
 
   it("parseFileUri still rejects a malformed id and a foreign scheme", () => {

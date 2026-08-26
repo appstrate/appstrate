@@ -23,17 +23,19 @@
  * afterwards so historical `runs.input` rows, persisted chat attachments and
  * model-authored prompts stayed resolvable. That compatibility became
  * unreachable when the rename was finished at the physical layer: every URI
- * ever written under the old scheme addresses a `doc_` id, and
- * {@link FILE_ID_RE} accepts only `file_`. So the pair `document://` +
- * `file_xxx` — the only thing the accept-path could still have matched — is a
- * form nothing has ever emitted, and a genuine `document://doc_xxx` fails on
- * the id, not the scheme. One spelling is read and one is written, and they
- * are the same one.
+ * ever written under the old scheme addresses a `doc_` id. Only the SCHEME is
+ * unread: `document://` is never parsed, while the `doc_` ID it addressed is
+ * still perfectly live and {@link FILE_ID_RE} accepts it.
  *
- * The row id prefix is `file_`, minted by `prefixedId("file")`. It was `doc_`
- * until the rename was finished at the physical layer; nothing reads the old
- * spelling any more, which is exactly why the old scheme has nothing left to
- * address.
+ * That distinction was lost once, expensively. An earlier revision of this
+ * header asserted the row id prefix "was `doc_` until the rename was finished
+ * at the physical layer" and concluded the old spelling had nothing left to
+ * address. The physical rename never touched `files.id` — 0043 renamed the
+ * table, 0044 rewrote `storage_key`, and no migration rewrites the id — so on
+ * production every row was still `doc_`, and a validator that accepted only
+ * `file_` 404'd all of them. Write the ids, not the intent.
+ *
+ * New rows mint `file_` via `prefixedId("file")`; `doc_` is read-only history.
  *
  * Dependency-free on purpose (no DB/storage imports) so the MCP tool layer,
  * the chat module, and the runtime can import it without pulling in the files
@@ -119,7 +121,34 @@ export const UPLOAD_URI_PREFIX = "upload://";
  * input before it reaches any database SELECT. Mirrors the service-side
  * validator (`apps/api/src/services/files.ts`).
  */
-export const FILE_ID_RE = /^file_[A-Za-z0-9_-]{8,}$/;
+/**
+ * Accepts `doc_` as well as `file_`, and that is not a courtesy — it is the
+ * only prefix production rows actually carry.
+ *
+ * The prose above this file claimed "the row id prefix is `file_` … it was
+ * `doc_` until the rename was finished at the physical layer". That premise was
+ * false. 0043 renamed the TABLE (`ALTER TABLE documents RENAME TO files`) and
+ * 0044 rewrote `storage_key`; NEITHER touched `files.id`, and no other
+ * migration does. Measured on production the day 0044 shipped: 521 rows with a
+ * `doc_` id, 0 with `file_`, plus 25 `file_links.file_id` pointing at them.
+ *
+ * Because `loadFileForPreview` and `resolveFileForActor`
+ * (`apps/api/src/services/files.ts`) test this regex BEFORE any SELECT, a
+ * `doc_` id returned null without ever reaching the database — so every
+ * pre-rename file 404'd on preview and download at once.
+ *
+ * Widened rather than migrating the ids: the id is opaque, and its prefix is
+ * read by nothing but this validator. Rewriting it would mean rewriting 521
+ * ids, 25 foreign keys, 521 `storage_key` values that embed the id in their
+ * path, and MOVING 521 storage objects a second time — all to change a string
+ * nobody parses. The one thing that could have forced a rewrite is a persisted
+ * `appfile://doc_…` reference, and there are none (measured: 0 rows in
+ * `runs.input`).
+ *
+ * New rows mint `file_` via `prefixedId("file")`. `doc_` is frozen history: it
+ * is never written again, only read.
+ */
+export const FILE_ID_RE = /^(?:file|doc)_[A-Za-z0-9_-]{8,}$/;
 
 /** Strict upload id shape: `upl_` + ≥8 id chars. Mirrors the uploads service validator. */
 export const UPLOAD_ID_RE = /^upl_[A-Za-z0-9_-]{8,}$/;
@@ -154,11 +183,19 @@ export function parseFileUri(uri: string): string | null {
 }
 
 /**
- * Scans a free-form text blob for an embedded stored-file URI. `file_` + ≥1 id
- * char keeps the boundary scan permissive, with the strict `{8,}` length
- * enforced by {@link parseFileUri}.
+ * Scans a free-form text blob for an embedded stored-file URI. The prefix
+ * alternation + ≥1 id char keeps the boundary scan permissive, with the strict
+ * `{8,}` length enforced by {@link parseFileUri}.
+ *
+ * `doc_` is matched here for the same reason {@link FILE_ID_RE} accepts it:
+ * {@link fileUri} is a bare concatenation, so a pre-rename row yields
+ * `appfile://doc_…`. A scan that matched only `file_` would silently drop every
+ * such reference from a prompt or a run's `input` — the callers
+ * (`inline-run.ts`, `files.ts`, `state/runs.ts`) treat "not found" as "not
+ * referenced". No production row carries one today, but attaching any existing
+ * file to a run mints one.
  */
-const EMBEDDED_FILE_URI_SCAN = /appfile:\/\/file_[A-Za-z0-9_-]+/g;
+const EMBEDDED_FILE_URI_SCAN = /appfile:\/\/(?:file|doc)_[A-Za-z0-9_-]+/g;
 
 /** The canonical `appfile://` URI for a file id. */
 export function fileUri(id: string): string {
