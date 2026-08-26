@@ -108,7 +108,7 @@ export async function fetchBundleForRun(input: BundleFetchInput): Promise<Bundle
       throw new BundleFetchError(
         "version_not_found",
         `No version of ${input.packageId} matches "${input.spec}"`,
-        "Check the spec or remove it to fall back to the version installed for this app.",
+        "Check the spec or remove it to fall back to the version installed for this space.",
       );
     }
     throw new BundleFetchError(

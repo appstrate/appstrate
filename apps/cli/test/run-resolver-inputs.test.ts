@@ -37,7 +37,7 @@ let keyring: FakeKeyringInstall;
 const originalEnv = {
   APPSTRATE_API_KEY: process.env.APPSTRATE_API_KEY,
   APPSTRATE_INSTANCE: process.env.APPSTRATE_INSTANCE,
-  APPSTRATE_APP_ID: process.env.APPSTRATE_APP_ID,
+  APPSTRATE_SPACE_ID: process.env.APPSTRATE_SPACE_ID,
 };
 
 afterAll(() => {
@@ -52,7 +52,7 @@ beforeEach(async () => {
   keyring = installFakeKeyring();
   delete process.env.APPSTRATE_API_KEY;
   delete process.env.APPSTRATE_INSTANCE;
-  delete process.env.APPSTRATE_APP_ID;
+  delete process.env.APPSTRATE_SPACE_ID;
 });
 
 afterEach(async () => {
@@ -64,11 +64,11 @@ function bundleOpts(over: Partial<RunCommandOptions> = {}): RunCommandOptions {
   return { bundle: "/tmp/fake.afps", ...over };
 }
 
-/** Org + application pinned: the resolver reads both off the profile. */
+/** Org + space pinned: the resolver reads both off the profile. */
 function seedPinnedProfile(profileName: string): Promise<void> {
   return seedLoggedInProfile(profileName, {
     orgId: "org_1",
-    applicationId: "app_1",
+    spaceId: "spc_1",
     tokens: {
       accessToken: "eyJhbGciOiJSUzI1NiJ9.test.jwt",
       expiresAt: Date.now() + 5 * 60 * 1000, // fresh — no refresh attempted
@@ -79,10 +79,10 @@ function seedPinnedProfile(profileName: string): Promise<void> {
 
 describe("buildResolverInputs — remote", () => {
   describe("headless path (APPSTRATE_API_KEY)", () => {
-    it("uses the explicit API key when paired with instance + applicationId env vars", async () => {
+    it("uses the explicit API key when paired with instance + spaceId env vars", async () => {
       process.env.APPSTRATE_API_KEY = "ask_headless_1";
       process.env.APPSTRATE_INSTANCE = "https://ci.example.com";
-      process.env.APPSTRATE_APP_ID = "app_ci";
+      process.env.APPSTRATE_SPACE_ID = "spc_ci";
 
       const inputs = (await _buildResolverInputsForTesting(
         "remote",
@@ -91,11 +91,11 @@ describe("buildResolverInputs — remote", () => {
       expect(inputs).toEqual({
         instance: "https://ci.example.com",
         bearerToken: "ask_headless_1",
-        applicationId: "app_ci",
+        spaceId: "spc_ci",
       });
     });
 
-    it("falls back to the profile for instance + applicationId when env vars are unset", async () => {
+    it("falls back to the profile for instance + spaceId when env vars are unset", async () => {
       process.env.APPSTRATE_API_KEY = "ask_headless_2";
       await seedPinnedProfile("default");
 
@@ -106,7 +106,7 @@ describe("buildResolverInputs — remote", () => {
       expect(inputs).toEqual({
         instance: "https://app.example.com",
         bearerToken: "ask_headless_2",
-        applicationId: "app_1",
+        spaceId: "spc_1",
         orgId: "org_1",
       });
     });
@@ -120,20 +120,20 @@ describe("buildResolverInputs — remote", () => {
       });
     });
 
-    it("throws a hint-bearing ResolverConfigError when applicationId cannot be resolved", async () => {
-      process.env.APPSTRATE_API_KEY = "ask_no_app";
+    it("throws a hint-bearing ResolverConfigError when spaceId cannot be resolved", async () => {
+      process.env.APPSTRATE_API_KEY = "ask_no_space";
       process.env.APPSTRATE_INSTANCE = "https://ci.example.com";
-      // No profile, no APPSTRATE_APP_ID → unresolvable.
+      // No profile, no APPSTRATE_SPACE_ID → unresolvable.
       await expect(_buildResolverInputsForTesting("remote", bundleOpts())).rejects.toMatchObject({
         name: "ResolverConfigError",
-        message: expect.stringMatching(/No application id pinned/),
+        message: expect.stringMatching(/No space id pinned/),
       });
     });
 
     it("explicit --api-key flag wins over the env var", async () => {
       process.env.APPSTRATE_API_KEY = "ask_from_env";
       process.env.APPSTRATE_INSTANCE = "https://ci.example.com";
-      process.env.APPSTRATE_APP_ID = "app_ci";
+      process.env.APPSTRATE_SPACE_ID = "spc_ci";
 
       const inputs = (await _buildResolverInputsForTesting(
         "remote",
@@ -154,7 +154,7 @@ describe("buildResolverInputs — remote", () => {
       expect(inputs).toEqual({
         instance: "https://app.example.com",
         bearerToken: "eyJhbGciOiJSUzI1NiJ9.test.jwt",
-        applicationId: "app_1",
+        spaceId: "spc_1",
         orgId: "org_1",
       });
     });
@@ -166,9 +166,9 @@ describe("buildResolverInputs — remote", () => {
       });
     });
 
-    it("demands `appstrate app switch` when the profile has no pinned application", async () => {
+    it("demands `appstrate space switch` when the profile has no pinned space", async () => {
       await seedLoggedInProfile("default", {
-        orgId: "org_1", // no applicationId — that is the point of this test
+        orgId: "org_1", // no spaceId — that is the point of this test
         tokens: {
           accessToken: "eyJhbGciOiJSUzI1NiJ9.test.jwt",
           expiresAt: Date.now() + 5 * 60 * 1000,
@@ -178,7 +178,7 @@ describe("buildResolverInputs — remote", () => {
 
       await expect(_buildResolverInputsForTesting("remote", bundleOpts())).rejects.toMatchObject({
         name: "ResolverConfigError",
-        message: expect.stringMatching(/no application pinned/),
+        message: expect.stringMatching(/no space pinned/),
       });
     });
   });

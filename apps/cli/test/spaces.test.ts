@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for `src/lib/applications.ts`. Mirror of `orgs.test.ts`:
- * the pure helpers (`resolveApplicationRef`, `findDefaultApplication`)
- * and the thin HTTP wrappers (`listApplications`, `createApplication`)
+ * Unit tests for `src/lib/spaces.ts`. Mirror of `orgs.test.ts`:
+ * the pure helpers (`resolveSpaceRef`, `findDefaultSpace`)
+ * and the thin HTTP wrappers (`listSpaces`, `createSpace`)
  * via the same in-memory keyring + fetch-stub pattern used by the other
  * CLI tests. No real network, no real keyring.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import {
-  listApplications,
-  createApplication,
-  resolveApplicationRef,
-  findDefaultApplication,
-  type Application,
-} from "../src/lib/applications.ts";
+  listSpaces,
+  createSpace,
+  resolveSpaceRef,
+  findDefaultSpace,
+  type Space,
+} from "../src/lib/spaces.ts";
 import {
   installFakeKeyring,
   seedLoggedInProfile,
@@ -30,7 +30,7 @@ type FetchCall = {
   headers: Record<string, string>;
 };
 
-const configHome = useTempConfigHome("appstrate-cli-apps-");
+const configHome = useTempConfigHome("appstrate-cli-spaces-");
 let keyring: FakeKeyringInstall;
 const originalFetch = globalThis.fetch;
 let fetchCalls: FetchCall[];
@@ -63,9 +63,9 @@ function seedAuth(name = "default"): Promise<void> {
   return seedLoggedInProfile(name, { email: "alice@example.com", orgId: "org_1" });
 }
 
-function appRow(overrides: Partial<Application> = {}): Application {
+function spaceRow(overrides: Partial<Space> = {}): Space {
   return {
-    id: "app_1",
+    id: "spc_1",
     orgId: "org_1",
     name: "Default",
     isDefault: true,
@@ -74,29 +74,29 @@ function appRow(overrides: Partial<Application> = {}): Application {
   };
 }
 
-describe("listApplications", () => {
-  it("GETs /api/applications and returns the `data` array", async () => {
+describe("listSpaces", () => {
+  it("GETs /api/spaces and returns the `data` array", async () => {
     await seedAuth();
     installFetch(async (url) => {
-      expect(url).toBe("https://app.example.com/api/applications");
+      expect(url).toBe("https://app.example.com/api/spaces");
       return new Response(
         JSON.stringify({
           object: "list",
-          data: [appRow({ id: "app_1", name: "Default", isDefault: true })],
+          data: [spaceRow({ id: "spc_1", name: "Default", isDefault: true })],
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
     });
-    const apps = await listApplications("default");
-    expect(apps).toHaveLength(1);
-    expect(apps[0]!.id).toBe("app_1");
+    const spaces = await listSpaces("default");
+    expect(spaces).toHaveLength(1);
+    expect(spaces[0]!.id).toBe("spc_1");
     expect(fetchCalls[0]!.method ?? "GET").toBe("GET");
-    // The pinned org is forwarded as X-Org-Id — listApplications is
-    // org-scoped even though it doesn't require X-Application-Id.
+    // The pinned org is forwarded as X-Org-Id — listSpaces is
+    // org-scoped even though it doesn't require X-Space-Id.
     expect(fetchCalls[0]!.headers["X-Org-Id"]).toBe("org_1");
   });
 
-  it("returns an empty array when the server returns no applications", async () => {
+  it("returns an empty array when the server returns no spaces", async () => {
     await seedAuth();
     installFetch(
       async () =>
@@ -105,8 +105,8 @@ describe("listApplications", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const apps = await listApplications("default");
-    expect(apps).toEqual([]);
+    const spaces = await listSpaces("default");
+    expect(spaces).toEqual([]);
   });
 
   it("throws when the response envelope is degenerate (missing data)", async () => {
@@ -121,81 +121,81 @@ describe("listApplications", () => {
     // Strict envelope: a 200 with no `data: [...]` is a server bug, not
     // a "no rows" signal — we surface it loudly via apiList rather than
     // silently returning [] (which used to mask broken servers).
-    await expect(listApplications("default")).rejects.toThrow(/Malformed list response/);
+    await expect(listSpaces("default")).rejects.toThrow(/Malformed list response/);
   });
 });
 
-describe("createApplication", () => {
-  it("POSTs with the name and returns the created application", async () => {
+describe("createSpace", () => {
+  it("POSTs with the name and returns the created space", async () => {
     await seedAuth();
     installFetch(async (url, init) => {
-      expect(url).toBe("https://app.example.com/api/applications");
+      expect(url).toBe("https://app.example.com/api/spaces");
       expect(init?.method).toBe("POST");
       const body = JSON.parse(String(init?.body));
       expect(body).toEqual({ name: "Staging" });
       return new Response(
-        JSON.stringify(appRow({ id: "app_2", name: "Staging", isDefault: false })),
+        JSON.stringify(spaceRow({ id: "spc_2", name: "Staging", isDefault: false })),
         { status: 201, headers: { "Content-Type": "application/json" } },
       );
     });
-    const app = await createApplication("default", "Staging");
-    expect(app.id).toBe("app_2");
-    expect(app.isDefault).toBe(false);
+    const space = await createSpace("default", "Staging");
+    expect(space.id).toBe("spc_2");
+    expect(space.isDefault).toBe(false);
   });
 });
 
-describe("resolveApplicationRef", () => {
-  const apps: Application[] = [
-    appRow({ id: "app_1", name: "Default", isDefault: true }),
-    appRow({ id: "app_2", name: "Staging", isDefault: false }),
+describe("resolveSpaceRef", () => {
+  const spaces: Space[] = [
+    spaceRow({ id: "spc_1", name: "Default", isDefault: true }),
+    spaceRow({ id: "spc_2", name: "Staging", isDefault: false }),
   ];
 
   it("matches by exact id", () => {
-    expect(resolveApplicationRef(apps, "app_2").name).toBe("Staging");
+    expect(resolveSpaceRef(spaces, "spc_2").name).toBe("Staging");
   });
 
   it("ignores surrounding whitespace", () => {
-    expect(resolveApplicationRef(apps, "  app_1  ").id).toBe("app_1");
+    expect(resolveSpaceRef(spaces, "  spc_1  ").id).toBe("spc_1");
   });
 
-  it("throws with the available apps (marked [default]) when ref is unknown", () => {
+  it("throws with the available spaces (marked [default]) when ref is unknown", () => {
     try {
-      resolveApplicationRef(apps, "app_999");
-      throw new Error("expected resolveApplicationRef to throw");
+      resolveSpaceRef(spaces, "spc_999");
+      throw new Error("expected resolveSpaceRef to throw");
     } catch (err) {
       const msg = (err as Error).message;
-      expect(msg).toContain('No application matches "app_999"');
-      expect(msg).toContain("app_1");
+      expect(msg).toContain('No space matches "spc_999"');
+      expect(msg).toContain("spc_1");
       expect(msg).toContain("[default]");
-      expect(msg).toContain("app_2");
+      expect(msg).toContain("spc_2");
     }
   });
 
   it("rejects empty references", () => {
-    expect(() => resolveApplicationRef(apps, "")).toThrow(/empty/);
-    expect(() => resolveApplicationRef(apps, "   ")).toThrow(/empty/);
+    expect(() => resolveSpaceRef(spaces, "")).toThrow(/empty/);
+    expect(() => resolveSpaceRef(spaces, "   ")).toThrow(/empty/);
   });
 
-  it("surfaces a dedicated message when the profile has zero apps", () => {
-    expect(() => resolveApplicationRef([], "anything")).toThrow(/No applications found/);
+  it("surfaces a dedicated message when the profile has zero spaces", () => {
+    expect(() => resolveSpaceRef([], "anything")).toThrow(/No spaces found/);
   });
 });
 
-describe("findDefaultApplication", () => {
-  it("returns the app marked isDefault", () => {
-    const apps = [
-      appRow({ id: "app_1", isDefault: false }),
-      appRow({ id: "app_2", isDefault: true }),
+describe("findDefaultSpace", () => {
+  it("returns the space marked isDefault", () => {
+    const spaces = [
+      spaceRow({ id: "spc_1", isDefault: false }),
+      spaceRow({ id: "spc_2", isDefault: true }),
     ];
-    expect(findDefaultApplication(apps)?.id).toBe("app_2");
+    expect(findDefaultSpace(spaces)?.id).toBe("spc_2");
   });
 
-  it("returns undefined when no app is marked default (defensive path)", () => {
-    const apps = [appRow({ id: "app_1", isDefault: false })];
-    expect(findDefaultApplication(apps)).toBeUndefined();
+  it("returns undefined when no space is marked default (defensive path)", () => {
+    const spaces = [spaceRow({ id: "spc_1", isDefault: false })];
+    expect(findDefaultSpace(spaces)).toBeUndefined();
   });
 
   it("returns undefined on an empty list", () => {
-    expect(findDefaultApplication([])).toBeUndefined();
+    expect(findDefaultSpace([])).toBeUndefined();
   });
 });
