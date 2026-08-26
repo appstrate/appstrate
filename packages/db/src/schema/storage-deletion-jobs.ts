@@ -20,7 +20,7 @@ import { sql } from "drizzle-orm";
  * becomes visible as a dead letter (operator surface) while continuing to
  * retry at the capped backoff interval.
  *
- * Deliberately has NO foreign keys. A job must outlive the org / app / run /
+ * Deliberately has NO foreign keys. A job must outlive the org / space / run /
  * file row it was created for — the whole point is to survive the cascade
  * that removed those rows.
  */
@@ -35,7 +35,7 @@ export const storageDeletionJobs = pgTable(
     storageKey: text("storage_key").notNull(),
     /**
      * Why the object is being purged — one of `file_deleted`, `file_expired`,
-     * `org_deleted`, `application_deleted`, `end_user_deleted`,
+     * `org_deleted`, `space_deleted`, `end_user_deleted`,
      * `run_workspace_deleted`, `version_deleted`, `upload_expired`,
      * `materialization_failed`.
      *

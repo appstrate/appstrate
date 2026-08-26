@@ -17,7 +17,7 @@ import {
 import { sql } from "drizzle-orm";
 import { orgRoleEnum, invitationStatusEnum } from "./enums.ts";
 import { user } from "./auth.ts";
-import { applications } from "./applications.ts";
+import { spaces } from "./spaces.ts";
 
 export const organizations = pgTable(
   "organizations",
@@ -47,8 +47,8 @@ export const organizations = pgTable(
     // transactionally alongside `files` insert/delete so the synchronous
     // org-storage quota check (`ORG_STORAGE_QUOTA_BYTES`) needs no aggregate
     // scan. bigint (mode: number) — total storage far exceeds the int4 ceiling.
-    // FK cascade deletes (run/chat-session/end-user/application removed) drop
-    // `files` rows WITHOUT the app-level decrement, so the counter can drift
+    // FK cascade deletes (run/chat-session/end-user/space removed) drop
+    // `files` rows WITHOUT the space-level decrement, so the counter can drift
     // high; `reconcileOrgFileBytes()` (files.ts GC loop, ~daily) recomputes
     // it from `SUM(files.size)` and corrects the drift.
     filesBytesUsed: bigint("files_bytes_used", { mode: "number" }).notNull().default(0),
@@ -130,9 +130,9 @@ export const apiKeys = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    applicationId: text("application_id")
+    spaceId: text("space_id")
       .notNull()
-      .references(() => applications.id, { onDelete: "cascade" }),
+      .references(() => spaces.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     keyHash: text("key_hash").notNull(),
     keyPrefix: text("key_prefix").notNull(),
@@ -148,7 +148,7 @@ export const apiKeys = pgTable(
   },
   (table) => [
     index("idx_api_keys_org_id").on(table.orgId),
-    index("idx_api_keys_application_id").on(table.applicationId),
+    index("idx_api_keys_space_id").on(table.spaceId),
     uniqueIndex("idx_api_keys_key_hash").on(table.keyHash),
     // Referencing-side index for the `user` SET NULL action (0048).
     // Postgres indexes only the REFERENCED side of a foreign key; without

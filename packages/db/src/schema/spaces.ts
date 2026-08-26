@@ -14,10 +14,10 @@ import { sql } from "drizzle-orm";
 import { user } from "./auth.ts";
 import { organizations } from "./organizations.ts";
 
-export const applications = pgTable(
-  "applications",
+export const spaces = pgTable(
+  "spaces",
   {
-    id: text("id").primaryKey(), // app_ prefix
+    id: text("id").primaryKey(), // spc_ prefix
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
@@ -31,8 +31,8 @@ export const applications = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    index("idx_applications_org_id").on(table.orgId),
-    uniqueIndex("idx_applications_one_default")
+    index("idx_spaces_org_id").on(table.orgId),
+    uniqueIndex("idx_spaces_one_default")
       .on(table.orgId)
       .where(sql`${table.isDefault} = true`),
   ],
@@ -42,9 +42,9 @@ export const endUsers = pgTable(
   "end_users",
   {
     id: text("id").primaryKey(), // eu_ prefix
-    applicationId: text("application_id")
+    spaceId: text("space_id")
       .notNull()
-      .references(() => applications.id, { onDelete: "cascade" }),
+      .references(() => spaces.id, { onDelete: "cascade" }),
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
@@ -57,12 +57,12 @@ export const endUsers = pgTable(
   },
   (table) => [
     uniqueIndex("idx_end_users_external_id")
-      .on(table.applicationId, table.externalId)
+      .on(table.spaceId, table.externalId)
       .where(sql`${table.externalId} IS NOT NULL`),
-    uniqueIndex("idx_end_users_app_email")
-      .on(table.applicationId, table.email)
+    uniqueIndex("idx_end_users_space_email")
+      .on(table.spaceId, table.email)
       .where(sql`email IS NOT NULL`),
-    index("idx_end_users_application_id").on(table.applicationId),
+    index("idx_end_users_space_id").on(table.spaceId),
     index("idx_end_users_org_id").on(table.orgId),
   ],
 );

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Per-(application, agent, integration, user?) connection pin.
+ * Per-(space, agent, integration, user?) connection pin.
  *
  * Two scopes share this table, discriminated by `user_id`:
  *
@@ -22,7 +22,7 @@
  *   3. schedules.connection_overrides                     (frozen at schedule create)
  *   4. member pin (this table, `user_id = actor.id`)    ← preference, this actor
  *   5. fallback: actor's accessible connections
- *      = own + (shared_with_org AND application match)
+ *      = own + (shared_with_org AND space match)
  *      → 1 match → auto, 0 → not_connected, N → must_choose
  *
  * A pin must reference a connection accessible to the actor at run time.
@@ -40,7 +40,7 @@
 import { pgTable, text, uuid, timestamp, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { user } from "./auth.ts";
-import { applications } from "./applications.ts";
+import { spaces } from "./spaces.ts";
 import { packages } from "./packages.ts";
 import { integrationConnections } from "./integrations.ts";
 
@@ -48,10 +48,10 @@ export const integrationPins = pgTable(
   "integration_pins",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    applicationId: text("application_id")
+    spaceId: text("space_id")
       .notNull()
-      .references(() => applications.id, { onDelete: "cascade" }),
-    /** Agent package (`packages.id`) — the pin is per-agent, not per-app-wide. */
+      .references(() => spaces.id, { onDelete: "cascade" }),
+    /** Agent package (`packages.id`) — the pin is per-agent, not per-space-wide. */
     packageId: text("package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
@@ -85,19 +85,19 @@ export const integrationPins = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    // One row per (application, agent, integration, scope). The
+    // One row per (space, agent, integration, scope). The
     // coalesce trick keeps the unique constraint usable for both scopes —
     // empty-string sentinel on the NULL side avoids PostgreSQL's
     // "NULLs distinct in unique" caveat. Admin and member pins can
     // therefore coexist on the same (agent, integration).
     uniqueIndex("idx_integration_pins_unique").on(
-      table.applicationId,
+      table.spaceId,
       table.packageId,
       table.integrationId,
       sql`coalesce(${table.userId}, '')`,
     ),
-    // Resolver hot path: fetch all pins for (app, agent) in one round trip,
-    // then partition by user_id at app level.
+    // Resolver hot path: fetch all pins for (space, agent) in one round trip,
+    // then partition by user_id at space level.
     // Reverse lookup: "what pins reference this connection?" — used by
     // the unshare-guard (refuse turning sharedWithOrg off if pinned) AND
     // by the impact-list confirm modal on /connections destructive delete.

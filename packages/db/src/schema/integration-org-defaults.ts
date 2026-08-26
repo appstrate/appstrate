@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Per-(application, integration) default connection — the org-wide baseline
+ * Per-(space, integration) default connection — the org-wide baseline
  * the resolver uses for EVERY agent that consumes the integration, unless a
  * more specific layer overrides it.
  *
  * This is the cross-agent governance primitive that `integration_pins` is
  * not: a pin is keyed per `(agent, integration)`, so forcing one connection
  * across N agents meant N pin rows. An org default is keyed per
- * `(application, integration)` — one row covers every agent.
+ * `(space, integration)` — one row covers every agent.
  *
  * `enforce` discriminates the two governance strengths:
  *
@@ -41,7 +41,7 @@
 
 import { pgTable, text, uuid, boolean, timestamp, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { user } from "./auth.ts";
-import { applications } from "./applications.ts";
+import { spaces } from "./spaces.ts";
 import { packages } from "./packages.ts";
 import { integrationConnections } from "./integrations.ts";
 
@@ -49,9 +49,9 @@ export const integrationOrgDefaults = pgTable(
   "integration_org_defaults",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    applicationId: text("application_id")
+    spaceId: text("space_id")
       .notNull()
-      .references(() => applications.id, { onDelete: "cascade" }),
+      .references(() => spaces.id, { onDelete: "cascade" }),
     /** Integration package this default governs. */
     integrationId: text("integration_package_id")
       .notNull()
@@ -75,9 +75,9 @@ export const integrationOrgDefaults = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    // One default per (application, integration).
-    uniqueIndex("idx_integration_org_defaults_unique").on(table.applicationId, table.integrationId),
-    // Resolver hot path: load all defaults for an application in one query.
+    // One default per (space, integration).
+    uniqueIndex("idx_integration_org_defaults_unique").on(table.spaceId, table.integrationId),
+    // Resolver hot path: load all defaults for a space in one query.
     // Reverse lookup for the unshare / destructive-delete impact guard.
     index("idx_integration_org_defaults_connection").on(table.connectionId),
   ],
