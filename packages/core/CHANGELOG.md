@@ -5,12 +5,10 @@ All notable changes to `@appstrate/core` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [9.0.0] — 2026-08-26
 
-Not yet on npm. `8.0.0` is the published version; `package.json` and
-`CORE_VERSION` are already at `9.0.0` because this window REMOVES an export,
-which is a major break — leaving them at `8.0.0` would ship a surface that
-differs from the `8.0.0` already on npm, under the same number.
+Published from tag `core@9.0.0`. This window REMOVES an export, which is the
+major break that set the number — see **Removed** below for the one removal.
 
 ### Removed
 
