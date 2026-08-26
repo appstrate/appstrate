@@ -122,26 +122,65 @@ export function sanitize(sql: string): string {
 }
 
 /**
- * Does a DML keyword at `index` start a statement, or is it a clause?
+ * Does a DML keyword at `index` open a statement, or is it part of a clause?
  *
  * `ON DELETE CASCADE`, `ON UPDATE NO ACTION` and `ON CONFLICT DO UPDATE` are
  * everywhere in this directory — matching the bare word would flag every
- * foreign key in `0000_init`. So the token before it must be a statement
- * boundary: nothing, `;` (which `--> statement-breakpoint` became), the `$$`
- * opening a `DO` body, or one of the PL/pgSQL keywords a nested statement can
- * follow.
+ * foreign key in `0000_init`. So the token before it must be a boundary:
+ *
+ *   - nothing, or `;` (which `--> statement-breakpoint` became);
+ *   - `$`, the `$$` opening a `DO` body;
+ *   - a PL/pgSQL keyword a nested statement can follow (`STATEMENT_OPENERS`);
+ *   - `)`, which closes the last CTE of a `WITH … AS (…) UPDATE …`;
+ *   - `(`, which opens a CTE body holding the DML itself, as in
+ *     `WITH moved AS (DELETE FROM a RETURNING *) INSERT INTO b SELECT …`.
+ *
+ * The last two are not decoration. `WITH … AS (DELETE … RETURNING *) INSERT
+ * INTO other …` is THE idiomatic Postgres way to move rows between tables —
+ * exactly a `scripts/migration/` job — and without them the whole form passed
+ * this gate in silence: the keyword after `)` and the one after `(` were both
+ * read as mid-clause.
+ *
+ * `,` is deliberately NOT a boundary. It would admit the second half of a
+ * privilege list (`GRANT INSERT, UPDATE ON …`), which grants a right rather
+ * than writing a row, and no CTE needs it: a DML inside `WITH a AS (…), b AS
+ * (DELETE …)` still sits directly behind that body's `(`.
  */
 const STATEMENT_OPENERS = new Set(["BEGIN", "THEN", "ELSE", "LOOP"]);
+const BOUNDARY_CHARS = [";", "$", "(", ")"];
 
 function startsStatement(sanitized: string, index: number): boolean {
   const before = sanitized.slice(0, index).trimEnd();
   if (before === "") return true;
-  if (before.endsWith(";") || before.endsWith("$")) return true;
+  if (BOUNDARY_CHARS.some((c) => before.endsWith(c))) return true;
   const lastWord = /([A-Za-z_]+)$/.exec(before)?.[1];
   return lastWord !== undefined && STATEMENT_OPENERS.has(lastWord.toUpperCase());
 }
 
-const DML = /\b(UPDATE|INSERT|DELETE)\b/gi;
+/**
+ * The write vocabulary.
+ *
+ * `TRUNCATE` is in it because it removes every row in a table, which is the
+ * most total row rewrite there is — and it was invisible to the first version
+ * of this gate. See `UNLICENCEABLE` for why it never reaches the carve-out.
+ */
+const DML = /\b(UPDATE|INSERT|DELETE|TRUNCATE)\b/gi;
+
+/**
+ * Writes that the same-table carve-out can never licence.
+ *
+ * A `TRUNCATE` empties the table. It cannot be the *precondition* of a
+ * constraint in any sense worth honouring — emptying a table satisfies every
+ * constraint vacuously, so licencing it would let "drop all rows, then add a
+ * `SET NOT NULL`" pass a gate whose entire purpose is to stop a migration from
+ * destroying data on every database it is ever replayed against.
+ *
+ * This is also why `dmlTarget` never parses a `TRUNCATE`, and why its
+ * comma-separated form (`TRUNCATE a, b, c`) needs no handling: with no
+ * exemption available there is no target to match against, and every table in
+ * the list is reported through the statement text either way.
+ */
+const UNLICENCEABLE = /^TRUNCATE$/i;
 
 /**
  * A possibly schema-qualified SQL identifier: `x`, `"x"`, `public.x`,
@@ -208,6 +247,22 @@ const LICENCE = /\bSET\s+NOT\s+NULL\b|\bCHECK\s*\(|\bVALIDATE\s+CONSTRAINT\b/gi;
  * columns a CHECK expression reads and which ones an UPDATE assigns — and that
  * is deliberately out of scope for a lint script. The gate stops at the table
  * boundary, and says so here rather than implying a reach it does not have.
+ *
+ * Two writing forms are also outside the `DML` vocabulary, on purpose:
+ *
+ *   - `SELECT … INTO t FROM …` — inside a `DO $$` body, which this gate
+ *     deliberately reads, `SELECT … INTO var` is PL/pgSQL variable assignment
+ *     and not a write at all; separating the two needs to know whether the
+ *     target is a table or a declared variable, and the table form creates a
+ *     new relation rather than rewriting existing rows.
+ *   - `COPY t FROM …` — it needs a file on the database host or `FROM STDIN`,
+ *     and the boot migrator supplies neither, so it cannot execute from this
+ *     directory in the first place.
+ *
+ * Neither is idiomatic in a drizzle migration. If either ever becomes
+ * reachable here it is one alternation entry in `DML` plus one branch in
+ * `dmlTarget` — named now so the omission is a decision on the record rather
+ * than a gap someone rediscovers.
  */
 export function licencedTables(sanitized: string): Set<string> {
   const statements = [...sanitized.matchAll(new RegExp(TABLE_STATEMENT, "gi"))];
@@ -249,7 +304,7 @@ interface Finding {
  *
  * A DML statement whose target table cannot be read fails closed: an
  * unparseable target matches no licence, so it is reported rather than waved
- * through.
+ * through. An `UNLICENCEABLE` write skips the carve-out entirely.
  */
 export function findDml(sql: string): Finding[] {
   const sanitized = sanitize(sql);
@@ -259,8 +314,10 @@ export function findDml(sql: string): Finding[] {
   for (const match of sanitized.matchAll(DML)) {
     const index = match.index;
     if (!startsStatement(sanitized, index)) continue;
-    const target = dmlTarget(sanitized, index);
-    if (target !== null && licenced.has(target)) continue;
+    if (!UNLICENCEABLE.test(match[1] ?? "")) {
+      const target = dmlTarget(sanitized, index);
+      if (target !== null && licenced.has(target)) continue;
+    }
     findings.push({
       line: sanitized.slice(0, index).split("\n").length,
       statement: statementAt(sql, sanitized, index),

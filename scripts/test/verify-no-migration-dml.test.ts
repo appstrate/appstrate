@@ -157,6 +157,108 @@ END $$;`;
   });
 });
 
+describe("findDml — CTE-led statements", () => {
+  // `WITH … AS (DELETE … RETURNING *) INSERT INTO other …` is THE idiomatic
+  // Postgres way to move rows between tables, and it passed this gate in
+  // silence until `(` and `)` became boundaries.
+  it("flags an UPDATE that follows a closing CTE paren", () => {
+    const sql = `WITH stale AS (
+  SELECT id FROM runs WHERE version_ref = 'draft'
+)
+UPDATE runs SET version_ref = 'v1' WHERE id IN (SELECT id FROM stale);`;
+    expect(flags(sql)).toBe(true);
+  });
+
+  it("flags a DELETE inside a CTE body and the INSERT it feeds", () => {
+    const sql = `WITH moved AS (
+  DELETE FROM uploads WHERE size = 0 RETURNING *
+)
+INSERT INTO files SELECT * FROM moved;`;
+    const findings = findDml(sql);
+    expect(findings.map((f) => f.line)).toEqual([2, 4]);
+  });
+
+  it("flags a DML in the second body of a multi-CTE statement", () => {
+    const sql = `WITH a AS (SELECT 1), b AS (DELETE FROM uploads RETURNING *)
+SELECT * FROM b;`;
+    expect(flags(sql)).toBe(true);
+  });
+
+  it("still ignores `ON DELETE` / `ON UPDATE` after a closing paren", () => {
+    // The FK clause is the shape `)` had to be admitted without breaking:
+    // `REFERENCES "orgs"("id") ON DELETE cascade` puts a `)` a few tokens
+    // before the keyword, but `ON` is what directly precedes it.
+    const sql = `ALTER TABLE "runs" ADD CONSTRAINT "runs_org_id_fk" FOREIGN KEY ("org_id")
+  REFERENCES "public"."orgs"("id") ON DELETE cascade ON UPDATE no action;`;
+    expect(flags(sql)).toBe(false);
+  });
+
+  it("does not double-count `DO UPDATE SET` in an ON CONFLICT clause", () => {
+    // The enclosing INSERT is already a finding on its own keyword; the
+    // `UPDATE` in the conflict action must not add a second one.
+    const sql = `INSERT INTO "orgs" ("id") VALUES ('o1')
+  ON CONFLICT ("id") DO UPDATE SET "id" = excluded."id";`;
+    const findings = findDml(sql);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.statement).toStartWith(`INSERT INTO "orgs"`);
+  });
+
+  it("does not treat a privilege list as two statements", () => {
+    // `,` is deliberately not a boundary: `GRANT INSERT, UPDATE` grants a
+    // right, it does not write a row.
+    expect(flags(`GRANT INSERT, UPDATE ON "runs" TO "appstrate";`)).toBe(false);
+  });
+});
+
+describe("findDml — TRUNCATE", () => {
+  it("flags a bare TRUNCATE", () => {
+    expect(flags(`TRUNCATE TABLE "runs";`)).toBe(true);
+    expect(flags(`TRUNCATE "runs";`)).toBe(true);
+    expect(flags(`TRUNCATE ONLY "runs" RESTART IDENTITY CASCADE;`)).toBe(true);
+  });
+
+  it("flags a TRUNCATE even when the same table gains a constraint", () => {
+    // Emptying a table satisfies every constraint vacuously. Licencing that
+    // would let "drop all rows, then promote the column" through the gate.
+    const sql = `TRUNCATE TABLE "runs";--> statement-breakpoint
+ALTER TABLE "runs" ALTER COLUMN "version_ref" SET NOT NULL;`;
+    expect(flags(sql)).toBe(true);
+  });
+
+  it("flags every table of a comma-separated TRUNCATE through one finding", () => {
+    const findings = findDml(`TRUNCATE "runs", "uploads", "files";`);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.statement).toBe(`TRUNCATE "runs", "uploads", "files";`);
+  });
+
+  it("ignores TRUNCATE inside a comment or a literal", () => {
+    expect(
+      flags(`-- we used to TRUNCATE "runs" here\nALTER TABLE "runs" ADD COLUMN "c" text;`),
+    ).toBe(false);
+  });
+});
+
+describe("findDml — writes deliberately outside the vocabulary", () => {
+  // Documented on `licencedTables`: excluded on purpose, not overlooked. These
+  // cases pin the decision so a future change to it is visible in the diff.
+  it("does not flag `SELECT … INTO`", () => {
+    expect(flags(`SELECT * INTO runs_backup FROM runs;`)).toBe(false);
+  });
+
+  it("does not flag a PL/pgSQL `SELECT … INTO` variable assignment", () => {
+    const sql = `DO $$
+DECLARE n integer;
+BEGIN
+  SELECT count(*) INTO n FROM "runs";
+END $$;`;
+    expect(flags(sql)).toBe(false);
+  });
+
+  it("does not flag `COPY … FROM`", () => {
+    expect(flags(`COPY runs (id) FROM '/tmp/x.csv';`)).toBe(false);
+  });
+});
+
 describe("findDml — what is not a statement", () => {
   it("ignores DML keywords in a `--` comment", () => {
     const sql = `-- This migration used to UPDATE every row, and an INSERT was

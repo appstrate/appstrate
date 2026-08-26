@@ -78,6 +78,21 @@ column-level analysis and is out of scope. The gap is a limit, not permission.
 predates the gate is grandfathered in `scripts/verify-no-migration-dml.ts` by
 name.
 
+Its write vocabulary is `UPDATE`, `INSERT`, `DELETE` and `TRUNCATE`, in every
+position a statement can open — including a CTE, since
+`WITH moved AS (DELETE … RETURNING *) INSERT INTO other …` is the idiomatic way
+to move rows between tables and is squarely a `scripts/migration/` job. A
+`TRUNCATE` is never licenced by the carve-out: emptying a table satisfies every
+constraint vacuously, so "drop all rows, then promote the column" is not a
+precondition, it is the destruction this rule exists to stop.
+
+Two writing forms are outside that vocabulary on purpose. `SELECT … INTO` is
+PL/pgSQL variable assignment inside the `DO $$` blocks this directory is full
+of, and creates a new relation rather than rewriting rows; `COPY … FROM` needs
+a file on the database host or `FROM STDIN`, and the boot migrator supplies
+neither. Both are named here so the omission stays a decision rather than a
+gap.
+
 ### 3. No dead transition scaffolding
 
 Feature flags whose branch is decided, shims, adapters wrapping a shape nothing
