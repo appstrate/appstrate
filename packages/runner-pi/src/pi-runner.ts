@@ -824,7 +824,7 @@ export class PiRunner {
     // the compaction LLM call has a chance to start, and the next run
     // turn re-encounters the same prompt-too-long 400. Polling
     // `isCompacting` here lets that recovery actually drain.
-    await waitForCompactionToSettle(session as unknown as { isCompacting: boolean }, signal);
+    await waitForCompactionToSettle(session, signal);
   }
 }
 
