@@ -46,7 +46,8 @@ docker exec -i <pg> psql -U appstrate -d appstrate -v ON_ERROR_STOP=1 \
 
 ## Log
 
-| #    | date       | what                                                                              | rows               |
-| ---- | ---------- | --------------------------------------------------------------------------------- | ------------------ |
-| 0001 | 2026-08-26 | `files.id` `doc_` → `file_` and every reference                                   | 521 / 25 / 64 / 59 |
-| 0002 | 2026-08-26 | `chat_messages`: `document://file_` → `appfile://file_`, finishing 0001's write 4 | 59                 |
+| #    | date       | what                                                                                                                      | rows                                                   |
+| ---- | ---------- | ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| 0001 | 2026-08-26 | `files.id` `doc_` → `file_` and every reference                                                                           | 521 / 25 / 64 / 59                                     |
+| 0002 | 2026-08-26 | `chat_messages`: `document://file_` → `appfile://file_`, finishing 0001's write 4                                         | 59                                                     |
+| 0003 | 2026-08-26 | `app_` → `spc_` space ids (+18 FK columns), `applications:*` scopes, `end_user:` realms, storage keys, `level` vocabulary | _not rehearsed — fill in from the `pg_dump` rehearsal_ |
