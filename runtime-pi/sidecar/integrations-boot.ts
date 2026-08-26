@@ -425,22 +425,14 @@ export async function connectRemoteHttpIntegration(
       `integration ${spec.integrationId} declares sourceKind="remote" but no server.url`,
     );
   }
-  // AFPS §7.1 — pick the MCP client transport from the manifest.
-  // Default to `streamable-http` when the field is absent (back-compat
-  // for manifests that predated the enum). Anything else is a
-  // hard-fail at boot — the platform validates the enum at install time,
-  // so reaching this branch means the manifest carries a value the
-  // sidecar doesn't (yet) know how to dispatch to.
-  const declaredTransport = spec.manifest.server?.transport;
-  const transport: "streamable-http" | "sse" =
-    declaredTransport === "sse" ? "sse" : "streamable-http";
-  if (
-    declaredTransport !== undefined &&
-    declaredTransport !== "streamable-http" &&
-    declaredTransport !== "sse"
-  ) {
+  // AFPS §7.1 — pick the MCP client transport from the manifest. The enum is
+  // required and validated at install time, so anything else — absent
+  // included — means the manifest carries a value the sidecar can't dispatch
+  // to, and is a hard-fail at boot.
+  const transport = spec.manifest.server?.transport;
+  if (transport !== "streamable-http" && transport !== "sse") {
     throw new Error(
-      `integration ${spec.integrationId} declares unsupported source.remote.transport="${declaredTransport}" (allowed: "streamable-http" | "sse")`,
+      `integration ${spec.integrationId} declares unsupported source.remote.transport="${transport}" (allowed: "streamable-http" | "sse")`,
     );
   }
 

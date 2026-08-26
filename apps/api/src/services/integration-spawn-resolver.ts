@@ -599,8 +599,8 @@ async function resolveOne(
               // a Streamable HTTP client against it. Mutually exclusive with
               // `entry_point` (enforced by `integrationManifestSchema`).
               ...(serverSpec.url ? { url: serverSpec.url } : {}),
-              // AFPS §7.1 — `streamable-http` (default) | `sse`. Only
-              // emitted on remote sources.
+              // AFPS §7.1 — `streamable-http` | `sse`, required by the
+              // manifest schema. Only emitted on remote sources.
               ...(serverSpec.transport ? { transport: serverSpec.transport } : {}),
             },
           }
