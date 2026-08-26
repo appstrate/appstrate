@@ -126,9 +126,10 @@ services:
   #   2. It must keep the `depends_on` gate. Drop it and you get two concurrent
   #      migrators racing the same journal.
   #
-  # It does NOT run the boot-time `reconcileOAuthResourceColumns()` self-heal;
-  # that only happens in the platform's own boot pass, which is another reason
-  # not to "optimise" the platform's migration step away.
+  # It does NOT run the boot-time schema-drift check that refuses to start when
+  # the migration watermark is ahead of the real schema; that only happens in
+  # the platform's own boot pass, which is another reason not to "optimise"
+  # the platform's migration step away.
   migrate:
     image: ghcr.io/appstrate/appstrate:${APPSTRATE_VERSION:-1.0.0-beta.41}
     networks:

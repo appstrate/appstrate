@@ -1516,7 +1516,7 @@ export async function bootIntegrations(
           serverUrl: server.url,
           // AFPS §7.1 — surface the actual transport the sidecar
           // dispatched to so operators can audit which path executed.
-          transport: server.transport ?? "streamable-http",
+          transport: server.transport,
           authKey,
           toolCount: added + apiCallAdded,
         });

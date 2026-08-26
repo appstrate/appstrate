@@ -100,10 +100,34 @@ ALTER TABLE "llm_usage" VALIDATE CONSTRAINT "llm_usage_run_id_org_id_fk";`;
     // The other half of the split: `0020` on its own. Adding the constraint
     // `NOT VALID` validates no existing row, so no backfill is its
     // precondition — the repair belongs in the file that validates it.
-    const sql = `ALTER TABLE "llm_usage" ADD CONSTRAINT "llm_usage_run_id_org_id_fk"
+    //
+    // Both arms, because the FK one is vacuous by itself: `FOREIGN KEY …` is no
+    // `LICENCE` clause at all, so that file is reported whether or not
+    // `NOT VALID` means anything here. The `CHECK` arm is the one that pins the
+    // rule — `CHECK (` IS a licence clause, and it is the only one that names a
+    // constraint's BIRTH rather than its enforcement, so only the trailing
+    // `NOT VALID` keeps it from licencing the repair sitting beside it.
+    const fk = `ALTER TABLE "llm_usage" ADD CONSTRAINT "llm_usage_run_id_org_id_fk"
   FOREIGN KEY ("run_id","org_id") REFERENCES "public"."runs"("id","org_id") NOT VALID;--> statement-breakpoint
 UPDATE llm_usage SET run_id = NULL WHERE run_id IS NOT NULL;`;
-    expect(flags(sql)).toBe(true);
+    const check = `ALTER TABLE "llm_usage" ADD CONSTRAINT "llm_usage_one_owner"
+  CHECK (run_id IS NULL OR chat_session_id IS NULL) NOT VALID;--> statement-breakpoint
+UPDATE llm_usage SET run_id = NULL WHERE chat_session_id IS NOT NULL;`;
+    expect(flags(fk)).toBe(true);
+    expect(flags(check)).toBe(true);
+  });
+
+  it("reads `NOT VALID` only from the CHECK's own statement", () => {
+    // The other direction, so the rule above cannot over-reach: a `NOT VALID`
+    // on a LATER, unrelated constraint must not retroactively disarm a CHECK
+    // that really is enforced. Were the search not bounded to the CHECK's own
+    // statement, following §2's advice anywhere in a file would strip the
+    // licence from every CHECK in it.
+    const sql = `ALTER TABLE "webhooks" ADD CONSTRAINT "k" CHECK (payload_mode IN ('full'));--> statement-breakpoint
+ALTER TABLE "runs" ADD CONSTRAINT "runs_org_id_fk" FOREIGN KEY ("org_id")
+  REFERENCES "public"."orgs"("id") NOT VALID;--> statement-breakpoint
+UPDATE "webhooks" SET "payload_mode" = 'full' WHERE "payload_mode" IS NULL;`;
+    expect(flags(sql)).toBe(false);
   });
 
   it("allows a fold beside a DROP COLUMN on the same table", () => {
@@ -173,6 +197,58 @@ ALTER TABLE IF EXISTS public.runs ALTER COLUMN "c" SET NOT NULL;`;
   it("fails closed when the DML target cannot be read", () => {
     const sql = `UPDATE 42 SET "c" = 1;--> statement-breakpoint
 ALTER TABLE "runs" ALTER COLUMN "c" SET NOT NULL;`;
+    expect(flags(sql)).toBe(true);
+  });
+
+  it("does NOT licence a repair from a clause that only appears in a comment or a literal", () => {
+    // The licence direction of `sanitize` — the DML direction is covered under
+    // "what is not a statement". A `SET NOT NULL` written in prose, or parked
+    // inside a string, promotes no column, so it must not excuse the write
+    // beside it. Both fixtures put the text exactly where an enclosing
+    // `ALTER TABLE` would attribute it to the very table being rewritten, which
+    // is what makes them discriminating: stop blanking and both pass.
+    const inComment = `ALTER TABLE "runs" ADD COLUMN "version_ref" text;--> statement-breakpoint
+-- next release: ALTER TABLE "runs" ALTER COLUMN "version_ref" SET NOT NULL;
+UPDATE "runs" SET "version_ref" = 'draft';`;
+    const inLiteral = `ALTER TABLE "runs" ALTER COLUMN "note" SET DEFAULT 'then ALTER COLUMN version_ref SET NOT NULL';--> statement-breakpoint
+UPDATE "runs" SET "version_ref" = 'draft';`;
+    expect(flags(inComment)).toBe(true);
+    expect(flags(inLiteral)).toBe(true);
+  });
+});
+
+describe("findDml — only an UPDATE is licenceable", () => {
+  // Both shapes §2 exempts are `UPDATE`s: a backfill fills the column a
+  // constraint is about to require, and a fold copies a column's values
+  // somewhere else before the file drops it. Neither is expressible as an
+  // `INSERT` or a `DELETE`, so no licence clause may excuse one. Licencing is
+  // closed by default and opened for that one verb — a blacklist that refused
+  // only `TRUNCATE` opened it for every other verb, and `DELETE FROM "t";`
+  // empties a table exactly as `TRUNCATE "t";` does.
+  it("still reports a DELETE beside a DROP COLUMN on the same table", () => {
+    const sql = `DELETE FROM "runs" WHERE "version_label" IS NULL;--> statement-breakpoint
+ALTER TABLE "runs" DROP COLUMN "version_label";`;
+    expect(flags(sql)).toBe(true);
+  });
+
+  it("still reports a DELETE beside a SET NOT NULL on the same table", () => {
+    // The destructive way to satisfy a promotion: delete the rows that would
+    // violate it, rather than repair them. That is the destruction this gate
+    // exists to stop, and it is the same statement `TRUNCATE` was refused for.
+    const sql = `DELETE FROM "runs" WHERE "version_ref" IS NULL;--> statement-breakpoint
+ALTER TABLE "runs" ALTER COLUMN "version_ref" SET NOT NULL;`;
+    expect(flags(sql)).toBe(true);
+  });
+
+  it("still reports an INSERT beside a CHECK on the same table", () => {
+    const sql = `INSERT INTO "webhooks" ("id", "payload_mode") VALUES ('w1', 'full');--> statement-breakpoint
+ALTER TABLE "webhooks" ADD CONSTRAINT "webhooks_payload_mode_valid" CHECK (payload_mode IN ('full', 'summary'));`;
+    expect(flags(sql)).toBe(true);
+  });
+
+  it("still reports an INSERT beside a VALIDATE CONSTRAINT on the same table", () => {
+    const sql = `INSERT INTO "llm_usage" ("id") VALUES ('u1');--> statement-breakpoint
+ALTER TABLE "llm_usage" VALIDATE CONSTRAINT "llm_usage_run_id_org_id_fk";`;
     expect(flags(sql)).toBe(true);
   });
 });
@@ -348,7 +424,6 @@ describe("findDml — the pure-DDL pass and its negative control", () => {
 });
 
 describe("review", () => {
-  const grandfathered = GRANDFATHERED[0]!;
   const offending = `UPDATE "runs" SET "version_ref" = 'draft';`;
   const present = new Map(GRANDFATHERED.map((name) => [name, offending]));
 
@@ -371,12 +446,18 @@ describe("review", () => {
   });
 
   it("fails when a GRANDFATHERED entry names no migration", () => {
-    const missing = new Map(present);
-    missing.delete(grandfathered);
-    const problems = review(missing);
-    expect(problems).toHaveLength(1);
-    expect(problems[0]).toContain(grandfathered);
-    expect(problems[0]).toContain("not in packages/db/drizzle/");
+    // Every entry, not `GRANDFATHERED[0]`: the list's composition is itself
+    // under review (an entry leaves when its file leaves the directory), so a
+    // test that indexes into it pins whichever name happens to sort first and
+    // stops covering the rest the moment that changes.
+    for (const name of GRANDFATHERED) {
+      const missing = new Map(present);
+      missing.delete(name);
+      const problems = review(missing);
+      expect(problems).toHaveLength(1);
+      expect(problems[0]).toContain(name);
+      expect(problems[0]).toContain("not in packages/db/drizzle/");
+    }
   });
 });
 

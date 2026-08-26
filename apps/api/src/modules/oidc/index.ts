@@ -26,7 +26,7 @@
  *  - `init()` installs the realm resolver and syncs instance clients. The
  *    Better Auth oauth-provider tables and the `oidc_end_user_profiles`
  *    shadow table live in the core schema and are created by the system
- *    migration pipeline — the module no longer owns migrations.
+ *    migration pipeline; modules own no tables and run no migrations.
  */
 
 import { z } from "zod";

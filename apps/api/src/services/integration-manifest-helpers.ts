@@ -314,16 +314,29 @@ export function getLocalServerRef(
   return typeof vendored === "boolean" ? { name, version, vendored } : { name, version };
 }
 
-/** `source.remote` for a `remote`-source integration (`{ url, transport }`). */
+/**
+ * `source.remote` for a `remote`-source integration (`{ url, transport }`).
+ *
+ * `transport` is validated against AFPS §7.1's enum, not merely against
+ * `string`. Returning the union is what makes every caller's narrowing real:
+ * accept `string` here and the spawn resolver has to turn it into the union
+ * somehow, and the only cheap way to do that is to map everything that is not
+ * `"sse"` onto `"streamable-http"` — which silently rewrites a manifest
+ * declaring `"websocket"` into one declaring HTTP, and hands the sidecar a
+ * spec that can never trip its own guard. A manifest outside the enum is
+ * malformed; it is dropped with the same loud warning as any other malformed
+ * remote source, never coerced into a shape that happens to run.
+ */
 export function getRemoteSource(
   manifest: IntegrationManifest,
-): { url: string; transport: string } | null {
+): { url: string; transport: "streamable-http" | "sse" } | null {
   const source = (
     manifest as { source?: { kind?: string; remote?: { url?: unknown; transport?: unknown } } }
   ).source;
   if (source?.kind !== "remote" || !source.remote) return null;
   const { url, transport } = source.remote;
-  if (typeof url !== "string" || typeof transport !== "string") return null;
+  if (typeof url !== "string") return null;
+  if (transport !== "streamable-http" && transport !== "sse") return null;
   return { url, transport };
 }
 

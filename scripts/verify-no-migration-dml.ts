@@ -9,15 +9,17 @@
  * This header describes the implementation only.
  *
  * What the code does: reject every `UPDATE` / `INSERT` / `DELETE` / `TRUNCATE`
- * that opens a statement in a new migration, UNLESS the same file also carries
- * one of the four clauses §2 licences ON THAT TABLE — `SET NOT NULL`, `CHECK`,
- * `VALIDATE CONSTRAINT` (the three constraint preconditions) or `DROP COLUMN`
- * (the fold whose source the file destroys). Same table, not merely the same
- * file: see `licencedTables`, which also records the one hole this deliberately
- * leaves open. A `TRUNCATE` is never licenced — see `UNLICENCEABLE`.
+ * that opens a statement in a new migration, UNLESS it is an `UPDATE` and the
+ * same file also carries one of the four clauses §2 licences ON THAT TABLE —
+ * `SET NOT NULL`, `CHECK`, `VALIDATE CONSTRAINT` (the three constraint
+ * preconditions) or `DROP COLUMN` (the fold whose source the file destroys).
+ * Same table, not merely the same file: see `licencedTables`, which also
+ * records the one hole this deliberately leaves open. Only an `UPDATE` is ever
+ * licenceable — see `LICENCEABLE` — and a `CHECK` added `NOT VALID` licences
+ * nothing, see `isDeferredCheck`.
  *
  * Only NEW files are gated. Every migration already in the directory has run
- * on real databases and cannot be changed, so the seven that predate this rule
+ * on real databases and cannot be changed, so the eight that predate this rule
  * are listed in `GRANDFATHERED` below — explicitly, so the exemption is
  * reviewable rather than implicit, and checked against the directory so an
  * entry cannot go on excusing a name nothing occupies.
@@ -32,36 +34,39 @@ const MIGRATIONS_DIR = join(REPO_ROOT, "packages/db/drizzle");
 /**
  * Migrations that carry data repair and predate this gate.
  *
- * These are permanent — they have been applied to production databases, and a
- * drizzle migration is never edited after it ships. The list is therefore
- * frozen: it may shrink (a file leaves the directory, or §2 grows a carve-out
- * that covers it on the merits), never grow. An eighth entry means a new
- * migration slipped the gate, not that the list was short.
+ * Membership means one thing, and it is a historical fact rather than a
+ * verdict: the file carries data repair AND it predates this gate. Both halves
+ * are permanent — a drizzle migration is never edited after it ships — so an
+ * entry is never re-litigated when the carve-out moves. The list may shrink
+ * only when a file leaves the directory, and it may never grow: a ninth entry
+ * means a NEW migration slipped the gate, not that the list was short.
  *
- * Six of the seven are live: the tightened, same-table carve-out flags them,
- * and only their presence here keeps the gate green. The set was established
- * by READING every file in the directory, then confirmed against an
- * independent scan for DML-shaped statements; that scan found row rewrites in
- * twelve files, of which `0021`, `0029`, `0038` and `0051` are genuine
- * constraint preconditions on the very table they repair.
+ * Deliberately NOT "files the current rules would flag". Whether §2's
+ * carve-out happens to licence one of these is incidental and changes with the
+ * regex; the fact that it shipped before there was a gate does not. Pruning an
+ * entry the carve-out currently covers would silently convert a permanently
+ * exempt file into a conditionally exempt one, so that the next tightening of
+ * `LICENCE` — which §2 explicitly anticipates, see `licencedTables`'s
+ * column-level limit — would re-flag an immutable file with no lawful remedy,
+ * since the only fix would be to grow this list.
  *
- * `0018_white_captain_universe` was the eighth and is gone: §2's fold clause
- * licences its `runs` rewrite on the merits (the fold's source column,
- * `version_dirty`, is dropped on the next line), so the entry excused nothing
- * and was itself dead scaffolding. `0040` is not in the same position — two of
- * its three folds are licenced, but its `application_packages` wrap keeps a
- * surviving column and stays a real finding.
+ * The set was established by READING every file in the directory, then
+ * confirmed against an independent scan for DML-shaped statements; that scan
+ * found row rewrites in twelve files, of which `0021`, `0029`, `0038` and
+ * `0051` are genuine constraint preconditions on the very table they repair.
  *
- * `0023_attribution_llm_usage` is the one no-op that STAYS. It backfills
- * `llm_usage.credential_source` and adds a `CHECK` to `llm_usage` over
- * unrelated columns, so the table-level carve-out exempts it before this list
- * is consulted — but on the merits it IS pre-existing data repair, exempt only
- * through a limit `licencedTables` documents rather than through a rule. If the
- * carve-out is ever narrowed to columns it becomes live without further
- * archaeology. That is the line between the two removals: a rule covers `0018`,
- * a blind spot covers `0023`.
+ * Two entries are already no-ops under today's carve-out and stay listed for
+ * exactly the reason above. `0018_white_captain_universe`'s `runs` fold is
+ * licenced by the `DROP COLUMN "version_dirty"` on the next line;
+ * `0023_attribution_llm_usage` is exempted more weakly still, by the
+ * table-level limit rather than by any rule, since its `CHECK` covers columns
+ * its backfill never touches. Narrow the carve-out to columns and `0023` goes
+ * live again; narrow it further and `0018` follows. `0040_config_into_input`
+ * is listed on its own merits — two of its three folds are licenced, but its
+ * `application_packages` wrap keeps a surviving column and is a real finding.
  */
 export const GRANDFATHERED: readonly string[] = [
+  "0018_white_captain_universe",
   "0022_prune_cross_org_application_packages",
   "0023_attribution_llm_usage",
   "0030_null_static_provider_available_models",
@@ -167,25 +172,31 @@ function startsStatement(sanitized: string, index: number): boolean {
  *
  * `TRUNCATE` is in it because it removes every row in a table, which is the
  * most total row rewrite there is — and it was invisible to the first version
- * of this gate. See `UNLICENCEABLE` for why it never reaches the carve-out.
+ * of this gate. See `LICENCEABLE` for why it never reaches the carve-out.
  */
 const DML = /\b(UPDATE|INSERT|DELETE|TRUNCATE)\b/gi;
 
 /**
- * Writes that the same-table carve-out can never licence.
+ * The ONLY write the same-table carve-out can licence.
  *
- * A `TRUNCATE` empties the table. It cannot be the *precondition* of a
- * constraint in any sense worth honouring — emptying a table satisfies every
- * constraint vacuously, so licencing it would let "drop all rows, then add a
- * `SET NOT NULL`" pass a gate whose entire purpose is to stop a migration from
- * destroying data on every database it is ever replayed against.
+ * Both shapes §2 exempts are `UPDATE`s and nothing else: a backfill fills the
+ * column a constraint is about to require, and a fold copies a column's values
+ * somewhere else before the file drops it. Neither is expressible as an
+ * `INSERT`, a `DELETE` or a `TRUNCATE`, so no licence clause may excuse one.
+ *
+ * Stated as a whitelist rather than a `TRUNCATE` blacklist deliberately. The
+ * blacklist was the same rule for the destructive case, but only for that one
+ * case: `DELETE FROM t;` empties a table exactly as `TRUNCATE t;` does, and it
+ * sailed through any file that also carried a licence clause on `t`. Licencing
+ * is now closed by default and opened for one verb, so a fourth DML verb added
+ * to the vocabulary later cannot inherit an exemption nobody argued for.
  *
  * This is also why `dmlTarget` never parses a `TRUNCATE`, and why its
  * comma-separated form (`TRUNCATE a, b, c`) needs no handling: with no
  * exemption available there is no target to match against, and every table in
  * the list is reported through the statement text either way.
  */
-const UNLICENCEABLE = /^TRUNCATE$/i;
+const LICENCEABLE = /^UPDATE$/i;
 
 /**
  * A possibly schema-qualified SQL identifier: `x`, `"x"`, `public.x`,
@@ -289,10 +300,34 @@ export function licencedTables(sanitized: string): Set<string> {
   const statements = [...sanitized.matchAll(new RegExp(TABLE_STATEMENT, "gi"))];
   const tables = new Set<string>();
   for (const licence of sanitized.matchAll(LICENCE)) {
+    if (isDeferredCheck(sanitized, licence)) continue;
     const enclosing = statements.filter((s) => s.index < licence.index).at(-1);
     if (enclosing?.[1] !== undefined) tables.add(normalizeTable(enclosing[1]));
   }
   return tables;
+}
+
+/**
+ * A `CHECK` added `NOT VALID`, which licences nothing.
+ *
+ * §2 licences a repair beside the CLAUSE that enforces a constraint, not
+ * beside its birth — which is why `VALIDATE CONSTRAINT` is matched on its own.
+ * `CHECK (…)` is the one licence token that IS a birth, and
+ * `ADD CONSTRAINT … CHECK (…) NOT VALID` enforces nothing at all: Postgres
+ * skips the existing rows precisely so the table is not scanned yet. The
+ * repair those rows need belongs beside the later `VALIDATE CONSTRAINT`, in
+ * the file that actually turns the constraint on, and `VALIDATE` licences it
+ * there.
+ *
+ * Without this, following §2's own advice — add `NOT VALID` now, repair and
+ * validate later — silently licences arbitrary repair in the FIRST file, the
+ * one where nothing is being enforced.
+ */
+function isDeferredCheck(sanitized: string, licence: RegExpExecArray): boolean {
+  if (!/^CHECK/i.test(licence[0])) return false;
+  const end = sanitized.indexOf(";", licence.index);
+  const statement = sanitized.slice(licence.index, end === -1 ? undefined : end);
+  return /\bNOT\s+VALID\b/i.test(statement);
 }
 
 /**
@@ -325,7 +360,7 @@ interface Finding {
  *
  * A DML statement whose target table cannot be read fails closed: an
  * unparseable target matches no licence, so it is reported rather than waved
- * through. An `UNLICENCEABLE` write skips the carve-out entirely.
+ * through. A write that is not an `UPDATE` skips the carve-out entirely.
  */
 export function findDml(sql: string): Finding[] {
   const sanitized = sanitize(sql);
@@ -335,7 +370,7 @@ export function findDml(sql: string): Finding[] {
   for (const match of sanitized.matchAll(DML)) {
     const index = match.index;
     if (!startsStatement(sanitized, index)) continue;
-    if (!UNLICENCEABLE.test(match[1] ?? "")) {
+    if (LICENCEABLE.test(match[1] ?? "")) {
       const target = dmlTarget(sanitized, index);
       if (target !== null && licenced.has(target)) continue;
     }
@@ -370,12 +405,12 @@ export function review(migrations: ReadonlyMap<string, string>): string[] {
 
   // Liveness, in the spirit of `KNOWN_IGNORED` in `scripts/lint.ts`: an
   // exemption that names nothing would silently excuse whatever lands at that
-  // name tomorrow. Existence, not "still flagged" — one of the seven is
-  // covered by the constraint carve-out as well (see `GRANDFATHERED`), and
-  // failing on that would only push the list out of sync with the files.
-  // Shrinking the list stays a review act: an entry drops when a reader can
-  // say WHY §2 now covers it on the merits, which is exactly what `0018`'s
-  // removal records and what an automatic check could not have written down.
+  // name tomorrow. Existence, and deliberately NOT "still flagged": two of the
+  // eight are already covered by a carve-out as well (see `GRANDFATHERED`), and
+  // a liveness check would demand their removal — converting an immutable file
+  // from permanently exempt to exempt-while-the-regex-says-so, which is the one
+  // thing that list exists not to be. Membership is a historical fact, so it is
+  // not re-derived from today's rules.
   const dead = GRANDFATHERED.filter((name) => !migrations.has(name));
   if (dead.length > 0) {
     problems.push(

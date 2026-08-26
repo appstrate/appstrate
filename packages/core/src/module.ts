@@ -1469,7 +1469,8 @@ export interface PlatformServices {
    * to delete the `chat_sessions` row, so the file teardown and the row
    * delete commit atomically: a file materializing in the gap can no longer
    * be cascade-deleted without a storage-deletion outbox job. Omitted → the
-   * platform opens its own transaction (the legacy, non-atomic single call).
+   * platform opens its own transaction, which is correct whenever the caller
+   * has no wider unit of work to join.
    */
   cleanupSessionFiles(chatSessionId: string, tx?: unknown): Promise<void>;
   /**

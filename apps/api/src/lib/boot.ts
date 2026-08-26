@@ -483,9 +483,26 @@ export async function bootBackground(): Promise<{ agentsHealthy: boolean }> {
  * that. The cost is real and accepted — a deployment this used to repair in
  * place now stays down until the script is run.
  *
- * The probe is a signature, not a proof: it sees the one migration the known
- * incident skipped. A watermark corrupted *after* 0006 applied leaves these
- * columns present and other migrations missing, and this check passes.
+ * The probe is a signature, not a proof, and the gap is wider than it looks.
+ * It sees one migration, so a watermark corrupted *after* 0006 applied leaves
+ * these columns present and this check passes with other migrations still
+ * missing. Worse for the upgrade path: the self-heal shipped in every release
+ * up to this one and ran on every boot, so a database that drifted BEFORE this
+ * release already had the columns restored — it will pass here while its
+ * watermark is still corrupt. In practice this fires for a drift that first
+ * appears from here on, and for restores of a backup taken before the heal.
+ *
+ * Restoring the columns therefore clears the boot refusal, not the drift.
+ * `scripts/migration/0003-…` ships the ledger diagnostic for the real extent,
+ * and its header says the same thing.
+ *
+ * The general check — compare `max(created_at)` in `__drizzle_migrations`
+ * against the largest `when` in `meta/_journal.json` — was considered and
+ * rejected. It is exact for this incident but refuses boot after any deliberate
+ * ROLLBACK, where a database legitimately carries a watermark from a newer
+ * release than the code, and turning routine rollbacks into outages costs more
+ * than the corruption it would catch. The diagnostic stays a query an operator
+ * runs, not a predicate that stops the process.
  *
  * `columnExists` is injected for tests — production reads the live database.
  */

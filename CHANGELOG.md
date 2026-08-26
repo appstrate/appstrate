@@ -595,6 +595,50 @@ latest, sidecar latest}` is byte-for-byte the same input as the supported
 
 ### Removed
 
+- **BREAKING (operators): the boot-time self-heal for the RFC 8707 oauth
+  `resources` columns is gone — a database whose `__drizzle_migrations`
+  watermark is ahead of its real schema now REFUSES TO BOOT.** Until now
+  `reconcileOAuthResourceColumns()` re-ran migration `0006`'s DDL on every boot
+  of every deployment, forever, so a drifted database silently worked. Nothing
+  recorded when that repair could stop shipping.
+
+  **If the check fires, the API will not start.** Apply
+  `scripts/migration/0003-oauth-resources-watermark-drift.sql` to the database
+  and restart; the boot error names the file. The repair is idempotent and a
+  few seconds of additive DDL.
+
+  **Most upgrades will not see it, and that is not reassurance.** The self-heal
+  ran on every boot of every release up to this one, so a database that drifted
+  earlier already had these columns restored and will pass the check with its
+  watermark still corrupt. The check is a signature for one migration, not a
+  drift detector: it catches a drift that first appears from here on, or a
+  restore of a backup taken before the heal. Run the ledger diagnostic in the
+  script's header to see the real extent on any database you suspect.
+
+  Refusing rather than warning is deliberate: drizzle's postgres-js migrator
+  applies by `max(created_at)`, so a corrupted watermark skipped **every**
+  migration below it, not just `0006`. A process that kept running would serve
+  from a schema nobody can enumerate and fail later at unrelated queries naming
+  none of this. The check is a signature, not a proof — a watermark corrupted
+  _after_ `0006` applied leaves these columns present and passes — so the script
+  also ships the diagnostic query for the true extent of the drift. It
+  deliberately does not touch the ledger: lowering a watermark makes the
+  migrator replay migrations that did apply, and most are not idempotent.
+
+  Tier 0 (PGlite) cannot reach this state — `applyCorePGliteMigrations` keys on
+  the journal tag, not on a watermark.
+
+- **BREAKING (internal API): `GET /internal/mcp-server-bundle/{scope}/{name}`
+  now returns `400` when `?version=` is absent on a non-system mcp-server**,
+  where it used to serve the latest non-yanked version. That fallback existed
+  for pre-#588 sidecars, which no supported deployment has — the platform,
+  `PI_IMAGE` and `SIDECAR_IMAGE` are a version contract and `@appstrate/env`
+  fails boot on a disagreeing trio — and it silently reintroduced the exact
+  manifest/bytes skew #588 closed. This is a container-to-host route; no
+  external client calls it, and the sidecar in the matching image always sends
+  the parameter. System mcp-servers still omit it and are served from the
+  in-memory boot registry by id alone.
+
 - **BREAKING (installer): `APPSTRATE_AUTO_INSTALL` is retired — `scripts/bootstrap.sh`
   now refuses to run while it is set.** The variable was a fourth trigger for a
   decision three live signals already make (`--yes`, `CI=true|1|yes`, stdout is

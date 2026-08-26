@@ -58,12 +58,20 @@ legitimate overlap. Two shapes qualify, and nothing else.
 
 **The precondition of a constraint.** Three clauses: `SET NOT NULL` (`0051`),
 `CHECK` (`0038`), `VALIDATE CONSTRAINT` (`0021`). What must be in the file is the
-_clause_, not the constraint's birth. On a large table the safe pattern is
-`ADD CONSTRAINT … NOT VALID` in one release and `VALIDATE CONSTRAINT` in a later
-one, with the repair the validation needs sitting beside the `VALIDATE` — so the
-constraint is added in a different file from the backfill that preconditions it.
-`0020`/`0021` are that pair, and `0018`'s own header tells future migrations to
-use it.
+clause that **enforces** the constraint, not the one that creates it. On a large
+table the safe pattern is `ADD CONSTRAINT … NOT VALID` in one release and
+`VALIDATE CONSTRAINT` in a later one, with the repair the validation needs
+sitting beside the `VALIDATE` — so the constraint is added in a different file
+from the backfill that preconditions it. `0020`/`0021` are that pair, and
+`0018`'s own header tells future migrations to use it.
+
+The corollary bites in the other direction too: `ADD CONSTRAINT … CHECK (…) NOT
+VALID` licences **nothing**. Postgres deliberately skips the existing rows, so
+nothing is being enforced yet and no repair beside it can be a precondition —
+the rows it would fix are exactly the rows the `NOT VALID` just excused. Repair
+them beside the `VALIDATE`, in the file that turns the constraint on. Without
+that carve-out the recommended two-step pattern would licence arbitrary repair
+in the first file, the one where nothing is enforced.
 
 **A fold whose source column is dropped in the same file.** `DROP COLUMN`
 destroys the values, so an operator script run afterwards would have nothing left
@@ -71,13 +79,20 @@ to read: the fold is as inseparable from the `DROP` as a backfill is from a
 `SET NOT NULL`. `0018` folds `version_dirty` into `runs.version_ref` and drops it
 on the next line; `0040` does it twice more. The `DROP` is the whole bound — a
 fold whose source **survives** is ordinary data repair and is not exempt.
-`0040`'s third `UPDATE` wraps an `application_packages` column it keeps, and
-`0033`'s second strips a key out of a `runs.metadata` it keeps: both are
+`0040`'s `application_packages` wrap keeps the column it reads, and `0033`'s
+second `UPDATE` strips a key out of a `runs.metadata` it keeps: both are
 violations, not folds.
 
 Either way the licensing clause must land on the **same table** the write
 touches; file-level, a `CHECK` on table A would licence a rewrite of table B.
 Keep the write minimal, and keep it in the file that carries the clause.
+
+And either way the write is an **`UPDATE`**. Both shapes fill or move column
+values, and neither is expressible any other way, so no clause licences an
+`INSERT`, a `DELETE` or a `TRUNCATE`. That is not a technicality: `DELETE FROM t;`
+empties a table exactly as `TRUNCATE t;` does, and "drop all the rows, then
+promote the column" satisfies any constraint vacuously — the destruction this
+rule exists to stop, wearing a precondition's clothes.
 
 `SET NOT NULL` is a _promotion_, and only a promotion counts. A `NOT NULL` in a
 column definition never had a backfill as its precondition: Postgres refuses
@@ -107,10 +122,14 @@ Every migration that predates the gate is grandfathered in
 Its write vocabulary is `UPDATE`, `INSERT`, `DELETE` and `TRUNCATE`, in every
 position a statement can open — including a CTE, since
 `WITH moved AS (DELETE … RETURNING *) INSERT INTO other …` is the idiomatic way
-to move rows between tables and is squarely a `scripts/migration/` job. A
-`TRUNCATE` is never licenced by the carve-out: emptying a table satisfies every
-constraint vacuously, so "drop all rows, then promote the column" is not a
-precondition, it is the destruction this rule exists to stop.
+to move rows between tables and is squarely a `scripts/migration/` job. Of those
+four only an `UPDATE` can ever be licenced, per the rule above. Licensing is
+closed by default and opened for the one verb the carve-out describes, rather
+than open by default and closed for `TRUNCATE` — otherwise `DELETE FROM t;`
+beside a `SET NOT NULL` on `t` passes a gate whose whole purpose is to stop a
+migration from destroying rows on every database it is replayed against, and a
+fifth verb added to the vocabulary later would inherit an exemption nobody
+argued for.
 
 Two writing forms are outside that vocabulary on purpose. `SELECT … INTO` is
 PL/pgSQL variable assignment inside the `DO $$` blocks this directory is full

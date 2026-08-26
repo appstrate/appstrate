@@ -409,20 +409,18 @@ async function resolveOne(
         `remote-source integration '${integrationId}' source.remote.url host '${egress.hostname}' is blocked by the SSRF guard (${egress.detail})`,
       );
     }
-    // AFPS §7.1 — `transport` is `"streamable-http" | "sse"`. The
-    // manifest schema enforces the enum + `required`; we forward the
-    // declared value verbatim so the sidecar can pick the right MCP
-    // client transport. `getRemoteSource` already returned null (→ skip,
-    // above) for a non-string `transport`, so this is TYPE NARROWING from
-    // the helper's `string` to the union, not a fallback:
-    // `"streamable-http"` is the normal taken branch.
+    // AFPS §7.1 — `transport` is `"streamable-http" | "sse"`, forwarded
+    // verbatim so the sidecar can pick the right MCP client transport.
+    // There is nothing to narrow and nothing to default: `getRemoteSource`
+    // returns the union or null, and null already skipped this integration
+    // above. Anything else here would be a rewrite of what the manifest
+    // said, which is how a malformed transport used to reach the sidecar
+    // wearing a valid one's name.
     //
     // `server.type` is intentionally omitted — the sidecar dispatches on
     // `spec.sourceKind === "remote"`. Carrying `"http"` here would collide
     // with the AFPS `mcpServerTypeEnum` (`node|python|binary|uv`).
-    const transport: "streamable-http" | "sse" =
-      remote.transport === "sse" ? "sse" : "streamable-http";
-    serverSpec = { url: remote.url, transport };
+    serverSpec = { url: remote.url, transport: remote.transport };
   } else if (sourceKind === "local") {
     const ref = getLocalServerRef(manifest);
     if (!ref) {

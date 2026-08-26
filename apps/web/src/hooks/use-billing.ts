@@ -63,9 +63,14 @@ export interface BillingPlanDetail {
   /**
    * Durable-file storage the plan grants, in bytes — the value projected onto
    * the org's platform storage limit. `@appstrate/cloud` declares it `required`
-   * on `CloudBillingPlan` and sets it on every plan definition; the cloud image
-   * is built `FROM` the platform image and serves this SPA, so producer and
-   * reader are one deployed artifact.
+   * on `CloudBillingPlan` and sets it on every plan definition, so one spelling
+   * is read and no absent-field branch exists here.
+   *
+   * Required rather than optional, and checked rather than trusted: the two
+   * ship together (the cloud image is built `FROM` the platform image and
+   * serves this SPA) but they are not one version — that `FROM` pairs a cloud
+   * checkout of one age with a platform image of another. `assertPlansPriced`
+   * below is where that gap fails loudly instead of rendering "undefined B".
    */
   file_storage_bytes: number;
 }
@@ -82,12 +87,44 @@ interface BillingInfo {
   upgrades: BillingPlanDetail[];
 }
 
+/**
+ * Refuse a payload whose plans are missing `file_storage_bytes`.
+ *
+ * `cloudApi` is a hand-rolled `fetch` + `JSON.parse` + cast: the interfaces
+ * above are a compile-time contract with a producer in another repo, and
+ * nothing enforces them at runtime. `file_storage_bytes` is required on
+ * `CloudBillingPlan` and set on every plan `@appstrate/cloud` defines, so an
+ * absent one means a cloud build older than the field — which the image
+ * layering makes unlikely but not impossible, since a cloud checkout of one
+ * age is built `FROM` a platform image of another.
+ *
+ * It has to be checked rather than trusted because the failure is silent
+ * otherwise: `formatBytes(undefined)` returns the string `"undefined B"`, so
+ * the card would price a plan at "undefined B de stockage" and nobody would
+ * hear about it. `docs/NO_TRANSITIONAL_CODE.md` step 5 — a form that can still
+ * arrive from outside must fail loudly, never work. React Query surfaces the
+ * throw as the billing page's error state, naming the field and the producer.
+ */
+function assertPlansPriced(info: BillingInfo): BillingInfo {
+  const unpriced = [...info.plans, ...info.upgrades].filter(
+    (p) => typeof p.file_storage_bytes !== "number",
+  );
+  if (unpriced.length > 0) {
+    throw new Error(
+      `Billing payload is missing file_storage_bytes on ${unpriced.length} plan(s): ` +
+        `${unpriced.map((p) => p.id).join(", ")}. The billing module predates the field — ` +
+        `upgrade @appstrate/cloud to a build that sets it on every plan.`,
+    );
+  }
+  return info;
+}
+
 export function useBilling(options?: { enabled?: boolean }) {
   const orgId = useCurrentOrgId();
   const enabled = (options?.enabled ?? true) && !!orgId;
   return useQuery({
     queryKey: billingKeys.forOrg(orgId),
-    queryFn: () => cloudApi<BillingInfo>("/billing"),
+    queryFn: () => cloudApi<BillingInfo>("/billing").then(assertPlansPriced),
     enabled,
     staleTime: 60_000,
   });

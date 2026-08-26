@@ -29,10 +29,12 @@ dimension, and consolidates into one report written to
    never fall back.
 2. **Data repair belongs in `scripts/migration/`, never in a drizzle migration**
    — `packages/db/drizzle/*.sql` describes schema and is replayed forever. DML
-   that rewrites row contents is an operational task. The one legitimate overlap
-   is a backfill that is the precondition of a `SET NOT NULL` promotion, a
-   `CHECK`, or a `VALIDATE CONSTRAINT` landing on the **same table**, never a
-   `TRUNCATE`; §2 of the doc states it in full, with its limits, and is the
+   that rewrites row contents is an operational task. Two overlaps are
+   legitimate, both an `UPDATE` landing on the **same table** as the clause
+   licensing it: a backfill preconditioning a `SET NOT NULL` promotion, a
+   `CHECK`, or a `VALIDATE CONSTRAINT`; and a fold whose source column the same
+   file `DROP`s. A `CHECK` added `NOT VALID` enforces nothing and licences
+   nothing. §2 of the doc states all of it in full, with its limits, and is the
    authority — do not audit from this summary.
 3. **No dead transition scaffolding** — decided feature flags, shims, adapters
    wrapping a shape nothing emits, `@deprecated` exports with no caller,

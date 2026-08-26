@@ -71,8 +71,9 @@ export { buildApiCallExtensionFactory } from "./api-call-bridge.ts";
 
 export { buildRuntimePiEnv, pickOperatorSidecarEnv } from "./container-env.ts";
 // `SIDECAR_OPERATOR_ENV_KEYS` is NOT here: #1178 removed its last external
-// reader. The platform forwards operator env through `pickOperatorSidecarEnv`,
-// and the key list itself is read only inside `container-env.ts`.
+// reader. The platform forwards operator env through `pickOperatorSidecarEnv`;
+// the key list itself is read only inside this package (`container-env.ts` and
+// its tests).
 
 export { emitRuntimeReady, emitBootProgress } from "./runtime-ready.ts";
 
