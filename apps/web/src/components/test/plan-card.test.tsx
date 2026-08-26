@@ -8,15 +8,10 @@
  * SPA's own i18n singleton so the locale under test is the locale the
  * assertions use.
  *
- * The storage entitlement is optional on the wire: a billing module older than
- * the release that added it omits the field, and the card must then show
- * nothing rather than a "0 B" that misrepresents the plan.
- *
- * ONE spelling: `file_storage_bytes`. `@appstrate/cloud` mints this field from
- * another repo, but not on another deploy clock — its image is built `FROM` the
- * platform image and serves this SPA, so the module and the dashboard reading
- * it ship together. The pre-#1177 `document_storage_bytes` was removed from
- * both sides in the same change.
+ * The storage entitlement is always on the wire: `@appstrate/cloud` declares
+ * `file_storage_bytes` required on `CloudBillingPlan` and sets it on every plan
+ * definition, so the card renders the line unconditionally — including for a
+ * plan that grants zero, which is a real entitlement and not a missing one.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -56,12 +51,11 @@ describe("PlanGrid storage entitlement", () => {
     expect(html).toContain("100 GB de stockage");
   });
 
-  it("omits the line entirely when the plan reports no storage entitlement", () => {
-    const html = render([{ id: "free", name: "Free", price: 0, credit_quota: 5000 }]);
+  it("still prices a zero entitlement rather than treating it as absent", () => {
+    const html = render([
+      { id: "free", name: "Free", price: 0, credit_quota: 5000, file_storage_bytes: 0 },
+    ]);
 
-    expect(html).toContain("5,000");
-    expect(html).not.toContain("de stockage");
-    // Specifically NOT the misleading zero.
-    expect(html).not.toContain("0 B");
+    expect(html).toContain("0 B de stockage");
   });
 });

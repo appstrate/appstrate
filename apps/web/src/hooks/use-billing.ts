@@ -61,18 +61,13 @@ export interface BillingPlanDetail {
   price: number;
   credit_quota: number;
   /**
-   * Durable-file storage the plan grants, in bytes. Optional: a cloud module
-   * older than the release that added it omits the field, and a plan card must
-   * still render — the storage line is dropped rather than showing "0 B" for a
-   * plan that actually grants capacity.
-   *
-   * ONE spelling. The pre-#1177 `document_storage_bytes` is gone from both
-   * sides in the same change: the cloud image is built `FROM` the platform
-   * image and serves this SPA, so the module and the dashboard reading it are
-   * one deployed artifact and cannot be a release apart. There is no window in
-   * which a dual read would answer anything a single read does not.
+   * Durable-file storage the plan grants, in bytes — the value projected onto
+   * the org's platform storage limit. `@appstrate/cloud` declares it `required`
+   * on `CloudBillingPlan` and sets it on every plan definition; the cloud image
+   * is built `FROM` the platform image and serves this SPA, so producer and
+   * reader are one deployed artifact.
    */
-  file_storage_bytes?: number;
+  file_storage_bytes: number;
 }
 
 interface BillingInfo {
