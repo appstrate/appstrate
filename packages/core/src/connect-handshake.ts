@@ -133,12 +133,13 @@ export function isIntegrationConnectMessage<T extends { origin: string; data: un
   // opaque origins compare equal and accept a forged completion. An opaque
   // origin identifies nobody — it can never be the platform origin a
   // completion is sent from, so it is refused outright rather than matched.
+  // Refusing the RECEIVER's opaque origin is the whole guard: with `self` known
+  // not to be `"null"`, the `event.origin === self` below cannot admit a `"null"`
+  // sender either. A second `event.origin !== OPAQUE_ORIGIN` clause used to sit
+  // here and could never discriminate — no test could detect its removal, which
+  // is the tell.
   if (self === OPAQUE_ORIGIN) return false;
-  return (
-    event.origin !== OPAQUE_ORIGIN &&
-    event.origin === self &&
-    isIntegrationConnectCompletion(event.data)
-  );
+  return event.origin === self && isIntegrationConnectCompletion(event.data);
 }
 
 /**
@@ -203,8 +204,8 @@ export function completionMatches(
  * that matters.
  *
  * The origin comes first: a listener that reads `event.data` without validating
- * `event.origin` has no authentication at all, and RFC 10017 §6.3.3.3 makes
- * validating it a MUST. An accepted forgery drives the waiting surface into its
+ * `event.origin` has no authentication at all. The HTML Living Standard's
+ * cross-document messaging section is explicit that a listener must check it. An accepted forgery drives the waiting surface into its
  * "connected" state — appending a resume turn the user never earned, telling the
  * model an integration is usable when it is not. Every completion is sent by a
  * page the platform serves, so `selfOrigin` (`window.location.origin`) is the

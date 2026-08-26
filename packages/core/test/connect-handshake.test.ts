@@ -221,7 +221,7 @@ describe("completionMatches", () => {
 
 describe("acceptsCompletionMessage", () => {
   // The listener checked the payload and never `event.origin`, which is a
-  // MUST-level failure (RFC 10017 §6.3.3.3): every completion is sent by a page
+  // Unauthenticated-listener failure: every completion is sent by a page
   // the platform serves, so any other origin is a forgery. An accepted forgery
   // flips the surface to "connected" — in chat it appends a resume turn, telling
   // the model an integration is usable when it is not.
