@@ -320,9 +320,9 @@ export function createS3Storage(config: S3StorageConfig): Storage {
     async createUploadUrl(
       bucket: string,
       path: string,
-      opts?: CreateUploadUrlOptions,
+      opts: CreateUploadUrlOptions,
     ): Promise<UploadUrlDescriptor> {
-      const expiresIn = opts?.expiresIn ?? 900;
+      const expiresIn = opts.expiresIn ?? 900;
       const key = makeKey(bucket, path);
       // Proxy-upload mode (issue #829): no public S3 endpoint configured →
       // sign an app-domain URL instead of presigning against the bucket.
@@ -338,12 +338,11 @@ export function createS3Storage(config: S3StorageConfig): Storage {
           opts,
         );
       }
-      // ContentLength IS signed when the caller declares a size (`maxSize`):
-      // `content-length` lands in X-Amz-SignedHeaders, so S3 rejects any PUT
-      // whose Content-Length differs from the declared byte count. That makes
-      // the declared size an upload-time contract — a client cannot reserve a
-      // 1 KB slot and PUT 100 MB — instead of relying solely on the
-      // server-side size check at consume time.
+      // ContentLength IS signed: `content-length` lands in X-Amz-SignedHeaders,
+      // so S3 rejects any PUT whose Content-Length differs from the declared
+      // byte count. That makes the declared size an upload-time contract — a
+      // client cannot reserve a 1 KB slot and PUT 100 MB — instead of relying
+      // solely on the server-side size check at consume time.
       // When the client declares a SHA-256, sign `x-amz-checksum-sha256` (base64
       // of the raw digest) INTO the presigned PUT. The presignClient runs
       // `requestChecksumCalculation: WHEN_REQUIRED`, so a command that carries an
@@ -352,7 +351,7 @@ export function createS3Storage(config: S3StorageConfig): Storage {
       // The client must echo the returned header. No sha256 ⇒ the command and
       // the signature are byte-identical to before (plain PUT, no checksum).
       const checksumBase64 =
-        opts?.sha256 && opts.sha256.length > 0
+        opts.sha256 && opts.sha256.length > 0
           ? Buffer.from(opts.sha256, "hex").toString("base64")
           : undefined;
       const cmd = new PutObjectCommand({
@@ -363,8 +362,8 @@ export function createS3Storage(config: S3StorageConfig): Storage {
         // replace bytes at the reserved key after they have been validated or
         // consumed.
         IfNoneMatch: "*",
-        ...(opts?.mime ? { ContentType: opts.mime } : {}),
-        ...(opts?.maxSize && opts.maxSize > 0 ? { ContentLength: opts.maxSize } : {}),
+        ...(opts.mime ? { ContentType: opts.mime } : {}),
+        ContentLength: opts.maxSize,
         ...(checksumBase64 ? { ChecksumSHA256: checksumBase64 } : {}),
       });
       // `@aws-sdk/s3-request-presigner` and `@aws-sdk/client-s3` resolve to
@@ -384,8 +383,8 @@ export function createS3Storage(config: S3StorageConfig): Storage {
       // from the body, so echoing the descriptor verbatim stays safe there;
       // listing it documents the exact byte count the signature requires.
       const headers: Record<string, string> = { "If-None-Match": "*" };
-      if (opts?.mime) headers["Content-Type"] = opts.mime;
-      if (opts?.maxSize && opts.maxSize > 0) headers["Content-Length"] = String(opts.maxSize);
+      if (opts.mime) headers["Content-Type"] = opts.mime;
+      headers["Content-Length"] = String(opts.maxSize);
       // The checksum header is part of the signature — the client MUST send it
       // verbatim (base64 of the raw sha-256) or S3 rejects the PUT.
       if (checksumBase64) headers["x-amz-checksum-sha256"] = checksumBase64;

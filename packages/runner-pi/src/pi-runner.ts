@@ -824,7 +824,7 @@ export class PiRunner {
     // the compaction LLM call has a chance to start, and the next run
     // turn re-encounters the same prompt-too-long 400. Polling
     // `isCompacting` here lets that recovery actually drain.
-    await waitForCompactionToSettle(session as unknown as { isCompacting?: boolean }, signal);
+    await waitForCompactionToSettle(session as unknown as { isCompacting: boolean }, signal);
   }
 }
 
@@ -1098,11 +1098,10 @@ const COMPACTION_POLL_INTERVAL_MS = 100;
  * @internal
  */
 export async function waitForCompactionToSettle(
-  session: { isCompacting?: boolean },
+  session: { isCompacting: boolean },
   signal?: AbortSignal,
   options: { timeoutMs?: number; pollIntervalMs?: number } = {},
 ): Promise<void> {
-  if (typeof session.isCompacting !== "boolean") return; // SDK older than 0.70 — best-effort no-op.
   if (!session.isCompacting) return;
   const timeoutMs = options.timeoutMs ?? COMPACTION_WAIT_TIMEOUT_MS;
   const pollMs = options.pollIntervalMs ?? COMPACTION_POLL_INTERVAL_MS;

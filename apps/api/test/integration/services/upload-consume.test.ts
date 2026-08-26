@@ -524,10 +524,10 @@ describe("writeProxyUploadContent (FS sink)", () => {
 
   it("refuses to overwrite an existing object at the same storage key", async () => {
     const { key, storagePath } = uniqueKey("replay");
-    await writeProxyUploadContent(key, bodyStream(new Uint8Array([1, 2, 3])), 0);
+    await writeProxyUploadContent(key, bodyStream(new Uint8Array([1, 2, 3])), 3);
     // Second PUT with the same (still-valid) token must be rejected.
     try {
-      await writeProxyUploadContent(key, bodyStream(new Uint8Array([4, 5, 6])), 0);
+      await writeProxyUploadContent(key, bodyStream(new Uint8Array([4, 5, 6])), 3);
       throw new Error("expected to throw");
     } catch (e) {
       expect(e).toBeInstanceOf(ApiError);
@@ -591,13 +591,6 @@ describe("writeProxyUploadContent (FS sink)", () => {
     const retry = new Uint8Array(64).fill(6);
     await writeProxyUploadContent(key, bodyStream(retry), 64);
     expect(await storageGet(UPLOAD_BUCKET, storagePath)).toEqual(retry);
-  });
-
-  it("treats a signed max of 0 as unlimited (legacy tokens)", async () => {
-    const { key, storagePath } = uniqueKey("nolimit");
-    const bytes = new Uint8Array(2048).fill(3);
-    await writeProxyUploadContent(key, bodyStream(bytes), 0);
-    expect(await storageGet(UPLOAD_BUCKET, storagePath)).toEqual(bytes);
   });
 
   it("enforces the token expiry WHILE the body streams, not just at PUT start", async () => {

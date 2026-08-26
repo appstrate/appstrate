@@ -52,6 +52,7 @@ describe("createS3Storage — createUploadUrl presign shape", () => {
     });
     const { url } = await storage.createUploadUrl("uploads", "app/upl_1/file.pdf", {
       mime: "application/pdf",
+      maxSize: 1024,
     });
     const params = new URL(url).searchParams;
     // The SDK's WHEN_SUPPORTED default would sign `x-amz-checksum-crc32=AAAAAA==`
@@ -61,11 +62,9 @@ describe("createS3Storage — createUploadUrl presign shape", () => {
     expect(params.get("x-amz-sdk-checksum-algorithm")).toBeNull();
     expect(params.get("X-Amz-Signature")).not.toBeNull();
     expect(params.get("X-Amz-SignedHeaders")).toContain("if-none-match");
-    // No declared size → content-length stays out of the signature.
-    expect(params.get("X-Amz-SignedHeaders")).not.toContain("content-length");
   });
 
-  it("signs Content-Length into the presigned PUT when a size is declared", async () => {
+  it("signs the declared Content-Length into the presigned PUT", async () => {
     const storage = createS3Storage({
       bucket: "test",
       region: "us-east-1",
@@ -95,6 +94,7 @@ describe("createS3Storage — createUploadUrl presign shape", () => {
     });
     const descriptor = await storage.createUploadUrl("uploads", "app/upl_2/data.csv", {
       mime: "text/csv",
+      maxSize: 512,
       expiresIn: 120,
     });
     expect(descriptor.method).toBe("PUT");
@@ -104,6 +104,7 @@ describe("createS3Storage — createUploadUrl presign shape", () => {
     expect(descriptor.headers).toEqual({
       "If-None-Match": "*",
       "Content-Type": "text/csv",
+      "Content-Length": "512",
     });
   });
 
@@ -116,6 +117,7 @@ describe("createS3Storage — createUploadUrl presign shape", () => {
     });
     const { url } = await storage.createUploadUrl("uploads", "app/upl_3/file.bin", {
       mime: "application/octet-stream",
+      maxSize: 2048,
     });
     expect(url.startsWith("https://files.example.com/")).toBe(true);
     expect(new URL(url).searchParams.get("x-amz-checksum-crc32")).toBeNull();
@@ -158,15 +160,15 @@ describe("createS3Storage — proxy-upload mode (issue #829)", () => {
 
   it("trims trailing slashes off the upload base URL", async () => {
     const storage = createS3Storage({ ...proxyConfig, uploadBaseUrl: "https://app.example.com//" });
-    const { url } = await storage.createUploadUrl("uploads", "a/b.bin");
+    const { url } = await storage.createUploadUrl("uploads", "a/b.bin", { maxSize: 16 });
     expect(url.startsWith("https://app.example.com/api/uploads/_content?token=")).toBe(true);
   });
 
   it("still rejects path traversal before signing", async () => {
     const storage = createS3Storage(proxyConfig);
-    await expect(storage.createUploadUrl("uploads", "../escape.bin")).rejects.toThrow(
-      "Path traversal detected",
-    );
+    await expect(
+      storage.createUploadUrl("uploads", "../escape.bin", { maxSize: 16 }),
+    ).rejects.toThrow("Path traversal detected");
   });
 
   it("S3_PUBLIC_ENDPOINT-style config wins: presigns direct-to-bucket even with proxy config present", async () => {
@@ -182,7 +184,9 @@ describe("createS3Storage — proxy-upload mode (issue #829)", () => {
         ...proxyConfig,
         publicEndpoint: "https://files.example.com",
       });
-      const { url } = await storage.createUploadUrl("uploads", "app/upl_9/file.bin");
+      const { url } = await storage.createUploadUrl("uploads", "app/upl_9/file.bin", {
+        maxSize: 16,
+      });
       expect(url.startsWith("https://files.example.com/")).toBe(true);
       expect(new URL(url).searchParams.get("X-Amz-Signature")).not.toBeNull();
     } finally {

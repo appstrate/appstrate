@@ -113,16 +113,16 @@ export interface ProxyUploadUrlConfig {
 export function createProxyUploadDescriptor(
   config: ProxyUploadUrlConfig,
   key: string,
-  opts?: CreateUploadUrlOptions,
+  opts: CreateUploadUrlOptions,
 ): UploadUrlDescriptor {
-  const expiresIn = opts?.expiresIn ?? 900;
+  const expiresIn = opts.expiresIn ?? 900;
   const token = signFsUploadToken(
     {
       k: key,
-      s: opts?.maxSize ?? 0,
-      m: opts?.mime ?? "",
+      s: opts.maxSize,
+      m: opts.mime ?? "",
       e: Math.floor(Date.now() / 1000) + expiresIn,
-      ...(opts?.sha256 && opts.sha256.length > 0 ? { h: opts.sha256 } : {}),
+      ...(opts.sha256 && opts.sha256.length > 0 ? { h: opts.sha256 } : {}),
     },
     config.uploadSecret,
   );
@@ -132,7 +132,7 @@ export function createProxyUploadDescriptor(
   while (baseUrl.endsWith("/")) baseUrl = baseUrl.slice(0, -1);
   const url = `${baseUrl}/api/uploads/_content?token=${encodeURIComponent(token)}`;
   const headers: Record<string, string> = {};
-  if (opts?.mime) headers["Content-Type"] = opts.mime;
+  if (opts.mime) headers["Content-Type"] = opts.mime;
   return { url, method: "PUT", headers, expiresIn };
 }
 
@@ -369,7 +369,7 @@ export function createFileSystemStorage(config: FileSystemStorageConfig): Storag
     async createUploadUrl(
       bucket: string,
       path: string,
-      opts?: CreateUploadUrlOptions,
+      opts: CreateUploadUrlOptions,
     ): Promise<UploadUrlDescriptor> {
       if (!config.uploadSecret) {
         throw new Error(

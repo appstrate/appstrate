@@ -5,6 +5,29 @@ All notable changes to `@appstrate/core` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **`CreateUploadUrlOptions.maxSize` is required, and `Storage.createUploadUrl`
+  no longer takes `opts` optionally** (`./storage`) — a breaking type change
+  with no runtime behaviour change for any caller that already declared a size.
+  An omitted `maxSize` was signed into the proxy-upload token as `s: 0`, and `0`
+  meant "unbounded" — a form three separate accept-sites had to keep special-
+  casing (`maxSize > 0` in the FS/proxy sink's mid-stream ceiling and its
+  exact-size check, `payload.s > 0` in the `PUT /api/uploads/_content` route)
+  and that `createProxyUploadDescriptor` produced by default, so the retired
+  form had a producer keeping it alive. Nothing has minted such a token since
+  size became mandatory upstream: the platform's only caller rejects
+  `size <= 0` before signing and passes `min(size, declared)`, and the signed
+  expiry is clamped to at most an hour, so the last `s: 0` token expired long
+  ago. Making the field required moves the guarantee into the type, which is
+  what let all five accept-sites go — including the two on the S3 presign path
+  (`ContentLength` and the echoed `Content-Length` header), which are now
+  unconditional. Callers that omitted `maxSize` must pass the exact declared
+  byte count; the S3 presign path will now sign a `Content-Length` for them,
+  which the client must echo.
+
 ## [9.0.0] — 2026-08-26
 
 Published from tag `core@9.0.0`. This window REMOVES an export, which is the

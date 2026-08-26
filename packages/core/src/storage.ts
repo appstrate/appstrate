@@ -22,13 +22,13 @@ export interface CreateUploadUrlOptions {
   /** Declared MIME type (advisory; storage adapters may enforce it in the signature). */
   mime?: string;
   /**
-   * Declared upload size in bytes. Callers pass the EXACT size the client
-   * declared: S3 signs it as the presigned PUT's `Content-Length` (the upload
-   * is rejected unless the body is exactly that many bytes); filesystem
-   * storage encodes it into the signed token as the upper bound the FS sink
-   * enforces while streaming the body to disk.
+   * Declared upload size in bytes — required, and always positive. Callers pass
+   * the EXACT size the client declared: S3 signs it as the presigned PUT's
+   * `Content-Length` (the upload is rejected unless the body is exactly that
+   * many bytes); filesystem storage encodes it into the signed token as the
+   * upper bound the FS sink enforces while streaming the body to disk.
    */
-  maxSize?: number;
+  maxSize: number;
   /** Seconds until the URL expires. Default: 900 (15 min). */
   expiresIn?: number;
   /**
@@ -175,7 +175,7 @@ export interface Storage {
   createUploadUrl(
     bucket: string,
     path: string,
-    opts?: CreateUploadUrlOptions,
+    opts: CreateUploadUrlOptions,
   ): Promise<UploadUrlDescriptor>;
   /**
    * Create a browser-usable URL the client can GET the object's bytes from

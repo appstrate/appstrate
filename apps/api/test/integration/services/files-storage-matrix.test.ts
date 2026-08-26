@@ -232,7 +232,10 @@ describeRequiresS3("files storage parity — S3 presigned posture", () => {
 
     // The presigned descriptor binds the sha256 into the signature + returns the
     // header the client must echo.
-    const descriptor = await createUploadUrl("uploads", key, { sha256: sha256hex });
+    const descriptor = await createUploadUrl("uploads", key, {
+      sha256: sha256hex,
+      maxSize: bytes.byteLength,
+    });
     expect(descriptor.headers["x-amz-checksum-sha256"]).toBeTruthy();
 
     // Matching body → MinIO verifies the checksum server-side and accepts.
@@ -247,7 +250,10 @@ describeRequiresS3("files storage parity — S3 presigned posture", () => {
     // sees the mismatch, and rejects with a 4xx of its own (BadDigest).
     const tampered = new TextEncoder().encode("tampered upload body");
     const key2 = `checksum-test/${crypto.randomUUID()}/file.bin`;
-    const descriptor2 = await createUploadUrl("uploads", key2, { sha256: sha256hex });
+    const descriptor2 = await createUploadUrl("uploads", key2, {
+      sha256: sha256hex,
+      maxSize: tampered.byteLength,
+    });
     const bad = await fetch(descriptor2.url, {
       method: "PUT",
       headers: descriptor2.headers,
