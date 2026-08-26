@@ -279,7 +279,7 @@ describe("organizations service", () => {
     // reverted.
 
     it("removeMember disables the member's enabled schedules in that org (CRIT-13)", async () => {
-      const { org, defaultAppId } = await createTestOrg(userId, { slug: "sched-revoke" });
+      const { org, defaultSpaceId } = await createTestOrg(userId, { slug: "sched-revoke" });
       const member = await createTestUser({ email: "sched-owner@test.com" });
       await addMember(org.id, member.id, "member");
 
@@ -287,7 +287,7 @@ describe("organizations service", () => {
       const memberSchedule = await seedSchedule({
         packageId: pkg.id,
         orgId: org.id,
-        applicationId: defaultAppId,
+        spaceId: defaultSpaceId,
         userId: member.id,
         enabled: true,
         nextRunAt: new Date(Date.now() + 3600_000),
@@ -296,7 +296,7 @@ describe("organizations service", () => {
       const ownerSchedule = await seedSchedule({
         packageId: pkg.id,
         orgId: org.id,
-        applicationId: defaultAppId,
+        spaceId: defaultSpaceId,
         userId,
         enabled: true,
         nextRunAt: new Date(Date.now() + 3600_000),
@@ -324,9 +324,11 @@ describe("organizations service", () => {
     it("removeMember only disables schedules in THAT org — the member's other-org schedules keep firing (CRIT-13)", async () => {
       const member = await createTestUser({ email: "multi-org-sched@test.com" });
 
-      const { org: org1, defaultAppId: app1 } = await createTestOrg(userId, { slug: "rev-org1" });
+      const { org: org1, defaultSpaceId: space1 } = await createTestOrg(userId, {
+        slug: "rev-org1",
+      });
       await addMember(org1.id, member.id, "member");
-      const { org: org2, defaultAppId: app2 } = await createTestOrg(member.id, {
+      const { org: org2, defaultSpaceId: space2 } = await createTestOrg(member.id, {
         slug: "rev-org2",
       });
 
@@ -336,7 +338,7 @@ describe("organizations service", () => {
       const inOrg1 = await seedSchedule({
         packageId: pkg1.id,
         orgId: org1.id,
-        applicationId: app1,
+        spaceId: space1,
         userId: member.id,
         enabled: true,
         nextRunAt: new Date(Date.now() + 3600_000),
@@ -344,7 +346,7 @@ describe("organizations service", () => {
       const inOrg2 = await seedSchedule({
         packageId: pkg2.id,
         orgId: org2.id,
-        applicationId: app2,
+        spaceId: space2,
         userId: member.id,
         enabled: true,
         nextRunAt: new Date(Date.now() + 3600_000),

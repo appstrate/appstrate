@@ -470,7 +470,7 @@ describe("Organizations API", () => {
           headers: {
             Cookie: ctx.cookie,
             "X-Org-Id": ctx.orgId,
-            "X-Application-Id": ctx.defaultAppId,
+            "X-Space-Id": ctx.defaultSpaceId,
           },
         });
         expect(runs.status).toBe(400);
@@ -492,7 +492,7 @@ describe("Organizations API", () => {
         const ctx = await createTestContext();
         const key = await seedApiKey({
           orgId: ctx.orgId,
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
           createdBy: ctx.user.id,
           name: "pin-lockout-key",
         });
@@ -834,9 +834,9 @@ describe("Organizations API", () => {
       const orgB = await createTestOrg(ctxA.user.id, { slug: "org-b-172" });
       const apiKey = await seedApiKey({
         orgId: ctxA.orgId,
-        applicationId: ctxA.defaultAppId,
+        spaceId: ctxA.defaultSpaceId,
         createdBy: ctxA.user.id,
-        scopes: ["agents:read", "applications:read", "applications:write", "applications:delete"],
+        scopes: ["agents:read", "spaces:read", "spaces:write", "spaces:delete"],
       });
       return {
         ctxA,
@@ -1000,7 +1000,7 @@ describe("Organizations API", () => {
       await addOrgMember(ctx.orgId, member.id, "member");
       const apiKey = await seedApiKey({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id, // creator is the org OWNER
         scopes: ["runs:read"], // narrow scope — must NOT inherit owner rights
       });

@@ -54,7 +54,7 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
     await seedSchedulableAgent({
       id: agentRef,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
     });
   });
@@ -126,13 +126,13 @@ describe("PUT /api/schedules/:id — body validation", () => {
     await seedSchedulableAgent({
       id: agentRef,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
     });
     const schedule = await seedSchedule({
       packageId: agentRef,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       cronExpression: "0 * * * *",
       name: "Hourly",

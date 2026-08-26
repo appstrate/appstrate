@@ -135,7 +135,7 @@ describe("recordLlmUsage — plain insert (proxy / chat)", () => {
     const run = await seedRun({
       packageId: "@ledgerwriter/agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "success",
     });
     await db.insert(chatSessions).values({
@@ -230,7 +230,7 @@ describe("recordLlmUsage — runner monotonic upsert", () => {
     const run = await seedRun({
       packageId: "@ledgerrunner/agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "running",
     });
     runId = run.id;

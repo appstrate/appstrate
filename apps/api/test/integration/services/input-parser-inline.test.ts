@@ -58,14 +58,14 @@ const arrayFileSchema: JSONSchemaObject = {
  * every route reaching it sits behind authentication (the actor gates both the
  * file ACL and the staged-upload ownership check).
  */
-function fakeCtx(ctx: { orgId: string; applicationId: string; user?: { id: string } }): Context {
+function fakeCtx(ctx: { orgId: string; spaceId: string; user?: { id: string } }): Context {
   const user = ctx.user ?? { id: "usr_input_parser_test" };
   return {
     get: (key: string) =>
       key === "orgId"
         ? ctx.orgId
-        : key === "applicationId"
-          ? ctx.applicationId
+        : key === "spaceId"
+          ? ctx.spaceId
           : key === "user"
             ? user
             : undefined,
@@ -85,7 +85,7 @@ describe("parseRequestInput — inline data: URIs", () => {
 
   it("materializes an unnamed inline text file + strips the payload from the input", async () => {
     const ctx = await createTestContext({ orgSlug: "org-inline-text" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const runId = `run_${crypto.randomUUID()}`;
 
     const uri = `data:text/plain;base64,${TEXT_BYTES.toString("base64")}`;
@@ -120,7 +120,7 @@ describe("parseRequestInput — inline data: URIs", () => {
 
   it("honours the data URI's name parameter", async () => {
     const ctx = await createTestContext({ orgSlug: "org-inline-named" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const runId = `run_${crypto.randomUUID()}`;
 
     const uri = `data:application/pdf;name=invoice.pdf;base64,${PDF_BYTES.toString("base64")}`;
@@ -146,7 +146,7 @@ describe("parseRequestInput — inline data: URIs", () => {
 
   it("rejects an inline file whose bytes do not match the declared binary MIME", async () => {
     const ctx = await createTestContext({ orgSlug: "org-inline-mime" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const runId = `run_${crypto.randomUUID()}`;
 
     // Declared application/pdf, payload is plain text → magic-byte sniff fails,
@@ -168,17 +168,17 @@ describe("parseRequestInput — inline data: URIs", () => {
 
   it("mixes staged uploads and inline files in one array field", async () => {
     const ctx = await createTestContext({ orgSlug: "org-inline-mixed" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const runId = `run_${crypto.randomUUID()}`;
 
     // Stage one classic upload.
     const uploadId = "upl_inline_mix_1";
-    const storagePath = `${ctx.defaultAppId}/${uploadId}/file.pdf`;
+    const storagePath = `${ctx.defaultSpaceId}/${uploadId}/file.pdf`;
     await storagePut("uploads", storagePath, PDF_BYTES);
     await db.insert(uploads).values({
       id: uploadId,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       createdBy: null,
       storageKey: `uploads/${storagePath}`,
       name: "file.pdf",

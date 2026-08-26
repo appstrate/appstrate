@@ -16,20 +16,20 @@ import { seedPackage } from "../../helpers/seed.ts";
 import { saveIntegrationConnection } from "../../../src/services/integration-connections.ts";
 import { integrationConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
-import type { AppScope } from "../../../src/lib/scope.ts";
+import type { SpaceScope } from "../../../src/lib/scope.ts";
 import type { Actor } from "@appstrate/connect";
 
 const INTEGRATION = "@orga/gmail";
 
 describe("integration connection — identity guard on reconnect/upgrade", () => {
   let ctx: TestContext;
-  let scope: AppScope;
+  let scope: SpaceScope;
   let actor: Actor;
 
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "idguard" });
-    scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     actor = { type: "user", id: ctx.user.id };
     await seedPackage({ id: INTEGRATION, orgId: ctx.orgId, type: "integration", source: "local" });
   });

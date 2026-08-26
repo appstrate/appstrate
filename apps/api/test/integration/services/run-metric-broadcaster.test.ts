@@ -7,9 +7,9 @@
  *   - leading-edge: first call for a run fires NOTIFY immediately
  *   - trailing-edge: bursts within the throttle window collapse to one
  *     trailing emit at window end
- *   - payload shape: org/application/package ids, latest tokenUsage,
+ *   - payload shape: org/space/package ids, latest tokenUsage,
  *     `cost_so_far` aggregated from `llm_usage`
- *   - cross-tenant isolation: filter delivery on orgId + applicationId
+ *   - cross-tenant isolation: filter delivery on orgId + spaceId
  *   - lifecycle: `clearRunMetricBroadcastState` removes pending timers
  *   - graceful degradation: missing run row drops the broadcast
  */
@@ -19,7 +19,7 @@ import { db, truncateAll } from "../../helpers/db.ts";
 import { eventData } from "../../helpers/sse.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import {
   scheduleRunMetricBroadcast,
   clearRunMetricBroadcastState,
@@ -55,11 +55,11 @@ describe("run-metric-broadcaster (integration)", () => {
     _resetRunMetricBroadcasterForTests();
     ctx = await createTestContext();
     await seedAgent({ id: agentId, orgId: ctx.orgId, createdBy: ctx.user.id });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, agentId);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, agentId);
     const run = await seedRun({
       packageId: agentId,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "running",
       tokenUsage: { input_tokens: 100, output_tokens: 50 },
@@ -81,7 +81,7 @@ describe("run-metric-broadcaster (integration)", () => {
     trackSubscriber(subId);
     addSubscriber({
       id: subId,
-      filter: { orgId: ctx.orgId, applicationId: ctx.defaultAppId, runId, isAdmin: true },
+      filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
       send,
     });
 
@@ -104,7 +104,7 @@ describe("run-metric-broadcaster (integration)", () => {
     expect(evt.data).toMatchObject({
       runId,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       packageId: agentId,
       tokenUsage: { input_tokens: 100, output_tokens: 50 },
     });
@@ -119,7 +119,7 @@ describe("run-metric-broadcaster (integration)", () => {
     trackSubscriber(subId);
     addSubscriber({
       id: subId,
-      filter: { orgId: ctx.orgId, applicationId: ctx.defaultAppId, runId, isAdmin: true },
+      filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
       send,
     });
 
@@ -144,7 +144,7 @@ describe("run-metric-broadcaster (integration)", () => {
     trackSubscriber(subId);
     addSubscriber({
       id: subId,
-      filter: { orgId: ctx.orgId, applicationId: ctx.defaultAppId, runId, isAdmin: true },
+      filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
       send,
     });
 
@@ -181,12 +181,12 @@ describe("run-metric-broadcaster (integration)", () => {
 
     addSubscriber({
       id: "sub-ours",
-      filter: { orgId: ctx.orgId, applicationId: ctx.defaultAppId, runId, isAdmin: true },
+      filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
       send: sendOurs,
     });
     addSubscriber({
       id: "sub-other",
-      filter: { orgId: "intruder-org", applicationId: "intruder-app", isAdmin: true },
+      filter: { orgId: "intruder-org", spaceId: "intruder-space", isAdmin: true },
       send: sendOther,
     });
 
@@ -205,7 +205,7 @@ describe("run-metric-broadcaster (integration)", () => {
     trackSubscriber(subId);
     addSubscriber({
       id: subId,
-      filter: { orgId: ctx.orgId, applicationId: ctx.defaultAppId, runId, isAdmin: true },
+      filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
       send,
     });
 
@@ -307,7 +307,7 @@ describe("run-metric-broadcaster (integration)", () => {
       trackSubscriber(subId);
       addSubscriber({
         id: subId,
-        filter: { orgId: ctx.orgId, applicationId: ctx.defaultAppId, runId, isAdmin: true },
+        filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
         send,
       });
 
@@ -338,7 +338,7 @@ describe("run-metric-broadcaster (integration)", () => {
       trackSubscriber(subId);
       addSubscriber({
         id: subId,
-        filter: { orgId: ctx.orgId, applicationId: ctx.defaultAppId, runId, isAdmin: true },
+        filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
         send,
       });
 
@@ -489,7 +489,7 @@ describe("run-metric-broadcaster (integration)", () => {
       trackSubscriber(subId);
       addSubscriber({
         id: subId,
-        filter: { orgId: ctx.orgId, applicationId: ctx.defaultAppId, runId, isAdmin: true },
+        filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
         send,
       });
 
@@ -537,7 +537,7 @@ describe("run-metric-broadcaster (integration)", () => {
       trackSubscriber(subId);
       addSubscriber({
         id: subId,
-        filter: { orgId: ctx.orgId, applicationId: ctx.defaultAppId, runId, isAdmin: true },
+        filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
         send,
       });
 
@@ -563,7 +563,7 @@ describe("run-metric-broadcaster (integration)", () => {
       const foreignRun = await seedRun({
         packageId: foreignAgent,
         orgId: intruder.orgId,
-        applicationId: intruder.defaultAppId,
+        spaceId: intruder.defaultSpaceId,
         userId: intruder.user.id,
         status: "running",
       });
@@ -605,7 +605,7 @@ describe("run-metric-broadcaster (integration)", () => {
     trackSubscriber(subId);
     addSubscriber({
       id: subId,
-      filter: { orgId: ctx.orgId, applicationId: ctx.defaultAppId, runId, isAdmin: true },
+      filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
       send,
     });
 
@@ -665,7 +665,7 @@ describe("run-metric-broadcaster (integration)", () => {
     trackSubscriber(subId);
     addSubscriber({
       id: subId,
-      filter: { orgId: ctx.orgId, applicationId: ctx.defaultAppId, isAdmin: true },
+      filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, isAdmin: true },
       send,
     });
 

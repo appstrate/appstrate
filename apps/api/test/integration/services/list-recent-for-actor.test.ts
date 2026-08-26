@@ -11,7 +11,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import { listRecentForActor } from "../../../src/services/state/runs.ts";
 
 describe("listRecentForActor (service layer)", () => {
@@ -24,18 +24,18 @@ describe("listRecentForActor (service layer)", () => {
     ctx = await createTestContext();
     for (const id of [agentA, agentB]) {
       await seedAgent({ id, orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, id);
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
     }
   });
 
-  const scope = () => ({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+  const scope = () => ({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
   const actor = () => ({ type: "user" as const, id: ctx.user.id });
 
   it("returns the actor's runs newest-first across packages and all statuses", async () => {
     await seedRun({
       packageId: agentA,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "success",
       startedAt: new Date("2026-01-01T00:00:00Z"),
@@ -43,7 +43,7 @@ describe("listRecentForActor (service layer)", () => {
     await seedRun({
       packageId: agentB,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "failed",
       error: "boom",
@@ -63,13 +63,13 @@ describe("listRecentForActor (service layer)", () => {
 
   it("isolates by actor — a user never sees another actor's runs", async () => {
     const other = await createTestContext({ orgSlug: "other-actor" });
-    // Seed a run owned by a different user in the SAME application is not
+    // Seed a run owned by a different user in the SAME space is not
     // possible cross-org here; instead seed a run with no userId (system) and
     // one for our user, then assert only ours comes back.
     await seedRun({
       packageId: agentA,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "success",
       startedAt: new Date("2026-01-03T00:00:00Z"),
@@ -77,7 +77,7 @@ describe("listRecentForActor (service layer)", () => {
     await seedRun({
       packageId: agentA,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       // Scheduled/system run — no actor.
       status: "success",
       startedAt: new Date("2026-01-04T00:00:00Z"),
@@ -87,7 +87,7 @@ describe("listRecentForActor (service layer)", () => {
     expect(mine).toHaveLength(1);
     expect(mine[0]!.package_id).toBe(agentA);
 
-    // The other org's actor sees nothing in our application.
+    // The other org's actor sees nothing in our space.
     void other;
   });
 
@@ -96,7 +96,7 @@ describe("listRecentForActor (service layer)", () => {
       await seedRun({
         packageId: agentA,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
         startedAt: new Date(Date.UTC(2026, 0, 10 + i)),

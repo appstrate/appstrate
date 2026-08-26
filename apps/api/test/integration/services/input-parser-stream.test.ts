@@ -41,15 +41,15 @@ const fileSchema: JSONSchemaObject = {
 };
 
 async function seedUpload(
-  ctx: { orgId: string; applicationId: string },
+  ctx: { orgId: string; spaceId: string },
   opts: { id: string; bytes: Buffer; mime?: string; sizeOverride?: number; name?: string },
 ): Promise<void> {
-  const storagePath = `${ctx.applicationId}/${opts.id}/file.pdf`;
+  const storagePath = `${ctx.spaceId}/${opts.id}/file.pdf`;
   await storagePut(UPLOAD_BUCKET, storagePath, opts.bytes);
   await db.insert(uploads).values({
     id: opts.id,
     orgId: ctx.orgId,
-    applicationId: ctx.applicationId,
+    spaceId: ctx.spaceId,
     createdBy: null,
     storageKey: `${UPLOAD_BUCKET}/${storagePath}`,
     name: opts.name ?? "file.pdf",
@@ -61,7 +61,7 @@ async function seedUpload(
 
 /**
  * Minimal Hono context stub — parseRequestInput reads the JSON body,
- * orgId/applicationId and the acting principal (end-user or dashboard user).
+ * orgId/spaceId and the acting principal (end-user or dashboard user).
  * A principal is ALWAYS present: the parser resolves it with the strict
  * `getActor`, mirroring the fact that every route reaching it sits behind
  * authentication, and it gates both the file ACL and the staged-upload
@@ -69,7 +69,7 @@ async function seedUpload(
  */
 function fakeCtx(ctx: {
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   endUser?: { id: string };
   user?: { id: string };
 }): Context {
@@ -78,8 +78,8 @@ function fakeCtx(ctx: {
     get: (key: string) =>
       key === "orgId"
         ? ctx.orgId
-        : key === "applicationId"
-          ? ctx.applicationId
+        : key === "spaceId"
+          ? ctx.spaceId
           : key === "endUser"
             ? ctx.endUser
             : key === "user"
@@ -90,13 +90,13 @@ function fakeCtx(ctx: {
 
 /** Insert a minimal prior-run row the rerun_from path can resolve. */
 async function seedRun(
-  scope: { orgId: string; applicationId: string },
+  scope: { orgId: string; spaceId: string },
   opts: { id: string; input: Record<string, unknown> | null },
 ): Promise<void> {
   await db.insert(runs).values({
     id: opts.id,
     orgId: scope.orgId,
-    applicationId: scope.applicationId,
+    spaceId: scope.spaceId,
     packageId: null,
     status: "cancelled",
     input: opts.input,
@@ -110,9 +110,9 @@ describe("parseRequestInput — streamed file consume", () => {
 
   it("streams the upload into the run workspace + writes the manifest", async () => {
     const ctx = await createTestContext({ orgSlug: "org-stream-ok" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const id = "upl_stream_ok_1";
-    const storagePath = `${ctx.defaultAppId}/${id}/file.pdf`;
+    const storagePath = `${ctx.defaultSpaceId}/${id}/file.pdf`;
     await seedUpload(scope, { id, bytes: PDF_BYTES });
 
     const runId = `run_${crypto.randomUUID()}`;
@@ -154,7 +154,7 @@ describe("parseRequestInput — streamed file consume", () => {
 
   it("rolls the workspace back + releases the claim on a size mismatch", async () => {
     const ctx = await createTestContext({ orgSlug: "org-stream-size" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const id = "upl_stream_size_1";
     // Declared size larger than the bytes actually staged → mismatch at drain.
     await seedUpload(scope, { id, bytes: PDF_BYTES, sizeOverride: PDF_BYTES.length + 1 });
@@ -176,7 +176,7 @@ describe("parseRequestInput — streamed file consume", () => {
 
   it("aborts mid-stream when an upload overshoots its declared size", async () => {
     const ctx = await createTestContext({ orgSlug: "org-stream-overshoot" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const id = "upl_stream_overshoot_1";
     // Declares 5 bytes but stages ~64 KB — the declared-small / uploaded-huge
     // abuse the early-abort guard exists for. The counter must error the stream
@@ -200,7 +200,7 @@ describe("parseRequestInput — streamed file consume", () => {
 
   it("rolls the workspace back on a MIME mismatch", async () => {
     const ctx = await createTestContext({ orgSlug: "org-stream-mime" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const id = "upl_stream_mime_1";
     // Declared application/pdf, but the bytes are plain text → magic-byte sniff fails.
     await seedUpload(scope, {
@@ -236,13 +236,13 @@ describe("parseRequestInput — appfile:// cross-actor ACL (S2)", () => {
   });
 
   async function seedRunningRun(
-    scope: { orgId: string; applicationId: string },
+    scope: { orgId: string; spaceId: string },
     id: string,
   ): Promise<void> {
     await db.insert(runs).values({
       id,
       orgId: scope.orgId,
-      applicationId: scope.applicationId,
+      spaceId: scope.spaceId,
       packageId: null,
       status: "running",
     });
@@ -250,7 +250,7 @@ describe("parseRequestInput — appfile:// cross-actor ACL (S2)", () => {
 
   it("member B cannot deliver member A's user_upload into their own run (404)", async () => {
     const ctx = await createTestContext({ orgSlug: "org-s2-upload" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const memberB = await createTestUser({ email: "b@s2.test" });
     await addOrgMember(ctx.orgId, memberB.id, "member");
 
@@ -277,7 +277,7 @@ describe("parseRequestInput — appfile:// cross-actor ACL (S2)", () => {
 
   it("member A CAN resolve their own user_upload", async () => {
     const ctx = await createTestContext({ orgSlug: "org-s2-own" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const runId = `run_${crypto.randomUUID()}`;
     await seedRunningRun(scope, runId);
     await seedUpload(scope, { id: "upl_s2_own", bytes: PDF_BYTES });
@@ -300,7 +300,7 @@ describe("parseRequestInput — appfile:// cross-actor ACL (S2)", () => {
 
   it("member B CAN resolve an agent_output of a run they can see (chaining, D6)", async () => {
     const ctx = await createTestContext({ orgSlug: "org-s2-out" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const memberB = await createTestUser({ email: "b2@s2.test" });
     await addOrgMember(ctx.orgId, memberB.id, "member");
 
@@ -332,7 +332,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
 
   it("replays a cancelled run's upload:// input — re-consumed, rewritten to appfile://", async () => {
     const ctx = await createTestContext({ orgSlug: "org-rerun-ok" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const id = "upl_rerun_ok_1";
     await seedUpload(scope, { id, bytes: PDF_BYTES });
 
@@ -368,9 +368,9 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     );
   });
 
-  it("resolves an appfile:// input into the run workspace; 404 cross-org and cross-app", async () => {
+  it("resolves an appfile:// input into the run workspace; 404 cross-org and cross-space", async () => {
     const ctx = await createTestContext({ orgSlug: "org-docref" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const actor = { type: "user" as const, id: ctx.user.id };
 
     // Materialize a durable file from a staged upload on a run.
@@ -380,7 +380,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     await db.insert(runs).values({
       id: runId,
       orgId: scope.orgId,
-      applicationId: scope.applicationId,
+      spaceId: scope.spaceId,
       status: "running",
     });
     const doc = await createFileFromUpload(scope, actor, id, { runId });
@@ -407,7 +407,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
       parseRequestInput(
         fakeCtx({
           orgId: other.orgId,
-          applicationId: other.defaultAppId,
+          spaceId: other.defaultSpaceId,
           user: { id: other.user.id },
         }),
         { input: { doc: `appfile://${doc.id}` } },
@@ -416,10 +416,10 @@ describe("parseRequestInput — rerun_from (#634)", () => {
       ),
     ).rejects.toMatchObject({ status: 404 });
 
-    // Cross-app: same org, foreign application id → 404.
+    // Cross-space: same org, foreign space id → 404.
     await expect(
       parseRequestInput(
-        fakeCtx({ orgId: ctx.orgId, applicationId: "app_not_this_one", user: { id: ctx.user.id } }),
+        fakeCtx({ orgId: ctx.orgId, spaceId: "spc_not_this_one", user: { id: ctx.user.id } }),
         { input: { doc: `appfile://${doc.id}` } },
         `run_${crypto.randomUUID()}`,
         fileSchema,
@@ -429,7 +429,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
 
   it("rejects an over-quota upload input synchronously (403) BEFORE the run is created", async () => {
     const ctx = await createTestContext({ orgSlug: "org-docquota" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const id = "upl_docquota_1";
     await seedUpload(scope, { id, bytes: PDF_BYTES });
 
@@ -459,7 +459,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
 
   it("rejects when both input and rerun_from are sent", async () => {
     const ctx = await createTestContext({ orgSlug: "org-rerun-both" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     await expect(
       parseRequestInput(
         fakeCtx(scope),
@@ -475,13 +475,13 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     const other = await createTestContext({ orgSlug: "org-rerun-other" });
     const priorRunId = `run_${crypto.randomUUID()}`;
     await seedRun(
-      { orgId: owner.orgId, applicationId: owner.defaultAppId },
+      { orgId: owner.orgId, spaceId: owner.defaultSpaceId },
       { id: priorRunId, input: { doc: "upload://upl_whatever1" } },
     );
 
     await expect(
       parseRequestInput(
-        fakeCtx({ orgId: other.orgId, applicationId: other.defaultAppId }),
+        fakeCtx({ orgId: other.orgId, spaceId: other.defaultSpaceId }),
         { rerun_from: priorRunId },
         `run_${crypto.randomUUID()}`,
         fileSchema,
@@ -491,7 +491,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
 
   it("rejects replaying a different agent's run with 409 rerun_agent_mismatch", async () => {
     const ctx = await createTestContext({ orgSlug: "org-rerun-agent" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const priorRunId = `run_${crypto.randomUUID()}`;
     // seedRun stamps packageId NULL — any concrete agent id mismatches.
     await seedRun(scope, { id: priorRunId, input: {} });
@@ -511,7 +511,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
 
   it("end-users cannot replay runs that are not their own", async () => {
     const ctx = await createTestContext({ orgSlug: "org-rerun-eu" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const priorRunId = `run_${crypto.randomUUID()}`;
     // Prior run has no end-user → an end-user caller must not see it.
     await seedRun(scope, { id: priorRunId, input: {} });
@@ -528,7 +528,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
 
   it("reports 410 when the replayed upload's reuse window has elapsed", async () => {
     const ctx = await createTestContext({ orgSlug: "org-rerun-gone" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const id = "upl_rerun_gone_1";
     await seedUpload(scope, { id, bytes: PDF_BYTES });
     const priorRunId = `run_${crypto.randomUUID()}`;
@@ -551,7 +551,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
 
   it("rejects replaying materialized inline data: inputs with 409 rerun_inline_input_unavailable", async () => {
     const ctx = await createTestContext({ orgSlug: "org-rerun-inline" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
 
     // The prior run's persisted input holds the payload-stripped marker the
     // consume path writes in place of inline bytes (empty payload + `name`
@@ -577,7 +577,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
     // Marker detection is rerun-only — a direct request carrying an
     // empty-payload data URI keeps today's invalid_request contract.
     const ctx = await createTestContext({ orgSlug: "org-rerun-fresh" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
 
     await expect(
       parseRequestInput(
@@ -591,7 +591,7 @@ describe("parseRequestInput — rerun_from (#634)", () => {
 
   it("replays a run with null input as no input (collapsed to undefined)", async () => {
     const ctx = await createTestContext({ orgSlug: "org-rerun-null" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const priorRunId = `run_${crypto.randomUUID()}`;
     await seedRun(scope, { id: priorRunId, input: null });
 
@@ -627,7 +627,7 @@ describe("parseRequestInput — colliding file names (workspace-name hardening)"
 
   it("gives colliding upload/file/inline inputs unique workspace names, preserving display names", async () => {
     const ctx = await createTestContext({ orgSlug: "org-collide" });
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const actor = { type: "user" as const, id: ctx.user.id };
 
     // An upload named report.pdf.
@@ -639,7 +639,7 @@ describe("parseRequestInput — colliding file names (workspace-name hardening)"
     await db.insert(runs).values({
       id: producerRunId,
       orgId: scope.orgId,
-      applicationId: scope.applicationId,
+      spaceId: scope.spaceId,
       status: "running",
     });
     const { row: doc } = await createFileFromStream(

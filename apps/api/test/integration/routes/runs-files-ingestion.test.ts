@@ -67,7 +67,7 @@ async function seedRun(
   await db.insert(runs).values({
     id: runId,
     orgId: ctx.orgId,
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     status: overrides.status ?? "running",
     runOrigin: "platform",
     sinkSecretEncrypted: encrypt(overrides.secret ?? RUN_SECRET),

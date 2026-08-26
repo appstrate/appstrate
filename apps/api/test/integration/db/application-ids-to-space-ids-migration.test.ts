@@ -21,11 +21,14 @@
  * and must come through byte-identical.
  *
  * Self-contained on purpose. It does not use `createTestContext` or
- * `truncateAll`: both still spell `applications` / `applicationId` in this
- * worktree (the test-side half of the rename has not landed), and a migration
- * test that cannot run proves nothing. It seeds and tears down its own fixed
- * ids with raw SQL — which is also what the operator runs, so the test
- * exercises the same surface.
+ * `truncateAll`. Every fixture here is PRE-rename by definition — `app_` ids,
+ * `level = 'application'`, `end_user:app_…` realms — and the helpers can no
+ * longer produce any of it: `createTestContext` mints `prefixedId("spc")` and
+ * asserts it against `SPACE_ID_RE`, which rejects the `app_` shape this script
+ * exists to rewrite. So it seeds and tears down its own fixed ids with raw SQL
+ * — which is also what the operator runs, so the test exercises the same
+ * surface. `truncateAll` would work now; it is still not used, because a fixed
+ * id set that only this file writes is what makes the CLEANUP below exact.
  */
 
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";

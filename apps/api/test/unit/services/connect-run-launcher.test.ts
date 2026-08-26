@@ -91,7 +91,7 @@ function encryptConnectResult(bundle: unknown, key: Buffer): string {
 
 function execution(): ConnectToolExecution {
   return {
-    scope: { orgId: "o", applicationId: "a" },
+    scope: { orgId: "o", spaceId: "a" },
     actor: { type: "user", id: "u" },
     integrationId: "@scope/connect-it",
     authKey: "session",

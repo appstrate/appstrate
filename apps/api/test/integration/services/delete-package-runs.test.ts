@@ -4,7 +4,7 @@
  * `deletePackageRuns` — the two obligations it shares with its siblings.
  *
  * It is the third run-deleting path (`deleteOrganization` and
- * `deleteApplication` are the others) and was the only one honouring neither:
+ * `deleteSpace` are the others) and was the only one honouring neither:
  *
  *  1. **Admission serialization.** The 409 lived in the route
  *     (`DELETE /api/agents/:scope/:name/runs`) as a non-transactional count. A
@@ -17,7 +17,7 @@
  *     `deleteOrganization` closes exactly this window with
  *     `pg_advisory_xact_lock(orgRunConcurrencyLockKey(orgId))` + an
  *     in-transaction re-count; this path now does the same.
- *  2. **The storage outbox.** `deleteApplication` enqueues
+ *  2. **The storage outbox.** `deleteSpace` enqueues
  *     `runWorkspaceDeletionJobs` per run. This path never did, so the bundle
  *     and the input-file objects of every deleted run were left referenced by
  *     no surviving row — invisible to every sweep, forever.
@@ -51,14 +51,14 @@ describe("deletePackageRuns", () => {
   });
 
   function scope() {
-    return { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    return { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
   }
 
   async function seed(status: "pending" | "running" | "success" | "failed"): Promise<string> {
     const run = await seedRun({
       packageId: PACKAGE_ID,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status,
     });
@@ -136,7 +136,7 @@ describe("deletePackageRuns", () => {
     const other = await seedRun({
       packageId: OTHER,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "running",
     });

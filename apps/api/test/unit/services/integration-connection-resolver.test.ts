@@ -33,7 +33,7 @@ import type {
 // ─────────────────────────── Fixtures ─────────────────────────────────────────
 
 const INTEG = "@vendor/test-integ";
-const APP_ID = "app_test";
+const SPACE_ID = "spc_test";
 const USER_ID = "user_alice";
 const AGENT_ID = "@vendor/test-agent";
 
@@ -97,7 +97,7 @@ function conn(input: Partial<ConnectionRow> & { authKey?: string }): ConnectionR
     integrationId: INTEG,
     authKey: input.authKey ?? "oauth",
     accountId: "acc_x",
-    applicationId: APP_ID,
+    spaceId: SPACE_ID,
     userId: USER_ID,
     endUserId: null,
     credentialsEncrypted: "ciphertext",
@@ -118,7 +118,7 @@ function pin(connectionId: string, opts?: { userId?: string | null }): PinRow {
   pinSeq += 1;
   return {
     id: `pin_${pinSeq}`,
-    applicationId: APP_ID,
+    spaceId: SPACE_ID,
     packageId: AGENT_ID,
     integrationId: INTEG,
     userId: opts?.userId ?? null,

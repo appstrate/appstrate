@@ -112,7 +112,7 @@ describe("readOrBuildBundle dispatch", () => {
     const raw = buildRawAfps({ name: "@x/agent", type: "agent", version: "1.0.0" }, "Hello.");
     const bundle = await readOrBuildBundle(raw, {
       orgId: "00000000-0000-0000-0000-000000000000",
-      applicationId: "00000000-0000-0000-0000-000000000000",
+      spaceId: "00000000-0000-0000-0000-000000000000",
     });
     expect(bundle.packages.size).toBeGreaterThanOrEqual(1);
     expect(bundle.root).toMatch(/^@x\/agent@/);
@@ -128,12 +128,12 @@ describe("readOrBuildBundle dispatch", () => {
     const ctx = await createTestContext({ orgSlug: "bundle-dispatch" });
     const oneShot = await readOrBuildBundle(raw, {
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
     });
     const wrapped = writeBundleToBuffer(oneShot);
     const reread = await readOrBuildBundle(wrapped, {
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
     });
     expect(reread.root).toBe(oneShot.root);
     expect(reread.packages.size).toBe(oneShot.packages.size);
@@ -150,7 +150,7 @@ describe("readOrBuildBundle dispatch", () => {
     try {
       await readOrBuildBundle(garbage, {
         orgId: "00000000-0000-0000-0000-000000000000",
-        applicationId: "00000000-0000-0000-0000-000000000000",
+        spaceId: "00000000-0000-0000-0000-000000000000",
       });
     } catch (e) {
       err = e;
@@ -166,7 +166,7 @@ describe("readOrBuildBundle dispatch", () => {
     try {
       await readOrBuildBundle(new Uint8Array(0), {
         orgId: "00000000-0000-0000-0000-000000000000",
-        applicationId: "00000000-0000-0000-0000-000000000000",
+        spaceId: "00000000-0000-0000-0000-000000000000",
       });
     } catch (e) {
       err = e;
@@ -185,7 +185,7 @@ describe("readOrBuildBundle dispatch", () => {
     const ctx = await createTestContext({ orgSlug: "bundle-big" });
     const oneShot = await readOrBuildBundle(raw, {
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
     });
     const wrapped = writeBundleToBuffer(oneShot);
     expect(wrapped.byteLength).toBeGreaterThan(65536);
@@ -193,7 +193,7 @@ describe("readOrBuildBundle dispatch", () => {
     // Must be read AS a bundle (not mis-promoted as a single-package afps).
     const reread = await readOrBuildBundle(wrapped, {
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
     });
     expect(reread.root).toBe(oneShot.root);
     expect(reread.packages.size).toBe(oneShot.packages.size);
@@ -233,7 +233,7 @@ describe("detectBundleConflicts", () => {
 
     const conflicts = await detectBundleConflicts(bundle, {
       orgId: ctxImporter.orgId,
-      applicationId: ctxImporter.defaultAppId,
+      spaceId: ctxImporter.defaultSpaceId,
     });
     expect(conflicts).toHaveLength(1);
     expect(conflicts[0]!.reason).toBe("foreign_org_owner");
@@ -252,7 +252,7 @@ describe("detectBundleConflicts", () => {
 
     const conflicts = await detectBundleConflicts(bundle, {
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
     });
     expect(conflicts).toEqual([]);
   });
@@ -298,7 +298,7 @@ describe("bundle import — upstream manifest rejection + rollback", () => {
 
     const err = await importBundle(
       bundle,
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       ctx.user.id,
     ).catch((e: unknown) => e);
 
@@ -356,15 +356,15 @@ describe("importBundle — cross-tenant ownership claim (CRIT-08)", () => {
 
   let ctxA: TestContext;
   let ctxB: TestContext;
-  let scopeA: { orgId: string; applicationId: string };
-  let scopeB: { orgId: string; applicationId: string };
+  let scopeA: { orgId: string; spaceId: string };
+  let scopeB: { orgId: string; spaceId: string };
 
   beforeEach(async () => {
     await truncateAll();
     ctxA = await createTestContext({ orgSlug: "raceorg", email: "owner-a@race.test" });
     ctxB = await createTestContext({ orgSlug: "raceorgb", email: "owner-b@race.test" });
-    scopeA = { orgId: ctxA.orgId, applicationId: ctxA.defaultAppId };
-    scopeB = { orgId: ctxB.orgId, applicationId: ctxB.defaultAppId };
+    scopeA = { orgId: ctxA.orgId, spaceId: ctxA.defaultSpaceId };
+    scopeB = { orgId: ctxB.orgId, spaceId: ctxB.defaultSpaceId };
   });
 
   it("sequential: org B importing a package owned by org A gets a 409 — never a silent graft", async () => {

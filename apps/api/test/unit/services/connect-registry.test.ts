@@ -86,7 +86,7 @@ describe("FieldsStrategy.complete", () => {
     await expect(
       s.complete(
         {
-          scope: { orgId: "o", applicationId: "a" },
+          scope: { orgId: "o", spaceId: "a" },
           actor: { type: "user", id: "u" },
           integrationId: "@x/y",
           authKey: "k",

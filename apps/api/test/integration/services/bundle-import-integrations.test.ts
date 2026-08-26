@@ -75,12 +75,12 @@ function validManifest(overrides: Record<string, unknown> = {}): Record<string, 
 
 describe("handleImportBundle — integration packages", () => {
   let ctx: TestContext;
-  let scope: { orgId: string; applicationId: string };
+  let scope: { orgId: string; spaceId: string };
 
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "testorg" });
-    scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
   });
 
   it("imports a minimal integration .afps and persists the package + version", async () => {

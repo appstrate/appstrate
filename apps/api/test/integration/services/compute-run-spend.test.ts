@@ -42,7 +42,7 @@ describe("computeRunSpend — remote-run mirror exclusion", () => {
     return seedRun({
       packageId: "@runcost/agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "success",
     });
   }
@@ -195,7 +195,7 @@ describe("computeRunSpend — worst-of provenance over the same rows as the cost
     return seedRun({
       packageId: "@runstatus/agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "success",
     });
   }

@@ -18,14 +18,14 @@
  * Escape hatch: pass `{ modules: [...] }` to bypass discovery and get a fresh
  * app with an explicit module list. Use `{ modules: [] }` to assert the
  * zero-footprint invariant (no modules → no module routes, no module
- * app-scoped prefixes). The explicit path never touches the singleton cache.
+ * space-scoped prefixes). The explicit path never touches the singleton cache.
  */
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { requestId } from "../../src/middleware/request-id.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
 import { apiVersion } from "../../src/middleware/api-version.ts";
-import { isAppScopedPath, requireAppContext } from "../../src/middleware/app-context.ts";
+import { isSpaceScopedPath, requireSpaceContext } from "../../src/middleware/space-context.ts";
 import { idempotencyGuard } from "../../src/middleware/idempotency-guard.ts";
 import { getOrgSettings } from "../../src/services/organizations.ts";
 import { initSystemProxies } from "../../src/services/proxy-registry.ts";
@@ -56,7 +56,7 @@ import { createModelsRouter } from "../../src/routes/models.ts";
 import { createModelProvidersOAuthRouter } from "../../src/routes/model-providers-oauth.ts";
 import { createModelProviderCredentialsRouter } from "../../src/routes/model-provider-credentials.ts";
 import { createInternalRouter } from "../../src/routes/internal.ts";
-import { createApplicationsRouter } from "../../src/routes/applications.ts";
+import { createSpacesRouter } from "../../src/routes/spaces.ts";
 import { createNotificationsRouter } from "../../src/routes/notifications.ts";
 import { createPackagesRouter } from "../../src/routes/packages.ts";
 import { createRealtimeRouter } from "../../src/routes/realtime.ts";
@@ -84,7 +84,7 @@ interface GetTestAppOptions {
    * populated discovery registry and returns a fresh (non-cached) app.
    *
    * Pass `[]` to assert the zero-footprint invariant: a core-only app with
-   * no module routes, no module app-scoped prefixes, no module-contributed
+   * no module routes, no module space-scoped prefixes, no module-contributed
    * middleware. Core tests that want to prove isolation should use this.
    */
   modules?: readonly AppstrateModule[];
@@ -119,7 +119,7 @@ await initAppConfig(); // initializes app config (routes like organizations.ts c
 export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   // Explicit module list → always return a fresh app (never touches the
   // singleton cache, so core "modules: []" tests stay isolated from the
-  // preload-discovered default app used by every other test).
+  // preload-discovered default space used by every other test).
   const explicit = options?.modules !== undefined;
   const extraModules = explicit ? options!.modules! : getDiscoveredModules();
 
@@ -180,7 +180,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/", healthRouter);
 
   // Cookie-less HTML preview — mounted BEFORE the auth pipeline (mirrors
-  // production wiring in `apps/api/src/index.ts`) so no cookie/API-key/org/app
+  // production wiring in `apps/api/src/index.ts`) so no cookie/API-key/org/space
   // middleware runs on it; authorized solely by the signed `?t=` token.
   app.route("/", createFilePreviewRouter());
 
@@ -204,14 +204,14 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
     authStrategies: () => moduleAuthStrategies,
   });
 
-  // App context middleware: resolve X-Application-Id for app-scoped routes.
-  // The prefix list is imported, not re-listed — see `isAppScopedPath`.
-  const appContextMiddleware = requireAppContext();
+  // Space context middleware: resolve X-Space-Id for space-scoped routes.
+  // The prefix list is imported, not re-listed — see `isSpaceScopedPath`.
+  const spaceContextMiddleware = requireSpaceContext();
   app.use("*", async (c, next) => {
     if (skipAuth(c.req.path, modulePublicPaths, c.req.raw.headers)) return next();
     if (!c.get("user")) return next();
-    if (!isAppScopedPath(c.req.path)) return next();
-    return appContextMiddleware(c, next);
+    if (!isSpaceScopedPath(c.req.path)) return next();
+    return spaceContextMiddleware(c, next);
   });
 
   // API versioning — mirrors production: read settings stashed on context
@@ -276,7 +276,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api/models", createModelsRouter());
   app.route("/api/model-provider-credentials", createModelProviderCredentialsRouter());
   app.route("/api/model-providers-oauth", createModelProvidersOAuthRouter());
-  app.route("/api/applications", createApplicationsRouter());
+  app.route("/api/spaces", createSpacesRouter());
   app.route("/api", profileRouter);
   app.route("/api/realtime", createRealtimeRouter());
   app.route("/api/integrations", createIntegrationsRouter());

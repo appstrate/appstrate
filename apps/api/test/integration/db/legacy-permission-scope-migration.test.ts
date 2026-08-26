@@ -28,7 +28,7 @@ import { sql, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   apiKeys,
-  applicationSocialProviders,
+  spaceSocialProviders,
   cliRefreshToken,
   deviceCode,
   integrationConnections,
@@ -62,7 +62,7 @@ async function seedKey(ctx: TestContext, name: string, scopes: string[]): Promis
   await db.insert(apiKeys).values({
     id,
     orgId: ctx.orgId,
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     name,
     keyHash: new Bun.CryptoHasher("sha256").update(id).digest("hex"),
     keyPrefix: "ask_testtest",
@@ -78,7 +78,7 @@ async function keyScopesOf(id: string): Promise<string[]> {
 
 /**
  * The token/consent rows are FKs onto `oauth_clients.client_id`, so they need a
- * client row to hang off. The client itself is instance-level (no org/app ref)
+ * client row to hang off. The client itself is instance-level (no org/space ref)
  * to satisfy the `oauth_clients_level_check` CHECK.
  */
 async function seedOauthClient(clientId: string, scopes: string[]): Promise<void> {
@@ -367,7 +367,7 @@ describe("migration 0046 — documents:* → files:* in every stored scope colum
   });
 
   describe("third-party provider scopes are out of reach", () => {
-    it("never touches application_social_providers.scopes", async () => {
+    it("never touches space_social_providers.scopes", async () => {
       // These are GOOGLE/GITHUB OAuth scopes, not Appstrate permissions. The
       // `documents:` prefix anchor cannot match a Drive scope URL — this
       // asserts that anchoring, so a future generic rewrite cannot quietly
@@ -376,8 +376,8 @@ describe("migration 0046 — documents:* → files:* in every stored scope colum
         "https://www.googleapis.com/auth/drive.readonly",
         "https://www.googleapis.com/auth/documents.readonly",
       ];
-      await db.insert(applicationSocialProviders).values({
-        applicationId: ctx.defaultAppId,
+      await db.insert(spaceSocialProviders).values({
+        spaceId: ctx.defaultSpaceId,
         provider: "google",
         clientId: "client-id",
         clientSecretEncrypted: "cipher",
@@ -387,9 +387,9 @@ describe("migration 0046 — documents:* → files:* in every stored scope colum
       await replayMigration();
 
       const [row] = await db
-        .select({ scopes: applicationSocialProviders.scopes })
-        .from(applicationSocialProviders)
-        .where(eq(applicationSocialProviders.applicationId, ctx.defaultAppId));
+        .select({ scopes: spaceSocialProviders.scopes })
+        .from(spaceSocialProviders)
+        .where(eq(spaceSocialProviders.spaceId, ctx.defaultSpaceId));
       expect(row!.scopes).toEqual(googleScopes);
     });
 
@@ -406,7 +406,7 @@ describe("migration 0046 — documents:* → files:* in every stored scope colum
         integrationId: packageId,
         authKey: "primary",
         accountId: "acct-1",
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: "cipher",
         scopesGranted: granted,

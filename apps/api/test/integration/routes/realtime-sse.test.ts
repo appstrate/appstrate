@@ -21,7 +21,7 @@ import {
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedAgent, seedRun, seedApplication, seedApiKey } from "../../helpers/seed.ts";
+import { seedAgent, seedRun, seedSpace, seedApiKey } from "../../helpers/seed.ts";
 import { sql } from "drizzle-orm";
 import { initRealtime, activeSubscriberCount } from "../../../src/services/realtime.ts";
 import { collectSSEEvents, pgNotify } from "../../helpers/sse.ts";
@@ -43,7 +43,7 @@ async function sseRequest(
   extra?: Record<string, string>,
 ): Promise<Response> {
   const separator = path.includes("?") ? "&" : "?";
-  const url = `${path}${separator}orgId=${ctx.orgId}&applicationId=${ctx.defaultAppId}`;
+  const url = `${path}${separator}orgId=${ctx.orgId}&spaceId=${ctx.defaultSpaceId}`;
   return await app.request(url, {
     headers: {
       Cookie: ctx.cookie,
@@ -69,7 +69,7 @@ describe("realtime SSE routes (integration)", () => {
     run = await seedRun({
       packageId: agentPkg.id,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
     });
   });
 
@@ -94,7 +94,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: run.id,
         status: "running",
         package_id: agentPkg.id,
@@ -142,7 +142,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: run.id,
         status: "running",
         package_id: agentPkg.id,
@@ -212,41 +212,41 @@ describe("realtime SSE routes (integration)", () => {
       expect(res.status).toBe(401);
     });
 
-    it("returns 401 without applicationId query param", async () => {
+    it("returns 401 without spaceId query param", async () => {
       const res = await app.request(`/api/realtime/runs/${run.id}?orgId=${ctx.orgId}`, {
         headers: { Cookie: ctx.cookie },
       });
       expect(res.status).toBe(401);
     });
 
-    it("app-scoped SSE — events from other apps are filtered out", async () => {
-      const appB = await seedApplication({ orgId: ctx.orgId, name: "SSE AppB" });
-      const appBRun = await seedRun({
+    it("space-scoped SSE — events from other spaces are filtered out", async () => {
+      const spaceB = await seedSpace({ orgId: ctx.orgId, name: "SSE SpaceB" });
+      const spaceBRun = await seedRun({
         packageId: agentPkg.id,
         orgId: ctx.orgId,
-        applicationId: appB.id,
+        spaceId: spaceB.id,
       });
 
-      // Subscribe from default app (AppA)
+      // Subscribe from default space (SpaceA)
       const res = await sseRequest(`/api/realtime/runs`, ctx);
       expect(res.body).not.toBeNull();
 
       await wait();
 
-      // Fire event for AppB — should NOT be received by AppA subscriber
+      // Fire event for SpaceB — should NOT be received by SpaceA subscriber
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: appB.id,
-        id: appBRun.id,
+        space_id: spaceB.id,
+        id: spaceBRun.id,
         status: "running",
         package_id: agentPkg.id,
       });
       await wait();
 
-      // Fire event for AppA — should be received
+      // Fire event for SpaceA — should be received
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: run.id,
         status: "success",
         package_id: agentPkg.id,
@@ -264,7 +264,7 @@ describe("realtime SSE routes (integration)", () => {
       const otherExec = await seedRun({
         packageId: agentPkg.id,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
       });
 
       const res = await sseRequest(`/api/realtime/runs/${run.id}`, ctx);
@@ -275,7 +275,7 @@ describe("realtime SSE routes (integration)", () => {
       // Fire event for a different run — should be filtered out
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: otherExec.id,
         status: "running",
         package_id: agentPkg.id,
@@ -285,7 +285,7 @@ describe("realtime SSE routes (integration)", () => {
       // Fire event for the target run — should be received
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: run.id,
         status: "success",
         package_id: agentPkg.id,
@@ -313,7 +313,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: run.id,
         status: "success",
         package_id: agentPkg.id,
@@ -339,7 +339,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("run_log_insert", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         run_id: run.id,
         level: "info",
         message: "processing",
@@ -368,7 +368,7 @@ describe("realtime SSE routes (integration)", () => {
       await pgNotify("run_update", {
         operation: "UPDATE",
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: run.id,
         status: "success",
         package_id: agentPkg.id,
@@ -406,7 +406,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("run_log_insert", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         run_id: run.id,
         level: "info",
         message: "step completed",
@@ -440,7 +440,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("run_metric", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         run_id: run.id,
         package_id: agentPkg.id,
         token_usage: { input_tokens: 10, output_tokens: 5 },
@@ -463,7 +463,7 @@ describe("realtime SSE routes (integration)", () => {
       expect(data).toEqual({
         runId: run.id,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         packageId: agentPkg.id,
         tokenUsage: { input_tokens: 10, output_tokens: 5 },
         costSoFar: 0.0042,
@@ -486,7 +486,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: run.id,
         status: "running",
         package_id: agentPkg.id,
@@ -518,7 +518,7 @@ describe("realtime SSE routes (integration)", () => {
       // Fire event for a different agent — should be filtered
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: "exec-other",
         status: "running",
         package_id: otherAgent.id,
@@ -528,7 +528,7 @@ describe("realtime SSE routes (integration)", () => {
       // Fire event for the target agent — should be received
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: run.id,
         status: "success",
         package_id: agentPkg.id,
@@ -563,7 +563,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: run.id,
         status: "running",
         package_id: agentPkg.id,
@@ -582,7 +582,7 @@ describe("realtime SSE routes (integration)", () => {
       const exec2 = await seedRun({
         packageId: agent2.id,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
       });
 
       const res = await sseRequest("/api/realtime/runs", ctx);
@@ -593,7 +593,7 @@ describe("realtime SSE routes (integration)", () => {
       // Fire events for two different agents
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: run.id,
         status: "running",
         package_id: agentPkg.id,
@@ -601,7 +601,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait(50);
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: exec2.id,
         status: "success",
         package_id: agent2.id,
@@ -638,7 +638,7 @@ describe("realtime SSE routes (integration)", () => {
         },
         body: JSON.stringify({
           name: "SSE Test Key",
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
         }),
       });
       expect(res.status).toBe(201);
@@ -670,7 +670,7 @@ describe("realtime SSE routes (integration)", () => {
     async function seedSseKey(opts: { createdBy: string; scopes: string[] }): Promise<string> {
       const key = await seedApiKey({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         createdBy: opts.createdBy,
         scopes: opts.scopes,
       });
@@ -727,7 +727,7 @@ describe("realtime SSE routes (integration)", () => {
       // Debug frame first — must be filtered for a non-admin subscriber.
       await pgNotify("run_log_insert", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         run_id: run.id,
         level: "debug",
         message: "debug-secret",
@@ -737,7 +737,7 @@ describe("realtime SSE routes (integration)", () => {
       // the debug frame was dropped, not merely delayed).
       await pgNotify("run_log_insert", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         run_id: run.id,
         level: "info",
         message: "info-visible",
@@ -763,7 +763,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("run_log_insert", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         run_id: run.id,
         level: "debug",
         message: "debug-for-admin",
@@ -792,7 +792,7 @@ describe("realtime SSE routes (integration)", () => {
       // the first collected frame and the assertion below would catch it.
       await pgNotify("run_log_insert", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         run_id: run.id,
         level: "info",
         message: "filtered-out",
@@ -800,7 +800,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: run.id,
         status: "success",
         package_id: agentPkg.id,
@@ -823,7 +823,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("run_log_insert", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         run_id: run.id,
         level: "info",
         message: "still-delivered",
@@ -844,7 +844,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("run_log_insert", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         run_id: run.id,
         level: "info",
         message: "fallback-delivered",
@@ -868,7 +868,7 @@ describe("realtime SSE routes (integration)", () => {
       await wait();
       await pgNotify("run_log_insert", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         run_id: run.id,
         level: "info",
         message: "declared",
@@ -914,7 +914,7 @@ describe("realtime SSE routes (integration)", () => {
           'user_id', NULL,
           'end_user_id', NULL,
           'org_id', ${ctx.orgId}::text,
-          'application_id', ${ctx.defaultAppId}::text,
+          'space_id', ${ctx.defaultSpaceId}::text,
           'schedule_id', NULL,
           'error', NULL,
           'started_at', NULL,
@@ -955,7 +955,7 @@ describe("realtime SSE routes (integration)", () => {
           'user_id', NULL,
           'end_user_id', NULL,
           'org_id', ${ctx.orgId}::text,
-          'application_id', ${ctx.defaultAppId}::text,
+          'space_id', ${ctx.defaultSpaceId}::text,
           'schedule_id', NULL,
           'error', NULL,
           'started_at', NULL,
@@ -978,7 +978,7 @@ describe("realtime SSE routes (integration)", () => {
       // Create a second org context
       const ctxB = await createTestContext();
       const agentB = await seedAgent({ orgId: ctxB.orgId });
-      await seedRun({ packageId: agentB.id, orgId: ctxB.orgId, applicationId: ctxB.defaultAppId });
+      await seedRun({ packageId: agentB.id, orgId: ctxB.orgId, spaceId: ctxB.defaultSpaceId });
 
       // Open SSE for org B (all runs)
       const resB = await sseRequest("/api/realtime/runs", ctxB);
@@ -989,7 +989,7 @@ describe("realtime SSE routes (integration)", () => {
       // Fire event for org A — org B should NOT receive it
       await pgNotify("run_update", {
         org_id: ctx.orgId,
-        application_id: ctx.defaultAppId,
+        space_id: ctx.defaultSpaceId,
         id: run.id,
         status: "running",
         package_id: agentPkg.id,
@@ -999,7 +999,7 @@ describe("realtime SSE routes (integration)", () => {
       // Fire event for org B — org B SHOULD receive it
       await pgNotify("run_update", {
         org_id: ctxB.orgId,
-        application_id: ctxB.defaultAppId,
+        space_id: ctxB.defaultSpaceId,
         id: "exec-b",
         status: "success",
         package_id: agentB.id,

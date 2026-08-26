@@ -81,7 +81,7 @@ async function buildHarness(): Promise<Harness> {
   const ctx = await createTestContext({ orgSlug: "system-proxy-admission" });
   const key = await seedApiKey({
     orgId: ctx.orgId,
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     createdBy: ctx.user.id,
     scopes: ["llm-proxy:call"],
   });
@@ -96,7 +96,7 @@ async function buildHarness(): Promise<Harness> {
   const run = await seedRun({
     packageId: pkg.id,
     orgId: ctx.orgId,
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     status: "running",
     runOrigin: "remote",
   });
@@ -145,7 +145,7 @@ function headers(h: Harness, withRun = true): Record<string, string> {
   return {
     authorization: `Bearer ${h.apiKey}`,
     "x-org-id": h.ctx.orgId,
-    "x-application-id": h.ctx.defaultAppId,
+    "x-space-id": h.ctx.defaultSpaceId,
     "content-type": "application/json",
     ...(withRun ? { "x-run-id": h.runId } : {}),
   };
@@ -241,7 +241,7 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
     // The bypass: an org past its quota (every new run/turn rejected) stamps
     // `X-Run-Id` of a still-alive platform-origin, system-model run onto raw
     // proxy calls. `assertRunAttributable` only binds an API-key principal to
-    // org + application, so ANY key of the app can borrow ANY live run — and
+    // org + space, so ANY key of the space can borrow ANY live run — and
     // the proxy used to skip admission entirely for that run shape, buying
     // unbounded platform-paid spend until the borrowed run expired.
     //
@@ -255,7 +255,7 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
     const platformRun = await seedRun({
       packageId: "@system/proxy-agent",
       orgId: h.ctx.orgId,
-      applicationId: h.ctx.defaultAppId,
+      spaceId: h.ctx.defaultSpaceId,
       status: "running",
       runOrigin: "platform",
       modelSource: "system",
@@ -319,7 +319,7 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
     const byokRun = await seedRun({
       packageId: "@system/proxy-agent",
       orgId: h.ctx.orgId,
-      applicationId: h.ctx.defaultAppId,
+      spaceId: h.ctx.defaultSpaceId,
       status: "running",
       runOrigin: "platform",
       modelSource: "org",
@@ -327,7 +327,7 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
     const unresolvedRun = await seedRun({
       packageId: "@system/proxy-agent",
       orgId: h.ctx.orgId,
-      applicationId: h.ctx.defaultAppId,
+      spaceId: h.ctx.defaultSpaceId,
       status: "running",
       runOrigin: "platform",
       modelSource: null,
@@ -426,7 +426,7 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
       headers: {
         authorization: `Bearer ${loopback}`,
         "x-org-id": h.ctx.orgId,
-        "x-application-id": h.ctx.defaultAppId,
+        "x-space-id": h.ctx.defaultSpaceId,
         "content-type": "application/json",
       },
       body: JSON.stringify({
@@ -580,7 +580,7 @@ describe("POST /api/llm-proxy — system admission and streaming usage", () => {
   it("refuses to reuse a terminal run as a system-model billing context", async () => {
     const h = await buildHarness();
     await loadModulesFromInstances([gateModule(null, [])], fakeInitCtx());
-    await updateRun({ orgId: h.ctx.orgId, applicationId: h.ctx.defaultAppId }, h.runId, {
+    await updateRun({ orgId: h.ctx.orgId, spaceId: h.ctx.defaultSpaceId }, h.runId, {
       status: "success",
     });
 

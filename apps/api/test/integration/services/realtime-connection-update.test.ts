@@ -5,7 +5,7 @@
  * `services/realtime.ts`. Validates the four filter branches added by
  * the connection-renewal-flow PR:
  *
- *   1. application_id mismatch  → skip (cross-app isolation)
+ *   1. space_id mismatch  → skip (cross-space isolation)
  *   2. userId match              → forward (own dashboard rows)
  *   3. userId mismatch           → skip (cross-actor isolation)
  *   4. no actor on subscriber    → skip (anti-leak default)
@@ -19,7 +19,7 @@ import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { eventData } from "../../helpers/sse.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import {
   addSubscriber,
   removeSubscriber,
@@ -120,7 +120,7 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
       source: "local",
       draftManifest: buildIntegrationManifest(INTEG),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INTEG);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEG);
   });
 
   afterEach(() => {
@@ -132,14 +132,14 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
    * Helper: insert a connection row for a given owner and wait for the
    * trigger → NOTIFY → LISTEN round-trip to flush.
    */
-  async function insertConnection(opts: { userId: string; applicationId: string }) {
+  async function insertConnection(opts: { userId: string; spaceId: string }) {
     const [row] = await db
       .insert(integrationConnections)
       .values({
         integrationId: INTEG,
         authKey: "primary",
         accountId: `acct-${opts.userId.slice(0, 6)}`,
-        applicationId: opts.applicationId,
+        spaceId: opts.spaceId,
         userId: opts.userId,
         endUserId: null,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "v1" } }),
@@ -158,21 +158,21 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
       id: subId,
       filter: {
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         isAdmin: true,
         userId: ctx.user.id,
       },
       send,
     });
 
-    await insertConnection({ userId: ctx.user.id, applicationId: ctx.defaultAppId });
+    await insertConnection({ userId: ctx.user.id, spaceId: ctx.defaultSpaceId });
     await waitFor(() => send.mock.calls.length >= 1);
 
     expect(send).toHaveBeenCalled();
     const evt = send.mock.calls[0]![0]!;
     expect(evt.event).toBe("connection_update");
     expect(eventData(evt, "connection_update")).toMatchObject({
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       integrationPackageId: INTEG,
       operation: "INSERT",
@@ -180,9 +180,9 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
     });
   });
 
-  it("skips a subscriber owned by a different user (same application)", async () => {
-    // Seed a second member on the SAME app so the cross-actor scenario
-    // is meaningful — otherwise the applicationId filter alone would
+  it("skips a subscriber owned by a different user (same space)", async () => {
+    // Seed a second member on the SAME space so the cross-actor scenario
+    // is meaningful — otherwise the spaceId filter alone would
     // pass/fail the assertion and we wouldn't be exercising the actor
     // filter branch.
     const otherUserId = ctxOther.user.id;
@@ -193,7 +193,7 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
       id: subId,
       filter: {
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         isAdmin: true,
         // Subscriber identifies as the OTHER user.
         userId: otherUserId,
@@ -202,27 +202,27 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
     });
 
     // Row owned by ctx.user — should NOT reach the other subscriber.
-    await insertConnection({ userId: ctx.user.id, applicationId: ctx.defaultAppId });
+    await insertConnection({ userId: ctx.user.id, spaceId: ctx.defaultSpaceId });
 
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("skips a subscriber on a different application (tenant isolation)", async () => {
+  it("skips a subscriber on a different space (tenant isolation)", async () => {
     const send = mock((_e: RealtimeEvent) => {});
-    const subId = "sub-other-app";
+    const subId = "sub-other-space";
     trackSubscriber(subId);
     addSubscriber({
       id: subId,
       filter: {
         orgId: ctxOther.orgId,
-        applicationId: ctxOther.defaultAppId,
+        spaceId: ctxOther.defaultSpaceId,
         isAdmin: true,
         userId: ctx.user.id,
       },
       send,
     });
 
-    await insertConnection({ userId: ctx.user.id, applicationId: ctx.defaultAppId });
+    await insertConnection({ userId: ctx.user.id, spaceId: ctx.defaultSpaceId });
 
     expect(send).not.toHaveBeenCalled();
   });
@@ -230,7 +230,7 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
   it("skips a subscriber with no actor identity (anti-leak default)", async () => {
     // Anti-leak guard: a malformed subscriber without userId AND without
     // endUserId must NOT receive connection events, even if the
-    // application matches. Regression here would silently fan out every
+    // space matches. Regression here would silently fan out every
     // member's connection state.
     const send = mock((_e: RealtimeEvent) => {});
     const subId = "sub-no-actor";
@@ -239,14 +239,14 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
       id: subId,
       filter: {
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         isAdmin: true,
         // No userId, no endUserId.
       },
       send,
     });
 
-    await insertConnection({ userId: ctx.user.id, applicationId: ctx.defaultAppId });
+    await insertConnection({ userId: ctx.user.id, spaceId: ctx.defaultSpaceId });
 
     expect(send).not.toHaveBeenCalled();
   });
@@ -259,14 +259,14 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
       id: subId,
       filter: {
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         isAdmin: true,
         userId: ctx.user.id,
       },
       send,
     });
 
-    const id = await insertConnection({ userId: ctx.user.id, applicationId: ctx.defaultAppId });
+    const id = await insertConnection({ userId: ctx.user.id, spaceId: ctx.defaultSpaceId });
     await waitFor(() =>
       send.mock.calls.some((c) => eventData(c[0]!, "connection_update").operation === "INSERT"),
     );

@@ -23,7 +23,7 @@ import { packages } from "@appstrate/db/schema";
 import { db } from "./db.ts";
 import { seedAgent } from "./seed.ts";
 import { createVersionFromDraft } from "../../src/services/package-versions.ts";
-import { installPackage } from "../../src/services/application-packages.ts";
+import { installPackage } from "../../src/services/space-packages.ts";
 
 /** Minimal agent manifest — `version` is what publish snapshots under. */
 function agentManifest(id: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
@@ -38,13 +38,13 @@ function agentManifest(id: string, extra: Record<string, unknown> = {}): Record<
 
 /**
  * Publish an already-seeded agent's draft as a version, and install it in the
- * application. The pair a schedule needs: the published version is what the
+ * space. The pair a schedule needs: the published version is what the
  * fire path executes, the installation is what the runtime gate requires.
  */
 export async function publishAndInstall(args: {
   id: string;
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   userId: string;
 }): Promise<void> {
   const published = await createVersionFromDraft({
@@ -55,7 +55,7 @@ export async function publishAndInstall(args: {
   if ("error" in published) {
     throw new Error(`fixture failed to publish ${args.id}: ${published.error}`);
   }
-  await installPackage({ orgId: args.orgId, applicationId: args.applicationId }, args.id);
+  await installPackage({ orgId: args.orgId, spaceId: args.spaceId }, args.id);
 }
 
 /**
@@ -66,7 +66,7 @@ export async function publishAndInstall(args: {
 export async function seedSchedulableAgent(args: {
   id: string;
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   userId: string;
   manifest?: Record<string, unknown>;
   content?: string;
@@ -93,7 +93,7 @@ export async function seedSchedulableAgent(args: {
 export async function seedDivergedAgent(args: {
   id: string;
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   userId: string;
   published: Record<string, unknown>;
   draft: Record<string, unknown>;
@@ -101,7 +101,7 @@ export async function seedDivergedAgent(args: {
   await seedSchedulableAgent({
     id: args.id,
     orgId: args.orgId,
-    applicationId: args.applicationId,
+    spaceId: args.spaceId,
     userId: args.userId,
     manifest: args.published,
   });

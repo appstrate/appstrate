@@ -11,7 +11,7 @@
  * The resolver does NOT take an injectable refresh function. It calls
  * `forceRefreshIntegrationConnection` directly, which in turn builds a
  * `RefreshContext` from the manifest's `auths.{key}.tokenUrl` + the seeded
- * per-application `integration_oauth_clients` row, then POSTs the
+ * per-space `integration_oauth_clients` row, then POSTs the
  * `refresh_token` to that token URL via the shared
  * `performRefreshTokenExchange`.
  *
@@ -31,7 +31,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connect";
@@ -172,12 +172,12 @@ describe("resolveLiveIntegrationCredentials", () => {
       source: "local",
       draftManifest: gmailManifest(token.url),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INTEGRATION_ID);
-    // Per-app OAuth client → makes the auth refreshable (buildIntegrationOAuthRefreshContext).
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION_ID);
+    // Per-space OAuth client → makes the auth refreshable (buildIntegrationOAuthRefreshContext).
     const [oauthClient] = await db
       .insert(integrationOauthClients)
       .values({
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         integrationId: INTEGRATION_ID,
         authKey: "primary",
         clientId: "cid",
@@ -214,12 +214,12 @@ describe("resolveLiveIntegrationCredentials", () => {
         integrationId: INTEGRATION_ID,
         authKey: "primary",
         accountId: opts.accountId ?? "acct-1",
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: opts.userId ?? null,
         endUserId: opts.endUserId ?? null,
         credentialsEncrypted: ciphertext,
         scopesGranted: opts.scopes ?? ["read", "send"],
-        // oauth2 connection → pins the org's custom per-app client by id (seeded above).
+        // oauth2 connection → pins the org's custom per-space client by id (seeded above).
         clientRef: customClientId,
         ...(opts.expiresAt ? { expiresAt: opts.expiresAt } : {}),
       })
@@ -231,7 +231,7 @@ describe("resolveLiveIntegrationCredentials", () => {
     return {
       runId: "run_test",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       agentPackageId: "@creds/agent",
       actor: { type: "user" as const, id: ctx.user.id },
     };
@@ -588,10 +588,7 @@ describe("resolveLiveIntegrationCredentials", () => {
       type: "agent",
       draftManifest: agentManifest("@creds/agent-deleter", ["delete_message"]),
     });
-    await installPackage(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      "@creds/agent-deleter",
-    );
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@creds/agent-deleter");
     const connId = await seedConnection({
       userId: ctx.user.id,
       scopes: ["read", "send", "delete"],
@@ -615,10 +612,7 @@ describe("resolveLiveIntegrationCredentials", () => {
       type: "agent",
       draftManifest: agentManifest("@creds/agent-reader", ["list_messages"]),
     });
-    await installPackage(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      "@creds/agent-reader",
-    );
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@creds/agent-reader");
     const connId = await seedConnection({
       userId: ctx.user.id,
       scopes: ["read", "send", "delete"],
@@ -657,7 +651,7 @@ describe("resolveLiveIntegrationCredentials", () => {
     expect(await needsReconnection(foreignId)).toBe(false);
   });
 
-  it("throws 404 when the integration is not installed in the application", async () => {
+  it("throws 404 when the integration is not installed in the space", async () => {
     // A different integration the agent never declared / installed.
     await seedPackage({
       id: "@official/uninstalled",

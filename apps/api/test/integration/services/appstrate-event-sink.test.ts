@@ -16,7 +16,7 @@ import { describe, it, expect, beforeEach, spyOn } from "bun:test";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import {
   persistRunEvent,
   writeRunnerLedgerRow,
@@ -48,11 +48,11 @@ describe("persistRunEvent", () => {
     _resetRunMetricBroadcasterForTests();
     ctx = await createTestContext();
     await seedAgent({ id: agentId, orgId: ctx.orgId, createdBy: ctx.user.id });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, agentId);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, agentId);
     const run = await seedRun({
       packageId: agentId,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "running",
     });
@@ -61,13 +61,7 @@ describe("persistRunEvent", () => {
 
   /** Persist with the production defaults — notably `writeLedger` off. */
   function persist(e: RunEvent, opts: Parameters<typeof persistRunEvent>[4] = {}) {
-    return persistRunEvent(
-      db,
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      runId,
-      e,
-      opts,
-    );
+    return persistRunEvent(db, { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, runId, e, opts);
   }
 
   async function loadLogs() {
@@ -601,7 +595,7 @@ describe("persistRunEvent", () => {
           // The terminal ledger barrier — the run's last write, and this
           // producer's natural once-per-run hook.
           await writeRunnerLedgerRow(
-            { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+            { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
             runId,
             {
               cost: 3,
@@ -631,7 +625,7 @@ describe("persistRunEvent", () => {
         try {
           // Agreement: 100k×3/1e6 = 0.3, which is what the container reports.
           await writeRunnerLedgerRow(
-            { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+            { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
             runId,
             {
               cost: 0.3,
@@ -646,7 +640,7 @@ describe("persistRunEvent", () => {
           // Remote-origin: the reported number IS the recorded one, so there
           // are never two numbers to disagree.
           await writeRunnerLedgerRow(
-            { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+            { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
             runId,
             {
               cost: 99,

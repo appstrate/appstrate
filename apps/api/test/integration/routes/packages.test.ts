@@ -9,14 +9,14 @@ import {
   seedAgent,
   seedPackage,
   seedPackageVersion,
-  seedApplication,
+  seedSpace,
   seedInstalledPackage,
 } from "../../helpers/seed.ts";
 import {
   initSystemIntegrations,
   __resetSystemIntegrationsForTest,
 } from "../../../src/services/integration-client-registry.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import { assertDbMissing, assertDbHas } from "../../helpers/assertions.ts";
 import {
   mcpServerManifest,
@@ -66,10 +66,7 @@ describe("Packages API", () => {
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
-      await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        "@pkgorg/list-agent",
-      );
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@pkgorg/list-agent");
 
       const res = await app.request("/api/packages/agents", {
         headers: authHeaders(ctx),
@@ -135,10 +132,7 @@ describe("Packages API", () => {
         },
         draftContent: "# My Skill\nDo something useful.",
       });
-      await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        "@pkgorg/my-skill",
-      );
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@pkgorg/my-skill");
 
       const res = await app.request("/api/packages/skills", {
         headers: authHeaders(ctx),
@@ -168,7 +162,7 @@ describe("Packages API", () => {
         createdBy: ctx.user.id,
       });
       await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@pkgorg/detail-agent",
       );
 
@@ -191,7 +185,7 @@ describe("Packages API", () => {
         createdBy: ctx.user.id,
       });
       await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@pkgorg/encoded-detail-agent",
       );
 
@@ -211,7 +205,7 @@ describe("Packages API", () => {
         createdBy: ctx.user.id,
       });
       await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@pkgorg/versioned-agent",
       );
 
@@ -286,7 +280,7 @@ describe("Packages API", () => {
         draftContent: "# Detail Skill",
       });
       await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@pkgorg/detail-skill",
       );
 
@@ -313,7 +307,7 @@ describe("Packages API", () => {
       expect(body.detail).toBe("Skill '@pkgorg/nope' not found");
     });
 
-    it("returns 404 from custom app when skill is not installed", async () => {
+    it("returns 404 from custom space when skill is not installed", async () => {
       await seedPackage({
         id: "@pkgorg/hidden-skill",
         orgId: ctx.orgId,
@@ -323,25 +317,25 @@ describe("Packages API", () => {
           name: "@pkgorg/hidden-skill",
           version: "0.1.0",
           type: "skill",
-          description: "Hidden from custom app",
+          description: "Hidden from custom space",
         },
         draftContent: "# Hidden",
       });
 
-      const customApp = await seedApplication({
+      const customApp = await seedSpace({
         orgId: ctx.orgId,
         name: "Skill Custom",
         createdBy: ctx.user.id,
       });
 
       const res = await app.request("/api/packages/skills/@pkgorg/hidden-skill", {
-        headers: { ...authHeaders(ctx), "X-Application-Id": customApp.id },
+        headers: { ...authHeaders(ctx), "X-Space-Id": customApp.id },
       });
 
       expect(res.status).toBe(404);
     });
 
-    it("returns 200 from custom app when skill is installed", async () => {
+    it("returns 200 from custom space when skill is installed", async () => {
       await seedPackage({
         id: "@pkgorg/installed-skill",
         orgId: ctx.orgId,
@@ -351,23 +345,20 @@ describe("Packages API", () => {
           name: "@pkgorg/installed-skill",
           version: "0.1.0",
           type: "skill",
-          description: "Installed in custom app",
+          description: "Installed in custom space",
         },
         draftContent: "# Installed",
       });
 
-      const customApp = await seedApplication({
+      const customApp = await seedSpace({
         orgId: ctx.orgId,
         name: "Skill Installed",
         createdBy: ctx.user.id,
       });
-      await installPackage(
-        { orgId: ctx.orgId, applicationId: customApp.id },
-        "@pkgorg/installed-skill",
-      );
+      await installPackage({ orgId: ctx.orgId, spaceId: customApp.id }, "@pkgorg/installed-skill");
 
       const res = await app.request("/api/packages/skills/@pkgorg/installed-skill", {
-        headers: { ...authHeaders(ctx), "X-Application-Id": customApp.id },
+        headers: { ...authHeaders(ctx), "X-Space-Id": customApp.id },
       });
 
       expect(res.status).toBe(200);
@@ -549,7 +540,7 @@ describe("Packages API", () => {
       await seedPackage({ id: ENV_SYSTEM, orgId: null, type: "integration", source: "system" });
       await seedPackage({ id: PLAIN, orgId: ctx.orgId, type: "integration" });
       await seedPackage({ id: INSTALLED, orgId: ctx.orgId, type: "integration" });
-      await seedInstalledPackage(ctx.defaultAppId, INSTALLED, { enabled: true });
+      await seedInstalledPackage(ctx.defaultSpaceId, INSTALLED, { enabled: true });
     });
 
     afterEach(() => {
@@ -581,7 +572,7 @@ describe("Packages API", () => {
     });
 
     it("excludes a SYSTEM integration with a sticky explicit disable", async () => {
-      await seedInstalledPackage(ctx.defaultAppId, ENV_SYSTEM, { enabled: false });
+      await seedInstalledPackage(ctx.defaultSpaceId, ENV_SYSTEM, { enabled: false });
       const ids = await activeIds();
       expect(ids.has(ENV_SYSTEM)).toBe(false);
     });
@@ -2369,17 +2360,14 @@ describe("Packages API", () => {
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
-      await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        "@pkgorg/my-agent",
-      );
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@pkgorg/my-agent");
       await seedAgent({
         id: "@isolatedorg/their-agent",
         orgId: otherCtx.orgId,
         createdBy: otherCtx.user.id,
       });
       await installPackage(
-        { orgId: otherCtx.orgId, applicationId: otherCtx.defaultAppId },
+        { orgId: otherCtx.orgId, spaceId: otherCtx.defaultSpaceId },
         "@isolatedorg/their-agent",
       );
 
@@ -3142,7 +3130,7 @@ describe("Packages API", () => {
       // Pin the id the rest of the test reads its rows by — a change in how the
       // route derives it would otherwise surface as "row not found".
       expect(((await res.json()) as { id: string }).id).toBe(targetId);
-      // The route auto-installs the fork in the calling application, which is
+      // The route auto-installs the fork in the calling space, which is
       // what satisfies the explorer's `hasPackageAccess` gate below — so no
       // install of our own, which would 409 as `already_installed`. The `200`
       // asserted in `fileIndex` is the proof that it happened.
@@ -3164,7 +3152,7 @@ describe("Packages API", () => {
      * `loadFileExplorerPackage`). Inserting `integrations/` makes
      * `SCOPED_PACKAGE_ROUTE` fail to match `:scope{@…}` and Hono answers 404
      * before any handler runs — a routing miss that looks exactly like the
-     * app-install 404 this suite would otherwise be probing.
+     * space-install 404 this suite would otherwise be probing.
      */
     async function fileIndex(
       packageId: string,

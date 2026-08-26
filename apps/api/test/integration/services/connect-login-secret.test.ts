@@ -60,7 +60,7 @@ describe("LoginSecretStrategy.complete — store the secret, session pending", (
 
   function connectCtx(packageId: string): ConnectContext {
     return {
-      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
       authKey: "session",
@@ -121,7 +121,7 @@ describe("LoginSecretStrategy.complete — store the secret, session pending", (
     await expect(
       new LoginSecretStrategy().complete(
         {
-          scope: { orgId: "o", applicationId: "a" },
+          scope: { orgId: "o", spaceId: "a" },
           actor: { type: "user", id: "u" },
           integrationId: "@x/y",
           authKey: "session",

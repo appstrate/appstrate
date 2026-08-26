@@ -15,7 +15,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
-import { applicationPackages, integrationConnections } from "@appstrate/db/schema";
+import { spacePackages, integrationConnections } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { proxyCall } from "../../../src/services/credential-proxy/core.ts";
 import {
@@ -48,15 +48,15 @@ async function seedIntegrationWithConnection(ctx: TestContext): Promise<void> {
       },
     }),
   });
-  await db.insert(applicationPackages).values({
-    applicationId: ctx.defaultAppId,
+  await db.insert(spacePackages).values({
+    spaceId: ctx.defaultSpaceId,
     packageId: PACKAGE_ID,
   });
   await db.insert(integrationConnections).values({
     integrationId: PACKAGE_ID,
     authKey: "api",
     accountId: "acct-1",
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "ya29.live-token" } }),
     scopesGranted: [],
@@ -95,7 +95,7 @@ describe("proxyCall — response-size capping (integration-backed)", () => {
       )) as unknown as typeof fetch;
 
     const res = await proxyCall({
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: PACKAGE_ID,
       method: "GET",
@@ -124,7 +124,7 @@ describe("proxyCall — response-size capping (integration-backed)", () => {
       )) as unknown as typeof fetch;
 
     const res = await proxyCall({
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: PACKAGE_ID,
       method: "GET",

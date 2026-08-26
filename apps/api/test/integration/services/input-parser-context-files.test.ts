@@ -27,7 +27,7 @@ import type { AgentManifest } from "../../../src/types/index.ts";
 
 interface Scope {
   orgId: string;
-  applicationId: string;
+  spaceId: string;
 }
 
 function fakeCtx(scope: Scope, userId: string): Context {
@@ -35,8 +35,8 @@ function fakeCtx(scope: Scope, userId: string): Context {
     get: (key: string) =>
       key === "orgId"
         ? scope.orgId
-        : key === "applicationId"
-          ? scope.applicationId
+        : key === "spaceId"
+          ? scope.spaceId
           : key === "user"
             ? { id: userId }
             : undefined,
@@ -62,7 +62,7 @@ async function seedRunFile(
   await db.insert(runs).values({
     id: runId,
     orgId: scope.orgId,
-    applicationId: scope.applicationId,
+    spaceId: scope.spaceId,
     packageId: null,
     status: "success",
   });
@@ -87,7 +87,7 @@ describe("parseRequestInput — reserved context-files field", () => {
 
   it("streams every context file into the run workspace (heterogeneous mimes)", async () => {
     const ctx = await createTestContext({ orgSlug: "ctxdocs-ok" });
-    const scope: Scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope: Scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const jsonId = await seedRunFile(scope, {
       name: "research.json",
       mime: "application/json",
@@ -143,7 +143,7 @@ describe("parseRequestInput — reserved context-files field", () => {
    */
   it("materializes more files than the concurrency limit, each under its own name", async () => {
     const ctx = await createTestContext({ orgSlug: "ctxdocs-many" });
-    const scope: Scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope: Scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
 
     const COUNT = 9;
     const ids: string[] = [];
@@ -190,11 +190,11 @@ describe("parseRequestInput — reserved context-files field", () => {
     expect(parsed.consumedFileIds!.sort()).toEqual([...ids].sort());
   });
 
-  it("refuses a file from another application (container ACL preserved)", async () => {
+  it("refuses a file from another space (container ACL preserved)", async () => {
     const owner = await createTestContext({ orgSlug: "ctxdocs-owner" });
     const other = await createTestContext({ orgSlug: "ctxdocs-other" });
     const foreignId = await seedRunFile(
-      { orgId: owner.orgId, applicationId: owner.defaultAppId },
+      { orgId: owner.orgId, spaceId: owner.defaultSpaceId },
       { name: "secret.md", mime: "text/markdown", content: "classified" },
     );
 
@@ -202,7 +202,7 @@ describe("parseRequestInput — reserved context-files field", () => {
     const runId = `run_${crypto.randomUUID()}`;
     await expect(
       parseRequestInput(
-        fakeCtx({ orgId: other.orgId, applicationId: other.defaultAppId }, other.user.id),
+        fakeCtx({ orgId: other.orgId, spaceId: other.defaultSpaceId }, other.user.id),
         {},
         runId,
         asJSONSchemaObject(manifest.input!.schema),
@@ -221,7 +221,7 @@ describe("parseRequestInput — reserved context-files field", () => {
     ]);
     await expect(
       parseRequestInput(
-        fakeCtx({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, ctx.user.id),
+        fakeCtx({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, ctx.user.id),
         {},
         `run_${crypto.randomUUID()}`,
         asJSONSchemaObject(manifest.input!.schema),

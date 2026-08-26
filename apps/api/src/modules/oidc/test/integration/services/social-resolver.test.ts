@@ -5,6 +5,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { prefixedId } from "../../../../../lib/ids.ts";
 import { db } from "@appstrate/db/client";
 import {
   user as userTable,
@@ -37,7 +38,7 @@ async function seedSpace(): Promise<string> {
       createdBy: ownerId,
     })
     .returning();
-  const spaceId = `spc_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  const spaceId = prefixedId("spc");
   await db.insert(spaces).values({
     id: spaceId,
     orgId: org!.id,

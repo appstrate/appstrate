@@ -23,6 +23,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { prefixedId } from "../../../../../lib/ids.ts";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { getAuth } from "@appstrate/db/auth";
@@ -67,7 +68,7 @@ async function setupSpaceClient(opts: { smtp: boolean }): Promise<{
     .returning();
   await db.insert(organizationMembers).values({ orgId: org!.id, userId: ownerId, role: "owner" });
 
-  const spaceId = `spc_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
+  const spaceId = prefixedId("spc");
   await db.insert(spaces).values({
     id: spaceId,
     orgId: org!.id,

@@ -5,7 +5,7 @@
  *
  * Every `GET` under `/api/packages` used to be gated on `hasPackageAccess`
  * alone — a visibility check ("is this package a system package, or installed
- * in THIS application?"), never an authorization one. A credential scoped
+ * in THIS space?"), never an authorization one. A credential scoped
  * without `skills:read` could therefore read a skill's manifest AND its full
  * `SKILL.md` through the detail route, and pull the published ZIP through
  * `/{version}/download`.
@@ -30,7 +30,7 @@
 
 import { describe, it, expect, beforeEach, beforeAll } from "bun:test";
 import { eq } from "drizzle-orm";
-import { applicationPackages } from "@appstrate/db/schema";
+import { spacePackages } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
@@ -119,7 +119,7 @@ describe("packages GET routes — read permission", () => {
       },
       draftContent: SKILL_BODY,
     });
-    await seedInstalledPackage(ctx.defaultAppId, SKILL_ID);
+    await seedInstalledPackage(ctx.defaultSpaceId, SKILL_ID);
     await seedPackageVersion({
       packageId: SKILL_ID,
       version: "0.1.0",
@@ -131,7 +131,7 @@ describe("packages GET routes — read permission", () => {
   async function keyWithoutSkillsRead(): Promise<string> {
     const key = await seedApiKey({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
       scopes: ["runs:read"],
     });
@@ -141,7 +141,7 @@ describe("packages GET routes — read permission", () => {
   async function keyWithSkillsRead(): Promise<string> {
     const key = await seedApiKey({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
       scopes: ["skills:read"],
     });
@@ -196,11 +196,11 @@ describe("packages GET routes — read permission", () => {
     // the point. Reading the agent is still allowed with the same key.
     const agentId = "@testorg/read-guard-agent";
     await seedPackage({ id: agentId, type: "agent", orgId: ctx.orgId, createdBy: ctx.user.id });
-    await seedInstalledPackage(ctx.defaultAppId, agentId);
+    await seedInstalledPackage(ctx.defaultSpaceId, agentId);
 
     const key = await seedApiKey({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
       scopes: ["agents:read"],
     });
@@ -227,11 +227,11 @@ describe("packages version download — access + read permission", () => {
 
   it("403s a download for a key without the package type's read scope", async () => {
     await publishSkill(ctx);
-    await seedInstalledPackage(ctx.defaultAppId, SKILL_ID);
+    await seedInstalledPackage(ctx.defaultSpaceId, SKILL_ID);
 
     const key = await seedApiKey({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
       scopes: ["runs:read"],
     });
@@ -244,11 +244,11 @@ describe("packages version download — access + read permission", () => {
 
   it("serves the artifact to a key holding skills:read", async () => {
     await publishSkill(ctx);
-    await seedInstalledPackage(ctx.defaultAppId, SKILL_ID);
+    await seedInstalledPackage(ctx.defaultSpaceId, SKILL_ID);
 
     const key = await seedApiKey({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
       scopes: ["skills:read"],
     });
@@ -260,7 +260,7 @@ describe("packages version download — access + read permission", () => {
     expect((await res.arrayBuffer()).byteLength).toBeGreaterThan(0);
   });
 
-  it("404s a download for a package that is not installed in the calling application", async () => {
+  it("404s a download for a package that is not installed in the calling space", async () => {
     // Pre-fix this route resolved the row with `orgOrSystemFilter` alone and
     // never called `hasPackageAccess`, so it served artifact bytes for
     // packages the `/files` routes correctly hide. Permission is held here
@@ -298,7 +298,7 @@ describe("packages file explorer — read permission", () => {
   async function keyWithScopes(scopes: string[]): Promise<string> {
     const key = await seedApiKey({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
       scopes,
     });
@@ -309,7 +309,7 @@ describe("packages file explorer — read permission", () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "testorg" });
     await publishSkill(ctx);
-    await seedInstalledPackage(ctx.defaultAppId, SKILL_ID);
+    await seedInstalledPackage(ctx.defaultSpaceId, SKILL_ID);
   });
 
   it("403s the index and the file bytes for a key without skills:read", async () => {
@@ -401,11 +401,11 @@ describe("packages file explorer — read permission", () => {
     expect(res.status).toBe(403);
   });
 
-  it("still 404s (not 403s) a package the calling application cannot see", async () => {
+  it("still 404s (not 403s) a package the calling space cannot see", async () => {
     // Visibility is settled first and deliberately: the RBAC resource comes
     // from the row, so `hasPackageAccess` has to run before the type is known.
     // Same order as `/{version}/download` — permission is held here.
-    await db.delete(applicationPackages).where(eq(applicationPackages.packageId, SKILL_ID));
+    await db.delete(spacePackages).where(eq(spacePackages.packageId, SKILL_ID));
 
     const res = await app.request(`/api/packages/${SKILL_ID}/files`, {
       headers: authHeaders(ctx),

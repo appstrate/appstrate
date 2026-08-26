@@ -53,7 +53,7 @@ async function seedCancellableRun(
     id: runId,
     packageId,
     orgId: ctx.orgId,
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     status: overrides.status ?? "running",
     runOrigin: "platform",
     sinkSecretEncrypted: encrypt(RUN_SECRET),
@@ -155,7 +155,7 @@ describe("POST /api/runs/:id/cancel — terminal-state convergence", () => {
     const params = spy.lastParams()!;
     expect(params.runId).toBe(runId);
     expect(params.orgId).toBe(ctx.orgId);
-    expect(params.applicationId).toBe(ctx.defaultAppId);
+    expect(params.spaceId).toBe(ctx.defaultSpaceId);
     expect(params.status).toBe("cancelled");
     expect(params.modelSource).toBe("system");
     // Cost rounded — `runs.cost` is doublePrecision, llm_usage stores the

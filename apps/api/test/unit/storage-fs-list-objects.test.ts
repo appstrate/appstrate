@@ -33,26 +33,26 @@ describe("filesystem listObjects", () => {
   });
 
   it("yields every object's in-bucket key (POSIX-separated) with its size", async () => {
-    await storage.uploadFile("files", "app1/doc1/a.txt", new TextEncoder().encode("hello"));
-    await storage.uploadFile("files", "app1/doc2/b.txt", new TextEncoder().encode("world!!"));
-    await storage.uploadFile("files", "app2/doc3/c.bin", new Uint8Array([1, 2, 3]));
+    await storage.uploadFile("files", "spc1/doc1/a.txt", new TextEncoder().encode("hello"));
+    await storage.uploadFile("files", "spc1/doc2/b.txt", new TextEncoder().encode("world!!"));
+    await storage.uploadFile("files", "spc2/doc3/c.bin", new Uint8Array([1, 2, 3]));
 
     const objects = await collect(storage.listObjects("files"));
     expect(objects.map((o) => o.key)).toEqual([
-      "app1/doc1/a.txt",
-      "app1/doc2/b.txt",
-      "app2/doc3/c.bin",
+      "spc1/doc1/a.txt",
+      "spc1/doc2/b.txt",
+      "spc2/doc3/c.bin",
     ]);
     // Sizes are the byte lengths written.
     const byKey = new Map(objects.map((o) => [o.key, o.size]));
-    expect(byKey.get("app1/doc1/a.txt")).toBe(5);
-    expect(byKey.get("app1/doc2/b.txt")).toBe(7);
-    expect(byKey.get("app2/doc3/c.bin")).toBe(3);
+    expect(byKey.get("spc1/doc1/a.txt")).toBe(5);
+    expect(byKey.get("spc1/doc2/b.txt")).toBe(7);
+    expect(byKey.get("spc2/doc3/c.bin")).toBe(3);
   });
 
   it("reports each object's last-modified time (stat mtime)", async () => {
     const before = Date.now();
-    await storage.uploadFile("files", "app1/doc1/a.txt", new TextEncoder().encode("hello"));
+    await storage.uploadFile("files", "spc1/doc1/a.txt", new TextEncoder().encode("hello"));
     const after = Date.now();
 
     const [obj] = await collect(storage.listObjects("files"));
@@ -64,11 +64,11 @@ describe("filesystem listObjects", () => {
   });
 
   it("filters to the given in-bucket prefix", async () => {
-    await storage.uploadFile("files", "app1/x.txt", new TextEncoder().encode("x"));
-    await storage.uploadFile("files", "app2/y.txt", new TextEncoder().encode("y"));
+    await storage.uploadFile("files", "spc1/x.txt", new TextEncoder().encode("x"));
+    await storage.uploadFile("files", "spc2/y.txt", new TextEncoder().encode("y"));
 
-    const only1 = await collect(storage.listObjects("files", "app1/"));
-    expect(only1.map((o) => o.key)).toEqual(["app1/x.txt"]);
+    const only1 = await collect(storage.listObjects("files", "spc1/"));
+    expect(only1.map((o) => o.key)).toEqual(["spc1/x.txt"]);
   });
 
   it("yields nothing for a bucket that was never written to", async () => {
@@ -77,7 +77,7 @@ describe("filesystem listObjects", () => {
   });
 
   it("round-trips: a listed key is deletable via deleteFile", async () => {
-    await storage.uploadFile("files", "app1/doc1/a.txt", new TextEncoder().encode("hello"));
+    await storage.uploadFile("files", "spc1/doc1/a.txt", new TextEncoder().encode("hello"));
     const [obj] = await collect(storage.listObjects("files"));
     await storage.deleteFile("files", obj!.key);
     expect(await collect(storage.listObjects("files"))).toEqual([]);

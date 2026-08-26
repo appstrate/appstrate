@@ -27,7 +27,7 @@ import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { flushRedis } from "../../helpers/redis.ts";
 import { seedApiKey, seedPackage } from "../../helpers/seed.ts";
-import { applicationPackages, integrationConnections } from "@appstrate/db/schema";
+import { spacePackages, integrationConnections } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
@@ -86,9 +86,9 @@ async function seedIntegrationWithConnection(ctx: TestContext): Promise<void> {
     source: "local",
     draftManifest: gmailManifest(),
   });
-  // Activate the integration in the default application.
-  await db.insert(applicationPackages).values({
-    applicationId: ctx.defaultAppId,
+  // Activate the integration in the default space.
+  await db.insert(spacePackages).values({
+    spaceId: ctx.defaultSpaceId,
     packageId: INTEGRATION_ID,
   });
   // A live connection owned by the API key's owner (the resolved actor).
@@ -96,7 +96,7 @@ async function seedIntegrationWithConnection(ctx: TestContext): Promise<void> {
     integrationId: INTEGRATION_ID,
     authKey: "api",
     accountId: "acct-1",
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "ya29.live-token" } }),
     scopesGranted: [],
@@ -108,7 +108,7 @@ async function seedIntegrationWithConnection(ctx: TestContext): Promise<void> {
 async function mintProxyKey(ctx: TestContext): Promise<string> {
   const key = await seedApiKey({
     orgId: ctx.orgId,
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     createdBy: ctx.user.id,
     scopes: ["credential-proxy:call"],
   });
@@ -140,7 +140,7 @@ describe("POST /api/credential-proxy/proxy — header validation", () => {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "X-Org-Id": ctx.orgId,
-        "X-Application-Id": ctx.defaultAppId,
+        "X-Space-Id": ctx.defaultSpaceId,
         "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
         "X-Session-Id": uuidV4(),
       },
@@ -156,7 +156,7 @@ describe("POST /api/credential-proxy/proxy — header validation", () => {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "X-Org-Id": ctx.orgId,
-        "X-Application-Id": ctx.defaultAppId,
+        "X-Space-Id": ctx.defaultSpaceId,
         "X-Integration-Id": INTEGRATION_ID,
         "X-Session-Id": uuidV4(),
       },
@@ -172,7 +172,7 @@ describe("POST /api/credential-proxy/proxy — header validation", () => {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "X-Org-Id": ctx.orgId,
-        "X-Application-Id": ctx.defaultAppId,
+        "X-Space-Id": ctx.defaultSpaceId,
         "X-Integration-Id": INTEGRATION_ID,
         "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
         "X-Session-Id": "not-a-uuid",
@@ -214,7 +214,7 @@ describe("POST /api/credential-proxy/proxy — session-principal rebind guard", 
     const baseHeaders = (apiKey: string) => ({
       Authorization: `Bearer ${apiKey}`,
       "X-Org-Id": ctx.orgId,
-      "X-Application-Id": ctx.defaultAppId,
+      "X-Space-Id": ctx.defaultSpaceId,
       "X-Integration-Id": INTEGRATION_ID,
       "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
       "X-Session-Id": sessionId,
@@ -257,7 +257,7 @@ describe("POST /api/credential-proxy/proxy — session-principal rebind guard", 
     const headers = {
       Authorization: `Bearer ${apiKey}`,
       "X-Org-Id": ctx.orgId,
-      "X-Application-Id": ctx.defaultAppId,
+      "X-Space-Id": ctx.defaultSpaceId,
       "X-Integration-Id": INTEGRATION_ID,
       "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
       "X-Session-Id": sessionId,
@@ -295,7 +295,7 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "X-Org-Id": ctx.orgId,
-        "X-Application-Id": ctx.defaultAppId,
+        "X-Space-Id": ctx.defaultSpaceId,
         // Integration is never seeded / installed → resolver throws
         // IntegrationCredentialNotFoundError → ProxyCredentialError → 404.
         "X-Integration-Id": "@cporg/missing",
@@ -316,8 +316,8 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
       source: "local",
       draftManifest: gmailManifest(),
     });
-    await db.insert(applicationPackages).values({
-      applicationId: ctx.defaultAppId,
+    await db.insert(spacePackages).values({
+      spaceId: ctx.defaultSpaceId,
       packageId: INTEGRATION_ID,
     });
 
@@ -332,7 +332,7 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "X-Org-Id": ctx.orgId,
-        "X-Application-Id": ctx.defaultAppId,
+        "X-Space-Id": ctx.defaultSpaceId,
         "X-Integration-Id": INTEGRATION_ID,
         "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
         "X-Session-Id": uuidV4(),
@@ -342,8 +342,8 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
     expect(upstreamCalls).toBe(0);
   });
 
-  it("maps an integration not activated in the application to 404 (not 500)", async () => {
-    // Package exists in the org but is NOT inserted into applicationPackages,
+  it("maps an integration not activated in the space to 404 (not 500)", async () => {
+    // Package exists in the org but is NOT inserted into spacePackages,
     // so assertIntegrationActive throws an RFC 9457 notFound (an ApiError, not
     // a ProxyCredentialError). The route's catch must surface its 404 status
     // rather than masking it as a 500.
@@ -366,7 +366,7 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "X-Org-Id": ctx.orgId,
-        "X-Application-Id": ctx.defaultAppId,
+        "X-Space-Id": ctx.defaultSpaceId,
         "X-Integration-Id": INTEGRATION_ID,
         "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
         "X-Session-Id": uuidV4(),
@@ -390,7 +390,7 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "X-Org-Id": ctx.orgId,
-        "X-Application-Id": ctx.defaultAppId,
+        "X-Space-Id": ctx.defaultSpaceId,
         "X-Integration-Id": INTEGRATION_ID,
         // Off the `https://gmail.googleapis.com/**` allowlist → blocked.
         "X-Target": "https://evil.example.com/exfil",
@@ -436,7 +436,7 @@ describe("POST /api/credential-proxy/proxy — cookie-session rejection (ACCEPTE
         // Cookie session (NOT a Bearer api_key) → authMethod = "session".
         Cookie: ctx.cookie,
         "X-Org-Id": ctx.orgId,
-        "X-Application-Id": ctx.defaultAppId,
+        "X-Space-Id": ctx.defaultSpaceId,
         "X-Integration-Id": INTEGRATION_ID,
         "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
         "X-Session-Id": uuidV4(),
@@ -507,7 +507,7 @@ describe("POST /api/credential-proxy/proxy — response capping (X-Truncated hea
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "X-Org-Id": ctx.orgId,
-        "X-Application-Id": ctx.defaultAppId,
+        "X-Space-Id": ctx.defaultSpaceId,
         "X-Integration-Id": INTEGRATION_ID,
         "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
         "X-Session-Id": uuidV4(),
@@ -535,7 +535,7 @@ describe("POST /api/credential-proxy/proxy — response capping (X-Truncated hea
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "X-Org-Id": ctx.orgId,
-        "X-Application-Id": ctx.defaultAppId,
+        "X-Space-Id": ctx.defaultSpaceId,
         "X-Integration-Id": INTEGRATION_ID,
         "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
         "X-Session-Id": uuidV4(),

@@ -66,12 +66,12 @@ async function seedDoc(
   const docId = `file_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
   const bytes = new TextEncoder().encode(opts.body ?? HTML);
   const safeName = "page.html";
-  const storagePath = `${ctx.defaultAppId}/${docId}/${safeName}`;
+  const storagePath = `${ctx.defaultSpaceId}/${docId}/${safeName}`;
   await uploadStream("files", storagePath, new Blob([bytes]).stream(), { exclusive: true });
   await db.insert(files).values({
     id: docId,
     orgId: opts.orgId ?? ctx.orgId,
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     purpose: opts.purpose ?? "agent_output",
     userId: opts.userId ?? null,
     endUserId: opts.endUserId ?? null,
@@ -317,7 +317,7 @@ describe("GET /preview/files/:id — hardened HTML preview", () => {
   // Same S1 gate down the `eu` (end-user creator) branch of actorFromIds — an
   // end-user's own upload, previewable only when the token binds THAT end-user.
   it("refuses an end-user user_upload preview whose token is bound to a DIFFERENT end-user (401)", async () => {
-    const eu = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+    const eu = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
     const docId = await seedDoc(ctx, { purpose: "user_upload", endUserId: eu.id });
     const token = mintToken(docId, ctx.orgId, nowSec() + 300, { eu: `eu_${crypto.randomUUID()}` });
     const res = await app.request(`/preview/files/${docId}?t=${encodeURIComponent(token)}`);
@@ -325,7 +325,7 @@ describe("GET /preview/files/:id — hardened HTML preview", () => {
   });
 
   it("serves an end-user user_upload preview when the token is bound to that end-user (200)", async () => {
-    const eu = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+    const eu = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
     const docId = await seedDoc(ctx, { purpose: "user_upload", endUserId: eu.id });
     const token = mintToken(docId, ctx.orgId, nowSec() + 300, { eu: eu.id });
     const res = await app.request(`/preview/files/${docId}?t=${encodeURIComponent(token)}`);

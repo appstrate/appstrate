@@ -29,7 +29,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import { integrationConnections, organizationMembers } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
@@ -60,7 +60,7 @@ describe("GET /api/integrations/:packageId/connections — own ∪ org-shared", 
     return {
       Cookie: other.cookie,
       "X-Org-Id": ctx.orgId,
-      "X-Application-Id": ctx.defaultAppId,
+      "X-Space-Id": ctx.defaultSpaceId,
     };
   }
 
@@ -76,7 +76,7 @@ describe("GET /api/integrations/:packageId/connections — own ∪ org-shared", 
         integrationId: INTEGRATION,
         authKey: "primary",
         accountId: opts.accountId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: opts.userId,
         endUserId: null,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
@@ -131,7 +131,7 @@ describe("GET /api/integrations/:packageId/connections — own ∪ org-shared", 
         tools_policy: { search: {} },
       }),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INTEGRATION);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
   });
 
   it("returns another member's SHARED connection", async () => {

@@ -31,7 +31,7 @@ import {
   type StrictAuthorizationServer,
   type StrictAuthorizationServerOptions,
 } from "../../helpers/strict-authorization-server.ts";
-import { applicationPackages, integrationConnections } from "@appstrate/db/schema";
+import { spacePackages, integrationConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { decryptCredentialsToStringMap } from "@appstrate/connect";
 import {
@@ -100,9 +100,7 @@ async function setup(
       },
     }),
   });
-  await db
-    .insert(applicationPackages)
-    .values({ applicationId: ctx.defaultAppId, packageId: INTEGRATION });
+  await db.insert(spacePackages).values({ spaceId: ctx.defaultSpaceId, packageId: INTEGRATION });
 
   // A secret-less registration must DECLARE itself public: the route refuses a
   // missing/blank `client_secret` under any other method rather than inferring
@@ -174,7 +172,7 @@ async function refresh(ctx: TestContext, connectionId: string): Promise<void> {
       .limit(1)
   )[0]!;
   const { auth } = await readIntegrationAuth(
-    { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+    { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
     INTEGRATION,
     AUTH_KEY,
   );
@@ -182,7 +180,7 @@ async function refresh(ctx: TestContext, connectionId: string): Promise<void> {
     INTEGRATION,
     AUTH_KEY,
     auth as AfpsManifestAuth,
-    ctx.defaultAppId,
+    ctx.defaultSpaceId,
     row.clientRef,
   );
   expect(context).not.toBeNull();

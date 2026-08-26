@@ -96,7 +96,7 @@ async function seedRunWithSink(
     id: runId,
     packageId,
     orgId: ctx.orgId,
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     status: overrides.status ?? "running",
     ...(overrides.versionRef !== undefined ? { versionRef: overrides.versionRef } : {}),
     runOrigin: "platform",
@@ -715,7 +715,7 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     expect(row?.artifacts).toEqual(artifacts);
 
     // The run DTO exposes `artifacts` snake_case (field + inner keys).
-    const dto = await getRunFull({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, runId);
+    const dto = await getRunFull({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, runId);
     expect(dto?.artifacts).toEqual(artifacts);
   });
 
@@ -1794,7 +1794,7 @@ describe("runs liveness — unified last_heartbeat_at bumps", () => {
       id: runId,
       packageId: "@test/beat-agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "running",
       runOrigin: "remote",
       sinkSecretEncrypted: (await import("@appstrate/connect")).encrypt(RUN_SECRET),
@@ -1826,7 +1826,7 @@ describe("runs liveness — unified last_heartbeat_at bumps", () => {
       id: runId,
       packageId: "@test/beat-agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "running",
       runOrigin: "remote",
       sinkSecretEncrypted: (await import("@appstrate/connect")).encrypt(RUN_SECRET),
@@ -1865,7 +1865,7 @@ describe("runs liveness — unified last_heartbeat_at bumps", () => {
       id: runId,
       packageId: "@test/beat-agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "running",
       runOrigin: "remote",
       sinkSecretEncrypted: (await import("@appstrate/connect")).encrypt(RUN_SECRET),
@@ -1970,7 +1970,7 @@ describe("remote run.started — emitted at first event, not at row insert", () 
       id: runId,
       packageId: "@test/started-agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "pending",
       runOrigin: "remote",
       sinkSecretEncrypted: encrypt(RUN_SECRET),

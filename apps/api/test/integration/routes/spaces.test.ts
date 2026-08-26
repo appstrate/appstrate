@@ -7,18 +7,18 @@ import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import {
   seedApiKey,
-  seedApplication,
+  seedSpace,
   seedPackage,
   seedInstalledPackage,
   seedOrgModel,
   seedOrgModelProviderOAuth,
 } from "../../helpers/seed.ts";
 import { assertDbMissing } from "../../helpers/assertions.ts";
-import { applications, applicationPackages } from "@appstrate/db/schema";
+import { spaces, spacePackages, auditEvents } from "@appstrate/db/schema";
 
 const app = getTestApp();
 
-describe("Applications API", () => {
+describe("Spaces API", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
@@ -26,9 +26,9 @@ describe("Applications API", () => {
     ctx = await createTestContext({ orgSlug: "testorg" });
   });
 
-  describe("GET /api/applications", () => {
-    it("lists applications including the default app from createTestContext", async () => {
-      const res = await app.request("/api/applications", {
+  describe("GET /api/spaces", () => {
+    it("lists spaces including the default space from createTestContext", async () => {
+      const res = await app.request("/api/spaces", {
         headers: authHeaders(ctx),
       });
 
@@ -38,57 +38,86 @@ describe("Applications API", () => {
       expect(body.data).toBeArray();
       expect(body.data.length).toBeGreaterThanOrEqual(1);
 
-      const defaultApp = body.data.find((a: { id: string }) => a.id === ctx.defaultAppId);
-      expect(defaultApp).toBeDefined();
-      expect(defaultApp.object).toBe("application");
+      const defaultSpace = body.data.find((a: { id: string }) => a.id === ctx.defaultSpaceId);
+      expect(defaultSpace).toBeDefined();
+      expect(defaultSpace.object).toBe("space");
     });
 
     it("returns 401 without authentication", async () => {
-      const res = await app.request("/api/applications");
+      const res = await app.request("/api/spaces");
       expect(res.status).toBe(401);
     });
   });
 
-  describe("POST /api/applications", () => {
-    it("creates an application", async () => {
-      const res = await app.request("/api/applications", {
+  describe("POST /api/spaces", () => {
+    it("creates a space", async () => {
+      const res = await app.request("/api/spaces", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "My New App" }),
+        body: JSON.stringify({ name: "My New Space" }),
       });
 
       expect(res.status).toBe(201);
       const body = (await res.json()) as any;
-      expect(body.object).toBe("application");
-      expect(body.name).toBe("My New App");
+      expect(body.object).toBe("space");
+      expect(body.name).toBe("My New Space");
       expect(body.id).toBeDefined();
+    });
+
+    // The audit row's `action` and `resource_type` are PERSISTED vocabulary —
+    // rows written before the rename still say `application.created` and the
+    // operator rewrite script matches on these exact strings. Nothing else in
+    // the core suite pins them, so a silent drift here would only surface as an
+    // unrewritable audit trail long after the deploy.
+    it("records the audit event under the `space` vocabulary", async () => {
+      const res = await app.request("/api/spaces", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Audited" }),
+      });
+      expect(res.status).toBe(201);
+      const created = (await res.json()) as { id: string };
+
+      const [row] = await db
+        .select({
+          action: auditEvents.action,
+          resourceType: auditEvents.resourceType,
+          resourceId: auditEvents.resourceId,
+        })
+        .from(auditEvents)
+        .where(eq(auditEvents.resourceId, created.id));
+      expect(row).toEqual({
+        action: "space.created",
+        resourceType: "space",
+        resourceId: created.id,
+      });
     });
   });
 
-  describe("GET /api/applications/:id", () => {
-    it("returns an application by ID", async () => {
-      const res = await app.request(`/api/applications/${ctx.defaultAppId}`, {
+  describe("GET /api/spaces/:id", () => {
+    it("returns a space by ID", async () => {
+      const res = await app.request(`/api/spaces/${ctx.defaultSpaceId}`, {
         headers: authHeaders(ctx),
       });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.object).toBe("application");
-      expect(body.id).toBe(ctx.defaultAppId);
+      expect(body.object).toBe("space");
+      expect(body.id).toBe(ctx.defaultSpaceId);
     });
   });
 
-  describe("PATCH /api/applications/:id", () => {
-    it("updates application name", async () => {
-      // Create a non-default app to update
-      const createRes = await app.request("/api/applications", {
+  describe("PATCH /api/spaces/:id", () => {
+    it("updates space name", async () => {
+      // Create a non-default space to update
+      const createRes = await app.request("/api/spaces", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ name: "Original Name" }),
       });
       const created = (await createRes.json()) as any;
 
-      const res = await app.request(`/api/applications/${created.id}`, {
+      const res = await app.request(`/api/spaces/${created.id}`, {
         method: "PATCH",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ name: "Updated Name" }),
@@ -96,22 +125,22 @@ describe("Applications API", () => {
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
-      expect(body.object).toBe("application");
+      expect(body.object).toBe("space");
       expect(body.name).toBe("Updated Name");
     });
   });
 
-  describe("DELETE /api/applications/:id", () => {
-    it("deletes an application and returns 204", async () => {
-      // Create a non-default app to delete
-      const createRes = await app.request("/api/applications", {
+  describe("DELETE /api/spaces/:id", () => {
+    it("deletes a space and returns 204", async () => {
+      // Create a non-default space to delete
+      const createRes = await app.request("/api/spaces", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ name: "To Delete" }),
       });
       const created = (await createRes.json()) as any;
 
-      const res = await app.request(`/api/applications/${created.id}`, {
+      const res = await app.request(`/api/spaces/${created.id}`, {
         method: "DELETE",
         headers: authHeaders(ctx),
       });
@@ -119,7 +148,7 @@ describe("Applications API", () => {
       expect(res.status).toBe(204);
 
       // Verify it is gone from the list
-      const listRes = await app.request("/api/applications", {
+      const listRes = await app.request("/api/spaces", {
         headers: authHeaders(ctx),
       });
       const listBody = (await listRes.json()) as any;
@@ -128,94 +157,89 @@ describe("Applications API", () => {
     });
   });
 
-  // Issue #172 (extension) — API keys are application-scoped, but the
-  // applications router only filtered by orgId. A key bound to App A could
-  // therefore enumerate, read, mutate, and delete every App B in the same
-  // org. These tests pin the cross-app surface.
-  describe("API key application scope (issue #172 extension)", () => {
-    async function setupTwoAppKey() {
-      const sharedCtx = await createTestContext({ orgSlug: "appscope-172" });
-      const otherApp = await seedApplication({
+  // Issue #172 (extension) — API keys are space-scoped, but the
+  // spaces router only filtered by orgId. A key bound to Space A could
+  // therefore enumerate, read, mutate, and delete every Space B in the same
+  // org. These tests pin the cross-space surface.
+  describe("API key space scope (issue #172 extension)", () => {
+    async function setupTwoSpaceKey() {
+      const sharedCtx = await createTestContext({ orgSlug: "spacescope-172" });
+      const otherSpace = await seedSpace({
         orgId: sharedCtx.orgId,
-        name: "Other App",
+        name: "Other Space",
       });
       const apiKey = await seedApiKey({
         orgId: sharedCtx.orgId,
-        applicationId: sharedCtx.defaultAppId,
+        spaceId: sharedCtx.defaultSpaceId,
         createdBy: sharedCtx.user.id,
-        scopes: [
-          "applications:read",
-          "applications:write",
-          "applications:delete",
-          "integrations:read",
-        ],
+        scopes: ["spaces:read", "spaces:write", "spaces:delete", "integrations:read"],
       });
       return {
         ctx: sharedCtx,
-        otherAppId: otherApp.id,
+        otherSpaceId: otherSpace.id,
         bearer: { Authorization: `Bearer ${apiKey.rawKey}` },
       };
     }
 
-    it("GET /api/applications returns only the key's app", async () => {
-      const { ctx, otherAppId, bearer } = await setupTwoAppKey();
-      const res = await app.request("/api/applications", { headers: bearer });
+    it("GET /api/spaces returns only the key's space", async () => {
+      const { ctx, otherSpaceId, bearer } = await setupTwoSpaceKey();
+      const res = await app.request("/api/spaces", { headers: bearer });
       expect(res.status).toBe(200);
       const body = (await res.json()) as { data: { id: string }[] };
       const ids = body.data.map((a) => a.id);
-      expect(ids).toContain(ctx.defaultAppId);
-      expect(ids).not.toContain(otherAppId);
+      expect(ids).toContain(ctx.defaultSpaceId);
+      expect(ids).not.toContain(otherSpaceId);
       expect(body.data).toHaveLength(1);
     });
 
-    it("GET /api/applications/:otherAppId returns 403", async () => {
-      const { otherAppId, bearer } = await setupTwoAppKey();
-      const res = await app.request(`/api/applications/${otherAppId}`, { headers: bearer });
+    it("GET /api/spaces/:otherSpaceId returns 403", async () => {
+      const { otherSpaceId, bearer } = await setupTwoSpaceKey();
+      const res = await app.request(`/api/spaces/${otherSpaceId}`, { headers: bearer });
       expect(res.status).toBe(403);
     });
 
-    it("PATCH /api/applications/:otherAppId returns 403 and does not mutate", async () => {
-      const { otherAppId, bearer } = await setupTwoAppKey();
-      const res = await app.request(`/api/applications/${otherAppId}`, {
+    it("PATCH /api/spaces/:otherSpaceId returns 403 and does not mutate", async () => {
+      const { otherSpaceId, bearer } = await setupTwoSpaceKey();
+      const res = await app.request(`/api/spaces/${otherSpaceId}`, {
         method: "PATCH",
         headers: { ...bearer, "Content-Type": "application/json" },
         body: JSON.stringify({ name: "PWNED" }),
       });
       expect(res.status).toBe(403);
       const [row] = await db
-        .select({ name: applications.name })
-        .from(applications)
-        .where(eq(applications.id, otherAppId));
+        .select({ name: spaces.name })
+        .from(spaces)
+        .where(eq(spaces.id, otherSpaceId));
       expect(row?.name).not.toBe("PWNED");
     });
 
-    it("DELETE /api/applications/:otherAppId returns 403 and app survives", async () => {
-      const { otherAppId, bearer } = await setupTwoAppKey();
-      const res = await app.request(`/api/applications/${otherAppId}`, {
+    it("DELETE /api/spaces/:otherSpaceId returns 403 and the space survives", async () => {
+      const { otherSpaceId, bearer } = await setupTwoSpaceKey();
+      const res = await app.request(`/api/spaces/${otherSpaceId}`, {
         method: "DELETE",
         headers: bearer,
       });
       expect(res.status).toBe(403);
       const rows = await db
-        .select({ id: applications.id })
-        .from(applications)
-        .where(eq(applications.id, otherAppId));
+        .select({ id: spaces.id })
+        .from(spaces)
+        .where(eq(spaces.id, otherSpaceId));
       expect(rows).toHaveLength(1);
     });
 
-    it("POST /api/applications returns 403 — API keys cannot create apps", async () => {
-      const { bearer } = await setupTwoAppKey();
-      const res = await app.request("/api/applications", {
+    it("POST /api/spaces returns 403 — API keys cannot create spaces", async () => {
+      const { bearer } = await setupTwoSpaceKey();
+      const res = await app.request("/api/spaces", {
         method: "POST",
         headers: { ...bearer, "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "Pwn App" }),
+        body: JSON.stringify({ name: "Pwn Space" }),
       });
       expect(res.status).toBe(403);
     });
 
-    it("POST /api/applications/:otherAppId/packages returns 403", async () => {
-      const { otherAppId, bearer } = await setupTwoAppKey();
-      const res = await app.request(`/api/applications/${otherAppId}/packages`, {
+    it("POST /api/spaces/:otherSpaceId/packages returns 403", async () => {
+      const { otherSpaceId, bearer } = await setupTwoSpaceKey();
+      const res = await app.request(`/api/spaces/${otherSpaceId}/packages`, {
         method: "POST",
         headers: { ...bearer, "Content-Type": "application/json" },
         body: JSON.stringify({ packageId: "@x/y" }),
@@ -223,11 +247,11 @@ describe("Applications API", () => {
       expect(res.status).toBe(403);
     });
 
-    it("DELETE /api/applications/:keyAppId is allowed (own scope)", async () => {
-      const { ctx, bearer } = await setupTwoAppKey();
+    it("DELETE /api/spaces/:keySpaceId is allowed (own scope)", async () => {
+      const { ctx, bearer } = await setupTwoSpaceKey();
       // Just confirm the guard does not block — actual delete may 4xx for
-      // default-app constraints, but it must not be 403 from the guard.
-      const res = await app.request(`/api/applications/${ctx.defaultAppId}`, {
+      // default-space constraints, but it must not be 403 from the guard.
+      const res = await app.request(`/api/spaces/${ctx.defaultSpaceId}`, {
         method: "DELETE",
         headers: bearer,
       });
@@ -238,13 +262,13 @@ describe("Applications API", () => {
   // ── CRIT-05 — PUT on a not-installed package must NOT implicitly install ──
   //
   // `updateInstalledPackage` used to upsert unconditionally, so a
-  // `PUT /applications/:id/packages/:packageId` for a package with no
-  // `application_packages` row silently CREATED the association (an implicit
+  // `PUT /spaces/:id/packages/:packageId` for a package with no
+  // `space_packages` row silently CREATED the association (an implicit
   // install bypassing the POST install path). The public route now passes
   // `requireInstalled: true`: no pre-existing row → 404, no row created.
-  describe("PUT /api/applications/:id/packages/:packageId requires a prior install (CRIT-05)", () => {
+  describe("PUT /api/spaces/:id/packages/:packageId requires a prior install (CRIT-05)", () => {
     function putPackage(packageId: string, body: Record<string, unknown> = { enabled: false }) {
-      return app.request(`/api/applications/${ctx.defaultAppId}/packages/${packageId}`, {
+      return app.request(`/api/spaces/${ctx.defaultSpaceId}/packages/${packageId}`, {
         method: "PUT",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -253,8 +277,8 @@ describe("Applications API", () => {
 
     function installedRowWhere(packageId: string) {
       return and(
-        eq(applicationPackages.applicationId, ctx.defaultAppId),
-        eq(applicationPackages.packageId, packageId),
+        eq(spacePackages.spaceId, ctx.defaultSpaceId),
+        eq(spacePackages.packageId, packageId),
       )!;
     }
 
@@ -266,21 +290,21 @@ describe("Applications API", () => {
 
       expect(res.status).toBe(404);
       // The regression: pre-fix this PUT upserted the row (implicit install).
-      await assertDbMissing(applicationPackages, installedRowWhere("@testorg/not-installed"));
+      await assertDbMissing(spacePackages, installedRowWhere("@testorg/not-installed"));
     });
 
     it("succeeds on the exact same PUT once the package IS installed (feature intact)", async () => {
       await seedPackage({ id: "@testorg/installed-pkg", orgId: ctx.orgId });
-      await seedInstalledPackage(ctx.defaultAppId, "@testorg/installed-pkg");
+      await seedInstalledPackage(ctx.defaultSpaceId, "@testorg/installed-pkg");
 
       const res = await putPackage("@testorg/installed-pkg", { enabled: false });
 
       expect(res.status).toBe(200);
       const body = (await res.json()) as { object: string };
-      expect(body.object).toBe("application_package");
+      expect(body.object).toBe("space_package");
       const [row] = await db
-        .select({ enabled: applicationPackages.enabled })
-        .from(applicationPackages)
+        .select({ enabled: spacePackages.enabled })
+        .from(spacePackages)
         .where(installedRowWhere("@testorg/installed-pkg"));
       expect(row?.enabled).toBe(false);
     });
@@ -291,7 +315,7 @@ describe("Applications API", () => {
     // required field). This generic route must not be a second, unvalidated one.
     it("ignores an `input_settings` key in the body — it is not a write path for stored input values", async () => {
       await seedPackage({ id: "@testorg/no-input-settings-write", orgId: ctx.orgId });
-      await seedInstalledPackage(ctx.defaultAppId, "@testorg/no-input-settings-write");
+      await seedInstalledPackage(ctx.defaultSpaceId, "@testorg/no-input-settings-write");
 
       const res = await putPackage("@testorg/no-input-settings-write", {
         input_settings: { values: { hello: "world" }, locked: [] },
@@ -299,8 +323,8 @@ describe("Applications API", () => {
 
       expect(res.status).toBe(200);
       const [row] = await db
-        .select({ inputSettings: applicationPackages.inputSettings })
-        .from(applicationPackages)
+        .select({ inputSettings: spacePackages.inputSettings })
+        .from(spacePackages)
         .where(installedRowWhere("@testorg/no-input-settings-write"));
       expect(row?.inputSettings).toEqual({ values: {}, locked: [] });
     });
@@ -308,7 +332,7 @@ describe("Applications API", () => {
     it("rejects unsupported generation settings instead of persisting them", async () => {
       const packageId = "@testorg/generation-agent";
       await seedPackage({ id: packageId, orgId: ctx.orgId });
-      await seedInstalledPackage(ctx.defaultAppId, packageId);
+      await seedInstalledPackage(ctx.defaultSpaceId, packageId);
       const credential = await seedOrgModelProviderOAuth({
         orgId: ctx.orgId,
         providerId: "codex",
@@ -330,8 +354,8 @@ describe("Applications API", () => {
         param: "generationConfig",
       });
       const [row] = await db
-        .select({ modelId: applicationPackages.modelId })
-        .from(applicationPackages)
+        .select({ modelId: spacePackages.modelId })
+        .from(spacePackages)
         .where(installedRowWhere(packageId));
       expect(row?.modelId).toBeNull();
     });
@@ -339,7 +363,7 @@ describe("Applications API", () => {
     it("reconciles persisted generation defaults when the model changes", async () => {
       const packageId = "@testorg/reconciled-agent";
       await seedPackage({ id: packageId, orgId: ctx.orgId });
-      await seedInstalledPackage(ctx.defaultAppId, packageId, {
+      await seedInstalledPackage(ctx.defaultSpaceId, packageId, {
         generationConfig: { temperature: 0.7 },
       });
       const credential = await seedOrgModelProviderOAuth({
@@ -356,8 +380,8 @@ describe("Applications API", () => {
 
       expect(res.status).toBe(200);
       const [row] = await db
-        .select({ generation: applicationPackages.generationConfig })
-        .from(applicationPackages)
+        .select({ generation: spacePackages.generationConfig })
+        .from(spacePackages)
         .where(installedRowWhere(packageId));
       expect(row?.generation).toEqual({});
     });
@@ -369,28 +393,28 @@ describe("Applications API", () => {
       const res = await putPackage("@foreignorg/theirs");
 
       expect(res.status).toBe(404);
-      await assertDbMissing(applicationPackages, installedRowWhere("@foreignorg/theirs"));
+      await assertDbMissing(spacePackages, installedRowWhere("@foreignorg/theirs"));
     });
   });
 
   // ── CRIT-05 — a historical stray association must not leak on the list ──
   //
-  // The old unconditional-upsert PUT could create an `application_packages`
+  // The old unconditional-upsert PUT could create an `space_packages`
   // row pointing at ANOTHER org's package. Blocking new creations is not
   // enough: `listInstalledPackages` must also refuse to resolve such a row,
   // or the foreign package's draft_manifest leaks through
-  // `GET /api/applications/:id/packages`.
-  describe("GET /api/applications/:id/packages excludes stray cross-org associations (CRIT-05)", () => {
+  // `GET /api/spaces/:id/packages`.
+  describe("GET /api/spaces/:id/packages excludes stray cross-org associations (CRIT-05)", () => {
     it("omits a foreign-org package attached by a corrupted association row", async () => {
       const foreignCtx = await createTestContext({ orgSlug: "foreignorg" });
       await seedPackage({ id: "@foreignorg/leaky", orgId: foreignCtx.orgId });
       await seedPackage({ id: "@testorg/mine", orgId: ctx.orgId });
       // Insert both associations directly in DB — the stray one simulates a
       // row created by the pre-fix vulnerable PUT.
-      await seedInstalledPackage(ctx.defaultAppId, "@foreignorg/leaky");
-      await seedInstalledPackage(ctx.defaultAppId, "@testorg/mine");
+      await seedInstalledPackage(ctx.defaultSpaceId, "@foreignorg/leaky");
+      await seedInstalledPackage(ctx.defaultSpaceId, "@testorg/mine");
 
-      const res = await app.request(`/api/applications/${ctx.defaultAppId}/packages`, {
+      const res = await app.request(`/api/spaces/${ctx.defaultSpaceId}/packages`, {
         headers: authHeaders(ctx),
       });
 

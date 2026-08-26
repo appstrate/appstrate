@@ -384,16 +384,16 @@ await loadModulesFromInstances(importedModules, buildModuleInitContext());
 // Mirror the production post-bootstrap wiring (boot.ts) so the bootstrap
 // after-hook does the same provisioning under test as it does in prod.
 // Without this, the bootstrap test would only ever see the org row — the
-// default app + hello-world agent + onOrgCreate emit (issue #228) would
+// default space + hello-world agent + onOrgCreate emit (issue #228) would
 // never run in CI, and any regression in that wiring would slip past us.
-const { createDefaultApplication } = await import("../../apps/api/src/services/applications.ts");
+const { createDefaultSpace } = await import("../../apps/api/src/services/spaces.ts");
 const { provisionDefaultAgentForOrg } =
   await import("../../apps/api/src/services/default-agent.ts");
 setPostBootstrapOrgHook(async ({ orgId, slug, userId, userEmail }) => {
   await emitEvent("onOrgCreate", orgId, userEmail);
-  const defaultApp = await createDefaultApplication(orgId, userId).catch(() => null);
-  if (defaultApp) {
-    await provisionDefaultAgentForOrg(orgId, slug, userId, defaultApp.id).catch(() => {});
+  const defaultSpace = await createDefaultSpace(orgId, userId).catch(() => null);
+  if (defaultSpace) {
+    await provisionDefaultAgentForOrg(orgId, slug, userId, defaultSpace.id).catch(() => {});
   }
 });
 

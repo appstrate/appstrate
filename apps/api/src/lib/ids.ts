@@ -22,14 +22,10 @@ export function prefixedId(prefix: string): string {
  * One shape is written and the same one is read: `app_` is REJECTED, never
  * accepted-and-warned (`docs/NO_TRANSITIONAL_CODE.md` §1).
  *
- * Note: a second, differently-shaped generator exists in
- * `apps/api/test/helpers/auth.ts` — it mints `app_` + a 16-char DASHLESS uuid
- * slice. That fixture cannot satisfy this regex on either count, and that is
- * deliberate: the canonical mint shape is the one form, and the helper is to be
- * rewritten to `prefixedId("spc")` (or `spc_` + a full dashed UUID) in the test
- * pass that follows. Widening the regex to admit the dashless slice would make
- * the retired shape legal forever, which is exactly what this guard exists to
- * prevent.
+ * There is one mint shape and this regex is it: fixtures go through
+ * `prefixedId("spc")` like everything else, rather than hand-rolling a lookalike.
+ * Widening this to admit a second shape — a dashless slice, a shorter id — would
+ * make that shape legal forever, which is what the guard exists to prevent.
  */
 export const SPACE_ID_RE = /^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 

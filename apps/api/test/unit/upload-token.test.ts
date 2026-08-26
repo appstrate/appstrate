@@ -16,7 +16,7 @@ function future(): number {
 describe("FS upload token", () => {
   it("round-trips a valid payload", () => {
     const payload: FsUploadTokenPayload = {
-      k: "uploads/app_x/upl_y/doc.pdf",
+      k: "uploads/spc_x/upl_y/doc.pdf",
       s: 1024,
       m: "application/pdf",
       e: future(),

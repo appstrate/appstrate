@@ -29,7 +29,7 @@ import { eq } from "drizzle-orm";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import { getPackage } from "../../../src/services/package-catalog.ts";
 import { resolveRunPreflight } from "../../../src/services/run-pipeline.ts";
 import type { IntegrationManifestCache } from "../../../src/services/integration-service.ts";
@@ -94,7 +94,7 @@ describe("resolveRunPreflight — integration manifests are read at the PIN", ()
       .update(packages)
       .set({ draftManifest: integManifest("9.9.9", ["read", "write"]) })
       .where(eq(packages.id, INTEG));
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INTEG);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEG);
 
     await seedAgent({
       id: AGENT,
@@ -110,7 +110,7 @@ describe("resolveRunPreflight — integration manifests are read at the PIN", ()
         integrations_configuration: { [INTEG]: { tools: ["search"] } },
       },
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
 
     // One accessible oauth2 connection granted `read` only: enough for the
     // pinned manifest, short of the drifted draft's demand.
@@ -118,7 +118,7 @@ describe("resolveRunPreflight — integration manifests are read at the PIN", ()
       integrationId: INTEG,
       authKey: "primary",
       accountId: "acct-schedpin",
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,
       credentialsEncrypted: encryptCredentialEnvelope({ outputs: { access_token: "tok" } }),
@@ -134,7 +134,7 @@ describe("resolveRunPreflight — integration manifests are read at the PIN", ()
   async function preflight(extra: Partial<PreflightArgs> = {}) {
     return resolveRunPreflight({
       agent,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       actor: { type: "user", id: ctx.user.id },
       ...extra,

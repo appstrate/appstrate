@@ -10,7 +10,7 @@
  * set by hand. So a key minted with the narrowest possible scopes — even
  * `scopes: []`, which `validateScopes` accepts — was 403'd on `/api/realtime/runs`
  * and on `/api/files`, and still read every run, every run log and every schedule
- * of the application. `requireAgent()` on the two agent-scoped routes is a
+ * of the space. `requireAgent()` on the two agent-scoped routes is a
  * resolver, not a gate.
  *
  * Two places in the tree asserted the opposite of the code, which is what makes
@@ -62,11 +62,11 @@ describe("run + schedule GET routes — read permission", () => {
       createdBy: ctx.user.id,
       draftManifest: { name: AGENT_ID, version: "0.1.0", type: "agent" },
     });
-    await seedInstalledPackage(ctx.defaultAppId, AGENT_ID);
+    await seedInstalledPackage(ctx.defaultSpaceId, AGENT_ID);
 
     const run = await seedRun({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       packageId: AGENT_ID,
       userId: ctx.user.id,
       status: "success",
@@ -75,7 +75,7 @@ describe("run + schedule GET routes — read permission", () => {
 
     const schedule = await seedSchedule({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       packageId: AGENT_ID,
       userId: ctx.user.id,
       enabled: true,
@@ -108,7 +108,7 @@ describe("run + schedule GET routes — read permission", () => {
   async function keyWithoutReads(): Promise<string> {
     const key = await seedApiKey({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
       scopes: ["agents:run"],
     });
@@ -118,7 +118,7 @@ describe("run + schedule GET routes — read permission", () => {
   async function keyWithReads(): Promise<string> {
     const key = await seedApiKey({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
       scopes: ["runs:read", "schedules:read", "agents:read"],
     });
@@ -143,7 +143,7 @@ describe("run + schedule GET routes — read permission", () => {
     // gap: the narrowest credential the platform can mint read everything here.
     const key = await seedApiKey({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
       scopes: [],
     });

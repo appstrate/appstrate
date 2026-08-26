@@ -34,7 +34,7 @@ describe("listOrphanRunIds — heartbeat-freshness filtering", () => {
     const fresh = await seedRun({
       packageId: agentId,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "running",
       lastHeartbeatAt: new Date(now - Math.floor((stallSeconds / 2) * 1000)),
     });
@@ -43,7 +43,7 @@ describe("listOrphanRunIds — heartbeat-freshness filtering", () => {
     const stale = await seedRun({
       packageId: agentId,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "running",
       lastHeartbeatAt: new Date(now - (stallSeconds + 60) * 1000),
     });
@@ -59,7 +59,7 @@ describe("listOrphanRunIds — heartbeat-freshness filtering", () => {
     const staleTerminal = await seedRun({
       packageId: agentId,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "success",
       lastHeartbeatAt: new Date(Date.now() - (stallSeconds + 60) * 1000),
     });

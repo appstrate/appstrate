@@ -29,7 +29,7 @@ import {
   resolveConnectClient,
 } from "../../../src/services/integration-connections.ts";
 import { __resetSystemIntegrationsForTest } from "../../../src/services/integration-client-registry.ts";
-import type { AppScope } from "../../../src/lib/scope.ts";
+import type { SpaceScope } from "../../../src/lib/scope.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import type { AfpsManifestAuth } from "../../../src/services/integration-manifest-helpers.ts";
 
@@ -78,12 +78,12 @@ const PUBLIC_AUTH = {
 
 describe("public OAuth client is declared, not inferred", () => {
   let ctx: TestContext;
-  let scope: AppScope;
+  let scope: SpaceScope;
 
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "myorg" });
-    scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     await seedPackage({
       id: INTEGRATION,
       orgId: ctx.orgId,
@@ -113,7 +113,7 @@ describe("public OAuth client is declared, not inferred", () => {
     const [row] = await db
       .insert(integrationOauthClients)
       .values({
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         integrationId: INTEGRATION,
         authKey: AUTH_KEY,
         clientId,
@@ -234,7 +234,7 @@ describe("public OAuth client is declared, not inferred", () => {
       // The manifest says client_secret_post; the client's own declaration wins.
       const resolved = await resolveIntegrationClientById(
         client.id,
-        ctx.defaultAppId,
+        ctx.defaultSpaceId,
         INTEGRATION,
         AUTH_KEY,
         "client_secret_post",
@@ -253,7 +253,7 @@ describe("public OAuth client is declared, not inferred", () => {
       });
       const resolved = await resolveIntegrationClientById(
         client.id,
-        ctx.defaultAppId,
+        ctx.defaultSpaceId,
         INTEGRATION,
         AUTH_KEY,
         "client_secret_post",

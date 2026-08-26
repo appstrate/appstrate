@@ -72,12 +72,12 @@ describe("POST /api/runs/inline — context_files", () => {
     await db.insert(runs).values({
       id: runId,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       packageId: null,
       status: "success",
     });
     const { row } = await createFileFromStream(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       runId,
       { userId: null, endUserId: null },
       null,
@@ -167,18 +167,18 @@ describe("POST /api/runs/inline — context_files", () => {
     expect(await shadowRows()).toHaveLength(0);
   });
 
-  it("returns 404 for a context file owned by another application", async () => {
+  it("returns 404 for a context file owned by another space", async () => {
     const other = await createTestContext({ orgSlug: "ctxdocsforeign" });
     const foreignRunId = `run_${crypto.randomUUID()}`;
     await db.insert(runs).values({
       id: foreignRunId,
       orgId: other.orgId,
-      applicationId: other.defaultAppId,
+      spaceId: other.defaultSpaceId,
       packageId: null,
       status: "success",
     });
     const { row } = await createFileFromStream(
-      { orgId: other.orgId, applicationId: other.defaultAppId },
+      { orgId: other.orgId, spaceId: other.defaultSpaceId },
       foreignRunId,
       { userId: null, endUserId: null },
       null,

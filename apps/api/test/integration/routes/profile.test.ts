@@ -48,7 +48,7 @@ describe("Profile API", () => {
 
     // Scope-independence invariant: `/api/profile` must be reachable by
     // any authenticated caller — including CLI-scope JWTs that carry
-    // only `user` + `applicationId` in context (no OIDC scope claim, no
+    // only `user` + `spaceId` in context (no OIDC scope claim, no
     // X-Org-Id). The CLI's `whoami` relies on this to verify its
     // session is valid without needing an org pin. This test uses the
     // session cookie (which also has no OIDC scope) to pin the
@@ -295,7 +295,7 @@ describe("Profile API", () => {
     it("returns 403 for API key auth", async () => {
       const apiKey = await seedApiKey({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id,
       });
       const res = await app.request("/api/profile/password", {
@@ -326,7 +326,7 @@ describe("Profile API", () => {
     it("GET /api/profile returns 403 for API key auth", async () => {
       const apiKey = await seedApiKey({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id,
       });
       const res = await app.request("/api/profile", {
@@ -338,7 +338,7 @@ describe("Profile API", () => {
     it("PATCH /api/profile returns 403 and does not rename the user", async () => {
       const apiKey = await seedApiKey({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id,
       });
       const originalName = ctx.user.name;

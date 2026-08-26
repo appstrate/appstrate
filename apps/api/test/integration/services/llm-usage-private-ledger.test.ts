@@ -31,7 +31,7 @@ describe("listLlmUsage — private ledger never leaks the alias backing", () => 
     const run = await seedRun({
       packageId: "@ledgerorg/agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
     });
 
     // A proxy row carrying the public alias in `model` and the hidden backing

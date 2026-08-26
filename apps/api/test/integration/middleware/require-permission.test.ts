@@ -19,7 +19,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import type { AssignableOrgRole } from "@appstrate/shared-types";
 
 const app = getTestApp();
@@ -165,7 +165,7 @@ describe("RBAC — Permission enforcement", () => {
         orgId: owner.orgId,
       });
       await installPackage(
-        { orgId: owner.orgId, applicationId: owner.defaultAppId },
+        { orgId: owner.orgId, spaceId: owner.defaultSpaceId },
         "@rbac-test/test-agent",
       );
       const res = await app.request(`/api/agents/@rbac-test/test-agent/schedules`, {
@@ -184,7 +184,7 @@ describe("RBAC — Permission enforcement", () => {
     it("viewer gets 403 on schedule creation", async () => {
       await seedPackage({ id: `@rbac-test/test-agent`, orgId: owner.orgId });
       await installPackage(
-        { orgId: owner.orgId, applicationId: owner.defaultAppId },
+        { orgId: owner.orgId, spaceId: owner.defaultSpaceId },
         "@rbac-test/test-agent",
       );
       const res = await app.request(`/api/agents/@rbac-test/test-agent/schedules`, {
@@ -269,8 +269,8 @@ describe("RBAC — Permission enforcement", () => {
       expect(res.status).toBe(200);
     });
 
-    it("viewer can list applications", async () => {
-      const res = await app.request("/api/applications", {
+    it("viewer can list spaces", async () => {
+      const res = await app.request("/api/spaces", {
         headers: authHeaders(viewer),
       });
       expect(res.status).toBe(200);

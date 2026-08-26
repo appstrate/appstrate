@@ -6,10 +6,10 @@
  * integration-connection-resolver with hand-built candidate arrays; this
  * file exercises the real Drizzle queries those candidates come from:
  *
- *   - validatePinTarget — cross-app / cross-integration / sharing /
+ *   - validatePinTarget — cross-space / cross-integration / sharing /
  *     ownership rejection (the gate every pin write passes through)
  *   - listAccessibleConnections — own ∪ sharedWithOrg, deduped, scoped
- *     to (application, integration), filtered by actor
+ *     to (space, integration), filtered by actor
  *   - loadConnectionOwnership — owner projection used by RBAC checks
  */
 
@@ -21,9 +21,9 @@ import {
   addOrgMember,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage, seedApplication } from "../../helpers/seed.ts";
+import { seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { integrationConnections } from "@appstrate/db/schema";
-import type { AppScope } from "../../../src/lib/scope.ts";
+import type { SpaceScope } from "../../../src/lib/scope.ts";
 import {
   validatePinTarget,
   listAccessibleConnections,
@@ -35,7 +35,7 @@ const OTHER_INTEGRATION = "@official/clickup";
 
 async function seedConnection(opts: {
   integrationId?: string;
-  applicationId: string;
+  spaceId: string;
   authKey?: string;
   accountId?: string;
   userId?: string | null;
@@ -49,7 +49,7 @@ async function seedConnection(opts: {
       integrationId: opts.integrationId ?? INTEGRATION,
       authKey: opts.authKey ?? "google",
       accountId: opts.accountId ?? `acct-${crypto.randomUUID().slice(0, 8)}`,
-      applicationId: opts.applicationId,
+      spaceId: opts.spaceId,
       userId: opts.userId ?? null,
       endUserId: opts.endUserId ?? null,
       credentialsEncrypted: "x",
@@ -63,13 +63,13 @@ async function seedConnection(opts: {
 
 describe("integration-pins-service — DB access/ownership", () => {
   let ctx: TestContext;
-  let scope: AppScope;
+  let scope: SpaceScope;
   let memberId: string;
 
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "pinsorg" });
-    scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     await seedPackage({ id: INTEGRATION, orgId: ctx.orgId, type: "integration", source: "local" });
     await seedPackage({
       id: OTHER_INTEGRATION,
@@ -89,18 +89,18 @@ describe("integration-pins-service — DB access/ownership", () => {
       );
     });
 
-    it("rejects a connection from a different application", async () => {
-      const otherApp = await seedApplication({ orgId: ctx.orgId, name: "Other" });
-      const id = await seedConnection({ applicationId: otherApp.id, userId: ctx.user.id });
+    it("rejects a connection from a different space", async () => {
+      const otherSpace = await seedSpace({ orgId: ctx.orgId, name: "Other" });
+      const id = await seedConnection({ spaceId: otherSpace.id, userId: ctx.user.id });
       await expect(validatePinTarget(scope, INTEGRATION, id, {})).rejects.toThrow(
-        /different application/i,
+        /different space/i,
       );
     });
 
     it("rejects a connection belonging to a different integration", async () => {
       const id = await seedConnection({
         integrationId: OTHER_INTEGRATION,
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         userId: ctx.user.id,
       });
       await expect(validatePinTarget(scope, INTEGRATION, id, {})).rejects.toThrow(
@@ -110,7 +110,7 @@ describe("integration-pins-service — DB access/ownership", () => {
 
     it("rejects a non-shared connection when requireShared is set", async () => {
       const id = await seedConnection({
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         userId: ctx.user.id,
         sharedWithOrg: false,
       });
@@ -121,7 +121,7 @@ describe("integration-pins-service — DB access/ownership", () => {
 
     it("accepts a shared connection under requireShared", async () => {
       const id = await seedConnection({
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         userId: memberId,
         sharedWithOrg: true,
       });
@@ -131,7 +131,7 @@ describe("integration-pins-service — DB access/ownership", () => {
 
     it("rejects allowOwnedBy when the connection is neither owned nor shared", async () => {
       const id = await seedConnection({
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         userId: memberId,
         sharedWithOrg: false,
       });
@@ -142,7 +142,7 @@ describe("integration-pins-service — DB access/ownership", () => {
 
     it("accepts allowOwnedBy when the caller owns the connection", async () => {
       const id = await seedConnection({
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         userId: ctx.user.id,
       });
       const conn = await validatePinTarget(scope, INTEGRATION, id, { allowOwnedBy: ctx.user.id });
@@ -152,20 +152,20 @@ describe("integration-pins-service — DB access/ownership", () => {
 
   describe("listAccessibleConnections", () => {
     it("returns the actor's own connections plus org-shared, deduped", async () => {
-      const own = await seedConnection({ applicationId: scope.applicationId, userId: ctx.user.id });
+      const own = await seedConnection({ spaceId: scope.spaceId, userId: ctx.user.id });
       const sharedByMember = await seedConnection({
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         userId: memberId,
         sharedWithOrg: true,
       });
       // Owned AND shared by the caller — must appear exactly once.
       const ownAndShared = await seedConnection({
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         userId: ctx.user.id,
         sharedWithOrg: true,
       });
       // Another member's private connection — must NOT be visible.
-      await seedConnection({ applicationId: scope.applicationId, userId: memberId });
+      await seedConnection({ spaceId: scope.spaceId, userId: memberId });
 
       const list = await listAccessibleConnections(scope, INTEGRATION, {
         type: "user",
@@ -179,19 +179,19 @@ describe("integration-pins-service — DB access/ownership", () => {
       expect(list).toHaveLength(3);
     });
 
-    it("excludes connections from other integrations and other applications", async () => {
+    it("excludes connections from other integrations and other spaces", async () => {
       const visible = await seedConnection({
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         userId: ctx.user.id,
       });
       await seedConnection({
         integrationId: OTHER_INTEGRATION,
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         userId: ctx.user.id,
       });
-      const otherApp = await seedApplication({ orgId: ctx.orgId, name: "Other" });
+      const otherSpace = await seedSpace({ orgId: ctx.orgId, name: "Other" });
       await seedConnection({
-        applicationId: otherApp.id,
+        spaceId: otherSpace.id,
         userId: ctx.user.id,
         sharedWithOrg: true,
       });
@@ -206,10 +206,10 @@ describe("integration-pins-service — DB access/ownership", () => {
 
   describe("loadConnectionOwnership", () => {
     it("projects the owner columns for an existing connection", async () => {
-      const id = await seedConnection({ applicationId: scope.applicationId, userId: ctx.user.id });
+      const id = await seedConnection({ spaceId: scope.spaceId, userId: ctx.user.id });
       const ownership = await loadConnectionOwnership(id);
       expect(ownership).toEqual({
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         userId: ctx.user.id,
         endUserId: null,
       });

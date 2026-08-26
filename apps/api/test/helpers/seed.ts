@@ -11,12 +11,13 @@
  * running alone have zero dependency on module schemas.
  */
 import { db } from "./db.ts";
+import { prefixedId, SPACE_ID_RE } from "../../src/lib/ids.ts";
 import {
   packages,
-  applicationPackages,
+  spacePackages,
   runs,
   runLogs,
-  applications,
+  spaces,
   endUsers,
   schedules,
   apiKeys,
@@ -64,23 +65,23 @@ export async function seedPackage(
 export const seedAgent = seedPackage;
 
 /**
- * Install (activate) a package in an application — creates the
- * `application_packages` row the runtime gate requires for a package to be
- * usable in that app. Idempotent.
+ * Install (activate) a package in a space — creates the
+ * `space_packages` row the runtime gate requires for a package to be
+ * usable in that space. Idempotent.
  */
 export async function seedInstalledPackage(
-  applicationId: string,
+  spaceId: string,
   packageId: string,
-  overrides?: Partial<InferInsertModel<typeof applicationPackages>>,
+  overrides?: Partial<InferInsertModel<typeof spacePackages>>,
 ): Promise<void> {
   await db
-    .insert(applicationPackages)
-    .values({ applicationId, packageId, ...overrides })
+    .insert(spacePackages)
+    .values({ spaceId, packageId, ...overrides })
     .onConflictDoUpdate({
-      target: [applicationPackages.applicationId, applicationPackages.packageId],
+      target: [spacePackages.spaceId, spacePackages.packageId],
       // Apply overrides on conflict so callers can flip e.g. `enabled` on an
       // already-installed package; no-op write when there are none.
-      set: overrides && Object.keys(overrides).length > 0 ? overrides : { applicationId },
+      set: overrides && Object.keys(overrides).length > 0 ? overrides : { spaceId },
     });
 }
 
@@ -146,7 +147,7 @@ export async function seedMcpServer(overrides: McpServerInsert): Promise<void> {
 type RunInsert = Partial<InferInsertModel<typeof runs>> & {
   packageId: string;
   orgId: string;
-  applicationId: string;
+  spaceId: string;
 };
 
 export async function seedRun(overrides: RunInsert): Promise<InferSelectModel<typeof runs>> {
@@ -183,30 +184,34 @@ export async function seedRunLog(
   return log!;
 }
 
-// ─── Applications ─────────────────────────────────────────
+// ─── Spaces ───────────────────────────────────────────────
 
-type ApplicationInsert = Partial<InferInsertModel<typeof applications>> & {
+type SpaceInsert = Partial<InferInsertModel<typeof spaces>> & {
   orgId: string;
 };
 
-export async function seedApplication(
-  overrides: ApplicationInsert,
-): Promise<InferSelectModel<typeof applications>> {
-  const [app] = await db
-    .insert(applications)
+export async function seedSpace(overrides: SpaceInsert): Promise<InferSelectModel<typeof spaces>> {
+  // `prefixedId("spc")` is the ONLY shape `assertSpaceId` accepts — a fixture
+  // that mints anything else is rejected by the platform, not by the test.
+  const id = overrides.id ?? prefixedId("spc");
+  if (!SPACE_ID_RE.test(id)) {
+    throw new Error(`test fixture minted a space id the platform rejects: ${id}`);
+  }
+  const [space] = await db
+    .insert(spaces)
     .values({
-      id: `app_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
-      name: "Test App",
+      name: "Test Space",
       ...overrides,
+      id,
     })
     .returning();
-  return app!;
+  return space!;
 }
 
 // ─── End Users ────────────────────────────────────────────
 
 type EndUserInsert = Partial<InferInsertModel<typeof endUsers>> & {
-  applicationId: string;
+  spaceId: string;
   orgId: string;
 };
 
@@ -228,7 +233,7 @@ export async function seedEndUser(
 type ScheduleInsert = Partial<InferInsertModel<typeof schedules>> & {
   packageId: string;
   orgId: string;
-  applicationId: string;
+  spaceId: string;
 };
 
 export async function seedSchedule(
@@ -249,7 +254,7 @@ export async function seedSchedule(
 
 type ApiKeyInsert = Partial<InferInsertModel<typeof apiKeys>> & {
   orgId: string;
-  applicationId: string;
+  spaceId: string;
 };
 
 export async function seedApiKey(

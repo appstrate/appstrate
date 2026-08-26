@@ -27,13 +27,13 @@ import { ApiError } from "../../../src/lib/errors.ts";
 interface Fixture {
   userId: string;
   org: TestOrg;
-  defaultAppId: string;
+  defaultSpaceId: string;
 }
 
 async function setup(): Promise<Fixture> {
   const user = await createTestUser();
-  const { org, defaultAppId } = await createTestOrg(user.id);
-  return { userId: user.id, org, defaultAppId };
+  const { org, defaultSpaceId } = await createTestOrg(user.id);
+  return { userId: user.id, org, defaultSpaceId };
 }
 
 const PLATFORM_URL = "http://localhost:3000";

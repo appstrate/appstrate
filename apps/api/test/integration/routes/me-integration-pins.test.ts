@@ -25,7 +25,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedEndUser, seedApiKey } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import { integrationConnections } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
@@ -83,7 +83,7 @@ describe("/api/me/integration-pins", () => {
         integrationId: INTEGRATION,
         authKey: "primary",
         accountId: `acct-${userId.slice(0, 6)}`,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId,
         endUserId: null,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
@@ -105,7 +105,7 @@ describe("/api/me/integration-pins", () => {
       source: "local",
       draftManifest: buildAgentManifest(),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
 
     await seedPackage({
       id: INTEGRATION,
@@ -114,7 +114,7 @@ describe("/api/me/integration-pins", () => {
       source: "local",
       draftManifest: buildIntegrationManifest(),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INTEGRATION);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
   });
 
   // ─── PUT — wire-shape snake_case body validation ───────
@@ -287,13 +287,13 @@ describe("/api/me/integration-pins", () => {
   describe("end-user impersonation", () => {
     it("PUT returns 401 when an end-user impersonates via Appstrate-User header", async () => {
       const endUser = await seedEndUser({
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         externalId: "ext-eu-pin",
       });
       const apiKey = await seedApiKey({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id,
         name: "pin-test-key-put",
       });
@@ -303,7 +303,7 @@ describe("/api/me/integration-pins", () => {
         method: "PUT",
         headers: {
           Authorization: `Bearer ${apiKey.rawKey}`,
-          "X-Application-Id": ctx.defaultAppId,
+          "X-Space-Id": ctx.defaultSpaceId,
           "Appstrate-User": endUser.id,
           "Content-Type": "application/json",
         },
@@ -321,13 +321,13 @@ describe("/api/me/integration-pins", () => {
 
     it("DELETE returns 401 when an end-user impersonates", async () => {
       const endUser = await seedEndUser({
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         externalId: "ext-eu-pin-del",
       });
       const apiKey = await seedApiKey({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         name: "pin-test-key-del",
       });
 
@@ -339,7 +339,7 @@ describe("/api/me/integration-pins", () => {
         method: "DELETE",
         headers: {
           Authorization: `Bearer ${apiKey.rawKey}`,
-          "X-Application-Id": ctx.defaultAppId,
+          "X-Space-Id": ctx.defaultSpaceId,
           "Appstrate-User": endUser.id,
         },
       });
@@ -349,13 +349,13 @@ describe("/api/me/integration-pins", () => {
 
     it("GET returns 200 + empty list when an end-user impersonates (no special-case for picker UI)", async () => {
       const endUser = await seedEndUser({
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         orgId: ctx.orgId,
         externalId: "ext-eu-pin-get",
       });
       const apiKey = await seedApiKey({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id,
         name: "pin-test-key-get",
       });
@@ -365,7 +365,7 @@ describe("/api/me/integration-pins", () => {
         {
           headers: {
             Authorization: `Bearer ${apiKey.rawKey}`,
-            "X-Application-Id": ctx.defaultAppId,
+            "X-Space-Id": ctx.defaultSpaceId,
             "Appstrate-User": endUser.id,
           },
         },

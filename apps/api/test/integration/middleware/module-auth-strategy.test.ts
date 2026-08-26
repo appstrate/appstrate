@@ -47,14 +47,14 @@ const stubStrategy: AuthStrategy = {
       orgSlug: currentCtx.org.slug,
       orgRole: "admin",
       authMethod: "stub-strategy",
-      applicationId: currentCtx.defaultAppId,
+      spaceId: currentCtx.defaultSpaceId,
       permissions: ["runs:read", "runs:write", "runs:cancel", "agents:read", "end-users:read"],
       // Exercise the endUser pass-through when token is "admin"
       endUser:
         token === "admin"
           ? {
               id: "eu_stub_admin_placeholder",
-              applicationId: currentCtx.defaultAppId,
+              spaceId: currentCtx.defaultSpaceId,
               name: "Stub Admin",
               email: "stub-admin@test.com",
             }
@@ -72,7 +72,7 @@ const stubModule: AppstrateModule = {
 };
 
 // Fresh app with the stub module wired in via options.modules.
-// Does NOT touch the cached default app used by other tests.
+// Does NOT touch the cached default space used by other tests.
 const app = getTestApp({ modules: [stubModule] });
 
 describe("module auth strategy pipeline", () => {
@@ -85,7 +85,7 @@ describe("module auth strategy pipeline", () => {
     const res = await app.request("/api/agents", {
       headers: {
         "X-Test-Strategy": "valid",
-        "X-Application-Id": currentCtx!.defaultAppId,
+        "X-Space-Id": currentCtx!.defaultSpaceId,
       },
     });
     // 200 OK = strategy authenticated, org context resolved, route reached
@@ -96,7 +96,7 @@ describe("module auth strategy pipeline", () => {
     const res = await app.request("/api/agents", {
       headers: {
         "X-Test-Strategy": "unknown",
-        "X-Application-Id": currentCtx!.defaultAppId,
+        "X-Space-Id": currentCtx!.defaultSpaceId,
       },
     });
     // 401 = fell through strategies, hit cookie auth fallback, no session
@@ -105,7 +105,7 @@ describe("module auth strategy pipeline", () => {
 
   it("falls through to core auth when the header is absent", async () => {
     const res = await app.request("/api/agents", {
-      headers: { "X-Application-Id": currentCtx!.defaultAppId },
+      headers: { "X-Space-Id": currentCtx!.defaultSpaceId },
     });
     expect(res.status).toBe(401);
   });
@@ -115,7 +115,7 @@ describe("module auth strategy pipeline", () => {
     const euId = prefixedId("eu");
     await db.insert(endUsers).values({
       id: euId,
-      applicationId: currentCtx!.defaultAppId,
+      spaceId: currentCtx!.defaultSpaceId,
       orgId: currentCtx!.orgId,
       name: "Stub Admin",
       email: "stub-admin@test.com",
@@ -128,7 +128,7 @@ describe("module auth strategy pipeline", () => {
     const res = await app.request(`/api/end-users/${euId}`, {
       headers: {
         "X-Test-Strategy": "admin",
-        "X-Application-Id": currentCtx!.defaultAppId,
+        "X-Space-Id": currentCtx!.defaultSpaceId,
       },
     });
     expect(res.status).toBe(200);

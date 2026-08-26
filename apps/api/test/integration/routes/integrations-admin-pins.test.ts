@@ -40,7 +40,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedAgent, seedPackage } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import { integrationConnections, organizationMembers } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
@@ -98,7 +98,7 @@ describe("/api/integrations/:packageId admin surface", () => {
         integrationId: INTEGRATION,
         authKey: "primary",
         accountId: `acct-shared`,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         endUserId: null,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
@@ -116,7 +116,7 @@ describe("/api/integrations/:packageId admin surface", () => {
         integrationId: INTEGRATION,
         authKey: "primary",
         accountId: `acct-private-${userId.slice(0, 6)}`,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId,
         endUserId: null,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
@@ -137,7 +137,7 @@ describe("/api/integrations/:packageId admin surface", () => {
       createdBy: ctx.user.id,
       draftManifest: buildAgentManifest(AGENT),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
 
     await seedPackage({
       id: INTEGRATION,
@@ -146,7 +146,7 @@ describe("/api/integrations/:packageId admin surface", () => {
       source: "local",
       draftManifest: buildIntegrationManifest(),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INTEGRATION);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
   });
 
   // ─── GET /api/agents/:scope/:name/connection-readiness ─────────────
@@ -241,7 +241,7 @@ describe("/api/integrations/:packageId admin surface", () => {
           integrations_configuration: { [INTEGRATION]: { auth_key: "primary" } },
         },
       });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INERT_AGENT);
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INERT_AGENT);
 
       // Two accessible connections → ambiguous → must_choose until pinned.
       const connA = await seedPrivateConnectionFor(ctx.user.id);
@@ -318,7 +318,7 @@ describe("/api/integrations/:packageId admin surface", () => {
         headers: {
           Cookie: member.cookie,
           "X-Org-Id": ctx.orgId,
-          "X-Application-Id": ctx.defaultAppId,
+          "X-Space-Id": ctx.defaultSpaceId,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ connection_id: connId }),
@@ -381,7 +381,7 @@ describe("/api/integrations/:packageId admin surface", () => {
         headers: {
           Cookie: member.cookie,
           "X-Org-Id": ctx.orgId,
-          "X-Application-Id": ctx.defaultAppId,
+          "X-Space-Id": ctx.defaultSpaceId,
         },
       });
 
@@ -401,7 +401,7 @@ describe("/api/integrations/:packageId admin surface", () => {
         createdBy: ctx.user.id,
         draftManifest: buildAgentManifest(SECOND_AGENT),
       });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, SECOND_AGENT);
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, SECOND_AGENT);
 
       for (const id of [AGENT, SECOND_AGENT]) {
         await app.request(`/api/integrations/${INTEGRATION}/pins/${id}`, {
@@ -451,7 +451,7 @@ describe("/api/integrations/:packageId admin surface", () => {
         createdBy: ctx.user.id,
         draftManifest: buildAgentManifest(SECOND_AGENT),
       });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, SECOND_AGENT);
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, SECOND_AGENT);
 
       const res = await app.request(`/api/integrations/${INTEGRATION}/consuming-agents`, {
         headers: authHeaders(ctx),

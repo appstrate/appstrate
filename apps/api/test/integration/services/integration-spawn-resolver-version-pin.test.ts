@@ -78,7 +78,7 @@ async function seedConnection(ctx: TestContext) {
     integrationId: INTEG,
     authKey: "oauth",
     accountId: "default",
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     endUserId: null,
     credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
@@ -110,7 +110,7 @@ async function resolve(ctx: TestContext) {
   return (
     await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
     })
@@ -136,7 +136,7 @@ describe("resolveIntegrationSpawns — source.server.version pin (#588)", () => 
       source: "local",
       draftManifest: integrationManifest("1.0.0"),
     });
-    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
     await seedPackage({
       id: SERVER,
       orgId: ctx.orgId,
@@ -176,7 +176,7 @@ describe("resolveIntegrationSpawns — source.server.version pin (#588)", () => 
       source: "local",
       draftManifest: integrationManifest("3.0.0"),
     });
-    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
     await seedPackage({
       id: SERVER,
       orgId: ctx.orgId,
@@ -198,7 +198,7 @@ describe("resolveIntegrationSpawns — source.server.version pin (#588)", () => 
       source: "local",
       draftManifest: integrationManifest("1.0.0"),
     });
-    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
     await seedPackage({
       id: SERVER,
       orgId: ctx.orgId,
@@ -223,7 +223,7 @@ describe("resolveIntegrationSpawns — source.server.version pin (#588)", () => 
       source: "local",
       draftManifest: integrationManifest("1.0.0"),
     });
-    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
     await seedPackage({
       id: SERVER,
       orgId: ctx.orgId,
