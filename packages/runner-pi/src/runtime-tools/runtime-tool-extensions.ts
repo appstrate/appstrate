@@ -39,9 +39,8 @@ export interface BuildRuntimeToolExtensionsOptions {
   outputSchema?: Record<string, unknown> | null;
   /**
    * Sink for the canonical events each tool call produces. Defaults to the
-   * legacy stdout-JSONL emitter (`{...event, timestamp, runId}\n`) harvested
-   * by `attachStdoutBridge` — same wire contract the former built-in tools
-   * used, so no-sidecar callers need no extra wiring.
+   * stdout-JSONL emitter (`{...event, timestamp, runId}\n`) harvested by
+   * `attachStdoutBridge`, so no-sidecar callers need no extra wiring.
    */
   emit?: (event: RuntimeToolEvent) => void;
 }
