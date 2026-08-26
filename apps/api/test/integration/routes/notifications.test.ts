@@ -477,7 +477,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
 
   describe("createRunNotifications edge cases", () => {
     it("returns 0 for an unknown run id and never throws (best-effort contract)", async () => {
-      const n = await createRunNotifications(scope(), "exec_does_not_exist");
+      const n = await createRunNotifications(scope(), "run_does_not_exist");
       expect(n).toBe(0);
     });
 

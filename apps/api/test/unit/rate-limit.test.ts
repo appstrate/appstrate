@@ -276,7 +276,7 @@ describe("rateLimitByBearer", () => {
     app.get("/internal", (c) => c.json({ ok: true }));
 
     const res = await app.request("/internal", {
-      headers: { Authorization: "Bearer exec_abc123.hmac" },
+      headers: { Authorization: "Bearer run_abc123.hmac" },
     });
     expect(res.status).toBe(200);
   });
@@ -286,7 +286,7 @@ describe("rateLimitByBearer", () => {
     app.use("/internal", rateLimitByBearer(2));
     app.get("/internal", (c) => c.json({ ok: true }));
 
-    const headers = { Authorization: "Bearer exec_def456.hmac" };
+    const headers = { Authorization: "Bearer run_def456.hmac" };
     await app.request("/internal", { headers });
     await app.request("/internal", { headers });
     const res = await app.request("/internal", { headers });
@@ -299,12 +299,12 @@ describe("rateLimitByBearer", () => {
     app.get("/internal", (c) => c.json({ ok: true }));
 
     const res1 = await app.request("/internal", {
-      headers: { Authorization: "Bearer exec_111.hmac1" },
+      headers: { Authorization: "Bearer run_111.hmac1" },
     });
     expect(res1.status).toBe(200);
 
     const res2 = await app.request("/internal", {
-      headers: { Authorization: "Bearer exec_222.hmac2" },
+      headers: { Authorization: "Bearer run_222.hmac2" },
     });
     expect(res2.status).toBe(200);
   });
@@ -315,14 +315,14 @@ describe("rateLimitByBearer", () => {
     app.get("/internal", (c) => c.json({ ok: true }));
 
     const first = await app.request("/internal", {
-      headers: { Authorization: "Bearer exec_333.hmac" },
+      headers: { Authorization: "Bearer run_333.hmac" },
     });
     expect(first.status).toBe(200);
 
     // Same token, non-canonical scheme — must land in the SAME bucket,
     // not a fresh `unknown` one that would hand out extra budget.
     const second = await app.request("/internal", {
-      headers: { Authorization: "bearer exec_333.hmac" },
+      headers: { Authorization: "bearer run_333.hmac" },
     });
     expect(second.status).toBe(429);
   });

@@ -698,7 +698,7 @@ describe("OpenAPI response validation", () => {
       const schema = getResponseSchema("/api/runs/{id}", "GET", "404");
       expect(schema).not.toBeNull();
 
-      const res = await app.request("/api/runs/exec_nonexistent12345", {
+      const res = await app.request("/api/runs/run_nonexistent12345", {
         headers: authHeaders(ctx),
       });
       expect(res.status).toBe(404);

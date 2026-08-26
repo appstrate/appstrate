@@ -76,7 +76,7 @@ export const notifications = pgTable(
     // Notification kind. "run_completed" today; extensible.
     type: text("type").notNull(),
     // Originating entity (the run, for "run_completed"). Null for types
-    // that have no run. `runs.id` is a text (`exec_`-prefixed) id, so this
+    // that have no run. `runs.id` is a text (`run_`-prefixed) id, so this
     // is text too. ON DELETE CASCADE: deleting a run drops its notifications.
     runId: text("run_id").references(() => runs.id, { onDelete: "cascade" }),
     // Render-without-join payload: { agent_id, status }.

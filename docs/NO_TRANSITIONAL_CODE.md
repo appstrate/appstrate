@@ -53,9 +53,30 @@ own verification queries.
 | Reviewed as | permanent contract         | an operational task                    |
 | Example     | `ALTER TABLE … ADD COLUMN` | rewrite 521 ids from `doc_` to `file_` |
 
-A `NOT NULL` promotion that requires a backfill is the one legitimate overlap:
-the backfill is the precondition of the constraint and cannot be separated from
-it. Keep it minimal, and keep it in the same file as the constraint it enables.
+A backfill that is the **precondition** of a constraint is the one legitimate
+overlap — it cannot be separated from the constraint it enables. Three clauses
+qualify: `SET NOT NULL` (`0051`), `CHECK` (`0038`) and `VALIDATE CONSTRAINT`
+(`0021`). The constraint must land on the **same table** the backfill repairs;
+file-level, a constraint on table A would licence a rewrite of table B. Keep it
+minimal, and keep it in the same file as the constraint.
+
+`SET NOT NULL` is a _promotion_, and only a promotion counts. A `NOT NULL` in a
+column definition never had a backfill as its precondition: Postgres refuses
+`ADD COLUMN … NOT NULL` on a populated table without a `DEFAULT`, and that
+default already satisfies the constraint. `0018` is the live example — it adds
+`runs.version_ref` with a default and then rewrites `runs`, so reading this
+carve-out as "any `NOT NULL`" would licence plain data repair on the very table
+the migration rewrites.
+
+What it does not separate: a constraint and an _unrelated_ repair on the same
+table. `0023` adds a `CHECK` to `llm_usage` and, in the same file, backfills a
+different `llm_usage` column — structurally indistinguishable from `0038`, where
+the `CHECK` covers the column the `UPDATE` fills. Telling the two apart needs
+column-level analysis and is out of scope. The gap is a limit, not permission.
+
+`bun run verify:no-migration-dml` enforces all of this; every migration that
+predates the gate is grandfathered in `scripts/verify-no-migration-dml.ts` by
+name.
 
 ### 3. No dead transition scaffolding
 

@@ -552,7 +552,7 @@ describe("Runs API", () => {
     });
 
     it("returns 404 for non-existent run", async () => {
-      const res = await app.request("/api/runs/exec_nonexistent", {
+      const res = await app.request("/api/runs/run_nonexistent", {
         headers: authHeaders(ctx),
       });
 
@@ -578,7 +578,7 @@ describe("Runs API", () => {
     });
 
     it("returns 401 without authentication", async () => {
-      const res = await app.request("/api/runs/exec_anything");
+      const res = await app.request("/api/runs/run_anything");
       expect(res.status).toBe(401);
     });
   });
@@ -948,7 +948,7 @@ describe("Runs API", () => {
     });
 
     it("returns 401 without authentication", async () => {
-      const res = await app.request("/api/runs/exec_anything/logs");
+      const res = await app.request("/api/runs/run_anything/logs");
       expect(res.status).toBe(401);
     });
 
@@ -1418,7 +1418,7 @@ describe("Runs API", () => {
     });
 
     it("returns 404 for non-existent run", async () => {
-      const res = await app.request("/api/runs/exec_nonexistent/cancel", {
+      const res = await app.request("/api/runs/run_nonexistent/cancel", {
         method: "POST",
         headers: authHeaders(ctx),
       });
@@ -1448,7 +1448,7 @@ describe("Runs API", () => {
     });
 
     it("returns 401 without authentication", async () => {
-      const res = await app.request("/api/runs/exec_anything/cancel", {
+      const res = await app.request("/api/runs/run_anything/cancel", {
         method: "POST",
       });
       expect(res.status).toBe(401);
