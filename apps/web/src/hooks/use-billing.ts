@@ -105,7 +105,7 @@ interface BillingInfo {
  * arrive from outside must fail loudly, never work. React Query surfaces the
  * throw as the billing page's error state, naming the field and the producer.
  */
-function assertPlansPriced(info: BillingInfo): BillingInfo {
+export function assertPlansPriced(info: BillingInfo): BillingInfo {
   const unpriced = [...info.plans, ...info.upgrades].filter(
     (p) => typeof p.file_storage_bytes !== "number",
   );
