@@ -101,11 +101,20 @@ find config keys read under two names; find module-contract branches keyed on a
 version or capability that every module now has.
 
 **Agent F — Cross-repo & tests.** `cloud/`, `connect-helper/`, `github-action/`,
-plus `test/` fixtures across the workspace. Out-of-tree consumers are the ONE
-legitimate reason a shape survives its in-tree caller — so a finding here must
-state whether the consumer still needs it (check the consumer's source, do not
-assume). Also flag test fixtures that pin a retired shape, which is how a
-compatibility branch acquires a test that justifies keeping it.
+plus `test/` fixtures across the workspace.
+
+> **Read `git show origin/main:<path>` in sibling repos, never the working tree.**
+> A sibling checkout sits on whatever branch someone left it on, which can
+> predate main by weeks. The first run of this audit reported `cloud` pinned to
+> `@appstrate/core >=8.0.0` — true of its working tree, which was parked on a
+> feature branch, and false of `origin/main`, which had been bumped to `>=9.0.0`
+> hours earlier. Run `git -C <repo> fetch -q origin` first, then read from
+> `origin/main`. Also confirm each repo's path before sweeping it: the workspace
+> layout in `CLAUDE.md` is not always where a clone actually lives. Out-of-tree consumers are the ONE
+> legitimate reason a shape survives its in-tree caller — so a finding here must
+> state whether the consumer still needs it (check the consumer's source, do not
+> assume). Also flag test fixtures that pin a retired shape, which is how a
+> compatibility branch acquires a test that justifies keeping it.
 
 ## Sub-agent prompt template
 
