@@ -368,6 +368,9 @@
     "//#verify:module-isolation": {
       "cache": false
     },
+    "//#verify:no-migration-dml": {
+      "cache": false
+    },
     "//#verify:module-contract": {
       "cache": false
     },

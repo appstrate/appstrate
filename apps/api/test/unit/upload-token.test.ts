@@ -27,7 +27,7 @@ describe("FS upload token", () => {
   });
 
   it("rejects a tampered body", () => {
-    const token = signFsUploadToken({ k: "uploads/a/b", s: 0, m: "", e: future() }, SECRET);
+    const token = signFsUploadToken({ k: "uploads/a/b", s: 1024, m: "", e: future() }, SECRET);
     // Flip a character in the base64url body portion
     const [body, sig] = token.split(".");
     const swapped = body!.slice(0, -1) + (body!.endsWith("A") ? "B" : "A");
@@ -35,13 +35,13 @@ describe("FS upload token", () => {
   });
 
   it("rejects a bad signature", () => {
-    const token = signFsUploadToken({ k: "uploads/a/b", s: 0, m: "", e: future() }, SECRET);
+    const token = signFsUploadToken({ k: "uploads/a/b", s: 1024, m: "", e: future() }, SECRET);
     expect(verifyFsUploadToken(token, "different-secret")).toBeNull();
   });
 
   it("rejects an expired token", () => {
     const past = Math.floor(Date.now() / 1000) - 1;
-    const token = signFsUploadToken({ k: "uploads/a/b", s: 0, m: "", e: past }, SECRET);
+    const token = signFsUploadToken({ k: "uploads/a/b", s: 1024, m: "", e: past }, SECRET);
     expect(verifyFsUploadToken(token, SECRET)).toBeNull();
   });
 

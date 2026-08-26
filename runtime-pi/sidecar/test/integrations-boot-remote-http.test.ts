@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { connectRemoteHttpIntegration, type ConnectRemoteHttpDeps } from "../integrations-boot.ts";
+import { isOperatorTrustedEgressHost } from "../ssrf.ts";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
 import type { IntegrationCredentialsSource } from "../integration-credentials-source.ts";
@@ -19,15 +20,23 @@ import type { IntegrationCredentialsWire } from "@appstrate/connect";
 
 const SERVER_URL = "https://mcp.example.com/mcp/v1";
 
+/**
+ * Target for the guard-is-still-on case. Deliberately a host the preload's
+ * `EGRESS_ALLOW_INTERNAL_HOSTS` fixture list does NOT contain (unlike
+ * `mcp.example.com`), so the host blocklist is actually reached instead of
+ * being short-circuited by the operator-trusted-host exemption.
+ */
+const UNTRUSTED_SERVER_URL = "https://internal-mcp.invalid/mcp/v1";
+
 /** Public (unblocked) address the injected resolver returns for fixtures. */
 const PUBLIC_IP = "93.184.216.34";
 
-function spec(): IntegrationSpawnSpec {
+function spec(url: string = SERVER_URL): IntegrationSpawnSpec {
   return {
     integrationId: "@vendor/remote",
     namespace: "remote",
     sourceKind: "remote",
-    manifest: { name: "remote", version: "1.0.0", server: { url: SERVER_URL } },
+    manifest: { name: "remote", version: "1.0.0", server: { url } },
     toolAllowlist: [],
   } as unknown as IntegrationSpawnSpec;
 }
@@ -224,7 +233,7 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
       async () => true,
       async () => ["10.0.0.5"],
     );
-    await connectRemoteHttpIntegration(spec(), source, deps);
+    await connectRemoteHttpIntegration(spec(UNTRUSTED_SERVER_URL), source, deps);
 
     let fetchCalls = 0;
     await withGlobalFetch(
@@ -233,12 +242,75 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
         return new Response("{}", { status: 200 });
       }) as unknown as typeof fetch,
       async () => {
-        await expect(getFetch()(SERVER_URL, { method: "POST" })).rejects.toThrow(
+        await expect(getFetch()(UNTRUSTED_SERVER_URL, { method: "POST" })).rejects.toThrow(
           /SSRF guard blocked outbound request/,
         );
       },
     );
     expect(fetchCalls).toBe(0); // fail-closed — the stubbed network layer was never reached
+  });
+
+  /**
+   * The operator-trusted-host exemption itself — the half of the guard that
+   * says YES. `sidecar-env.ts` forwards `EGRESS_ALLOW_INTERNAL_HOSTS` so a
+   * host the platform already vouched for is not re-blocked in-run; without
+   * a test for it, `isOperatorTrustedEgressHost` could return `false` for
+   * everything and the whole suite would stay green while every operator
+   * allowlist silently stopped working in production.
+   *
+   * Both halves share ONE resolver returning ONE private address, so the
+   * allowlist is the only variable between them: the exempted host is
+   * permitted where the other is blocked. Either half alone proves nothing —
+   * the first passes if the guard is off entirely, the second if the
+   * exemption never fires.
+   *
+   * `ssrf.ts` snapshots the env into a module-level Set at IMPORT time, so a
+   * test cannot vary the list at run time; the list is the preload's fixture
+   * one. The precondition asserts state that dependency out loud rather than
+   * leaving the coupling implicit.
+   */
+  describe("operator-trusted host exemption", () => {
+    const bearerWire = () =>
+      wire([{ authKey: "oauth", authType: "oauth2" }], {
+        oauth: { headerName: "Authorization", headerPrefix: "Bearer ", value: "TOKEN" },
+      });
+    /** Same private address for both halves — only the hostname differs. */
+    const resolvesPrivate = async () => ["10.0.0.5"];
+
+    it("permits an allowlisted host that resolves to a private address", async () => {
+      expect(isOperatorTrustedEgressHost("mcp.example.com")).toBe(true);
+
+      const { deps, source, getFetch } = makeDeps(bearerWire(), async () => true, resolvesPrivate);
+      await connectRemoteHttpIntegration(spec(), source, deps);
+
+      let fetchCalls = 0;
+      const status = await withGlobalFetch(
+        (async () => {
+          fetchCalls += 1;
+          return new Response("{}", { status: 200 });
+        }) as unknown as typeof fetch,
+        async () => (await getFetch()(SERVER_URL, { method: "POST" })).status,
+      );
+
+      expect(status).toBe(200); // exempted — the private address never blocked it
+      expect(fetchCalls).toBe(1);
+    });
+
+    it("still blocks a non-allowlisted host resolving to the same private address", async () => {
+      expect(isOperatorTrustedEgressHost("internal-mcp.invalid")).toBe(false);
+
+      const { deps, source, getFetch } = makeDeps(bearerWire(), async () => true, resolvesPrivate);
+      await connectRemoteHttpIntegration(spec(UNTRUSTED_SERVER_URL), source, deps);
+
+      await withGlobalFetch(
+        (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch,
+        async () => {
+          await expect(getFetch()(UNTRUSTED_SERVER_URL, { method: "POST" })).rejects.toThrow(
+            /SSRF guard blocked outbound request/,
+          );
+        },
+      );
+    });
   });
 
   it("throws when no auth has a resolvable delivery plan", async () => {

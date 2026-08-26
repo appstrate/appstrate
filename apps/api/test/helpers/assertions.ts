@@ -15,7 +15,7 @@ import type { PgTable } from "drizzle-orm/pg-core";
  * Assert that at least one row matching the given conditions exists in the table.
  *
  * @example
- * await assertDbHas(runs, eq(runs.id, "exec_123"));
+ * await assertDbHas(runs, eq(runs.id, "run_123"));
  * await assertDbHas(packages, and(eq(packages.orgId, orgId), eq(packages.type, "agent")));
  */
 export async function assertDbHas(table: PgTable, where: SQL): Promise<void> {
@@ -27,7 +27,7 @@ export async function assertDbHas(table: PgTable, where: SQL): Promise<void> {
  * Assert that no rows matching the given conditions exist in the table.
  *
  * @example
- * await assertDbMissing(runs, eq(runs.id, "exec_123"));
+ * await assertDbMissing(runs, eq(runs.id, "run_123"));
  */
 export async function assertDbMissing(table: PgTable, where: SQL): Promise<void> {
   const rows = await db.select().from(table).where(where).limit(1);
@@ -53,8 +53,8 @@ export async function assertDbCount(table: PgTable, where: SQL, count: number): 
  * Throws if no row found (use assertDbMissing for that case).
  *
  * @example
- * const exec = await getDbRow(runs, eq(runs.id, "exec_123"));
- * expect(exec.status).toBe("success");
+ * const run = await getDbRow(runs, eq(runs.id, "run_123"));
+ * expect(run.status).toBe("success");
  */
 export async function getDbRow<T extends PgTable>(
   table: T,

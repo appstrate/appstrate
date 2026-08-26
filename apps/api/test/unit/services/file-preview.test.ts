@@ -60,14 +60,14 @@ describe("preview token", () => {
     // shared codec takes it as a required argument), so neither direction
     // validates — previously only the preview side was bound, and the upload
     // side was protected by nothing more than its payload shape.
-    const uploadToken = signFsUploadToken({ k: "files/x", s: 0, m: "", e: nowSec() + 60 }, SECRET);
+    const uploadToken = signFsUploadToken({ k: "files/x", s: 64, m: "", e: nowSec() + 60 }, SECRET);
     expect(verifyPreviewToken(uploadToken, SECRET)).toBeNull();
 
     // Deliberately give the preview token an UPLOAD-shaped payload too, so the
     // rejection can only come from the domain-separated signature — not from a
     // missing field the upload verifier happens to check.
     const previewToken = signPreviewToken(
-      { d: "file_abc12345", o: "org_1", e: nowSec() + 60, k: "files/x", s: 0, m: "" } as never,
+      { d: "file_abc12345", o: "org_1", e: nowSec() + 60, k: "files/x", s: 64, m: "" } as never,
       SECRET,
     );
     expect(verifyFsUploadToken(previewToken, SECRET)).toBeNull();

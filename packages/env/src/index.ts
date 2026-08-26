@@ -105,13 +105,17 @@ const describeRuntimeImageMismatch = (m: RuntimeImageTagMismatch): string => {
 // transforms/refinements that don't extract cleanly via static analysis.
 
 /**
- * Env vars retired by the `document` -> `file` rename (#1177), mapped to what
- * replaced them. Boot refuses while one is still set — see the superRefine
- * below for why silence is the wrong answer here.
+ * Retired env names mapped to what replaced them. Boot refuses while one is
+ * still set — see the superRefine below for why silence is the wrong answer
+ * here. Four come from the `document` -> `file` rename (#1177);
+ * `OAUTH_ALLOWED_INTERNAL_IDP_HOSTS` is the OAuth-era spelling of the SSRF
+ * internal-host allowlist, which the schema aliased but the sidecar's raw
+ * `process.env` read did not — so the two disagreed on which hosts were exempt.
  */
 const RETIRED_ENV_RENAMES: Record<string, string> = {
   DOCUMENT_MAX_FILE_BYTES: "FILE_MAX_BYTES",
   DOCUMENT_RETENTION_DAYS: "FILE_RETENTION_DAYS",
+  OAUTH_ALLOWED_INTERNAL_IDP_HOSTS: "EGRESS_ALLOW_INTERNAL_HOSTS",
   RUN_MAX_DOCUMENTS: "RUN_MAX_FILES",
   WORKSPACE_MAX_DOCS_BYTES: "WORKSPACE_MAX_FILES_BYTES",
 };
@@ -750,14 +754,7 @@ export const envSchema = z
     // upstreams, org proxies, model tests, credential-proxy targets, remote MCP
     // servers, and the sidecar's own gates) skips ONLY the host blocklist for
     // these hosts so self-hosted deployments can reach internal upstreams.
-    //
-    // Accepts the legacy `OAUTH_ALLOWED_INTERNAL_IDP_HOSTS` name as an alias
-    // (the var outgrew its OAuth-only origin): the new name wins when both are
-    // set, the old name is honoured only here at the env-parse boundary.
-    EGRESS_ALLOW_INTERNAL_HOSTS: z.preprocess(
-      (v) => (v === undefined ? process.env.OAUTH_ALLOWED_INTERNAL_IDP_HOSTS || undefined : v),
-      z.string().optional(),
-    ),
+    EGRESS_ALLOW_INTERNAL_HOSTS: z.string().optional(),
 
     // Run token signing (required). Dedicated HMAC secret for run bearer
     // tokens — without a key, `Bun.CryptoHasher("sha256", undefined)`
@@ -1011,14 +1008,21 @@ export const envSchema = z
       path: [mismatch.oddOneOut === "sidecar" ? "SIDECAR_IMAGE" : "PI_IMAGE"],
     });
   })
-  // The four file-limit variables were renamed by #1177 with no alias, and Zod
-  // strips unknown keys — so an `.env` still carrying an old name booted
-  // cleanly with the limit silently back at its default. That is not a cosmetic
-  // regression for two of them: `DOCUMENT_RETENTION_DAYS` unset makes
-  // `retentionExpiry` return null, so `expires_at` is null and files NEVER
-  // expire; `DOCUMENT_MAX_FILE_BYTES` unset reverts a tightened per-file cap to
-  // 100 MiB. An operator who set either for data-minimisation loses it without
-  // a single line of output.
+  // Two classes of retired name, one guard. The file-limit variables were
+  // renamed by #1177 with no alias, and Zod strips unknown keys — so an `.env`
+  // still carrying an old name booted cleanly with the limit silently back at
+  // its default. That is not a cosmetic regression for two of them:
+  // `DOCUMENT_RETENTION_DAYS` unset makes `retentionExpiry` return null, so
+  // `expires_at` is null and files NEVER expire; `DOCUMENT_MAX_FILE_BYTES`
+  // unset reverts a tightened per-file cap to 100 MiB. An operator who set
+  // either for data-minimisation loses it without a single line of output.
+  //
+  // `OAUTH_ALLOWED_INTERNAL_IDP_HOSTS` is the other class: it DID have an
+  // alias, which is what made it worse. It is the SSRF host-blocklist
+  // exemption list, so leaving the old name set silently WIDENS EGRESS — and
+  // only half-way, since the schema honoured it but the sidecar's raw
+  // `process.env` read never did, leaving a host exempt on the platform's
+  // egress paths and blocked in-run. One name, one answer: it refuses to boot.
   //
   // Read from raw `process.env` rather than the parsed object, because the
   // parsed object is exactly where these no longer exist. Same shape as
@@ -1042,8 +1046,8 @@ export const envSchema = z
       ctx.addIssue({
         code: "custom",
         message:
-          `${retired} was renamed to ${replacement} (#1177) and is no longer read. ` +
-          `Leaving it set would silently revert the limit to its default. ` +
+          `${retired} was renamed to ${replacement} and is no longer read. ` +
+          `Leaving it set would silently revert the setting to its default. ` +
           `Rename it in your .env.`,
         path: [replacement],
       });

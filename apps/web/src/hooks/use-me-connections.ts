@@ -44,11 +44,9 @@ function scopedHeaders({ orgId, applicationId }: OrgAppHeaders) {
 /**
  * Destructive delete of an integration connection from the user-scope page.
  *
- * Uses the new `DELETE /api/me/connections/:id` endpoint — same effect
- * (row + cascades), but the action lives under `/me/*` so it's never
- * surfaced from an agent context. The legacy
- * `DELETE /api/integrations/:packageId/connections/:id` is deprecated and
- * no longer called from the UI.
+ * `DELETE /api/me/connections/:id` is the only endpoint that deletes a
+ * connection (row + cascades). It lives under `/me/*` so the action is never
+ * surfaced from an agent context.
  */
 export function useDisconnectIntegrationConnection() {
   const qc = useQueryClient();

@@ -294,6 +294,7 @@ const EXCLUDED_SCOPES: readonly ExcludedScope[] = [
     reason: BYTE_LIMIT,
   },
   { path: "apps/api/src/services/uploads.ts", keys: ["maxSize"], reason: BYTE_LIMIT },
+  { path: "packages/core/src/storage.ts", keys: ["maxSize"], reason: BYTE_LIMIT },
   {
     path: "packages/afps-runtime/src/resolvers/http-call-core.ts",
     keys: ["maxSize"],

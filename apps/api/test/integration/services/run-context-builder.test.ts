@@ -101,42 +101,42 @@ describe("ModelCredentialMissingError", () => {
 
 describe("signRunToken", () => {
   it("returns a string with runId and signature", () => {
-    const token = signRunToken("exec_test-123");
+    const token = signRunToken("run_test-123");
     expect(typeof token).toBe("string");
-    expect(token).toContain("exec_test-123");
+    expect(token).toContain("run_test-123");
   });
 
   it("token follows runId.signature format", () => {
-    const execId = "exec_format-check";
-    const token = signRunToken(execId);
+    const runId = "run_format-check";
+    const token = signRunToken(runId);
     const parts = token.split(".");
     expect(parts).toHaveLength(2);
-    expect(parts[0]).toBe(execId);
+    expect(parts[0]).toBe(runId);
     expect(parts[1]!.length).toBe(64); // SHA256 hex = 64 chars
   });
 
   it("produces deterministic tokens for the same runId", () => {
-    const a = signRunToken("exec_deterministic");
-    const b = signRunToken("exec_deterministic");
+    const a = signRunToken("run_deterministic");
+    const b = signRunToken("run_deterministic");
     expect(a).toBe(b);
   });
 
   it("produces different tokens for different runIds", () => {
-    const a = signRunToken("exec_aaa");
-    const b = signRunToken("exec_bbb");
+    const a = signRunToken("run_aaa");
+    const b = signRunToken("run_bbb");
     expect(a).not.toBe(b);
   });
 });
 
 describe("parseSignedToken", () => {
   it("round-trips a valid signed token", () => {
-    const runId = "exec_roundtrip-test";
+    const runId = "run_roundtrip-test";
     const token = signRunToken(runId);
     expect(parseSignedToken(token)).toBe(runId);
   });
 
   it("rejects a token with a tampered signature", () => {
-    const token = signRunToken("exec_tamper");
+    const token = signRunToken("run_tamper");
     const tampered = token.slice(0, -4) + "dead";
     expect(parseSignedToken(tampered)).toBeNull();
   });

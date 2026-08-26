@@ -126,7 +126,7 @@ export function createUploadContentRouter() {
     const lenHdr = c.req.header("content-length");
     if (lenHdr) {
       const len = Number(lenHdr);
-      if (Number.isFinite(len) && payload.s > 0 && len > payload.s) {
+      if (Number.isFinite(len) && len > payload.s) {
         throw invalidRequest(`Content-Length ${len} exceeds signed max ${payload.s}`);
       }
     }

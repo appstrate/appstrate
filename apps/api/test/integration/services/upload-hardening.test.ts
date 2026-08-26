@@ -31,6 +31,7 @@ import {
   downloadStream as storageDownload,
 } from "@appstrate/db/storage";
 import type { Actor } from "@appstrate/connect";
+import { verifyFsUploadToken } from "@appstrate/core/storage-fs";
 
 const UPLOAD_BUCKET = "uploads";
 const PDF_BYTES = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a]); // %PDF-1.4\n
@@ -347,5 +348,33 @@ describe("createUpload staging budget", () => {
         });
       },
     );
+  });
+});
+
+describe("createUpload signed size", () => {
+  let ctx: TestContext;
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "signedsize" });
+  });
+
+  it("always signs the declared byte count — never an unbounded 0", async () => {
+    // The sink binds `s` as both the mid-stream ceiling AND the exact size on
+    // completion, so a token signed with 0 would be unusable rather than
+    // unbounded. `createUpload` rejects `size <= 0` up front and signs
+    // `min(size, max)`, which is the single reason the sink can drop the
+    // `s > 0` special case entirely.
+    const created = await createUpload({
+      orgId: ctx.orgId,
+      applicationId: ctx.defaultAppId,
+      createdBy: ctx.user.id,
+      name: "sized.pdf",
+      mime: "application/pdf",
+      size: 42,
+    });
+    const token = new URL(created.url).searchParams.get("token");
+    expect(token).toBeTruthy();
+    const payload = verifyFsUploadToken(token!, process.env.UPLOAD_SIGNING_SECRET!);
+    expect(payload?.s).toBe(42);
   });
 });

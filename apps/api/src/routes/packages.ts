@@ -2135,7 +2135,7 @@ export function createPackagesRouter() {
     } catch {
       throw invalidRequest("Request must be multipart/form-data with a file field", "file");
     }
-    const file = formData.get("file") ?? formData.get("bundle");
+    const file = formData.get("file");
     if (!file || !(file instanceof File)) {
       throw invalidRequest("File is required", "file");
     }

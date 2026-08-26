@@ -562,7 +562,7 @@ describe("buildEnrichedPrompt — run history is tool-wired, never in the prompt
   // whether a signed `runToken` is present.
 
   it("does not render a Run History section when runToken is present", async () => {
-    const ctx = baseContext({ runToken: "exec_token_123" });
+    const ctx = baseContext({ runToken: "run_token_123" });
     const prompt = await buildEnrichedPrompt(ctx);
     expect(prompt).not.toContain("## Run History");
     expect(prompt).not.toContain("$SIDECAR_URL");

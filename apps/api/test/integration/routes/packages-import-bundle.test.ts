@@ -764,6 +764,36 @@ describe("POST /api/packages/import-bundle — import", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects a `bundle` form field with 400", async () => {
+    // The retired `bundle` alias must fail loudly, not silently work:
+    // `file` is the only accepted part name.
+    const form = new FormData();
+    form.append(
+      "bundle",
+      new Blob([
+        buildAfps({
+          manifest: {
+            name: "@importorg/aliased",
+            version: "1.0.0",
+            type: "agent",
+            schema_version: "0.1",
+            display_name: "Aliased",
+            author: "tester",
+          },
+          content: "Aliased prompt.",
+          type: "agent",
+        }),
+      ]),
+      "aliased.afps",
+    );
+    const res = await app.request("/api/packages/import-bundle", {
+      method: "POST",
+      body: form,
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(400);
+  });
+
   it("reuses existing version without overwriting storage on same-org re-import", async () => {
     // Regression: on same-instance round-trip (publish → export → import),
     // the importer must detect the matching row via the content-hash

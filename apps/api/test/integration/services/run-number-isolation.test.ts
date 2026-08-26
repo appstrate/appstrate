@@ -38,7 +38,7 @@ describe("nextRunNumber isolation per application", () => {
     await createRun(
       { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
       {
-        id: "exec_aaaabbbbcccc0001",
+        id: "run_aaaabbbbcccc0001",
         packageId: agentId,
         actor,
         input: null,
@@ -47,7 +47,7 @@ describe("nextRunNumber isolation per application", () => {
     await createRun(
       { orgId: ctx.orgId, applicationId: appBId },
       {
-        id: "exec_aaaabbbbcccc0002",
+        id: "run_aaaabbbbcccc0002",
         packageId: agentId,
         actor,
         input: null,
@@ -57,12 +57,12 @@ describe("nextRunNumber isolation per application", () => {
     const [runA] = await db
       .select({ runNumber: runs.runNumber })
       .from(runs)
-      .where(and(eq(runs.id, "exec_aaaabbbbcccc0001"), eq(runs.applicationId, ctx.defaultAppId)));
+      .where(and(eq(runs.id, "run_aaaabbbbcccc0001"), eq(runs.applicationId, ctx.defaultAppId)));
 
     const [runB] = await db
       .select({ runNumber: runs.runNumber })
       .from(runs)
-      .where(and(eq(runs.id, "exec_aaaabbbbcccc0002"), eq(runs.applicationId, appBId)));
+      .where(and(eq(runs.id, "run_aaaabbbbcccc0002"), eq(runs.applicationId, appBId)));
 
     expect(runA!.runNumber).toBe(1);
     expect(runB!.runNumber).toBe(1);
@@ -75,31 +75,31 @@ describe("nextRunNumber isolation per application", () => {
     const appBScope = { orgId: ctx.orgId, applicationId: appBId };
     // 3 runs in AppA, 2 runs in AppB
     await createRun(appAScope, {
-      id: "exec_aaaa000000000001",
+      id: "run_aaaa000000000001",
       packageId: agentId,
       actor,
       input: null,
     });
     await createRun(appAScope, {
-      id: "exec_aaaa000000000002",
+      id: "run_aaaa000000000002",
       packageId: agentId,
       actor,
       input: null,
     });
     await createRun(appBScope, {
-      id: "exec_bbbb000000000001",
+      id: "run_bbbb000000000001",
       packageId: agentId,
       actor,
       input: null,
     });
     await createRun(appAScope, {
-      id: "exec_aaaa000000000003",
+      id: "run_aaaa000000000003",
       packageId: agentId,
       actor,
       input: null,
     });
     await createRun(appBScope, {
-      id: "exec_bbbb000000000002",
+      id: "run_bbbb000000000002",
       packageId: agentId,
       actor,
       input: null,

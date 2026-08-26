@@ -27,10 +27,9 @@ function uniquePath(label: string): string {
   return `app_test/upl_${label}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}/file.bin`;
 }
 
-function makeToken(overrides: Partial<FsUploadTokenPayload> & { k: string }): string {
+function makeToken(overrides: Partial<FsUploadTokenPayload> & { k: string; s: number }): string {
   return signFsUploadToken(
     {
-      s: 0,
       m: "",
       e: Math.floor(Date.now() / 1000) + 300,
       ...overrides,
@@ -65,7 +64,7 @@ describe("PUT /api/uploads/_content", () => {
   });
 
   it("rejects a tampered token with 401", async () => {
-    const token = makeToken({ k: `${BUCKET}/${uniquePath("tampered")}` });
+    const token = makeToken({ k: `${BUCKET}/${uniquePath("tampered")}`, s: 1 });
     const res = await putContent(token.slice(0, -2) + "xx", new Uint8Array([1]));
     expect(res.status).toBe(401);
   });
@@ -73,6 +72,7 @@ describe("PUT /api/uploads/_content", () => {
   it("rejects an expired token with 401", async () => {
     const token = makeToken({
       k: `${BUCKET}/${uniquePath("expired")}`,
+      s: 1,
       e: Math.floor(Date.now() / 1000) - 60,
     });
     const res = await putContent(token, new Uint8Array([1]));
@@ -82,6 +82,7 @@ describe("PUT /api/uploads/_content", () => {
   it("rejects a Content-Type that does not match the signed MIME", async () => {
     const token = makeToken({
       k: `${BUCKET}/${uniquePath("mime")}`,
+      s: 3,
       m: "application/pdf",
     });
     const res = await putContent(token, new Uint8Array([1, 2, 3]), {

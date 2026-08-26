@@ -716,7 +716,7 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
   // allowlists an internal host must not be able to steer the platform there.)
   //
   // Exception: a host the OPERATOR has explicitly declared trusted via
-  // `OAUTH_ALLOWED_INTERNAL_IDP_HOSTS` (a self-hosted deployment whose login
+  // `EGRESS_ALLOW_INTERNAL_HOSTS` (a self-hosted deployment whose login
   // endpoint legitimately lives on a private address). Unset in production by
   // default, so every internal host stays blocked there.
   let loginUrl: URL;

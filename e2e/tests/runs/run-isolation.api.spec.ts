@@ -30,17 +30,17 @@ test.describe("Cross-org run isolation", () => {
 
   test("OrgB cannot access a run ID from OrgA", async ({ clientB }) => {
     // Attempt to access a fabricated run ID — should 404
-    const res = await clientB.get("/runs/exec_nonexistent12345");
+    const res = await clientB.get("/runs/run_nonexistent12345");
     expect(res.status()).toBe(404);
   });
 
   test("OrgB cannot access OrgA run logs", async ({ clientB }) => {
-    const res = await clientB.get("/runs/exec_nonexistent12345/logs");
+    const res = await clientB.get("/runs/run_nonexistent12345/logs");
     expect(res.status()).toBe(404);
   });
 
   test("OrgB cannot cancel OrgA run", async ({ clientB }) => {
-    const res = await clientB.post("/runs/exec_nonexistent12345/cancel");
+    const res = await clientB.post("/runs/run_nonexistent12345/cancel");
     expect(res.status()).toBe(404);
   });
 

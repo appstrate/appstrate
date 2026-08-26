@@ -15678,7 +15678,7 @@ export interface operations {
                 "multipart/form-data": {
                     /**
                      * Format: binary
-                     * @description `.afps-bundle` (preferred), `.afps`, or `.zip` archive — detected automatically via the bundle.json marker. May also be supplied under the `bundle` form field as an alias.
+                     * @description `.afps-bundle` (preferred), `.afps`, or `.zip` archive — detected automatically via the bundle.json marker.
                      */
                     file: Blob;
                 };

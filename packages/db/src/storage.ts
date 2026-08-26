@@ -99,7 +99,7 @@ export function ensureBucket(): Promise<void> {
 export function createUploadUrl(
   bucket: string,
   path: string,
-  opts?: CreateUploadUrlOptions,
+  opts: CreateUploadUrlOptions,
 ): Promise<UploadUrlDescriptor> {
   return getStore().createUploadUrl(bucket, path, opts);
 }

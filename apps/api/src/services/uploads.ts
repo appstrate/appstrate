@@ -707,8 +707,7 @@ interface FsContentWriteResult {
  *     stays usable for a clean retry. This mirrors what direct-presign S3
  *     mode gets by signing Content-Length (and S3 presigned-POST's
  *     `content-length-range`), instead of deferring the mismatch to
- *     consume time. `maxSize = 0` (legacy/unbounded tokens) keeps
- *     ceiling-only semantics.
+ *     consume time.
  *
  * Deadline: `expiresAt` (the token's signed expiry, unix seconds; 0 = none)
  * is re-checked on every chunk — the route only validates it when the PUT
@@ -747,7 +746,7 @@ export async function writeProxyUploadContent(
         return;
       }
       bytes += chunk.byteLength;
-      if (maxSize > 0 && bytes > maxSize) {
+      if (bytes > maxSize) {
         controller.error(invalidRequest(`body exceeds signed max ${maxSize} bytes`));
         return;
       }
@@ -763,7 +762,7 @@ export async function writeProxyUploadContent(
     }
     throw err;
   }
-  if (maxSize > 0 && bytes !== maxSize) {
+  if (bytes !== maxSize) {
     // Exact-size binding (see doc comment): the object was created but is
     // shorter than the declared size — remove it so the token can be reused
     // for a clean retry instead of the mismatch surfacing at consume time.
