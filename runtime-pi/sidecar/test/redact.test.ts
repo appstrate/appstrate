@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { filterSensitiveHeaders, redactLocationHeader, scrubSecretMaterial } from "../redact.ts";
+import {
+  filterSensitiveHeaders,
+  redactLocationHeader,
+  scrubSecretMaterial,
+  truncateForScrub,
+} from "../redact.ts";
 
 describe("filterSensitiveHeaders", () => {
   it("drops set-cookie from a Headers instance", () => {
@@ -335,7 +340,7 @@ describe("scrubSecretMaterial", () => {
   // delimiter decomposes into bytes (`%`, `2`, `C`) the byte class admitted one
   // at a time. Both renderings of an authority now share one exclusion list.
   it("control: an ENCODED delimiter ends the encoded authority too", () => {
-    for (const sep of ["%2C", "%20", "%22", "%26", "%27x%2C"]) {
+    for (const sep of ["%2C", "%20", "%22", "%26", "%3B", "%3D", "%27x%2C"]) {
       const input = `see https%3A%2F%2Fdocs.example.com${sep}contact%3Aadmin%40example.com`;
       expect(scrubSecretMaterial(input)).toBe(input);
     }
@@ -351,15 +356,7 @@ describe("scrubSecretMaterial", () => {
   // nothing to do with the comma problem. Every one of them is a byte a real
   // DSN password carries, and every password below shipped verbatim.
   it("masks a DSN password built from RFC 3986 sub-delims", () => {
-    for (const pw of [
-      "s3cr3t!x",
-      "pa$$w0rd",
-      "p(ass)",
-      "x'y",
-      "pass=word",
-      "a;b*c",
-      "p!a$s'w(o)r*d;=x",
-    ]) {
+    for (const pw of ["s3cr3t!x", "pa$$w0rd", "p(ass)", "x'y", "a*b", "p!a$s'w(o)r*d+x"]) {
       const out = scrubSecretMaterial(`postgres://user:${pw}@db.internal:5432/app`);
       expect(out).toBe("postgres://[redacted]@db.internal:5432/app");
     }
@@ -369,13 +366,39 @@ describe("scrubSecretMaterial", () => {
     );
   });
 
-  // Control for the rule above: admitting the sub-delims must NOT re-admit the
-  // three bytes the comma fix excluded, or the fix is undone.
-  it('control: sub-delims are back but `,`, `&`, `"` and whitespace are not', () => {
-    for (const sep of [",", "&", '"', " "]) {
+  // Control for the rule above: "sub-delims are back" is not the rule. `;` and
+  // `=` separate items in cookies, matrix params and query strings exactly as
+  // `,` and `&` do, and admitting them reopened the comma defect verbatim —
+  // host destroyed, nothing sensitive masked, the identical trade the comma
+  // exclusion was written to undo.
+  it('control: `,`, `&`, `;`, `=`, `"` and whitespace end a raw authority', () => {
+    for (const sep of [",", "&", ";", "=", '"', " "]) {
       const input = `see https://docs.example.com${sep}contact:admin@example.com`;
       expect(scrubSecretMaterial(input)).toBe(input);
     }
+    // The query-string shape the `=` exclusion is really about: a redirect
+    // target and the next parameter, both intact.
+    expect(scrubSecretMaterial("GET /v1?next=https://cb.example.com;user=a@b.com")).toBe(
+      "GET /v1?next=https://cb.example.com;user=a@b.com",
+    );
+  });
+
+  // LEAK: the encoded rendering's stop-triplet list was applied to the RAW rule
+  // too, "so the two renderings behave identically". Inverted: a triplet inside
+  // a RAW authority is a byte the password HAD to encode — `&`, `/`, space and
+  // `,` are legal in a URL in no other form — so refusing triplets there
+  // refuses real passwords. Base64 alphabets contain `/`; generated DSN
+  // passwords contain all four.
+  it("masks a raw DSN password whose bytes are percent-encoded", () => {
+    for (const pw of ["pa%26ss", "pa%2Fss", "pa%20ss", "pa%2Css", "pa%3Dss", "pa%3Bss"]) {
+      expect(scrubSecretMaterial(`postgres://user:${pw}@db.internal/appdb`)).toBe(
+        "postgres://[redacted]@db.internal/appdb",
+      );
+    }
+    // The `%40` case the shared list was originally justified by still holds.
+    expect(scrubSecretMaterial("https://user:p%40ss@host/path")).toBe(
+      "https://[redacted]@host/path",
+    );
   });
 
   // The keyword rule's separator group accepted bare whitespace, so
@@ -429,5 +452,61 @@ describe("scrubSecretMaterial", () => {
     );
     expect(scrubSecretMaterial('{"token": "abc123def456"}')).toBe('{"token": "[redacted]"}');
     expect(scrubSecretMaterial("KEY_FILE=/etc/secrets/id_rsa")).toBe("KEY_FILE=[redacted]");
+  });
+});
+
+describe("truncateForScrub", () => {
+  // Every OTHER rule in redact.ts matches a credential from its START, so a cut
+  // can only shorten a match. The userinfo pair is the exception: it needs the
+  // `@` that ENDS the userinfo. `/llm` cut the body at 264 chars BEFORE
+  // scrubbing (a measured DoS bound: ~2.5 s per MB scrubbed unbounded), so an
+  // `@` past the cut meant the rule never fired and the visible prefix of the
+  // password shipped into the operator log.
+  const pw = "S3cr3tP4ssw0rd".repeat(16); // 224 chars — pushes the `@` past 264
+  const body = `{"error":{"type":"upstream_connect_error","message":"dial failed for postgres://svc_admin:${pw}@db.internal:5432/app"}}`;
+
+  it("masks an authority whose terminator the cut removed", () => {
+    const out = scrubSecretMaterial(truncateForScrub(body, 264));
+    expect(out).not.toContain("S3cr3tP4ssw0rd");
+    // The scheme and the fact a URL was cut both survive — the operator still
+    // reads "dial failed for postgres://…".
+    expect(out).toContain("dial failed for postgres://");
+    expect(out.endsWith("[redacted]")).toBe(true);
+  });
+
+  it("masks the encoded rendering of the same cut", () => {
+    const encoded = `redirect_uri=https%3A%2F%2Fsvc_admin%3A${pw}%40host%2Fcb`;
+    const out = scrubSecretMaterial(truncateForScrub(encoded, 264));
+    expect(out).not.toContain("S3cr3tP4ssw0rd");
+    expect(out).toContain("https%3A%2F%2F[redacted]");
+  });
+
+  // The mask must cost nothing when the cut did not actually cut. On a complete
+  // text the scrubber saw every terminator there was, so a trailing `://run`
+  // with no `@` genuinely has no userinfo — masking it would destroy a host for
+  // nothing, which is the trade this file exists to avoid making.
+  it("control: an untruncated text keeps its trailing host", () => {
+    const line = "upstream unreachable: https://api.anthropic.com";
+    expect(truncateForScrub(line, 264)).toBe(line);
+    expect(scrubSecretMaterial(truncateForScrub(line, 264))).toBe(line);
+  });
+
+  // …and a cut that lands past a complete authority leaves it alone: the run
+  // after `://` is broken by the `@` (and by the path), so nothing is anchored
+  // at the cut and the userinfo rule masks it the ordinary way.
+  it("control: an authority whose terminator survived the cut is masked, not truncated", () => {
+    const line = `dial failed for postgres://svc:hunter2@db.internal:5432/app and then ${"x".repeat(300)}`;
+    const out = scrubSecretMaterial(truncateForScrub(line, 264));
+    expect(out).toContain("postgres://[redacted]@db.internal:5432/app");
+    expect(out).not.toContain("hunter2");
+  });
+
+  // A truncated URL that is NOT an authority at all (the cut is inside a path)
+  // keeps its host: the run anchored at the cut has to start right after the
+  // `://`, and a `/` breaks it.
+  it("control: a cut inside a path keeps the host", () => {
+    const line = `see https://docs.example.com/guides/${"a".repeat(300)}`;
+    const out = truncateForScrub(line, 264);
+    expect(out).toContain("https://docs.example.com/guides/");
   });
 });

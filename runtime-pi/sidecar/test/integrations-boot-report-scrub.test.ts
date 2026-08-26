@@ -20,7 +20,7 @@
 import { describe, it, expect } from "bun:test";
 import { zipArtifact } from "@appstrate/core/zip";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
-import { bootIntegrations } from "../integrations-boot.ts";
+import { bootIntegrations, scrubStderrLine } from "../integrations-boot.ts";
 import { _setLogSinkForTesting } from "../logger.ts";
 import { installPassthroughRunnerExec } from "./helpers/runner-exec.ts";
 
@@ -184,5 +184,29 @@ describe("boot report — third-party failure text is scrubbed", () => {
       _setLogSinkForTesting(null);
       if (result) await result.shutdown();
     }
+  });
+});
+
+describe("scrubStderrLine", () => {
+  // The 500-char cap is the tightest cut in the sidecar, so it is the one most
+  // likely to land inside an authority — and the userinfo rule is the one rule
+  // that needs a TERMINATOR (`@`) rather than matching from the credential's
+  // start. Cut the `@` off and the rule cannot fire at all: the visible prefix
+  // of the password went into `failed[].error` on the UNAUTHENTICATED
+  // `GET /integrations/boot-report` the agent container reads.
+  it("masks a connection string whose `@` falls past the 500-char cap", () => {
+    const password = "S3cr3tP4ssw0rd".repeat(40); // 560 chars — `@` past the cap
+    const out = scrubStderrLine(
+      `Error: connect ECONNREFUSED postgres://svc_admin:${password}@db.internal:5432/app`,
+    );
+    expect(out).not.toContain("S3cr3tP4ssw0rd");
+    expect(out).toContain("connect ECONNREFUSED postgres://");
+  });
+
+  // …and a line the cap did not cut keeps its host: the scrubber saw every
+  // terminator there was, so there is nothing to be uncertain about.
+  it("control: an uncut line keeps its host", () => {
+    const line = "Error: connect ECONNREFUSED https://api.example.com:5432";
+    expect(scrubStderrLine(line)).toBe(line);
   });
 });

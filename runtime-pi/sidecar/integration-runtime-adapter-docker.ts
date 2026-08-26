@@ -19,7 +19,7 @@ import { SubprocessTransport } from "@appstrate/mcp-transport";
 import { isMcpServerRuntime, type McpServerRuntime } from "@appstrate/core/mcp-server";
 
 import { logger } from "./logger.ts";
-import { scrubSecretMaterial } from "./redact.ts";
+import { scrubSecretMaterial, truncateForScrub } from "./redact.ts";
 import type { IntegrationSpawnSpec } from "./integrations-boot.ts";
 import { createIntegrationDnsResponder } from "./integration-dns-responder.ts";
 import { createTransparentEgressListener } from "./integration-transparent-listener.ts";
@@ -232,8 +232,13 @@ async function dockerExec(args: string[]): Promise<string> {
       // `GET /integrations/boot-report` that the agent container reads, so
       // scrub credential shapes out of it here, at the point the third-party
       // text enters our own error string.
+      // `truncateForScrub` rather than a bare `.slice`: the cap can land inside
+      // a `scheme://user:pass@host` and the userinfo rule needs the `@` it just
+      // removed, so the cut masks what it left unterminated. Same class as the
+      // `/llm` body sample, lower probability (2 KB, not 264) — but the cost of
+      // covering it is one call, and the leak it prevents is a whole password.
       const detail = scrubSecretMaterial(
-        (stderr.trim() || stdout.trim()).slice(0, DOCKER_EXEC_DETAIL_MAX_CHARS),
+        truncateForScrub(stderr.trim() || stdout.trim(), DOCKER_EXEC_DETAIL_MAX_CHARS),
       );
       throw new Error(`docker ${args[0]} failed (exit ${code}): ${detail}`);
     }

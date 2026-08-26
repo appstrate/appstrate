@@ -270,28 +270,42 @@ const KEYWORD_SEP = String.raw`(?:["'\s:=]|%20|%3A|%3D|%22|%27)+`;
 const KEYWORD_VALUE = String.raw`[^\s"',&]+`;
 
 /**
- * Percent triplets that END a userinfo rather than belong to it.
+ * Percent triplets that END an ENCODED userinfo rather than belong to it.
  *
- * `%2C`/`%26`/`%20`/`%22` are the encoded twins of the raw bytes
- * {@link USERINFO_BYTE} refuses; `%2F`/`%3F`/`%23` are the encoded authority
- * terminators. Listing them is what makes the two renderings of an authority
- * behave identically, which the first version of this pair did NOT: it spelled
- * the exclusions out as raw characters only, and every triplet decomposes into
- * bytes (`%`, `2`, `C`) that the raw class admits one at a time. So the encoded
- * rule reproduced, verbatim, the defect its raw twin had just been fixed for —
+ * This is the ENCODED rendering's exclusion list and ONLY that. Sharing it with
+ * the raw rule was a leak, because it inverts what percent-encoding means: a
+ * triplet inside a RAW authority is, by definition, a byte the userinfo had to
+ * encode — `&`, `/`, space and `,` are legal in a URL in no other form — so
+ * refusing triplets there refuses real passwords. Four shapes shipped verbatim
+ * for as long as the raw rule carried this list, all of them ordinary
+ * generated-DSN passwords (base64 alphabets contain `/`):
+ * `postgres://user:pa%26ss@db`, `pa%2Fss`, `pa%20ss`, `pa%2Css`.
+ *
+ * What the two renderings must share is a VERDICT — the same authority is
+ * masked in both, or left whole in both — and that is not the same thing as
+ * sharing one byte class. Each rendering spells its own separators: between two
+ * RAW URLs the separator is itself raw (`,` `&` `;` `=` whitespace `"`), which
+ * {@link USERINFO_BYTE} already refuses; between two ENCODED URLs it is a
+ * triplet, which decomposes into bytes (`%`, `2`, `C`) that the byte class
+ * admits one at a time. So the encoded rule — and only it — needs this list on
+ * top, or it reproduces the spanning defect its raw twin was fixed for:
  * `see https%3A%2F%2Fdocs.example.com%2Ccontact%3Aadmin%40example.com` came out
  * as `see https%3A%2F%2F[redacted]%40example.com`.
  *
+ * Entries: `%2C`/`%26`/`%3B`/`%3D`/`%20`/`%22`/`%09`/`%0A`/`%0D` are the encoded
+ * twins of the separators {@link USERINFO_BYTE} refuses — one triplet per
+ * refused raw byte, which is what keeps the two verdicts aligned;
+ * `%2F`/`%3F`/`%23` are the encoded authority terminators.
+ *
  * `%40` is deliberately absent: it is the encoded `@` the encoded rule matches
- * ON, and its lazy quantifier already stops at the first one. Keeping it
- * admissible is what lets the RAW rule mask `https://user:p%40ss@host`.
+ * ON, and its lazy quantifier already stops at the first one.
  */
-const USERINFO_STOP_TRIPLET = String.raw`%(?:2C|26|20|22|2F|3F|23|09|0A|0D)`;
+const USERINFO_STOP_TRIPLET = String.raw`%(?:2C|26|3B|3D|20|22|2F|3F|23|09|0A|0D)`;
 
 /**
- * Bytes a URL authority may carry before the `@` that ends its userinfo — in
- * BOTH the raw and the percent-encoded rendering of that authority, which is
- * why the two rules below share one definition.
+ * Bytes a URL authority may carry before the `@` that ends its userinfo, in the
+ * RAW rendering. The encoded rendering layers {@link USERINFO_STOP_TRIPLET} on
+ * top of this class; it does not get a different class.
  *
  * Deliberately a POSITIVE class rather than the negated `[^/?#@\s]` it
  * replaced. That negation stopped only at `/`, `?`, `#` and whitespace, so a
@@ -302,16 +316,41 @@ const USERINFO_STOP_TRIPLET = String.raw`%(?:2C|26|20|22|2F|3F|23|09|0A|0D)`;
  * gone, and nothing sensitive masked in exchange.
  *
  * What it admits is RFC 3986 §3.2.1 userinfo: unreserved (`A-Za-z0-9._~-`),
- * `:`, percent-triplets, and the sub-delims `!$&'()*+,;=` MINUS `,` and `&`.
- * Those two, plus whitespace and `"`, are the ONLY exclusions, and each is
- * excluded for the same stated reason: they are what separates one item from
- * the next in the prose and query strings this scrubber runs over, so admitting
- * them is what lets a match cross from one URL into another. The rest were
- * dropped by accident in the narrowing that fixed the comma, and every one of
- * them is a byte a real DSN password carries — `postgres://user:s3cr3t!x@db`,
- * `pa$$w0rd`, `p(ass)`, `x'y`, `pass=word` all shipped verbatim in exchange.
+ * `:`, percent-triplets, and the sub-delims `!$&'()*+,;=` minus the four that
+ * separate one item from the next in the prose and query strings this scrubber
+ * runs over. "Sub-delims are back" is NOT the rule — both directions of that
+ * generalisation have now shipped a defect — so the verdict is stated per
+ * character:
+ *
+ *   - `!` `$` `'` `(` `)` `*` `+` — ADMITTED. None of them separates two items
+ *     in prose, a query string or a header value; each is a byte real DSN
+ *     passwords carry (`s3cr3t!x`, `pa$$w0rd`, `p(ass)`, `x'y`), and dropping
+ *     them in the narrowing that fixed the comma shipped those passwords whole.
+ *   - `&` — REFUSED. The query-parameter separator.
+ *   - `,` — REFUSED. The list separator in prose and in HTTP header values;
+ *     the original spanning case.
+ *   - `;` — REFUSED. Separates parameters in cookies, matrix params and query
+ *     strings. Admitting it reopened the comma defect verbatim:
+ *     `see https://docs.example.com;contact:admin@example.com` came out as
+ *     `see https://[redacted]@example.com`.
+ *   - `=` — REFUSED. The key/value separator, so a match crossed out of a
+ *     redirect target into the next parameter:
+ *     `GET /v1?next=https://cb.example.com;user=a@b.com` lost `cb.example.com`.
+ *
+ * The price of refusing `;` and `=` is stated rather than hidden: a RAW `;` or
+ * `=` inside a password (`postgres://user:pa=ss@db`) is not masked. It is not a
+ * regression — neither byte was in this class before the pass that reopened
+ * spanning — and the ENCODED rendering of the same password (`pa%3Dss`,
+ * `pa%3Bss`) IS masked by the raw rule, which is the rendering a DSN takes
+ * wherever it travels through a URL or a query parameter.
  */
-const USERINFO_BYTE = String.raw`(?:(?!${USERINFO_STOP_TRIPLET})[A-Za-z0-9._~:%+!$'()*;=-])`;
+const USERINFO_BYTE = String.raw`[A-Za-z0-9._~:%+!$'()*-]`;
+
+/**
+ * {@link USERINFO_BYTE} as the ENCODED rendering needs it: the same class, plus
+ * the triplet exclusions that rendering's separators require.
+ */
+const USERINFO_BYTE_ENCODED = String.raw`(?:(?!${USERINFO_STOP_TRIPLET})${USERINFO_BYTE})`;
 
 /**
  * Ordered scrub rules. Compiled once: these run on every proxied error body.
@@ -335,18 +374,19 @@ const SCRUB_RULES: ReadonlyArray<readonly [RegExp, string]> = [
   // (`https://token:hunter2@host/path`) is masked as userinfo rather than
   // swallowing the host and path into the keyword rule's value class.
   // {@link USERINFO_BYTE} admits neither `/`, `?`, `#`, whitespace, a quote,
-  // an ampersand nor a comma — in either rendering — so an `@` inside a path
+  // an ampersand, a comma, a semicolon nor an equals, so an `@` inside a path
   // or query (`/users/me@example.com`) is not userinfo, and a match can never
-  // span from one URL to the next.
+  // span from one URL to the next. Percent-triplets ARE admitted here: inside a
+  // raw authority a triplet is a byte the password had to encode.
   [new RegExp(`(:\\/\\/)${USERINFO_BYTE}*@`, "gi"), "$1[redacted]@"],
   // Percent-encoded form (`https%3A%2F%2Fuser%3Apass%40host%2Fcb`). Encoded
   // URLs are the whole reason this file has an anchor of its own, and a
   // `redirect_uri=` value — where an OAuth error body echoes a userinfo back —
-  // is encoded by definition. It needs no tempering of its own: the shared
-  // {@link USERINFO_STOP_TRIPLET} list already refuses `%2F`/`%3F`/`%23` (the
-  // path) and `%2C`/`%20`/`%22`/`%26` (the next URL along), and the lazy
-  // quantifier stops at the FIRST `%40` of the authority.
-  [new RegExp(`(%3A%2F%2F)${USERINFO_BYTE}*?%40`, "gi"), "$1[redacted]%40"],
+  // is encoded by definition. This rendering — and only this one — layers
+  // {@link USERINFO_STOP_TRIPLET} on the byte class, so it refuses `%2F`/`%3F`/
+  // `%23` (the path) and `%2C`/`%26`/`%3B`/`%3D`/`%20`/`%22` (the next item
+  // along); the lazy quantifier stops at the FIRST `%40` of the authority.
+  [new RegExp(`(%3A%2F%2F)${USERINFO_BYTE_ENCODED}*?%40`, "gi"), "$1[redacted]%40"],
   [/(Bearer|Basic)(?:\s|%20)+[A-Za-z0-9._~+/=%-]+/gi, "$1 [redacted]"],
   [new RegExp(`${CRED_START}eyJ[A-Za-z0-9._-]{10,}`, "g"), "[redacted-jwt]"],
   [/sk-ant-[A-Za-z0-9._-]+/gi, "[redacted-key]"],
@@ -372,5 +412,57 @@ const SCRUB_RULES: ReadonlyArray<readonly [RegExp, string]> = [
 export function scrubSecretMaterial(text: string): string {
   let out = text;
   for (const [pattern, replacement] of SCRUB_RULES) out = out.replace(pattern, replacement);
+  return out;
+}
+
+/**
+ * A run of authority-legal bytes left hanging at the end of a cut text — i.e.
+ * an authority whose terminator the CUT may have removed, one per rendering.
+ */
+const TRUNCATED_AUTHORITY_RULES: ReadonlyArray<readonly [RegExp, string]> = [
+  [new RegExp(`(:\\/\\/)${USERINFO_BYTE}+$`), "$1[redacted]"],
+  [new RegExp(`(%3A%2F%2F)${USERINFO_BYTE_ENCODED}+$`, "i"), "$1[redacted]"],
+];
+
+/**
+ * Slice `text` to `maxChars` for a caller that scrubs afterwards, masking an
+ * authority the slice itself left unterminated.
+ *
+ * Callers MUST slice before scrubbing, and this exists because that ordering
+ * has a blind spot they cannot see. `scrubSecretMaterial` is a pass of ~10
+ * global regexes over upstream-controlled text on a single-threaded sidecar:
+ * scrubbing a 1 MB error body to produce a 200-char log line blocked the event
+ * loop for 2.5 s (measured, adversarial body) where slice-first costs ~0.05 ms.
+ * So the bound stays, and this function is bounded by it — one anchored match
+ * over the ALREADY-sliced text, O(cut), never O(body).
+ *
+ * The blind spot: every other rule in `redact.ts` matches a credential from its
+ * START, so a cut can only shorten what a rule already matched. The two
+ * userinfo rules are the exception — they need the `@`/`%40` that ENDS the
+ * userinfo before they can match at all. Cut that terminator off and the rule
+ * does not fire at all, and the visible prefix ships raw:
+ *
+ *   `{"error":{"message":"dial failed for postgres://svc_admin:S3cr3tP4ssw…`
+ *
+ * which put ~130 characters of a DSN password into the operator log. Raising
+ * the caller's margin does not close that — it only moves the cut, and the next
+ * authority to straddle it leaks the same way. So the terminator is treated as
+ * UNKNOWN rather than assumed absent: a run of authority-legal bytes that
+ * reaches the end of the cut may or may not have been followed by an `@`, and
+ * the only safe reading of "may" is to mask it.
+ *
+ * The mask fires ONLY when the text was actually cut. On a complete text the
+ * scrubber sees every terminator there is, so a trailing `://run` with no `@`
+ * genuinely has no userinfo, and masking it would destroy a host for nothing.
+ * When it does fire it costs the tail of one truncated URL — the scheme and the
+ * fact that a URL was cut both survive — which is the trade this file makes
+ * everywhere else: never a leak, occasionally a lost host at the very cut.
+ */
+export function truncateForScrub(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  let out = text.slice(0, maxChars);
+  for (const [pattern, replacement] of TRUNCATED_AUTHORITY_RULES) {
+    out = out.replace(pattern, replacement);
+  }
   return out;
 }

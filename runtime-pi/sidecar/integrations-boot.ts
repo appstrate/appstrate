@@ -83,7 +83,7 @@ import {
   type RuntimeAdapterRunContext,
   type RuntimeEgressContext,
 } from "./integration-runtime-adapter.ts";
-import { scrubSecretMaterial } from "./redact.ts";
+import { scrubSecretMaterial, truncateForScrub } from "./redact.ts";
 // Side-effect imports — each adapter module registers itself on load.
 // New adapters (firecracker, podman, …) plug in with one more import here.
 import "./integration-runtime-adapter-docker.ts";
@@ -737,9 +737,15 @@ const STDERR_LINE_MAX_CHARS = 500;
  * This is defence-in-depth, not a guarantee — the primary control remains
  * that runs are org-scoped to an actor who already holds the integration's
  * credentials.
+ *
+ * The cap is applied with `truncateForScrub` rather than a bare `.slice`. It is
+ * the TIGHTEST cut in the sidecar (500 chars, against 2 KB elsewhere), so it is
+ * the one most likely to land inside a `scheme://user:pass@host` — an ordinary
+ * shape for a runner printing a connection error — and the userinfo rule cannot
+ * fire without the `@` the cut would have removed.
  */
 export function scrubStderrLine(line: string): string {
-  return scrubSecretMaterial(line.slice(0, STDERR_LINE_MAX_CHARS));
+  return scrubSecretMaterial(truncateForScrub(line, STDERR_LINE_MAX_CHARS));
 }
 
 /**

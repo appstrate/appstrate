@@ -29,6 +29,7 @@ import {
 import type { McpHost } from "./mcp-host.ts";
 import type { IntegrationCredentialsSource } from "./integration-credentials-source.ts";
 import { logger } from "./logger.ts";
+import { truncateForScrub } from "./redact.ts";
 
 /**
  * AFPS `auths.{key}.delivery.http` block — snake_case (`in`, `name`,
@@ -211,7 +212,12 @@ function parseLoginToolResult(result: {
     const errFirst = result.content?.[0];
     const detail =
       errFirst && errFirst.type === "text" && typeof errFirst.text === "string"
-        ? errFirst.text.slice(0, LOGIN_TOOL_ERROR_DETAIL_MAX_CHARS)
+        ? // `truncateForScrub`, not a bare `.slice`: every consumer named above
+          // scrubs this text, and the cut can land inside a `scheme://user:pass@host`
+          // and remove the `@` their userinfo rule needs before they ever see it.
+          // The cut masks what it left unterminated so no downstream scrub is
+          // blinded by a boundary this file chose.
+          truncateForScrub(errFirst.text, LOGIN_TOOL_ERROR_DETAIL_MAX_CHARS)
         : "";
     throw new Error(`${CONNECT_LOGIN_TOOL_ERROR_PREFIX}${detail ? `: ${detail}` : ""}`);
   }

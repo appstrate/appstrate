@@ -37,7 +37,7 @@ import {
 } from "./token-budget.ts";
 import { OAuthTokenCache, NeedsReconnectionError, type CachedToken } from "./oauth-token-cache.ts";
 import { logger } from "./logger.ts";
-import { filterSensitiveHeaders, scrubSecretMaterial } from "./redact.ts";
+import { filterSensitiveHeaders, scrubSecretMaterial, truncateForScrub } from "./redact.ts";
 
 export type { SidecarConfig } from "./helpers.ts";
 
@@ -301,12 +301,17 @@ const BODY_SAMPLE_MAX_CHARS = 200;
  * `scrubStderrLine` in `integrations-boot.ts` is the sibling that already gets
  * this right.
  *
- * The margin exists because every scrub rule matches a credential from its
- * START: cutting at exactly the preview length would still mask the visible
- * prefix of a straddling token, EXCEPT where a rule carries a minimum length
- * (`AKIA` + 12, `eyJ` + 10) that the cut takes it below. 64 chars clears every
- * such minimum, so a credential straddling the preview cut is masked rather
- * than surviving as a short unmatched prefix.
+ * The margin covers the rules that match a credential from its START: cutting
+ * at exactly the preview length would still mask the visible prefix of a
+ * straddling token, EXCEPT where a rule carries a minimum length (`AKIA` + 12,
+ * `eyJ` + 10) that the cut takes it below. 64 chars clears every such minimum.
+ *
+ * It does NOT cover the two rules that need a TERMINATOR — the userinfo pair,
+ * which must see the `@`/`%40` before it can match anything. No margin can:
+ * raising it moves the cut, it does not remove one. That case is closed by
+ * `truncateForScrub`, which masks an authority the cut left unterminated; see
+ * its docstring. The margin is therefore sized for the minimum-length rules
+ * alone, which is all it was ever able to promise.
  */
 const BODY_SAMPLE_SCRUB_MARGIN = 64;
 
@@ -335,7 +340,7 @@ async function logOauthLlmResponse(
   // guarantee holds independent of upstream behavior.
   const responseHeaders = filterSensitiveHeaders(upstream.headers);
   const scrubbed = scrubSecretMaterial(
-    bodySample.slice(0, BODY_SAMPLE_MAX_CHARS + BODY_SAMPLE_SCRUB_MARGIN),
+    truncateForScrub(bodySample, BODY_SAMPLE_MAX_CHARS + BODY_SAMPLE_SCRUB_MARGIN),
   );
   const truncated =
     bodySample.length > BODY_SAMPLE_MAX_CHARS
