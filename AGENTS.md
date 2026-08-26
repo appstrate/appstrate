@@ -127,14 +127,14 @@ appstrate/
 - Auth: Better Auth cookie sessions + `X-Org-Id` header for org context
 - API key auth (`ask_*` prefix) tried first, then cookie fallback
 - Request pipeline: error handler -> Request-Id -> CORS -> health -> auth -> org context -> routes
-- Route guards (`middleware/guards.ts`): `requireAgent()`, `requireOrgAgent()`, `requirePackageInOrg()`, `requireMutableAgent()`, `apiKeyOrgScopeGuard()`/`apiKeyAppScopeGuard()`. RBAC is `requirePermission(resource, action)` (`middleware/require-permission.ts`) — there is **no** `requireAdmin()` / `requireOwner()`
+- Route guards (`middleware/guards.ts`): `requireAgent()`, `requireOrgAgent()`, `requirePackageInOrg()`, `requireMutableAgent()`, `apiKeyOrgScopeGuard()`/`apiKeySpaceScopeGuard()`. RBAC is `requirePermission(resource, action)` (`middleware/require-permission.ts`) — there is **no** `requireAdmin()` / `requireOwner()`
 - Rate limiting: Redis-backed, keyed by `method:path:identity`
 
 ### Frontend Patterns
 
 - i18next: `fr` (default) + `en`, namespaces: `common`, `agents`, `settings`
 - **Typed API client only** — `apps/web/src/api/client.ts`: `$api.useQuery("get", "/api/end-users", { params })` / `$api.useMutation(...)` (openapi-react-query) and raw `client.GET(...)` (openapi-fetch), typed against `api/schema.d.ts` (regenerate with `bun run generate:api`). The legacy fetch barrel `api.ts` is **deleted** and its import specifiers are **banned by ESLint** (`eslint.config.mjs`) — code written against it will not lint
-- React Query keys: typed-client hooks use `[method, path, init]` (org/app scope rides in `init`). Run/schedule/package caches keep pinned legacy keys because the SSE patcher invalidates by those names
+- React Query keys: typed-client hooks use `[method, path, init]` (org/space scope rides in `init`). Run/schedule/package caches keep pinned legacy keys because the SSE patcher invalidates by those names
 - Feature gating: `useAppConfig()` reads `window.__APP_CONFIG__` (injected at serve time)
 - Always use `<Modal>` from `components/modal.tsx` for dialogs
 

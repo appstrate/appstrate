@@ -144,7 +144,8 @@ export async function getPackage(
 
 /**
  * Load an agent and verify space-level access in one operation.
- * Default space = access to all, custom space = must be explicitly installed.
+ * System packages are reachable from every space; everything else needs an
+ * installed `space_packages` row (`hasPackageAccess`).
  * Returns null if agent not found OR access denied (404 semantics — no info leak).
  */
 export async function getPackageWithAccess(
