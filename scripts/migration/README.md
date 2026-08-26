@@ -13,11 +13,12 @@ production incident.
 `packages/db/drizzle/*.sql` describes schema shape, is replayed on every
 database at boot forever, and is reviewed as a permanent contract; a script
 here fixes data once, on the deployments that need it, and is reviewed as an
-operational task. The one legitimate overlap — a backfill that is the
+operational task. The two legitimate overlaps — a backfill that is the
 **precondition** of a `SET NOT NULL` promotion, a `CHECK`, or a
-`VALIDATE CONSTRAINT` landing on the **same table**, never a `TRUNCATE` — is
-stated in full, with its limits, in `docs/NO_TRANSITIONAL_CODE.md` §2, which is
-the authority; `bun run verify:no-migration-dml` enforces it.
+`VALIDATE CONSTRAINT`, and a fold whose source column the same file `DROP`s —
+each landing on the **same table**, never a `TRUNCATE`, are stated in full,
+with their limits, in `docs/NO_TRANSITIONAL_CODE.md` §2, which is the
+authority; `bun run verify:no-migration-dml` enforces it.
 
 ## Writing one
 
@@ -28,7 +29,10 @@ the authority; `bun run verify:no-migration-dml` enforces it.
 2. **One transaction** — `BEGIN` / `COMMIT`, so a failure leaves nothing half-done.
 3. **Fenced** — `SET LOCAL lock_timeout` and `statement_timeout`.
 4. **Rehearsed** — `pg_dump` production → throwaway `postgres:16-alpine` →
-   apply → verify. Record the row counts in the header.
+   apply → verify. Record the row counts in the header. When the script repairs
+   a state no reachable database is in — `0003` — say so in the header and mark
+   the counts UNMEASURED, so a reader never mistakes a required value for an
+   observed one.
 5. **Verifiable** — ship the "before" and "after" queries alongside it.
 
 ## Running one
@@ -46,7 +50,8 @@ docker exec -i <pg> psql -U appstrate -d appstrate -v ON_ERROR_STOP=1 \
 
 ## Log
 
-| #    | date       | what                                                                              | rows               |
-| ---- | ---------- | --------------------------------------------------------------------------------- | ------------------ |
-| 0001 | 2026-08-26 | `files.id` `doc_` → `file_` and every reference                                   | 521 / 25 / 64 / 59 |
-| 0002 | 2026-08-26 | `chat_messages`: `document://file_` → `appfile://file_`, finishing 0001's write 4 | 59                 |
+| #    | date        | what                                                                              | rows               |
+| ---- | ----------- | --------------------------------------------------------------------------------- | ------------------ |
+| 0001 | 2026-08-26  | `files.id` `doc_` → `file_` and every reference                                   | 521 / 25 / 64 / 59 |
+| 0002 | 2026-08-26  | `chat_messages`: `document://file_` → `appfile://file_`, finishing 0001's write 4 | 59                 |
+| 0003 | not applied | oauth `resources` columns (0006) on a watermark-drifted DB — not rehearsed        | unmeasured         |
