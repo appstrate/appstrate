@@ -1,4 +1,8 @@
 {
   "extends": "../../tsconfig.base.json",
-  "include": ["src"]
+  // `test` for the same reason every other workspace lists it — tests are
+  // TypeScript and `bun test` does not typecheck them. `drizzle.config.ts`
+  // drives `bun run db:generate`; it was in no program and no lint scope, so a
+  // migration-generation config could break silently.
+  "include": ["src", "test", "drizzle.config.ts"]
 }

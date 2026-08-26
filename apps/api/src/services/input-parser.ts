@@ -60,6 +60,7 @@ import {
 import { isUploadUri, isFileUri, parseFileUri, fileUri } from "@appstrate/core/file-uri";
 import { getActor } from "../lib/actor.ts";
 import { prefixedId } from "../lib/ids.ts";
+import { mapWithConcurrency } from "../lib/map-with-concurrency.ts";
 import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import { isValidRange } from "@appstrate/core/semver";
 import { extensionForMime } from "@appstrate/core/naming";
@@ -450,41 +451,12 @@ export function assertDocsWithinCap(files: { size: number }[], maxBytes: number)
  * regardless of file count.
  *
  * Module-private: its one consumer is the `mapWithConcurrency` fan-out below
- * that streams resolved uploads into the run workspace.
+ * that streams resolved uploads into the run workspace. The pool itself lives
+ * in `lib/map-with-concurrency.ts` — on a rejection here the caller rolls back
+ * the run workspace by doc name, so stragglers that finished are cleaned
+ * regardless.
  */
 const DOC_STREAM_CONCURRENCY = 4;
-
-/**
- * Map over `items` running at most `limit` callbacks concurrently, preserving
- * input order in the result. On the first rejection, in-flight callbacks are
- * allowed to settle but no new ones start, and the rejection propagates — the
- * caller rolls back any partial work (here: the run workspace, by doc name, so
- * stragglers that finished are cleaned regardless).
- */
-export async function mapWithConcurrency<T, R>(
-  items: readonly T[],
-  limit: number,
-  fn: (item: T, index: number) => Promise<R>,
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let nextIndex = 0;
-  let aborted = false;
-  async function worker(): Promise<void> {
-    while (!aborted) {
-      const i = nextIndex++;
-      if (i >= items.length) break;
-      try {
-        results[i] = await fn(items[i]!, i);
-      } catch (err) {
-        aborted = true;
-        throw err;
-      }
-    }
-  }
-  const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
-  await Promise.all(workers);
-  return results;
-}
 
 /**
  * Resolve `rerun_from` to the prior run's persisted `input` snapshot.

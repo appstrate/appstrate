@@ -132,6 +132,24 @@ async function seedRunRow(
   return id;
 }
 
+/**
+ * Move a seeded run to a terminal status.
+ *
+ * `seedRunRow` seeds `running` (the state a file is published from), but
+ * `deletePackageRuns` refuses a package that still has an active run — it holds
+ * the per-org run-admission advisory lock and re-counts inside its transaction,
+ * so it can no longer delete a run out from under a live container. Tests that
+ * exercise the file teardown therefore end the run first, which is also what
+ * production does: the sidecar's last publications land around the terminal
+ * transition, not after the runs are gone.
+ */
+async function endRun(runId: string): Promise<void> {
+  await db
+    .update(runs)
+    .set({ status: "success", completedAt: new Date() })
+    .where(eq(runs.id, runId));
+}
+
 async function orgBytesUsed(orgId: string): Promise<number> {
   const [org] = await db
     .select({ used: organizations.filesBytesUsed })
@@ -1221,6 +1239,7 @@ describe("files service + routes", () => {
 
     const usedBefore = await orgBytesUsed(ctx.orgId);
 
+    await endRun(runA);
     await deletePackageRuns(scope, "@chain/producer");
 
     // Producer run gone; docX survives, DETACHED (both containers NULL), bytes +
@@ -1258,6 +1277,11 @@ describe("files service + routes", () => {
     await seedPackage({ id: "@chain/race", orgId: ctx.orgId });
     const runId = await seedRunRow(scope, { packageId: "@chain/race" });
     const { row: existing } = await publishStream(scope, runId, "before.txt", "before bytes");
+    // Terminal BEFORE the race — `deletePackageRuns` refuses a package with an
+    // active run, and a still-live sidecar publishing after the terminal
+    // transition is precisely the shape this test is about (an at-least-once
+    // retry of the end-of-run publication sweep).
+    await endRun(runId);
 
     // Both legs start in the same tick — no `setTimeout` handicap. A sleep here
     // would let the delete finish first whenever it happens to be fast, quietly
@@ -1267,10 +1291,14 @@ describe("files service + routes", () => {
     // underneath it), so its rejection is captured rather than thrown — but it
     // is captured with its identity intact and asserted on below, instead of
     // being blanket-swallowed by `.catch(() => null)`.
-    const [, racedResult] = await Promise.allSettled([
+    const [deleteResult, racedResult] = await Promise.allSettled([
       deletePackageRuns(scope, "@chain/race"),
       publishStream(scope, runId, "during.txt", "during bytes"),
     ]);
+    // The delete leg must genuinely have run: with the run terminal there is
+    // nothing legitimate for it to refuse, and a swallowed rejection here would
+    // leave the rest of this test asserting about a delete that never happened.
+    expect(deleteResult.status).toBe("fulfilled");
     const raced = racedResult.status === "fulfilled" ? racedResult.value : null;
     if (racedResult.status === "rejected") {
       // Only a lost race is acceptable: the run vanished mid-publish. Any other
@@ -1351,6 +1379,7 @@ describe("files service + routes", () => {
     const [bucket, ...rest] = docX.storageKey.split("/");
     expect(await downloadStream(bucket!, rest.join("/"))).not.toBeNull();
 
+    await endRun(runA);
     await deletePackageRuns(scope, "@chain/solo");
 
     const [row] = await db.select().from(files).where(eq(files.id, docX.id));
@@ -1541,6 +1570,7 @@ describe("files service + routes", () => {
     const runB = await seedRunRow(scope, { endUserId: euOwner.id });
     await db.insert(fileLinks).values({ fileId: doc.id, consumerRunId: runB, orgId: ctx.orgId });
 
+    await endRun(runA);
     await deletePackageRuns(scope, "@chain/eu");
 
     // Detached now. The owning end-user still resolves it; another end-user cannot

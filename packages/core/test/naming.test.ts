@@ -223,6 +223,51 @@ describe("sanitizeFilename", () => {
   it("caps at MAX_FILENAME_LEN", () => {
     expect(sanitizeFilename("x".repeat(400))).toHaveLength(MAX_FILENAME_LEN);
   });
+
+  it("never mints a name that no download can serve", () => {
+    // The cut is on UTF-16 code units, so a name whose 255th unit is the FIRST
+    // half of a surrogate pair used to be truncated to a lone high surrogate —
+    // a string `encodeURIComponent` throws `URIError` on. That name is durable
+    // (`files.name`, and part of the `(run_id, sha256, name)` dedup identity),
+    // so every later download of the file 500'd, on both serving branches.
+    const name = "a".repeat(MAX_FILENAME_LEN - 1) + "\u{1f4ca}";
+    const cut = sanitizeFilename(name);
+
+    expect(cut.length).toBeLessThanOrEqual(MAX_FILENAME_LEN);
+    // The orphaned half is dropped, not kept: the string is well-formed UTF-16.
+    expect(cut).toBe("a".repeat(MAX_FILENAME_LEN - 1));
+    expect(() => attachmentDisposition(cut)).not.toThrow();
+    expect(() => encodeFilenameHeader(cut)).not.toThrow();
+
+    // A pair that ends BEFORE the cut is untouched — the fix must not eat a
+    // legitimate emoji.
+    const fits = "a".repeat(MAX_FILENAME_LEN - 3) + "\u{1f4ca}";
+    expect(sanitizeFilename(fits)).toBe(fits);
+  });
+});
+
+describe("filename encoders are total", () => {
+  // Both sit on the last line before a response header is written, so a throw
+  // here is a 500 on a download that would otherwise have worked. A lone
+  // surrogate can reach them from any producer, not just the truncation above.
+  const LONE_HIGH = "rapport\ud83d.pdf";
+  const LONE_LOW = "rapport\ude00.pdf";
+
+  it("substitutes U+FFFD for an unpaired surrogate instead of throwing", () => {
+    for (const name of [LONE_HIGH, LONE_LOW]) {
+      expect(() => encodeURIComponent(name)).toThrow();
+      expect(() => encodeFilenameHeader(name)).not.toThrow();
+      expect(() => attachmentDisposition(name)).not.toThrow();
+      expect(encodeFilenameHeader(name)).toBe("rapport%EF%BF%BD.pdf");
+    }
+  });
+
+  it("leaves a well-formed name byte-identical (control)", () => {
+    expect(attachmentDisposition("rapport été.pdf")).toBe(
+      "attachment; filename=\"rapport _t_.pdf\"; filename*=UTF-8''rapport%20%C3%A9t%C3%A9.pdf",
+    );
+    expect(encodeFilenameHeader("\u{1f4ca}.png")).toBe("%F0%9F%93%8A.png");
+  });
 });
 
 describe("encodeFilenameHeader / decodeFilenameHeader", () => {

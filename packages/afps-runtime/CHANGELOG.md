@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed — the `Runner` interface
+
+- `Runner` (`{ name, run(options: RunOptions): Promise<void> }`) is gone from
+  `@appstrate/afps-runtime/runner`. It had exactly one implementation and no
+  consumer anywhere typed against it — every caller constructs its concrete
+  runner directly — so it named a polymorphism nothing exercised, and the
+  single-engine decision means no second adapter is coming. `RunOptions`, the
+  argument shape a runner is actually handed, stays exported and unchanged: it
+  is what a downstream runner conforms to.
+
 ### Removed — the `dataschema` attribute
 
 - CloudEvent envelopes no longer carry the OPTIONAL `dataschema` attribute

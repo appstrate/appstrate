@@ -487,7 +487,7 @@ export const modelsPaths = {
       responses: {
         "200": {
           description:
-            "Model updated — the bare updated model resource (same shape as `GET`/`list`).",
+            "Model updated — the bare updated model resource (same shape as `GET`/`list`). For a managed (aliased) model the binding fields are nulled, exactly as on `list`.",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
@@ -526,7 +526,7 @@ export const modelsPaths = {
       tags: ["Models"],
       summary: "Test model connection",
       description:
-        "Test that the model's API key and base URL are valid by making a lightweight request to the provider. Rate limited to 5 requests per minute.",
+        "Test that the model's API key and base URL are valid by making a lightweight request to the provider. Rate limited to 5 requests per minute. Not available for a managed (aliased) model: the result would report the hidden backing's round-trip time and upstream status.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -541,6 +541,7 @@ export const modelsPaths = {
             },
           },
         },
+        "400": { $ref: "#/components/responses/ValidationError" },
         "404": { $ref: "#/components/responses/NotFound" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },

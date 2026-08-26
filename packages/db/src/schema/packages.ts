@@ -89,7 +89,7 @@ export const packages = pgTable(
     // would wipe the associated `runs` history. Compaction NULLs the
     // content after retention (see inline-compaction worker).
     ephemeral: boolean("ephemeral").notNull().default(false),
-    createdBy: text("created_by").references(() => user.id),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
     lockVersion: integer("lock_version").notNull().default(1),
@@ -98,6 +98,10 @@ export const packages = pgTable(
   (table) => [
     index("idx_packages_type").on(table.type),
     index("idx_packages_org_type").on(table.orgId, table.type),
+    // Referencing-side index for the `user` SET NULL action (0048).
+    // Postgres indexes only the REFERENCED side of a foreign key; without
+    // this, deleting one user seq-scans this table under the deletion's lock.
+    index("idx_packages_created_by").on(table.createdBy),
     // Partial index sized for the compaction sweep (`ephemeral = true AND
     // created_at < now() - interval '30 days'`). Keeps the hot set tiny.
     index("idx_packages_ephemeral_created")
@@ -128,11 +132,15 @@ export const packageVersions = pgTable(
     manifest: jsonb("manifest").notNull(),
     yanked: boolean("yanked").notNull().default(false),
     yankedReason: text("yanked_reason"),
-    createdBy: text("created_by").references(() => user.id),
+    createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     uniqueIndex("package_versions_pkg_version_unique").on(table.packageId, table.version),
+    // Referencing-side index for the `user` SET NULL action (0048).
+    // Postgres indexes only the REFERENCED side of a foreign key; without
+    // this, deleting one user seq-scans this table under the deletion's lock.
+    index("idx_package_versions_created_by").on(table.createdBy),
     // AFPS 0.1 shape gate: published version snapshots MUST carry a 0.x
     // `schema_version` when present. Mirrors the draft-side gate on `packages`
     // so the wire and the persisted snapshot never disagree.

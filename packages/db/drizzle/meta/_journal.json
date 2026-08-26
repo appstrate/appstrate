@@ -330,6 +330,48 @@
       "when": 1787584512907,
       "tag": "0046_legacy_permission_scope_strings",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1787600000000,
+      "tag": "0047_timestamptz_oidc_webhooks",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1787600060000,
+      "tag": "0048_user_attribution_set_null",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1787600120000,
+      "tag": "0049_drop_credential_proxy_usage",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1787600180000,
+      "tag": "0050_notifications_recipient_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1787600240000,
+      "tag": "0051_closed_vocabularies",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1787600300000,
+      "tag": "0052_chat_messages_session_seq_index",
+      "breakpoints": true
     }
   ]
 }

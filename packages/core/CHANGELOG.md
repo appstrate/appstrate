@@ -7,11 +7,202 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Not yet on npm. `8.0.0` is the published version; `package.json` and
+`CORE_VERSION` are already at `9.0.0` because this window REMOVES an export,
+which is a major break — leaving them at `8.0.0` would ship a surface that
+differs from the `8.0.0` already on npm, under the same number.
+
+### Removed
+
+- **`syntheticAliasErrorMessage`** (`./model-swap`) — interpolated the
+  org-chosen alias into the string both retry classifiers read, so an alias
+  containing `500`, `502` or `overloaded` turned a terminal failure into a
+  retried one. Replaced by **`syntheticAliasClassifierMessage`**, which takes no
+  `ModelSwap` and so has nothing org-controlled to interpolate; see the entry
+  under Added. The alias moved to `error.model` on the wire body, so operators
+  keep the "which model" signal.
+
+### Changed
+
+- **`completionMatches`** (`./connect-handshake`) — narrows on an identifier
+  BOTH sides carry. It was a first-match chain, so an identifier only one side
+  carried decided in a direction it must not: a completion carrying a `state`
+  and no `packageId` fell through to the permissive tail and was accepted by
+  EVERY target, including one that identifies nothing — the opposite of the
+  fail-closed rule the same doc comment promised. That is the shape the OAuth
+  callback emits on its early failures (`popupHtmlError(msg, { state })`, where
+  the package is only known once the signed state is decoded — the step that
+  failed), so a Gmail OAuth failure drove an unrelated ClickUp connect card into
+  its error state. Now a conjunction: a shared identifier that disagrees
+  rejects, at least one shared identifier must match, and only a completion
+  naming NEITHER a flow nor a package stays for everyone. Signature and origin
+  policy unchanged; strictly narrowing — 5 of the 36 target x completion cells
+  move accept to reject, none the other way. One accepted cost: a surface
+  holding only a `packageId` no longer mirrors the callback's state-only
+  failures; the fix for that is to widen the SENDER, not this predicate.
+
+- **`classifyModelError`** (`./model-error`) — behaviour change, name and
+  signature unchanged. A known status now decides the verdict over the prose it
+  travelled with — BELOW the two categories that are read first and are
+  unchanged: a dead credential (`401` `402` `403` → `credential_unavailable`)
+  and a throttle (`429` → `rate_limited`, which stays **retryable**). Under
+  those, a known 4xx is `invalid_request` (terminal) and a 5xx
+  `upstream_unavailable` (retryable). Previously only `400` was named, and the
+  generic `"Upstream model error"` this package emits at the alias boundary fell
+  through to the transient branch — so `404` `405` `408` `409` `413` `415`, six
+  of the fourteen statuses `projectAliasUpstreamStatus` forwards, read as
+  retryable while pi-ai read the same sentence as terminal. `413` makes it
+  concrete: an oversized prompt was offered a retry, on a request that can never
+  succeed. The two classifiers now agree on all fourteen, pinned by a test in
+  `@appstrate/runner-pi` (core may not import the SDK). Messages carrying NO
+  status are unchanged, the status-less `"Upstream model error"` included.
+
+- **`validateAgainstSchema`** (`./schema-validation`) — no longer throws on a
+  schema Ajv cannot compile; it returns `{ valid: false }` carrying the
+  compiler's message. `compileCached` stays the throwing path for callers that
+  want the compile error, and now strips a root `$schema`, so a document
+  declaring draft-04/06/07 or 2019-09 is validated on the 2020-12 dialect
+  instead of failing to compile. The server had this workaround and core did
+  not, which broke the server/CLI parity this module promises.
+
+- **`sanitizeFilename` truncates on whole code points** (`./naming`), and
+  `encodeFilenameHeader` / `attachmentDisposition` are now total. The cap was a
+  `slice` over UTF-16 code units, so a name whose 255th unit was the first half
+  of a surrogate pair became a LONE surrogate — a string `encodeURIComponent`
+  throws `URIError` on. That name is durable (`files.name`, part of the
+  `(run_id, sha256, name)` dedup identity), so every later download of the file
+  500'd on both serving branches. The orphaned half is now dropped, and an
+  unpaired surrogate reaching either encoder from any other producer becomes
+  U+FFFD instead of a throw. No signature changes; a well-formed name — emoji
+  and CJK included — encodes byte-identically to before.
+- **`PUBLISHED_FILE_LOG_EVENTS` is deprecated** (`./file-uri`) — both readers
+  (the web shell's run page, the chat module's run card) now compare against
+  the singular `PUBLISHED_FILE_LOG_EVENT` the sink writes, so the list has no
+  in-repo consumer left. It stays exported, unchanged and still `["file"]`,
+  because removing a published name is breaking; delete at the next major.
+  Nothing on the wire moves.
+- **`@appstrate/afps-shared` dependency range moved to `^0.5.0`.**
+  `@appstrate/core/zip`'s `stripWrapperPrefix` is now a verbatim re-export from
+  the new `@appstrate/afps-shared/archive-prefix` — the export, both overloads
+  and the identity-return behaviour are unchanged, so this is not a surface
+  change. It moved because `packages/afps-runtime` carried a token-for-token
+  copy of the same algorithm, each pointing at the other and asking a human to
+  keep them aligned, with no parity test. That is the shape that had already
+  drifted three times for the MIME set, one of those corrupting every OOXML
+  download.
+
+  **Publish `afps-shared@0.5.0` before this release.** The ordering is already
+  enforced — `verify-package-resolves.ts` packs the real tarball, installs it
+  outside the monorepo and typechecks every subpath, so an unpublished leaf
+  fails the publish rather than the first consumer's `npm install`. Declaring
+  `^0.5.0` rather than leaving `^0.4.0` only changes WHICH error it fails with:
+  `ETARGET / no matching version` at install, which names the missing artifact,
+  instead of a `TS2307` three layers down inside `node_modules`.
+
+### Added
+
+- **`syntheticAliasClassifierMessage`** (`./model-swap`) — REPLACES
+  **`syntheticAliasErrorMessage`**, which is REMOVED. Same neutral prose, one
+  difference: it takes no `ModelSwap`, so an alias cannot be interpolated into
+  it. Both classifiers that read this string are substring matchers — pi-ai's
+  `isRetryableAssistantError` alternates over `429`/`500`/`502`/`503`/`504`/
+  `524`/`overloaded`/`rate.?limit`/the timeout family, and this package's own
+  `classifyModelError` reads a `\b[45]\d\d\b` out of it — while an alias is
+  ORG-CONTROLLED text. An alias named `gpt-500-fast` (not a contrived name)
+  made EVERY failure on it retryable, terminal `400` included, on both
+  classifiers. The status is still interpolated, and only from the enumerated
+  forwardable set, so the integers that can appear are a closed list of
+  fourteen. Callers of the old helper drop the swap argument and pass the
+  status alone.
+- **`syntheticAliasErrorBody`** (`./model-swap`) — **behaviour change**, name
+  and signature unchanged. The alias moved OUT of `error.message` and into a
+  new `error.model` field — `error.message` is now
+  `"Upstream model error (status 502)"` and `error.model` is `"<alias>"`. An
+  operator still reads which model failed; the sentence a classifier consumes
+  no longer carries org-controlled text. A consumer parsing the alias out of
+  `error.message` must read `error.model` instead.
+- **`projectAliasUpstreamStatus`**,
+  **`ALIAS_COLLAPSED_TRANSIENT_UPSTREAM_STATUS`** and
+  **`ALIAS_COLLAPSED_TERMINAL_UPSTREAM_STATUS`** (`./model-swap`) — the
+  allowlist an aliased upstream status must pass before it is disclosed, and
+  the two codes the rest collapse to. A status describes the transaction, not
+  the backing, which is why forwarding one costs no opacity and buys back the
+  container's retry budget — but that reasoning holds only for GENERIC codes.
+  `529` is Anthropic's own overload code, `520`–`526` say the backing sits
+  behind Cloudflare, `402` is an aggregating gateway out of credit, `422` is
+  Mistral's validation verdict where Anthropic and OpenAI answer `400`, and
+  `431` is an edge code no model API emits: each names a backing as surely as
+  its prose does, so each is collapsed. The collapse target is chosen by the
+  status CLASS, because pi-ai's retry classifier reads the projected status out
+  of the message text and a single target would decide retryability for every
+  failure alike: a 4xx collapses to `400`
+  (`ALIAS_COLLAPSED_TERMINAL_UPSTREAM_STATUS`, matched by neither of pi-ai's
+  patterns, so a permanent failure fails fast) and everything else to `502`
+  (`ALIAS_COLLAPSED_TRANSIENT_UPSTREAM_STATUS`, retryable). An allowlist, not a
+  denylist: the space of vendor- and CDN-specific codes is unenumerable, so a
+  new one must default to opaque — and the class-based target makes that
+  default right on the retry axis too. Both boundaries that replace an upstream
+  failure — the sidecar's re-originated `pi-messages` error event and the
+  platform gateway's synthesized response — now call it, so they cannot drift
+  apart. Additive; nothing removed or renamed.
+- **`isUnconstrainedSchema`** (`./schema-validation`) — "can this schema reject
+  any object at all?", the predicate the validators short-circuit on. Additive;
+  nothing is removed or renamed. It replaces the `!schema.properties ||
+Object.keys(schema.properties).length === 0` test that three validators
+  carried, which answered a DIFFERENT question: `properties` says what a named
+  key must look like, and a schema constrains plenty without naming one.
+  `{properties: {}, required: [...]}`, `{properties: {},
+additionalProperties: false}` and `{allOf: [{required: [...]}]}` were all
+  returned as `valid: true` before Ajv ran — under `strict: false` Ajv would
+  have enforced every one. **Behaviour change**: such a schema is now enforced,
+  so a value that used to pass may now be rejected. A schema carrying nothing
+  but `type` / `title` / `description` / `$schema` / `$comment` (and an empty
+  `properties`) still short-circuits exactly as before.
+- **`./model-error`** — `classifyModelError`, `ModelErrorCategory`,
+  `ModelErrorInput`, `ModelErrorClassification` and
+  `MODEL_ERROR_RETRYABLE_BY_CATEGORY`. THE rules that turn a raw provider
+  failure string into a provider-neutral verdict, moved out of the chat module
+  so the run surface classifies with the same ones. `ChatTurnErrorCategory`
+  (`./chat-turn-metadata`) is now an alias of `ModelErrorCategory` — same five
+  values, same persisted field, no behaviour change for any input.
+  `retryable` is derived from the category alone, so every path that rebuilds
+  one (live classification, stream marker, persisted turn) reaches the same
+  answer.
+- **`./connect-handshake`** — `INTEGRATION_CONNECT_CHANNEL`,
+  `INTEGRATION_CONNECT_MESSAGE_TYPE`, `IntegrationConnectCompletion`,
+  `buildIntegrationConnectCompletion`, `integrationConnectOrigin`,
+  `isIntegrationConnectCompletion`, `isIntegrationConnectMessage`,
+  `completionMatches` and `acceptsCompletionMessage`. The
+  completion handshake an integration-connect flow uses to tell the surface
+  that started it that the connection landed — the `BroadcastChannel` name, the
+  `postMessage` type, the payload, and the origin policy for both directions.
+  These were private constants duplicated across the API, the SPA and the chat
+  module, kept aligned by "must match" comments, and the two senders had
+  already drifted: one scoped its `postMessage` to the platform origin, the
+  other posted to `"*"`. Additive; nothing is removed or renamed. Out-of-tree
+  modules that render their own connect surface should read the constants from
+  here rather than re-declaring them, and MUST validate `event.origin` with
+  `isIntegrationConnectMessage` before acting on a `message` event.
+
+  `completionMatches` (which waiting surface a completion is addressed to, by
+  `state` and `packageId`) and `acceptsCompletionMessage` (that correlation
+  behind the origin check, for the `postMessage` carrier) are part of the same
+  contract and were added in the same unreleased window. They were briefly
+  declared inside `@appstrate/module-chat` instead, where the dashboard's own
+  connect popup could not import them — so it re-implemented the gate with no
+  correlation at all and any successful completion, for any integration,
+  settled it. Both carriers fan out (`BroadcastChannel` to every listener on
+  the origin, `postMessage` to every listener on the window), so a surface that
+  waits on a specific integration MUST correlate. `completionMatches` is a type
+  guard narrowing `unknown` to `IntegrationConnectCompletion`, so it can be
+  applied directly to a raw `event.data`.
+
+## [8.0.0] — 2026-08-25
+
 Breaking, batched per the release policy in `.github/workflows/publish-core.yml`:
 these changes accumulate here until a deliberate major. **This is that major —
-`8.0.0`** — and the version moves in `package.json` even though nothing is
-published yet, which is the opposite of what this section said for most of the
-cycle. The reason it had to move is worth stating, because the argument for
+`8.0.0`** — and the version moved in `package.json` ahead of publication, which
+is the opposite of what this section said for most of the cycle. The reason it had to move is worth stating, because the argument for
 holding it at `7.0.0` was sound about the thing it was reasoning about and
 silent about the thing that actually breaks.
 
@@ -35,9 +226,9 @@ call a platform service whose signature moved under it — silently, without an
 error." Holding the constant at a version whose surface no longer exists is
 what produced both halves.
 
-Publishing `8.0.0` to npm stays gated on the `core@8.0.0` tag and is still
-independent of this branch; what moves here is the constant the platform
-compares against, plus the `version` field the drift guard
+Publishing `8.0.0` to npm was gated on the `core@8.0.0` tag, independent of the
+branch that wrote this; what moved here is the constant the platform compares
+against, plus the `version` field the drift guard
 (`test/core-version.test.ts`) pins it to.
 
 **Out-of-tree consumers.** The config removals below touch nothing `cloud` or
@@ -122,16 +313,6 @@ them, it only names them in docblocks.
 
 ### Added
 
-- **`./model-error`** — `classifyModelError`, `ModelErrorCategory`,
-  `ModelErrorInput`, `ModelErrorClassification` and
-  `MODEL_ERROR_RETRYABLE_BY_CATEGORY`. THE rules that turn a raw provider
-  failure string into a provider-neutral verdict, moved out of the chat module
-  so the run surface classifies with the same ones. `ChatTurnErrorCategory`
-  (`./chat-turn-metadata`) is now an alias of `ModelErrorCategory` — same five
-  values, same persisted field, no behaviour change for any input.
-  `retryable` is derived from the category alone, so every path that rebuilds
-  one (live classification, stream marker, persisted turn) reaches the same
-  answer.
 - **Alias-opacity surface** (`./model-swap`, #1202) — `ALIAS_CLIENT_API_SHAPE`,
   `AliasBackingApiShape`, `isAliasBackingShape`, `isAliasClientShape`,
   `isAliasInferenceCall`, `syntheticAliasErrorMessage`, and `ModelSwapBacking`
@@ -263,24 +444,6 @@ them, it only names them in docblocks.
   made attractive. It supplies no trailing punctuation.
 
 ### Changed
-
-- **`@appstrate/afps-shared` dependency range moved to `^0.5.0`.**
-  `@appstrate/core/zip`'s `stripWrapperPrefix` is now a verbatim re-export from
-  the new `@appstrate/afps-shared/archive-prefix` — the export, both overloads
-  and the identity-return behaviour are unchanged, so this is not a surface
-  change. It moved because `packages/afps-runtime` carried a token-for-token
-  copy of the same algorithm, each pointing at the other and asking a human to
-  keep them aligned, with no parity test. That is the shape that had already
-  drifted three times for the MIME set, one of those corrupting every OOXML
-  download.
-
-  **Publish `afps-shared@0.5.0` before this release.** The ordering is already
-  enforced — `verify-package-resolves.ts` packs the real tarball, installs it
-  outside the monorepo and typechecks every subpath, so an unpublished leaf
-  fails the publish rather than the first consumer's `npm install`. Declaring
-  `^0.5.0` rather than leaving `^0.4.0` only changes WHICH error it fails with:
-  `ETARGET / no matching version` at install, which names the missing artifact,
-  instead of a `TS2307` three layers down inside `node_modules`.
 
 - **`SubscriptionChatResolution` → `ChatModelResolution`** (`./chat-contract`),
   and the `PlatformServices` member `resolveSubscriptionChatModel` →

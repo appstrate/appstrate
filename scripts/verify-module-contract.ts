@@ -60,13 +60,15 @@ import type {
 } from "@appstrate/core/module";
 import { Glob } from "bun";
 import { resolve, dirname } from "node:path";
+import { readGatePolicy } from "./lib/policy-env.ts";
 
 // Default-secure (`fail`). The `MODULE_CONTRACT_POLICY` downgrade exists for
 // local iteration only — under CI it is ignored so a green pipeline can never
-// be bought with `MODULE_CONTRACT_POLICY=off`.
-const POLICY = process.env.CI
-  ? "fail"
-  : ((process.env.MODULE_CONTRACT_POLICY ?? "fail") as "warn" | "fail" | "off");
+// be bought with `MODULE_CONTRACT_POLICY=off`. `readGatePolicy` additionally
+// REJECTS an unrecognised value instead of casting it: the exit at the bottom
+// of this file is `problems.length > 0 && POLICY === "fail"`, so a typo used to
+// print every finding and still exit 0.
+const POLICY = readGatePolicy("MODULE_CONTRACT_POLICY");
 const ROOT = resolve(dirname(Bun.fileURLToPath(import.meta.url)), "..");
 const WORKSPACE = resolve(ROOT, "..");
 

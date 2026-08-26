@@ -68,13 +68,55 @@ export const chatSessions = pgTable(
   ],
 );
 
-// Messages are OPAQUE tree nodes written by assistant-ui's native history
-// adapter (the client encodes each message with its format adapter and
-// POSTs `{ id, parent_id, format, content }`): the server never interprets
-// the payload beyond a best-effort title derivation. `parentId` carries the
-// branching structure (regeneration/edit); `seq` preserves insertion order
-// for tree reconstruction on load. Mirrors the appstrate-chat satellite's
-// store (services/sessions.ts) on Postgres.
+/**
+ * One row per chat message, written SERVER-SIDE and in insertion order.
+ *
+ * The comment this replaces described a client-authoritative model that no
+ * longer exists: messages as opaque tree nodes POSTed by assistant-ui's native
+ * history adapter as `{ id, parent_id, format, content }`, with the server
+ * merely storing what it was handed. That path was deleted. Today
+ * `packages/module-chat/src/persistence.ts` is the ONLY writer: it persists the
+ * user turn before inference starts and the assistant turn when the stream
+ * finalizes, upserting on `(session_id, message_id)`. The server decides `seq`
+ * (a `serial`), the server decides `format`, and the server decides `parent_id`.
+ *
+ * Ordering is `seq`, always — never `created_at`. Two messages in one turn can
+ * share a clock tick; a `serial` cannot collide. The same reasoning already
+ * governs `chat_sessions.lastAssistantSeq` / `lastReadSeq`, which are message
+ * POINTERS into this column rather than timestamps.
+ *
+ * ── TWO COLUMNS THAT NO LONGER CARRY INFORMATION ────────────────────────────
+ *
+ * Recorded here rather than acted on: both are still echoed to the client, so
+ * removing either is a coordinated change with `packages/module-chat`, which
+ * this pass does not own.
+ *
+ * `format` — a server constant. `persistence.ts` writes `CHAT_MESSAGE_FORMAT`
+ * at both the insert and the conflict-update, and nothing else writes the
+ * column, so it has exactly one possible value in every row that exists. It was
+ * a discriminator back when the CLIENT chose its format adapter; with a single
+ * server writer it discriminates nothing. Removing it takes: dropping it from
+ * the persisted DTO in `module-chat/src/routes.ts`, confirming no client reads
+ * it back, then a migration. If a second format ever ships, the column comes
+ * back with a CHECK — it should not be kept on the chance that it might.
+ *
+ * `parent_id` — a redundant re-encoding of `seq` order. It exists to carry
+ * branching (regeneration / edit), but the only writer is linear:
+ * `persistUserMessage` chains onto `lastMessageId(sessionId)` (the highest
+ * `seq`) and `persistAssistantMessage` chains onto the user turn that prompted
+ * it. Under a linear writer, `parent_id` is always "the previous message", i.e.
+ * exactly what `ORDER BY seq` already gives, and no reader reconstructs a tree
+ * from it. It is also unconstrained — no FK, no uniqueness — so nothing stops a
+ * cycle or a dangling parent. Removing it takes: dropping it from the DTO and
+ * from `upsertMessage`'s insert/update, plus the `parentId` argument threaded
+ * through `persistAssistantMessage`, then a migration. If real branching ships,
+ * what it needs is a per-branch pointer WITH a self-FK — not this column
+ * revived.
+ *
+ * Neither is a correctness bug today. They are both dead weight that reads as
+ * capability, which is the thing that makes the next reader model a tree that
+ * is not there.
+ */
 export const chatMessages = pgTable(
   "chat_messages",
   {
@@ -89,5 +131,15 @@ export const chatMessages = pgTable(
     content: jsonb("content").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [unique("uq_chat_messages_session_message").on(table.sessionId, table.messageId)],
+  (table) => [
+    unique("uq_chat_messages_session_message").on(table.sessionId, table.messageId),
+    // Filter + sort for every thread read (migration 0052). All three readers
+    // filter `session_id`; two then `ORDER BY seq` (ASC for the full thread,
+    // DESC LIMIT 1 for the parent of the next turn, on the hot path before
+    // inference). The UNIQUE index above serves the filter but orders by
+    // `message_id` — a client-generated identity — so both sorted reads had to
+    // sort. A btree walks backwards, so this one index serves both directions.
+    // Not UNIQUE: `seq` is the PRIMARY KEY, so the pair is unique already.
+    index("idx_chat_messages_session_seq").on(table.sessionId, table.seq),
+  ],
 );

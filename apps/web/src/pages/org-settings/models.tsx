@@ -149,22 +149,34 @@ function ModelsList({
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
-                        {testResults[m.id] && (
-                          <TestResultSpan
-                            result={testResults[m.id]!}
-                            successKey="models.testSuccess"
-                            failedKey="models.testFailed"
-                          />
+                        {/* Aliases expose no connection test. The result
+                            (`{ ok, latency, status }`) is measured against the
+                            hidden backing, so it would report that vendor's
+                            round-trip time and upstream status to a user who is
+                            never told which vendor it is. The route refuses it
+                            server-side too (400) — this only keeps the UI from
+                            offering a button that cannot work. Same posture as
+                            the edit button below. */}
+                        {!m.aliased && (
+                          <>
+                            {testResults[m.id] && (
+                              <TestResultSpan
+                                result={testResults[m.id]!}
+                                successKey="models.testSuccess"
+                                failedKey="models.testFailed"
+                              />
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={() => handleTest(m.id)}
+                              disabled={testingId === m.id}
+                            >
+                              {testingId === m.id ? <Spinner /> : t("models.test")}
+                            </Button>
+                          </>
                         )}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 text-xs"
-                          onClick={() => handleTest(m.id)}
-                          disabled={testingId === m.id}
-                        >
-                          {testingId === m.id ? <Spinner /> : t("models.test")}
-                        </Button>
                         {!isBuiltIn && (
                           <>
                             {/* Aliases hide their real binding (modelId etc.),

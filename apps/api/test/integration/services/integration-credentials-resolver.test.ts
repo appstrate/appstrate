@@ -198,13 +198,14 @@ describe("resolveLiveIntegrationCredentials", () => {
     scopes?: string[];
     accountId?: string;
     expiresAt?: Date;
+    /** `false` seeds the "IdP never issued one" shape (no `access_type=offline`). */
+    withRefreshToken?: boolean;
   }): Promise<string> {
     const ciphertext = encryptCredentialEnvelope({
       outputs: {
         access_token: "old-access",
         accessToken: "old-access",
-        refresh_token: "rt-1",
-        refreshToken: "rt-1",
+        ...(opts.withRefreshToken === false ? {} : { refresh_token: "rt-1", refreshToken: "rt-1" }),
       },
     });
     const [row] = await db
@@ -443,6 +444,58 @@ describe("resolveLiveIntegrationCredentials", () => {
       }
     });
   }
+
+  it("forced refresh reaches the IdP even when the stored token is far from expiry", async () => {
+    // The matrix above seeds connections with a NULL `expires_at`, so it never
+    // exercised the freshness short-circuit. This is the shape that broke: a
+    // token issued 10:00/expiring 11:00 and revoked upstream at 10:05. At 10:10
+    // the sidecar's 401 forces a refresh, the resolver decides to refresh — and
+    // the flag stopped there. `dedupedRefresh`'s post-lock re-read saw 50
+    // minutes of remaining lifetime, returned the revoked ciphertext as
+    // `{status:"refreshed"}`, and `needs_reconnection` was never written, so
+    // the banner / readiness gate / badge all read healthy for another 50 min.
+    const connId = await seedConnection({
+      userId: ctx.user.id,
+      expiresAt: new Date(Date.now() + 50 * 60_000),
+    });
+    token.setResponse({ access_token: "rotated", expires_in: 3600 });
+
+    const result = await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {
+      forceRefresh: true,
+    });
+
+    const primary = result.auths.find((a) => a.authKey === "primary");
+    expect(primary?.fields.access_token).toBe("rotated");
+    expect(await needsReconnection(connId)).toBe(false);
+  });
+
+  it("forced refresh of a connection with no stored refresh_token → 410 + flagged", async () => {
+    // Terminal, and it must SAY so. The helper flagged the row and then
+    // returned `{ fields: <the dead token> }` as a success, so the sidecar
+    // re-injected the credential that had just 401'd and answered the run 200 —
+    // contradicting both the flag it had written and the 410 contract.
+    const connId = await seedConnection({ userId: ctx.user.id, withRefreshToken: false });
+    // The IdP is reachable and would answer — proving the refusal comes from
+    // the missing refresh_token, not from an upstream failure.
+    token.setResponse({ access_token: "rotated", expires_in: 3600 });
+
+    let status: number | undefined;
+    let message: string | undefined;
+    try {
+      await resolveLiveIntegrationCredentials(INTEGRATION_ID, resolverContext(), {
+        forceRefresh: true,
+      });
+      throw new Error("expected resolveLiveIntegrationCredentials to throw");
+    } catch (err) {
+      status = (err as { status?: number }).status;
+      message = (err as Error).message;
+    }
+    expect(status).toBe(410);
+    // Named for what it is — not "refresh token revoked", which would send an
+    // operator hunting upstream for a revocation that never happened.
+    expect(message).toContain("no stored refresh_token");
+    expect(await needsReconnection(connId)).toBe(true);
+  });
 
   it("does NOT flag on a TRANSIENT token-endpoint discovery failure (issuer-only) — 502", async () => {
     // Major-regression guard: an issuer-only manifest (Drive/OneDrive shape)

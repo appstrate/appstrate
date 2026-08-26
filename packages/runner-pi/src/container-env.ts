@@ -75,8 +75,6 @@ export interface RuntimePiEnvOptions {
   outputSchema?: unknown;
   /** Forward-proxy URL. When set, HTTP(S)_PROXY + NO_PROXY are emitted. */
   forwardProxyUrl?: string;
-  /** Turn off the Pi SDK's retry loop (default on, `maxRetries: 4`) when wiring an external one. */
-  disableModelRetry?: boolean;
   /** Hosts excluded from the proxy. Required with {@link forwardProxyUrl} on a sidecar run. */
   noProxy?: string;
   sink?: {
@@ -245,8 +243,23 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
     env.no_proxy = noProxy;
   }
 
-  if (opts.disableModelRetry) {
-    env.MODEL_RETRY_ENABLED = "false";
+  // The two Pi SDK loops `pi-runner.ts` reads out of the container's env. Both
+  // are forwarded from the API host's own `process.env` — the same mechanism
+  // `TOOL_RESULT_BYTE_LIMIT` uses below — because the host env is the only
+  // surface an operator can actually set. Routing them through a
+  // `RuntimePiEnvOptions` flag instead looks like plumbing and is not: the sole
+  // production caller (`apps/api/src/services/run-launcher/pi.ts`) passes no
+  // such flag, so the knob would be reachable from the test fixture and nowhere
+  // else. A writer with no caller is the same defect as a reader with no writer.
+  //
+  // Worth reaching for when an outer layer already retries: the sidecar's
+  // aliased `/llm` path does, `ALIAS_UPSTREAM_MAX_RETRIES` attempts per call,
+  // which multiplies with the SDK's own loop rather than replacing it.
+  for (const key of ["MODEL_RETRY_ENABLED", "MODEL_COMPACTION_ENABLED"] as const) {
+    const value = process.env[key];
+    if (value !== undefined && value !== "") {
+      env[key] = value;
+    }
   }
 
   if (opts.sink) {

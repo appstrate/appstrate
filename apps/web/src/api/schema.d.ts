@@ -2399,7 +2399,7 @@ export interface paths {
         put?: never;
         /**
          * Test model connection
-         * @description Test that the model's API key and base URL are valid by making a lightweight request to the provider. Rate limited to 5 requests per minute.
+         * @description Test that the model's API key and base URL are valid by making a lightweight request to the provider. Rate limited to 5 requests per minute. Not available for a managed (aliased) model: the result would report the hidden backing's round-trip time and upstream status.
          */
         post: operations["testModel"];
         delete?: never;
@@ -5855,6 +5855,25 @@ export interface components {
                 "application/problem+json": components["schemas"]["ProblemDetail"];
             };
         };
+        /** @description Resource not found. On `PUT /api/schedules/{id}`, most commonly the schedule id itself does not exist (or belongs to another application) — that check runs first. Both writes also answer 404 when the target agent does not exist, or has no published version (`no_published_version`): on `POST` always, on `PUT` when the patch carries `input` or `version_override`. A schedule with no `version_override` fires the PUBLISHED manifest, so a never-published agent is refused at the write rather than 404ing on every tick; pin the working copy with `version_override: "draft"` to schedule it anyway. */
+        NoPublishedVersion: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                /**
+                 * @example {
+                 *       "type": "https://docs.appstrate.dev/errors/not-found",
+                 *       "title": "Not Found",
+                 *       "status": 404,
+                 *       "detail": "Agent '@acme/reporter' has no published version",
+                 *       "code": "no_published_version",
+                 *       "requestId": "req_abc123"
+                 *     }
+                 */
+                "application/problem+json": components["schemas"]["ProblemDetail"];
+            };
+        };
         /** @description Same Idempotency-Key used with a different request body */
         IdempotencyConflict: {
             headers: {
@@ -7287,7 +7306,7 @@ export interface operations {
                     "application/json": components["schemas"]["Schedule"];
                 };
             };
-            /** @description Validation error. Possible causes: missing/invalid cron expression, invalid input, or agent has file inputs (cannot be scheduled). */
+            /** @description Validation error. Possible causes: missing/invalid cron expression, a timezone `cron-parser` cannot schedule against (`timezone`), invalid input, or agent has file inputs (cannot be scheduled). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7298,6 +7317,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            404: components["responses"]["NoPublishedVersion"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -13839,7 +13859,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Model updated — the bare updated model resource (same shape as `GET`/`list`). */
+            /** @description Model updated — the bare updated model resource (same shape as `GET`/`list`). For a managed (aliased) model the binding fields are nulled, exactly as on `list`. */
             200: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -13907,6 +13927,7 @@ export interface operations {
                     "application/json": components["schemas"]["TestResult"];
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -19391,7 +19412,7 @@ export interface operations {
                     "application/json": components["schemas"]["Schedule"];
                 };
             };
-            /** @description Validation error. Possible causes: missing/invalid cron expression or invalid input. */
+            /** @description Validation error. Possible causes: missing/invalid cron expression, a timezone `cron-parser` cannot schedule against (`timezone`), or invalid input. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -19402,7 +19423,7 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
+            404: components["responses"]["NoPublishedVersion"];
         };
     };
     deleteSchedule: {

@@ -11,7 +11,7 @@
 
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 
-const wordCountExtension: ExtensionFactory = (context) => {
+const wordCountExtension: ExtensionFactory = (_context) => {
   return {
     name: "word_count",
     tools: [

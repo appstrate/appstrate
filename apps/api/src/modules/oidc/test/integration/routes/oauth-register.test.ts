@@ -16,6 +16,7 @@ import {
   authHeaders,
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
+import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
 import oidcModule from "../../../index.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
@@ -171,7 +172,49 @@ describe("Public registration page — /api/oauth/register", () => {
     });
     expect(res.status).toBe(400);
     const html = await res.text();
-    expect(html).toContain("8 caractères");
+    // Interpolated, not a literal `8`: this was the last reporter of the bound
+    // still hard-coded beside the word "password", so bumping the constant
+    // turned this assertion into a false red that says nothing about the page.
+    expect(html).toContain(`${MIN_PASSWORD_LENGTH} caractères`);
+  });
+
+  // The maximum had a `maxlength=` on neither page and a branch in neither
+  // handler, so an over-length password reached Better Auth and came back as
+  // the page's generic failure. `maxlength=` alone would not have covered this
+  // request: it is a scripted POST, exactly what a client-side attribute cannot
+  // constrain.
+  it("POST /register with an over-long password returns 400 naming the maximum", async () => {
+    const { clientId } = await registerClient(ctx);
+    const qs = `?client_id=${encodeURIComponent(clientId)}`;
+
+    const getRes = await app.request(`/api/oauth/register${qs}`);
+    const { csrfToken, cookie } = await getCsrfFromGet(getRes);
+
+    const res = await app.request(`/api/oauth/register${qs}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Cookie: cookie,
+      },
+      body:
+        `_csrf=${csrfToken}&name=Test&email=long@test.com&password=` +
+        "a".repeat(MAX_PASSWORD_LENGTH + 1),
+    });
+    expect(res.status).toBe(400);
+    const html = await res.text();
+    expect(html).toContain(`${MAX_PASSWORD_LENGTH} caractères`);
+    expect(html).toContain("ne doit pas dépasser");
+  });
+
+  // Both pages stamp the bounds into the input so the form states what the
+  // handler enforces — the split that made the register page advertise one
+  // number while its handler compared against another.
+  it("GET /register stamps both bounds onto the password input", async () => {
+    const { clientId } = await registerClient(ctx);
+    const res = await app.request(`/api/oauth/register?client_id=${encodeURIComponent(clientId)}`);
+    const html = await res.text();
+    expect(html).toContain(`minlength="${MIN_PASSWORD_LENGTH}"`);
+    expect(html).toContain(`maxlength="${MAX_PASSWORD_LENGTH}"`);
   });
 
   it("POST /register with valid data creates user and sets session cookie", async () => {

@@ -134,13 +134,17 @@ describe("credential-proxy integration-resolver", () => {
     token.stop();
   });
 
-  async function seedConnection(opts: { userId?: string; endUserId?: string }): Promise<string> {
+  async function seedConnection(opts: {
+    userId?: string;
+    endUserId?: string;
+    /** `false` seeds the "IdP never issued one" shape (no `access_type=offline`). */
+    withRefreshToken?: boolean;
+  }): Promise<string> {
     const ciphertext = encryptCredentialEnvelope({
       outputs: {
         access_token: "live-access",
         accessToken: "live-access",
-        refresh_token: "rt-1",
-        refreshToken: "rt-1",
+        ...(opts.withRefreshToken === false ? {} : { refresh_token: "rt-1", refreshToken: "rt-1" }),
       },
     });
     const [row] = await db
@@ -230,6 +234,24 @@ describe("credential-proxy integration-resolver", () => {
     // Not-refreshed, like the other terminal shape: the caller (inside
     // `catch {}` either way) relays the upstream 401, and the persisted flag
     // is what makes the failure legible.
+    expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
+    const [row] = await db
+      .select({ needsReconnection: integrationConnections.needsReconnection })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connId));
+    expect(row!.needsReconnection).toBe(true);
+  });
+
+  it("returns null (never the dead token) when the connection has no refresh_token", async () => {
+    // The row is already flagged in this shape — what was wrong is that the
+    // refresh reported SUCCESS carrying the very access_token that just 401'd,
+    // so the proxy rebuilt a payload from it and retried with an identical
+    // credential. Terminal in, terminal out.
+    const connId = await seedConnection({ userId: ctx.user.id, withRefreshToken: false });
+    // A working token endpoint: the refusal must come from the missing
+    // refresh_token, not from an upstream failure.
+    token.setResponse({ access_token: "rotated", expires_in: 3600 });
+
     expect(await forceRefreshIntegrationProxyCredentials(input())).toBeNull();
     const [row] = await db
       .select({ needsReconnection: integrationConnections.needsReconnection })

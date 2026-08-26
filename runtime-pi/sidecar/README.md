@@ -107,7 +107,7 @@ The download counterpart, `responseMode.toFile`, is supported on **both** runtim
 
 ## Upstream response-header propagation
 
-`{ns}__api_call` ships upstream HTTP `status`, an allowlist of response headers, and the post-redirect terminal URL back to the agent-side resolver via the MCP `_meta` field, namespaced as `dev.appstrate/upstream` (`UPSTREAM_META_KEY` in `@appstrate/mcp-transport`):
+`{ns}__api_call` ships upstream HTTP `status` and an allowlist of response headers back to the agent-side resolver via the MCP `_meta` field, namespaced as `dev.appstrate/upstream` (`UPSTREAM_META_KEY` in `@appstrate/mcp-transport`):
 
 ```jsonc
 {
@@ -116,15 +116,12 @@ The download counterpart, `responseMode.toFile`, is supported on **both** runtim
     "dev.appstrate/upstream": {
       "status": 200,
       "headers": { "content-type": "application/json" },
-      "finalUrl": "https://api.example.com/callback?code=ABC123",
     },
   },
 }
 ```
 
 The key and allowlist are shared constants in `@appstrate/mcp-transport` (`UPSTREAM_META_KEY` / `UPSTREAM_HEADER_ALLOWLIST` in [`packages/mcp-transport/src/upstream-meta.ts`](../../packages/mcp-transport/src/upstream-meta.ts), re-exported by [`runtime-pi/sidecar/upstream-meta.ts`](./upstream-meta.ts)). The allowlist includes every header the four chunked-upload protocols depend on (`Location`, `ETag`, `Content-Range`, `Upload-Offset`, `Upload-Length`, `Tus-Resumable`, …) plus standard caching headers (`Cache-Control`, `Last-Modified`, `Vary`, `Retry-After`). Credential-bearing headers (`Set-Cookie`, `Authorization`, `WWW-Authenticate`) are deliberately excluded.
-
-`finalUrl` is the URL the response was eventually served from after the sidecar's redirect follower terminated. Distinct from `headers.location` (which is the _next hop_ on a non-terminal 30x — undefined on the terminal 200/4xx). Sanitised per WHATWG Fetch: userinfo (`user:pass@`) and fragment (`#…`) are stripped before serialisation. Use for OAuth Authorization Code / CAS `?ticket=…` / magic-link flows where the agent needs to extract callback query params from the terminal hop. Omitted on preflight failures (no upstream contact).
 
 The payload is present on **every** `api_call` result, not just successes: sidecar pre-flight failures (credential fetch failure, URL not in `authorizedUris`, body too large — no upstream contact) ship `status: 0`, `headers: {}`. The runtime-side parser treats a missing payload as a sidecar protocol violation and throws.
 

@@ -73,7 +73,8 @@ export interface ModelErrorInput {
   message: string;
   /**
    * HTTP status, when the caller unwrapped one from the error envelope. Absent
-   * callers lose nothing: a `[45]xx` in {@link message} is read as a fallback.
+   * callers lose nothing: a `[45]xx` in {@link message} is read as a fallback,
+   * and either way the status outranks the prose it travelled with.
    */
   status?: number;
 }
@@ -92,12 +93,43 @@ function statusFromMessage(message: string): number | undefined {
 }
 
 /**
+ * A 4xx: the upstream's own verdict that re-sending the IDENTICAL request can
+ * never succeed.
+ *
+ * The whole class is terminal, not just the handful of codes a model API
+ * happens to document. The alias boundary
+ * (`syntheticAliasClassifierMessage`, `./model-swap`) forwards fourteen
+ * statuses into a sentence whose vendor prose has been replaced by the fixed
+ * words "Upstream model error", so for `404` `405` `408` `409` `413` `415`
+ * that sentence is the ONLY thing left to classify by — and reading it as
+ * prose used to hand every one of them to the transient branch below on the
+ * strength of the word "upstream". `413` is the case that makes it concrete:
+ * an oversized prompt is unfixable by retrying, and it was being offered a
+ * retry on both the run trail (`run_logs.data.error_retryable`) and the chat
+ * surface. The status is authoritative over the prose that surrounds it.
+ *
+ * Statuses this predicate ADDS to the terminal side beyond the forwardable
+ * fourteen — `422` (Mistral's request-validation code), `431`, and every other
+ * unnamed 4xx — get the same verdict for the same reason, which is also what
+ * `projectAliasUpstreamStatus` already decided when it collapses an unknown
+ * 4xx to `400`.
+ */
+function isTerminalRequestStatus(status: number | undefined): status is number {
+  return status !== undefined && status >= 400 && status < 500;
+}
+
+/**
  * Classify one failed model call.
  *
  * The cascade is ordered by how much the caller can DO about the failure, not
- * by status: an explicit 400 must beat the generic "upstream model error"
- * wrapper the platform puts around proxied failures, or every proxied
- * bad-request would read as a transient outage.
+ * by status: a dead credential and a throttle are read first, whatever code
+ * carried them.
+ *
+ * Below those two, a KNOWN status wins over the prose around it — a 4xx is
+ * terminal and a 5xx is transient — and the generic "upstream model error"
+ * wrapper the platform puts around proxied failures only classifies a message
+ * that carries no status at all. Without that ordering every proxied 4xx read
+ * as a transient outage: see {@link isTerminalRequestStatus}.
  */
 export function classifyModelError(input: ModelErrorInput): ModelErrorClassification {
   const message = input.message.trim();
@@ -126,10 +158,15 @@ export function classifyModelError(input: ModelErrorInput): ModelErrorClassifica
     category = "credential_unavailable";
   } else if (status === 429 || normalized.includes("rate limit")) {
     category = "rate_limited";
-  } else if (status === 400 || normalized.includes("invalid request")) {
+  } else if (isTerminalRequestStatus(status) || normalized.includes("invalid request")) {
     category = "invalid_request";
   } else if (
     (status !== undefined && status >= 500) ||
+    // Reachable only with NO 4xx/5xx status in hand: every 4xx was taken by the
+    // branch above and every 5xx by the clause beside this one. That ordering
+    // is what keeps this substring from overriding a status — it may still
+    // classify the status-LESS "Upstream model error", which is all it was
+    // ever meant to do.
     normalized.includes("upstream model error")
   ) {
     category = "upstream_unavailable";

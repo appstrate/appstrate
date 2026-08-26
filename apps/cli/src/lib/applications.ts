@@ -11,7 +11,8 @@
  * Server contract:
  *   - `GET /api/applications` runs under org context (`X-Org-Id`) but
  *     does NOT require app context (`X-Application-Id`) — see
- *     `apps/api/src/index.ts` `CORE_APP_SCOPED_PREFIXES`. That makes it
+ *     `APP_SCOPED_PREFIXES` in `apps/api/src/middleware/app-context.ts`.
+ *     That makes it
  *     safe to call immediately after an org is pinned and before the app
  *     cascade has chosen a default.
  *   - `POST /api/orgs` server-side also provisions a default application

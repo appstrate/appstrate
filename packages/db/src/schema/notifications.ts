@@ -112,6 +112,26 @@ export const notifications = pgTable(
     // Backs the run_id FK ON DELETE CASCADE + by-run lookups
     // (markNotificationReadByRun).
     index("idx_notifications_run").on(table.runId),
+    // Recipient-keyed, NON-partial (migration 0050). The partial index above
+    // cannot serve the two delete-by-recipient callers — member removal
+    // (`services/organizations.ts`) and end-user deletion
+    // (`services/end-users.ts`) — because neither carries `read_at IS NULL`
+    // (they must remove read rows too), and the planner cannot prove a partial
+    // index's predicate from a query that does not state it. Without this,
+    // both seq-scan the whole table inside a transaction already holding the
+    // member / end-user row lock.
+    //
+    // Column ORDER is deliberate and differs from the partial index's prefix:
+    // member removal is org-wide and does NOT filter `application_id`, so
+    // `application_id` goes LAST. That way member removal seeks on the first
+    // three columns and end-user deletion seeks on all four. All four
+    // predicates are equality, so only prefix-ability matters.
+    index("idx_notifications_recipient").on(
+      table.orgId,
+      table.recipientType,
+      table.recipientId,
+      table.applicationId,
+    ),
     // Defense-in-depth against a double fan-out: at most one notification of
     // a given type per (run, recipient). The fan-out path is already
     // exactly-once (finalizeRun CAS winner), so this never fires in practice

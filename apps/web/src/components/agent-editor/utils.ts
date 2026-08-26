@@ -370,7 +370,7 @@ function convertDefaultValue(value: string, type: string): unknown {
 
 export function schemaToFields(
   schema: JSONSchemaObject | undefined,
-  mode: "input" | "output" | "credentials",
+  mode: "input" | "output",
   wrapper?: {
     file_constraints?: Record<string, FileConstraint>;
     ui_hints?: Record<string, UIHint>;
@@ -460,7 +460,7 @@ export function schemaToFields(
  */
 export function fieldsToSchema(
   fields: SchemaField[],
-  mode: "input" | "output" | "credentials",
+  mode: "input" | "output",
 ): SchemaWrapper | null {
   const filtered = fields.filter((f) => f.key.trim());
   if (filtered.length === 0) return null;

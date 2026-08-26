@@ -364,14 +364,22 @@ export function applyAuthPipeline(app: Hono<AppEnv>, opts: AuthPipelineOptions):
  * Exported so call sites that need to gate downstream middleware on the
  * same rule (e.g. app-context, api-version) can share this function.
  *
- * `headers` is optional and lets callers signal a request-scoped bypass
- * (e.g. pairing-token bearer auth on /pair/redeem) without polluting the
- * static `publicPaths` allowlist with conditionals.
+ * `headers` carries the request-scoped bypasses (e.g. pairing-token bearer
+ * auth on /pair/redeem) that would otherwise have to be encoded as
+ * conditionals inside the static `publicPaths` allowlist.
+ *
+ * It is REQUIRED, and deliberately so: it used to be optional, and the test
+ * harness (`apps/api/test/helpers/app.ts`) silently omitted it on the two
+ * middlewares it wires after the pipeline — the omission type-checked, so the
+ * harness evaluated a different predicate from production with nothing to say
+ * so. Every call site has a `Context` in hand and can pass `c.req.raw.headers`;
+ * making the parameter mandatory turns that class of drift into a compile
+ * error.
  */
 export function skipAuth(
   path: string,
   publicPaths: ReadonlySet<string>,
-  headers?: Headers,
+  headers: Headers,
 ): boolean {
   if (!path.startsWith("/api/")) return true;
   if (path.startsWith("/api/auth/")) return true; // Better Auth handles its own auth
@@ -398,7 +406,7 @@ export function skipAuth(
   // providerId become the request context, replacing the cookie/API-key
   // chain entirely. Requests without the bearer reach the route handler
   // and 401 there.
-  if (path === "/api/model-providers-oauth/pair/redeem" && headers) {
+  if (path === "/api/model-providers-oauth/pair/redeem") {
     const auth = headers.get("authorization") ?? headers.get("Authorization");
     if (parseBearer(auth)?.startsWith("appp_")) return true;
   }

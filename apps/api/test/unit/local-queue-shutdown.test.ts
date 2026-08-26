@@ -96,7 +96,7 @@ describe("LocalQueue.shutdown — retries inside the budget", () => {
   // attempt — `attempts` would be `[0]` and `succeeded` false.
   it("lets a job finish a retry chain that fits in the shutdown budget", async () => {
     const { logger, emitted } = recordingLogger();
-    const q = new LocalQueue<{ v: string }>("test-shutdown", logger);
+    const q = new LocalQueue<{ v: string }>("test-shutdown", undefined, logger);
 
     const attempts: number[] = [];
     let succeeded = false;
@@ -129,7 +129,7 @@ describe("LocalQueue.shutdown — retries inside the budget", () => {
 describe("LocalQueue.shutdown — retries beyond the budget", () => {
   it("abandons a sleeper whose backoff cannot fit, and does not pin the loop", async () => {
     const { lines, logger, emitted } = recordingLogger();
-    const q = new LocalQueue<{ v: string }>("slow-retry-queue", logger);
+    const q = new LocalQueue<{ v: string }>("slow-retry-queue", undefined, logger);
 
     const attempts: number[] = [];
 
@@ -169,7 +169,7 @@ describe("LocalQueue.shutdown — retries beyond the budget", () => {
   // `_resetLlmUsageRetryWorkerForTests` asks for.
   it("abandons every sleeper under a zero grace, and never runs the attempt", async () => {
     const { lines, logger, emitted } = recordingLogger();
-    const q = new LocalQueue<{ v: string }>("test-shutdown", logger);
+    const q = new LocalQueue<{ v: string }>("test-shutdown", undefined, logger);
 
     const attempts: number[] = [];
 
@@ -210,7 +210,7 @@ describe("LocalQueue.shutdown — retries beyond the budget", () => {
 describe("LocalQueue.shutdown — failures during shutdown", () => {
   it("does not arm a new timer when the retry falls outside the remaining budget", async () => {
     const { lines, logger, emitted } = recordingLogger();
-    const q = new LocalQueue<{ v: string }>("test-shutdown", logger);
+    const q = new LocalQueue<{ v: string }>("test-shutdown", undefined, logger);
 
     const attempts: number[] = [];
 
@@ -255,7 +255,7 @@ describe("LocalQueue.shutdown — jobs that never started", () => {
    */
   it("runs queued-but-unstarted jobs that fit in the budget", async () => {
     const { lines, logger } = recordingLogger();
-    const queue = new LocalQueue<{ n: number }>("test-pending", logger);
+    const queue = new LocalQueue<{ n: number }>("test-pending", undefined, logger);
     const ran: number[] = [];
     const started = signal();
 
@@ -286,7 +286,7 @@ describe("LocalQueue.shutdown — jobs that never started", () => {
    */
   it("abandons queued jobs under a zero grace, and names each one", async () => {
     const { lines, logger } = recordingLogger();
-    const queue = new LocalQueue<{ n: number }>("test-pending-zero", logger);
+    const queue = new LocalQueue<{ n: number }>("test-pending-zero", undefined, logger);
     const ran: number[] = [];
     const started = signal();
 

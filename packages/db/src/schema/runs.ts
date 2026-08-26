@@ -536,8 +536,12 @@ export const packagePersistence = pgTable(
  * `finalizeRun` (terminal write). Both writers use a monotonic guard
  * (`UPDATE … WHERE cost IS NULL OR cost < new`) so the value never
  * regresses. This table remains the single source of truth — `runs.cost`
- * is only a cache of `SUM(llm_usage.cost_usd)`. (`credential_proxy_usage`
- * is an audit log, not a cost ledger — see its header comment.)
+ * is only a cache of `SUM(llm_usage.cost_usd)`, and this table is the ONLY
+ * ledger summed into it. `credential_proxy_usage` used to be named here as
+ * the deliberate non-summand; it was dropped in migration 0049 (write-only,
+ * no reader, no retention sweep). A future metered credential provider must
+ * route its cost rows through THIS table with a new `source` value rather
+ * than growing a second ledger — that is what keeps `runs.cost` a single SUM.
  *
  * A call is attributable to exactly one principal: either an API key
  * (`api_key_id`) or a JWT-authenticated user (`user_id`). The `CHECK`
@@ -726,63 +730,6 @@ export const llmUsage = pgTable(
   ],
 );
 
-/**
- * Per-call audit log of the `/api/credential-proxy/*` routes — one row per
- * upstream provider call proxied server-side for a remote runner. Records
- * provider id, target host, HTTP status, and duration for observability /
- * abuse-detection / per-org telemetry.
- *
- * No cost column: this is an audit ledger, not a billing ledger. When a
- * metered credential provider ships, route its cost rows through `llm_usage`
- * with a new `source` enum value rather than adding a SUM here, so the
- * single-ledger invariant for `runs.cost` is preserved.
- *
- * `request_id` is the dedup key: the credential-proxy route derives one per
- * upstream request; replays of the same request are no-ops via the UNIQUE
- * constraint. Prevents double-counting when a CLI retries.
- */
-export const credentialProxyUsage = pgTable(
-  "credential_proxy_usage",
-  {
-    id: serial("id").primaryKey(),
-    orgId: uuid("org_id")
-      .notNull()
-      .references(() => organizations.id, { onDelete: "cascade" }),
-    apiKeyId: text("api_key_id").references(() => apiKeys.id, {
-      onDelete: "set null",
-    }),
-    userId: text("user_id").references(() => user.id, {
-      onDelete: "set null",
-    }),
-    runId: text("run_id").references(() => runs.id, {
-      onDelete: "set null",
-    }),
-    applicationId: text("application_id").references(() => applications.id, {
-      onDelete: "set null",
-    }),
-    // Integration id the call hit (e.g. "@appstrate/gmail"). Matches the
-    // credential-proxy `X-Integration-Id` request header.
-    integrationId: text("integration_id").notNull(),
-    // Upstream host for audit (no path/query — avoid logging secrets).
-    targetHost: text("target_host"),
-    httpStatus: integer("http_status"),
-    durationMs: integer("duration_ms"),
-    requestId: text("request_id").notNull().unique(),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  },
-  (table) => [
-    index("idx_credential_proxy_usage_run_id").on(table.runId),
-    index("idx_credential_proxy_usage_org_created").on(table.orgId, table.createdAt),
-    // FK cascade targets: api_keys / user / applications deletes SET NULL
-    // rows by these columns — without indexes each delete seq-scans the
-    // audit log.
-    index("idx_credential_proxy_usage_api_key_id").on(table.apiKeyId),
-    index("idx_credential_proxy_usage_user_id").on(table.userId),
-    index("idx_credential_proxy_usage_application_id").on(table.applicationId),
-    check("credential_proxy_usage_principal_single", sql`api_key_id IS NULL OR user_id IS NULL`),
-  ],
-);
-
 export const schedules = pgTable(
   "package_schedules",
   {
@@ -805,7 +752,11 @@ export const schedules = pgTable(
     name: text("name"),
     enabled: boolean("enabled").default(true).notNull(),
     cronExpression: text("cron_expression").notNull(),
-    timezone: text("timezone").default("UTC"),
+    // NOT NULL (migration 0051): the column always had `DEFAULT 'UTC'`, so a
+    // NULL could only come from a writer passing one explicitly — and three
+    // readers in `services/scheduler.ts` compensated with `?? "UTC"`. One
+    // default, in one place.
+    timezone: text("timezone").default("UTC").notNull(),
     input: jsonb("input").$type<Record<string, unknown>>(),
     modelIdOverride: text("model_id_override"),
     generationConfigOverride: jsonb("generation_config_override").$type<ModelGenerationSettings>(),

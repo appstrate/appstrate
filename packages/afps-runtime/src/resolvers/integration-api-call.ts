@@ -38,7 +38,8 @@
  * `api_call` dispatcher keyed by a providerId enum.
  */
 
-import type { Bundle, Tool } from "./types.ts";
+import type { Tool } from "@afps-spec/types";
+import type { Bundle } from "../bundle/types.ts";
 import {
   makeApiCallTool,
   resolveBodyForFetch,

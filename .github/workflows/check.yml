@@ -56,6 +56,13 @@ jobs:
       #
       # The key carries the toolchain + config hash, so a dependency or rule
       # change starts a fresh lineage instead of trusting stale verdicts.
+      # `tsconfig.base.json` is in that list as the compiler half of "rule": the
+      # 22 tsconfigs extend it, so it decides whether `strict` and friends are
+      # on. It is also `globalDependencies` in turbo.json — belt and braces on
+      # purpose, because these fail differently. turbo's entry invalidates the
+      # task inside a run; this key stops a PR that relaxes the compiler from
+      # inheriting the previous lineage's `.turbo/cache` through `restore-keys`
+      # in the first place.
       - name: Restore check caches
         id: check-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4.4.0
@@ -66,10 +73,10 @@ jobs:
             node_modules/.cache/prettier
           key: >-
             check-${{ runner.os }}-${{ hashFiles('bun.lock', 'eslint.config.mjs',
-            '.prettierrc', 'turbo.json') }}-${{ github.sha }}
+            '.prettierrc', 'turbo.json', 'tsconfig.base.json') }}-${{ github.sha }}
           restore-keys: >-
             check-${{ runner.os }}-${{ hashFiles('bun.lock', 'eslint.config.mjs',
-            '.prettierrc', 'turbo.json') }}-
+            '.prettierrc', 'turbo.json', 'tsconfig.base.json') }}-
 
       - name: Run checks
         run: bun run check
@@ -93,7 +100,7 @@ jobs:
             node_modules/.cache/prettier
           key: >-
             check-${{ runner.os }}-${{ hashFiles('bun.lock', 'eslint.config.mjs',
-            '.prettierrc', 'turbo.json') }}-${{ github.sha }}
+            '.prettierrc', 'turbo.json', 'tsconfig.base.json') }}-${{ github.sha }}
 
   # `bun run check` above CANNOT catch a missing dependency in a source-only
   # package: the root devDependencies hoist type packages into the shared

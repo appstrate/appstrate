@@ -35,7 +35,12 @@ import { anthropicThinkingBudgets } from "@appstrate/core/model-generation";
 import { PI_SDK_VERSION, PI_SDK_VERSION_HEADER } from "@appstrate/runner-pi/provider-map";
 import { PLATFORM_MODEL_COMPAT, ZERO_MODEL_COST } from "@appstrate/runner-pi/model-compat";
 import { logger } from "./logger.ts";
-import { syntheticAliasErrorBody, syntheticAliasErrorMessage } from "./model-swap.ts";
+import {
+  syntheticAliasErrorBody,
+  syntheticAliasClassifierMessage,
+  projectAliasUpstreamStatus,
+  ALIAS_COLLAPSED_TRANSIENT_UPSTREAM_STATUS,
+} from "./model-swap.ts";
 import { streamBacking } from "./pi-sdk.ts";
 import type {
   Api,
@@ -148,6 +153,131 @@ export interface PiMessagesBackendDeps {
    * not wait two real minutes.
    */
   llmStreamIdleTimeoutMs?: number;
+  /**
+   * Transport the re-originated call uses. Defaults to the global `fetch`;
+   * {@link createUpstreamStatusProbe} always wraps it, so this is the base of
+   * that wrapper, never a replacement for it.
+   *
+   * A test injects it here rather than through `streamBackingFn`'s `options`:
+   * an `options.fetch` supplied by the caller would DISPLACE the status probe
+   * instead of feeding it, and the retry budget + the observed upstream status
+   * are precisely what has to be exercised through REAL pi-ai (this repo bans
+   * `mock.module()`, and a hand-rolled stream double reproduces neither).
+   */
+  fetchImpl?: typeof fetch;
+}
+
+/**
+ * Provider-level retry budget for the re-originated call.
+ *
+ * The sidecar is the ONLY side of an aliased run that can see the backing's
+ * `retry-after` / `retry-after-ms` headers: the container speaks `pi-messages`,
+ * a closed event union with no header channel at all, so the backoff a
+ * throttling provider ASKS for is legible here and nowhere else. pi-ai's
+ * `retryProviderRequest` honours those headers — but only when it is given a
+ * budget, and its `options.maxRetries ?? 0` makes an unset field mean "never
+ * retry" (`@earendil-works/pi-ai/dist/utils/provider-retry.js`). Leaving it
+ * unset is why an aliased run used to spend zero attempts on a `429`.
+ *
+ * Two, matching the pinned OpenAI/Anthropic SDK default pi-ai reproduces. It
+ * COMPOSES with the container's turn-level budget (`packages/runner-pi`), which
+ * restarts the whole assistant turn rather than the HTTP call. The product of
+ * the two is bounded, and not by arithmetic: every attempt here shares ONE
+ * `llmUpstreamAbort` signal, so the retries fit inside that call's 60 s TTFB
+ * window (see {@link ALIAS_MAX_RETRY_DELAY_MS}) and the exchange as a whole
+ * inside its 30 min absolute cap.
+ */
+const ALIAS_UPSTREAM_MAX_RETRIES = 2;
+
+/**
+ * Cap on a server-REQUESTED retry delay. pi-ai fails the request immediately
+ * when `retry-after` asks for more, which is what this path wants: the TTFB
+ * bound in `llmUpstreamAbort` (60 s by default) is measured from the FIRST
+ * attempt and is not reset by a backoff sleep, so a multi-minute `retry-after`
+ * honoured here would be killed by that timer with nothing to show for the
+ * wait. Failing fast hands the container a retryable terminal instead, and its
+ * turn-level budget — which carries no TTFB bound — absorbs the long wait.
+ */
+const ALIAS_MAX_RETRY_DELAY_MS = 10_000;
+
+/**
+ * The two statuses this sidecar attributes to a failure of its OWN making
+ * (as opposed to one the backing reported). Both are gateway statuses because
+ * that is exactly what the sidecar is on this path: it terminated the client's
+ * protocol and re-originated upstream, so "I could not reach the backing" is a
+ * 502 and "the backing went silent on me" is a 504.
+ *
+ * The unreachable status IS core's
+ * {@link ALIAS_COLLAPSED_TRANSIENT_UPSTREAM_STATUS} rather than a second
+ * literal `502` — the two must move together (a caller cannot tell "the
+ * sidecar could not reach the backing" from "the backing answered a transient
+ * failure too vendor-specific to forward", and both must stay retryable under
+ * pi-ai's classifier), and a magic number one package away from the constant
+ * it has to equal is exactly the drift this boundary exists to prevent. The
+ * TERMINAL collapse target is deliberately NOT reused here: a hop the sidecar
+ * could not complete is transient by definition, and reporting it as terminal
+ * would spend the container's retry budget on nothing.
+ */
+const SIDECAR_UPSTREAM_UNREACHABLE_STATUS = ALIAS_COLLAPSED_TRANSIENT_UPSTREAM_STATUS;
+const SIDECAR_UPSTREAM_IDLE_STATUS = 504;
+
+/** Records the status of the last upstream response of one re-originated call. */
+interface UpstreamStatusProbe {
+  /** The transport handed to pi-ai — delegates verbatim, records the status. */
+  fetch: typeof fetch;
+  /**
+   * The status a failed turn should report, or `undefined` when there is
+   * nothing honest to report:
+   *
+   *   - the backing answered with an error status → that status when
+   *     {@link projectAliasUpstreamStatus} forwards it (generic enough to name
+   *     no vendor, and terminal-vs-transient preserved — this is what makes a
+   *     `429` retryable in the container again), otherwise
+   *     {@link SIDECAR_UPSTREAM_UNREACHABLE_STATUS};
+   *   - nothing ever answered — DNS, connect, TLS, an aborted fetch →
+   *     {@link SIDECAR_UPSTREAM_UNREACHABLE_STATUS};
+   *   - the backing answered 2xx and the turn failed AFTER that (a truncated
+   *     stream, a `finish_reason` the provider calls an error) → `undefined`.
+   *     That failure has no HTTP status, and fabricating one would tell the
+   *     container's retry classifier something this boundary does not know.
+   */
+  failureStatus: () => number | undefined;
+}
+
+/**
+ * Wrap `base` so the status of each upstream response is observable after the
+ * fact. pi-ai's `error` event carries an `AssistantMessage`, which models no
+ * status at all — and its `errorMessage`, the one place the status sometimes
+ * appears, is vendor prose this boundary must replace rather than parse. The
+ * transport is therefore the only vendor-neutral place the number is legible.
+ *
+ * The LAST response wins: with {@link ALIAS_UPSTREAM_MAX_RETRIES} in play a
+ * turn can make several upstream calls, and the one that decided the outcome
+ * is the one that ran last.
+ */
+function createUpstreamStatusProbe(base: typeof fetch): UpstreamStatusProbe {
+  let observed: number | undefined;
+  return {
+    // `typeof fetch` (Bun) carries a static `preconnect` beside the call
+    // signature, and pi-ai's `FetchFunction` demands the whole shape. Forward
+    // the real member rather than casting it away, so the probe stays a
+    // faithful drop-in — the same idiom `integrations-boot.ts` uses.
+    fetch: Object.assign(
+      async (input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
+        const response = await base(input, init);
+        observed = response.status;
+        return response;
+      },
+      { preconnect: base.preconnect },
+    ),
+    failureStatus: () => {
+      if (observed === undefined) return SIDECAR_UPSTREAM_UNREACHABLE_STATUS;
+      if (observed < 400) return undefined;
+      // One home for the projection, shared with the platform gateway: a
+      // vendor- or CDN-specific code names the backing as surely as its prose.
+      return projectAliasUpstreamStatus(observed);
+    },
+  };
 }
 
 /**
@@ -265,11 +395,18 @@ function projectRequestOptions(
   swap: ModelSwap,
   apiKey: string,
   signal: AbortSignal,
+  upstreamFetch: typeof fetch,
 ): SimpleStreamOptions {
   const incoming = body.options ?? {};
   return {
     apiKey,
     signal,
+    fetch: upstreamFetch,
+    // NOT part of the client's payload and deliberately not derived from it:
+    // the retry budget is this boundary's, because this boundary is the only
+    // one that can read the backing's `retry-after`. See the constants.
+    maxRetries: ALIAS_UPSTREAM_MAX_RETRIES,
+    maxRetryDelayMs: ALIAS_MAX_RETRY_DELAY_MS,
     ...(incoming.temperature !== undefined ? { temperature: incoming.temperature } : {}),
     ...(incoming.maxTokens !== undefined ? { maxTokens: incoming.maxTokens } : {}),
     ...(incoming.reasoning !== undefined ? { reasoning: incoming.reasoning } : {}),
@@ -474,10 +611,12 @@ export function handlePiMessagesRequest(
   const unwind = new AbortController();
   const idleTimeoutMs = deps.llmStreamIdleTimeoutMs ?? LLM_STREAM_IDLE_TIMEOUT_MS;
   const abort = llmUpstreamAbort(AbortSignal.any([request.signal, unwind.signal]));
+  // Per REQUEST, never per process: the recorded status belongs to this turn.
+  const statusProbe = createUpstreamStatusProbe(deps.fetchImpl ?? fetch);
   const upstream = stream(
     model,
     body.context,
-    projectRequestOptions(body, swap, deps.llm.apiKey, abort.signal),
+    projectRequestOptions(body, swap, deps.llm.apiKey, abort.signal, statusProbe.fetch),
   );
 
   const encoder = new TextEncoder();
@@ -504,7 +643,10 @@ export function handlePiMessagesRequest(
               type: "error",
               reason: "error",
               usage: EMPTY_USAGE,
-              errorMessage: syntheticAliasErrorMessage(swap),
+              // 504, not the backing's last status: the stall is THIS hop's
+              // verdict on the exchange, and it is unambiguously transient —
+              // which is the whole point of carrying a status here.
+              errorMessage: syntheticAliasClassifierMessage(SIDECAR_UPSTREAM_IDLE_STATUS),
             };
             break;
           }
@@ -517,7 +659,13 @@ export function handlePiMessagesRequest(
           if (!projected) continue;
           if (projected.type === "error") {
             // Attached here so the projection never reads the alias descriptor.
-            terminal = { ...projected, errorMessage: syntheticAliasErrorMessage(swap) };
+            // The STATUS travels with it: it is the only thing in the replaced
+            // message the container's retry classifier can act on, and it names
+            // no vendor — see {@link syntheticAliasClassifierMessage}.
+            terminal = {
+              ...projected,
+              errorMessage: syntheticAliasClassifierMessage(statusProbe.failureStatus()),
+            };
             break;
           }
           if (projected.type === "done") {
@@ -548,7 +696,10 @@ export function handlePiMessagesRequest(
           type: "error",
           reason: "error",
           usage: EMPTY_USAGE,
-          errorMessage: syntheticAliasErrorMessage(swap),
+          // Reached when the generator ended with no terminal, or the stream
+          // machinery threw. Whatever the probe saw still describes it best: a
+          // status the backing reported, or 502 for "never got that far".
+          errorMessage: syntheticAliasClassifierMessage(statusProbe.failureStatus()),
         };
       }
       controller.enqueue(encoder.encode(sseFrame(terminal)));

@@ -40,8 +40,9 @@ import type { RuntimePiEnvOptions } from "../src/container-env.ts";
  * MAXIMAL on purpose: an option left unset is a hole in the allowlist, since a
  * key emitted behind that conditional would never appear in the pinned set and
  * could be added without failing anything. So this pins what the builder CAN
- * emit, not one production run — `agentInput` and `disableModelRetry` come from
- * the CLI / GitHub Action side of the same contract.
+ * emit, not one production run — `agentInput` comes from the CLI side of the
+ * same contract; the two Pi SDK loop switches are host-env passthroughs, set
+ * here through {@link HOST_ENV_KEYS} rather than through an option.
  *
  * Sidecar-backed, because an aliased run always is: the sidecar is the only place
  * the alias→real `model` swap happens, so skipping it would hand the agent the
@@ -86,7 +87,6 @@ const RUN: RuntimePiEnvOptions = {
   maxFileBytes: 104_857_600,
   forwardProxyUrl: "http://sidecar:8081",
   noProxy: "sidecar,localhost,127.0.0.1",
-  disableModelRetry: true,
   sink: {
     url: "https://appstrate.test/api/runs/run_1/events",
     finalizeUrl: "https://appstrate.test/api/runs/run_1/events/finalize",
@@ -112,6 +112,11 @@ const RUN: RuntimePiEnvOptions = {
  *   out-tells them anyway (`docs/architecture/MODEL_ALIASES.md`).
  * - `MODEL_INPUT` is the modality vector, published on purpose: withholding it
  *   would silently disable image input for the run.
+ * - `MODEL_RETRY_ENABLED` is the operator's opt-out of the Pi SDK retry loop, and
+ *   `MODEL_COMPACTION_ENABLED` the same opt-out for its auto-compaction loop.
+ *   Both are the operator's own choice, read off the host env and identical
+ *   whatever vendor backs the alias — a run either retries (or compacts) or it
+ *   does not, and neither answer names a provider.
  * - the rest is run plumbing (prompt, input, sink, trace, proxy, caps) whose
  *   values come from the platform and the org's own request.
  */
@@ -137,6 +142,7 @@ const ALIASED_CONTAINER_ENV_KEYS = [
   "MODEL_REASONING",
   "MODEL_REASONING_LEVEL",
   "MODEL_RETRY_ENABLED",
+  "MODEL_COMPACTION_ENABLED",
   "MODEL_TEMPERATURE",
   "NO_PROXY",
   "OUTPUT_SCHEMA",
@@ -218,7 +224,14 @@ function expectExactKeySet(actual: readonly string[], expected: readonly string[
  * unknown one, and this key is read at module scope by anything building a logger
  * while it is set.
  */
-const HOST_ENV_KEYS = [...SIDECAR_OPERATOR_ENV_KEYS, "TOOL_RESULT_BYTE_LIMIT"] as const;
+const HOST_ENV_KEYS = [
+  ...SIDECAR_OPERATOR_ENV_KEYS,
+  "TOOL_RESULT_BYTE_LIMIT",
+  // The two Pi SDK loop switches. Forwarded from the host env, not from an
+  // option, so they belong here rather than in the builder fixture.
+  "MODEL_RETRY_ENABLED",
+  "MODEL_COMPACTION_ENABLED",
+] as const;
 const originalHostEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {

@@ -35,7 +35,7 @@ export {
  * chips).
  *
  * Lives here, not in the web shell, for the same reason
- * `PUBLISHED_FILE_LOG_EVENTS` lives in `@appstrate/core/file-uri`: two
+ * `PUBLISHED_FILE_LOG_EVENT` lives in `@appstrate/core/file-uri`: two
  * independent renderers of the same file rows — the shell's file surfaces and
  * the chat module's attachment chips — must agree on which rows get a
  * thumbnail, and each kept its own verbatim copy of the predicate. The shell's

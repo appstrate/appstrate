@@ -122,7 +122,11 @@ export async function resolveOAuthTokenForSidecar(
     return buildResolvedToken(state);
   }
 
-  return forceRefreshOAuthModelProviderToken(credentialId, expectedOrgId);
+  // PROACTIVE: we got here from the lead-window check above, not from an
+  // upstream rejection — so the post-lock freshness short-circuit is welcome.
+  // A peer that refreshed while we waited has already produced the token this
+  // caller wants, and re-refreshing would burn a healthy rotated credential.
+  return forceRefreshOAuthModelProviderToken(credentialId, expectedOrgId, { force: false });
 }
 
 /**
@@ -148,10 +152,20 @@ export async function resolveOAuthTokenForSidecar(
  *
  * On `invalid_grant` (refresh token revoked), flips `needsReconnection=true`
  * on the row and throws `gone()`.
+ *
+ * `options.force` defaults to TRUE — "regardless of expiry" is the contract
+ * this function's name promises, and the sidecar calls it precisely because it
+ * just saw a 401 from the provider, so remaining lifetime is not evidence the
+ * token works. The freshness short-circuit in (2) is therefore skipped unless
+ * a caller that is merely PROACTIVE opts in ({@link resolveOAuthTokenForSidecar}
+ * does). The re-read itself always runs: `doRefresh` reloads the credential
+ * state under the lock, so a peer's just-rotated `refresh_token` is what gets
+ * spent either way.
  */
 export async function forceRefreshOAuthModelProviderToken(
   credentialId: string,
   expectedOrgId?: string,
+  options: { force?: boolean } = {},
 ): Promise<OAuthTokenResponse> {
   // Two dedup layers (in-process singleflight + cross-process Redis lock +
   // post-acquire re-read), owned by `dedupedRefresh`. The lock-winner may have
@@ -160,7 +174,8 @@ export async function forceRefreshOAuthModelProviderToken(
   return dedupedRefresh<OAuthTokenResponse>(credentialId, {
     lockKey: `oauth-refresh:${credentialId}`,
     lockLabel: "oauth-refresh",
-    reReadFreshness: async () => {
+    force: options.force ?? true,
+    reReadFreshness: async ({ force }) => {
       const state = await loadCredentialState(credentialId, expectedOrgId);
       if (state.blob.needsReconnection) {
         throw gone(
@@ -168,6 +183,9 @@ export async function forceRefreshOAuthModelProviderToken(
           `OAuth credential ${credentialId} needs reconnection`,
         );
       }
+      // Forced: the caller has upstream evidence this token is dead, so an
+      // unexpired `expiresAt` must not send it back down to the sidecar.
+      if (force) return null;
       if (state.blob.expiresAt && state.blob.expiresAt - Date.now() > OAUTH_REFRESH_LEAD_MS) {
         return buildResolvedToken(state);
       }

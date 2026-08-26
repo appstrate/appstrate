@@ -325,7 +325,19 @@ export async function resolveLiveIntegrationCredentials(
         authKey,
         connection.credentialsEncrypted,
         refreshContext,
+        // A forced refresh follows an upstream 401: the post-lock freshness
+        // short-circuit must not answer it with the very token that 401'd.
+        // The proactive (lead-window) branch keeps the short-circuit — there
+        // the stored token is presumed good, we are merely ahead of expiry.
+        { force: options.forceRefresh === true },
       );
+      if (classified.status === "terminal") {
+        // The connection can never be refreshed as stored (no refresh_token).
+        // Same terminal surface as every other dead credential: 410 + flagged.
+        // `markIntegrationConnectionNeedsReconnection` is idempotent, so the
+        // helper having already flagged the row costs nothing here.
+        return flagTerminalAndThrow(classified.reason);
+      }
       if (classified.status === "revoked") {
         // 410 here propagates to the sidecar, which translates back
         // to a 401 to the integration's MCP client. The

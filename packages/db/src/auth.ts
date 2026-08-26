@@ -23,6 +23,7 @@ import {
   normalizeEmail,
 } from "./auth-policy.ts";
 import { createBootstrapOrg } from "./bootstrap-org.ts";
+import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "./password-policy.ts";
 
 /**
  * True when a `pending` non-expired invitation exists for `email`. Used by
@@ -663,7 +664,16 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
 
     emailAndPassword: {
       enabled: true,
-      minPasswordLength: 8,
+      // The one place these two numbers are ENFORCED; every other declaration
+      // of them reports this one (`src/password-policy.ts` states the rule).
+      // `maxPasswordLength` is set explicitly even though it equals Better
+      // Auth's own default: left unset, the ceiling the routes' Zod bounds
+      // report was a framework default they could not see, and `auth-bootstrap`
+      // had already drifted to 256 above it — a 200-character password cleared
+      // its Zod and was refused here, surfacing to the caller as that route's
+      // generic `bootstrap_signup_rejected` 400, which names no length.
+      minPasswordLength: MIN_PASSWORD_LENGTH,
+      maxPasswordLength: MAX_PASSWORD_LENGTH,
       requireEmailVerification: smtpEnabled,
       // Test-only fast password hasher. Better Auth's default is scrypt
       // (deliberately slow — ~35ms/hash), which dominates the test suite since

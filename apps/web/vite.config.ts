@@ -53,6 +53,11 @@ function i18nBootPreload(): Plugin {
             const match = LOCALE_MODULE_RE.exec(moduleId);
             if (!match) continue;
             const [, language, namespace] = match;
+            // Both groups are non-optional in LOCALE_MODULE_RE, so a match
+            // always fills them — but `noUncheckedIndexedAccess` types a
+            // capture as `string | undefined` and it is right to: this file was
+            // in no tsc program until now, so nothing had ever said so.
+            if (language === undefined || namespace === undefined) continue;
             if (!bootNamespaces.has(namespace)) continue;
             (byLanguage[language] ??= []).push(`${base}${output.fileName}`);
             break;

@@ -69,12 +69,28 @@ interface IntegrationRefreshResult {
 }
 
 /**
- * Force-refresh the OAuth2 access token for an integration connection.
+ * Thrown when an oauth2 connection can never be refreshed as it stands, no
+ * matter how many times the caller retries — currently the single case of a
+ * stored credential bundle with no `refresh_token` at all. TERMINAL, and
+ * distinct from `RefreshError(kind="revoked")`: the IdP never rejected
+ * anything, so an operator reading "revoked" would go hunting upstream for a
+ * revocation that never happened. `reason` is surfaced verbatim in the 410.
+ */
+class UnrefreshableConnectionError extends Error {
+  constructor(readonly reason: string) {
+    super(reason);
+    this.name = "UnrefreshableConnectionError";
+  }
+}
+
+/**
+ * Refresh the OAuth2 access token for an integration connection.
  * No-op (returns current creds) when the manifest auth isn't OAuth2 or no
  * per-app OAuth client is registered (`refreshContext` absent). When the auth
  * IS refreshable but the stored credentials carry no refresh_token, the token
- * is unrecoverable: returns the current creds AND flags needsReconnection so
- * the surface prompts a re-connect.
+ * is unrecoverable: flags needsReconnection AND throws
+ * {@link UnrefreshableConnectionError} so the caller surfaces the same terminal
+ * status it gives any other dead credential.
  *
  * On success: writes the new ciphertext + expiresAt + clears needsReconnection.
  * On `invalid_grant`: throws RefreshError(kind="revoked") AND flips
@@ -83,6 +99,11 @@ interface IntegrationRefreshResult {
  * On any other failure: throws RefreshError(kind="transient") without
  * touching the row — caller fails the current request but the connection
  * stays usable for future calls.
+ *
+ * `options.force` defaults to TRUE: every caller reaching here has already
+ * decided a refresh is warranted, and the one that is merely PROACTIVE (the
+ * credentials resolver's lead-window branch) says so explicitly. Forced skips
+ * the post-lock freshness short-circuit — see {@link dedupedRefresh}.
  */
 export async function forceRefreshIntegrationConnection(
   connectionId: string,
@@ -90,6 +111,7 @@ export async function forceRefreshIntegrationConnection(
   authKeyForLog: string,
   credentialsEncrypted: string,
   refreshContext?: IntegrationRefreshContext,
+  options: { force?: boolean } = {},
 ): Promise<IntegrationRefreshResult> {
   if (!refreshContext) {
     return {
@@ -109,7 +131,8 @@ export async function forceRefreshIntegrationConnection(
   return dedupedRefresh<IntegrationRefreshResult>(connectionId, {
     lockKey: `intg-refresh:${connectionId}`,
     lockLabel: "intg-refresh",
-    reReadFreshness: async () => {
+    force: options.force ?? true,
+    reReadFreshness: async ({ force }) => {
       const [row] = await db
         .select({
           credentialsEncrypted: integrationConnections.credentialsEncrypted,
@@ -118,7 +141,10 @@ export async function forceRefreshIntegrationConnection(
         .from(integrationConnections)
         .where(eq(integrationConnections.id, connectionId))
         .limit(1);
+      // The read happens even when forced — `doRefresh` must spend the
+      // freshest stored refresh_token, not the one the caller was holding.
       if (row?.credentialsEncrypted) freshCiphertext = row.credentialsEncrypted;
+      if (force) return null;
       if (row?.expiresAt && row.expiresAt.getTime() - Date.now() > OAUTH_REFRESH_LEAD_MS) {
         return {
           fields: decryptCredentialsToStringMap(row.credentialsEncrypted),
@@ -152,6 +178,12 @@ async function doRefresh(
     // serving a token that 401s on every call. (Root cause for Google was a
     // missing `access_type=offline` on the authorize URL — see
     // `auths.{key}.authorizationParams` — so the IdP never issued one.)
+    //
+    // THROW, never return: a success shape carrying the dead token contradicts
+    // the flag we just wrote — the sidecar would inject the same credential
+    // that 401'd and report 200 to the run, exactly the "stale-200, no flag"
+    // no-op the 410 contract exists to forbid. The model-provider twin
+    // (`model-providers/token-resolver.ts`) has always thrown here.
     logger.warn(
       "Integration connection unrefreshable — no refresh_token; flagging needsReconnection",
       {
@@ -161,7 +193,7 @@ async function doRefresh(
       },
     );
     await markIntegrationConnectionNeedsReconnection(connectionId);
-    return { fields: current, expiresAt: null, scopesGranted: null, shrinkDetected: false };
+    throw new UnrefreshableConnectionError("no stored refresh_token");
   }
 
   let parsed: RefreshExchangeResult["parsed"];
@@ -268,12 +300,17 @@ async function doRefresh(
  *   expiresAt, and scope-shrink signals.
  * - `revoked`: the refresh token was revoked upstream (RFC 6749 §5.2
  *   `invalid_grant`); the helper has already flipped `needsReconnection`.
+ * - `terminal`: the connection can never be refreshed as stored (no
+ *   `refresh_token` at all). Also already flagged, but no upstream call was
+ *   made — `reason` says so, instead of blaming a revocation that never
+ *   happened.
  * - `transient`: any other failure (network, 5xx, parse). The cached
  *   credential may still be usable; the connection row is untouched.
  */
 type RefreshClassification =
   | { status: "refreshed"; result: IntegrationRefreshResult }
   | { status: "revoked"; error: RefreshError }
+  | { status: "terminal"; reason: string }
   | { status: "transient"; error: unknown };
 
 /**
@@ -288,6 +325,7 @@ export async function refreshAndClassify(
   authKeyForLog: string,
   credentialsEncrypted: string,
   refreshContext: IntegrationRefreshContext,
+  options: { force?: boolean } = {},
 ): Promise<RefreshClassification> {
   try {
     const result = await forceRefreshIntegrationConnection(
@@ -296,11 +334,15 @@ export async function refreshAndClassify(
       authKeyForLog,
       credentialsEncrypted,
       refreshContext,
+      options,
     );
     return { status: "refreshed", result };
   } catch (err) {
     if (err instanceof RefreshError && err.kind === "revoked") {
       return { status: "revoked", error: err };
+    }
+    if (err instanceof UnrefreshableConnectionError) {
+      return { status: "terminal", reason: err.reason };
     }
     return { status: "transient", error: err };
   }

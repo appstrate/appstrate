@@ -12,7 +12,7 @@ import { computeIntegrity } from "@appstrate/core/integrity";
 import { createVersionAndUpload } from "./package-versions.ts";
 import { uploadPackageFiles, SYSTEM_STORAGE_NAMESPACE } from "./package-items/storage.ts";
 import { storageFolderForType } from "./package-items/config.ts";
-import { mapBounded } from "../lib/map-bounded.ts";
+import { mapWithConcurrency } from "../lib/map-with-concurrency.ts";
 
 export type { SystemPackageEntry };
 
@@ -297,7 +297,10 @@ export async function syncSystemPackagesToDb(
     syncedVersions++;
   };
 
-  await mapBounded(Array.from(canonicalPackages), SYNC_CONCURRENCY, ([id, entry]) =>
+  // Each callback swallows its own failure into a `logger.warn` below, so the
+  // pool's abort-on-first-rejection never triggers here — one unsyncable
+  // package must not stop the rest of the boot sync.
+  await mapWithConcurrency(Array.from(canonicalPackages), SYNC_CONCURRENCY, ([id, entry]) =>
     syncCanonical(id, entry).catch((err) => {
       logger.warn("Failed to sync canonical system package", {
         packageId: id,
@@ -305,7 +308,7 @@ export async function syncSystemPackagesToDb(
       });
     }),
   );
-  await mapBounded(allVersions, SYNC_CONCURRENCY, (entry) =>
+  await mapWithConcurrency(allVersions, SYNC_CONCURRENCY, (entry) =>
     syncVersion(entry).catch((err) => {
       logger.warn("Failed to register system package version", {
         packageId: entry.packageId,

@@ -3,5 +3,10 @@
   "compilerOptions": {
     "types": ["bun"]
   },
-  "include": ["src", "test"]
+  // `bin` and `examples` are here because tsc otherwise compiled neither:
+  // `bin/afps.ts` is this package's manifest `bin` target (the shipped CLI
+  // entrypoint, and one knip resolves as an entry), and
+  // `examples/briefing-agent/build.ts` reaches deep into `../../src/bundle/**`
+  // — so a signature change in `src` breaks it with nothing to say so.
+  "include": ["src", "test", "bin", "examples"]
 }

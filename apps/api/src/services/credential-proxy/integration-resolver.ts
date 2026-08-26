@@ -114,8 +114,9 @@ export async function resolveIntegrationProxyCredentials(
  *   - not refreshable at all (no accessible connection, non-oauth2 auth) —
  *     row untouched, there is nothing this path can conclude;
  *   - TERMINAL (the minting OAuth client is gone / the manifest can never
- *     yield a token endpoint) — the connection is flagged `needsReconnection`
- *     before returning, mirroring the sidecar resolver's 410 branch;
+ *     yield a token endpoint / the stored bundle has no `refresh_token`) — the
+ *     connection is flagged `needsReconnection` before returning, mirroring the
+ *     sidecar resolver's 410 branch;
  *   - REVOKED (the refresh token was rejected upstream) — `refreshAndClassify`
  *     has already flagged `needsReconnection`, so the caller relaying the
  *     upstream 401 is not what stands between the user and a reconnect prompt.
@@ -184,7 +185,9 @@ export async function forceRefreshIntegrationProxyCredentials(
   }
 
   // Re-acquisition = fast-path refresh_token POST. `authDef.type` is gated
-  // to oauth2 above, so this is the only refreshable auth.
+  // to oauth2 above, so this is the only refreshable auth. `force` is left at
+  // its default (true): this whole function IS the proxy's 401-retry hook, so
+  // the stored token is known-bad and its remaining lifetime proves nothing.
   const classified = await refreshAndClassify(
     connection.id,
     input.integrationId,
@@ -192,6 +195,19 @@ export async function forceRefreshIntegrationProxyCredentials(
     connection.credentialsEncrypted,
     refreshContext,
   );
+  if (classified.status === "terminal") {
+    // Terminal, and already recorded: the connection carries no refresh_token
+    // at all, and `refreshAndClassify` flagged `needsReconnection` before
+    // returning. Same degrade-and-mark contract as the unrefreshable branch
+    // above — the caller keeps seeing the real upstream 401.
+    logger.warn("credential-proxy: integration credential unrefreshable — needs re-connection", {
+      integrationId: input.integrationId,
+      authKey: connection.authKey,
+      connectionId: connection.id,
+      reason: classified.reason,
+    });
+    return null;
+  }
   if (classified.status === "revoked") {
     // Terminal, and already recorded: `refreshAndClassify` flipped
     // `needsReconnection` on the connection before returning this status.

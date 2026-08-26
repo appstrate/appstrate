@@ -18,6 +18,7 @@ import { GoogleIcon, GitHubIcon } from "../../components/icons";
 import { ReauthModal } from "../../components/reauth-modal";
 import { SessionNotFreshError } from "../../lib/auth-errors";
 import { availableReauthMethods } from "../../lib/reauth-methods";
+import { MIN_PASSWORD_LENGTH } from "@appstrate/shared-types";
 
 type LinkedAccount = { providerId: string; accountId: string };
 
@@ -248,13 +249,13 @@ function PasswordChangeForm() {
             type="password"
             {...register("newPassword", {
               required: t("validation.required", { ns: "common" }),
-              // Better Auth rejects passwords shorter than 8 (minPasswordLength)
+              // Better Auth's own minimum, imported rather than restated.
               minLength: {
-                value: 8,
-                message: t("validation.minLength", { ns: "common", min: 8 }),
+                value: MIN_PASSWORD_LENGTH,
+                message: t("validation.minLength", { ns: "common", min: MIN_PASSWORD_LENGTH }),
               },
             })}
-            minLength={8}
+            minLength={MIN_PASSWORD_LENGTH}
             autoComplete="new-password"
             aria-invalid={showError("newPassword") ? true : undefined}
             className={cn(showError("newPassword") && "border-destructive")}
@@ -359,13 +360,13 @@ function PasswordSetForm({ onPasswordSet }: { onPasswordSet: () => Promise<unkno
             type="password"
             {...register("newPassword", {
               required: t("validation.required", { ns: "common" }),
-              // Better Auth rejects passwords shorter than 8 (minPasswordLength)
+              // Better Auth's own minimum, imported rather than restated.
               minLength: {
-                value: 8,
-                message: t("validation.minLength", { ns: "common", min: 8 }),
+                value: MIN_PASSWORD_LENGTH,
+                message: t("validation.minLength", { ns: "common", min: MIN_PASSWORD_LENGTH }),
               },
             })}
-            minLength={8}
+            minLength={MIN_PASSWORD_LENGTH}
             autoComplete="new-password"
             aria-invalid={showError("newPassword") ? true : undefined}
             className={cn(showError("newPassword") && "border-destructive")}

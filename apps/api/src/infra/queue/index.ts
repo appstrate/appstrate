@@ -16,5 +16,11 @@ export async function createQueue<T>(
     const { BullMQQueue } = await import("./bullmq-queue.ts");
     return new BullMQQueue<T>(name, defaultJobOptions);
   }
-  return new LocalQueue<T>(name);
+  // `defaultJobOptions` reaches BOTH implementations. Dropping them here left
+  // every Redis-less deployment (Tier 0/1 — the documented self-hosting
+  // default) running the queues at `attempts: 1`: a webhook delivery whose
+  // first POST hit a transient 503 was abandoned on a queue configured for 8
+  // attempts with custom backoff, and `add("deliver", …)` passes no per-job
+  // options to make up for it.
+  return new LocalQueue<T>(name, defaultJobOptions);
 }

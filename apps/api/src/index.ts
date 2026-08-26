@@ -8,7 +8,7 @@ import { recordProcessAnomaly } from "@appstrate/core/telemetry";
 import { logger } from "./lib/logger.ts";
 import { bootCritical, bootBackground, probeUsercontentReachability } from "./lib/boot.ts";
 import { createShutdownHandler } from "./lib/shutdown.ts";
-import { requireAppContext } from "./middleware/app-context.ts";
+import { isAppScopedPath, requireAppContext } from "./middleware/app-context.ts";
 import { requestId } from "./middleware/request-id.ts";
 import { telemetry } from "./middleware/telemetry.ts";
 import { clientIp } from "./middleware/client-ip.ts";
@@ -209,26 +209,13 @@ applyAuthPipeline(app, {
 });
 
 // App context middleware: resolve X-Application-Id for app-scoped routes.
-// Modules own app-scoping for their own routes (e.g. webhooks gates via an
-// explicit `applicationId` body/query field), so the prefix list is core-only.
-const APP_SCOPED_PREFIXES = [
-  "/api/agents",
-  "/api/runs",
-  "/api/schedules",
-  "/api/end-users",
-  "/api/api-keys",
-  "/api/notifications",
-  "/api/packages",
-  "/api/integrations",
-  "/api/uploads",
-  "/api/files",
-];
-
+// The prefix list itself lives in `middleware/app-context.ts` so this wiring
+// and the test harness read the same one.
 const appContextMiddleware = requireAppContext();
 app.use("*", async (c, next) => {
   if (skipAuth(c.req.path, getModulePublicPaths(), c.req.raw.headers)) return next();
   if (!c.get("user")) return next();
-  if (!APP_SCOPED_PREFIXES.some((p) => c.req.path.startsWith(p))) return next();
+  if (!isAppScopedPath(c.req.path)) return next();
   return appContextMiddleware(c, next);
 });
 

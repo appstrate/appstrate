@@ -36,35 +36,6 @@ export interface AfterToolCallOverride {
   terminate?: boolean;
 }
 
-/**
- * Whether a finalized tool result carries a `connectOffer` — the typed payload
- * the chat's connect card renders its button from.
- *
- * It matters here because pi-agent-core rebuilds a tool result as exactly
- * `{content, details, terminate}` whenever `afterToolCall` returns a TRUTHY
- * override (`agent-loop.js:408-415`), dropping every other field. `details` is
- * redacted, so nothing falls back: terminating through this hook on a batch
- * carrying an offer would strip the connect URL and leave the user a dead end
- * at the exact moment the turn closes. `mcp-tools.ts` states that contract.
- *
- * `shouldStopAfterTurn` would stop the loop without rewriting any result, but
- * it is unreachable from an `AgentSession`: `Agent.createLoopConfig` forwards
- * `beforeToolCall`/`afterToolCall` only (`agent.js:288-289`), never that hook.
- * So the offer's batch is let through untouched and the cap fires on the next
- * one — at most one extra tool step, in a rare case.
- */
-function carriesConnectOffer(context: unknown): boolean {
-  const result = (context as { result?: unknown } | null | undefined)?.result;
-  if (typeof result !== "object" || result === null) return false;
-  return (result as { connectOffer?: unknown }).connectOffer != null;
-}
-
-/** Batch identity: every tool call finalized in one batch shares its assistant message. */
-function batchKey(context: unknown): object | undefined {
-  const message = (context as { assistantMessage?: unknown } | null | undefined)?.assistantMessage;
-  return typeof message === "object" && message !== null ? message : undefined;
-}
-
 /** The slice of the Pi `AgentSession` the step cap drives. */
 export interface PiChatToolLoopSession {
   /** Restrict the tools exposed on the NEXT run (`[]` = tool-less). */
@@ -101,11 +72,6 @@ export function createStepCapController(options: {
 }): StepCapController {
   const budget = options.budget ?? CHAT_TOOL_STEP_BUDGET;
   let fired = false;
-  // Batches spared because one of their results carries a connect offer. Keyed
-  // by the shared assistant message so the whole batch is spared, not just the
-  // one call — `terminate` is only honoured when EVERY result in the batch sets
-  // it, so a split decision would leave `fired` true with the loop still running.
-  const sparedBatches = new WeakSet<object>();
 
   return {
     attach(session) {
@@ -115,12 +81,6 @@ export function createStepCapController(options: {
       session.agent.afterToolCall = async (context, signal) => {
         const override = await inner?.(context, signal);
         if (options.modelCallCount() < budget) return override;
-        // See `carriesConnectOffer`: terminating through this hook rebuilds the
-        // result and silently drops the offer, leaving the user a connect card
-        // with no URL. Spare the batch and cap on the next one.
-        const batch = batchKey(context);
-        if (carriesConnectOffer(context) && batch) sparedBatches.add(batch);
-        if (batch && sparedBatches.has(batch)) return override;
         fired = true;
         return { ...override, terminate: true };
       };
