@@ -177,9 +177,15 @@ const CRED_START = String.raw`(?<=^|%[0-9A-Fa-f]{2}|[^A-Za-z0-9_])`;
 const KEYWORD_START = String.raw`(?<=^|%[0-9A-Fa-f]{2}|[^A-Za-z0-9])`;
 
 /**
- * The NAME half of the keyword rule, split into TWO tiers that differ in what
- * may sit between the name and the value. Collapsing them into one rule is
- * what made this rule eat prose.
+ * The NAME half of the keyword rule, split into TWO tiers that differ in the
+ * NAME each accepts — and in nothing else. Both take the same value class and
+ * the same {@link ASSIGNMENT_SEP}; the split exists because one tier is
+ * case-SENSITIVE with `_`-joined segments and the other is case-INsensitive
+ * with none, which is two regex flags and cannot be one pattern.
+ *
+ * Collapsing them into one rule is what made this rule eat prose: the single
+ * pre-split rule was case-insensitive AND whitespace-separated at once, and
+ * each half destroyed a different population of operator diagnostics.
  *
  * TIER 1 — env-var NAME ({@link ENV_NAME_KEYWORD} + {@link ASSIGNMENT_SEP}).
  * Fifth bug on the same rule, and the one that mattered most on the sink it
@@ -225,15 +231,49 @@ const KEYWORD_START = String.raw`(?<=^|%[0-9A-Fa-f]{2}|[^A-Za-z0-9])`;
  * expressed as an explicit `_` on its left (`GCP_KEY`, `PRIVATE_KEY`) or a
  * segment on its right (`KEY_FILE`), which no sentence produces.
  *
- * TIER 2 — bare keyword ({@link BARE_KEYWORD} + {@link KEYWORD_SEP}). Byte for
- * byte the rule as it stood BEFORE the widening: case-insensitive, no segments,
- * and it KEEPS whitespace as a separator. That is a deliberate decision, not an
- * oversight. CLI and runner diagnostics echo `--password <secret>` and
- * `--token <secret>` with no assignment character at all, and that is exactly
- * the docker/stderr sink this scrubber guards; dropping whitespace here would
- * give up real coverage rather than reclaim prose. Its known price — a bare
- * keyword eating the next word ("the access token has expired") — pre-dates
- * the widening, so leaving it is what keeps this fix to the regression.
+ * TIER 2 — bare keyword ({@link BARE_KEYWORD} + {@link ASSIGNMENT_SEP}).
+ * Case-insensitive and segment-less, which is what covers the shapes tier 1's
+ * two constraints give up: a lowercase env name whose last segment is the
+ * keyword (`notion_token=…`) and the JSON field an error body carries
+ * (`{"access_token": "…"}`). It requires the SAME assignment separator as
+ * tier 1 — the two tiers differ in the NAME half only, never in what may sit
+ * between a name and its value.
+ *
+ * That is the sixth bug on this rule, and the first five fixes each stopped one
+ * tier short of it. Tier 2 accepted bare WHITESPACE, so `<keyword> <word>` lost
+ * the word: measured over the 68,449 string literals and comment lines in
+ * `apps/api/src`, `runtime-pi/` and `packages/core/src`, requiring an
+ * assignment here hands back 1,545 of them and re-redacts none. Four of the six
+ * worked examples were pure tier-2 whitespace damage — `token budget exceeded`,
+ * `invalid password format (must contain a digit)`, `RUN_TOKEN_SECRET produced
+ * an empty keyring`, `an empty client_secret clears the stored credential`.
+ *
+ * The justification this docstring used to carry for keeping whitespace — that
+ * CLI and runner diagnostics echo `--password <secret>` with no assignment
+ * character — does not survive contact with the paths the scrubber is actually
+ * routed through, and was never true of them:
+ *
+ *   - A credential reaches a spawned integration through `delivery.env`,
+ *     `delivery.http` (header) or `delivery.files`, and through nothing else —
+ *     `packages/core/src/integration.ts` enumerates the three. Argv is not a
+ *     delivery channel, so no platform-produced diagnostic can echo one.
+ *   - `--token <secret>` does occur in `apps/cli`, and that CLI is a different
+ *     process that never calls this function. Even there the one place a token
+ *     could land on a command line refuses to put it there
+ *     (`apps/cli/src/commands/install.ts`: "NOT argv: a `--token <secret>` on
+ *     the sudo command line is visible to any process").
+ *   - Outside those two, the shape appears nowhere in `apps/api/src`,
+ *     `runtime-pi/` or `packages/core/src` except in this docstring's own
+ *     previous claim.
+ *
+ * The cost is stated rather than hidden: a bare `token <value>` with no
+ * assignment character anywhere — a third-party MCP server printing its own
+ * credential in a shape the platform never produces — is no longer masked by
+ * the keyword rule. The shape rules (`Bearer …`, `sk-…`, `ghp_…`, `eyJ…`,
+ * `AKIA…`, `ya29.`) and the two userinfo rules still cover it whenever the
+ * value is recognisable, and this rule was always the defence-in-depth half of
+ * the guarantee (see `integrations-boot.scrubStderrLine`) — the primary control
+ * is that runs are org-scoped to an actor who already holds the credential.
  *
  * `mytoken=`, `9secret=` and `monkey_bars=` stay prose in both tiers: the first
  * two fail {@link KEYWORD_START} at the keyword, the third has an `_` but no
@@ -260,12 +300,11 @@ const BARE_KEYWORD = String.raw`token|secret|password|api[_-]?key|authorization|
  */
 const ASSIGN_CHAR = String.raw`(?:["'=:]|%22|%27|%3D|%3A)`;
 /**
- * Tier-1 separator: whitespace may surround an assignment, never replace it.
- * `NAME = value` and `"name": "value"` both pass; `NAME word` does not.
+ * The separator, in BOTH tiers: whitespace may surround an assignment, never
+ * replace it. `NAME = value` and `"name": "value"` both pass; `NAME word` does
+ * not. See {@link BARE_KEYWORD} for why tier 2 no longer has one of its own.
  */
 const ASSIGNMENT_SEP = String.raw`(?:[ \t]|%20)*${ASSIGN_CHAR}(?:${ASSIGN_CHAR}|[ \t]|%20)*`;
-/** Tier-2 separator: the pre-widening group, bare whitespace included. */
-const KEYWORD_SEP = String.raw`(?:["'\s:=]|%20|%3A|%3D|%22|%27)+`;
 /** The value a separator introduces, up to the next item boundary. */
 const KEYWORD_VALUE = String.raw`[^\s"',&]+`;
 
@@ -421,9 +460,10 @@ const SCRUB_RULES: ReadonlyArray<readonly [RegExp, string]> = [
     new RegExp(`${KEYWORD_START}(${ENV_NAME_KEYWORD})(${ASSIGNMENT_SEP})${KEYWORD_VALUE}`, "g"),
     "$1$2[redacted]",
   ],
-  // Tier 2 — bare keyword, case-insensitive, whitespace-separated allowed.
+  // Tier 2 — bare keyword, case-insensitive, and assignment-only exactly like
+  // tier 1; see {@link BARE_KEYWORD} for why whitespace is not a separator.
   [
-    new RegExp(`${KEYWORD_START}(${BARE_KEYWORD})(${KEYWORD_SEP})${KEYWORD_VALUE}`, "gi"),
+    new RegExp(`${KEYWORD_START}(${BARE_KEYWORD})(${ASSIGNMENT_SEP})${KEYWORD_VALUE}`, "gi"),
     "$1$2[redacted]",
   ],
 ];

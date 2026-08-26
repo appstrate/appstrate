@@ -98,4 +98,90 @@ describe("validateAgainstSchema", () => {
     expect(result.valid).toBe(false);
     expect(result.errors[0]?.message).toContain("email");
   });
+
+  // Narrowing the short-circuit above (an empty `properties` no longer waives
+  // `required` / `allOf` / `additionalProperties`) routed shapes into the
+  // compiler that never reached it before. Some of them Ajv refuses to
+  // compile, and a refusal used to escape this function as an EXCEPTION —
+  // a stack trace out of `appstrate run`, a 500 out of a route whose whole
+  // contract is a 400 with per-field errors. The contract is: a result, always.
+  describe("a schema Ajv cannot compile yields a result, not an exception", () => {
+    const uncompilable: [string, JSONSchemaObject][] = [
+      ["allOf: []", { allOf: [] }],
+      ["anyOf: []", { anyOf: [] }],
+      ["oneOf: []", { oneOf: [] }],
+      ["enum: []", { enum: [] }],
+      ["allOf: {} (wrong type)", { allOf: {} }],
+      ["nullable without a type", { nullable: true }],
+      ["$ref to a missing pointer", { $ref: "#/$defs/missing" }],
+      ["$ref to an unreachable external URI", { $ref: "https://example.invalid/other.json" }],
+      ["allOf: [] alongside real properties", { allOf: [], properties: { a: { type: "string" } } }],
+    ] as unknown[] as [string, JSONSchemaObject][];
+
+    for (const [label, badSchema] of uncompilable) {
+      it(`reports ${label} as invalid instead of throwing`, () => {
+        expect(() => validateAgainstSchema({ a: "x" }, badSchema)).not.toThrow();
+        const result = validateAgainstSchema({ a: "x" }, badSchema);
+        // NOT `valid: true`: nothing was checked, so nothing can be accepted.
+        // Accepting a value no validator ever examined is the one outcome
+        // worse than the throw this replaces.
+        expect(result.valid).toBe(false);
+        expect(result.errors[0]?.message).toBeTruthy();
+      });
+    }
+  });
+
+  // `$schema` names the document's DIALECT and asserts nothing about the
+  // value, but the shared instance is an Ajv2020 bound to one dialect: any
+  // other URL made `compile` throw "no schema with key or ref …". draft-07 is
+  // what most JSON Schema tooling still emits, so this fired on ordinary
+  // manifests — and `apps/api` had already worked around it locally, which is
+  // precisely the server/CLI drift this module exists to prevent.
+  describe("a foreign `$schema` dialect is validated, not refused", () => {
+    const shaped = (dialect: string): JSONSchemaObject =>
+      ({
+        $schema: dialect,
+        type: "object",
+        properties: { name: { type: "string" } },
+        required: ["name"],
+      }) as unknown as JSONSchemaObject;
+
+    const FOREIGN = [
+      "http://json-schema.org/draft-04/schema#",
+      "http://json-schema.org/draft-06/schema#",
+      "http://json-schema.org/draft-07/schema#",
+      "https://json-schema.org/draft/2019-09/schema",
+      "https://example.invalid/dialect/v1", // a URL Ajv has never heard of
+    ];
+
+    for (const dialect of FOREIGN) {
+      it(`reaches a real verdict under ${dialect}`, () => {
+        expect(validateAgainstSchema({ name: "ok" }, shaped(dialect)).valid).toBe(true);
+        const bad = validateAgainstSchema({}, shaped(dialect));
+        expect(bad.valid).toBe(false);
+        expect(bad.errors[0]?.field).toBe("name");
+      });
+    }
+
+    // Anti-weakening control. Dropping `$schema` must make the schema
+    // COMPILABLE, never more permissive: everything it forbids is still
+    // forbidden, and the native dialect (which never threw) is unchanged.
+    it("still rejects everything the schema forbids", () => {
+      const draft07 = "http://json-schema.org/draft-07/schema#";
+      const closed = {
+        $schema: draft07,
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      } as unknown as JSONSchemaObject;
+      expect(validateAgainstSchema({ unexpected: 1 }, closed).valid).toBe(false);
+
+      const requiredOnly = { $schema: draft07, required: ["a"] } as unknown as JSONSchemaObject;
+      expect(validateAgainstSchema({}, requiredOnly).valid).toBe(false);
+
+      const native = shaped("https://json-schema.org/draft/2020-12/schema");
+      expect(validateAgainstSchema({}, native).valid).toBe(false);
+      expect(validateAgainstSchema({ name: "ok" }, native).valid).toBe(true);
+    });
+  });
 });

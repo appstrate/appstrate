@@ -130,7 +130,19 @@ function runValidate(
     effectiveSchema as JSONSchemaObject & {
       $schema?: unknown;
     };
-  const validate = compileCached(dialectFreeSchema as JSONSchemaObject);
+  // A schema Ajv cannot compile (`allOf: []`, `enum: []`, a `$ref` to nowhere)
+  // is a defect in the MANIFEST, so it belongs in this function's 400, not in a
+  // 500 from an uncaught throw. `compileCached` is deliberately the throwing
+  // path — see its doc comment in `@appstrate/core/schema-validation` — so the
+  // catch belongs here, at the boundary that owns the status code.
+  let validate: ReturnType<typeof compileCached>;
+  try {
+    validate = compileCached(dialectFreeSchema as JSONSchemaObject);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (kind === "output") return { valid: false, errors: [message] };
+    return { valid: false, errors: [{ field: "", message }] };
+  }
   const valid = validate(effectiveData);
 
   // 4. Per-kind error mapping
@@ -191,7 +203,15 @@ export function validateConnectionCredentials(
   // Mirror the input path: AJV coerceTypes lets "" satisfy `required`, so
   // strip empty/null values for required keys before validating.
   const effectiveData = stripEmptyRequired(credentials, required);
-  const validate = compileCached(schema);
+  // Same reasoning as `runValidate`: an uncompilable credentials schema is a
+  // manifest defect and must surface as a validation failure, not a 500.
+  let validate: ReturnType<typeof compileCached>;
+  try {
+    validate = compileCached(schema);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { valid: false, errors: [{ field: "", message }] };
+  }
   if (validate(effectiveData)) return { valid: true, errors: [], data: credentials };
   const errors = (validate.errors || []).map((e) => ({
     field:

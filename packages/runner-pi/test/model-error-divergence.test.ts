@@ -34,6 +34,7 @@
 
 import { describe, expect, it } from "bun:test";
 import { classifyModelError, type ModelErrorCategory } from "@appstrate/core/model-error";
+import { syntheticAliasClassifierMessage } from "@appstrate/core/model-swap";
 // Straight from the vendor, not through `src/pi-sdk.ts`. The barrel's header is
 // explicit that nothing test-only belongs in it — two re-exports were removed
 // from it for exactly that reason — and its `no-restricted-imports` guard never
@@ -153,6 +154,50 @@ describe("model-error classification stays pinned against the agent SDK", () => 
         ...(entry.status !== undefined ? { status: entry.status } : {}),
       });
       expect(classified.category).toBe(entry.category);
+    });
+  }
+});
+
+/**
+ * Where the two classifiers may NOT diverge: the alias boundary's own sentence.
+ *
+ * Everything above records deliberate disagreements over REAL provider text —
+ * the vendor's prose carries signals ours does not read, and that is fine. Here
+ * the vendor's prose is gone by construction (the boundary replaced it, so an
+ * alias cannot leak through it) and the forwarded status is the only evidence
+ * left. A disagreement on THAT is not a difference of opinion, it is one side
+ * misreading the only fact in the sentence.
+ *
+ * This lives here rather than in `packages/core/test/` because
+ * `eslint.config.mjs` bans `@earendil-works/pi-*` from core's src AND test —
+ * core cannot import the SDK, so the table it asserts is hard-coded there and
+ * checked against the real classifier here.
+ */
+describe("both classifiers agree on every forwardable alias status", () => {
+  // Derived from the boundary itself rather than re-listed: the message only
+  // carries `(status N)` for a status the boundary is willing to disclose, so
+  // sweeping recovers the set without core having to export it.
+  const FORWARDABLE = Array.from({ length: 500 }, (_, i) => 100 + i).filter((status) =>
+    syntheticAliasClassifierMessage(status).includes(`(status ${status})`),
+  );
+
+  it("recovers the fourteen forwardable statuses (positive control)", () => {
+    expect(FORWARDABLE).toEqual([
+      400, 401, 403, 404, 405, 408, 409, 413, 415, 429, 500, 502, 503, 504,
+    ]);
+  });
+
+  for (const path of ["message only", "status also unwrapped"] as const) {
+    it(`agrees on every one of them (${path})`, () => {
+      const disagreements = FORWARDABLE.filter((status) => {
+        const message = syntheticAliasClassifierMessage(status);
+        const platform = classifyModelError({
+          message,
+          ...(path === "message only" ? {} : { status }),
+        }).retryable;
+        return vendorRetryable(message) !== platform;
+      });
+      expect(disagreements).toEqual([]);
     });
   }
 });

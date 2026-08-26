@@ -149,19 +149,29 @@ const ALIAS_UPSTREAM_ERROR_MESSAGE = "Upstream model error";
  *    can answer is different: it names the backing as surely as the prose this
  *    boundary scrubs. Those are collapsed.
  *
- * 2. RETRYABILITY — what may the number be collapsed TO? The container's retry
- *    budget sits behind pi-ai's `isRetryableAssistantError`, a regex over the
- *    message text, and the projected status is the ONLY thing left in that
- *    text once the vendor's prose is replaced. Its
- *    `RETRYABLE_PROVIDER_ERROR_PATTERN` matches the status literals `429`,
- *    `500`, `502`, `503`, `504` and `524`; no other 4xx matches anything in
- *    it, and its `NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN` keys on words
- *    ("billing", "quota exceeded", "insufficient_quota", …) this boundary has
- *    already replaced with "Upstream model error". So the collapse TARGET
- *    decides retryability, and one target cannot serve both kinds of failure:
- *    collapsing a permanent failure to `502` has the container retry to
- *    exhaustion a request that can never succeed, while forwarding a
- *    vendor-identifying code just to keep it terminal re-opens axis 1.
+ * 2. RETRYABILITY — what may the number be collapsed TO? TWO classifiers read
+ *    this text, and a status is only correct on this axis when BOTH agree:
+ *
+ *      - pi-ai's `isRetryableAssistantError` (the container's in-turn retry
+ *        budget), a regex over the message text. Its
+ *        `RETRYABLE_PROVIDER_ERROR_PATTERN` matches the status literals `429`,
+ *        `500`, `502`, `503`, `504` and `524`; no other 4xx matches anything
+ *        in it, and its `NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN` keys on
+ *        words ("billing", "quota exceeded", "insufficient_quota", …) this
+ *        boundary has already replaced with "Upstream model error".
+ *      - the platform's own `classifyModelError` (`./model-error`), which
+ *        drives `run_logs.data.error_retryable` on the run trail and the chat
+ *        surface's retry affordance through `classifyClientTurnError`. It
+ *        reads the `(status N)` hint — via `\b[45]\d\d\b` when no envelope
+ *        status was unwrapped — and treats the STATUS as authoritative over
+ *        the prose around it: any 4xx is terminal, any 5xx transient.
+ *
+ *    The projected status is the ONLY thing left in that text once the
+ *    vendor's prose is replaced, so the collapse TARGET decides retryability,
+ *    and one target cannot serve both kinds of failure: collapsing a permanent
+ *    failure to `502` has the container retry to exhaustion a request that can
+ *    never succeed, while forwarding a vendor-identifying code just to keep it
+ *    terminal re-opens axis 1.
  *
  * Hence two targets, picked by the CLASS of the status being collapsed: a 4xx
  * becomes {@link ALIAS_COLLAPSED_TERMINAL_UPSTREAM_STATUS} (400 — matched by
@@ -180,9 +190,20 @@ const ALIAS_UPSTREAM_ERROR_MESSAGE = "Upstream model error";
  *     framing (method, body size, media type), not entries in a model API's
  *     error vocabulary: any HTTP server can answer them and no candidate is
  *     singled out by one, so axis 1 is clean. All three are terminal when
- *     forwarded — no substring of `status 413` is in either pi-ai pattern —
- *     which is the right verdict for an oversized prompt or an unsupported
- *     media type, so axis 2 is clean too.
+ *     forwarded, on both classifiers, which is the right verdict for an
+ *     oversized prompt or an unsupported media type — so axis 2 is clean too.
+ *
+ *     Checked, not assumed: `no substring of "status 413" is in either pi-ai
+ *     pattern` was only ever half the answer, and the half it left out was
+ *     wrong. `classifyModelError` used to read the fixed words "Upstream model
+ *     error" as a transient 5xx and hand `404` `405` `408` `409` `413` `415` —
+ *     every forwardable status it did not name explicitly — back to the
+ *     retryable side, so the exact failure this bullet cites (an oversized
+ *     prompt, retried to the max on a request that can never succeed) was
+ *     fixed on the pi-ai path and left live on the platform's own. It now
+ *     classifies by the status: 4xx terminal, 5xx transient. Both classifiers
+ *     are pinned to agree over all fourteen forwardable statuses by
+ *     `packages/core/test/model-error.test.ts`.
  *   - `402` — COLLAPSED. Anthropic, OpenAI and Mistral have no 402 in their
  *     error vocabulary; an aggregating gateway out of credit (OpenRouter) does,
  *     so the number names the backing. The failure is permanent and 400 keeps

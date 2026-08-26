@@ -156,46 +156,81 @@ export function isIntegrationConnectMessage<T extends { origin: string; data: un
  * on sitting three lines up, unused.
  *
  * A completion is accepted only when it is POSITIVELY addressed to the target.
- * Which identifier decides is not a preference, it is what each flow carries:
+ * The rule is one sentence: an identifier BOTH sides carry must agree, at least
+ * one identifier must be SHARED, and a completion that identifies nothing at all
+ * is for everyone. The two identifiers, and why neither alone covers every flow:
  *
  *  - `state` — the OAuth state is a per-flow nonce, so an equal pair on both
- *    sides identifies THIS flow and nothing else; it decides on its own. The
- *    hosted-connect offer (`connect_url`) carries NO state (its OAuth state is
- *    minted later, at /connect/start click time), so surfaces from that flow
- *    cannot rely on it and fall through to the next rule.
+ *    sides identifies THIS flow and nothing else. The hosted-connect offer
+ *    (`connect_url`) carries NO state (its OAuth state is minted later, at
+ *    /connect/start click time), so surfaces from that flow cannot rely on it.
  *  - `packageId` — the package-level filter, mirroring the SSE
  *    `connection_update` backstop so all three completion signals share the same
  *    semantics. Without it, one Gmail connect flipped an unrelated card
- *    "connected" and double-resumed the conversation (forked thread).
+ *    "connected" and double-resumed the conversation (forked thread). The OAuth
+ *    callback's early failures (`popupHtmlError(msg, { state })` — the provider
+ *    refused, `code` missing, the token exchange threw) carry no packageId,
+ *    because the package is only known once the signed state is decoded.
  *
- * The narrowing is driven by what the COMPLETION identifies, not by what the
- * target happens to know. That direction is the whole point: `target.packageId`
- * is optional in the type and a card really can mount without one
- * (`oauth-connect-card.tsx` reads it out of the model's tool args), and a
- * predicate keyed on the target's knowledge narrowed nothing in exactly that
- * case — so an unidentified card accepted a foreign integration's completion,
- * which is the bug this rule exists to stop. An unidentified surface now fails
- * CLOSED.
+ * SHARED is the load-bearing word, and it is what a chain of `if`s kept getting
+ * wrong. An identifier only ONE side carries neither addresses nor contradicts:
+ * it must not decide, in either direction.
+ *
+ *  - It must not ACCEPT. A completion carrying only a state names a specific
+ *    flow, so it is emphatically not context-less — yet a predicate that reached
+ *    its permissive tail whenever `detail.packageId` was absent handed every
+ *    such completion to every waiting surface. A Gmail OAuth failure drove an
+ *    unrelated ClickUp card into its error state, and the target that identifies
+ *    NOTHING accepted it too, which is the opposite of failing closed.
+ *  - It must not REJECT. The same early failures must still reach the card that
+ *    minted that state, even though that card also knows a `packageId` the
+ *    completion never names.
+ *
+ * A disagreement on either identifier is fatal on its own, which is why this is
+ * an AND and not a first-match chain. A matching state beside a mismatched
+ * packageId is a contradiction, not a stronger match: the completion's
+ * `packageId` is derived from the very state it echoes (`result.packageId`, read
+ * out of the signed state), so a genuine pair can never disagree. Letting the
+ * state override the mismatch is a widening no flow needs, and it resumes a card
+ * on another integration's completion — the exact failure `packageId` was added
+ * to prevent.
+ *
+ * `target.packageId` is optional in the type and a card really can mount without
+ * one (`oauth-connect-card.tsx` reads it out of the model's tool args). A
+ * surface that shares NO identifier with a completion cannot tell that
+ * completion apart from any other, so it fails CLOSED.
  *
  * The one exception is the case the permissiveness was written for: completions
  * that identify nothing at all (context-less error pages such as "Missing
- * connect token", emitted before the flow ever resolved a package) stay accepted
- * by anyone. They only surface an error, never an append.
+ * connect token", emitted by /connect/start before the flow ever resolved a
+ * package OR a state) stay accepted by anyone. They only surface an error, never
+ * an append.
+ *
+ * The cost of that closure, deliberately accepted: a surface holding only a
+ * `packageId` (the hosted-connect offer) no longer mirrors the OAuth callback's
+ * early failures, because those name a state it was never told and no package.
+ * It keeps waiting while the callback page itself shows the user the error. The
+ * fix for that is to widen the SENDER — give those paths their `packageId` — not
+ * to reopen a predicate that would hand the same message to every other card.
  */
 export function completionMatches(
   detail: unknown,
   target: { state?: string; packageId?: string },
 ): detail is IntegrationConnectCompletion {
   if (!isIntegrationConnectCompletion(detail)) return false;
-  // Both sides carry a state: an exact match settles it either way. This is
-  // what keeps an OAuth card whose `packageId` never arrived correlating.
-  if (target.state && detail.state) return detail.state === target.state;
-  // No state pairing to decide with. A completion that NAMES its integration is
-  // for a surface waiting on that same one — and a surface that names none is
-  // not it, which is the whole point of the direction.
-  if (detail.packageId) return detail.packageId === target.packageId;
-  // Identifies nothing: the context-less error pages.
-  return true;
+  // An identifier is SHARED only when both sides carry it — the only condition
+  // under which comparing it means anything.
+  const stateShared = Boolean(target.state && detail.state);
+  const packageShared = Boolean(target.packageId && detail.packageId);
+  // Either disagreement settles it: a different flow, or a different
+  // integration. Both are checked; neither short-circuits the other.
+  if (stateShared && detail.state !== target.state) return false;
+  if (packageShared && detail.packageId !== target.packageId) return false;
+  // Something matched and nothing contradicted: positively addressed here.
+  if (stateShared || packageShared) return true;
+  // Nothing shared, so this completion is ours only if it is everyone's: the
+  // context-less error pages, which name neither a flow nor a package.
+  return !detail.state && !detail.packageId;
 }
 
 /**

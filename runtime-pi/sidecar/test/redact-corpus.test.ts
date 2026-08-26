@@ -85,6 +85,70 @@ describe("scrubSecretMaterial — generated credential corpus", () => {
     ).toEqual([]);
   });
 
+  // The other direction of the tier-2 separator narrowing. Dropping bare
+  // whitespace reclaimed 1,545 prose strings; this generates the shapes that
+  // narrowing must NOT have cost — every keyword the rule knows, at every case,
+  // behind every assignment character the sinks actually produce (env-file
+  // lines, JSON bodies, header strings, percent-encoded query values).
+  it("masks a generated value behind every assignment separator", () => {
+    // Names whose LAST segment is a tier-2 keyword: covered in BOTH cases —
+    // tier 1 takes the SCREAMING_SNAKE form, tier 2 the lowercase twin.
+    const BOTH_CASES = [
+      "TOKEN",
+      "SECRET",
+      "PASSWORD",
+      "API_KEY",
+      "AUTHORIZATION",
+      "ACCESS_TOKEN",
+      "REFRESH_TOKEN",
+      "NOTION_TOKEN",
+      "GCP_SECRET",
+      "STRIPE_API_KEY",
+      "CLIENT_SECRET",
+    ];
+    // Names carrying a segment PAST the keyword, or built on bare `KEY`: tier 1
+    // only, so UPPERCASE only. This is the cost the tier-1 docstring states —
+    // `aws_secret_access_key=…` is not covered — asserted here rather than
+    // taken on trust, and it predates the separator change on both sides.
+    const UPPER_ONLY = ["AWS_SECRET_ACCESS_KEY", "CLIENT_SECRET_ID", "PRIVATE_KEY", "KEY_FILE"];
+    const ASSIGN: Array<(n: string, v: string) => string> = [
+      (n, v) => `${n}=${v}`,
+      (n, v) => `${n} = ${v}`,
+      (n, v) => `${n}='${v}'`,
+      (n, v) => `{"${n}": "${v}"}`,
+      (n, v) => `${n}: ${v}`,
+      (n, v) => `env-file line 1: ${n}=${v}`,
+      (n, v) => `docker: invalid variable '${n}=${v}'`,
+      (n, v) => `q?${n}%3D${v}&next=1`,
+    ];
+    const cases: string[] = [...BOTH_CASES.flatMap((n) => [n, n.toLowerCase()]), ...UPPER_ONLY];
+    const leaks: string[] = [];
+    let checked = 0;
+    for (const name of cases) {
+      for (const wrap of ASSIGN) {
+        for (let i = 0; i < 4; i++) {
+          // Alphanumeric so the value cannot be masked by a shape rule
+          // instead — this must be the keyword rule doing the work.
+          const value =
+            randomBytes(18)
+              .toString("base64")
+              .replace(/[^A-Za-z0-9]/g, "") + "7";
+          checked++;
+          const line = wrap(name, value);
+          if (scrubSecretMaterial(line).includes(value)) leaks.push(line);
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(700);
+    expect(
+      leaks.slice(0, 5),
+      `${leaks.length} of ${checked} assignment-separated credentials survived.\n` +
+        `Narrowing the keyword separator must not cost the shapes that DO\n` +
+        `carry an assignment. First five:\n  ` +
+        leaks.slice(0, 5).join("\n  "),
+    ).toEqual([]);
+  });
+
   it("control: leaves generated prose intact", () => {
     // The other half of the trade. A scrubber that masks everything passes the
     // test above and destroys every log line, so this bounds it from the other
@@ -98,21 +162,32 @@ describe("scrubSecretMaterial — generated credential corpus", () => {
       "missing required field: api_key_id in manifest",
       "GET /integrations/boot-report 200 in 14ms",
     ];
-    // KNOWN over-redaction, kept out of the list above and named here so it
-    // cannot be forgotten: tier 2 treats bare whitespace as a separator, so
-    // `<KEYWORD> <word>` loses the word. `"token budget exceeded"` ->
-    // `"token [redacted] exceeded"`. It predates the tier split and is the
-    // remaining half of the prose problem; closing it needs tier 2 to require
-    // an assignment separator the way tier 1 does.
-    const KNOWN_OVER_REDACTED = [
+    // This list WAS `KNOWN_OVER_REDACTED`, pinned at 3 while tier 2 still took
+    // bare whitespace as a separator, so `<KEYWORD> <word>` lost the word. Tier
+    // 2 now requires the same assignment separator as tier 1, so the count of
+    // survivors is 0 — and the list stays here, populated, rather than being
+    // emptied to satisfy the assertion. An empty array would make the filter
+    // below pass while checking nothing; these seven strings are the positive
+    // control that it still checks something.
+    //
+    // The last four are the `_`-anchored half of the same defect: tier 2 admits
+    // `_` on the LEFT of the keyword (it must, or `notion_token=…` ships in
+    // clear), which combined with whitespace made an env-var NAME mentioned in
+    // a sentence eat the next word.
+    const PREVIOUSLY_OVER_REDACTED = [
       "token budget exceeded: 128000 of 120000",
       "invalid password format (must contain a digit)",
       "Redeem AUTH_BOOTSTRAP_TOKEN to claim instance ownership",
+      "RUN_TOKEN_SECRET produced an empty keyring",
+      "treats empty MODEL_API_KEY as unset",
+      "an empty client_secret clears the stored credential",
+      "the access token has expired, refresh it",
     ];
-    // Pinned so the day tier 2 is fixed, this list must shrink deliberately.
-    expect(KNOWN_OVER_REDACTED.filter((p) => scrubSecretMaterial(p) !== p)).toHaveLength(3);
+    expect(PREVIOUSLY_OVER_REDACTED.filter((p) => scrubSecretMaterial(p) !== p)).toHaveLength(0);
 
-    const eaten = prose.filter((p) => scrubSecretMaterial(p) !== p);
+    const eaten = [...prose, ...PREVIOUSLY_OVER_REDACTED].filter(
+      (p) => scrubSecretMaterial(p) !== p,
+    );
     expect(
       eaten,
       `The scrubber redacted operator prose that carries no secret. Each of\n` +

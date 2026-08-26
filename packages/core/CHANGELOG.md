@@ -22,6 +22,46 @@ differs from the `8.0.0` already on npm, under the same number.
   under Added. The alias moved to `error.model` on the wire body, so operators
   keep the "which model" signal.
 
+### Changed
+
+- **`completionMatches`** (`./connect-handshake`) — narrows on an identifier
+  BOTH sides carry. It was a first-match chain, so an identifier only one side
+  carried decided in a direction it must not: a completion carrying a `state`
+  and no `packageId` fell through to the permissive tail and was accepted by
+  EVERY target, including one that identifies nothing — the opposite of the
+  fail-closed rule the same doc comment promised. That is the shape the OAuth
+  callback emits on its early failures (`popupHtmlError(msg, { state })`, where
+  the package is only known once the signed state is decoded — the step that
+  failed), so a Gmail OAuth failure drove an unrelated ClickUp connect card into
+  its error state. Now a conjunction: a shared identifier that disagrees
+  rejects, at least one shared identifier must match, and only a completion
+  naming NEITHER a flow nor a package stays for everyone. Signature and origin
+  policy unchanged; strictly narrowing — 5 of the 36 target x completion cells
+  move accept to reject, none the other way. One accepted cost: a surface
+  holding only a `packageId` no longer mirrors the callback's state-only
+  failures; the fix for that is to widen the SENDER, not this predicate.
+
+- **`classifyModelError`** (`./model-error`) — behaviour change, name and
+  signature unchanged. A known status now decides the verdict over the prose it
+  travelled with: any 4xx is `invalid_request` (terminal), any 5xx
+  `upstream_unavailable` (retryable). Previously only `400` was named, and the
+  generic `"Upstream model error"` this package emits at the alias boundary fell
+  through to the transient branch — so `404` `405` `408` `409` `413` `415`, six
+  of the fourteen statuses `projectAliasUpstreamStatus` forwards, read as
+  retryable while pi-ai read the same sentence as terminal. `413` makes it
+  concrete: an oversized prompt was offered a retry, on a request that can never
+  succeed. The two classifiers now agree on all fourteen, pinned by a test in
+  `@appstrate/runner-pi` (core may not import the SDK). Messages carrying NO
+  status are unchanged, the status-less `"Upstream model error"` included.
+
+- **`validateAgainstSchema`** (`./schema-validation`) — no longer throws on a
+  schema Ajv cannot compile; it returns `{ valid: false }` carrying the
+  compiler's message. `compileCached` stays the throwing path for callers that
+  want the compile error, and now strips a root `$schema`, so a document
+  declaring draft-04/06/07 or 2019-09 is validated on the 2020-12 dialect
+  instead of failing to compile. The server had this workaround and core did
+  not, which broke the server/CLI parity this module promises.
+
 ### Added
 
 - **`syntheticAliasClassifierMessage`** (`./model-swap`) — REPLACES
