@@ -247,9 +247,10 @@ async function fetchBundleBytes(
   serverVersion: string | undefined,
   opts: BundleFetchOptions,
 ): Promise<Uint8Array> {
-  // #588 — when the platform pinned a concrete version at run kickoff, forward
-  // it so the bytes match the manifest the spawn-resolver read. Absent → the
-  // route serves the latest non-yanked version (back-compat).
+  // #588 — the platform pins a concrete version at run kickoff; forward it so
+  // the bytes match the manifest the spawn-resolver read. Only a system
+  // mcp-server has none (boot registry, single version, served by id alone) —
+  // for anything else the route rejects an absent `?version=`.
   const url = serverVersion
     ? `${opts.platformApiUrl}/internal/mcp-server-bundle/${mcpServerId}?version=${encodeURIComponent(serverVersion)}`
     : `${opts.platformApiUrl}/internal/mcp-server-bundle/${mcpServerId}`;

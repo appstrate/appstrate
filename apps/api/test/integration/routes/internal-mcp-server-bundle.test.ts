@@ -35,6 +35,8 @@ import {
 import * as storage from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { installPackage } from "../../../src/services/application-packages.ts";
+import { _setSystemPackagesForTesting } from "../../../src/services/system-packages.ts";
+import type { SystemPackageEntry } from "@appstrate/core/system-packages";
 
 const BUCKET = "agent-packages";
 const app = getTestApp();
@@ -43,18 +45,36 @@ const AGENT = "@mcporg/test-agent";
 const INTEGRATION = "@mcporg/local-integ";
 const MCP_SERVER = "@mcporg/local-server";
 const ORPHAN_SERVER = "@mcporg/unreferenced-server";
+const SYSTEM_SERVER = "@appstrate/mcp-server-system-fixture";
 
 const SERVER_VERSION = "1.0.0";
 // Distinctive payload so the ALLOW case can assert the exact bytes are returned.
 const SERVER_BUNDLE_BYTES = new TextEncoder().encode("PK-mcp-server-bundle-bytes-marker");
+const SYSTEM_BUNDLE_BYTES = new TextEncoder().encode("PK-system-boot-registry-bytes-marker");
+
+/** Minimal boot-registry entry — the byte route reads `zipBuffer` and nothing else. */
+function systemEntry(id: string, bytes: Uint8Array): SystemPackageEntry {
+  const slash = id.indexOf("/");
+  return {
+    packageId: id,
+    scope: id.slice(0, slash),
+    name: id.slice(slash + 1),
+    type: "mcp-server",
+    version: SERVER_VERSION,
+    manifest: mcpServerManifest({ name: id, version: SERVER_VERSION }),
+    zipBuffer: Buffer.from(bytes),
+    content: "",
+    files: {},
+  };
+}
 
 describe("GET /internal/mcp-server-bundle/:scope/:name", () => {
   let ctx: TestContext;
   let runId: string;
   let token: string;
 
-  /** Seed the integration package + manifest referencing `MCP_SERVER` via local source. */
-  async function seedLocalIntegration(installed: boolean) {
+  /** Seed the integration package + manifest referencing an mcp-server via local source. */
+  async function seedLocalIntegration(installed: boolean, serverName = MCP_SERVER) {
     await seedPackage({
       id: INTEGRATION,
       orgId: ctx.orgId,
@@ -62,7 +82,7 @@ describe("GET /internal/mcp-server-bundle/:scope/:name", () => {
       source: "local",
       draftManifest: localIntegrationManifest({
         name: INTEGRATION,
-        serverName: MCP_SERVER,
+        serverName,
         version: "1.0.0",
         auths: {
           primary: {
@@ -147,9 +167,10 @@ describe("GET /internal/mcp-server-bundle/:scope/:name", () => {
     await seedLocalIntegration(true);
     await seedMcpServerWithBundle(MCP_SERVER, SERVER_BUNDLE_BYTES);
 
-    const res = await app.request(`/internal/mcp-server-bundle/${MCP_SERVER}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const res = await app.request(
+      `/internal/mcp-server-bundle/${MCP_SERVER}?version=${SERVER_VERSION}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
 
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toBe("application/zip");
@@ -172,7 +193,7 @@ describe("GET /internal/mcp-server-bundle/:scope/:name", () => {
     expect(res.status).toBe(404);
   });
 
-  it("serves the EXACT version requested via ?version= (not the latest)", async () => {
+  it("serves the EXACT version requested via ?version=, and refuses to guess when absent", async () => {
     // #588 — the spawn resolver pins a concrete version and the sidecar
     // forwards it as ?version=. The route must serve THAT version's bytes even
     // when a newer version exists, so manifest and bytes never skew.
@@ -212,12 +233,42 @@ describe("GET /internal/mcp-server-bundle/:scope/:name", () => {
     expect(pinned.status).toBe(200);
     expect(Array.from(new Uint8Array(await pinned.arrayBuffer()))).toEqual(Array.from(v100));
 
-    // No pin → latest (1.0.1), preserving the back-compat fallback.
-    const latest = await app.request(`/internal/mcp-server-bundle/${MCP_SERVER}`, {
+    // No pin → 400. This assertion is the INVERSE of the one it replaces: the
+    // route used to serve the newest published version (1.0.1) when `?version=`
+    // was absent, which is the manifest/bytes skew #588 closed reopening
+    // through the byte route. There is no "latest" fallback any more.
+    const unpinned = await app.request(`/internal/mcp-server-bundle/${MCP_SERVER}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
-    expect(latest.status).toBe(200);
-    expect(Array.from(new Uint8Array(await latest.arrayBuffer()))).toEqual(Array.from(v101));
+    expect(unpinned.status).toBe(400);
+    const problem = (await unpinned.json()) as { code: string; param?: string; detail: string };
+    expect(problem.code).toBe("invalid_request");
+    expect(problem.param).toBe("version");
+    expect(problem.detail).toContain("version");
+  });
+
+  it("serves a SYSTEM mcp-server from the boot registry without ?version=", async () => {
+    // Positive control for the short-circuit that survives the rule above: a
+    // system mcp-server has no `package_versions` row to pin, so the sidecar
+    // legitimately omits `?version=` for it and the route answers from the
+    // in-memory boot registry. `getTestApp()` skips `boot()`, so the registry
+    // is empty unless a test installs one.
+    await seedLocalIntegration(true, SYSTEM_SERVER);
+    const restore = _setSystemPackagesForTesting(
+      new Map([[SYSTEM_SERVER, systemEntry(SYSTEM_SERVER, SYSTEM_BUNDLE_BYTES)]]),
+    );
+    try {
+      const res = await app.request(`/internal/mcp-server-bundle/${SYSTEM_SERVER}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("Content-Type")).toBe("application/zip");
+      expect(Array.from(new Uint8Array(await res.arrayBuffer()))).toEqual(
+        Array.from(SYSTEM_BUNDLE_BYTES),
+      );
+    } finally {
+      restore();
+    }
   });
 
   it("returns 404 for a ?version= that does not exist", async () => {
@@ -288,18 +339,20 @@ describe("GET /internal/mcp-server-bundle/:scope/:name", () => {
     const pinnedToken = signRunToken(pinnedRun.id);
 
     // The pinned run reads the 2.0.0 dep set → ALLOW.
-    const res = await app.request(`/internal/mcp-server-bundle/${MCP_SERVER}`, {
-      headers: { Authorization: `Bearer ${pinnedToken}` },
-    });
+    const res = await app.request(
+      `/internal/mcp-server-bundle/${MCP_SERVER}?version=${SERVER_VERSION}`,
+      { headers: { Authorization: `Bearer ${pinnedToken}` } },
+    );
     expect(res.status).toBe(200);
     expect(Array.from(new Uint8Array(await res.arrayBuffer()))).toEqual(
       Array.from(SERVER_BUNDLE_BYTES),
     );
 
     // The original draft-ref run (beforeEach) now sees an empty draft dep set → DENY.
-    const draftRes = await app.request(`/internal/mcp-server-bundle/${MCP_SERVER}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const draftRes = await app.request(
+      `/internal/mcp-server-bundle/${MCP_SERVER}?version=${SERVER_VERSION}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
     expect(draftRes.status).toBe(404);
   });
 });

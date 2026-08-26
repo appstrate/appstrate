@@ -5,7 +5,6 @@ import type { Context } from "hono";
 import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { modelProviderCredentials, packageVersions, runs } from "@appstrate/db/schema";
-import { sql } from "drizzle-orm";
 import { asRecord } from "@appstrate/core/safe-json";
 import { parseBearer } from "@appstrate/core/bearer";
 import { downloadVersionZip } from "../services/package-storage.ts";
@@ -486,39 +485,31 @@ export function createInternalRouter() {
     // `source.server.version`) and the sidecar forwards it here as `?version=`,
     // so the runnable bytes match the version's manifest the resolver read. The
     // version is server-resolved at run kickoff (not caller-chosen); we serve it
-    // by exact match (yank-visibility already applied upstream). Falling back to
-    // "latest non-yanked" only when the query is absent keeps older sidecars
-    // (and the pre-#588 path) working.
+    // by exact match (yank-visibility already applied upstream). Past the system
+    // short-circuit above, an absent `?version=` is unanswerable rather than a
+    // request for "latest": serving the newest published version is precisely
+    // the manifest/bytes skew #588 closed, so it fails loudly instead.
     const requestedVersion = c.req.query("version")?.trim();
-    let resolved: { version: string; integrity: string } | undefined;
-    if (requestedVersion) {
-      [resolved] = await db
-        .select({ version: packageVersions.version, integrity: packageVersions.integrity })
-        .from(packageVersions)
-        .where(
-          and(
-            eq(packageVersions.packageId, mcpServerId),
-            eq(packageVersions.version, requestedVersion),
-          ),
-        )
-        .limit(1);
-      if (!resolved) {
-        throw notFound(`Version '${requestedVersion}' not found for '${mcpServerId}'`);
-      }
-    } else {
-      [resolved] = await db
-        .select({ version: packageVersions.version, integrity: packageVersions.integrity })
-        .from(packageVersions)
-        .where(
-          and(eq(packageVersions.packageId, mcpServerId), sql`${packageVersions.yanked} = false`),
-        )
-        // Tiebreak by the serial `id` (insertion order) so two versions
-        // published in the same `createdAt` tick still resolve "latest"
-        // deterministically — without it the ORDER BY is non-deterministic on
-        // a tie and the most-recently-inserted version is not guaranteed.
-        .orderBy(sql`${packageVersions.createdAt} DESC, ${packageVersions.id} DESC`)
-        .limit(1);
-      if (!resolved) throw notFound(`No published version for '${mcpServerId}'`);
+    if (!requestedVersion) {
+      throw invalidRequest(
+        `Query parameter 'version' is required for '${mcpServerId}': send the concrete ` +
+          `version the run resolved at kickoff (the spawn spec's \`server.version\`). Only ` +
+          `system mcp-servers, served from the in-memory boot registry, may omit it.`,
+        "version",
+      );
+    }
+    const [resolved] = await db
+      .select({ version: packageVersions.version, integrity: packageVersions.integrity })
+      .from(packageVersions)
+      .where(
+        and(
+          eq(packageVersions.packageId, mcpServerId),
+          eq(packageVersions.version, requestedVersion),
+        ),
+      )
+      .limit(1);
+    if (!resolved) {
+      throw notFound(`Version '${requestedVersion}' not found for '${mcpServerId}'`);
     }
     const bytes = await downloadVersionZip(mcpServerId, resolved.version, resolved.integrity);
     if (!bytes) throw notFound(`Bundle bytes unavailable for '${mcpServerId}'`);
@@ -526,7 +517,6 @@ export function createInternalRouter() {
       runId,
       mcpServerId,
       version: resolved.version,
-      pinned: Boolean(requestedVersion),
       bytes: bytes.length,
     });
     return new Response(bytes, { status: 200, headers: { "Content-Type": "application/zip" } });

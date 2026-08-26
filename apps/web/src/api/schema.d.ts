@@ -4365,7 +4365,7 @@ export interface paths {
         };
         /**
          * Fetch the AFPS bundle bytes for a referenced mcp-server package
-         * @description Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an installed integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. Returns the raw ZIP archive (`application/zip`). The sidecar passes `?version=` with the concrete version the spawn resolver pinned from `source.server.version` (#588) so the bytes match the manifest the resolver read. It is omitted for system mcp-servers, which have no `package_versions` row to pin: their bytes are served from the in-memory boot registry by id alone.
+         * @description Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an installed integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. Returns the raw ZIP archive (`application/zip`). The sidecar passes `?version=` with the concrete version the spawn resolver pinned from `source.server.version` (#588) so the bytes match the manifest the resolver read. It is omitted for system mcp-servers, which have no `package_versions` row to pin: their bytes are served from the in-memory boot registry by id alone. For any other mcp-server `?version=` is mandatory — omitting it is a 400, never a fallback to the newest published version (that fallback is the manifest/bytes skew #588 closed).
          */
         get: operations["getMcpServerBundle"];
         put?: never;
@@ -20353,7 +20353,7 @@ export interface operations {
     getMcpServerBundle: {
         parameters: {
             query?: {
-                /** @description Concrete published version to serve (the version the spawn resolver pinned from `source.server.version`). Omitted for system mcp-servers, which are served from the in-memory boot registry by id alone. */
+                /** @description Concrete published version to serve (the version the spawn resolver pinned from `source.server.version`). Required for every mcp-server backed by a `package_versions` row; omitted only for system mcp-servers, which are served from the in-memory boot registry by id alone. */
                 version?: string;
             };
             header?: never;
@@ -20376,9 +20376,10 @@ export interface operations {
                     "application/zip": Blob;
                 };
             };
+            400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description Agent does not reference this mcp-server through an installed integration, or no published version exists. */
+            /** @description Agent does not reference this mcp-server through an installed integration, or the requested `?version=` does not exist. */
             404: {
                 headers: {
                     [name: string]: unknown;

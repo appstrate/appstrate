@@ -96,6 +96,24 @@ export function isSystemPackage(id: string): boolean {
 }
 
 /**
+ * Test-only: install a registry and return the undo. `getTestApp()` skips
+ * `boot()`, so the registry is empty under test and every boot-registry branch
+ * (e.g. the mcp-server byte route's system short-circuit — the one caller
+ * allowed to omit `?version=`) is otherwise unreachable. Restoring matters:
+ * `bun test` runs the whole suite in one process, and a registry left populated
+ * would flip `isSystemPackage()` for every file that runs after.
+ */
+export function _setSystemPackagesForTesting(
+  entries: ReadonlyMap<string, SystemPackageEntry>,
+): () => void {
+  const previous = systemPackages;
+  systemPackages = entries;
+  return () => {
+    systemPackages = previous;
+  };
+}
+
+/**
  * Sync the already-loaded system-package registry to the DB. Public so
  * integration tests can drive it independently of `initSystemPackages`
  * (which reads from disk) — production calls it with no args and it reads
