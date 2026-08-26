@@ -9,14 +9,15 @@
  * This header describes the implementation only.
  *
  * What the code does: reject every `UPDATE` / `INSERT` / `DELETE` / `TRUNCATE`
- * that opens a statement in a new migration, UNLESS the same file also
- * constrains THAT TABLE with a `SET NOT NULL`, a `CHECK`, or a `VALIDATE
- * CONSTRAINT` — the carve-out §2 names. Same table, not merely the same file:
- * see `licencedTables`, which also records the one hole this deliberately
+ * that opens a statement in a new migration, UNLESS the same file also carries
+ * one of the four clauses §2 licences ON THAT TABLE — `SET NOT NULL`, `CHECK`,
+ * `VALIDATE CONSTRAINT` (the three constraint preconditions) or `DROP COLUMN`
+ * (the fold whose source the file destroys). Same table, not merely the same
+ * file: see `licencedTables`, which also records the one hole this deliberately
  * leaves open. A `TRUNCATE` is never licenced — see `UNLICENCEABLE`.
  *
  * Only NEW files are gated. Every migration already in the directory has run
- * on real databases and cannot be changed, so the eight that predate this rule
+ * on real databases and cannot be changed, so the seven that predate this rule
  * are listed in `GRANDFATHERED` below — explicitly, so the exemption is
  * reviewable rather than implicit, and checked against the directory so an
  * entry cannot go on excusing a name nothing occupies.
@@ -33,26 +34,34 @@ const MIGRATIONS_DIR = join(REPO_ROOT, "packages/db/drizzle");
  *
  * These are permanent — they have been applied to production databases, and a
  * drizzle migration is never edited after it ships. The list is therefore
- * frozen: it may shrink (a file leaves the directory), never grow. A ninth
- * entry means a new migration slipped the gate, not that the list was short.
+ * frozen: it may shrink (a file leaves the directory, or §2 grows a carve-out
+ * that covers it on the merits), never grow. An eighth entry means a new
+ * migration slipped the gate, not that the list was short.
  *
- * Seven of the eight are live: the tightened, same-table carve-out flags them,
+ * Six of the seven are live: the tightened, same-table carve-out flags them,
  * and only their presence here keeps the gate green. The set was established
  * by READING every file in the directory, then confirmed against an
  * independent scan for DML-shaped statements; that scan found row rewrites in
  * twelve files, of which `0021`, `0029`, `0038` and `0051` are genuine
  * constraint preconditions on the very table they repair.
  *
- * `0023_attribution_llm_usage` is the one no-op. It backfills
+ * `0018_white_captain_universe` was the eighth and is gone: §2's fold clause
+ * licences its `runs` rewrite on the merits (the fold's source column,
+ * `version_dirty`, is dropped on the next line), so the entry excused nothing
+ * and was itself dead scaffolding. `0040` is not in the same position — two of
+ * its three folds are licenced, but its `application_packages` wrap keeps a
+ * surviving column and stays a real finding.
+ *
+ * `0023_attribution_llm_usage` is the one no-op that STAYS. It backfills
  * `llm_usage.credential_source` and adds a `CHECK` to `llm_usage` over
  * unrelated columns, so the table-level carve-out exempts it before this list
- * is consulted. It stays listed because it IS pre-existing data repair, a
- * reviewer auditing the exemption should see the same eight either way, and if
- * the carve-out is ever narrowed to columns it becomes live without further
- * archaeology. `licencedTables` documents that residual limit.
+ * is consulted — but on the merits it IS pre-existing data repair, exempt only
+ * through a limit `licencedTables` documents rather than through a rule. If the
+ * carve-out is ever narrowed to columns it becomes live without further
+ * archaeology. That is the line between the two removals: a rule covers `0018`,
+ * a blind spot covers `0023`.
  */
 export const GRANDFATHERED: readonly string[] = [
-  "0018_white_captain_universe",
   "0022_prune_cross_org_application_packages",
   "0023_attribution_llm_usage",
   "0030_null_static_provider_available_models",
@@ -208,41 +217,57 @@ function dmlTarget(sanitized: string, index: number): string | null {
 const TABLE_STATEMENT = `\\b(?:ALTER|CREATE)\\s+TABLE\\s+(?:IF\\s+(?:NOT\\s+)?EXISTS\\s+)?(?:ONLY\\s+)?(${QUALIFIED})`;
 
 /**
- * The three clauses whose precondition a backfill can legitimately be.
+ * The four clauses `docs/NO_TRANSITIONAL_CODE.md` §2 licences a write beside.
  *
- * `SET NOT NULL` and not a bare `NOT NULL`, which is the narrowing
- * `docs/NO_TRANSITIONAL_CODE.md` §2 already states — only a *promotion*
- * counts. A `NOT NULL` in a column DEFINITION is not a promotion — Postgres
- * refuses `ADD COLUMN … NOT NULL` on a populated table without a `DEFAULT`,
- * and that default already satisfies the constraint, so no backfill was ever
- * its precondition. It also
- * drops the `IS NOT NULL` problem for free: a `WHERE` predicate cannot match
- * this shape at all.
+ * Three are constraint preconditions — `SET NOT NULL`, `CHECK`,
+ * `VALIDATE CONSTRAINT`. The `VALIDATE` is matched on its own, never paired
+ * with an `ADD CONSTRAINT`, and that is §2's wording, not a shortcut: the safe
+ * pattern on a large table adds the constraint `NOT VALID` in one file and
+ * repairs-then-validates in a later one (`0020`/`0021`), so requiring the
+ * `ADD` here would reject the very shape the docs recommend.
+ *
+ * The fourth is `DROP COLUMN`, which licences a fold: after the `DROP` the
+ * source values are gone, so the write cannot be deferred to an operator
+ * script. Its bound is the `DROP` itself — a file that keeps every column
+ * licences nothing, which is why `0033`'s `metadata` strip is still a finding.
+ *
+ * `SET NOT NULL` and not a bare `NOT NULL`, which is the narrowing §2 already
+ * states — only a *promotion* counts. A `NOT NULL` in a column DEFINITION is
+ * not a promotion — Postgres refuses `ADD COLUMN … NOT NULL` on a populated
+ * table without a `DEFAULT`, and that default already satisfies the
+ * constraint, so no backfill was ever its precondition. It also drops the
+ * `IS NOT NULL` problem for free: a `WHERE` predicate cannot match this shape
+ * at all.
  */
-const LICENCE = /\bSET\s+NOT\s+NULL\b|\bCHECK\s*\(|\bVALIDATE\s+CONSTRAINT\b/gi;
+const LICENCE = /\bSET\s+NOT\s+NULL\b|\bCHECK\s*\(|\bVALIDATE\s+CONSTRAINT\b|\bDROP\s+COLUMN\b/gi;
 
 /**
- * Every table this file adds a constraint to.
+ * Every table this file carries a `LICENCE` clause for.
  *
  * Same-TABLE, not file-level, and that is the whole of the carve-out's
- * strength. File-level, any unrelated `SET NOT NULL` or `CHECK` anywhere in
- * the file licences any data repair anywhere else in it — a bypass a future
- * author reaches by accident, not by intent: add a constrained column to table
- * A, fold some rows on table B, gate green. `0018` is exactly that shape.
+ * strength. File-level, any unrelated `SET NOT NULL`, `CHECK` or `DROP COLUMN`
+ * anywhere in the file licences any data repair anywhere else in it — a bypass
+ * a future author reaches by accident, not by intent: add a constrained column
+ * to table A, fold some rows on table B, gate green. `0018` is exactly that
+ * shape (its `CHECK` lands on `package_schedules`, its `UPDATE` on `runs`, and
+ * only the `DROP COLUMN "version_dirty"` on `runs` legitimately licences it).
  *
  * ─── What this does NOT catch ───────────────────────────────────────
  *
- * A constraint and an unrelated data repair on the SAME table. `0023` is the
- * live example: it adds `CHECK (run_id IS NULL OR chat_session_id IS NULL)` to
- * `llm_usage` and, in the same file, backfills `llm_usage.credential_source` —
- * a different column, and plain data repair. Structurally it is
+ * A licensing clause and an unrelated data repair on the SAME table. `0023` is
+ * the live example: it adds `CHECK (run_id IS NULL OR chat_session_id IS NULL)`
+ * to `llm_usage` and, in the same file, backfills `llm_usage.credential_source`
+ * — a different column, and plain data repair. Structurally it is
  * indistinguishable from `0038`, where the `CHECK` covers the very column the
- * `UPDATE` fills and the backfill genuinely is the precondition.
+ * `UPDATE` fills and the backfill genuinely is the precondition. `DROP COLUMN`
+ * has the identical reach: it licences the fold of the column it drops, and
+ * cannot see that a second write touches a column the file keeps.
  *
  * Telling those two apart needs column-level analysis — resolving which
- * columns a CHECK expression reads and which ones an UPDATE assigns — and that
- * is deliberately out of scope for a lint script. The gate stops at the table
- * boundary, and says so here rather than implying a reach it does not have.
+ * columns a CHECK expression reads, which ones a DROP removes, and which ones
+ * an UPDATE assigns — and that is deliberately out of scope for a lint script.
+ * The gate stops at the table boundary, and says so here rather than implying
+ * a reach it does not have.
  *
  * Two writing forms are also outside the `DML` vocabulary, on purpose:
  *
@@ -345,9 +370,12 @@ export function review(migrations: ReadonlyMap<string, string>): string[] {
 
   // Liveness, in the spirit of `KNOWN_IGNORED` in `scripts/lint.ts`: an
   // exemption that names nothing would silently excuse whatever lands at that
-  // name tomorrow. Existence, not "still flagged" — one of the eight is
+  // name tomorrow. Existence, not "still flagged" — one of the seven is
   // covered by the constraint carve-out as well (see `GRANDFATHERED`), and
   // failing on that would only push the list out of sync with the files.
+  // Shrinking the list stays a review act: an entry drops when a reader can
+  // say WHY §2 now covers it on the merits, which is exactly what `0018`'s
+  // removal records and what an automatic check could not have written down.
   const dead = GRANDFATHERED.filter((name) => !migrations.has(name));
   if (dead.length > 0) {
     problems.push(
@@ -376,8 +404,9 @@ function main(): number {
       `\nA drizzle migration describes the SCHEMA — it is replayed on every database, forever.\n` +
         `A one-off rewrite of row contents belongs in scripts/migration/<NNNN>-<slug>.{sql,ts},\n` +
         `run deliberately by an operator. See docs/NO_TRANSITIONAL_CODE.md §2.\n` +
-        `The one exception, already applied above: a backfill that is the precondition of a\n` +
-        `SET NOT NULL / CHECK / VALIDATE CONSTRAINT on the SAME TABLE, in the same file.`,
+        `The exceptions, already applied above: a backfill that is the precondition of a\n` +
+        `SET NOT NULL / CHECK / VALIDATE CONSTRAINT, or a fold whose source column the file\n` +
+        `DROPs — either way on the SAME TABLE, in the same file.`,
     );
     return 1;
   }

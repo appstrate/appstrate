@@ -86,16 +86,58 @@ ALTER TABLE "webhooks" ADD CONSTRAINT "webhooks_payload_mode_valid" CHECK (paylo
   });
 
   it("allows an UPDATE beside a VALIDATE CONSTRAINT on the same table", () => {
+    // Nothing in this file ADDs the constraint, and that is the point: §2
+    // licences the repair beside the `VALIDATE`, not beside the `ADD`. The safe
+    // pattern on a large table splits the two across releases — `0020` adds the
+    // FK `NOT VALID`, `0021` repairs and validates — so demanding both in one
+    // file would reject the shape the docs recommend. This IS `0021`'s shape.
     const sql = `UPDATE llm_usage SET run_id = NULL WHERE run_id IS NOT NULL;--> statement-breakpoint
 ALTER TABLE "llm_usage" VALIDATE CONSTRAINT "llm_usage_run_id_org_id_fk";`;
     expect(flags(sql)).toBe(false);
   });
 
+  it("does NOT licence a repair whose VALIDATE lives in another file", () => {
+    // The other half of the split: `0020` on its own. Adding the constraint
+    // `NOT VALID` validates no existing row, so no backfill is its
+    // precondition — the repair belongs in the file that validates it.
+    const sql = `ALTER TABLE "llm_usage" ADD CONSTRAINT "llm_usage_run_id_org_id_fk"
+  FOREIGN KEY ("run_id","org_id") REFERENCES "public"."runs"("id","org_id") NOT VALID;--> statement-breakpoint
+UPDATE llm_usage SET run_id = NULL WHERE run_id IS NOT NULL;`;
+    expect(flags(sql)).toBe(true);
+  });
+
+  it("allows a fold beside a DROP COLUMN on the same table", () => {
+    // `0018`'s shape: after the DROP the source values no longer exist, so the
+    // write cannot be deferred to `scripts/migration/`.
+    const sql = `UPDATE "runs" SET "version_ref" = COALESCE("version_label", 'draft');--> statement-breakpoint
+ALTER TABLE "runs" DROP COLUMN "version_dirty";`;
+    expect(flags(sql)).toBe(false);
+  });
+
+  it("does NOT licence a fold whose source column survives the file", () => {
+    // `0033`'s second UPDATE: it strips a key out of a `metadata` column the
+    // migration keeps. Nothing is destroyed, so nothing is inseparable — this
+    // is ordinary data repair and belongs in `scripts/migration/`.
+    const sql = `ALTER TABLE "runs" ADD COLUMN "chat_session_id" text;--> statement-breakpoint
+UPDATE "runs" SET "metadata" = "metadata" - 'chatSessionId' WHERE "metadata" ? 'chatSessionId';`;
+    expect(flags(sql)).toBe(true);
+  });
+
   it("does NOT let a constraint on one table licence a rewrite of another", () => {
     // The bypass a future author reaches by accident: constrain table A, fold
-    // rows on table B, gate green. This is `0018`'s exact shape.
+    // rows on table B, gate green. This is `0018` minus the `DROP COLUMN` that
+    // legitimately licences its `runs` rewrite.
     const sql = `UPDATE "runs" SET "version_ref" = 'draft';--> statement-breakpoint
 ALTER TABLE "package_schedules" ADD CONSTRAINT "one_actor" CHECK ((user_id IS NOT NULL) <> (end_user_id IS NOT NULL));`;
+    expect(flags(sql)).toBe(true);
+  });
+
+  it("does NOT let a DROP COLUMN on one table licence a rewrite of another", () => {
+    // Same tightness for the fold clause: `0040` drops `package_schedules`
+    // columns and also wraps `application_packages` rows, and the second write
+    // stays a finding.
+    const sql = `UPDATE "application_packages" SET "input_settings" = jsonb_build_object('values', "input_settings");--> statement-breakpoint
+ALTER TABLE "package_schedules" DROP COLUMN IF EXISTS "config_override";`;
     expect(flags(sql)).toBe(true);
   });
 
@@ -139,8 +181,15 @@ describe("licencedTables", () => {
   it("attributes each clause to its own ALTER TABLE", () => {
     const sql = `ALTER TABLE "a" ALTER COLUMN "c" SET NOT NULL;
 ALTER TABLE "b" ADD CONSTRAINT "k" CHECK (c > 0);
-ALTER TABLE "c" VALIDATE CONSTRAINT "k";`;
-    expect(licencedTables(sanitize(sql))).toEqual(new Set(["a", "b", "c"]));
+ALTER TABLE "c" VALIDATE CONSTRAINT "k";
+ALTER TABLE "d" DROP COLUMN IF EXISTS "c";`;
+    expect(licencedTables(sanitize(sql))).toEqual(new Set(["a", "b", "c", "d"]));
+  });
+
+  it("does not read `DROP CONSTRAINT` as `DROP COLUMN`", () => {
+    // `0018` opens with one, and it destroys no values — it licences nothing.
+    const sql = `ALTER TABLE "package_schedules" DROP CONSTRAINT "at_most_one_actor";`;
+    expect(licencedTables(sanitize(sql))).toEqual(new Set());
   });
 
   it("attributes a clause nested in a DO block to the enclosing ALTER TABLE", () => {

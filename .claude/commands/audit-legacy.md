@@ -75,9 +75,12 @@ retired form still WRITTEN anywhere? If not, it is a 🔴.
 
 **Agent B — Drizzle migrations.** Read every `packages/db/drizzle/*.sql`.
 Classify each statement as schema (DDL) or data (DML). Report every `UPDATE` /
-`INSERT` / `DELETE` / `TRUNCATE` that rewrites row contents, EXCEPT a backfill
-that is the precondition of a `SET NOT NULL` promotion, a `CHECK`, or a
-`VALIDATE CONSTRAINT` landing on the **same table** — read
+`INSERT` / `DELETE` / `TRUNCATE` that rewrites row contents, EXCEPT the two
+shapes §2 licences on the **same table**, in the same file: a backfill that is
+the precondition of a `SET NOT NULL` promotion, a `CHECK` or a
+`VALIDATE CONSTRAINT` (the `VALIDATE`, not the `ADD` — the constraint is
+routinely added `NOT VALID` a release earlier), and a fold whose source column
+that file `DROP`s. A fold whose source column survives is NOT exempt. Read
 `docs/NO_TRANSITIONAL_CODE.md` §2 for the exact carve-out and the column-level
 limit it does not reach, and note that a `TRUNCATE` is never licenced by it.
 Also flag migrations
