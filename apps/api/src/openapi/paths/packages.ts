@@ -87,7 +87,7 @@ export const packagesPaths = {
                   type: "string",
                   format: "binary",
                   description:
-                    "`.afps-bundle` (preferred), `.afps`, or `.zip` archive — detected automatically via the bundle.json marker. May also be supplied under the `bundle` form field as an alias.",
+                    "`.afps-bundle` (preferred), `.afps`, or `.zip` archive — detected automatically via the bundle.json marker.",
                 },
               },
             },
