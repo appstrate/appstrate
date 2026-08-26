@@ -16,17 +16,9 @@
 import { describe, it, expect } from "bun:test";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  assertExtractorStillWorks,
-  extractSchemaDefaults,
-  findTableGaps,
-  readSchemaDefaults,
-} from "../verify-compose-defaults.ts";
-import {
-  analyzeComposeDefaults,
-  CODE_DEFAULTS,
-  SCHEMA_SOURCE,
-} from "../../apps/cli/src/lib/compose-defaults.ts";
+import { findTableGaps, readSchemaDefaults, suppliesValue } from "../verify-compose-defaults.ts";
+import { analyzeComposeDefaults, CODE_DEFAULTS } from "../../apps/cli/src/lib/compose-defaults.ts";
+import { envSchema } from "../../packages/env/src/index.ts";
 
 /**
  * A synthetic variable name, and that is the point.
@@ -76,9 +68,11 @@ describe("readSchemaDefaults", () => {
     expect(defaulted.has("MODULES")).toBe(true);
   });
 
-  it("detects a default applied by a discovered helper (jsonEnv / boolEnv)", () => {
-    // `SYSTEM_PROXIES: jsonEnv<unknown[]>("[]")` — no literal `.default(` on the
-    // line. A literal-only scan missed 16 variables of this shape.
+  it("detects a default that a `.transform()` pipe sits on top of", () => {
+    // `SYSTEM_PROXIES: jsonEnv<unknown[]>("[]")` is
+    // `z.string().default("[]").transform(…)`, so the top node is a pipe and
+    // the default is on its `in` side. Reading only the top node under-reports
+    // 22 variables of this shape.
     expect(defaulted.has("SYSTEM_PROXIES")).toBe(true);
     expect(defaulted.has("TRUST_PROXY")).toBe(true);
   });
@@ -92,10 +86,20 @@ describe("readSchemaDefaults", () => {
   });
 
   it("agrees with the hand-maintained table on every var they both name", () => {
-    // The gate runs this before trusting the extractor; running it here too
-    // means the schema's style drifting away from the parser fails a test
-    // rather than silently shrinking coverage.
-    expect(() => assertExtractorStillWorks(keys, defaulted)).not.toThrow();
+    // `CODE_DEFAULTS` is an independent, hand-written statement that a variable
+    // HAS a schema default — and the gate's Class-1 check compares its recorded
+    // VALUE against compose. An entry naming a variable the schema declares
+    // WITHOUT a default is therefore a stale table entry, comparing compose
+    // against a value nothing produces.
+    //
+    // Entries absent from the schema entirely are not an error and are excluded:
+    // `OTEL_*` and the two `SIDECAR_MAX_*` vars are read straight from
+    // `process.env` by the sidecar and by `@appstrate/module-observability`.
+    const { keys, defaulted } = readSchemaDefaults();
+    const claimedButNotDefaulted = Object.keys(CODE_DEFAULTS)
+      .filter((name) => keys.has(name) && !defaulted.has(name))
+      .sort();
+    expect(claimedButNotDefaulted).toEqual([]);
   });
 });
 
@@ -153,365 +157,59 @@ describe("findTableGaps", () => {
 });
 
 /**
- * The defaulting forms the extractor recognises, held against a SYNTHETIC
- * schema rather than `packages/env/src/index.ts`.
+ * Which Zod nodes count as "the schema supplies this value".
  *
- * Two of the four cases below cannot be written any other way: `.catch(` and a
- * `function`-declared helper appear zero times in the real schema today
- * (measured 2026-08-25), so a test reading the real file could only assert that
- * the extractor handles the styles already in use — which is the one thing
- * never at risk. These are the styles a future edit might introduce, and this
- * is where they get their assertion.
+ * Held against schemas built here rather than against
+ * `packages/env/src/index.ts`, for the reason two of the cases below cannot be
+ * written any other way: `.catch()` and `.prefault()` appear zero times in the
+ * real schema today (measured 2026-08-26), so a test reading the real file
+ * could only assert the forms already in use — the one thing never at risk.
+ *
+ * This describe replaces one that held SOURCE TEXT against a regex, and its two
+ * helper-declaration cases (`const helper = …` vs `function helper(…) {}`) are
+ * gone with it: they asserted that a text scan could find a helper's
+ * declaration, which is a property of the parser and not of the schema. The
+ * property they stood in for — a helper's internal default being seen — is
+ * `SYSTEM_PROXIES` above, and it now holds regardless of how the helper is
+ * written.
  */
-describe("extractSchemaDefaults — recognised defaulting forms", () => {
-  /** Wraps key blocks in the minimal shape the extractor anchors on. */
-  const schema = (helpers: string, keyBlocks: string): string =>
-    `${helpers}
-const envSchema = z
-  .object({
-${keyBlocks}
-  })
-`;
+describe("suppliesValue — which schemas produce a value the environment did not", () => {
+  /**
+   * A bare `z.string()` taken from the schema itself rather than from a `z`
+   * import: `zod` is not a dependency of the root workspace this script lives
+   * in, and building the cases off a real field means they are exercised
+   * against the exact Zod build the gate introspects.
+   */
+  const bare = envSchema.shape.BETTER_AUTH_SECRET;
 
-  it("detects a literal .default()", () => {
-    const { keys, defaulted } = extractSchemaDefaults(
-      schema("", `    A_VAR: z.string().default("x"),`),
-    );
-    expect(keys.has("A_VAR")).toBe(true);
-    expect(defaulted.has("A_VAR")).toBe(true);
+  it("sees a literal .default()", () => {
+    expect(suppliesValue(bare.default("x"))).toBe(true);
   });
 
-  it("detects .catch() and .prefault() as defaulting", () => {
-    const { defaulted } = extractSchemaDefaults(
-      schema(
-        "",
-        `    A_VAR: z.string().catch("info"),
-    B_VAR: z.string().prefault("info"),`,
-      ),
-    );
+  it("sees .catch() and .prefault()", () => {
     // Both hand the parse a value the environment did not supply, so a compose
     // line pinning that value is the same #513 duplication a `.default()` is.
-    expect(defaulted.has("A_VAR")).toBe(true);
-    expect(defaulted.has("B_VAR")).toBe(true);
+    expect(suppliesValue(bare.catch("info"))).toBe(true);
+    expect(suppliesValue(bare.prefault("info"))).toBe(true);
   });
 
-  it("discovers an arrow-const helper that defaults internally", () => {
-    const helpers = `const boolEnv = (d: string) =>
-  z
-    .string()
-    .default(d);
-`;
-    const { defaulted } = extractSchemaDefaults(schema(helpers, `    A_VAR: boolEnv("false"),`));
-    expect(defaulted.has("A_VAR")).toBe(true);
+  it("sees a default underneath a .transform() pipe", () => {
+    // The `boolEnv` / `jsonEnv` shape: the transform makes the top node a pipe.
+    expect(suppliesValue(bare.default("false").transform((s) => s === "true"))).toBe(true);
   });
 
-  it("discovers a `function`-declared helper that defaults internally", () => {
-    // The form the extractor was blind to: it only scanned `const NAME =`, so a
-    // helper written as a function declaration made every variable using it
-    // read as un-defaulted, and a compose file pinning its default passed.
-    const helpers = `function boolEnv(d: string) {
-  return z.string().default(d);
-}
-`;
-    const { defaulted } = extractSchemaDefaults(schema(helpers, `    A_VAR: boolEnv("false"),`));
-    expect(defaulted.has("A_VAR")).toBe(true);
+  it("does not claim a default for a plain optional or a bare type", () => {
+    expect(suppliesValue(bare.optional())).toBe(false);
+    expect(suppliesValue(bare)).toBe(false);
   });
 
-  it("does not claim a default for a plain optional", () => {
-    const { keys, defaulted } = extractSchemaDefaults(
-      schema("", `    A_VAR: z.string().optional(),`),
-    );
-    expect(keys.has("A_VAR")).toBe(true);
-    expect(defaulted.has("A_VAR")).toBe(false);
-  });
-
-  it("does NOT see a default supplied inside a transform (documented hole)", () => {
+  it("does NOT see a default supplied inside a transform body (documented hole)", () => {
     // Asserted so the limitation is a recorded decision rather than a surprise:
     // recognising this needs the transform body evaluated. A variable defaulted
-    // only this way escapes the gate.
-    const { defaulted } = extractSchemaDefaults(
-      schema("", `    A_VAR: z.string().optional().transform((v) => v ?? "512"),`),
-    );
-    expect(defaulted.has("A_VAR")).toBe(false);
-  });
-});
-
-/**
- * The mutation the self-check could not see: the extractor returning NOTHING.
- *
- * Every other way this file can break is fail-closed — rename `envSchema` and
- * `extractSchemaDefaults` throws; move a helper below the schema and
- * `assertExtractorStillWorks` throws. Breaking the KEY ANCHOR was fail-OPEN:
- * `keys` and `defaulted` both come back empty, the intersection with
- * `CODE_DEFAULTS` is empty, nothing is "undetected", and the gate prints
- * `✓ … (0 schema defaults known …)` and exits 0 over every compose file.
- *
- * The mutation used here is the real one, not a strawman: re-indenting the real
- * schema from four spaces to two is what splitting `z.object({ … })` into
- * spread groups, or collapsing `z\n  .object({` to `z.object({`, does to every
- * key line.
- */
-describe("assertExtractorStillWorks — vacuity floor", () => {
-  const SCHEMA = readFileSync(join(import.meta.dir, "..", "..", SCHEMA_SOURCE), "utf-8");
-
-  it("throws when the key anchor stops matching", () => {
-    const reindented = SCHEMA.replace(/^ {4}/gm, "  ");
-    const { keys, defaulted } = extractSchemaDefaults(reindented);
-
-    // The mutation landed: this is the state the gate used to accept.
-    expect(keys.size).toBe(0);
-    expect(defaulted.size).toBe(0);
-
-    expect(() => assertExtractorStillWorks(keys, defaulted)).toThrow(/below the floor/);
-  });
-
-  it("is silent on the real schema, which is far above the floor", () => {
-    const { keys, defaulted } = extractSchemaDefaults(SCHEMA);
-    // Not a pinned count — the floor is what is asserted, so this test does not
-    // fail on every unrelated env addition or removal.
-    expect(keys.size).toBeGreaterThanOrEqual(50);
-    expect(() => assertExtractorStillWorks(keys, defaulted)).not.toThrow();
-  });
-
-  it("would have reported a real finding that the empty set hides", () => {
-    // The half that proves the floor is worth having: with the extractor
-    // working, this compose line IS a table gap; with it broken, the same line
-    // reads as clean. "No findings" is what the broken gate said too.
-    const compose = `services:
-  api:
-    environment:
-      - WORKSPACE_TMPFS_SIZE_MB=\${WORKSPACE_TMPFS_SIZE_MB:-512}
-`;
-    const real = extractSchemaDefaults(SCHEMA);
-    const broken = extractSchemaDefaults(SCHEMA.replace(/^ {4}/gm, "  "));
-    expect(findTableGaps(compose, real.defaulted)).toEqual([
-      { line: 4, varName: "WORKSPACE_TMPFS_SIZE_MB", yamlDefault: "512" },
-    ]);
-    expect(findTableGaps(compose, broken.defaulted)).toEqual([]);
-  });
-});
-
-/**
- * Total collapse was the only mutation the floor could see, and it was also the
- * only one anybody had measured. PARTIAL collapse is the likelier shape — the
- * "object split into spread groups" refactor the gate's own failure text names
- * moves SOME keys out, not all of them — and a floor on the raw key count let
- * it through by a mile.
- *
- * Measured 2026-08-25 against the real schema: giving the first 44 key blocks
- * one extra level of indent gives 55 keys / 34 defaults instead of 99 / 67.
- * 33 defaults gone, `keys.size` still comfortably over the old floor of 50, the
- * self-check silent, a real table-gap finding gone with them, and the green tick
- * printed. The companion `undetected` check cannot cover for it either: it
- * filters on `keys.has(name)`, so every key the extractor loses leaves that
- * check quieter rather than louder.
- *
- * So one of the three floors sits on `CODE_DEFAULTS ∩ keys` — a set that
- * degrades one variable at a time — and this is the case that proves the
- * difference. The other two (`MIN_SCHEMA_KEYS`, `MIN_CLASS3_POPULATION`) have
- * their own describes below; each has a mutation only it can catch.
- */
-describe("assertExtractorStillWorks — partial degradation", () => {
-  const SCHEMA = readFileSync(join(import.meta.dir, "..", "..", SCHEMA_SOURCE), "utf-8");
-
-  /** One extra indent level on the first `count` key blocks, leaving the rest. */
-  function degradeFirstKeys(source: string, count: number): string {
-    const lines = source.split("\n");
-    const keyLines: number[] = [];
-    lines.forEach((line, i) => {
-      if (/^ {4}[A-Z][A-Z0-9_]*:/.test(line)) keyLines.push(i);
-    });
-    if (keyLines.length <= count) {
-      throw new Error(`schema has ${keyLines.length} keys — too few to degrade only ${count}.`);
-    }
-    const boundary = keyLines[count] ?? lines.length;
-    return lines.map((l, i) => (i < boundary && /^ {4}/.test(l) ? `  ${l}` : l)).join("\n");
-  }
-
-  it("throws when half the keys stop matching the anchor", () => {
-    const { keys, defaulted } = extractSchemaDefaults(degradeFirstKeys(SCHEMA, 44));
-
-    // The mutation landed AND stayed well clear of a raw-count floor: this is
-    // the exact state the previous `keys.size < 50` check waved through.
-    expect(keys.size).toBe(55);
-    expect(defaulted.size).toBe(34);
-    expect(keys.size).toBeGreaterThan(50);
-
-    expect(() => assertExtractorStillWorks(keys, defaulted)).toThrow(/below the floor/);
-  });
-
-  it("loses real table-gap findings in exactly that state", () => {
-    // The half that proves the floor is worth having. `CONNECT_SESSION_TTL_MS`
-    // is one of the 14 schema-defaulted variables `CODE_DEFAULTS` does not
-    // name, which is precisely what makes a compose line pinning it a Class-3
-    // finding — and it sits in the degraded region.
-    const compose = `services:
-  api:
-    environment:
-      - CONNECT_SESSION_TTL_MS=\${CONNECT_SESSION_TTL_MS:-3600000}
-`;
-    const real = extractSchemaDefaults(SCHEMA);
-    const degraded = extractSchemaDefaults(degradeFirstKeys(SCHEMA, 44));
-    expect(findTableGaps(compose, real.defaulted)).toEqual([
-      { line: 4, varName: "CONNECT_SESSION_TTL_MS", yamlDefault: "3600000" },
-    ]);
-    expect(findTableGaps(compose, degraded.defaulted)).toEqual([]);
-  });
-
-  it("still accepts the real schema, so the floor has headroom", () => {
-    const { keys, defaulted } = extractSchemaDefaults(SCHEMA);
-    const covered = Object.keys(CODE_DEFAULTS).filter((name) => keys.has(name));
-    // 53 of 58 at the time of writing; the 5 outside are read from process.env
-    // by the sidecar and module-observability and are not schema keys at all.
-    expect(covered.length).toBeGreaterThanOrEqual(45);
-    expect(() => assertExtractorStillWorks(keys, defaulted)).not.toThrow();
-  });
-});
-
-/**
- * The two floors the `CODE_DEFAULTS ∩ keys` one cannot stand in for.
- *
- * That floor counts the table entries the extractor still recognises — which is
- * exactly the set `findTableGaps` throws away: it opens with
- * `if (match.varName in CODE_DEFAULTS) continue;`. So the instrument added to
- * protect the Class-3 check measured its COMPLEMENT, and it also replaced the
- * raw `keys.size` floor that used to sit beside it. Both gaps are measured, and
- * each mutation below is caught by exactly one floor — remove that floor and
- * the case goes green.
- *
- * The mutation is the same real one used above (one extra indent level, the
- * "object split into spread groups" refactor), applied to a CHOSEN subset of
- * key blocks rather than to a prefix. Choosing the subset is what makes each
- * case discriminate: a mutation that degrades everything trips every floor and
- * proves none of them.
- */
-describe("assertExtractorStillWorks — the floors beside the table intersection", () => {
-  const SCHEMA = readFileSync(join(import.meta.dir, "..", "..", SCHEMA_SOURCE), "utf-8");
-  const REAL = extractSchemaDefaults(SCHEMA);
-
-  /**
-   * One extra indent level on every key block whose name `pick` selects.
-   *
-   * A key line at five spaces no longer matches the anchor, and its body no
-   * longer dedents far enough to close the PREVIOUS key — so the block is
-   * absorbed into its predecessor, which is precisely what the real refactor
-   * does to it.
-   */
-  function degrade(source: string, pick: (name: string) => boolean): string {
-    const out: string[] = [];
-    let shifting = false;
-    for (const line of source.split("\n")) {
-      const key = /^ {4}([A-Z][A-Z0-9_]*):/.exec(line);
-      if (key?.[1]) shifting = pick(key[1]);
-      else if (shifting && /^ {0,3}\S/.test(line)) shifting = false;
-      out.push(shifting ? ` ${line}` : line);
-    }
-    return out.join("\n");
-  }
-
-  const tableIntersection = (keys: Set<string>): number =>
-    Object.keys(CODE_DEFAULTS).filter((name) => keys.has(name)).length;
-  const class3Population = (defaulted: Set<string>): string[] =>
-    [...defaulted].filter((name) => !(name in CODE_DEFAULTS)).sort();
-
-  it("throws when a fifth of the raw key count disappears, leaving both other floors clear", () => {
-    // MIN_SCHEMA_KEYS, restored. Degrading only the key blocks that are neither
-    // in CODE_DEFAULTS nor defaulted leaves the intersection and the Class-3
-    // population untouched, so this case is invisible to the two floors that
-    // survived the round which removed the raw count.
-    const { keys, defaulted } = extractSchemaDefaults(
-      degrade(SCHEMA, (name) => !(name in CODE_DEFAULTS) && !REAL.defaulted.has(name)),
-    );
-    expect(keys.size).toBe(67);
-    expect(tableIntersection(keys)).toBe(53);
-    expect(class3Population(defaulted)).toHaveLength(14);
-    // Both other instruments are silent about it, by construction:
-    expect(tableIntersection(keys)).toBeGreaterThanOrEqual(45);
-    expect(Object.keys(CODE_DEFAULTS).filter((n) => keys.has(n) && !defaulted.has(n))).toEqual([]);
-
-    expect(() => assertExtractorStillWorks(keys, defaulted)).toThrow(
-      /found only 67 schema key\(s\), below the floor of 80/,
-    );
-  });
-
-  it("throws when the Class-3 population collapses, leaving both other floors clear", () => {
-    // MIN_CLASS3_POPULATION. Degrading ONLY the 14 schema-defaulted variables
-    // CODE_DEFAULTS does not name takes away 100% of what Class 3 can report
-    // while `keys.size` stays at 85 and the intersection never moves — the
-    // shape neither other floor can see.
-    const { keys, defaulted } = extractSchemaDefaults(
-      degrade(SCHEMA, (name) => !(name in CODE_DEFAULTS) && REAL.defaulted.has(name)),
-    );
-    expect(keys.size).toBe(85);
-    expect(tableIntersection(keys)).toBe(53);
-    expect(class3Population(defaulted)).toHaveLength(3);
-    expect(keys.size).toBeGreaterThanOrEqual(80);
-    expect(tableIntersection(keys)).toBeGreaterThanOrEqual(45);
-
-    expect(() => assertExtractorStillWorks(keys, defaulted)).toThrow(
-      /Class-3 check has only 3 variable\(s\) left to report on/,
-    );
-  });
-
-  it("names the legitimate cause of a shrink, not only the suspicious one", () => {
-    // The failure text this replaces said "do NOT lower this floor" — but the
-    // sanctioned fix for a Class-3 finding is to add the variable to
-    // CODE_DEFAULTS, which shrinks this population by design. A message that
-    // forbids the correct action sends the reader to the wrong edit.
-    const { keys, defaulted } = extractSchemaDefaults(
-      degrade(SCHEMA, (name) => !(name in CODE_DEFAULTS) && REAL.defaulted.has(name)),
-    );
-    const message = (() => {
-      try {
-        assertExtractorStillWorks(keys, defaulted);
-        return "";
-      } catch (error) {
-        return (error as Error).message;
-      }
-    })();
-    expect(message).toMatch(/CODE_DEFAULTS legitimately GREW/);
-    expect(message).toMatch(/LOWER MIN_CLASS3_POPULATION/);
-    expect(message).toMatch(/extractor lost the defaults/);
-  });
-
-  it("was silent, and lost a real finding, in the state that motivated all this", () => {
-    // The measured attack, reproduced whole: degrade every NON-table key block.
-    // `CODE_DEFAULTS ∩ keys` — the only floor there was — does not move by a
-    // single entry, and `undetected` stays empty, because both are computed
-    // over the set Class 3 skips.
-    const degraded = extractSchemaDefaults(degrade(SCHEMA, (name) => !(name in CODE_DEFAULTS)));
-    expect(degraded.keys.size).toBe(53);
-    expect(degraded.defaulted.size).toBe(53);
-    expect(tableIntersection(degraded.keys)).toBe(53);
-    expect(tableIntersection(degraded.keys)).toBeGreaterThanOrEqual(45);
-    expect(
-      Object.keys(CODE_DEFAULTS).filter((n) => degraded.keys.has(n) && !degraded.defaulted.has(n)),
-    ).toEqual([]);
-    expect(class3Population(degraded.defaulted)).toEqual([]);
-
-    // …and a real Class-3 finding on a real compose line goes with it.
-    const compose = `services:
-  api:
-    environment:
-      - WORKSPACE_TMPFS_SIZE_MB=\${WORKSPACE_TMPFS_SIZE_MB:-512}
-`;
-    expect(findTableGaps(compose, REAL.defaulted)).toHaveLength(1);
-    expect(findTableGaps(compose, degraded.defaulted)).toEqual([]);
-
-    // Two of the three floors now refuse it. Neither of them existed, in this
-    // form, when the state above measured GATE EXIT=0.
-    expect(() => assertExtractorStillWorks(degraded.keys, degraded.defaulted)).toThrow(
-      /below the floor of 80/,
-    );
-  });
-
-  it("leaves headroom on the real schema for all three floors", () => {
-    // Stated headroom, so an ordinary env-var change never turns this red:
-    // keys 99 vs 80, intersection 53 vs 45, Class-3 population 14 vs 8.
-    expect(REAL.keys.size).toBeGreaterThanOrEqual(80 + 15);
-    expect(tableIntersection(REAL.keys)).toBeGreaterThanOrEqual(45 + 5);
-    expect(class3Population(REAL.defaulted).length).toBeGreaterThanOrEqual(8 + 4);
-    expect(() => assertExtractorStillWorks(REAL.keys, REAL.defaulted)).not.toThrow();
+    // only this way escapes the gate. `PLATFORM_API_URL` is the live instance of
+    // the same shape — a pipe whose `in` side carries no default.
+    expect(suppliesValue(bare.optional().transform((v) => v ?? "512"))).toBe(false);
+    expect(suppliesValue(envSchema.shape.PLATFORM_API_URL)).toBe(false);
   });
 });
 

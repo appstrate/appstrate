@@ -23,16 +23,7 @@ import { describe, it, expect } from "bun:test";
 import { ESLint } from "eslint";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  assertIgnoredSetIsExact,
-  assertRuleCoverage,
-  countErrorRules,
-  KNOWN_IGNORED,
-  measureRuleCoverage,
-  MIN_ERROR_RULES_PER_FILE,
-  partitionIgnored,
-  populationOf,
-} from "../lint.ts";
+import { assertIgnoredSetIsExact, KNOWN_IGNORED, partitionIgnored } from "../lint.ts";
 import { SOURCE_GLOBS, trackedIndexFiles } from "../lib/tracked-files.ts";
 
 const REPO_ROOT = join(import.meta.dir, "..", "..");
@@ -87,122 +78,6 @@ describe("the live eslint config", () => {
       (file) => api.isPathIgnored(file),
     );
     expect(ignored).toEqual([...KNOWN_IGNORED]);
-  });
-});
-
-/**
- * The ignored-set assertion answers "does eslint have a config for this file?".
- * It cannot answer "does that config say anything?", and the second question
- * has the same green-over-nothing failure. Two measured doors, both giving
- * GATE EXIT=0:
- *
- *   - 2026-08-25 — appending one config object that sets all 70 rules enabled
- *     for a `.ts` file to `"off"`, plus a real seeded error, over 2206 files;
- *   - 2026-08-26 — the same 70 rules set to `"warn"` instead:
- *     `712 problems (0 errors, 712 warnings)`, exit 0.
- *
- * The second is why `countErrorRules` requires severity 2 rather than "not
- * off", and why the invocation carries `--max-warnings 0`.
- */
-describe("countErrorRules", () => {
-  it("counts an error rule once, whatever form its severity takes", () => {
-    expect(countErrorRules({ a: "error", b: 2, c: ["error", { allow: [] }], d: [2] })).toBe(4);
-  });
-
-  it("does not count the rules a config explicitly turns off", () => {
-    // `tseslint.configs.recommended` alone sets dozens of rules to `"off"`
-    // explicitly, so counting KEYS would score a disable-everything config as
-    // fully covered.
-    expect(countErrorRules({ a: "off", b: 0, c: ["off"], d: "error" })).toBe(1);
-    expect(countErrorRules({})).toBe(0);
-    expect(countErrorRules(undefined)).toBe(0);
-  });
-
-  it("does not count a rule downgraded to a warning", () => {
-    // The measured `0 errors, 712 warnings` pass, in miniature. A warning does
-    // not fail eslint's exit code on its own, so counting `"warn"` as coverage
-    // scored a repo whose every rule had been defanged as fully covered.
-    expect(countErrorRules({ a: "warn", b: 1, c: ["warn", { x: 1 }], d: [1] })).toBe(0);
-    expect(countErrorRules({ a: "warn", b: "error" })).toBe(1);
-  });
-});
-
-describe("populationOf", () => {
-  it("groups by top-level directory, with a bucket for the repo root", () => {
-    expect(populationOf("packages/core/src/naming.ts")).toBe("packages");
-    expect(populationOf("apps/web/src/main.tsx")).toBe("apps");
-    expect(populationOf("eslint.config.mjs")).toBe(".");
-  });
-});
-
-describe("assertRuleCoverage", () => {
-  const ok = (file: string): [string, number] => [file, MIN_ERROR_RULES_PER_FILE];
-
-  it("accepts a measurement at or above the floor", () => {
-    expect(() =>
-      assertRuleCoverage(new Map([ok("apps/a.ts"), ok("packages/b.ts"), ok("scripts/c.ts")])),
-    ).not.toThrow();
-  });
-
-  it("refuses a single file whose rules have been switched off", () => {
-    // The floor's subject is every file, so ONE file dropping below it is
-    // enough — there is no sentinel to keep intact.
-    const measured = new Map([ok("apps/a.ts"), ["packages/b.ts", 0] as [string, number]]);
-    expect(() => assertRuleCoverage(measured)).toThrow(/fewer error-severity rules/);
-    expect(() => assertRuleCoverage(measured)).toThrow(/packages\/: 1 file\(s\) under the floor/);
-  });
-
-  it("reports a whole disabled population as one line, naming its worst file", () => {
-    // The `{ files: ["packages/**"], rules: { …off } }` shape: hundreds of
-    // files at once. Printing them individually would bury the finding.
-    const measured = new Map<string, number>([ok("apps/a.ts")]);
-    for (let i = 0; i < 300; i++) measured.set(`packages/p${i}/x.ts`, i === 7 ? 1 : 40);
-    const message = (() => {
-      try {
-        assertRuleCoverage(measured);
-        return "";
-      } catch (error) {
-        return (error as Error).message;
-      }
-    })();
-    expect(message).toMatch(/300 of the 301 file\(s\)/);
-    expect(message).toMatch(
-      /packages\/: 300 file\(s\) under the floor, worst packages\/p7\/x\.ts at 1 rule\(s\)/,
-    );
-    expect(message).not.toMatch(/apps\//);
-  });
-
-  it("refuses a measurement of nothing at all", () => {
-    // An empty map is the vacuous pass one level up: nothing measured, nothing
-    // under the floor, gate green.
-    expect(() => assertRuleCoverage(new Map())).toThrow(/measurement is empty/);
-  });
-});
-
-describe("the live eslint config's rule coverage", () => {
-  it("clears the floor for EVERY lintable file, with the headroom the comment claims", async () => {
-    // The real instrument against the real config, over the real population —
-    // the same list `scripts/lint.ts` measures, not a chosen subset.
-    const api = new ESLint({ cwd: REPO_ROOT });
-    const { lintable } = await partitionIgnored(
-      trackedIndexFiles(SOURCE_GLOBS, "lintable file"),
-      (file) => api.isPathIgnored(file),
-    );
-    const measured = await measureRuleCoverage(api, lintable);
-    expect(measured.size).toBe(lintable.length);
-    expect(() => assertRuleCoverage(measured)).not.toThrow();
-
-    // The population really does span the repo — a measurement covering one
-    // directory would satisfy the assertion above and prove nothing.
-    const populations = new Set([...measured.keys()].map(populationOf));
-    expect(populations.size).toBeGreaterThanOrEqual(5);
-    expect(populations).toContain("packages");
-    expect(populations).toContain("scripts");
-
-    // Headroom, stated: measured 2026-08-26 the repo-wide minimum is 63
-    // against a floor of 50.
-    const min = Math.min(...measured.values());
-    expect(min).toBeGreaterThan(MIN_ERROR_RULES_PER_FILE);
   });
 });
 
@@ -312,12 +187,21 @@ describe("scripts/lint.ts as a process", () => {
         `  eslintConfigPrettier,\n  { files: ["packages/**/*.{ts,tsx}", "scripts/**/*.ts"], rules: ${allOff} },\n);`,
       ),
     );
+    // Caught by `--max-warnings 0`, not by a rule-count floor. Turning a rule
+    // off does not just stop it firing — it strands every `eslint-disable`
+    // written for it, and eslint reports each as an unused directive. This
+    // repo carries enough of them that a wholesale disable is loud. Measured
+    // 2026-08-26: 25 warnings, exit 1.
+    //
+    // A floor over the enabled-rule count was tried here and removed: it cost
+    // ~190 lines to detect what one already-present flag detects, and it could
+    // only ever catch a DELIBERATE act by someone who can edit
+    // `eslint.config.mjs` — who can edit `scripts/lint.ts` just as easily.
     expect(code).not.toBe(0);
-    expect(output).toMatch(/fewer error-severity rules than this repo's floor/);
-    // …and it says WHERE, which is what makes the report actionable.
-    expect(output).toMatch(/packages\/: \d+ file\(s\) under the floor/);
-    expect(output).toMatch(/scripts\/: \d+ file\(s\) under the floor/);
-  });
+    expect(output).toMatch(/too many warnings|Unused eslint-disable directive/);
+    // Lints the whole repo with a cold cache (the mutation changes the config
+    // hash), measured ~4s — well past bunfig's default.
+  }, 120_000);
 
   it("fails when rules are downgraded to warnings", async () => {
     // DEFECT 2, static half. `"warn"` is not `"off"`, so a count of
@@ -334,16 +218,20 @@ describe("scripts/lint.ts as a process", () => {
         `  eslintConfigPrettier,\n  { files: ["**/*.ts"], plugins: { "@typescript-eslint": tseslint.plugin }, rules: ${allWarn} },\n);`,
       ),
     );
+    // Same mechanism as above: `"warn"` fires as a warning, and the flag
+    // refuses any warning at all.
     expect(code).not.toBe(0);
-    expect(output).toMatch(/fewer error-severity rules than this repo's floor/);
-  });
+    expect(output).toMatch(/too many warnings/);
+    // Cold cache, whole repo — and a timeout here does not just fail THIS
+    // test: `runGateWith`'s restore never runs, so the next case finds a
+    // config whose anchor this mutation already consumed.
+  }, 120_000);
 
   it("fails on a warning that fires, however few", () => {
-    // DEFECT 2, runtime half — and the only case that discriminates
-    // `--max-warnings 0` on its own. The rule-count floor above cannot see
-    // this: the config still enables its full complement of ERROR rules, and
-    // one extra `"warn"` rule is added on top. Without the flag eslint prints
-    // the finding and exits 0, so `bun run check` stays green over it.
+    // The narrowest case for `--max-warnings 0`: the config keeps its full
+    // complement of ERROR rules and one `"warn"` rule is added on top. Without
+    // the flag eslint prints the finding and exits 0, so `bun run check` would
+    // stay green over it.
     //
     // `no-warning-comments` is a core rule (no plugin to resolve) pointed at
     // the SPDX header every file in this repo carries, so it is guaranteed to

@@ -116,7 +116,7 @@ const RETIRED_ENV_RENAMES: Record<string, string> = {
   WORKSPACE_MAX_DOCS_BYTES: "WORKSPACE_MAX_FILES_BYTES",
 };
 
-const envSchema = z
+export const envSchema = z
   .object({
     // Node environment — gates production-only invariants (e.g. APP_URL https)
     NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
