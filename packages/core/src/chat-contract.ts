@@ -80,7 +80,7 @@ export type ChatModelResolution =
  */
 export interface ChatAttachmentRequest {
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   /** The chat session owner (chat sessions are per dashboard user). */
   userId: string;
   /** Container the materialized file is anchored to (session-scoped ACL). */

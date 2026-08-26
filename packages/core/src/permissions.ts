@@ -76,7 +76,7 @@ export interface CoreResources {
   // NOT "may it touch THIS file" (the per-file container ACL, derived
   // from the run/chat session at check time, stays the fine-grained layer).
   // Without it a minimally-scoped API key could download every `agent_output`
-  // in the application. `delete` is owner/admin, plus the file's own
+  // in the space. `delete` is owner/admin, plus the file's own
   // creator (enforced in the route handler, not RBAC).
   files: "read" | "delete";
   schedules: "read" | "write" | "delete";
@@ -87,14 +87,14 @@ export interface CoreResources {
   "model-provider-credentials": "read" | "write" | "delete";
   proxies: "read" | "write" | "delete";
   "api-keys": "read" | "create" | "revoke";
-  applications: "read" | "write" | "delete";
+  spaces: "read" | "write" | "delete";
   "end-users": "read" | "write" | "delete";
   "credential-proxy": "call";
   "llm-proxy": "call";
   // AFPS integrations (INTEGRATIONS_PROPOSAL Phase 1.3 — marketplace UI).
   // Read = browse catalog + view the actor's connection inventory.
   // Write/delete = author/edit/remove the integration manifest (JSON-body
-  // editor, parity with agents/skills). Install/uninstall = manage per-app
+  // editor, parity with agents/skills). Install/uninstall = manage per-space
   // installation. Connect/disconnect = manage credentials (connections) per
   // declared `auths.{key}`.
   integrations: "read" | "write" | "delete" | "install" | "uninstall" | "connect" | "disconnect";
@@ -136,7 +136,7 @@ export const CORE_RESOURCE_NAMES: ReadonlySet<string> = new Set<string>([
   "model-provider-credentials",
   "proxies",
   "api-keys",
-  "applications",
+  "spaces",
   "end-users",
   "credential-proxy",
   "llm-proxy",

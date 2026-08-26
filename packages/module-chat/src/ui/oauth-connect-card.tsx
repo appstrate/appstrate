@@ -62,8 +62,8 @@ function watchConnectionSse(
   if (typeof EventSource === "undefined") return () => {};
   const headers = getHeaders?.() ?? {};
   const orgId = headers["X-Org-Id"] ?? headers["x-org-id"];
-  const appId = headers["X-Application-Id"] ?? headers["x-application-id"];
-  if (!orgId || !appId) return () => {};
+  const spaceId = headers["X-Space-Id"] ?? headers["x-space-id"];
+  if (!orgId || !spaceId) return () => {};
 
   let es: EventSource | null = null;
   try {
@@ -75,7 +75,7 @@ function watchConnectionSse(
       // `channels` is declared because this opens one org-wide stream PER
       // rendered card, and the listener below reads `connection_update` only.
       // Without it each card would also carry the org's whole run_log traffic.
-      `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&applicationId=${encodeURIComponent(appId)}&channels=connection_update`,
+      `/api/realtime/runs?orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}&channels=connection_update`,
       { withCredentials: true },
     );
     es.addEventListener("connection_update", (ev) => {

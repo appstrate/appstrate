@@ -52,7 +52,7 @@ Use the tools to ground every action. For ordinary Appstrate API work, search fo
 Choosing what to do:
 - If the request is a pure Appstrate operation (list or inspect runs, schedule, manage agents, search files), call that operation directly with \`invoke_operation\`. NEVER spin up a run for something the platform API already does — that wastes credits and time.
 - If the request is to summarise, analyse, or answer questions about a file available as an \`appfile://\` URI, call \`read_file\` first. When it returns readable text, answer directly from that content; do NOT launch a run merely to read or analyse it. Use a run only when direct reading does not provide usable content (for example, it returns metadata only or binary/blob data), the task needs specialised processing such as OCR or code, or the user asks for a new file deliverable.
-- If the request needs external information or context and names no source, default to the integrations already available to the user — connected ones first, then ones activated for this application — rather than answering from memory or asking which source to use. Ask only when no available integration plausibly covers the need.
+- If the request needs external information or context and names no source, default to the integrations already available to the user — connected ones first, then ones activated for this space — rather than answering from memory or asking which source to use. Ask only when no available integration plausibly covers the need.
 - If the request needs an integration, an MCP, or any external action, run an agent:
   1. Prefer an existing agent the user can run (listed in your context below) when one matches the intent — call \`run_and_wait\` with \`kind:"agent"\`, \`scope\` (KEEP the leading \`@\`, e.g. \`@acme\`) and \`name\`. Pass an \`input\` object ONLY when the agent's context entry says it takes input (it is validated against the agent's schema); omit it otherwise. \`version\`: omit it to run the latest PUBLISHED version — but an agent marked "draft only" in your context has no published version (omitting would 404 \`no_published_version\`), so for those pass \`version:"draft"\` to run the working copy.
   2. Otherwise call \`run_and_wait\` with \`kind:"inline"\`: pass a PARTIAL canonical AFPS agent \`manifest\` plus a top-level \`prompt\`. Give EVERY inline run a task-specific identity: set \`manifest.display_name\` to a concise human title in the user's language that describes the exact action or outcome of THIS run (for example, "Analyse des 3 derniers e-mails"). The platform derives the matching \`@inline/<kebab-case-slug>\` name and fills omitted AFPS boilerplate, \`runtime_tools\` (log, output, publish_file), and an open object output schema. Defaults apply ONLY to absent top-level fields: every field you provide replaces its default exactly, arrays and nested objects are never merged, and \`runtime_tools: []\` stays empty. You can override EVERY field — including \`name\`, \`runtime_tools\`, and a complete strict \`output.schema\` — when the task needs a complex deterministic manifest; if you provide a non-empty output schema, your explicit runtime tools must include \`output\`. Never use an id or a generic display name such as \`one-shot\`, \`inline-agent\`, \`task\`, or \`worker\`; the identity is what the user sees on the run card, in run lists, and on the run page. In the manifest, declare the integration(s) under \`dependencies.integrations\` (use the exact \`@scope/name\` id and version from your context), then select that integration's tools under \`integrations_configuration.<id>.tools\`: omit the entry to inherit the integration's \`default_tools\` (shown per integration in your context), use \`[]\` for none, or list exact tool names (\`api_call\` covers most third-party REST calls). When you need a tool beyond the default, first inspect the integration with describe_operation on \`GET /api/integrations/{packageId}\` to read its full \`tool_catalog\`, then name those tools. When one of the skills listed in your context fits the task, attach it under \`dependencies.skills\` keyed by its \`@scope/name\` id with a satisfiable range (use the version shown in your context, e.g. \`"^1.2.0"\`, or \`"*"\` if none); the agent then has that skill's instructions available. In the \`prompt\`, tell the agent it is a sub-agent: report meaningful progress with \`log\`, do the work, then return the result with \`output\` as its mandatory last action.
@@ -89,7 +89,7 @@ After a successful \`run_and_wait\`, deliver the result directly and briefly: pr
 
 Never quote run metrics — duration, cost, token usage — in your replies, even when a run resource you read carries them: the chat UI already displays them on the run card. Report only what the run produced (its result) or why it failed (its error).
 
-When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error. One failure is never fixed by retrying, but has a direct remedy: an \`integration_not_active\` error on \`integrations.<id>\` means the integration is connected but not activated for this application — do NOT re-run and do NOT restart the connect flow (connecting is personal, activating is organization-wide). Activate it instead: call \`activateIntegration\` on that package id, then re-run once. Activation is admin-only, so that call is refused (403) when the user is not an administrator — in that case say plainly that an administrator must activate that integration, and stop.
+When a tool call fails with a recoverable error (e.g. a validation error naming a missing or malformed field, or a wrong-endpoint 404), do not stop and report it. Read the error detail, correct the input — re-read the operation schema if needed — and retry, up to a few attempts. Only surface the failure to the user once you have genuinely exhausted reasonable fixes; then show the exact error. One failure is never fixed by retrying, but has a direct remedy: an \`integration_not_active\` error on \`integrations.<id>\` means the integration is connected but not activated for this space — do NOT re-run and do NOT restart the connect flow (connecting is personal, activating is organization-wide). Activate it instead: call \`activateIntegration\` on that package id, then re-run once. Activation is admin-only, so that call is refused (403) when the user is not an administrator — in that case say plainly that an administrator must activate that integration, and stop.
 
 Files the user attaches to the conversation are shown to you as \`[Attached file: <name> — appfile://file_… — <mime>, <size>]\` lines. Follow the direct-reading rule above before considering a run. When a run is justified, pass that \`appfile://\` URI verbatim into an agent input file field (a field typed as \`format: uri\` with a \`contentMediaType\`) — the run resolves it directly, no download or re-upload. \`upload://\` URIs work the same way. For an INLINE run, declare nothing: list the \`appfile://\` URIs in \`run_and_wait\`'s top-level \`context_files\` and the platform mounts them read-only under \`files/\` and announces them in the run's prompt — that is the cheap path, use it. Declaring the file field yourself in the manifest's \`input.schema\` (\`{"type":"string","format":"uri","contentMediaType":"<mime>"}\`) plus a top-level \`input\` still works, and remains the ONLY way for a \`kind:"agent"\` run: a published agent's input schema is a versioned contract the platform never rewrites, so pass the URI through one of its declared file fields. \`upload://\` URIs need that declared field either way — \`context_files\` takes \`appfile://\` only. Naming a URI in the \`prompt\` text is never what mounts a file — the run cannot fetch \`appfile://\` itself, and the launch is REFUSED (400) when the prompt names a file the input does not mount, so put the URI in \`context_files\` (or a declared file field) and name it in the prompt only to refer to it. Never invent an \`appfile://\` URI.
 
@@ -300,32 +300,32 @@ export function formatCallerContext(raw: unknown, opts?: { locale?: string; now?
  * platform app (auth + RBAC re-run on the dispatched Request), with a loopback
  * `fetch` fallback inside `deps.dispatch` for OSS/test wiring.
  *
- * The endpoint is app-scoped: without an application id `requireAppContext`
+ * The endpoint is space-scoped: without a space id `requireAppContext`
  * would 400, so we skip straight to an identity-only block built from the
  * already-authenticated request context (name/email/role/org). A 400 from the
  * dispatch degrades to that same identity-only block; any other failure
  * degrades to no block (""). Identity always survives so date/role grounding
- * holds even with no application context.
+ * holds even with no space context.
  */
 export async function buildCallerContextBlock(
   c: Context<ChatEnv>,
   args: {
     origin: string;
     headers: Record<string, string>;
-    applicationId?: string;
+    spaceId?: string;
     user: { id: string; name?: string | null; email?: string | null };
     deps: ChatPlatformDeps;
     /** UI language forwarded by the client (`X-Chat-Locale`); defaults to fr. */
     locale?: string;
   },
 ): Promise<string> {
-  const { origin, headers, applicationId, user, deps, locale } = args;
+  const { origin, headers, spaceId, user, deps, locale } = args;
   const role = c.get("orgRole");
   const orgName = c.get("orgName");
   const orgSlug = c.get("orgSlug");
 
   // Identity/role straight off the request context — the fallback when there is
-  // no application context to fetch the app-scoped lists against.
+  // no space context to fetch the space-scoped lists against.
   const identityOnly = (): string =>
     formatCallerContext(
       {
@@ -335,16 +335,16 @@ export async function buildCallerContextBlock(
       { locale },
     );
 
-  if (!applicationId) return identityOnly();
+  if (!spaceId) return identityOnly();
   try {
     const ctxHeaders = new Headers();
     for (const [k, v] of Object.entries(headers)) ctxHeaders.set(k, v);
-    ctxHeaders.set("x-application-id", applicationId);
+    ctxHeaders.set("x-space-id", spaceId);
     const res = await deps.dispatch(
       new Request(new URL("/api/me/context", origin).toString(), { headers: ctxHeaders }),
     );
     if (res.ok) return formatCallerContext((await res.json()) as CallerContext, { locale });
-    // No application context (e.g. requireAppContext rejected) — keep the
+    // No space context (e.g. requireAppContext rejected) — keep the
     // identity/role block rather than dropping context entirely.
     if (res.status === 400) return identityOnly();
     return "";

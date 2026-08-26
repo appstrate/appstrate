@@ -57,7 +57,7 @@ const chatModule: AppstrateModule = {
     // Tables are centralized in the core schema — nothing to migrate. No
     // workers: chat is request-driven. Capture the platform deps once: the
     // rate limiter, the in-process dispatcher (re-enters the platform app for
-    // /api/models, /api/applications, /api/me/context and the MCP hops —
+    // /api/models, /api/spaces, /api/me/context and the MCP hops —
     // loopback fetch fallback inside; inference does NOT ride it, pi-ai opens a
     // real socket to the llm-proxy at `CHAT_SELF_ORIGIN`), and the chat-model
     // resolution + usage metering.

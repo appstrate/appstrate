@@ -260,7 +260,7 @@ export function apiCallToolName(meta: ApiCallIntegrationMeta): string {
  */
 const RESERVED_TRANSPORT_HEADERS: ReadonlySet<string> = new Set([
   "authorization",
-  "x-application-id",
+  "x-space-id",
   "x-org-id",
   "x-session-id",
   "x-integration-id",
@@ -614,8 +614,8 @@ interface RemoteAppstrateIntegrationResolverOptions {
   instance: string;
   /** API key (ask_...) or device-flow JWT with `credential-proxy:call`. */
   apiKey: string;
-  /** Application id (app_...) the caller is scoped to. */
-  applicationId: string;
+  /** Space id (spc_...) the caller is scoped to. */
+  spaceId: string;
   /** Org id (org_...) — required for JWT auth. Optional for API-key auth. */
   orgId?: string;
   /** End-user to impersonate (eu_...). Optional. */
@@ -641,7 +641,7 @@ interface RemoteAppstrateIntegrationResolverOptions {
 export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallResolver {
   private readonly instance: string;
   private readonly apiKey: string;
-  private readonly applicationId: string;
+  private readonly spaceId: string;
   private readonly orgId: string | undefined;
   private readonly endUserId: string | undefined;
   private readonly sessionId: string;
@@ -651,11 +651,10 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
   constructor(opts: RemoteAppstrateIntegrationResolverOptions) {
     if (!opts.instance) throw new Error("RemoteAppstrateIntegrationResolver: instance is required");
     if (!opts.apiKey) throw new Error("RemoteAppstrateIntegrationResolver: apiKey is required");
-    if (!opts.applicationId)
-      throw new Error("RemoteAppstrateIntegrationResolver: applicationId is required");
+    if (!opts.spaceId) throw new Error("RemoteAppstrateIntegrationResolver: spaceId is required");
     this.instance = opts.instance.replace(/\/$/, "");
     this.apiKey = opts.apiKey;
-    this.applicationId = opts.applicationId;
+    this.spaceId = opts.spaceId;
     this.orgId = opts.orgId;
     this.endUserId = opts.endUserId;
     this.sessionId = opts.sessionId ?? crypto.randomUUID();
@@ -709,7 +708,7 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
       const baseHeaders: Record<string, string> = {
         ...sanitizedAgentHeaders,
         Authorization: `Bearer ${this.apiKey}`,
-        "X-Application-Id": this.applicationId,
+        "X-Space-Id": this.spaceId,
         ...(this.orgId ? { "X-Org-Id": this.orgId } : {}),
         "X-Session-Id": this.sessionId,
         "X-Integration-Id": meta.name,

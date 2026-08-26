@@ -21,7 +21,7 @@
  *     the log-derived set rather than emptying the card.
  *
  * Auth mirrors the OAuth connect card: relative URLs, `credentials: "include"`
- * (cookie session), and the host's forwarded `X-Org-Id` / `X-Application-Id`
+ * (cookie session), and the host's forwarded `X-Org-Id` / `X-Space-Id`
  * for the SSE query params (EventSource cannot send headers).
  */
 
@@ -33,7 +33,7 @@ import {
   isTerminalStatus,
   mergeLogs,
   mergeRunFiles,
-  orgAppFromHeaders,
+  orgSpaceFromHeaders,
   parseLogListResponse,
   parseRunLogFrame,
   parseRunResource,
@@ -94,7 +94,7 @@ interface RunLogStream {
    *    mounts on an already-finished run: the SSE is opened even then, and the
    *    server answers with a `run_update` snapshot that takes this path.
    *  - the one-shot run read, when no live tail can be opened at all (missing
-   *    `X-Org-Id` / `X-Application-Id`, or no `EventSource`) and the run comes
+   *    `X-Org-Id` / `X-Space-Id`, or no `EventSource`) and the run comes
    *    back terminal — nothing else will ever report on this run.
    *
    * Never inferred from the ABSENCE of a live tail. `live` used to serve as
@@ -161,13 +161,13 @@ export function useRunLogStream(
     if (!runId) return;
     let cancelled = false;
     const headers = getHeaders?.() ?? {};
-    const { orgId, applicationId } = orgAppFromHeaders(headers);
+    const { orgId, spaceId } = orgSpaceFromHeaders(headers);
 
     // Decided up front (not after the fetches) because the one-shot run read
     // below needs to know whether anything else will ever report on this run.
     // NOTE this says the tail is OPENABLE, not that it ever opened — see the
     // `es.onerror` fallback for the case where the connection never lands.
-    const sseUrl = buildRunSseUrl({ runId, orgId, applicationId });
+    const sseUrl = buildRunSseUrl({ runId, orgId, spaceId });
     const willTail = !!sseUrl && typeof EventSource !== "undefined";
 
     const apply = (incoming: RunLogLine[]) => {
@@ -206,7 +206,7 @@ export function useRunLogStream(
     };
 
     // 1. History fetch (best-effort — a failure just means the live tail is the
-    //    only source). Same-origin, cookie auth + forwarded org/app headers.
+    //    only source). Same-origin, cookie auth + forwarded org/space headers.
     void (async () => {
       try {
         const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/logs?limit=1000`, {
@@ -241,7 +241,7 @@ export function useRunLogStream(
         if (run.completedAt) setCompletedAt((prev) => prev ?? run.completedAt ?? undefined);
         if (typeof run.duration === "number")
           setDuration((prev) => prev ?? run.duration ?? undefined);
-        // No live tail will ever open (missing org/app context, or no
+        // No live tail will ever open (missing org/space context, or no
         // EventSource): this read is the last word on a terminal run, so it
         // also owns the completion signal. With a tail, the `run_update`
         // snapshot below owns it instead — it lands after a strictly larger
@@ -268,7 +268,7 @@ export function useRunLogStream(
       }
     })();
 
-    // 2. Live tail. Skipped only when org/app context or EventSource is unavailable.
+    // 2. Live tail. Skipped only when org/space context or EventSource is unavailable.
     //    Even terminal initial results still open briefly to receive the SSE snapshot.
     if (!sseUrl || !willTail) {
       return () => {
