@@ -80,7 +80,7 @@ export interface GuardedFetchOptions {
   fetchImpl?: typeof fetch;
   /**
    * Opt-in predicate for hosts the OPERATOR has explicitly trusted (e.g. an
-   * internal IdP on a private address via `OAUTH_ALLOWED_INTERNAL_IDP_HOSTS`).
+   * internal IdP on a private address via `EGRESS_ALLOW_INTERNAL_HOSTS`).
    * When it returns true the host blocklist is skipped for that hop, but the
    * manual-redirect discipline (cross-origin body/credential stripping) still
    * applies — so a trusted host that open-redirects cannot forward the secret.

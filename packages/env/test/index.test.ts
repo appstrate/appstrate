@@ -18,10 +18,10 @@ const TRACKED = [
   "PI_IMAGE",
   "SIDECAR_IMAGE",
   "APP_VERSION",
-  // The retired file-limit names and their replacements. Both halves are
-  // tracked: `restore()` only cleans what is listed here, so a test that sets a
-  // retired name would otherwise leave it set for every test after it — which
-  // is exactly how the control below first failed.
+  // The retired names and their replacements. Both halves are tracked:
+  // `restore()` only cleans what is listed here, so a test that sets a retired
+  // name would otherwise leave it set for every test after it — which is
+  // exactly how the control below first failed.
   "DOCUMENT_MAX_FILE_BYTES",
   "DOCUMENT_RETENTION_DAYS",
   "RUN_MAX_DOCUMENTS",
@@ -30,6 +30,8 @@ const TRACKED = [
   "FILE_RETENTION_DAYS",
   "RUN_MAX_FILES",
   "WORKSPACE_MAX_FILES_BYTES",
+  "OAUTH_ALLOWED_INTERNAL_IDP_HOSTS",
+  "EGRESS_ALLOW_INTERNAL_HOSTS",
 ] as const;
 
 type Snap = Record<(typeof TRACKED)[number], string | undefined>;
@@ -591,6 +593,46 @@ describe("retired file-limit env names are refused, not ignored", () => {
   });
 });
 
+describe("the retired egress-allowlist name is refused, not aliased", () => {
+  let s: Snap;
+
+  beforeEach(() => {
+    s = snap();
+    setBaseEnv();
+    _resetCacheForTesting();
+  });
+
+  afterEach(() => {
+    restore(s);
+    _resetCacheForTesting();
+  });
+
+  it("aborts boot on OAUTH_ALLOWED_INTERNAL_IDP_HOSTS, naming EGRESS_ALLOW_INTERNAL_HOSTS", () => {
+    // The old name was an alias HERE and nowhere else: the sidecar launch path
+    // (`buildBaseSidecarEnv`) reads raw `process.env` and only ever saw the new
+    // one, so a deployment still on the old spelling exempted hosts
+    // platform-side and none of them sidecar-side. One name, one behaviour.
+    process.env.OAUTH_ALLOWED_INTERNAL_IDP_HOSTS = "intranet.corp";
+    expect(() => getEnv()).toThrow(
+      /OAUTH_ALLOWED_INTERNAL_IDP_HOSTS.*EGRESS_ALLOW_INTERNAL_HOSTS/s,
+    );
+  });
+
+  it("control: the replacement name parses normally", () => {
+    // Without the assertion above this would pass against a schema that had
+    // dropped the allowlist entirely.
+    process.env.EGRESS_ALLOW_INTERNAL_HOSTS = "intranet.corp";
+    expect(getEnv().EGRESS_ALLOW_INTERNAL_HOSTS).toBe("intranet.corp");
+  });
+
+  it("boots with OAUTH_ALLOWED_INTERNAL_IDP_HOSTS= (blank), which exempts nothing", () => {
+    // Same carve-out as the file-limit names below: a blanked line carries no
+    // value, so it cannot exempt a host and refusing it would refuse a no-op.
+    process.env.OAUTH_ALLOWED_INTERNAL_IDP_HOSTS = "";
+    expect(() => getEnv()).not.toThrow();
+  });
+});
+
 describe("an explicitly blanked retired name is not 'still set'", () => {
   let s: Snap;
 
@@ -621,7 +663,7 @@ describe("an explicitly blanked retired name is not 'still set'", () => {
       // is unset — sixteen times in this repo's own docker-compose.yml — and
       // blanking a line is the normal dotenv way to disable a setting. Refusing
       // it would abort boot over a variable carrying no value, with an error
-      // ("Leaving it set would silently revert the limit to its default")
+      // ("Leaving it set would silently revert the setting to its default")
       // describing a hazard an empty value cannot cause.
       process.env[retired] = "";
       expect(() => getEnv()).not.toThrow();

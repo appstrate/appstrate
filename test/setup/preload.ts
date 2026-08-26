@@ -92,8 +92,8 @@ process.env.RUN_WAIT_POLL_INTERVAL_MS = process.env.RUN_WAIT_POLL_INTERVAL_MS ??
 // operator internal-host allowlist to exempt exactly those fixture hosts for the
 // test run; production leaves it unset so every host stays guarded. NEVER set
 // these hosts in production.
-process.env.OAUTH_ALLOWED_INTERNAL_IDP_HOSTS =
-  process.env.OAUTH_ALLOWED_INTERNAL_IDP_HOSTS ??
+process.env.EGRESS_ALLOW_INTERNAL_HOSTS =
+  process.env.EGRESS_ALLOW_INTERNAL_HOSTS ??
   "auth.example.test,127.0.0.1,localhost,mcp.example.com,api.openai.test,api.anthropic.test,api.mistral.test,api.example.com,intranet.corp,mcp-norefresh.example,mcp-refresh.example";
 
 if (TIER0) {

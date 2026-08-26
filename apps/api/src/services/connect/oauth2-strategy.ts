@@ -235,7 +235,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
         // and refuses loopback / RFC1918 / link-local / metadata targets
         // (throwing SsrfBlockedError, caught below) so a malicious manifest
         // can't exfiltrate the token to internal infra — unless the operator
-        // opted the host into OAUTH_ALLOWED_INTERNAL_IDP_HOSTS.
+        // opted the host into EGRESS_ALLOW_INTERNAL_HOSTS.
         const res = await oauthEgressFetch(userinfoUrl, {
           headers: {
             Authorization: `Bearer ${result.accessToken}`,

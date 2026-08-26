@@ -67,12 +67,11 @@ export function buildBaseSidecarEnv(params: BaseSidecarEnvParams): Record<string
   // same name, so a host the platform-side checks just exempted (internal model
   // endpoint, allowlisted remote MCP server) isn't re-blocked in-run by the
   // sidecar's own literal/fail-closed gates. Empty/unset ⇒ nothing exempted.
-  // Raw process.env read (with the legacy alias), NOT getEnv(): this also runs
-  // inside the standalone firecracker runner daemon, which does not carry the
-  // platform's required env vars (BETTER_AUTH_SECRET, …), so getEnv()'s
-  // fail-fast validation would crash sidecar creation there.
-  const egressAllowHosts =
-    process.env.EGRESS_ALLOW_INTERNAL_HOSTS ?? process.env.OAUTH_ALLOWED_INTERNAL_IDP_HOSTS;
+  // Raw process.env read, NOT getEnv(): this also runs inside the standalone
+  // firecracker runner daemon, which does not carry the platform's required env
+  // vars (BETTER_AUTH_SECRET, …), so getEnv()'s fail-fast validation would
+  // crash sidecar creation there.
+  const egressAllowHosts = process.env.EGRESS_ALLOW_INTERNAL_HOSTS;
   if (egressAllowHosts) env.EGRESS_ALLOW_INTERNAL_HOSTS = egressAllowHosts;
   applySpecToSidecarEnv(params.spec, env);
   return env;
