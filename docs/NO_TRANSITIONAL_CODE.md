@@ -74,9 +74,12 @@ different `llm_usage` column — structurally indistinguishable from `0038`, whe
 the `CHECK` covers the column the `UPDATE` fills. Telling the two apart needs
 column-level analysis and is out of scope. The gap is a limit, not permission.
 
-`bun run verify:no-migration-dml` enforces all of this; every migration that
-predates the gate is grandfathered in `scripts/verify-no-migration-dml.ts` by
-name.
+`bun run verify:no-migration-dml` enforces the table-level half of this section
+and nothing else: a write in a new migration must be licenced by one of those
+three clauses landing on the table it writes. The column-level gap just
+described is out of its reach, and §1 and §3 have no automated gate at all.
+Every migration that predates the gate is grandfathered in
+`scripts/verify-no-migration-dml.ts` by name.
 
 Its write vocabulary is `UPDATE`, `INSERT`, `DELETE` and `TRUNCATE`, in every
 position a statement can open — including a CTE, since

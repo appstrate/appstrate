@@ -4,20 +4,16 @@
 /**
  * Gate — data repair must not live in a drizzle migration.
  *
- * `docs/NO_TRANSITIONAL_CODE.md` §2: `packages/db/drizzle/*.sql` describes the
- * **schema**, is replayed on every database that has ever existed, and every
- * file in it is permanent. A one-off rewrite of row *contents* is an
- * operational task — it belongs in `scripts/migration/<NNNN>-<slug>.{sql,ts}`,
- * run deliberately by an operator, with its own verification queries.
+ * The rule this enforces, and every reason behind it, is stated once — in
+ * `docs/NO_TRANSITIONAL_CODE.md` §2, which is the authority. Read it there.
+ * This header describes the implementation only.
  *
- * So: no `UPDATE` / `INSERT` / `DELETE` in a new migration — UNLESS the same
- * file also constrains THAT TABLE with a `SET NOT NULL`, a `CHECK`, or a
- * `VALIDATE CONSTRAINT`. That is the one legitimate overlap the document
- * names: the backfill is the *precondition* of the constraint and cannot be
- * separated from it.
- *
- * Same table, not merely the same file — see `licencedTables`, which also
- * records the one hole this deliberately leaves open.
+ * What the code does: reject every `UPDATE` / `INSERT` / `DELETE` / `TRUNCATE`
+ * that opens a statement in a new migration, UNLESS the same file also
+ * constrains THAT TABLE with a `SET NOT NULL`, a `CHECK`, or a `VALIDATE
+ * CONSTRAINT` — the carve-out §2 names. Same table, not merely the same file:
+ * see `licencedTables`, which also records the one hole this deliberately
+ * leaves open. A `TRUNCATE` is never licenced — see `UNLICENCEABLE`.
  *
  * Only NEW files are gated. Every migration already in the directory has run
  * on real databases and cannot be changed, so the eight that predate this rule
@@ -215,11 +211,11 @@ const TABLE_STATEMENT = `\\b(?:ALTER|CREATE)\\s+TABLE\\s+(?:IF\\s+(?:NOT\\s+)?EX
  * The three clauses whose precondition a backfill can legitimately be.
  *
  * `SET NOT NULL` and not a bare `NOT NULL`, which is the narrowing
- * `docs/NO_TRANSITIONAL_CODE.md` §2 already states: "a NOT NULL **promotion**
- * that requires a backfill is the one legitimate overlap". A `NOT NULL` in a
- * column DEFINITION is not a promotion — Postgres refuses `ADD COLUMN … NOT
- * NULL` on a populated table without a `DEFAULT`, and that default already
- * satisfies the constraint, so no backfill was ever its precondition. It also
+ * `docs/NO_TRANSITIONAL_CODE.md` §2 already states — only a *promotion*
+ * counts. A `NOT NULL` in a column DEFINITION is not a promotion — Postgres
+ * refuses `ADD COLUMN … NOT NULL` on a populated table without a `DEFAULT`,
+ * and that default already satisfies the constraint, so no backfill was ever
+ * its precondition. It also
  * drops the `IS NOT NULL` problem for free: a `WHERE` predicate cannot match
  * this shape at all.
  */
@@ -349,7 +345,7 @@ export function review(migrations: ReadonlyMap<string, string>): string[] {
 
   // Liveness, in the spirit of `KNOWN_IGNORED` in `scripts/lint.ts`: an
   // exemption that names nothing would silently excuse whatever lands at that
-  // name tomorrow. Existence, not "still flagged" — two of the eight are
+  // name tomorrow. Existence, not "still flagged" — one of the eight is
   // covered by the constraint carve-out as well (see `GRANDFATHERED`), and
   // failing on that would only push the list out of sync with the files.
   const dead = GRANDFATHERED.filter((name) => !migrations.has(name));

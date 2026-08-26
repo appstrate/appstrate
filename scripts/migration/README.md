@@ -10,15 +10,14 @@ production incident.
 
 ## The split
 
-|             | `packages/db/drizzle/*.sql`   | here                 |
-| ----------- | ----------------------------- | -------------------- |
-| Describes   | schema shape                  | a one-time data fix  |
-| Runs        | on every DB, forever, at boot | once, by an operator |
-| Reviewed as | a permanent contract          | an operational task  |
-
-The one legitimate overlap: a backfill that is the **precondition** of a
-`NOT NULL` or `CHECK` in the same migration file. It cannot be separated from
-the constraint it enables, so it stays with it.
+`packages/db/drizzle/*.sql` describes schema shape, is replayed on every
+database at boot forever, and is reviewed as a permanent contract; a script
+here fixes data once, on the deployments that need it, and is reviewed as an
+operational task. The one legitimate overlap — a backfill that is the
+**precondition** of a `SET NOT NULL` promotion, a `CHECK`, or a
+`VALIDATE CONSTRAINT` landing on the **same table**, never a `TRUNCATE` — is
+stated in full, with its limits, in `docs/NO_TRANSITIONAL_CODE.md` §2, which is
+the authority; `bun run verify:no-migration-dml` enforces it.
 
 ## Writing one
 

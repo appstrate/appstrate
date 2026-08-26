@@ -30,8 +30,10 @@ dimension, and consolidates into one report written to
 2. **Data repair belongs in `scripts/migration/`, never in a drizzle migration**
    — `packages/db/drizzle/*.sql` describes schema and is replayed forever. DML
    that rewrites row contents is an operational task. The one legitimate overlap
-   is a backfill that is the precondition of a `NOT NULL` promotion in the same
-   file.
+   is a backfill that is the precondition of a `SET NOT NULL` promotion, a
+   `CHECK`, or a `VALIDATE CONSTRAINT` landing on the **same table**, never a
+   `TRUNCATE`; §2 of the doc states it in full, with its limits, and is the
+   authority — do not audit from this summary.
 3. **No dead transition scaffolding** — decided feature flags, shims, adapters
    wrapping a shape nothing emits, `@deprecated` exports with no caller,
    re-export barrels that exist only to keep an old import path resolving.
@@ -73,8 +75,12 @@ retired form still WRITTEN anywhere? If not, it is a 🔴.
 
 **Agent B — Drizzle migrations.** Read every `packages/db/drizzle/*.sql`.
 Classify each statement as schema (DDL) or data (DML). Report every `UPDATE` /
-`INSERT` / `DELETE` that rewrites row contents, EXCEPT a backfill that is the
-precondition of a `NOT NULL` / `CHECK` in the same file. Also flag migrations
+`INSERT` / `DELETE` / `TRUNCATE` that rewrites row contents, EXCEPT a backfill
+that is the precondition of a `SET NOT NULL` promotion, a `CHECK`, or a
+`VALIDATE CONSTRAINT` landing on the **same table** — read
+`docs/NO_TRANSITIONAL_CODE.md` §2 for the exact carve-out and the column-level
+limit it does not reach, and note that a `TRUNCATE` is never licenced by it.
+Also flag migrations
 whose header argues its own necessity from a read-time alias that no longer
 exists — that pairing is what produced `0046`. Note: existing files are
 permanent and cannot be deleted; the finding is about the PATTERN and what to do
