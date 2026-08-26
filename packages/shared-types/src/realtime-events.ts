@@ -99,6 +99,14 @@ export const connectionUpdateEventSchema = z.object({
   needsReconnection: z.boolean().nullable(),
   deleted: z.boolean(),
 });
+/**
+ * Only ever named as the `connection_update` arm of `RealtimeEvent` below —
+ * no consumer imports it, they narrow the union on `event` and read `data`.
+ * Part of that union's contract rather than an independent export; see
+ * `knip.config.ts` on `@typeContract`.
+ *
+ * @typeContract
+ */
 export type ConnectionUpdateEvent = z.infer<typeof connectionUpdateEventSchema>;
 
 /**
@@ -115,6 +123,12 @@ export const chatSessionUpdateEventSchema = z.object({
   orgId: z.string(),
   userId: z.string(),
 });
+/**
+ * Same position as `ConnectionUpdateEvent` above: the `chat_session_update`
+ * arm of `RealtimeEvent`, reached by narrowing rather than by name.
+ *
+ * @typeContract
+ */
 export type ChatSessionUpdateEvent = z.infer<typeof chatSessionUpdateEventSchema>;
 
 /**

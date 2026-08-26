@@ -242,8 +242,21 @@ const config: KnipConfig = {
    *     name stops being exported. knip sees a string literal, not an edge.
    *
    *   `@typeContract` — the `type`-alias half of the `ignoreExportsUsedInFile`
-   *     rule above: a parameter or return type of an exported function in the
-   *     same file, which callers read by inference and never name.
+   *     rule above: a `type` that is the shape of another export in the same
+   *     file, which callers read by inference and never name.
+   *
+   *     What that covers narrowed at knip 6. Through knip 5 it also covered
+   *     the parameter and return types of an exported function; knip 6 counts
+   *     that use on its own, and reported the three tags carrying it
+   *     (`RealmResolver`, `CreateBootstrapOrgResult`, `SignupPolicyDecision`,
+   *     all in `packages/db`) as suppressing nothing, so they were dropped —
+   *     a carve-out that suppresses nothing is drift, not insurance. What
+   *     knip 6 still does NOT count is a `type` named only as an ARM of an
+   *     exported union in the same file (`ConnectionUpdateEvent` and
+   *     `ChatSessionUpdateEvent` in `packages/shared-types`, arms of
+   *     `RealtimeEvent`, which every consumer reaches by narrowing on
+   *     `event`), or one named only inside another tagged type
+   *     (`SignupBlockReason`). Those are what the tag holds today.
    */
   tags: ["-openapiMirror", "-typeContract"],
 
@@ -263,8 +276,23 @@ const config: KnipConfig = {
    * Invoked through `npx`/`bunx` or a shell builtin, so no manifest lists
    * them: `playwright` (e2e job + `test:e2e` script), `which`/`mktemp`
    * (POSIX utilities called from scripts and one test).
+   *
+   * knip 6 reports `playwright` and `which` as redundant here — it now
+   * resolves `npx playwright` back to the `@playwright/test` dependency, and
+   * treats `which` as a system binary. Both stay: that resolution is exactly
+   * the host-dependent judgement the note on configuration hints above says
+   * is read rather than obeyed, and a wrong deletion fails the gate on the
+   * host that resolves differently. `mktemp` draws no hint at all.
+   *
+   * `setpriv` is a fourth case, and not the same one: it is not invoked from
+   * a script at all. `apps/api/src/modules/firecracker/guest/supervisor.ts`
+   * spawns it INSIDE the Firecracker guest rootfs, where util-linux provides
+   * it — it is a property of the guest image, not of this repo's toolchain,
+   * and no host running `bun run check` needs it installed. knip 6 reads
+   * `spawn()` call sites as binary uses, which knip 5 did not, so this entry
+   * arrived with that bump rather than with the code.
    */
-  ignoreBinaries: ["playwright", "which", "mktemp"],
+  ignoreBinaries: ["playwright", "which", "mktemp", "setpriv"],
 
   /**
    * `duplicates` reports two exported names bound to one value. Every hit is

@@ -202,10 +202,9 @@ export interface RealmResolutionContext {
 /**
  * Parameter type of the exported `setRealmResolver` injection slot; the OIDC
  * module passes a function literal and never names the type, so this is part
- * of that function's contract rather than an independent export — see
- * `knip.config.ts` on `@typeContract`.
- *
- * @typeContract
+ * of that function's contract rather than an independent export. It carried a
+ * `@typeContract` tag until knip 6, which counts a same-file signature use on
+ * its own — see `knip.config.ts` on what the tag still covers.
  */
 export type RealmResolver = (ctx: RealmResolutionContext) => Promise<string>;
 

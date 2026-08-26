@@ -82,8 +82,10 @@ const MAX_CONSECUTIVE_RECORD_POLL_FAILURES = 20;
 
 // `RunStatus` and `TerminalRunStatus` are imported from `@appstrate/shared-types`
 // (themselves derived from the Drizzle pgEnum in `packages/db`) — single source
-// of truth across server, CLI, and dashboard.
-export type { RunStatus, TerminalRunStatus };
+// of truth across server, CLI, and dashboard. They used to be re-exported from
+// here as well; nothing ever imported them from this module (both consumers,
+// `run.ts` and the test suite, take them from `@appstrate/shared-types`
+// directly), so the re-export was a second name for the same type and is gone.
 
 /** Subset of the `runs` row returned by `GET /api/runs/:id`. */
 export interface RemoteRunRecord {
