@@ -306,8 +306,10 @@ describe("assertExtractorStillWorks — vacuity floor", () => {
  * filters on `keys.has(name)`, so every key the extractor loses leaves that
  * check quieter rather than louder.
  *
- * So the floor sits on `CODE_DEFAULTS ∩ keys` — a set that degrades one
- * variable at a time — and this is the case that proves the difference.
+ * So one of the three floors sits on `CODE_DEFAULTS ∩ keys` — a set that
+ * degrades one variable at a time — and this is the case that proves the
+ * difference. The other two (`MIN_SCHEMA_KEYS`, `MIN_CLASS3_POPULATION`) have
+ * their own describes below; each has a mutation only it can catch.
  */
 describe("assertExtractorStillWorks — partial degradation", () => {
   const SCHEMA = readFileSync(join(import.meta.dir, "..", "..", SCHEMA_SOURCE), "utf-8");
@@ -363,6 +365,153 @@ describe("assertExtractorStillWorks — partial degradation", () => {
     // by the sidecar and module-observability and are not schema keys at all.
     expect(covered.length).toBeGreaterThanOrEqual(45);
     expect(() => assertExtractorStillWorks(keys, defaulted)).not.toThrow();
+  });
+});
+
+/**
+ * The two floors the `CODE_DEFAULTS ∩ keys` one cannot stand in for.
+ *
+ * That floor counts the table entries the extractor still recognises — which is
+ * exactly the set `findTableGaps` throws away: it opens with
+ * `if (match.varName in CODE_DEFAULTS) continue;`. So the instrument added to
+ * protect the Class-3 check measured its COMPLEMENT, and it also replaced the
+ * raw `keys.size` floor that used to sit beside it. Both gaps are measured, and
+ * each mutation below is caught by exactly one floor — remove that floor and
+ * the case goes green.
+ *
+ * The mutation is the same real one used above (one extra indent level, the
+ * "object split into spread groups" refactor), applied to a CHOSEN subset of
+ * key blocks rather than to a prefix. Choosing the subset is what makes each
+ * case discriminate: a mutation that degrades everything trips every floor and
+ * proves none of them.
+ */
+describe("assertExtractorStillWorks — the floors beside the table intersection", () => {
+  const SCHEMA = readFileSync(join(import.meta.dir, "..", "..", SCHEMA_SOURCE), "utf-8");
+  const REAL = extractSchemaDefaults(SCHEMA);
+
+  /**
+   * One extra indent level on every key block whose name `pick` selects.
+   *
+   * A key line at five spaces no longer matches the anchor, and its body no
+   * longer dedents far enough to close the PREVIOUS key — so the block is
+   * absorbed into its predecessor, which is precisely what the real refactor
+   * does to it.
+   */
+  function degrade(source: string, pick: (name: string) => boolean): string {
+    const out: string[] = [];
+    let shifting = false;
+    for (const line of source.split("\n")) {
+      const key = /^ {4}([A-Z][A-Z0-9_]*):/.exec(line);
+      if (key?.[1]) shifting = pick(key[1]);
+      else if (shifting && /^ {0,3}\S/.test(line)) shifting = false;
+      out.push(shifting ? ` ${line}` : line);
+    }
+    return out.join("\n");
+  }
+
+  const tableIntersection = (keys: Set<string>): number =>
+    Object.keys(CODE_DEFAULTS).filter((name) => keys.has(name)).length;
+  const class3Population = (defaulted: Set<string>): string[] =>
+    [...defaulted].filter((name) => !(name in CODE_DEFAULTS)).sort();
+
+  it("throws when a fifth of the raw key count disappears, leaving both other floors clear", () => {
+    // MIN_SCHEMA_KEYS, restored. Degrading only the key blocks that are neither
+    // in CODE_DEFAULTS nor defaulted leaves the intersection and the Class-3
+    // population untouched, so this case is invisible to the two floors that
+    // survived the round which removed the raw count.
+    const { keys, defaulted } = extractSchemaDefaults(
+      degrade(SCHEMA, (name) => !(name in CODE_DEFAULTS) && !REAL.defaulted.has(name)),
+    );
+    expect(keys.size).toBe(67);
+    expect(tableIntersection(keys)).toBe(53);
+    expect(class3Population(defaulted)).toHaveLength(14);
+    // Both other instruments are silent about it, by construction:
+    expect(tableIntersection(keys)).toBeGreaterThanOrEqual(45);
+    expect(Object.keys(CODE_DEFAULTS).filter((n) => keys.has(n) && !defaulted.has(n))).toEqual([]);
+
+    expect(() => assertExtractorStillWorks(keys, defaulted)).toThrow(
+      /found only 67 schema key\(s\), below the floor of 80/,
+    );
+  });
+
+  it("throws when the Class-3 population collapses, leaving both other floors clear", () => {
+    // MIN_CLASS3_POPULATION. Degrading ONLY the 14 schema-defaulted variables
+    // CODE_DEFAULTS does not name takes away 100% of what Class 3 can report
+    // while `keys.size` stays at 85 and the intersection never moves — the
+    // shape neither other floor can see.
+    const { keys, defaulted } = extractSchemaDefaults(
+      degrade(SCHEMA, (name) => !(name in CODE_DEFAULTS) && REAL.defaulted.has(name)),
+    );
+    expect(keys.size).toBe(85);
+    expect(tableIntersection(keys)).toBe(53);
+    expect(class3Population(defaulted)).toHaveLength(3);
+    expect(keys.size).toBeGreaterThanOrEqual(80);
+    expect(tableIntersection(keys)).toBeGreaterThanOrEqual(45);
+
+    expect(() => assertExtractorStillWorks(keys, defaulted)).toThrow(
+      /Class-3 check has only 3 variable\(s\) left to report on/,
+    );
+  });
+
+  it("names the legitimate cause of a shrink, not only the suspicious one", () => {
+    // The failure text this replaces said "do NOT lower this floor" — but the
+    // sanctioned fix for a Class-3 finding is to add the variable to
+    // CODE_DEFAULTS, which shrinks this population by design. A message that
+    // forbids the correct action sends the reader to the wrong edit.
+    const { keys, defaulted } = extractSchemaDefaults(
+      degrade(SCHEMA, (name) => !(name in CODE_DEFAULTS) && REAL.defaulted.has(name)),
+    );
+    const message = (() => {
+      try {
+        assertExtractorStillWorks(keys, defaulted);
+        return "";
+      } catch (error) {
+        return (error as Error).message;
+      }
+    })();
+    expect(message).toMatch(/CODE_DEFAULTS legitimately GREW/);
+    expect(message).toMatch(/LOWER MIN_CLASS3_POPULATION/);
+    expect(message).toMatch(/extractor lost the defaults/);
+  });
+
+  it("was silent, and lost a real finding, in the state that motivated all this", () => {
+    // The measured attack, reproduced whole: degrade every NON-table key block.
+    // `CODE_DEFAULTS ∩ keys` — the only floor there was — does not move by a
+    // single entry, and `undetected` stays empty, because both are computed
+    // over the set Class 3 skips.
+    const degraded = extractSchemaDefaults(degrade(SCHEMA, (name) => !(name in CODE_DEFAULTS)));
+    expect(degraded.keys.size).toBe(53);
+    expect(degraded.defaulted.size).toBe(53);
+    expect(tableIntersection(degraded.keys)).toBe(53);
+    expect(tableIntersection(degraded.keys)).toBeGreaterThanOrEqual(45);
+    expect(
+      Object.keys(CODE_DEFAULTS).filter((n) => degraded.keys.has(n) && !degraded.defaulted.has(n)),
+    ).toEqual([]);
+    expect(class3Population(degraded.defaulted)).toEqual([]);
+
+    // …and a real Class-3 finding on a real compose line goes with it.
+    const compose = `services:
+  api:
+    environment:
+      - WORKSPACE_TMPFS_SIZE_MB=\${WORKSPACE_TMPFS_SIZE_MB:-512}
+`;
+    expect(findTableGaps(compose, REAL.defaulted)).toHaveLength(1);
+    expect(findTableGaps(compose, degraded.defaulted)).toEqual([]);
+
+    // Two of the three floors now refuse it. Neither of them existed, in this
+    // form, when the state above measured GATE EXIT=0.
+    expect(() => assertExtractorStillWorks(degraded.keys, degraded.defaulted)).toThrow(
+      /below the floor of 80/,
+    );
+  });
+
+  it("leaves headroom on the real schema for all three floors", () => {
+    // Stated headroom, so an ordinary env-var change never turns this red:
+    // keys 99 vs 80, intersection 53 vs 45, Class-3 population 14 vs 8.
+    expect(REAL.keys.size).toBeGreaterThanOrEqual(80 + 15);
+    expect(tableIntersection(REAL.keys)).toBeGreaterThanOrEqual(45 + 5);
+    expect(class3Population(REAL.defaulted).length).toBeGreaterThanOrEqual(8 + 4);
+    expect(() => assertExtractorStillWorks(REAL.keys, REAL.defaulted)).not.toThrow();
   });
 });
 

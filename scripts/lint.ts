@@ -48,7 +48,12 @@
 import { ESLint } from "eslint";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { missingFromWorktree, SOURCE_GLOBS, trackedIndexFiles } from "./lib/tracked-files.ts";
+import {
+  applyMissingFilePolicy,
+  missingFromWorktree,
+  SOURCE_GLOBS,
+  trackedIndexFiles,
+} from "./lib/tracked-files.ts";
 
 const REPO_ROOT = join(import.meta.dir, "..");
 
@@ -148,109 +153,193 @@ export async function partitionIgnored(
 }
 
 /**
- * A dialect this config is supposed to have rules for, and the floor under the
- * number of them eslint actually resolves for it.
+ * The floor under the number of ERROR-severity rules eslint resolves for a
+ * lintable file — every one of them, not a chosen few.
  *
  * ─── Why a count, when the ignored set is already asserted ───────────
  *
  * `KNOWN_IGNORED` partitions the tracked files into "eslint has a config for
  * this" and "eslint skips this". That partition is orthogonal to whether the
  * config it has says anything. Measured 2026-08-25: taking the 70 rules
- * currently enabled for a `.ts` file and appending one config object setting
- * all 70 to `"off"`, plus a real seeded error, gave GATE EXIT=0 — `bun run
- * lint` reporting success over 2206 files with every TypeScript rule disabled,
+ * enabled for a `.ts` file and appending one config object setting all 70 to
+ * `"off"`, plus a real seeded error, gave GATE EXIT=0 — `bun run lint`
+ * reporting success over 2206 files with every TypeScript rule disabled,
  * printing nothing but `Unused eslint-disable directive` warnings. No file had
  * become IGNORED, so the partition was undisturbed and had nothing to say. That
  * is the same "green over an unlinted repo" outcome `KNOWN_IGNORED` exists to
  * prevent, reached through the other door.
  *
- * This is the instrument `MIN_SCHEMA_KEYS` already is in the sibling gate
- * `scripts/verify-compose-defaults.ts` — a floor under the thing the gate
- * measures WITH, checked before its output is trusted. Applying it there and
- * not here was the asymmetry.
+ * ─── Why the whole population, and not three sentinel files ──────────
  *
- * ─── The numbers are a FLOOR, not a pin ──────────────────────────────
+ * The version this replaces floored three named files — `apps/api/src/index.ts`,
+ * `apps/web/src/main.tsx`, `eslint.config.mjs`. A floor on three paths is a
+ * floor on three paths, and the escape route is a `files:` glob that misses all
+ * three. Measured 2026-08-26, appending ONE object
+ *
+ *     { files: ["packages/**\/*.{ts,tsx}", "scripts/**\/*.ts"],
+ *       rules: { …all 70 rules "off"… } }
+ *
+ * with a real seeded `any` in `packages/core/src/naming.ts`: **GATE EXIT=0**,
+ * over ~640 tracked sources — `packages/` plus every gate script in
+ * `scripts/`, this file included — linted at zero rules. All three sentinels
+ * were untouched, so all three floors held, and the gate said so.
+ *
+ * A bigger roster of sentinels only moves the glob. So the floor is applied to
+ * the POPULATION the gate is about to hand eslint: every path in `lintable`,
+ * measured individually, each required to clear the floor. There is no sample
+ * to miss and no roster to extend — a config object that disables rules for any
+ * set of files necessarily lowers the count of the files it names, and those
+ * files are in the list by construction (they are tracked, and they are not
+ * ignored, or they would not be lintable).
+ *
+ * The cost is why this can be exhaustive rather than sampled. Measured
+ * 2026-08-26 over the 2206 lintable paths: `isPathIgnored` (already spent, in
+ * `partitionIgnored` above) 887 ms, and `calculateConfigForFile` over the same
+ * list **4 ms** on top of it — config resolution is cached per directory, so
+ * the second pass is nearly free. Against eslint's own ~15-21 s, the whole
+ * measurement rounds to nothing.
+ *
+ * ─── ERROR severity, not "not-off" ───────────────────────────────────
+ *
+ * `countErrorRules` requires severity `2`/`"error"`. Counting anything that is
+ * not `"off"` left the second half of the same door open: downgrading those
+ * same 70 rules to `"warn"` keeps every count identical, and eslint's exit code
+ * does not distinguish. Measured 2026-08-26: **GATE EXIT=0** with
+ * `712 problems (0 errors, 712 warnings)`. `--max-warnings 0` on the invocation
+ * below closes the runtime half; requiring severity `2` here closes the
+ * static half, before eslint is even spawned.
+ *
+ * ─── The number is a FLOOR, not a pin ────────────────────────────────
  *
  * Retiring a rule is ordinary and must not fail this gate; switching the config
- * off wholesale must. So each floor sits well under its measurement, and the
- * failure text says so. Measured 2026-08-25 via
- * `ESLint#calculateConfigForFile`, counting entries whose severity is neither
- * `0` nor `"off"`:
+ * off wholesale must. Measured 2026-08-26 across all 2206 lintable files, the
+ * MINIMUM error-severity rule count per top-level population:
  *
- *     apps/api/src/index.ts   70 enabled  (451 resolved)
- *     apps/web/src/main.tsx   92 enabled  (473 resolved)
- *     eslint.config.mjs       63 enabled  (421 resolved)
+ *     .            3 files   min 63   (eslint.config.mjs — plain-JS block only)
+ *     apps      1414 files   min 63
+ *     packages   589 files   min 63
+ *     runtime-pi 119 files   min 63
+ *     scripts     47 files   min 63
+ *     e2e         30 files   min 68
+ *     test         3 files   min 63
+ *     examples     1 file    min 68
  *
- * Re-measure with those three calls — `new ESLint({ cwd })`, then
- * `calculateConfigForFile(file)` — and read `rules`. Raise a floor only after
- * re-measuring; never lower one to make a red gate green.
- *
- * The three files are the three dialects the config treats differently: a `.ts`
- * under the TypeScript blocks, a `.tsx` (which adds the React and
- * `apps/web`-scoped rules), and `eslint.config.mjs` itself, whose only cover is
- * the plain-JS `js.configs.recommended` block — the file that decides every
- * rule in this repo, and the one that used to be linted by nothing.
+ * 63 is the floor of the whole repo, not of one dialect: `.tsx` under
+ * `apps/web` resolves far more, and `**\/test\/**` resolves three fewer than
+ * its neighbours because that block downgrades three rules to `"warn"` (see
+ * `eslint.config.mjs`), which severity-2 counting correctly declines to count.
+ * 50 leaves 13 rules of headroom. Re-measure with `new ESLint({ cwd })` then
+ * `calculateConfigForFile(file)` per lintable path; raise the floor only after
+ * re-measuring, and never lower it to make a red gate green.
  */
-export const RULE_COVERAGE_FLOORS: readonly { file: string; min: number }[] = [
-  { file: "apps/api/src/index.ts", min: 55 },
-  { file: "apps/web/src/main.tsx", min: 70 },
-  { file: "eslint.config.mjs", min: 50 },
-];
+export const MIN_ERROR_RULES_PER_FILE = 50;
 
 /**
- * How many of a resolved config's rules are actually ON.
+ * How many of a resolved config's rules are set to ERROR.
  *
  * `calculateConfigForFile` returns every rule any matched config object
  * mentions, `"off"` ones included — `tseslint.configs.recommended` alone turns
- * dozens off explicitly. Counting keys would therefore count a config that
- * disables everything as fully covered, which is the mutation this exists to
- * catch, so severity is read: `0` / `"off"` do not count, and an array form
+ * dozens off explicitly — so counting keys would score a disable-everything
+ * config as fully covered. Counting "anything not off" scores a
+ * downgrade-everything config as fully covered instead, which was the measured
+ * `0 errors, 712 warnings` pass. Only `"error"` / `2` counts, and an array form
  * (`["error", {...}]`) is judged on its first element.
  *
- * Pure, so `scripts/test/lint.test.ts` can hold both directions against it.
+ * Pure, so `scripts/test/lint.test.ts` can hold every direction against it.
  */
-export function countEnabledRules(rules: Record<string, unknown> | undefined): number {
+export function countErrorRules(rules: Record<string, unknown> | undefined): number {
   if (!rules) return 0;
   return Object.values(rules).filter((value) => {
     const severity = Array.isArray(value) ? value[0] : value;
-    return severity !== 0 && severity !== "off" && severity !== undefined;
+    return severity === 2 || severity === "error";
   }).length;
 }
 
 /**
- * Every dialect still resolves at least its floor's worth of enabled rules.
+ * The top-level directory a lintable path belongs to — `apps`, `packages`,
+ * `scripts`, … or `.` for the handful of files at the repo root.
  *
- * Takes the measurement rather than making it, so the test file can assert both
- * directions without an eslint run.
+ * Used only to GROUP the failure report, never to decide what gets measured:
+ * grouping by a derived key means a population nobody anticipated (a new
+ * top-level directory) appears in the report the day its first file is
+ * committed, with no roster to extend.
+ */
+export function populationOf(file: string): string {
+  const slash = file.indexOf("/");
+  return slash === -1 ? "." : file.slice(0, slash);
+}
+
+/**
+ * Every lintable file still resolves at least the floor's worth of error rules.
+ *
+ * Takes the measurement rather than making it, so the test file can assert
+ * every direction without an eslint run.
  */
 export function assertRuleCoverage(measured: ReadonlyMap<string, number>): void {
-  const under = RULE_COVERAGE_FLOORS.filter(({ file, min }) => (measured.get(file) ?? 0) < min);
+  if (measured.size === 0) {
+    throw new Error(
+      `lint: the rule-coverage measurement is empty — nothing was measured, so the floor below ` +
+        `checked nothing. This is the vacuous pass the floor exists to prevent, one level up.`,
+    );
+  }
+
+  const under = [...measured]
+    .filter(([, count]) => count < MIN_ERROR_RULES_PER_FILE)
+    .sort(([, a], [, b]) => a - b);
   if (under.length === 0) return;
 
+  // One line per POPULATION, not per file: a `files:` glob that switches a
+  // directory off puts hundreds of paths under the floor at once, and printing
+  // them all would bury the fact in its own output.
+  const byPopulation = new Map<string, { count: number; worst: [string, number] }>();
+  for (const [file, count] of under) {
+    const key = populationOf(file);
+    const seen = byPopulation.get(key);
+    if (!seen) byPopulation.set(key, { count: 1, worst: [file, count] });
+    else {
+      seen.count++;
+      if (count < seen.worst[1]) seen.worst = [file, count];
+    }
+  }
+
   throw new Error(
-    `lint: eslint resolves fewer enabled rules than this repo's floor.\n\n` +
-      under
+    `lint: eslint resolves fewer error-severity rules than this repo's floor of ` +
+      `${MIN_ERROR_RULES_PER_FILE} for ${under.length} of the ${measured.size} file(s) it was ` +
+      `about to lint.\n\n` +
+      [...byPopulation]
+        .sort()
         .map(
-          ({ file, min }) =>
-            `  - ${file}: ${measured.get(file) ?? 0} enabled rule(s), floor ${min}`,
+          ([key, { count, worst }]) =>
+            `  - ${key}/: ${count} file(s) under the floor, worst ${worst[0]} at ${worst[1]} rule(s)`,
         )
         .join("\n") +
-      `\n\nA config that matches every file and enables nothing lints every file and finds` +
-      `\nnothing, and \`bun run lint\` exits 0 over it — the ignored-set assertion above cannot` +
-      `\nsee that, because no file became ignored. These floors sit well under the measured` +
-      `\ncounts (see RULE_COVERAGE_FLOORS) so that retiring a rule never trips them. If a rule` +
-      `\nset was deliberately shrunk this far, re-measure and raise the floor in scripts/lint.ts` +
-      `\nwith the new number — do not lower it to make this green.`,
+      `\n\nA config that matches these files and enables nothing lints them and finds nothing, and` +
+      `\n\`bun run lint\` exits 0 over it — the ignored-set assertion above cannot see that, because` +
+      `\nno file became ignored. Note the count is of ERROR-severity rules only: downgrading a rule` +
+      `\nto \`"warn"\` removes it from this count on purpose, because a warning that fails nothing is` +
+      `\nnot coverage (the invocation below passes \`--max-warnings 0\`, so a warning DOES fail — but` +
+      `\nonly if some rule still fires).` +
+      `\n\nIf a rule set was deliberately shrunk this far, re-measure across the whole lintable list` +
+      `\nand raise MIN_ERROR_RULES_PER_FILE in scripts/lint.ts with the new number — do not lower it` +
+      `\nto make this green.`,
   );
 }
 
-/** The floors' subject files, measured against the config the gate runs under. */
-export async function measureRuleCoverage(api: ESLint): Promise<Map<string, number>> {
+/**
+ * Error-rule counts for every path the gate is about to lint.
+ *
+ * Takes the list rather than reading a roster: the subject of the floor is the
+ * population, and the population is whatever `partitionIgnored` just produced.
+ */
+export async function measureRuleCoverage(
+  api: ESLint,
+  files: readonly string[],
+): Promise<Map<string, number>> {
   const measured = new Map<string, number>();
-  for (const { file } of RULE_COVERAGE_FLOORS) {
+  for (const file of files) {
     const config = (await api.calculateConfigForFile(file)) as
       { rules?: Record<string, unknown> } | undefined;
-    measured.set(file, countEnabledRules(config?.rules));
+    measured.set(file, countErrorRules(config?.rules));
   }
   return measured;
 }
@@ -266,20 +355,26 @@ async function main(): Promise<number> {
   const api = new ESLint({ cwd: REPO_ROOT });
   const { lintable, ignored } = await partitionIgnored(indexed, (file) => api.isPathIgnored(file));
   assertIgnoredSetIsExact(ignored);
-  assertRuleCoverage(await measureRuleCoverage(api));
+  // The floor's subject is `lintable` — the exact list about to be handed to
+  // eslint — so no glob can scope a disable around it.
+  assertRuleCoverage(await measureRuleCoverage(api, lintable));
 
   // eslint is handed paths it can open. A tracked file missing from the working
   // tree is a `git rm` not yet committed or a refactor in flight — not a lint
   // finding, and not a reason to fail a push. (The compose gate next door makes
   // the opposite choice, for the opposite reason; see `MissingFilePolicy`.)
-  const missing = new Set(missingFromWorktree(lintable));
-  const present = lintable.filter((file) => !missing.has(file));
-  if (present.length === 0) {
-    throw new Error(
-      `lint: all ${lintable.length} lintable tracked file(s) are missing from the working tree — ` +
-        `eslint would be handed nothing and exit 0.`,
-    );
-  }
+  //
+  // The `"skip"` policy itself lives next to `"fail"` in `tracked-files.ts`, so
+  // that both answers to the same question are written, and tested, in one
+  // place. It cannot be reached through `trackedFiles` here: this gate needs the
+  // INDEX list first, for the `KNOWN_IGNORED` liveness check above, and the
+  // allowance applies to what survives the ignore partition.
+  const present = applyMissingFilePolicy(
+    lintable,
+    missingFromWorktree(lintable),
+    "lintable file",
+    "skip",
+  );
 
   const eslint = join(REPO_ROOT, "node_modules/.bin/eslint");
   if (!existsSync(eslint)) {
@@ -289,8 +384,36 @@ async function main(): Promise<number> {
   // No `--no-warn-ignored`: the ignored files are already out of `lintable`, so
   // there is no warning left to suppress, and a file eslint skips for the OTHER
   // reason ("no matching configuration was supplied") still gets to say so.
+  //
+  // `--max-warnings 0`, because eslint's exit code otherwise ignores warnings
+  // entirely and "warn" becomes a severity that fails nothing. Measured
+  // 2026-08-26: downgrading the 70 rules enabled for a `.ts` file from `"error"`
+  // to `"warn"` gave `712 problems (0 errors, 712 warnings)` and GATE EXIT=0 —
+  // the whole repo's TypeScript linting turned off, in a run that printed 712
+  // findings and called itself a success.
+  //
+  // The repo's four deliberate `"warn"` rules stay `"warn"`: three under
+  // `**\/test\/**` and `react-refresh/only-export-components`. Their severity is
+  // an editor signal (a yellow squiggle rather than a red one) and this flag
+  // does not change that; what it changes is that CI no longer treats them as
+  // optional. The flag costs nothing today — measured 2026-08-26 on a COLD
+  // cache, `bun scripts/lint.ts --max-warnings 0` printed zero bytes and exited
+  // 0, so the repo currently emits zero warnings of any kind.
+  //
+  // It goes before `Bun.argv.slice(2)` so that a caller who genuinely wants a
+  // budget (`bun run lint --max-warnings 20`) still wins: eslint takes the last
+  // occurrence.
   const proc = Bun.spawnSync({
-    cmd: [eslint, "--cache", "--cache-strategy", "content", ...Bun.argv.slice(2), ...present],
+    cmd: [
+      eslint,
+      "--cache",
+      "--cache-strategy",
+      "content",
+      "--max-warnings",
+      "0",
+      ...Bun.argv.slice(2),
+      ...present,
+    ],
     cwd: REPO_ROOT,
     stdio: ["inherit", "inherit", "inherit"],
   });

@@ -15,14 +15,22 @@
  * The second property, added after the unification lost it: the deleted-file
  * allowance is a per-caller CHOICE. Unifying three different answers on one
  * silent pre-filter handed `verify-compose-defaults` an allowance it never
- * wanted, and `rm docker-compose.yml` became a green tick. `MissingFilePolicy`
- * is asserted below in both directions.
+ * wanted, and `rm docker-compose.yml` became a green tick.
+ *
+ * Both `MissingFilePolicy` branches are asserted, in the `applyMissingFilePolicy`
+ * describe below. They were not, when this comment first claimed they were: the
+ * `"skip"` branch — the filter itself, and the empty-remainder throw behind it —
+ * was executed by no test in the repo. Reaching it through `trackedFiles` needs
+ * a tracked file to be missing from the working tree, which a test has no
+ * business arranging; taking the two lists as arguments is what makes both
+ * branches reachable from synthetic input.
  */
 
 import { describe, it, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  applyMissingFilePolicy,
   COMPOSE_GLOBS,
   missingFromWorktree,
   SOURCE_GLOBS,
@@ -75,6 +83,43 @@ describe("trackedFiles", () => {
     expect(files.length).toBeGreaterThan(0);
     expect(files.every((f) => /docker-compose.*\.ya?ml$/.test(f))).toBe(true);
     expect(files).toContain("docker-compose.yml");
+  });
+});
+
+describe("applyMissingFilePolicy", () => {
+  const FILES = ["a.ts", "b.ts", "c.ts"];
+
+  it("drops the missing paths under `skip`", () => {
+    // `lint.ts` and `lint-manifest-casing.ts` take this: a `git rm` not yet
+    // committed, or a refactor in flight, is not a lint finding.
+    expect(applyMissingFilePolicy(FILES, ["b.ts"], "source file", "skip")).toEqual([
+      "a.ts",
+      "c.ts",
+    ]);
+  });
+
+  it("still refuses to return an empty list under `skip`", () => {
+    // The allowance stops short of vacuity: dropping EVERY file would hand the
+    // gate nothing, which is the pass this module exists to prevent.
+    expect(() => applyMissingFilePolicy(FILES, FILES, "source file", "skip")).toThrow(
+      /none of them exist in the working tree — the gate would pass vacuously/,
+    );
+  });
+
+  it("throws under `fail`, naming the paths", () => {
+    // `verify-compose-defaults.ts` takes this: its file list IS its coverage.
+    // Measured with the silent skip in place, `rm docker-compose.yml` gave
+    // `✓ … across 8 compose files` and exit 0.
+    expect(() => applyMissingFilePolicy(FILES, ["b.ts"], "compose file", "fail")).toThrow(
+      /names 1 tracked compose file\(s\) that the working tree does not have:\n {2}- b\.ts/,
+    );
+  });
+
+  it("is a pass-through for both policies when nothing is missing", () => {
+    // The ordinary case, held for both branches so that neither can start
+    // dropping or throwing on a healthy tree.
+    expect(applyMissingFilePolicy(FILES, [], "source file", "skip")).toEqual(FILES);
+    expect(applyMissingFilePolicy(FILES, [], "compose file", "fail")).toEqual(FILES);
   });
 });
 

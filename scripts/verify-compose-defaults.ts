@@ -187,8 +187,8 @@ export function extractSchemaDefaults(source: string): {
 }
 
 /**
- * The vacuity floor — under the extractor's OVERLAP WITH `CODE_DEFAULTS`, not
- * under its raw key count.
+ * The vacuity floors — three of them, because the extractor feeds three
+ * different consumers and no single count degrades with all three.
  *
  * Every other failure mode of this file is fail-CLOSED — renaming `envSchema`
  * throws, moving a helper below the schema throws — but the ONE that mattered
@@ -202,47 +202,79 @@ export function extractSchemaDefaults(source: string): {
  * threw? false`, and a compose line pinning `WORKSPACE_TMPFS_SIZE_MB=512` —
  * a real finding on the real schema — came back as `[]`.
  *
- * ─── Why the raw count could not do this job ─────────────────────────
+ * ─── `MIN_SCHEMA_KEYS` — the raw count, restored ─────────────────────
  *
- * A floor of 50 on `keys.size` against 99 keys only ever caught total
- * collapse — the 0-key case above, which is the one mutation anybody had
- * measured. PARTIAL collapse is the likelier shape and it slid straight
- * through: giving the first 44 key blocks one extra level of indent (the
- * "object was split into spread groups" refactor this file's own failure text
- * names) yielded keys/defaulted of 55/34 instead of 99/67. 33 defaults gone,
- * still above 50, `assertExtractorStillWorks` silent, a REAL table-gap finding
- * on a real compose file gone with them, and the green tick printed.
+ * A floor on `keys.size` was here first, at 50, and the round that added
+ * `MIN_TABLE_KEYS_FOUND` REPLACED it. That was a strict regression, measured
+ * 2026-08-26: a mutation losing 54 of the 99 keys — every non-table key block
+ * plus eight table ones — leaves `CODE_DEFAULTS ∩ keys` at 45 and passes the
+ * new floor, while the old one threw at anything under 50. So the raw count is
+ * back, and this time near its measurement rather than at half of it: 99 keys
+ * today, floor 80, 19 keys of headroom. Retiring a handful of env vars never
+ * trips it; a structural change that loses a fifth of the schema does.
  *
- * The companion check below cannot cover for it, by construction: it filters on
- * `keys.has(n)`, so a key the extractor LOST is excluded before it can be
- * counted as undetected. Losing keys makes that check quieter, not louder.
+ * ─── `MIN_TABLE_KEYS_FOUND` — the table-anchored count ───────────────
  *
- * So the floor moves onto `CODE_DEFAULTS ∩ keys`. `CODE_DEFAULTS` is this
- * repo's independent, hand-maintained statement of which variables the schema
- * defaults, so the intersection degrades one variable at a time as the
- * extractor loses ground, instead of holding steady until half the schema is
- * gone. Measured 2026-08-25: 58 table entries, 53 of them schema keys. The
- * other 5 — `OTEL_ENABLED`, `OTEL_SERVICE_NAME`, `OTEL_TRUST_INCOMING_TRACE`,
- * `SIDECAR_MAX_REQUEST_BODY_BYTES`, `SIDECAR_MAX_MCP_ENVELOPE_BYTES` — are read
- * straight from `process.env` outside the schema and legitimately never appear
- * in `keys`.
+ * `CODE_DEFAULTS` is this repo's independent, hand-maintained statement of
+ * which variables the schema defaults, so `CODE_DEFAULTS ∩ keys` degrades one
+ * variable at a time as the extractor loses ground on the keys somebody has
+ * already written down twice. It is what makes the `undetected` check below
+ * non-vacuous. Measured 2026-08-26: 58 table entries, 53 of them schema keys.
+ * The other 5 — `OTEL_ENABLED`, `OTEL_SERVICE_NAME`,
+ * `OTEL_TRUST_INCOMING_TRACE`, `SIDECAR_MAX_REQUEST_BODY_BYTES`,
+ * `SIDECAR_MAX_MCP_ENVELOPE_BYTES` — are read straight from `process.env`
+ * outside the schema and legitimately never appear in `keys`. Floor 45 against
+ * 53: 8 entries of headroom.
  *
- * 45 against a measured 53 is a FLOOR, not a pin: retiring a handful of table
- * entries never trips it, while the 44-block mutation above (which leaves 30 of
- * the 53) does. Re-measure with
- * `Object.keys(CODE_DEFAULTS).filter((n) => keys.has(n)).length`; raise it only
- * after re-measuring, and never lower it to make a red gate green.
+ * ─── `MIN_CLASS3_POPULATION` — what Class 3 can actually report ──────
+ *
+ * The floor above measures the complement of the check it was added to protect.
+ * `findTableGaps` opens with `if (match.varName in CODE_DEFAULTS) continue;`,
+ * so Class 3 operates on `defaulted \ CODE_DEFAULTS` — precisely the variables
+ * `CODE_DEFAULTS ∩ keys` excludes. Measured 2026-08-26, degrading ONLY the
+ * non-table key blocks:
+ *
+ *     keys 99 → 53   defaulted 67 → 53   CODE_DEFAULTS ∩ keys 53 → 53
+ *     Class-3 population 14 → 0
+ *     assertExtractorStillWorks threw? false
+ *     real Class-3 finding on a real compose line: true → false
+ *
+ * 100% of Class-3 coverage destroyed, both existing checks silent, the only
+ * trace `67` turning into `53` in a success line nobody diffs. (`MIN_SCHEMA_KEYS`
+ * above now also catches that particular mutation, at 53 < 80 — but it catches
+ * it by SIZE, and a mutation that loses only the 14 blocks below would keep
+ * `keys` at 85 and still cost Class 3 everything. This floor is the one that
+ * measures the population itself.)
+ *
+ * Measured 2026-08-26, `defaulted \ CODE_DEFAULTS` is 14 variables — the exact
+ * blind spot `readSchemaDefaults`'s header names: `AUTH_SESSION_COOKIE_CACHE_SECONDS`,
+ * `CONNECT_SESSION_TTL_MS`, `FILE_MAX_BYTES`, `MODULE_CONTRACT_ENFORCE`,
+ * `RUN_MAX_FILES`, `RUN_MAX_OUTPUT_BYTES`, `RUN_WAIT_POLL_INTERVAL_MS`,
+ * `STORAGE_DELETION_WORKER_INTERVAL_MS`, `UPLOAD_MAX_ACTIVE_PER_ACTOR`,
+ * `UPLOAD_RETENTION_HOURS`, `UPLOAD_STAGING_MAX_BYTES_PER_ORG`,
+ * `WORKSPACE_INIT_IMAGE`, `WORKSPACE_MAX_FILES_BYTES`, `WORKSPACE_TMPFS_SIZE_MB`.
+ * Floor 8, six entries of headroom.
+ *
+ * Unlike the other two, this population is meant to DRAIN: the sanctioned fix
+ * for a Class-3 finding is to add the variable to `CODE_DEFAULTS`, which moves
+ * it out of this set. Adding seven of the fourteen is therefore a legitimate
+ * way to turn this floor red, and the correct response is to re-measure and
+ * LOWER it — see the failure text, which says so rather than forbidding it.
  */
+const MIN_SCHEMA_KEYS = 80;
 const MIN_TABLE_KEYS_FOUND = 45;
+const MIN_CLASS3_POPULATION = 8;
 
 /**
  * Self-check on the extractor above, run before its output is trusted.
  *
- * Two independent checks, in the order a reader needs them: first that the
- * extractor produced a plausible key set at all (`MIN_SCHEMA_KEYS`), then that
- * every variable `CODE_DEFAULTS` and the schema BOTH name came back as
- * defaulted. The second is meaningless without the first — an empty key set
- * satisfies it trivially.
+ * Four checks, in the order a reader needs them: that the extractor produced a
+ * plausible key set at all (`MIN_SCHEMA_KEYS`), that it still recognises the
+ * keys the table names (`MIN_TABLE_KEYS_FOUND`), that Class 3 still has a
+ * population to report on (`MIN_CLASS3_POPULATION`), and finally that every
+ * variable `CODE_DEFAULTS` and the schema BOTH name came back as defaulted. The
+ * last is meaningless without the first two — an empty key set satisfies it
+ * trivially.
  *
  * The hand-maintained `CODE_DEFAULTS` is an independent statement that a
  * variable HAS a schema default. So every table entry that is also a schema key
@@ -278,6 +310,25 @@ const MIN_TABLE_KEYS_FOUND = 45;
  * forward-looking.
  */
 export function assertExtractorStillWorks(keys: Set<string>, defaulted: Set<string>): void {
+  /** The anchor-drift explanation all three floors share. */
+  const ANCHOR_CAUSE =
+    `The most likely cause is that the key anchor — a name at EXACTLY four spaces of indent, ` +
+    `inside \`const envSchema\`'s \`z.object({ … })\` — no longer matches for some or all keys: ` +
+    `the object was split into spread groups, or \`z\\n  .object({\` was collapsed to ` +
+    `\`z.object({\`, moving keys one level out. Every key lost that way is a compose line nothing ` +
+    `compares, reported as a green tick.`;
+
+  if (keys.size < MIN_SCHEMA_KEYS) {
+    throw new Error(
+      `verify-compose-defaults: the ${SCHEMA_SOURCE} key extractor found only ${keys.size} ` +
+        `schema key(s), below the floor of ${MIN_SCHEMA_KEYS} — 99 at the time of writing. ` +
+        ANCHOR_CAUSE +
+        ` If the schema genuinely shrank this far, re-measure ` +
+        `(\`readSchemaDefaults().keys.size\`) and set MIN_SCHEMA_KEYS to the new number with the ` +
+        `same headroom; otherwise fix the anchor in extractSchemaDefaults.`,
+    );
+  }
+
   const tableKeysFound = Object.keys(CODE_DEFAULTS).filter((name) => keys.has(name));
   if (tableKeysFound.length < MIN_TABLE_KEYS_FOUND) {
     throw new Error(
@@ -285,12 +336,36 @@ export function assertExtractorStillWorks(keys: Set<string>, defaulted: Set<stri
         `${tableKeysFound.length} of the ${Object.keys(CODE_DEFAULTS).length} variables ` +
         `CODE_DEFAULTS names (${keys.size} schema key(s) in total), below the floor of ` +
         `${MIN_TABLE_KEYS_FOUND} — 53 of 58 at the time of writing. ` +
-        `The most likely cause is that the key anchor — a name at EXACTLY four spaces of indent, ` +
-        `inside \`const envSchema\`'s \`z.object({ … })\` — no longer matches for some or all ` +
-        `keys: the object was split into spread groups, or \`z\\n  .object({\` was collapsed to ` +
-        `\`z.object({\`, moving keys one level out. Every key lost here is a compose line nothing ` +
-        `compares, reported as a green tick. Fix the anchor in extractSchemaDefaults; do NOT ` +
-        `lower this floor.`,
+        ANCHOR_CAUSE +
+        ` Two causes, and they need opposite fixes: if the extractor lost ground, fix the anchor ` +
+        `in extractSchemaDefaults. If CODE_DEFAULTS entries were deliberately RETIRED — the ` +
+        `variable left the schema — re-measure ` +
+        `(\`Object.keys(CODE_DEFAULTS).filter((n) => keys.has(n)).length\`) and lower this floor ` +
+        `to the new number, recording it here. Never lower it merely to make a red gate green.`,
+    );
+  }
+
+  // Class 3 (`findTableGaps`) opens with `if (varName in CODE_DEFAULTS) continue`,
+  // so THIS is the set it can report on — and the set both floors above exclude.
+  const class3Population = [...defaulted].filter((name) => !(name in CODE_DEFAULTS));
+  if (class3Population.length < MIN_CLASS3_POPULATION) {
+    throw new Error(
+      `verify-compose-defaults: the Class-3 check has only ${class3Population.length} variable(s) ` +
+        `left to report on — schema keys that carry a default and are NOT named by ` +
+        `CODE_DEFAULTS — below the floor of ${MIN_CLASS3_POPULATION} (14 at the time of ` +
+        `writing).\n` +
+        `Class 3 skips every variable the table already names, so neither floor above can see ` +
+        `this: they measure the complement. Two causes, and they need opposite fixes.\n` +
+        `  1. The extractor lost the defaults for these variables — measured, degrading only the ` +
+        `non-table key blocks took this population from 14 to 0 while ` +
+        `\`CODE_DEFAULTS ∩ keys\` never moved. ` +
+        ANCHOR_CAUSE +
+        `\n  2. CODE_DEFAULTS legitimately GREW to cover variables it used to miss. That is the ` +
+        `sanctioned fix for a Class-3 finding and it shrinks this population by design — in ` +
+        `which case re-measure ` +
+        `(\`[...readSchemaDefaults().defaulted].filter((n) => !(n in CODE_DEFAULTS)).length\`) ` +
+        `and LOWER MIN_CLASS3_POPULATION to the new number, recording it in the comment above.\n` +
+        `Tell the two apart by looking at whether CODE_DEFAULTS grew in the same change.`,
     );
   }
 
@@ -399,9 +474,15 @@ function main(): number {
   }
 
   if (findings.length === 0 && gaps.length === 0) {
+    // Every quantity the floors above stand on, printed — so that a shrinking
+    // gate is visible in the success line rather than only in the one number
+    // (`67`) it used to report. The Class-3 figure is the one that used to be
+    // invisible: it can fall to zero while the others hold.
+    const class3 = [...schemaDefaulted].filter((name) => !(name in CODE_DEFAULTS)).length;
     console.log(
       `\x1b[32m✓\x1b[0m verify-compose-defaults: no duplicated env defaults across ${COMPOSE_FILES.length} compose files ` +
-        `(${schemaDefaulted.size} schema defaults known, all compose-pinned vars covered by the table).`,
+        `(${schemaKeys.size} schema keys, ${schemaDefaulted.size} of them defaulted, ` +
+        `${class3} outside CODE_DEFAULTS and therefore checked by Class 3; all compose-pinned vars covered by the table).`,
     );
     return 0;
   }

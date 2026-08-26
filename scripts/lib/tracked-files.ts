@@ -52,6 +52,15 @@
  *   - `"fail"` — the same path throws, naming it. `verify-compose-defaults.ts`
  *     takes this: its file list IS its coverage, so losing one silently is the
  *     failure the gate is for.
+ *
+ * `lint-manifest-casing.ts` and `verify-compose-defaults.ts` reach the policy
+ * through `trackedFiles`, which asks the index and applies the answer in one
+ * call. `lint.ts` cannot: it needs the raw INDEX list first (its `KNOWN_IGNORED`
+ * liveness check is a question about the index, not about the disk), and the
+ * allowance applies only to what survives its ignore partition. So the policy
+ * itself is `applyMissingFilePolicy`, exported, and `lint.ts` calls that —
+ * rather than hand-rolling a fourth copy of the rule, which is what it did while
+ * this comment claimed it was a caller.
  */
 
 import { existsSync } from "node:fs";
@@ -128,6 +137,47 @@ export function missingFromWorktree(files: readonly string[]): string[] {
 }
 
 /**
+ * The policy itself: `files` minus `missing`, or a throw, depending on what the
+ * caller asked for.
+ *
+ * Separate from `trackedFiles` and exported for two reasons. `lint.ts` needs the
+ * policy without the index lookup that normally precedes it (see the header),
+ * and — the reason it is worth an export on its own — a rule whose two branches
+ * both END A GATE is a rule whose two branches both need an assertion. Taking
+ * the two lists as arguments lets `scripts/test/tracked-files.test.ts` drive
+ * both, plus the empty-remainder case, against synthetic input, instead of
+ * deleting a tracked file to reach one of them.
+ */
+export function applyMissingFilePolicy(
+  files: readonly string[],
+  missing: readonly string[],
+  what: string,
+  onMissing: MissingFilePolicy,
+): string[] {
+  if (missing.length === 0) return [...files];
+
+  if (onMissing === "fail") {
+    throw new Error(
+      `git ls-files names ${missing.length} tracked ${what}(s) that the working tree does not ` +
+        `have:\n${missing.map((f) => `  - ${f}`).join("\n")}\n` +
+        `This gate reads every ${what} it is handed, so skipping one would shrink its coverage ` +
+        `without shrinking its success line. Restore the file, or \`git rm\` it so it leaves the ` +
+        `index too.`,
+    );
+  }
+
+  const gone = new Set(missing);
+  const present = files.filter((rel) => !gone.has(rel));
+  if (present.length === 0) {
+    throw new Error(
+      `git ls-files matched ${files.length} ${what}(s) but none of them exist in the working ` +
+        `tree — the gate would pass vacuously.`,
+    );
+  }
+  return present;
+}
+
+/**
  * Tracked files matching `globs`, sorted, with the worktree-existence question
  * answered the way THIS caller wants it answered.
  *
@@ -140,25 +190,5 @@ export function trackedFiles(
   onMissing: MissingFilePolicy,
 ): string[] {
   const files = trackedIndexFiles(globs, what);
-  const missing = missingFromWorktree(files);
-  if (missing.length === 0) return files;
-
-  if (onMissing === "fail") {
-    throw new Error(
-      `git ls-files names ${missing.length} tracked ${what}(s) that the working tree does not ` +
-        `have:\n${missing.map((f) => `  - ${f}`).join("\n")}\n` +
-        `This gate reads every ${what} it is handed, so skipping one would shrink its coverage ` +
-        `without shrinking its success line. Restore the file, or \`git rm\` it so it leaves the ` +
-        `index too.`,
-    );
-  }
-
-  const present = files.filter((rel) => !missing.includes(rel));
-  if (present.length === 0) {
-    throw new Error(
-      `git ls-files matched ${files.length} ${what}(s) but none of them exist in the working ` +
-        `tree — the gate would pass vacuously.`,
-    );
-  }
-  return present;
+  return applyMissingFilePolicy(files, missingFromWorktree(files), what, onMissing);
 }
