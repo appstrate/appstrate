@@ -595,6 +595,25 @@ latest, sidecar latest}` is byte-for-byte the same input as the supported
 
 ### Removed
 
+- **BREAKING (installer): `APPSTRATE_AUTO_INSTALL` is retired — `scripts/bootstrap.sh`
+  now refuses to run while it is set.** The variable was a fourth trigger for a
+  decision three live signals already make (`--yes`, `CI=true|1|yes`, stdout is
+  not a TTY), and its only justification was preserving the pre-two-step
+  "always auto-install" default for IaC written against it. Its only in-repo
+  writer was the CI scenario covering the legacy path itself.
+
+  It is a hard failure, not a silent ignore, because silence is the expensive
+  answer here: an Ansible / cloud-init run that still exports it would fall
+  through to the two-step path and exit 0 having dropped the binary and
+  installed nothing — a provisioning run that reports success and provisions
+  no instance. The guard runs before the first download and names the
+  replacement. **Replace `APPSTRATE_AUTO_INSTALL=1` with `--yes`**
+  (`curl -fsSL https://get.appstrate.dev | bash -s -- --yes`); CI runners and
+  non-TTY contexts already select unattended mode on their own and need no
+  change. An explicitly blanked `APPSTRATE_AUTO_INSTALL=` carries no intent and
+  stays a no-op, matching `RETIRED_ENV_RENAMES` in `@appstrate/env`.
+  `APPSTRATE_NO_LAUNCH=1` is untouched.
+
 - **Three columns that were written and never read**, with their writers
   (migrations `0044` and `0045`). The `last_refresh_failure_at` columns on
   `model_provider_credentials` and on `integration_connections` were stamped
