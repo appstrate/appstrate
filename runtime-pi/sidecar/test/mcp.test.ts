@@ -10,7 +10,7 @@
  * SSRF guarantees that the MCP path enforces end-to-end.
  */
 
-import { describe, it, expect, mock } from "bun:test";
+import { describe, it, expect, jest, mock } from "bun:test";
 import { PROXY_INJECTED_FIELD } from "@appstrate/connect/integration-credentials";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -578,4 +578,109 @@ describe("POST /mcp — api_call", () => {
     const result = res.json.result as { tools: Array<{ name: string }> };
     expect(result.tools.some((t) => t.name.endsWith("__api_call"))).toBe(false);
   });
+});
+
+/**
+ * The deadline on the two first-party platform calls.
+ *
+ * `run_history` and `recall_memory` are the sidecar's only calls out to the
+ * platform, and `/mcp` has no server-side deadline of its own: a platform that
+ * accepts the connection and never answers would hang the agent's tool call —
+ * and the agent with it — for the rest of the run. `OUTBOUND_TIMEOUT_MS` is
+ * the same 30 s bound every other outbound call in the sidecar carries.
+ *
+ * Fake timers, not real sleeps: a suite that actually waits 30 s is not worth
+ * having. Bun's fake timers drive `AbortSignal.timeout` too.
+ */
+describe("POST /mcp — first-party platform calls are deadline-bounded", () => {
+  /** Let the in-flight request chain advance without any wall-clock wait. */
+  async function flushMicrotasks(): Promise<void> {
+    for (let i = 0; i < 50; i++) await Promise.resolve();
+  }
+
+  /** A platform that accepts the call and never answers, ending only on abort. */
+  function hangingFetch(signals: AbortSignal[]): typeof fetch {
+    return (async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      const signal = init?.signal;
+      if (!signal) throw new Error("platform call carried no AbortSignal — it can hang forever");
+      signals.push(signal);
+      return await new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    }) as unknown as typeof fetch;
+  }
+
+  for (const [tool, args] of [
+    ["run_history", { limit: 5 }],
+    ["recall_memory", { q: "python" }],
+  ] as const) {
+    it(`${tool} gives up when the platform never answers`, async () => {
+      jest.useFakeTimers();
+      try {
+        const signals: AbortSignal[] = [];
+        const app = createTestApp(makeDeps({ fetchFn: hangingFetch(signals) }));
+        const pending = rpc(app, { method: "tools/call", params: { name: tool, arguments: args } });
+
+        await flushMicrotasks();
+        expect(signals).toHaveLength(1);
+        // One second short of the bound, the call is still waiting — the
+        // deadline is the 30 s one, not an accidental shorter cancel.
+        jest.advanceTimersByTime(29_000);
+        await flushMicrotasks();
+        expect(signals[0]!.aborted).toBe(false);
+
+        jest.advanceTimersByTime(2_000);
+        await flushMicrotasks();
+
+        const res = await pending;
+        expect((signals[0]!.reason as Error).name).toBe("TimeoutError");
+        const result = res.json.result as { content: Array<{ text: string }>; isError?: boolean };
+        // A tool-level error the agent can read and retry — not a hung call.
+        expect(result.isError).toBe(true);
+        expect(result.content[0]!.text).toBe(`${tool}: upstream fetch timed out after 30000ms`);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    // Control: same tool, same clock, against a platform that answers. If the
+    // composed signal broke the call outright, or the deadline fired on a
+    // finished request, this fails — so the test above cannot pass by way of a
+    // wholly broken path.
+    it(`${tool} still returns the upstream body when the platform answers`, async () => {
+      jest.useFakeTimers();
+      try {
+        // Sampled at call time. Reading it afterwards would say nothing: the
+        // SDK aborts the MCP request's own signal once the response is
+        // written, and that signal is one leg of the composed one — which is
+        // precisely why the deadline is composed WITH it rather than replacing
+        // it.
+        let armedNotFired: boolean | undefined;
+        const fetchFn = (async (
+          _input: string | URL | Request,
+          init?: RequestInit,
+        ): Promise<Response> => {
+          armedNotFired = init?.signal != null && !init.signal.aborted;
+          return new Response('{"ok":true}', {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }) as unknown as typeof fetch;
+        const app = createTestApp(makeDeps({ fetchFn }));
+
+        const res = await rpc(app, {
+          method: "tools/call",
+          params: { name: tool, arguments: args },
+        });
+
+        const result = res.json.result as { content: Array<{ text: string }>; isError?: boolean };
+        expect(result.isError).toBeUndefined();
+        expect(result.content[0]!.text).toBe('{"ok":true}');
+        // The bound was armed and simply never reached.
+        expect(armedNotFired).toBe(true);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+  }
 });

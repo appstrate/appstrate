@@ -389,7 +389,7 @@ async function nextRunNumber(
  * automatically at transaction end.
  */
 async function acquireRunNumberLock(tx: DbTx, scope: SpaceScope, packageId: string): Promise<void> {
-  const lockKey = `run_number:${scope.orgId ?? ""}:${scope.spaceId ?? ""}:${packageId}`;
+  const lockKey = `run_number:${scope.orgId}:${scope.spaceId}:${packageId}`;
   await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
 }
 
@@ -435,18 +435,17 @@ export function orgRunConcurrencyLockKey(orgId: string): string {
  * lock serializes admission per org; the cap therefore holds exactly. Throws a
  * 429 `org_run_concurrency_exceeded` (same code the gate surfaces) when at cap.
  *
- * A no-op when the run-limits registry is not initialized (e.g. an isolated
- * unit test that never booted it) — there is no cap to enforce.
+ * An uninitialized run-limits registry throws through, it does NOT open the
+ * gate: this is the authoritative enforcement (the preflight pre-check is
+ * explicitly non-atomic), so swallowing that throw silently uncapped the org
+ * for the whole INSERT. The peer read in `run-preflight-gates.ts` lets the same
+ * throw propagate; a caller that reaches either without `initRunLimits()` has a
+ * boot-ordering bug, not a run to admit.
  */
 async function enforceOrgConcurrencyCap(tx: DbTx, scope: SpaceScope): Promise<void> {
-  let cap: number;
-  try {
-    cap = getPlatformRunLimits().max_concurrent_per_org;
-  } catch {
-    return;
-  }
+  const cap = getPlatformRunLimits().max_concurrent_per_org;
   await tx.execute(
-    sql`SELECT pg_advisory_xact_lock(hashtext(${orgRunConcurrencyLockKey(scope.orgId ?? "")})::bigint)`,
+    sql`SELECT pg_advisory_xact_lock(hashtext(${orgRunConcurrencyLockKey(scope.orgId)})::bigint)`,
   );
   const [row] = await tx
     .select({ active: count() })

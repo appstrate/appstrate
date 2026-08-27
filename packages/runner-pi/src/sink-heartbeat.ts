@@ -19,6 +19,10 @@
  *     transient network error shouldn't tear down an otherwise healthy
  *     run. The watchdog is the backstop — if heartbeats have truly
  *     stopped, it finalizes as `failed` after `stallThreshold`.
+ *   - Every attempt is deadline-bounded (see `attemptTimeoutMs` below).
+ *     Ticks are serialised, so an unbounded POST that never settles is not
+ *     one lost ping — it silences the heartbeat for the rest of the run and
+ *     makes the watchdog reap a live container.
  *
  * Jitter (±15% by default): per the AWS Builders' Library "timeouts,
  * retries, backoff with jitter" guidance, randomising the interval
@@ -103,6 +107,33 @@ export function startSinkHeartbeat(opts: StartSinkHeartbeatOptions): SinkHeartbe
 
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  /** The controller of the POST currently in flight, if any (see `stop()`). */
+  let inFlight: AbortController | null = null;
+
+  /**
+   * Per-attempt deadline, derived from the tick interval rather than added as
+   * a separate knob: half an interval.
+   *
+   * Ticks are serialised (`sendOnce().finally(scheduleNext)`), so an attempt
+   * that never settles does not merely lose one ping — it stops the loop for
+   * good, and the platform's stall watchdog then reaps a container that is
+   * perfectly alive. That is the exact failure this component exists to
+   * prevent, so every attempt must be bounded.
+   *
+   * Half an interval, and not more. The invariant to preserve is that a hung
+   * attempt must still leave a ping inside the watchdog's window: the bound
+   * caps the worst-case gap between two ATTEMPTS at 1.5 intervals (a hang
+   * burns half an interval, then the next tick waits a full one), which is
+   * 22.5 s at this helper's 15 s default (the CLI) and 45 s at the container's
+   * `HEARTBEAT_INTERVAL_MS` of 30 s — both under the 60 s
+   * `RUN_STALL_THRESHOLD_SECONDS` the platform reaps on. A deadline at or
+   * above the interval pushes that gap to ≥2 intervals, which at 30 s exceeds
+   * the threshold outright: the pile-up again, only slower. In the other
+   * direction, even the smaller 7.5 s is orders of magnitude above an honest
+   * heartbeat RTT (a bodyless POST to the platform), so it cannot fire on a
+   * merely slow-but-live network.
+   */
+  const attemptTimeoutMs = Math.max(1, Math.round(intervalMs / 2));
 
   const scheduleNext = (): void => {
     if (stopped) return;
@@ -125,11 +156,19 @@ export function startSinkHeartbeat(opts: StartSinkHeartbeatOptions): SinkHeartbe
     const msgId = generateId();
     const timestampSec = Math.floor(now() / 1000);
     const headers = sign({ msgId, timestampSec, body, secret: opts.runSecret });
+    // Two ways this request may be cut short, composed into one signal:
+    // `attempt` is `stop()`'s handle on an in-flight POST, the timeout is the
+    // per-tick deadline above. Nothing reads the response body, so a
+    // whole-request bound is the right instrument here (unlike a streaming
+    // upstream, where it would also cap the stream).
+    const attempt = new AbortController();
+    inFlight = attempt;
     try {
       const res = await fetchImpl(opts.url, {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
         body,
+        signal: AbortSignal.any([attempt.signal, AbortSignal.timeout(attemptTimeoutMs)]),
       });
       if (!res.ok && res.status !== 410) {
         // 410 (Gone) — sink already closed, equivalent to "stop" from
@@ -142,7 +181,11 @@ export function startSinkHeartbeat(opts: StartSinkHeartbeatOptions): SinkHeartbe
         stopped = true;
       }
     } catch (err) {
-      onError(err);
+      // A rejection caused by our own `stop()` is not a fault to report: the
+      // caller asked for the abort and is already tearing the run down.
+      if (!stopped) onError(err);
+    } finally {
+      inFlight = null;
     }
   };
 
@@ -155,6 +198,12 @@ export function startSinkHeartbeat(opts: StartSinkHeartbeatOptions): SinkHeartbe
         clearTimeout(timer);
         timer = null;
       }
+      // Clearing the timer cancels the NEXT tick; it says nothing about a POST
+      // already in flight, which would otherwise hold a socket until its
+      // deadline expires — past the run's own teardown. Abort it explicitly so
+      // `stop()` means stopped.
+      inFlight?.abort();
+      inFlight = null;
     },
   };
 }

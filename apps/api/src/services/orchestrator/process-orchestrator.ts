@@ -549,7 +549,24 @@ export class ProcessOrchestrator implements RunOrchestrator {
   async startWorkload(handle: WorkloadHandle): Promise<void> {
     const pending = this.pendingSpecs.get(handle.id);
     const ph = this.processes.get(handle.id);
-    if (!pending || !ph) return;
+    if (!pending || !ph) {
+      // The one legitimate miss: `createSidecar` spawns eagerly in this
+      // topology (there is no container to start later), so it registers a
+      // process entry and NO pending spec. The Docker path defers its sidecar
+      // start, which is why callers issue this call at all — here it is a no-op.
+      if (ph?.role === "sidecar") return;
+      // Anything else is a caller/lifecycle bug, and the silent `return` this
+      // replaces hid it: the caller went on to `waitForExit` a process that
+      // would never be spawned. Name WHICH half is missing — both gone means an
+      // id this orchestrator never created (or already removed), exactly one
+      // gone means a half-torn-down record.
+      const missing: string[] = [];
+      if (!pending) missing.push("pending spec");
+      if (!ph) missing.push("process entry");
+      throw new Error(
+        `Process orchestrator: cannot start workload "${handle.id}" — missing ${missing.join(" + ")}`,
+      );
+    }
 
     const stdoutPath = join(pending.workDir, ".stdout.jsonl");
 
@@ -610,6 +627,12 @@ export class ProcessOrchestrator implements RunOrchestrator {
       // Already dead
     }
     this.processes.delete(handle.id);
+    // The pending spec goes with it. `startWorkload` consumes it on the happy
+    // path, but a workload removed BEFORE it ever started (every sidecar- or
+    // upload-failure teardown in `run-launcher/pi.ts`) never reaches that
+    // delete — and the spec holds the agent's full env: RUN_TOKEN, sink secret,
+    // model credentials. Nothing else ever evicts this map short of `shutdown`.
+    this.pendingSpecs.delete(handle.id);
     if (ph.role === "sidecar") this.sidecarPorts.delete(ph.runId);
     await this.removePidfile(ph.runId, ph.role);
   }

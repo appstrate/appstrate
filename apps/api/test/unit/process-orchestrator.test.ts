@@ -437,4 +437,141 @@ describe("ProcessOrchestrator", () => {
       expect(port).toBeLessThan(65536);
     });
   });
+
+  /**
+   * `pendingSpecs` retains the agent's FULL env — RUN_TOKEN, sink secret,
+   * model credentials — until something evicts it. Only `startWorkload`
+   * (happy path) and `shutdown` ever did; `removeWorkload` deleted the
+   * `processes` entry and left the spec behind. Every sidecar- or
+   * upload-failure teardown in `run-launcher/pi.ts` takes exactly that path,
+   * so a long-lived process-mode platform accumulated one credential-bearing
+   * spec per failed launch, forever.
+   *
+   * The knock-on was worse than the retention: a later `startWorkload` found
+   * the spec but no process entry and returned SILENTLY, leaving the caller
+   * to `waitForExit` a process that would never be spawned.
+   */
+  describe("createWorkload / startWorkload / removeWorkload", () => {
+    beforeEach(async () => {
+      await resetDataDir();
+      orchestrator = new ProcessOrchestrator();
+      await orchestrator.initialize();
+    });
+
+    /** The private map, read directly — the retention IS the defect. */
+    function pendingSpecCount(): number {
+      return (orchestrator as unknown as { pendingSpecs: Map<string, unknown> }).pendingSpecs.size;
+    }
+
+    async function stageAgent(runId: string) {
+      const boundary = await orchestrator.createIsolationBoundary(runId);
+      const handle = await orchestrator.createWorkload(
+        {
+          runId,
+          role: "agent",
+          image: "unused-in-process-mode",
+          env: { RUN_TOKEN: "run-token-that-must-not-be-retained" },
+          resources: { memoryBytes: 512 * 1024 * 1024, nanoCpus: 1_000_000_000 },
+        },
+        boundary,
+      );
+      return { boundary, handle };
+    }
+
+    /** Swap the agent entrypoint for an idle script so no real run boots. */
+    async function withFakeEntrypoint<T>(dir: string, fn: () => Promise<T>): Promise<T> {
+      const fake = join(dir, "fake-agent.ts");
+      await writeFile(fake, "setInterval(()=>{},60000);");
+      const originalSpawn = Bun.spawn;
+      const patched = ((cmd: string[], opts: Parameters<typeof Bun.spawn>[1]) =>
+        originalSpawn(
+          cmd[0] === "bun" && cmd[1] === "run" ? ["bun", "run", fake] : cmd,
+          opts,
+        )) as typeof Bun.spawn;
+      (Bun as { spawn: typeof Bun.spawn }).spawn = patched;
+      try {
+        return await fn();
+      } finally {
+        (Bun as { spawn: typeof Bun.spawn }).spawn = originalSpawn;
+      }
+    }
+
+    // CONTROL. Passes before and after: the happy path must still consume the
+    // spec and actually SPAWN. Without it, a `startWorkload` that threw (or
+    // returned) unconditionally would look identical to the fix below.
+    it("startWorkload spawns the staged process and consumes its pending spec", async () => {
+      const { boundary, handle } = await stageAgent("test-run-start-ok");
+      expect(pendingSpecCount()).toBe(1);
+
+      await withFakeEntrypoint(boundary.id, () => orchestrator.startWorkload(handle));
+
+      expect(await readdir(boundary.id)).toContain("agent.pid");
+      expect(pendingSpecCount()).toBe(0);
+    }, 10_000);
+
+    it("removeWorkload drops the pending spec, not just the process entry", async () => {
+      const { handle } = await stageAgent("test-run-remove-evicts");
+      expect(pendingSpecCount()).toBe(1);
+
+      await orchestrator.removeWorkload(handle);
+
+      expect(pendingSpecCount()).toBe(0);
+    });
+
+    it("startWorkload after removeWorkload throws, naming both missing halves", async () => {
+      const { handle } = await stageAgent("test-run-start-after-remove");
+      await orchestrator.removeWorkload(handle);
+
+      const err = await orchestrator.startWorkload(handle).then(
+        () => null,
+        (e: unknown) => e,
+      );
+
+      expect(err).toBeInstanceOf(Error);
+      // BOTH halves gone is what proves the spec was evicted with the process
+      // entry: a removeWorkload that dropped only the process entry would
+      // report the process entry alone.
+      expect((err as Error).message).toContain("pending spec");
+      expect((err as Error).message).toContain("process entry");
+    });
+
+    it("startWorkload throws for a handle this orchestrator never created", async () => {
+      const err = await orchestrator
+        .startWorkload({ id: "workload-ghost-agent", runId: "ghost", role: "agent" })
+        .then(
+          () => null,
+          (e: unknown) => e,
+        );
+
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toContain("workload-ghost-agent");
+    });
+
+    it("startWorkload is a no-op for a sidecar, which createSidecar already spawned", async () => {
+      // The carve-out that keeps connect-runs working in process mode:
+      // `createSidecar` spawns eagerly and stages no pending spec, but the
+      // Docker path defers its start, so callers issue the call regardless.
+      const runId = "test-run-sidecar-start";
+      const boundary = await orchestrator.createIsolationBoundary(runId);
+      const fakeSidecar = join(boundary.id, "fake-sidecar.ts");
+      await writeFile(fakeSidecar, "setInterval(()=>{},60000);");
+
+      const originalSpawn = Bun.spawn;
+      const patched = ((cmd: string[], opts: Parameters<typeof Bun.spawn>[1]) =>
+        originalSpawn(
+          cmd[0] === "bun" && cmd[1] === "run" ? ["bun", "run", fakeSidecar] : cmd,
+          opts,
+        )) as typeof Bun.spawn;
+      (Bun as { spawn: typeof Bun.spawn }).spawn = patched;
+      let sidecar;
+      try {
+        sidecar = await orchestrator.createSidecar(runId, boundary, { runToken: "tok" });
+      } finally {
+        (Bun as { spawn: typeof Bun.spawn }).spawn = originalSpawn;
+      }
+
+      await orchestrator.startWorkload(sidecar); // must not throw
+      await orchestrator.stopByRunId(runId);
+    }, 10_000);
+  });
 });

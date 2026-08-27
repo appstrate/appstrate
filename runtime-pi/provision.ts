@@ -32,6 +32,32 @@ import { getErrorMessage } from "@appstrate/core/errors";
  */
 const PROVISION_MAX_ATTEMPTS = 9;
 
+/**
+ * Per-attempt deadline on the platform's RESPONSE HEADERS.
+ *
+ * Without it the budget above is unreachable: a platform that accepts the
+ * connection and never answers leaves attempt 1 pending forever, so the 9
+ * attempts never happen and boot hangs. Nothing else catches that — the run
+ * watchdog's agent budget starts at the run loop, boot excluded
+ * (`entrypoint.ts`).
+ *
+ * 10 s, sized against the two ends it sits between. Below: this is a
+ * platform-local hop (through the sidecar forward proxy when attached), whose
+ * honest time-to-first-byte at boot is sub-second — 10 s is more than an order
+ * of magnitude of headroom, so it cannot fire on a merely slow platform.
+ * Above: the whole loop must finish well inside `RUN_BOOT_DEADLINE_SECONDS`
+ * (300 s) or the failure surfaces as an opaque boot-deadline reap instead of
+ * the "failed after N attempts" message this function raises; 9 × 10 s plus
+ * ~9.7 s of backoff is ~100 s, a 3× margin. A 30 s bound would fit only
+ * barely, and buys nothing this hop needs.
+ *
+ * HEADERS only, then disarmed: a signal handed to `fetch` aborts the BODY too,
+ * and `provisionFiles` streams input files (up to `WORKSPACE_MAX_FILES_BYTES`,
+ * 256 MiB) off the very `Response` this function returns. A whole-request cap
+ * would kill a healthy large download mid-stream.
+ */
+const PROVISION_HEADERS_TIMEOUT_MS = 10_000;
+
 export interface ProvisionDeps {
   /** The run-scoped event sink URL (`…/api/runs/:id/events`). The workspace
    *  and files routes are derived by swapping the `/events` suffix. */
@@ -61,8 +87,9 @@ const defaultSleep = (ms: number): Promise<void> => new Promise((r) => setTimeou
  * budget. Re-signs each attempt (fresh timestamp). Returns the {@link Response}
  * as soon as it is `ok` OR carries a deterministic non-retryable status (4xx
  * other than 429 — the caller decides whether that status is fatal). Retries
- * 5xx, 429, and network errors with exponential backoff; throws only when the
- * budget is exhausted on transient failures.
+ * 5xx, 429, network errors, and attempts whose response headers do not arrive
+ * within {@link PROVISION_HEADERS_TIMEOUT_MS}, with exponential backoff; throws
+ * only when the budget is exhausted on transient failures.
  *
  * Auth mirrors the event sink: a Standard Webhooks HMAC over the (empty) GET
  * body keyed on the run secret. Outbound traffic reaches the platform exactly
@@ -84,7 +111,29 @@ export async function signedGetWithRetry(url: string, deps: ProvisionDeps): Prom
           secret: deps.sinkSecret,
         }),
       };
-      const res = await fetchFn(url, { method: "GET", headers });
+      // Arm the headers deadline for this attempt and disarm it the moment the
+      // response object exists (or the attempt fails) — see
+      // `PROVISION_HEADERS_TIMEOUT_MS` for why it must not outlive the headers.
+      // A fired deadline rejects with a `TimeoutError`, which the `catch` below
+      // already classifies as a retryable failure, so a hung attempt now spends
+      // one attempt of the budget instead of all of it.
+      const deadline = new AbortController();
+      const timer = setTimeout(
+        () =>
+          deadline.abort(
+            new DOMException(
+              `no response headers after ${PROVISION_HEADERS_TIMEOUT_MS}ms`,
+              "TimeoutError",
+            ),
+          ),
+        PROVISION_HEADERS_TIMEOUT_MS,
+      );
+      let res: Response;
+      try {
+        res = await fetchFn(url, { method: "GET", headers, signal: deadline.signal });
+      } finally {
+        clearTimeout(timer);
+      }
       // Success, or a deterministic 4xx (404 missing, 401 bad signature, 410
       // closed/expired sink) that retrying cannot fix — hand back either way.
       if (res.ok || !isRetryableHttpStatus(res.status)) return res;

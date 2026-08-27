@@ -469,36 +469,77 @@ async function runPlatformContainerImpl(
     // agent boots; racing it alongside the create calls here satisfies that
     // ordering. When `skipSidecar`, only the agent is created (it reaches the
     // platform directly over its egress network).
-    const [sidecar, agent] = await Promise.all([
-      skipSidecar ? Promise.resolve(undefined) : orch.createSidecar(runId, boundary, sidecarSpec),
-      orch.createWorkload(
-        {
-          runId,
-          role: "agent",
-          image: getEnv().PI_IMAGE,
-          env: containerEnv,
-          resources: plan.resources.workload,
-          // Without a sidecar there is no egress proxy — the agent must
-          // reach the upstream LLM and the platform sink directly, so it
-          // goes on the egress network instead of the internal boundary.
-          egress: skipSidecar,
-          // Hard host-side lifetime ceiling (B2): run budget + the same
-          // boot grace the platform safety net uses + a 600 s margin, so
-          // the daemon's kill is strictly a LAST resort behind the
-          // safety-net setTimeout in waitForWorkload — it only ever fires
-          // when the platform died or was partitioned mid-run and its own
-          // stop can no longer reach the workload.
-          maxLifetimeSeconds:
-            plan.timeout +
-            Math.ceil((input.timeoutBootGraceMs ?? platformTimeoutBootGraceMs()) / 1000) +
-            600,
-        },
-        boundary,
+    //
+    // `allSettled`, NOT `all`. Two distinct leaks came out of `all`, and only
+    // waiting for every branch closes both:
+    //   - `all` rejects on the FIRST failure, so the `await` never returns and
+    //     `sidecarHandle` / `agentHandle` are never assigned — the `finally`
+    //     below then sees `undefined` and removes nothing. On Docker the agent
+    //     container sits on `boundary.id`, so `removeIsolationBoundary`'s
+    //     network + volume removals 409 on the still-attached container and are
+    //     swallowed by its own `allSettled`: container, network AND volume all
+    //     leak, holding `spec.env` — RUN_TOKEN, sink secret, model credentials,
+    //     the sidecar auth token — readable via `docker inspect` forever
+    //     (`cleanupOrphans()` runs only at boot).
+    //   - `all` also resumes the caller while the slower branches are still in
+    //     flight, so a container created AFTER a sibling's rejection is born
+    //     orphaned — cleanup has already run.
+    // Assignment therefore happens on the settled results, before the rethrow.
+    //
+    // `rejections` preserves WHICH failure the caller sees: `all` reported the
+    // branch that failed first IN TIME, not the lowest index, and the catch
+    // below plus the caller's error mapping have always keyed off that one.
+    // Re-deriving it from array position would silently blame a different phase.
+    const rejections: unknown[] = [];
+    const track = <T>(p: Promise<T>): Promise<T> =>
+      p.catch((err: unknown) => {
+        rejections.push(err);
+        throw err;
+      });
+    const [sidecarResult, agentResult, uploadResult] = await Promise.allSettled([
+      track(
+        skipSidecar ? Promise.resolve(undefined) : orch.createSidecar(runId, boundary, sidecarSpec),
       ),
-      uploadBundle(runId, plan.agentPackage ?? undefined),
+      track(
+        orch.createWorkload(
+          {
+            runId,
+            role: "agent",
+            image: getEnv().PI_IMAGE,
+            env: containerEnv,
+            resources: plan.resources.workload,
+            // Without a sidecar there is no egress proxy — the agent must
+            // reach the upstream LLM and the platform sink directly, so it
+            // goes on the egress network instead of the internal boundary.
+            egress: skipSidecar,
+            // Hard host-side lifetime ceiling (B2): run budget + the same
+            // boot grace the platform safety net uses + a 600 s margin, so
+            // the daemon's kill is strictly a LAST resort behind the
+            // safety-net setTimeout in waitForWorkload — it only ever fires
+            // when the platform died or was partitioned mid-run and its own
+            // stop can no longer reach the workload.
+            maxLifetimeSeconds:
+              plan.timeout +
+              Math.ceil((input.timeoutBootGraceMs ?? platformTimeoutBootGraceMs()) / 1000) +
+              600,
+          },
+          boundary,
+        ),
+      ),
+      track(uploadBundle(runId, plan.agentPackage ?? undefined)),
     ]);
-    sidecarHandle = sidecar;
-    agentHandle = agent;
+    // Reclaimable BEFORE the rethrow: whatever exists must reach the `finally`.
+    if (sidecarResult.status === "fulfilled") sidecarHandle = sidecarResult.value;
+    if (agentResult.status === "fulfilled") agentHandle = agentResult.value;
+    if (
+      sidecarResult.status === "rejected" ||
+      agentResult.status === "rejected" ||
+      uploadResult.status === "rejected"
+    ) {
+      throw rejections[0];
+    }
+    const sidecar = sidecarResult.value;
+    const agent = agentResult.value;
     recordContainerSpawn(Date.now() - spawnStart, { sidecar: !skipSidecar });
     spawnRecorded = true;
 

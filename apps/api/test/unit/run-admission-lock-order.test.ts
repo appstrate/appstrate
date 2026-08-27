@@ -112,3 +112,32 @@ describe("run-admission lock order", () => {
     assertOrder(body, "deleteOrganization", "orgRunConcurrencyLockKey(orgId)", ".from(files)");
   });
 });
+
+/**
+ * Same channel as the order guard above, for the same reason: the invariant is
+ * decidable from the source, and the failure mode it guards is unreachable
+ * through the public surface. `lib/scope.ts` declares `SpaceScope.orgId` and
+ * `.spaceId` required and non-nullable, and says in prose that these types
+ * "replace the old `{ orgId: "" }` sentinel" — so no caller can hand these
+ * lock keys a nullish id, and no behavioural test can make the `?? ""` fire.
+ *
+ * It is still not inert. `??` on a non-nullable operand is dead scaffolding
+ * that `docs/NO_TRANSITIONAL_CODE.md` forbids, and it is the loudest possible
+ * kind: the day either field turns optional, every org silently collapses onto
+ * `run_concurrency:` — ONE advisory lock serialising run admission platform-wide
+ * — and nothing fails, it just queues.
+ */
+describe("run-admission lock keys", () => {
+  it("derives both advisory keys from the scope's real ids, with no empty-string sentinel", () => {
+    const source = readFileSync(join(SRC_ROOT, "services/state/runs.ts"), "utf8");
+
+    // Positive control: the two keys still exist and are still scope-derived,
+    // so the `not.toContain`s below cannot pass by the expressions having been
+    // renamed or deleted out from under them.
+    expect(source).toContain("`run_number:${scope.orgId}:${scope.spaceId}:${packageId}`");
+    expect(source).toContain("orgRunConcurrencyLockKey(scope.orgId)");
+
+    expect(source).not.toContain('scope.orgId ?? ""');
+    expect(source).not.toContain('scope.spaceId ?? ""');
+  });
+});

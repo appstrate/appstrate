@@ -213,8 +213,11 @@ export function createSpacesRouter() {
     return next();
   });
 
-  // GET /api/spaces/:spaceId/packages — list installed packages
-  router.get("/:spaceId/packages", async (c) => {
+  // GET /api/spaces/:spaceId/packages — list installed packages.
+  // The `router.use` guards above only prove the space belongs to the org;
+  // `spaces:read` is the read twin of the `spaces:write` the mutating routes
+  // carry, and matches this route being package-type agnostic.
+  router.get("/:spaceId/packages", requirePermission("spaces", "read"), async (c) => {
     const spaceId = c.req.param("spaceId")!;
     const orgId = c.get("orgId");
     const type = c.req.query("type") as PackageType | undefined;
@@ -235,21 +238,25 @@ export function createSpacesRouter() {
   });
 
   // GET /api/spaces/:spaceId/packages/:packageId — get installed package detail
-  router.get(`/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
-    const spaceId = c.req.param("spaceId")!;
-    const orgId = c.get("orgId");
-    const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
-    const row = await getInstalledPackage({ orgId, spaceId: spaceId }, packageId);
-    if (!row) {
-      throw new ApiError({
-        status: 404,
-        code: "package_not_installed",
-        title: "Package Not Installed",
-        detail: `Package '${packageId}' is not installed in this space`,
-      });
-    }
-    return c.json({ object: "space_package", ...row });
-  });
+  router.get(
+    `/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`,
+    requirePermission("spaces", "read"),
+    async (c) => {
+      const spaceId = c.req.param("spaceId")!;
+      const orgId = c.get("orgId");
+      const packageId = `${c.req.param("scope")!}/${c.req.param("name")!}`;
+      const row = await getInstalledPackage({ orgId, spaceId: spaceId }, packageId);
+      if (!row) {
+        throw new ApiError({
+          status: 404,
+          code: "package_not_installed",
+          title: "Package Not Installed",
+          detail: `Package '${packageId}' is not installed in this space`,
+        });
+      }
+      return c.json({ object: "space_package", ...row });
+    },
+  );
 
   // PUT /api/spaces/:spaceId/packages/:packageId — update config
   router.put(

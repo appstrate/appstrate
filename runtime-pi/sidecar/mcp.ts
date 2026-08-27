@@ -82,6 +82,7 @@ import {
   MAX_MCP_ENVELOPE_SIZE,
   MAX_REQUEST_BODY_SIZE,
   MAX_RESPONSE_SIZE,
+  OUTBOUND_TIMEOUT_MS,
   concatAndRelease,
   readRequestBodyBounded,
   substituteVars,
@@ -667,6 +668,28 @@ function validateMultipartParts(parts: unknown): MultipartValidationOk | Multipa
 }
 
 /**
+ * One-line failure text for a first-party platform call that never produced a
+ * response. Shared by `run_history` and `recall_memory`, whose upstream is the
+ * same platform and whose failure modes are therefore identical.
+ *
+ * The three cases are distinguished because the agent acts on them
+ * differently, and because the legacy numeric `code` an aborted fetch carries
+ * (`23` for a timeout, `20` for an abort) tells it nothing: a deadline hit is
+ * worth retrying, a caller-side cancellation is not, and a transport fault
+ * keeps surfacing its `ECONNREFUSED`-style code as it always has.
+ */
+function upstreamFetchErrorText(tool: string, err: unknown): string {
+  if (err instanceof Error && err.name === "TimeoutError") {
+    return `${tool}: upstream fetch timed out after ${OUTBOUND_TIMEOUT_MS}ms`;
+  }
+  if (err instanceof Error && err.name === "AbortError") {
+    return `${tool}: upstream fetch aborted`;
+  }
+  const code = err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
+  return `${tool}: upstream fetch failed${code ? `: ${code}` : ""}`;
+}
+
+/**
  * Build the `{ns}__api_call`, `run_history`, and `recall_memory` MCP
  * tool definitions. All three tools are implemented in-process —
  * `{ns}__api_call` calls {@link executeApiCall} directly via
@@ -1188,7 +1211,7 @@ function buildSidecarTools(options: MountMcpOptions): {
       inputSchema:
         RUN_HISTORY_INJECTED_TOOL.parameters as AppstrateToolDefinition["descriptor"]["inputSchema"],
     },
-    handler: async (rawArgs) => {
+    handler: async (rawArgs, extra) => {
       const args = rawArgs as { limit?: number; fields?: string[] };
       const params = new URLSearchParams();
       if (args.limit !== undefined) params.set("limit", String(args.limit));
@@ -1200,13 +1223,20 @@ function buildSidecarTools(options: MountMcpOptions): {
       try {
         res = await fetchFn(url, {
           headers: { Authorization: `Bearer ${config.runToken}` },
+          // Caller cancellation and deadline, composed: `extra.signal` is the
+          // MCP request's own abort (client gone, transport closed) and must
+          // keep working, `OUTBOUND_TIMEOUT_MS` is the same bound every other
+          // outbound call in the sidecar already carries. `/mcp` has no
+          // server-side deadline of its own, so without this a platform that
+          // accepts the connection and never answers hangs this tool call —
+          // and with it the agent — for the rest of the run. Bounding the
+          // whole request is right here: `responseToToolResult` reads the body
+          // immediately, there is no long-lived stream to cap.
+          signal: AbortSignal.any([extra.signal, AbortSignal.timeout(OUTBOUND_TIMEOUT_MS)]),
         });
       } catch (err) {
-        const code =
-          err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
-        const suffix = code ? `: ${code}` : "";
         return {
-          content: [{ type: "text", text: `run_history: upstream fetch failed${suffix}` }],
+          content: [{ type: "text", text: upstreamFetchErrorText("run_history", err) }],
           isError: true,
         };
       }
@@ -1233,7 +1263,7 @@ function buildSidecarTools(options: MountMcpOptions): {
       inputSchema:
         RECALL_MEMORY_INJECTED_TOOL.parameters as AppstrateToolDefinition["descriptor"]["inputSchema"],
     },
-    handler: async (rawArgs) => {
+    handler: async (rawArgs, extra) => {
       const args = rawArgs as { q?: string; limit?: number };
       const params = new URLSearchParams();
       if (args.q !== undefined && args.q.length > 0) params.set("q", args.q);
@@ -1245,13 +1275,13 @@ function buildSidecarTools(options: MountMcpOptions): {
       try {
         res = await fetchFn(url, {
           headers: { Authorization: `Bearer ${config.runToken}` },
+          // Same composed cancellation + deadline as `run_history` above —
+          // same upstream, same hang, see there for the reasoning.
+          signal: AbortSignal.any([extra.signal, AbortSignal.timeout(OUTBOUND_TIMEOUT_MS)]),
         });
       } catch (err) {
-        const code =
-          err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
-        const suffix = code ? `: ${code}` : "";
         return {
-          content: [{ type: "text", text: `recall_memory: upstream fetch failed${suffix}` }],
+          content: [{ type: "text", text: upstreamFetchErrorText("recall_memory", err) }],
           isError: true,
         };
       }

@@ -19,7 +19,7 @@
  * container e2e.
  */
 
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, jest } from "bun:test";
 import { mkdtemp, readFile, rm, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -450,5 +450,129 @@ describe("signedGetWithRetry", () => {
     const res = await signedGetWithRetry(`${base}/api/runs/run_test/files`, deps(ws, die));
     expect(res.status).toBe(200);
     expect(config.lastSigOk).toBe(true);
+  });
+});
+
+/**
+ * The per-attempt headers deadline. Without it, an attempt that never settles
+ * consumes the WHOLE retry budget — the documented 9-attempt / ~9.7 s span is
+ * never reached and agent boot hangs forever, with nothing behind it (the run
+ * watchdog's agent budget starts at the run loop, boot excluded).
+ *
+ * Fake timers, not real sleeps: the deadline is 10 s and a suite that actually
+ * waits for it is not worth having.
+ */
+describe("signedGetWithRetry — per-attempt headers deadline", () => {
+  /** Let the pending promise chain advance without any wall-clock wait. */
+  async function flushMicrotasks(): Promise<void> {
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+  }
+
+  it("times out a hung attempt and spends exactly one attempt of the budget on it", async () => {
+    jest.useFakeTimers();
+    try {
+      const signals: AbortSignal[] = [];
+      // Never settles on its own — only the caller's signal ends it, exactly
+      // like a platform that accepts the connection and never answers.
+      const hangingFetch = (async (
+        _input: string | URL | Request,
+        init?: RequestInit,
+      ): Promise<Response> => {
+        const signal = init?.signal;
+        if (!signal) throw new Error("provisioning GET carried no AbortSignal — it can hang");
+        signals.push(signal);
+        return await new Promise<Response>((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      }) as unknown as typeof fetch;
+
+      const ws = await tempWorkspace();
+      const { die } = makeDie();
+      // Capture the outcome eagerly so a rejection is never unhandled.
+      const settled = signedGetWithRetry(
+        `${base}/api/runs/run_test/files`,
+        deps(ws, die, { fetchFn: hangingFetch, maxAttempts: 3 }),
+      ).then(
+        () => "resolved" as const,
+        (err: unknown) => err,
+      );
+
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        await flushMicrotasks();
+        // Each attempt is reached only because the previous one gave up.
+        expect(signals).toHaveLength(attempt);
+        jest.advanceTimersByTime(11_000);
+      }
+      await flushMicrotasks();
+
+      const outcome = await settled;
+      // The budget is REACHED and then exhausted — the whole point.
+      expect((outcome as Error).message).toContain("failed after 3 attempts");
+      expect(signals).toHaveLength(3);
+      // Every attempt died on the deadline, not on some other fault.
+      for (const signal of signals) expect((signal.reason as Error).name).toBe("TimeoutError");
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  // Control: the same path against a platform that answers. If the deadline
+  // fired indiscriminately — or the signal broke the request outright — this
+  // fails, so the test above cannot pass by way of a broken fetch path.
+  it("an attempt answered inside the deadline succeeds and is not retried", async () => {
+    let calls = 0;
+    config.files = () => {
+      calls += 1;
+      return new Response("prompt-bytes", { status: 200 });
+    };
+    const ws = await tempWorkspace();
+    const { die } = makeDie();
+
+    const res = await signedGetWithRetry(`${base}/api/runs/run_test/files`, deps(ws, die));
+
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("prompt-bytes");
+    expect(calls).toBe(1);
+  });
+
+  // The half a whole-request `AbortSignal.timeout` would get wrong:
+  // `provisionFiles` streams input files (up to 256 MiB) off the very Response
+  // this function returns, so the deadline must cover the HEADERS only.
+  it("disarms once the headers land — a body slower than the deadline still completes", async () => {
+    jest.useFakeTimers();
+    try {
+      let captured: AbortSignal | undefined;
+      let push: ReadableStreamDefaultController<Uint8Array> | undefined;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          push = controller;
+        },
+      });
+      const headersThenSilence = (async (
+        _input: string | URL | Request,
+        init?: RequestInit,
+      ): Promise<Response> => {
+        captured = init?.signal ?? undefined;
+        return new Response(body, { status: 200 });
+      }) as unknown as typeof fetch;
+
+      const ws = await tempWorkspace();
+      const { die } = makeDie();
+      const res = await signedGetWithRetry(
+        `${base}/api/runs/run_test/files/big.bin`,
+        deps(ws, die, { fetchFn: headersThenSilence }),
+      );
+      expect(res.status).toBe(200);
+
+      // Six times the per-attempt deadline later, the transfer is still live.
+      jest.advanceTimersByTime(60_000);
+      expect(captured?.aborted).toBe(false);
+
+      push!.enqueue(new TextEncoder().encode("late-bytes"));
+      push!.close();
+      expect(await res.text()).toBe("late-bytes");
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
