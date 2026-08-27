@@ -18,6 +18,7 @@ import {
 } from "../../../src/services/integration-client-registry.ts";
 import { installPackage } from "../../../src/services/space-packages.ts";
 import { assertDbMissing, assertDbHas } from "../../helpers/assertions.ts";
+import { expectRejectedField } from "../../helpers/body-validation.ts";
 import {
   mcpServerManifest,
   remoteIntegrationManifest,
@@ -683,14 +684,17 @@ describe("Packages API", () => {
       expect(body.lock_version).toBeGreaterThan(created.lock_version);
     });
 
-    // `source_code` was dropped from both JSON-body schemas once the last
-    // reader died with the `tool` package type. Neither schema is `.strict()`,
-    // so Zod strips the unknown key instead of rejecting it — a client still
-    // sending it must keep working exactly as before (it was already a no-op:
-    // no route config ever declared the `sourceFileName` that would have
-    // written it). This pins that the removal did not tighten validation.
-    it("still accepts a body carrying the retired source_code key", async () => {
-      const createRes = await app.request("/api/packages/integrations", {
+    // `source_code` was dropped from the JSON-body schemas once the last reader
+    // died with the `tool` package type, and the schemas are `.strict()` since
+    // the retirement was finished: the key now fails loudly instead of being
+    // stripped in silence, which is what a retired name owes its callers
+    // (`docs/NO_TRANSITIONAL_CODE.md` §1) and what #1187 gave the launch
+    // surfaces. Each refusal is asserted through `expectRejectedField` rather
+    // than a bare status — a 400 on these routes is reachable for reasons that
+    // have nothing to do with the schema rule — and each is paired with the
+    // same body MINUS the key, so a 400 can only mean the key was refused.
+    it("rejects a body carrying the retired source_code key", async () => {
+      const rejectedCreate = await app.request("/api/packages/integrations", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
@@ -699,9 +703,18 @@ describe("Packages API", () => {
         }),
       });
 
+      await expectRejectedField(rejectedCreate, "body");
+
+      const createRes = await app.request("/api/packages/integrations", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: remoteIntegrationManifest("@pkgorg/legacy-source-code"),
+        }),
+      });
+
       expect(createRes.status).toBe(201);
       const created = (await createRes.json()) as any;
-      expect(created.source_code).toBeUndefined();
 
       const updateRes = await app.request("/api/packages/integrations/@pkgorg/legacy-source-code", {
         method: "PUT",
@@ -716,9 +729,31 @@ describe("Packages API", () => {
         }),
       });
 
-      expect(updateRes.status).toBe(200);
-      const updated = (await updateRes.json()) as any;
-      expect(updated.source_code).toBeUndefined();
+      await expectRejectedField(updateRes, "body");
+
+      // The control for that refusal, and the only place this file pins that
+      // `.strict()` left the ordinary update path alone: the same body MINUS
+      // the retired key is a 200. The refused PUT wrote nothing, so it still
+      // carries the `lock_version` the create returned.
+      const acceptedUpdate = await app.request(
+        "/api/packages/integrations/@pkgorg/legacy-source-code",
+        {
+          method: "PUT",
+          headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+          body: JSON.stringify({
+            manifest: {
+              ...remoteIntegrationManifest("@pkgorg/legacy-source-code"),
+              display_name: "Renamed Integration",
+            },
+            lock_version: created.lock_version,
+          }),
+        },
+      );
+
+      expect(acceptedUpdate.status).toBe(200);
+      expect(((await acceptedUpdate.json()) as any).lock_version).toBeGreaterThan(
+        created.lock_version,
+      );
     });
   });
 

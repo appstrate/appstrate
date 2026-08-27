@@ -737,6 +737,12 @@ export const packagesPaths = {
                     "SKILL.md content (markdown with YAML frontmatter). Must not be blank.",
                 },
               },
+              // An unknown field is a 400, never a silent drop: the create /
+              // update bodies are `.strict()` in `routes/packages.ts`, so a
+              // client still sending the retired `source_code` learns it is
+              // gone instead of getting a 201 without it. Same rule the four
+              // launch surfaces took in #1187.
+              additionalProperties: false,
             },
           },
         },
@@ -1041,6 +1047,7 @@ export const packagesPaths = {
                 content: { type: "string" },
                 lock_version: { type: "integer", description: "Optimistic lock version" },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -1157,6 +1164,7 @@ export const packagesPaths = {
                   description: "Agent prompt (markdown). Must not be blank.",
                 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -1235,6 +1243,7 @@ export const packagesPaths = {
                 content: { type: "string" },
                 lock_version: { type: "integer", description: "Optimistic lock version" },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -1673,6 +1682,7 @@ export const packagesPaths = {
                   description: "Primary package file content (manifest file).",
                 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -1977,6 +1987,7 @@ export const packagesPaths = {
                 content: { type: "string" },
                 lock_version: { type: "integer", description: "Optimistic lock version" },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -2402,6 +2413,7 @@ export const packagesPaths = {
                 content: { type: "string" },
                 lock_version: { type: "integer", description: "Optimistic lock version" },
               },
+              additionalProperties: false,
             },
           },
         },
