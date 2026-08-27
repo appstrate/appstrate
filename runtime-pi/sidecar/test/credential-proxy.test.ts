@@ -29,7 +29,7 @@ function makeDeps(overrides: Partial<ApiCallDeps> = {}): ApiCallDeps {
       authorizedUris: ["https://api.example.com/**"],
       allowAllUris: false,
       credentialHeaderName: "Authorization",
-      credentialHeaderPrefix: "Bearer",
+      credentialHeaderPrefix: "Bearer ",
       credentialFieldName: "access_token",
     })),
     reportedAuthFailures: new Set<string>(),
@@ -228,7 +228,7 @@ describe("executeApiCall — 401 retry path", () => {
         authorizedUris: ["https://api.example.com/**"],
         allowAllUris: false,
         credentialHeaderName: "Authorization",
-        credentialHeaderPrefix: "Bearer",
+        credentialHeaderPrefix: "Bearer ",
         credentialAllowServerOverride: true,
         credentialFieldName: "access_token",
       })),
@@ -275,7 +275,7 @@ describe("executeApiCall — 401 retry path", () => {
       authorizedUris: ["https://api.example.com/**"],
       allowAllUris: false,
       credentialHeaderName: "Authorization",
-      credentialHeaderPrefix: "Bearer",
+      credentialHeaderPrefix: "Bearer ",
       credentialFieldName: "access_token",
     }));
     const deps = makeDeps({
@@ -343,7 +343,7 @@ describe("executeApiCall — 401 retry path", () => {
       authorizedUris: ["https://api.example.com/**"],
       allowAllUris: false,
       credentialHeaderName: "Authorization",
-      credentialHeaderPrefix: "Bearer",
+      credentialHeaderPrefix: "Bearer ",
       credentialFieldName: "access_token",
     }));
     const deps = makeDeps({
@@ -939,7 +939,7 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
         authorizedUris: null,
         allowAllUris: true,
         credentialHeaderName: "Authorization",
-        credentialHeaderPrefix: "Bearer",
+        credentialHeaderPrefix: "Bearer ",
         credentialFieldName: "access_token",
       }));
       const deps = makeDeps({
@@ -1027,7 +1027,7 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
       authorizedUris: ["https://api.dropboxapi.com/**", "https://content.dropboxapi.com/**"],
       allowAllUris: false,
       credentialHeaderName: "Authorization",
-      credentialHeaderPrefix: "Bearer",
+      credentialHeaderPrefix: "Bearer ",
       credentialFieldName: "access_token",
     }));
     const deps = makeDeps({
@@ -1075,7 +1075,7 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
       authorizedUris: null,
       allowAllUris: true,
       credentialHeaderName: "Authorization",
-      credentialHeaderPrefix: "Bearer",
+      credentialHeaderPrefix: "Bearer ",
       credentialFieldName: "access_token",
     }));
     const deps = makeDeps({
@@ -1319,7 +1319,7 @@ describe("executeApiCall — finalUrl: redirect terminus", () => {
       authorizedUris: ["https://api.example.com/**"],
       allowAllUris: false,
       credentialHeaderName: "Authorization",
-      credentialHeaderPrefix: "Bearer",
+      credentialHeaderPrefix: "Bearer ",
       credentialFieldName: "access_token",
     }));
     const deps = makeDeps({
@@ -1508,7 +1508,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
     authorizedUris: null,
     allowAllUris: false,
     credentialHeaderName: "Authorization",
-    credentialHeaderPrefix: "Bearer",
+    credentialHeaderPrefix: "Bearer ",
     credentialFieldName: "access_token",
   }));
 
@@ -1517,7 +1517,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
     authorizedUris: null,
     allowAllUris: true,
     credentialHeaderName: "Authorization",
-    credentialHeaderPrefix: "Bearer",
+    credentialHeaderPrefix: "Bearer ",
     credentialFieldName: "access_token",
   }));
 
@@ -1616,7 +1616,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
           authorizedUris: ["https://intranet.corp.example/**"],
           allowAllUris: false,
           credentialHeaderName: "Authorization",
-          credentialHeaderPrefix: "Bearer",
+          credentialHeaderPrefix: "Bearer ",
           credentialFieldName: "access_token",
         })),
         resolveHost: async () => ["10.0.0.5"],
@@ -1644,7 +1644,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
             authorizedUris: [pattern],
             allowAllUris: false,
             credentialHeaderName: "Authorization",
-            credentialHeaderPrefix: "Bearer",
+            credentialHeaderPrefix: "Bearer ",
             credentialFieldName: "access_token",
           })),
           resolveHost: async () => ["169.254.169.254"],
@@ -1670,7 +1670,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
           authorizedUris: ["https://**"],
           allowAllUris: false,
           credentialHeaderName: "Authorization",
-          credentialHeaderPrefix: "Bearer",
+          credentialHeaderPrefix: "Bearer ",
           credentialFieldName: "access_token",
         })),
         resolveHost: async () => ["203.0.113.7"],
@@ -1692,7 +1692,7 @@ describe("executeApiCall — SSRF DNS-rebind layer", () => {
           authorizedUris: ["https://**"],
           allowAllUris: false,
           credentialHeaderName: "Authorization",
-          credentialHeaderPrefix: "Bearer",
+          credentialHeaderPrefix: "Bearer ",
           credentialFieldName: "access_token",
         })),
         resolveHost,
@@ -1743,7 +1743,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
     authorizedUris: null,
     allowAllUris: true,
     credentialHeaderName: "Authorization",
-    credentialHeaderPrefix: "Bearer",
+    credentialHeaderPrefix: "Bearer ",
     credentialFieldName: "access_token",
   }));
 
@@ -1843,7 +1843,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
       authorizedUris: ["https://api.dropboxapi.com/**", "https://content.dropboxapi.com/**"],
       allowAllUris: false,
       credentialHeaderName: "Authorization",
-      credentialHeaderPrefix: "Bearer",
+      credentialHeaderPrefix: "Bearer ",
       credentialFieldName: "access_token",
     }));
     const { cookiesSeen, fetchFn } = recordingFetch("sess=DROPBOX");
@@ -1884,7 +1884,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
       authorizedUris: ["https://*.myshopify.com/**"],
       allowAllUris: false,
       credentialHeaderName: "Authorization",
-      credentialHeaderPrefix: "Bearer",
+      credentialHeaderPrefix: "Bearer ",
       credentialFieldName: "access_token",
     }));
     const { cookiesSeen, fetchFn } = recordingFetch("sess=VICTIM-SESSION");
@@ -1925,7 +1925,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
       authorizedUris: ["https://**"],
       allowAllUris: false,
       credentialHeaderName: "Authorization",
-      credentialHeaderPrefix: "Bearer",
+      credentialHeaderPrefix: "Bearer ",
       credentialFieldName: "access_token",
     }));
     const { cookiesSeen, fetchFn } = recordingFetch("sess=VICTIM-SESSION");
@@ -1963,7 +1963,7 @@ describe("executeApiCall — cookie jar is scoped to the capture origin", () => 
       authorizedUris: ["https://api.example.com/**"],
       allowAllUris: true,
       credentialHeaderName: "Authorization",
-      credentialHeaderPrefix: "Bearer",
+      credentialHeaderPrefix: "Bearer ",
       credentialFieldName: "access_token",
     }));
     const { cookiesSeen, fetchFn } = recordingFetch("sess=FROM-OPEN-CALL");

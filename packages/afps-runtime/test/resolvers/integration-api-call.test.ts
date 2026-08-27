@@ -570,7 +570,7 @@ describe("LocalIntegrationResolver", () => {
       "integration.json": JSON.stringify(
         apiKeyIntegrationManifest("@acme/api", {
           headerName: "Authorization",
-          headerPrefix: "Bearer",
+          headerPrefix: "Bearer ",
           allowServerOverride: true,
         }).integration,
       ),

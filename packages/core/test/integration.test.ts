@@ -532,6 +532,57 @@ describe("integrationManifestSchema — delivery.http.in install gate", () => {
 });
 
 // ─────────────────────────────────────────────
+// delivery.http.prefix install gate (§7.6)
+// ─────────────────────────────────────────────
+
+describe("integrationManifestSchema — delivery.http.prefix install gate", () => {
+  const withPrefix = (name: string, prefix: string) =>
+    baseManifest({
+      source: { kind: "none" },
+      auths: {
+        key: {
+          type: "api_key",
+          credentials: { schema: { type: "object", properties: {} } },
+          authorized_uris: ["https://api.example.com/**"],
+          delivery: { http: { in: "header", name, value: "{$credential.api_key}", prefix } },
+        },
+      },
+    });
+
+  it("rejects a bare auth scheme and names the separator-carrying form", () => {
+    const r = integrationManifestSchema.safeParse(withPrefix("Authorization", "Bearer"));
+    expect(r.success).toBe(false);
+    if (!r.success) {
+      const onPrefix = r.error.issues.find(
+        (i) => i.path.join(".") === "auths.key.delivery.http.prefix",
+      );
+      expect(onPrefix).toBeDefined();
+      expect(onPrefix!.message).toContain('Write "Bearer ".');
+    }
+  });
+
+  it("rejects a bare scheme in Proxy-Authorization position too", () => {
+    expect(
+      integrationManifestSchema.safeParse(withPrefix("Proxy-Authorization", "Basic")).success,
+    ).toBe(false);
+  });
+
+  it("accepts every prefix that already carries its own separator", () => {
+    // "Bearer " / "Basic " (canonical schemes), "Token token=" (vendor
+    // composite — not a bare token), and "" (no prefix at all).
+    for (const prefix of ["Bearer ", "Basic ", "Zoho-oauthtoken ", "Token token=", ""]) {
+      expect(integrationManifestSchema.safeParse(withPrefix("Authorization", prefix)).success).toBe(
+        true,
+      );
+    }
+  });
+
+  it("leaves a non-auth header's bare prefix alone — there it is a literal", () => {
+    expect(integrationManifestSchema.safeParse(withPrefix("Cookie", "session")).success).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────
 // mtls + delivery.http install gate (§7.6)
 // ─────────────────────────────────────────────
 

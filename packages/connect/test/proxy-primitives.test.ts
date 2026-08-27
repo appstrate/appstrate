@@ -190,7 +190,7 @@ describe("buildInjectedCredentialHeader", () => {
     const out = buildInjectedCredentialHeader({
       credentials: { access_token: "abc" },
       credentialHeaderName: "Authorization",
-      credentialHeaderPrefix: "Bearer",
+      credentialHeaderPrefix: "Bearer ",
       credentialFieldName: "access_token",
     });
     expect(out).toEqual({ name: "Authorization", value: "Bearer abc" });
@@ -241,7 +241,7 @@ describe("applyInjectedCredentialHeader (record)", () => {
     applyInjectedCredentialHeader(headers, {
       credentials: { access_token: "abc" },
       credentialHeaderName: "Authorization",
-      credentialHeaderPrefix: "Bearer",
+      credentialHeaderPrefix: "Bearer ",
       credentialFieldName: "access_token",
     });
     expect(headers).toEqual({ Authorization: "Bearer abc" });
@@ -252,7 +252,7 @@ describe("applyInjectedCredentialHeader (record)", () => {
     applyInjectedCredentialHeader(headers, {
       credentials: { access_token: "server" },
       credentialHeaderName: "Authorization",
-      credentialHeaderPrefix: "Bearer",
+      credentialHeaderPrefix: "Bearer ",
       credentialFieldName: "access_token",
     });
     expect(headers).toEqual({ Authorization: "Bearer server" });
@@ -263,7 +263,7 @@ describe("applyInjectedCredentialHeader (record)", () => {
     const decision = applyInjectedCredentialHeader(headers, {
       credentials: { access_token: "server" },
       credentialHeaderName: "Authorization",
-      credentialHeaderPrefix: "Bearer",
+      credentialHeaderPrefix: "Bearer ",
       credentialAllowServerOverride: true,
       credentialFieldName: "access_token",
     });
@@ -290,7 +290,7 @@ describe("applyInjectedCredentialHeaderToHeaders (Headers instance)", () => {
     applyInjectedCredentialHeaderToHeaders(headers, {
       credentials: { access_token: "abc" },
       credentialHeaderName: "Authorization",
-      credentialHeaderPrefix: "Bearer",
+      credentialHeaderPrefix: "Bearer ",
       credentialFieldName: "access_token",
     });
     expect(headers.get("authorization")).toBe("Bearer abc");
@@ -301,7 +301,7 @@ describe("applyInjectedCredentialHeaderToHeaders (Headers instance)", () => {
     applyInjectedCredentialHeaderToHeaders(headers, {
       credentials: { access_token: "server" },
       credentialHeaderName: "Authorization",
-      credentialHeaderPrefix: "Bearer",
+      credentialHeaderPrefix: "Bearer ",
       credentialFieldName: "access_token",
     });
     expect(headers.get("authorization")).toBe("Bearer server");
@@ -312,7 +312,7 @@ describe("applyInjectedCredentialHeaderToHeaders (Headers instance)", () => {
     const decision = applyInjectedCredentialHeaderToHeaders(headers, {
       credentials: { access_token: "server" },
       credentialHeaderName: "Authorization",
-      credentialHeaderPrefix: "Bearer",
+      credentialHeaderPrefix: "Bearer ",
       credentialAllowServerOverride: true,
       credentialFieldName: "access_token",
     });
