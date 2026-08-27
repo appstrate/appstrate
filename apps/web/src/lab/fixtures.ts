@@ -1876,6 +1876,446 @@ export const agentDiagnosticsBlocking: AgentDiagnostics = {
   ],
 };
 
+/**
+ * The advanced map is server projected in production. The Lab keeps one dense,
+ * deliberately imperfect installation so every card, relation and correction
+ * affordance remains visible without a backend.
+ */
+export const agentMap: Json200<"/api/agents/{scope}/{name}/map", "get"> = {
+  agent: {
+    packageId: "@tractr/compta-trimestrielle",
+    display_name: "Compta trimestrielle",
+    version: "1.4.0",
+    version_ref: "draft",
+    source: "local",
+  },
+  nodes: [
+    {
+      id: "connections",
+      type: "connections",
+      position: { x: 0, y: 0 },
+      data: {
+        items: [
+          {
+            id: "conn_lab_1",
+            integration_id: "@appstrate/google-drive",
+            label: "olivier@tractr.net",
+            locked: false,
+          },
+          {
+            id: "conn_lab_2",
+            integration_id: "@appstrate/gmail",
+            label: "compta@tractr.net",
+            locked: true,
+          },
+        ],
+      },
+    },
+    {
+      id: "schedules",
+      type: "schedules",
+      position: { x: 0, y: 0 },
+      data: {
+        items: [
+          {
+            id: "sch_01",
+            name: "Clôture trimestrielle",
+            cron_expression: "0 8 1 */3 *",
+            timezone: "America/Toronto",
+            enabled: true,
+            next_run_at: ago(-7_200),
+            version_override: null,
+          },
+          {
+            id: "sch_04",
+            name: "Relance des pièces manquantes",
+            cron_expression: "0 10 * * 1",
+            timezone: "America/Toronto",
+            enabled: true,
+            next_run_at: ago(-10_080),
+            version_override: "1.3.0",
+          },
+        ],
+      },
+    },
+    {
+      id: "model",
+      type: "model",
+      position: { x: 0, y: 0 },
+      data: {
+        agent_model_id: null,
+        org_default_model_id: "model_sonnet_45",
+        resolved_model_id: "model_sonnet_45",
+        resolved_model_label: "Claude Sonnet 4.5",
+        resolved: true,
+        inherited: true,
+      },
+    },
+    {
+      id: "proxy",
+      type: "proxy",
+      position: { x: 0, y: 0 },
+      data: {
+        proxy_id: "proxy_europe",
+        proxy_name: "Sortie Europe",
+        inherited: true,
+        resolved: true,
+      },
+    },
+    {
+      id: "input_values",
+      type: "input_values",
+      position: { x: 0, y: 0 },
+      data: {
+        items: [
+          { name: "currency", title: "Devise", type: "string", required: true, value: "CAD" },
+          {
+            name: "archive_folder",
+            title: "Dossier d’archivage",
+            type: "string",
+            required: true,
+            value: "Comptabilité/2026",
+          },
+          {
+            name: "matching_threshold",
+            title: "Seuil de rapprochement",
+            type: "number",
+            required: false,
+            value: "0.85",
+          },
+        ],
+      },
+    },
+    {
+      id: "input",
+      type: "agent_input",
+      position: { x: 0, y: 0 },
+      data: {
+        items: [
+          { name: "fiscal_year", title: "Année fiscale", type: "string", required: true },
+          { name: "drive_folder", title: "Dossier Drive", type: "string", required: true },
+          { name: "language", title: "Langue", type: "string", required: false },
+          { name: "report_format", title: "Format du rapport", type: "string", required: true },
+        ],
+      },
+    },
+    {
+      id: "agent",
+      type: "agent",
+      position: { x: 0, y: 0 },
+      data: {
+        display_name: "Compta trimestrielle",
+        description:
+          "Pipeline de comptabilité trimestrielle : renomme les relevés, extrait les transactions et concilie les factures.",
+        prompt:
+          "Tu es responsable de la clôture comptable trimestrielle de Tractr. Vérifie les relevés BNC, rapproche chaque transaction avec sa pièce et signale les écarts.",
+        timeout: 1800,
+      },
+    },
+    {
+      id: "output",
+      type: "agent_output",
+      position: { x: 0, y: 0 },
+      data: {
+        items: [
+          { name: "report", title: "Rapport Excel", type: "string", required: true },
+          {
+            name: "matching_summary",
+            title: "Synthèse de rapprochement",
+            type: "object",
+            required: true,
+          },
+          { name: "alerts", title: "Alertes à vérifier", type: "array", required: false },
+        ],
+      },
+    },
+    {
+      id: "toolbox",
+      type: "toolbox",
+      position: { x: 0, y: 0 },
+      data: {
+        items: [
+          {
+            id: "@appstrate/gmail",
+            declared_version: "^1.0.0",
+            tools: ["search", "read"],
+            scopes: [],
+            status: "missing_connection",
+            connected: false,
+            locked: false,
+            missing_scopes: [],
+            run_blocking: true,
+            connection_label: null,
+          },
+          {
+            id: "@appstrate/google-drive",
+            declared_version: "^2.1.0",
+            tools: ["search", "download"],
+            scopes: ["drive.readonly"],
+            status: "resolved",
+            connected: true,
+            locked: false,
+            missing_scopes: [],
+            run_blocking: false,
+            connection_label: "olivier@tractr.net",
+          },
+          {
+            id: "@appstrate/quickbooks-online",
+            declared_version: "^1.0.0",
+            tools: "*",
+            scopes: [],
+            status: "missing_connection",
+            connected: false,
+            locked: false,
+            missing_scopes: [],
+            run_blocking: true,
+            connection_label: null,
+          },
+        ],
+      },
+    },
+    {
+      id: "skills",
+      type: "skills",
+      position: { x: 0, y: 0 },
+      data: {
+        items: [
+          {
+            id: "@tractr/compta-references",
+            declared_version: "^1.4.0",
+            resolved: true,
+            name: "Références comptables",
+            description: "Règles BNC et année fiscale Tractr.",
+          },
+          {
+            id: "@tractr/gog",
+            declared_version: "^2.2.0",
+            resolved: false,
+            name: "Google Workspace CLI",
+            description: "Accès aux fichiers et courriels de la comptabilité.",
+          },
+          {
+            id: "@tractr/invoice-matcher",
+            declared_version: "^1.0.0",
+            resolved: true,
+            name: "Rapprochement de factures",
+            description: "Méthode de rapprochement marchand et pièce.",
+          },
+        ],
+      },
+    },
+    {
+      id: "mcp_servers",
+      type: "mcp_servers",
+      position: { x: 0, y: 0 },
+      data: {
+        items: [
+          { id: "@appstrate/quickbooks", version: "^1.3.0" },
+          { id: "@appstrate/google-workspace", version: "^2.1.0" },
+        ],
+      },
+    },
+    {
+      id: "system_tools",
+      type: "system_tools",
+      position: { x: 0, y: 0 },
+      data: {
+        items: [
+          { id: "output", always: false },
+          { id: "log", always: false },
+          { id: "note", always: false },
+          { id: "pin", always: false },
+          { id: "publish_document", always: false },
+          { id: "run_history", always: true },
+          { id: "recall_memory", always: true },
+        ],
+      },
+    },
+    {
+      id: "memory",
+      type: "memory",
+      position: { x: 0, y: 0 },
+      data: {
+        available: true,
+        items: [
+          { id: "pin_1", label: "Année fiscale Tractr", kind: "pinned", updated_at: ago(600) },
+          { id: "pin_2", label: "Tolérance TPS/TVQ", kind: "pinned", updated_at: ago(820) },
+          { id: "mem_1", label: "Marchands validés Q2", kind: "archive", updated_at: ago(1_200) },
+          { id: "mem_2", label: "Écart carte BNC", kind: "archive", updated_at: ago(1_600) },
+          { id: "mem_3", label: "Dossier final 2026-Q2", kind: "archive", updated_at: ago(2_000) },
+        ],
+      },
+    },
+  ],
+  edges: [
+    {
+      id: "resolution-schedules",
+      source: "schedules",
+      target: "agent",
+      source_handle: "right",
+      target_handle: "left",
+    },
+    {
+      id: "resolution-model",
+      source: "model",
+      target: "agent",
+      source_handle: "right",
+      target_handle: "left",
+    },
+    {
+      id: "resolution-proxy",
+      source: "proxy",
+      target: "agent",
+      source_handle: "right",
+      target_handle: "left",
+    },
+    {
+      id: "resolution-connections",
+      source: "connections",
+      target: "input",
+      source_handle: "right",
+      target_handle: "left",
+    },
+    {
+      id: "resolution-input-values",
+      source: "input_values",
+      target: "input",
+      source_handle: "right",
+      target_handle: "left",
+    },
+    {
+      id: "dependency-toolbox",
+      source: "toolbox",
+      target: "agent",
+      source_handle: "left",
+      target_handle: "right",
+    },
+    {
+      id: "dependency-skills",
+      source: "skills",
+      target: "agent",
+      source_handle: "left",
+      target_handle: "right",
+    },
+    {
+      id: "dependency-mcp_servers",
+      source: "mcp_servers",
+      target: "agent",
+      source_handle: "left",
+      target_handle: "right",
+    },
+    {
+      id: "dependency-system_tools",
+      source: "system_tools",
+      target: "agent",
+      source_handle: "left",
+      target_handle: "right",
+    },
+    {
+      id: "input->agent",
+      source: "input",
+      target: "agent",
+      source_handle: "bottom",
+      target_handle: "top",
+    },
+    {
+      id: "agent->output",
+      source: "agent",
+      target: "output",
+      source_handle: "bottom",
+      target_handle: "top",
+    },
+    {
+      id: "resolution-memory-read",
+      source: "memory",
+      target: "agent",
+      source_handle: "top",
+      target_handle: "left",
+    },
+    {
+      id: "resolution-memory-write",
+      source: "agent",
+      target: "memory",
+      source_handle: "right",
+      target_handle: "top",
+    },
+  ],
+  diagnostics: [
+    {
+      field: "integrations.@appstrate/gmail",
+      code: "missing_connection",
+      title: "Compte Gmail manquant",
+      message: "Connectez un compte Gmail avant le prochain run.",
+      node_id: "toolbox",
+      item_id: "@appstrate/gmail",
+    },
+    {
+      field: "integrations.@appstrate/quickbooks-online",
+      code: "missing_connection",
+      title: "Compte QuickBooks manquant",
+      message: "Connectez le compte comptable de l’organisation.",
+      node_id: "toolbox",
+      item_id: "@appstrate/quickbooks-online",
+    },
+    {
+      field: "dependencies.skills.@tractr/gog",
+      code: "unresolved_skill",
+      title: "Skill non résolue",
+      message: "La version demandée de gog n’est pas installée.",
+      node_id: "skills",
+      item_id: "@tractr/gog",
+    },
+    {
+      field: "config.archive_folder",
+      code: "config_review",
+      title: "Dossier à vérifier",
+      message: "Vérifiez le dossier d’archivage avant la clôture.",
+      node_id: "input_values",
+      item_id: "archive_folder",
+    },
+    {
+      field: "schedules.sch_04.version",
+      code: "schedule_version",
+      title: "Version différente",
+      message: "Cette planification utilise encore la version 1.3.0.",
+      node_id: "schedules",
+      item_id: "sch_04",
+    },
+    {
+      field: "input.drive_folder",
+      code: "required_input",
+      title: "Entrée requise",
+      message: "Le dossier Drive doit être fourni au lancement.",
+      node_id: "input",
+      item_id: "drive_folder",
+    },
+    {
+      field: "output.alerts",
+      code: "optional_output",
+      title: "Sortie facultative",
+      message: "Les alertes ne sont pas obligatoires dans le schéma de sortie.",
+      node_id: "output",
+      item_id: "alerts",
+    },
+    {
+      field: "prompt",
+      code: "prompt_review",
+      title: "Prompt modifié",
+      message: "Le brouillon diffère de la dernière version publiée.",
+      node_id: "agent",
+      item_id: null,
+    },
+    {
+      field: "proxy",
+      code: "inherited_proxy",
+      title: "Proxy hérité",
+      message: "Ce run utilisera le proxy par défaut de l’organisation.",
+      node_id: "proxy",
+      item_id: null,
+    },
+  ],
+};
+
 /** Latest published version + the draft the editor is on. */
 export const agentVersionInfo: Json200<"/api/packages/agents/{scope}/{name}/versions/info", "get"> =
   {

@@ -2515,16 +2515,19 @@ Bundle. The former API, About, standalone Connections, standalone Schedules,
 Versions and Diff destinations are no longer part of the Agent's primary
 navigation.
 
-Overview is dominated by one installation map with three labelled boundaries:
-Appstrate Configuration, portable AFPS Bundle and Appstrate Memory. The
+The Map destination is dominated by one installation map with four labelled
+boundaries: Appstrate Configuration, portable AFPS Bundle, bundle dependencies
+and Appstrate Memory. The
 desktop composition keeps configuration on the left, the input-to-Agent-to-
 output flow in the centre, declared capabilities on the right and persistent
 memory below. At 375px the graph becomes a structured list that names the
 relations instead of shrinking a canvas. Full screen remains an explicit map
-action. The map uses only existing Agent, model, proxy, schedule, connection
-and persistence reads. It does not port the older `agent-map` endpoint or add a
-database object: a missing production fact renders as Unknown, while typed Lab
-fixtures provide the varied complete installation needed for visual review.
+action. The consolidated review ports the `agent-map` module endpoint because
+resolution, diagnostics and installation facts must be computed by the same
+server logic that gates a Run. It adds no database object. A typed Lab fixture
+now covers its complete card and relation inventory, including multiple list
+items and routed diagnostics, so the combined review does not depend on a live
+backend.
 
 The Lab Agent now carries a real input and output schema, prompt, recorded input
 values, model and proxy resolution, linked schedule, connection candidates,

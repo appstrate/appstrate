@@ -50,6 +50,7 @@ import { getTypeShape, type TypeShape } from "./lib/ts-interface-required-keys.t
 const {
   paths: modulePaths,
   componentSchemas: moduleComponentSchemas,
+  exemptSchemas: moduleExemptSchemas,
   tags: moduleTags,
   schemas: moduleSchemas,
 } = await collectModuleOpenApi();
@@ -1921,12 +1922,22 @@ if (responseDrifts.length === 0) {
   const allSchemaNames = Object.keys(
     (openApiSpec.components.schemas ?? {}) as Record<string, unknown>,
   );
+  // Core exemptions plus the ones each module declares for its OWN schemas
+  // (`openApiExemptSchemas()`), so contributing a module-owned wire schema does
+  // not require editing the core registry. Core wins a name collision: a schema
+  // the core registry speaks for is not a module's to exempt.
+  const effectiveExemptSchemas: Record<string, string> = {
+    ...moduleExemptSchemas,
+    ...EXEMPT_SCHEMAS,
+  };
   const uncovered = allSchemaNames
-    .filter((n) => !registeredSpecNames.has(n) && !(n in EXEMPT_SCHEMAS))
+    .filter((n) => !registeredSpecNames.has(n) && !(n in effectiveExemptSchemas))
     .sort();
   // A stale EXEMPT entry (schema renamed/removed) is also a failure — keep the
-  // list honest.
-  const staleExempt = Object.keys(EXEMPT_SCHEMAS)
+  // list honest. Module-declared entries are held to the same rule: the spec
+  // here is built with every discovered module's contributions, so a module
+  // exempting a name it does not contribute is just as stale as a core one.
+  const staleExempt = Object.keys(effectiveExemptSchemas)
     .filter((n) => !allSchemaNames.includes(n))
     .sort();
 
@@ -1935,7 +1946,8 @@ if (responseDrifts.length === 0) {
   if (uncovered.length === 0 && staleExempt.length === 0) {
     console.log(
       `  OK — all ${allSchemaNames.length} component schemas are registered ` +
-        `(${registeredSpecNames.size}) or exempt (${Object.keys(EXEMPT_SCHEMAS).length}).`,
+        `(${registeredSpecNames.size}) or exempt (${Object.keys(effectiveExemptSchemas).length}, ` +
+        `of which ${Object.keys(moduleExemptSchemas).length} module-declared).`,
     );
   } else {
     exitCode = 1;
@@ -1944,7 +1956,8 @@ if (responseDrifts.length === 0) {
       for (const n of uncovered) console.log(`    - ${n}`);
       console.log(
         `\n  Add each to responseTypeRegistry (with its shared-type) or to ` +
-          `EXEMPT_SCHEMAS (with a reason) in apps/api/src/openapi/response-type-registry.ts.`,
+          `EXEMPT_SCHEMAS (with a reason) in apps/api/src/openapi/response-type-registry.ts. ` +
+          `A MODULE-owned schema goes in that module's own openApiExemptSchemas() instead.`,
       );
     }
     if (staleExempt.length > 0) {

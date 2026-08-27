@@ -697,6 +697,14 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   },
   {
     method: "GET",
+    pattern: /^\/api\/agents\/[^/]+\/[^/]+\/map$/,
+    handler: (_url, scenario) =>
+      scenario === "error"
+        ? { status: 500, body: { title: "Agent map unavailable" } }
+        : { status: 200, body: f.agentMap },
+  },
+  {
+    method: "GET",
     pattern: /^\/api\/agents\/[^/]+\/[^/]+\/diagnostics$/,
     handler: (url, scenario) => {
       const packageId = agentPackageId(url);

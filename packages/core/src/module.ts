@@ -110,6 +110,25 @@ export interface AppstrateModule {
   openApiComponentSchemas?(): Record<string, unknown>;
 
   /**
+   * Declare which of this module's own component schemas have no shared-type
+   * twin, keyed by schema name with the reason as value.
+   *
+   * `verify-openapi` step 7b is fail-closed: every component schema in the spec
+   * must either be registered against a shared-type or be explicitly exempt with
+   * a justification. Without this hook a module's schemas can only be exempted
+   * from the CORE registry (`apps/api/src/openapi/response-type-registry.ts`),
+   * so contributing a module-owned wire schema means editing a core file — the
+   * one thing the module contract exists to avoid.
+   *
+   * Only names this module also contributes via {@link openApiComponentSchemas}
+   * belong here: an entry naming a schema absent from the built spec is reported
+   * as stale, exactly like a stale core entry.
+   *
+   * @example openApiExemptSchemas: () => ({ WidgetObject: "admin wire; SPA uses the generated spec type" })
+   */
+  openApiExemptSchemas?(): Record<string, string>;
+
+  /**
    * Return OpenAPI 3.1 tags owned by this module.
    * Merged into the spec `tags` array at boot — absent when the module is disabled.
    * Keeps core `openApiInfo.tags` free of module-specific entries.

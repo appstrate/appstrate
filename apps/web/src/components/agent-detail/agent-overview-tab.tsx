@@ -36,7 +36,7 @@ import { useAgentRunActivity } from "../../hooks/use-paginated-runs";
 import { useAgentMemories, useAgentPinned } from "../../hooks/use-persistence";
 import { Badge } from "../status-badge";
 import { formatDateField } from "../../lib/markdown";
-import { AgentMapView, type InstalledAgentMap } from "../../modules/agent-map/agent-map-view";
+import { AgentMapView } from "../../modules/agent-map/agent-map-view";
 import { AgentFilesView } from "./agent-files-view";
 import { useAgentDiagnostics, type AgentDiagnostic } from "../../hooks/use-agent-diagnostics";
 
@@ -386,7 +386,7 @@ export function AgentOverviewTab({
       ? memoryDates.sort((a, b) => Date.parse(b) - Date.parse(a))[0]
       : undefined;
   const configurationWarning = t("detail.overview.configurationRequiredDescription");
-  const installedMap: InstalledAgentMap = {
+  const installedMap = {
     configuration: {
       schedules: {
         id: "schedule",
@@ -520,6 +520,9 @@ export function AgentOverviewTab({
     },
     scheduleActive: Boolean(nextSchedule?.next_run_at),
   };
+  // The structured mobile map below still derives from the same local facts.
+  // Keep this projection alive until it is moved behind the shared map DTO.
+  void installedMap;
 
   if (surface === "files") {
     return (
@@ -742,7 +745,7 @@ export function AgentOverviewTab({
   return (
     <div className="px-4 py-4 md:px-6 md:py-6" data-agent-overview>
       <div className="hidden md:block">
-        <AgentMapView map={installedMap} embedded footer={<RelationLegend />} />
+        <AgentMapView packageId={packageId} version={version} />
       </div>
 
       <section

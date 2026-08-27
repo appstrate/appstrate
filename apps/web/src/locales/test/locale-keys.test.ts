@@ -159,6 +159,7 @@ describe("t() keys", () => {
  * failure is how a dead-key guard becomes decorative.
  */
 const DYNAMIC_KEY_PREFIXES = [
+  "concept.", // modules/agent-map/map-nodes.tsx — t(`agent-map:concept.${concept}.{title,body}`)
   "filter.", // components/document-list-panel.tsx — t(`filter.${p}`)
   "purpose.", // components/document-columns.tsx — t(`purpose.${doc.purpose}`)
   "type.", // components/document-columns.tsx — t(`type.${mimeKind(doc.mime)}`)
@@ -167,6 +168,8 @@ const DYNAMIC_KEY_PREFIXES = [
   "integration.auth.type.", // components/integration-connect/{inline-connect-button,integration-connection-picker}.tsx
   "integration.connect.fields.", // components/integration-connect/credential-fields.tsx
   "library.tab.", // pages/library-page.tsx — t(`library.tab.${tab}`)
+  "log.level.", // components/log-viewer.tsx — t(`log.level.${value}`)
+  "log.type.", // components/log-viewer.tsx — t(`log.type.${value}`)
   "oauthClients.scopeLabels.", // modules/oidc/components/oauth-client-form-modal.tsx
   "oauthClients.signupRoleOption.", // modules/oidc/components/oauth-client-form-modal.tsx
   "packages.type.", // components/package-detail/shared-header.tsx, pages/unified-package-detail.tsx
@@ -177,6 +180,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "run.status.", // packages/module-chat/src/ui/run-events.ts — runStatusLineKey()
   "status.", // components/status-badge.tsx — t(`status.${status}`)
   "switcher.role.", // components/org-switcher.tsx — t(`switcher.role.${org.role}`)
+  "systemTool.", // modules/agent-map/map-nodes.tsx — t(`agent-map:systemTool.${item.id}`)
 ];
 
 /**

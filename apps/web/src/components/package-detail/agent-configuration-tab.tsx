@@ -57,7 +57,8 @@ function SettingRow({
 
 // ─── Config Section ─────────────────────────────────────────────────
 
-function ConfigSection({
+/** Exported so the visual map can mount the same settings form in a dialog. */
+export function ConfigSection({
   packageId,
   schema,
   isHistorical,
@@ -120,7 +121,8 @@ function ConfigSection({
 
 // ─── Model Section ──────────────────────────────────────────────────
 
-function ModelSection({ packageId }: { packageId: string }) {
+/** Exported so the visual map can mount the same picker in a dialog. */
+export function ModelSection({ packageId }: { packageId: string }) {
   const { data: orgModels } = useModels();
   const { data: agentModel } = useAgentModel(packageId);
   if (!orgModels || orgModels.length === 0 || !agentModel) return null;
@@ -366,7 +368,8 @@ function ModelSectionEditor({
 
 // ─── Proxy Section ──────────────────────────────────────────────────
 
-function ProxySection({ packageId }: { packageId: string }) {
+/** Shared with the visual map so both surfaces edit the same proxy setting. */
+export function ProxySection({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["agents", "settings"]);
   const { data: orgProxies } = useProxies();
   const { data: agentProxy } = useAgentProxy(packageId);

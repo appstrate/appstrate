@@ -358,7 +358,17 @@ export function useCreatePackage(type: Exclude<PackageType, "mcp-server">) {
   });
 }
 
-export function useUpdatePackage(type: PackageType, packageId: string) {
+/**
+ * `opts.redirect` (default true) keeps the editor's behaviour: a successful save
+ * leaves the editor for the detail page. Callers that are ALREADY on the detail
+ * page — the visual map's in-place edit dialogs — pass false, since navigating
+ * would drop the URL hash and throw the user back to the default tab.
+ */
+export function useUpdatePackage(
+  type: PackageType,
+  packageId: string,
+  opts: { redirect?: boolean } = {},
+) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const cfg = PACKAGE_CONFIG[type];
@@ -394,7 +404,7 @@ export function useUpdatePackage(type: PackageType, packageId: string) {
         void invalidateIntegrationQueries(qc);
       }
       qc.invalidateQueries({ queryKey: ["version-info"] });
-      navigate(packageDetailPath(type, packageId));
+      if (opts.redirect !== false) navigate(packageDetailPath(type, packageId));
     },
     onError: onMutationError,
   });
