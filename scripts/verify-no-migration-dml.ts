@@ -9,14 +9,26 @@
  * This header describes the implementation only.
  *
  * What the code does: reject every `UPDATE` / `INSERT` / `DELETE` / `TRUNCATE`
- * that opens a statement in a new migration, UNLESS it is an `UPDATE` and the
- * same file also carries one of the four clauses §2 licences ON THAT TABLE —
- * `SET NOT NULL`, `CHECK`, `VALIDATE CONSTRAINT` (the three constraint
+ * / `MERGE` that opens a statement in a new migration, UNLESS it is an `UPDATE`
+ * and the same file also carries one of the four clauses §2 licences ON THAT
+ * TABLE — `SET NOT NULL`, `CHECK`, `VALIDATE CONSTRAINT` (the three constraint
  * preconditions) or `DROP COLUMN` (the fold whose source the file destroys).
  * Same table, not merely the same file: see `licencedTables`, which also
  * records the one hole this deliberately leaves open. Only an `UPDATE` is ever
  * licenceable — see `LICENCEABLE` — and a `CHECK` added `NOT VALID` licences
  * nothing, see `isDeferredCheck`.
+ *
+ * Two spans of a migration are read differently from the rest of it, and the
+ * question both answer is WHEN the SQL inside them runs:
+ *
+ *   - the command string of an `EXECUTE` / `format(…)` is written as a string
+ *     literal but executes at apply time, so it is scanned as the code it
+ *     becomes rather than blanked with every other literal — see
+ *     `dynamicSqlSpans`;
+ *   - the body of a `CREATE FUNCTION` / `PROCEDURE` does NOT execute at apply
+ *     time — defining a trigger function rewrites no row — so it is scanned as
+ *     neither a write nor a licence. A `DO $$ … $$` block, which does execute,
+ *     gets no such exemption. See `functionBodies`.
  *
  * Only NEW files are gated. Every migration already in the directory has run
  * on real databases and cannot be changed, so the eight that predate this rule
@@ -91,8 +103,16 @@ export const GRANDFATHERED: readonly string[] = [
  * `--> statement-breakpoint` is drizzle's separator and is itself a comment.
  * It becomes a `;` (same width) so it keeps acting as a boundary once the
  * comment stripping below would otherwise erase it.
+ *
+ * `keepLiterals` produces the SECOND reading `findDml` needs. Blanking a
+ * literal is right for prose and for `'DELETE'`-as-a-value, and wrong for
+ * exactly one thing: the command string of an `EXECUTE format(…)`, which is a
+ * literal to the parser and a statement to the server. That mode blanks only
+ * the two delimiting quotes and keeps what is between them, so the command
+ * string reads as the code it becomes. Byte offsets are preserved in both
+ * modes, so a finding made in one can be quoted through the other.
  */
-export function sanitize(sql: string): string {
+export function sanitize(sql: string, options: { readonly keepLiterals?: boolean } = {}): string {
   const BREAKPOINT = "--> statement-breakpoint";
   const source = sql.replaceAll(BREAKPOINT, ";".padEnd(BREAKPOINT.length));
 
@@ -123,7 +143,18 @@ export function sanitize(sql: string): string {
         else if (source[end + 1] === "'") end += 2;
         else break;
       }
-      blank(Math.min(end + 1, source.length) - i);
+      const stop = Math.min(end + 1, source.length);
+      if (options.keepLiterals === true) {
+        // The delimiters go, the body stays. Blanking the quotes rather than
+        // keeping them also leaves the token in front of the body being either
+        // the `(` of `format(` or the `EXECUTE` itself, which is precisely what
+        // `startsStatement` reads to decide the keyword opens a statement.
+        blank(1);
+        keep(Math.max(stop - 1 - i, 0));
+        blank(stop - i);
+      } else {
+        blank(stop - i);
+      }
     } else {
       keep(1);
     }
@@ -155,8 +186,13 @@ export function sanitize(sql: string): string {
  * privilege list (`GRANT INSERT, UPDATE ON …`), which grants a right rather
  * than writing a row, and no CTE needs it: a DML inside `WITH a AS (…), b AS
  * (DELETE …)` still sits directly behind that body's `(`.
+ *
+ * `EXECUTE` is an opener for the same reason `THEN` is — a nested statement
+ * follows it. It matters only under `sanitize(sql, { keepLiterals: true })`,
+ * where `EXECUTE 'UPDATE …'` finally has a keyword behind that quote; with
+ * literals blanked nothing a DML pattern can match ever follows it.
  */
-const STATEMENT_OPENERS = new Set(["BEGIN", "THEN", "ELSE", "LOOP"]);
+const STATEMENT_OPENERS = new Set(["BEGIN", "THEN", "ELSE", "LOOP", "EXECUTE"]);
 const BOUNDARY_CHARS = [";", "$", "(", ")"];
 
 function startsStatement(sanitized: string, index: number): boolean {
@@ -173,8 +209,15 @@ function startsStatement(sanitized: string, index: number): boolean {
  * `TRUNCATE` is in it because it removes every row in a table, which is the
  * most total row rewrite there is — and it was invisible to the first version
  * of this gate. See `LICENCEABLE` for why it never reaches the carve-out.
+ *
+ * `MERGE` is in it because PostgreSQL 16 — the version this platform targets —
+ * writes rows in all three directions with it, and one statement can insert,
+ * update and delete at once. It used to be caught only INCIDENTALLY, through
+ * the `UPDATE` in its `WHEN MATCHED THEN UPDATE SET …` action, and that read
+ * the table as `set`: a finding, but an unusable one. It is now named, and its
+ * WHEN actions are folded into the one statement — see `MERGE_VERB`.
  */
-const DML = /\b(UPDATE|INSERT|DELETE|TRUNCATE)\b/gi;
+const DML = /\b(UPDATE|INSERT|DELETE|TRUNCATE|MERGE)\b/gi;
 
 /**
  * The ONLY write the same-table carve-out can licence.
@@ -184,6 +227,13 @@ const DML = /\b(UPDATE|INSERT|DELETE|TRUNCATE)\b/gi;
  * somewhere else before the file drops it. Neither is expressible as an
  * `INSERT`, a `DELETE` or a `TRUNCATE`, so no licence clause may excuse one.
  *
+ * `MERGE` is refused for the reason §2 closes licensing by default: it is not
+ * the verb either carve-out is written in, and one `MERGE` can delete rows —
+ * `WHEN MATCHED THEN DELETE` is a legal action — so licencing it would licence
+ * exactly what refusing `DELETE` and `TRUNCATE` above is for. A backfill that
+ * genuinely preconditions a constraint is an `UPDATE`; writing it as a `MERGE`
+ * is a choice, and the remedy is to write the `UPDATE`.
+ *
  * Stated as a whitelist rather than a `TRUNCATE` blacklist deliberately. The
  * blacklist was the same rule for the destructive case, but only for that one
  * case: `DELETE FROM t;` empties a table exactly as `TRUNCATE t;` does, and it
@@ -191,12 +241,28 @@ const DML = /\b(UPDATE|INSERT|DELETE|TRUNCATE)\b/gi;
  * is now closed by default and opened for one verb, so a fourth DML verb added
  * to the vocabulary later cannot inherit an exemption nobody argued for.
  *
- * This is also why `dmlTarget` never parses a `TRUNCATE`, and why its
- * comma-separated form (`TRUNCATE a, b, c`) needs no handling: with no
- * exemption available there is no target to match against, and every table in
- * the list is reported through the statement text either way.
+ * This is also why `dmlTarget` parses neither a `TRUNCATE` nor a `MERGE`, and
+ * why `TRUNCATE`'s comma-separated form (`TRUNCATE a, b, c`) needs no
+ * handling: `dmlTarget` is reached only through the carve-out, so with no
+ * exemption available there is no target to match against, and every table
+ * touched is reported through the statement text either way. A `MERGE INTO
+ * <table>` branch there would be a branch nothing can call.
  */
 const LICENCEABLE = /^UPDATE$/i;
+
+/**
+ * A `MERGE`, whose `WHEN` actions belong to the statement rather than opening
+ * one of their own.
+ *
+ * `WHEN MATCHED THEN UPDATE SET …` / `WHEN NOT MATCHED THEN INSERT …` put a
+ * DML keyword directly behind `THEN`, which `startsStatement` reads — rightly,
+ * for the PL/pgSQL `IF … THEN INSERT …` it exists for — as a statement
+ * opening. So one `MERGE` would be reported two or three times over, the extra
+ * findings quoting a fragment. The `MERGE` is already reported in full and is
+ * never licenceable, so the rest of its statement is skipped: the author is
+ * told about the statement once, at the keyword that names it.
+ */
+const MERGE_VERB = /^MERGE$/i;
 
 /**
  * A possibly schema-qualified SQL identifier: `x`, `"x"`, `public.x`,
@@ -218,6 +284,114 @@ function dmlTarget(sanitized: string, index: number): string | null {
     "i",
   ).exec(sanitized.slice(index));
   return head?.[1] === undefined ? null : normalizeTable(head[1]);
+}
+
+/** A half-open `[start, end)` slice of a sanitized migration. */
+type Span = readonly [number, number];
+
+/** Does `index` fall inside any of `spans`? */
+function within(spans: readonly Span[], index: number): boolean {
+  return spans.some(([start, end]) => index >= start && index < end);
+}
+
+/**
+ * Where the statement that starts at `index` ends: its `;`, or end of file.
+ *
+ * Always measured on the BLANKED sanitization, never on the literal-keeping
+ * one, so a `;` written inside a command string cannot end a span early.
+ */
+function statementEnd(sanitized: string, index: number): number {
+  const semicolon = sanitized.indexOf(";", index);
+  return semicolon === -1 ? sanitized.length : semicolon + 1;
+}
+
+/**
+ * Every `CREATE [OR REPLACE] FUNCTION` / `PROCEDURE` body in the file.
+ *
+ * A function body is a DEFINITION. `CREATE FUNCTION audit_fn() … $$ BEGIN
+ * INSERT INTO audit …; RETURN NEW; END; $$` writes no row when the migration
+ * is applied — it writes a `pg_proc` entry, which is schema. The `INSERT` runs
+ * later, per row, when something touches the table the trigger is on, and that
+ * is the application's behaviour rather than a one-off repair. Reporting it
+ * would flag the first audit- or outbox-trigger migration anyone writes, and
+ * the workaround an author reaches for next is `EXECUTE format(…)` — the one
+ * bypass `dynamicSqlSpans` exists to close.
+ *
+ * A `DO $$ … $$` block is the counter-case and is deliberately NOT matched
+ * here: it executes at apply time, on the rows that exist, which is exactly
+ * what §2 forbids. `0021`, `0023`, `0040` and `0051` are that shape. The whole
+ * distinction is therefore the `CREATE … FUNCTION` in front of the dollar
+ * quote, and nothing else.
+ *
+ * A body written as a plain string (`AS 'BEGIN … END'` — legal, and how a
+ * `LANGUAGE sql` one-liner is usually spelled) opens no dollar quote, so the
+ * next one in the file belongs to something else — very possibly a `DO` block
+ * this must not swallow. The `;` guard rejects that case: for a dollar-quoted
+ * body the statement's first `;` is INSIDE the body and therefore after the
+ * opening tag, and for any other body it is the terminator and comes first.
+ */
+const FUNCTION_DEFINITION = /\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:FUNCTION|PROCEDURE)\b/gi;
+const DOLLAR_TAG = /\$[A-Za-z0-9_]*\$/g;
+
+function functionBodies(sanitized: string): Span[] {
+  const bodies: Span[] = [];
+  for (const definition of sanitized.matchAll(FUNCTION_DEFINITION)) {
+    DOLLAR_TAG.lastIndex = definition.index;
+    const open = DOLLAR_TAG.exec(sanitized);
+    if (open === null) continue;
+    // The tag must come before the statement's first `;` — see above.
+    if (open.index >= statementEnd(sanitized, definition.index)) continue;
+    const close = sanitized.indexOf(open[0], open.index + open[0].length);
+    if (close === -1) continue;
+    bodies.push([open.index, close + open[0].length]);
+  }
+  return bodies;
+}
+
+/**
+ * Every span whose contents PostgreSQL executes as SQL it was handed at run
+ * time: an `EXECUTE` statement, or a `format(…)` call building a command for
+ * one.
+ *
+ * `sanitize` blanks single-quoted literals, which is right for prose and for
+ * `'DELETE'`-as-a-value and erases exactly one thing it should not — the body
+ * of `EXECUTE format('UPDATE t SET x = 1')`. That is not a hypothetical
+ * bypass: `EXECUTE format(…)` is already the idiomatic way this directory
+ * writes catalog-guarded DDL (23 occurrences across four files at the time of
+ * writing, every one of them a `RENAME`, a `DROP CONSTRAINT` or a probe), so
+ * it is the form the next author reaches for — and reaching for it with a data
+ * statement used to produce a green gate.
+ *
+ * A write found here is reported UNCONDITIONALLY, with no carve-out: the
+ * target table is typically a `%I` placeholder filled from a catalog query, so
+ * there is no table name to match a licence against, and failing closed is the
+ * same choice `findDml` already makes for an unreadable target.
+ *
+ * `EXECUTE FUNCTION` / `EXECUTE PROCEDURE` is the `CREATE TRIGGER` action
+ * clause — a function reference, not a command string — and opens no span.
+ *
+ * A `format(…)` is a span in its own right, not only one nested in an
+ * `EXECUTE`, so that `stmt := format('UPDATE …'); EXECUTE stmt;` — the same
+ * bypass in two statements — is seen too. The accepted cost is a `format(…)`
+ * used to build a MESSAGE rather than a command: `RAISE EXCEPTION '%',
+ * format('DELETE failed on %I', t)` reads as a write and is reported. That
+ * direction is the safe one, and the remedy is to reword the message.
+ *
+ * What this still does not see, on the record rather than by omission: a
+ * command CONCATENATED rather than formatted (`stmt := 'UPDATE ' || t || …;
+ * EXECUTE stmt;`, which passes through neither an `EXECUTE` nor a `format(`
+ * while it is being built), and a verb interpolated rather than written
+ * (`format('%s t SET …', verb)`). Both need to follow a value through
+ * PL/pgSQL, which a lint script does not do. What is closed is the case that
+ * reads as ordinary SQL.
+ */
+const DYNAMIC_SQL = /\bEXECUTE\b(?!\s+(?:FUNCTION|PROCEDURE)\b)|\bformat\s*\(/gi;
+
+function dynamicSqlSpans(sanitized: string): Span[] {
+  return [...sanitized.matchAll(DYNAMIC_SQL)].map((m): Span => [
+    m.index,
+    statementEnd(sanitized, m.index),
+  ]);
 }
 
 /**
@@ -310,12 +484,22 @@ const LICENCE = new RegExp(
  * reachable here it is one alternation entry in `DML` plus one branch in
  * `dmlTarget` — named now so the omission is a decision on the record rather
  * than a gap someone rediscovers.
+ *
+ * A licence clause inside a `CREATE FUNCTION` body is skipped, for the reason
+ * `functionBodies` gives in the other direction: the body defines behaviour,
+ * so an `ALTER TABLE … SET NOT NULL` written in one promotes no column when
+ * the migration is applied and preconditions no repair. Exempting a body from
+ * the write scan but not from the licence scan would have been worse than
+ * exempting it from neither — it would turn a function definition into a way
+ * to manufacture a licence for a write elsewhere in the file.
  */
 export function licencedTables(sanitized: string): Set<string> {
   const statements = [...sanitized.matchAll(new RegExp(TABLE_STATEMENT, "gi"))];
+  const definitions = functionBodies(sanitized);
   const tables = new Set<string>();
   for (const licence of sanitized.matchAll(LICENCE)) {
     if (isDeferredCheck(sanitized, licence)) continue;
+    if (within(definitions, licence.index)) continue;
     const enclosing = statements.filter((s) => s.index < licence.index).at(-1);
     if (enclosing?.[1] !== undefined) tables.add(normalizeTable(enclosing[1]));
   }
@@ -385,9 +569,7 @@ function isDeferredCheck(sanitized: string, licence: RegExpExecArray): boolean {
  * it early.
  */
 function statementAt(sql: string, sanitized: string, index: number): string {
-  const semicolon = sanitized.indexOf(";", index);
-  const end = semicolon === -1 ? sanitized.length : semicolon + 1;
-  const text = sql.slice(index, end).replace(/\s+/g, " ").trim();
+  const text = sql.slice(index, statementEnd(sanitized, index)).replace(/\s+/g, " ").trim();
   return text.length > 240 ? `${text.slice(0, 240)}…` : text;
 }
 
@@ -399,32 +581,72 @@ interface Finding {
 /**
  * Every row-rewriting statement in one migration that no constraint licences.
  *
+ * Two passes, over the same file read two ways — see `sanitize`. The first
+ * reads the statements the migration executes literally; the second reads the
+ * ones it BUILDS at apply time inside an `EXECUTE format(…)`, which the first
+ * cannot see because a command string is a string literal. Both skip
+ * `CREATE FUNCTION` bodies, which execute nothing when the migration is
+ * applied.
+ *
  * The carve-out is applied per STATEMENT against `licencedTables`, so a file
  * may legitimately hold a backfill for the table it constrains and still be
- * flagged for a second, unrelated rewrite of another table.
+ * flagged for a second, unrelated rewrite of another table. It is applied in
+ * the first pass only: a dynamic write has no table name to licence.
  *
  * A DML statement whose target table cannot be read fails closed: an
  * unparseable target matches no licence, so it is reported rather than waved
  * through. A write that is not an `UPDATE` skips the carve-out entirely.
+ *
+ * Findings are keyed by offset, so a statement both passes can reach is
+ * reported once, and returned in file order rather than pass order.
  */
 export function findDml(sql: string): Finding[] {
   const sanitized = sanitize(sql);
   const licenced = licencedTables(sanitized);
+  const definitions = functionBodies(sanitized);
 
-  const findings: Finding[] = [];
+  const findings = new Map<number, Finding>();
+  /** Report the DML at `index`, quoting the statement that starts at `quoteFrom`. */
+  const report = (index: number, quoteFrom: number): void => {
+    if (findings.has(index)) return;
+    findings.set(index, {
+      line: sanitized.slice(0, index).split("\n").length,
+      statement: statementAt(sql, sanitized, quoteFrom),
+    });
+  };
+
+  // Pass 1 — what the file executes as written.
+  let mergeEnd = -1;
   for (const match of sanitized.matchAll(DML)) {
     const index = match.index;
+    const verb = match[1] ?? "";
+    if (index < mergeEnd) continue;
     if (!startsStatement(sanitized, index)) continue;
-    if (LICENCEABLE.test(match[1] ?? "")) {
+    if (within(definitions, index)) continue;
+    if (LICENCEABLE.test(verb)) {
       const target = dmlTarget(sanitized, index);
       if (target !== null && licenced.has(target)) continue;
     }
-    findings.push({
-      line: sanitized.slice(0, index).split("\n").length,
-      statement: statementAt(sql, sanitized, index),
-    });
+    if (MERGE_VERB.test(verb)) mergeEnd = statementEnd(sanitized, index);
+    report(index, index);
   }
-  return findings;
+
+  // Pass 2 — what the file builds and then executes.
+  const dynamic = sanitize(sql, { keepLiterals: true });
+  const spans = dynamicSqlSpans(sanitized);
+  for (const match of dynamic.matchAll(DML)) {
+    const index = match.index;
+    const span = spans.find(([start, end]) => index >= start && index < end);
+    if (span === undefined) continue;
+    if (!startsStatement(dynamic, index)) continue;
+    if (within(definitions, index)) continue;
+    // Quoted from the `EXECUTE` / `format(`, not from the verb: the statement
+    // an author has to go and find is the one that builds the command, and
+    // slicing from inside the literal would quote it with a dangling `');`.
+    report(index, span[0]);
+  }
+
+  return [...findings.entries()].sort(([a], [b]) => a - b).map(([, finding]) => finding);
 }
 
 /**

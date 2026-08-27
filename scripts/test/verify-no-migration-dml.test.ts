@@ -28,6 +28,56 @@ import {
 /** `findDml` reports at least one statement. */
 const flags = (sql: string): boolean => findDml(sql).length > 0;
 
+/**
+ * The `EXECUTE format(…)` sites that actually live in `packages/db/drizzle/`,
+ * one fixture per distinct shape.
+ *
+ * These are the regression control for the dynamic-SQL pass. `EXECUTE
+ * format(…)` is how this directory writes catalog-guarded DDL — 23 occurrences
+ * across `0043`, `0047`, `0048` and `0053` when the pass was added, every one
+ * of them a `RENAME`, a `DROP CONSTRAINT` or a probe — so a pass that reads
+ * command strings as code has to read all of them as clean. Copied here rather
+ * than scanned out of the directory for the reason this file's header gives:
+ * a fixture keeps saying what it was written to say after the directory moves
+ * on.
+ */
+const LIVE_DYNAMIC_DDL: readonly string[] = [
+  // `0043` — the constraint rename, in both its fixed-table and `%s` forms.
+  `EXECUTE format(
+      'ALTER TABLE "public"."organizations" RENAME CONSTRAINT %I TO %I',
+      r.conname, replace(r.conname, 'documents_bytes', 'files_bytes')
+    );`,
+  `EXECUTE format(
+      'ALTER TABLE %s RENAME CONSTRAINT %I TO %I',
+      r.tbl, r.conname, replace(r.conname, 'document', 'file')
+    );`,
+  // `0043` / `0053` — the index and sequence renames.
+  `EXECUTE format(
+      'ALTER INDEX %I.%I RENAME TO %I',
+      r.schemaname, r.idxname, replace(r.idxname, 'document', 'file')
+    );`,
+  `EXECUTE format(
+      'ALTER SEQUENCE %I.%I RENAME TO %I',
+      r.schemaname, r.seqname, replace(r.seqname, 'application', 'space')
+    );`,
+  // `0053` — the column rename.
+  `EXECUTE format(
+      'ALTER TABLE %I.%I RENAME COLUMN %I TO %I',
+      'public', r.table_name, r.column_name,
+      replace(r.column_name, 'application', 'space')
+    );`,
+  // `0047` — a probe, whose result feeds a PL/pgSQL variable.
+  `EXECUTE format('SELECT EXISTS (SELECT 1 FROM public.%I)', candidate) INTO has_rows;`,
+  // `0048` — a `DROP CONSTRAINT` whose replacement, on the NEXT line, carries
+  // `ON DELETE set null`. The discriminating one: the span must end at the
+  // `EXECUTE`'s own `;`, or that FK action reads as a write.
+  `EXECUTE format('ALTER TABLE public.organizations DROP CONSTRAINT %I', existing);
+  END LOOP;
+  ALTER TABLE "organizations" ADD CONSTRAINT "organizations_created_by_user_id_fk"
+    FOREIGN KEY ("created_by") REFERENCES "public"."user"("id")
+    ON DELETE set null ON UPDATE no action;`,
+];
+
 const PURE_DDL = `
 ALTER TABLE "runs" ADD COLUMN "version_ref" text;--> statement-breakpoint
 CREATE INDEX "idx_runs_version_ref" ON "runs" USING btree ("version_ref");--> statement-breakpoint
@@ -345,6 +395,32 @@ END $$;`;
     const sql = `ALTER TABLE "runs" ADD COLUMN "c" text DEFAULT 'x' NOT NULL;`;
     expect(licencedTables(sanitize(sql))).toEqual(new Set());
   });
+
+  it("licences nothing from a clause inside a CREATE FUNCTION body", () => {
+    // The same carve-out as the write scan, in the other direction, and the
+    // pair has to move together: exempting a body from the write scan alone
+    // would turn a function definition into a way to MANUFACTURE a licence for
+    // a write elsewhere in the file. Nothing in a body promotes a column when
+    // the migration is applied.
+    const sql = `CREATE FUNCTION f() RETURNS void AS $$
+BEGIN
+  ALTER TABLE "runs" ALTER COLUMN "c" SET NOT NULL;
+END;
+$$ LANGUAGE plpgsql;`;
+    expect(licencedTables(sanitize(sql))).toEqual(new Set());
+    expect(flags(`${sql}--> statement-breakpoint\nUPDATE "runs" SET "c" = 1;`)).toBe(true);
+  });
+
+  it("still licences from a clause inside a DO block", () => {
+    // The control for the case above, and the shape `0051` is written in: a
+    // `DO` block runs at apply time, so a promotion inside one is a real
+    // promotion.
+    const sql = `DO $$
+BEGIN
+  ALTER TABLE "runs" ALTER COLUMN "c" SET NOT NULL;
+END $$;`;
+    expect(licencedTables(sanitize(sql))).toEqual(new Set(["runs"]));
+  });
 });
 
 describe("findDml — CTE-led statements", () => {
@@ -425,6 +501,206 @@ ALTER TABLE "runs" ALTER COLUMN "version_ref" SET NOT NULL;`;
     expect(
       flags(`-- we used to TRUNCATE "runs" here\nALTER TABLE "runs" ADD COLUMN "c" text;`),
     ).toBe(false);
+  });
+});
+
+describe("findDml — MERGE", () => {
+  // PostgreSQL 16 writes rows in all three directions with a single MERGE. It
+  // used to be caught only by ACCIDENT, through the `UPDATE` behind its
+  // `WHEN MATCHED THEN` — which `dmlTarget` then read as a write to a table
+  // called `set`, producing a finding no author could act on.
+  it("flags a MERGE, and reports the whole statement exactly once", () => {
+    const sql = `MERGE INTO "runs" t USING "staging" s ON t."id" = s."id"
+WHEN MATCHED THEN UPDATE SET "status" = s."status"
+WHEN NOT MATCHED THEN INSERT ("id") VALUES (s."id");`;
+    const findings = findDml(sql);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.line).toBe(1);
+    expect(findings[0]?.statement).toStartWith(`MERGE INTO "runs"`);
+  });
+
+  it("does not report a MERGE's WHEN actions as statements of their own", () => {
+    // `THEN` is a STATEMENT_OPENER and has to stay one, for the PL/pgSQL
+    // `IF … THEN INSERT …` it was added for. So without the merge-statement
+    // skip each action here is a second finding quoting a fragment.
+    const sql = `MERGE INTO "runs" t USING "staging" s ON t."id" = s."id"
+WHEN MATCHED AND s."stale" THEN DELETE
+WHEN MATCHED THEN UPDATE SET "status" = 'done'
+WHEN NOT MATCHED THEN INSERT ("id") VALUES (s."id");`;
+    expect(findDml(sql)).toHaveLength(1);
+  });
+
+  it("resumes reporting after the MERGE's own statement ends", () => {
+    // The skip is bounded by the MERGE's `;`. An unrelated write on the next
+    // line must not ride through on it.
+    const sql = `MERGE INTO "runs" t USING "staging" s ON t."id" = s."id"
+  WHEN MATCHED THEN UPDATE SET "status" = 'done';--> statement-breakpoint
+DELETE FROM "uploads";`;
+    expect(findDml(sql).map((f) => f.line)).toEqual([1, 3]);
+  });
+
+  it("never licences a MERGE, whatever clause the file carries on that table", () => {
+    // §2 opens licencing for one verb, `UPDATE`, and a MERGE can delete rows
+    // (`WHEN MATCHED THEN DELETE` is a legal action). Licencing it would
+    // re-open exactly what refusing `DELETE` and `TRUNCATE` beside a
+    // constraint is for. Both licence shapes, so neither is the exception.
+    const notNull = `MERGE INTO "runs" t USING "s" s ON t."id" = s."id" WHEN MATCHED THEN UPDATE SET "c" = 1;--> statement-breakpoint
+ALTER TABLE "runs" ALTER COLUMN "c" SET NOT NULL;`;
+    const dropColumn = `MERGE INTO "runs" t USING "s" s ON t."id" = s."id" WHEN MATCHED THEN UPDATE SET "c" = 1;--> statement-breakpoint
+ALTER TABLE "runs" DROP COLUMN "old";`;
+    expect(flags(notNull)).toBe(true);
+    expect(flags(dropColumn)).toBe(true);
+  });
+
+  it("ignores `MERGE` in a comment and in an identifier that starts with it", () => {
+    expect(
+      flags(`-- we could MERGE the two tables here\nALTER TABLE "runs" ADD COLUMN "c" text;`),
+    ).toBe(false);
+    expect(flags(`CREATE INDEX "idx_runs_merged" ON "runs" USING btree ("merged_at");`)).toBe(
+      false,
+    );
+  });
+});
+
+describe("findDml — dynamic SQL built by EXECUTE / format(…)", () => {
+  // THE reachable bypass, before this pass existed. `sanitize` blanks
+  // single-quoted literals — right for prose and for `'DELETE'`-as-a-value,
+  // and wrong for the one literal the server executes.
+  it("flags a write built by `EXECUTE format(…)`", () => {
+    const sql = `DO $$ BEGIN EXECUTE format('UPDATE t SET x = 1'); END $$;`;
+    const findings = findDml(sql);
+    expect(findings).toHaveLength(1);
+    // Quoted from the `EXECUTE`, not from inside the literal: the statement an
+    // author has to go and fix is the one that builds the command.
+    expect(findings[0]?.statement).toBe(`EXECUTE format('UPDATE t SET x = 1');`);
+  });
+
+  it("flags a write handed straight to `EXECUTE` as a literal", () => {
+    expect(flags(`DO $$ BEGIN EXECUTE 'DELETE FROM t'; END $$;`)).toBe(true);
+  });
+
+  it("flags a command assembled into a variable and executed later", () => {
+    // The same bypass in two statements. `format(` is a span in its own right
+    // and not only one nested inside an `EXECUTE`, so this is seen too.
+    const sql = `DO $$
+DECLARE stmt text;
+BEGIN
+  stmt := format('TRUNCATE %I', 'runs');
+  EXECUTE stmt;
+END $$;`;
+    expect(flags(sql)).toBe(true);
+  });
+
+  it("reports a dynamic write no matter what the file constrains", () => {
+    // No carve-out applies: the target is a `%I` filled from a catalog query,
+    // so there is no table name a licence could be matched against, and the
+    // gate fails closed exactly as it does for an unreadable target.
+    const sql = `DO $$ BEGIN EXECUTE format('UPDATE %I SET c = 1', 'runs'); END $$;--> statement-breakpoint
+ALTER TABLE "runs" ALTER COLUMN "c" SET NOT NULL;`;
+    expect(flags(sql)).toBe(true);
+  });
+
+  it("leaves every live `EXECUTE format(…)` DDL shape clean", () => {
+    // The regression control. Every one of these is in the directory today
+    // (see `LIVE_DYNAMIC_DDL`); a pass that reads command strings as code and
+    // flags one of them would be unusable.
+    for (const fixture of LIVE_DYNAMIC_DDL) {
+      expect(findDml(`DO $$\nDECLARE r record;\nBEGIN\n  ${fixture}\nEND $$;`)).toEqual([]);
+    }
+  });
+
+  it("does not read a dynamic FK's `ON DELETE` action as a write", () => {
+    // The narrower half of the control above: a command string is scanned with
+    // the same statement-opener discipline as the rest of the file, so
+    // `ON DELETE CASCADE` inside one is still a clause, not a statement.
+    const sql = `DO $$ BEGIN
+  EXECUTE format('ALTER TABLE %I ADD CONSTRAINT k FOREIGN KEY (a) REFERENCES b(c) ON DELETE CASCADE', t);
+END $$;`;
+    expect(flags(sql)).toBe(false);
+  });
+
+  it("does not read a `CREATE TRIGGER … EXECUTE FUNCTION` clause as dynamic SQL", () => {
+    // `EXECUTE FUNCTION` names a function; it hands the server no command
+    // string, so it opens no span.
+    const sql = `CREATE TRIGGER "runs_notify" AFTER INSERT ON "runs"
+  FOR EACH ROW EXECUTE FUNCTION notify_run_change();`;
+    expect(flags(sql)).toBe(false);
+  });
+
+  it("still blanks a literal that no EXECUTE or format(…) reaches", () => {
+    // The other direction, and the reason literals are blanked at all: a DML
+    // keyword parked in an ordinary value is not a statement. Only a command
+    // string is read as code, so this must stay clean.
+    const sql = `ALTER TABLE "runs" ALTER COLUMN "note" SET DEFAULT 'DELETE FROM runs';--> statement-breakpoint
+DO $$ BEGIN EXECUTE format('ALTER TABLE %I RENAME TO %I', 'a', 'b'); END $$;`;
+    expect(flags(sql)).toBe(false);
+  });
+});
+
+describe("findDml — a CREATE FUNCTION body is a definition, not a write", () => {
+  // Defining a trigger function writes a `pg_proc` row, which is schema. Its
+  // `INSERT` runs later, per row, when something touches the table the trigger
+  // is on — the application's behaviour, not a one-off repair.
+  it("does not flag DML inside a CREATE FUNCTION body", () => {
+    const sql = `CREATE FUNCTION f() RETURNS trigger AS $$
+BEGIN
+  INSERT INTO "audit" ("kind") VALUES ('run');
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;`;
+    expect(flags(sql)).toBe(false);
+  });
+
+  it("does not flag DML inside a CREATE OR REPLACE PROCEDURE body either", () => {
+    const sql = `CREATE OR REPLACE PROCEDURE p() LANGUAGE plpgsql AS $body$
+BEGIN
+  DELETE FROM "runs" WHERE "status" = 'pending';
+END;
+$body$;`;
+    expect(flags(sql)).toBe(false);
+  });
+
+  it("STILL flags DML inside a DO block — the counter-case", () => {
+    // A `DO $$ … $$` executes at apply time, against the rows that exist,
+    // which is precisely what §2 forbids. `0021`, `0023`, `0040` and `0051`
+    // are that shape, and the whole distinction is the `CREATE … FUNCTION` in
+    // front of the dollar quote.
+    expect(flags(`DO $$ BEGIN INSERT INTO "audit" ("kind") VALUES ('run'); END $$;`)).toBe(true);
+  });
+
+  it("flags only the DO block when a file carries both", () => {
+    const sql = `CREATE OR REPLACE FUNCTION f() RETURNS trigger AS $fn$
+BEGIN
+  INSERT INTO "audit" ("kind") VALUES ('run');
+  RETURN NEW;
+END;
+$fn$ LANGUAGE plpgsql;--> statement-breakpoint
+DO $$ BEGIN DELETE FROM "runs"; END $$;`;
+    const findings = findDml(sql);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.statement).toStartWith(`DELETE FROM "runs"`);
+  });
+
+  it("does not let a string-bodied CREATE FUNCTION swallow a later DO block", () => {
+    // `AS 'SELECT 1'` opens no dollar quote, so the next `$$` in the file
+    // belongs to something else — here, a DO block that must stay flagged.
+    // The body span is bounded by the CREATE's own `;` for exactly this.
+    const sql = `CREATE FUNCTION f() RETURNS integer AS 'SELECT 1' LANGUAGE sql;--> statement-breakpoint
+DO $$ BEGIN DELETE FROM "runs"; END $$;`;
+    expect(flags(sql)).toBe(true);
+  });
+
+  it("does not flag dynamic SQL a function body builds", () => {
+    // Both carve-outs at once: the command string is read as code, and then
+    // discarded because the body it sits in defines behaviour rather than
+    // running it.
+    const sql = `CREATE FUNCTION f() RETURNS trigger AS $$
+BEGIN
+  EXECUTE format('INSERT INTO %I VALUES (1)', TG_TABLE_NAME);
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;`;
+    expect(flags(sql)).toBe(false);
   });
 });
 
@@ -548,5 +824,31 @@ describe("sanitize", () => {
     const out = sanitize(`SELECT 'it''s here', "kept";`);
     expect(out).toContain("kept");
     expect(out).not.toContain("here");
+  });
+
+  it("keeps the body and blanks the delimiters under `keepLiterals`", () => {
+    // The second reading `findDml` needs. Byte offsets must survive it too:
+    // a finding made in this copy is quoted through the blanked one.
+    const sql = `EXECUTE format('UPDATE t SET x = 1');`;
+    const out = sanitize(sql, { keepLiterals: true });
+    expect(out).toHaveLength(sql.length);
+    expect(out).toContain("UPDATE t SET x = 1");
+    expect(out).not.toContain("'");
+  });
+
+  it("still blanks comments under `keepLiterals`", () => {
+    // Prose is prose in both readings — the `EXECUTE format(…)` blocks this
+    // directory comments out (`0048`, `0053`) must not come back as code.
+    const out = sanitize(`-- EXECUTE format('UPDATE t SET x = 1')\nSELECT 1;`, {
+      keepLiterals: true,
+    });
+    expect(out).not.toContain("UPDATE");
+    expect(out).toContain("SELECT 1;");
+  });
+
+  it("keeps an empty literal and an escaped quote at the right width", () => {
+    for (const sql of [`SELECT '';`, `SELECT 'it''s';`]) {
+      expect(sanitize(sql, { keepLiterals: true })).toHaveLength(sql.length);
+    }
   });
 });
