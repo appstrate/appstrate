@@ -2527,7 +2527,9 @@ resolution, diagnostics and installation facts must be computed by the same
 server logic that gates a Run. It adds no database object. A typed Lab fixture
 now covers its complete card and relation inventory, including multiple list
 items and routed diagnostics, so the combined review does not depend on a live
-backend.
+backend. The `agent-map` Lab screen addresses the Map tab directly, so the
+fixture guard covers the module endpoint without relying on a human to switch
+tabs.
 
 The Lab Agent now carries a real input and output schema, prompt, recorded input
 values, model and proxy resolution, linked schedule, connection candidates,

@@ -51,12 +51,22 @@ export const SCREENS = [
   // The two detail pages that host the compact lists: an agent's Connexions
   // and Mémoire tabs, and a run's Documents and Mémoire tabs. They are here
   // because the third body of a collection lives on them and nowhere else.
-  { path: "/agents/@tractr/compta-trimestrielle#overview", name: "agent-overview" },
-  { path: "/agents/@default/wiki-brain#overview", name: "agent-overview-warning" },
+  {
+    path: "/agents/@tractr/compta-trimestrielle#overview",
+    name: "agent-overview",
+    settleMs: 1500,
+  },
+  {
+    path: "/agents/@default/wiki-brain#overview",
+    name: "agent-overview-warning",
+    settleMs: 1500,
+  },
   {
     path: "/agents/@tractr/analyse-recurrence-articles-tastet#overview",
     name: "agent-overview-blocking",
+    settleMs: 1500,
   },
+  { path: "/agents/@tractr/compta-trimestrielle#map", name: "agent-map" },
   { path: "/agents/@tractr/compta-trimestrielle#runs", name: "agent-runs" },
   { path: "/agents/@tractr/compta-trimestrielle#configuration", name: "agent-configuration" },
   { path: "/agents/@tractr/compta-trimestrielle#memory", name: "agent-memory" },
