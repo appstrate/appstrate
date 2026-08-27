@@ -30,6 +30,35 @@ jobs:
           # rather than degrading to a vacuous pass, so without this it fails
           # every run. Tags only, not `fetch-depth: 0` — full history costs
           # minutes on this repo and nothing here reads a commit range.
+          #
+          # `fetch-tags` on a DEPTH-1 checkout is the combination worth
+          # recording, because the obvious reading of it is wrong: git's own
+          # auto-tag-follow only pulls tags pointing at downloaded objects, and
+          # at `--depth=1` the one downloaded commit is a PR merge tip that no
+          # `v*` tag points at. If `fetch-tags` merely dropped `--no-tags`, this
+          # would fetch nothing and the gate would be red on every PR.
+          #
+          # It does more than that. MEASURED on run 33080988147 (this file's
+          # own PR) rather than assumed — actions/checkout v7 adds an explicit
+          # tag refspec, and the tags arrive even though `--no-tags` is still on
+          # the command line:
+          #
+          #   git -c protocol.version=2 fetch --no-tags --prune \
+          #     --no-recurse-submodules --depth=1 origin \
+          #     +refs/tags/*:refs/tags/* +<sha>:refs/remotes/pull/1230/merge
+          #   * [new tag]  v1.0.0-beta.53 -> v1.0.0-beta.53      (185 tags in all)
+          #
+          # And the gate then did the comparison rather than skipping it — the
+          # vacuous-pass shape to watch for is a run where it resolves to
+          # something other than a tag:
+          #
+          #   ✓ verify-release-version: 82 hardcoded version site(s) … all name
+          #     1.0.0-beta.53 (newest git tag v1.0.0-beta.53)
+          #
+          # "(newest git tag …)" in that line is the evidence. If it ever reads
+          # otherwise, or the gate throws its "no `v*` tag" error, the fix is
+          # `fetch-depth: 0` or an explicit `git fetch --tags` step — not
+          # relaxing the gate.
           fetch-tags: true
 
       - name: Setup Bun

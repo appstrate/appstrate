@@ -324,6 +324,23 @@
     //                                 git index at runtime, so this glob must be
     //                                 a SUPERSET of what discovery can return.
     //
+    // `**/` matching the ROOT file was the open question here, and it is the
+    // one that decides whether this task caches a false GREEN: if `**/` needed
+    // at least one directory segment, adding an undocumented variable to the
+    // root `.env.example` would leave the hash unmoved and replay a cached
+    // pass. MEASURED 2026-08-27 with the probe below rather than reasoned
+    // about — turbo's `**/` DOES match at zero depth:
+    //
+    //     $ turbo run '//#verify:env-docs' --dry=json | jq '.tasks[0].inputs'
+    //     { ".env.example": "4bcf3e5f…", "examples/self-hosting/.env.example": "6ff035f1…", … }
+    //     # append a line to the ROOT .env.example, run again:
+    //     task hash 7f43e544fa412d09 → 28829c1af54ed916   (moved)
+    //
+    // So both files are covered by the one entry and neither needs an explicit
+    // root line — unlike `//#typecheck:scripts`, whose `knip.config.ts` and
+    // `commitlint.config.ts` are named individually because no glob in that
+    // list reaches them at all.
+    //
     // `scripts/verify-env-docs.ts` and `scripts/lib/tracked-files.ts` are the
     // gate's own code; an edit to either changes the verdict without touching
     // any of the three populations above.

@@ -15,6 +15,8 @@ import {
   findVersionSites,
   gitTags,
   isStale,
+  main,
+  parseGitTags,
   resolveReleaseSource,
   type ReleaseSource,
 } from "../verify-release-version.ts";
@@ -29,15 +31,19 @@ const compose = (version: string): string =>
     `      - PI_IMAGE=ghcr.io/appstrate/appstrate-pi:\${APPSTRATE_VERSION:-${version}}`,
   ].join("\n");
 
+/** The version sites only — most cases below care about nothing else. */
+const sitesOf = (content: string): ReturnType<typeof findVersionSites>["sites"] =>
+  findVersionSites(content).sites;
+
 describe("findVersionSites", () => {
   it("finds every `${APPSTRATE_VERSION:-…}` fallback, with its line", () => {
-    const sites = findVersionSites(compose("1.0.0-beta.53"));
+    const sites = sitesOf(compose("1.0.0-beta.53"));
     expect(sites.map((s) => s.version)).toEqual(["1.0.0-beta.53", "1.0.0-beta.53"]);
     expect(sites.map((s) => s.line)).toEqual([3, 5]);
   });
 
   it("finds a commented `APPSTRATE_VERSION=` assignment in an .env.example", () => {
-    const sites = findVersionSites("# APPSTRATE_VERSION=1.0.0-beta.53\n");
+    const sites = sitesOf("# APPSTRATE_VERSION=1.0.0-beta.53\n");
     expect(sites).toHaveLength(1);
     expect(sites[0]!.version).toBe("1.0.0-beta.53");
   });
@@ -46,13 +52,13 @@ describe("findVersionSites", () => {
     // `.env.example` carried `beta.51` example pins while every compose file
     // said `beta.41`. A gate that read only the interpolated fallbacks would
     // have called that repo clean.
-    const sites = findVersionSites("# PI_IMAGE=ghcr.io/appstrate/appstrate-pi:1.0.0-beta.51\n");
+    const sites = sitesOf("# PI_IMAGE=ghcr.io/appstrate/appstrate-pi:1.0.0-beta.51\n");
     expect(sites).toHaveLength(1);
     expect(sites[0]!.version).toBe("1.0.0-beta.51");
   });
 
   it("strips a leading `v` so a tag-shaped value compares equal to a bare one", () => {
-    expect(findVersionSites(compose("v1.0.0-beta.53"))[0]!.version).toBe("1.0.0-beta.53");
+    expect(sitesOf(compose("v1.0.0-beta.53"))[0]!.version).toBe("1.0.0-beta.53");
   });
 
   it("ignores the alias tag families the release also publishes", () => {
@@ -67,11 +73,77 @@ describe("findVersionSites", () => {
       compose("sha-0a1b2c3"),
       "# RUNNER_IMAGE_NODE=ghcr.io/appstrate/appstrate-mcp-runner-node:latest",
     ].join("\n");
-    expect(findVersionSites(content)).toHaveLength(0);
+    const scan = findVersionSites(content);
+    expect(scan.sites).toHaveLength(0);
+    // Counted, not dropped: the skip is a decision the success line reports.
+    expect(scan.skipped).toBe(7);
+    expect(scan.malformed).toHaveLength(0);
   });
 
   it("does not fire on an unrelated registry", () => {
-    expect(findVersionSites("    image: docker.io/library/postgres:16.4\n")).toHaveLength(0);
+    expect(sitesOf("    image: docker.io/library/postgres:16.4\n")).toHaveLength(0);
+  });
+
+  // ─── The defect: an unparseable site used to vanish ─────────────────────
+  //
+  // `add()` returned early on `!isValidVersion` and recorded nothing, so a
+  // malformed site was indistinguishable from no site at all.
+
+  it("REPORTS a value that matched the shape but is not a version", () => {
+    // Mutation caught: deleting the `malformed.push(…)` arm, or widening
+    // ALIAS_TAG_FAMILY to `/./`, makes this return an empty list.
+    const scan = findVersionSites(compose("1.0.0.beta.54"));
+    expect(scan.sites).toHaveLength(0);
+    expect(scan.malformed.map((m) => m.raw)).toEqual(["1.0.0.beta.54", "1.0.0.beta.54"]);
+    expect(scan.malformed.map((m) => m.line)).toEqual([3, 5]);
+  });
+
+  it("keeps the good sites AND the malformed one — the 81-of-82 shape", () => {
+    // The scenario the silent drop hid: a bump touches every site but one.
+    // Both halves must survive the scan, or the report cannot say which file
+    // was left behind.
+    const scan = findVersionSites([compose("1.0.0-beta.54"), compose("1.0.0.beta.54")].join("\n"));
+    expect(scan.sites).toHaveLength(2);
+    expect(scan.malformed).toHaveLength(2);
+  });
+
+  it("separates the two classes: an alias is skipped, junk is reported", () => {
+    // The discrimination this fix is about. A single input carrying one of
+    // each: a test asserting only the alias half would pass against a parser
+    // that swallowed both.
+    const scan = findVersionSites([compose("latest"), compose("beta.54")].join("\n"));
+    expect(scan.skipped).toBe(2);
+    expect(scan.malformed.map((m) => m.raw)).toEqual(["beta.54", "beta.54"]);
+  });
+
+  it("treats the compose header's `<version>` placeholder as prose, not junk", () => {
+    // `docker-compose.yml`'s RELEASE CHECKLIST comment quotes the shape it is
+    // telling you to bump. Reporting it would make the gate red on a clean
+    // repo, which is the other way a gate stops being used.
+    const scan = findVersionSites("# the `${APPSTRATE_VERSION:-<version>}` fallback below\n");
+    expect(scan.malformed).toHaveLength(0);
+    expect(scan.skipped).toBe(1);
+  });
+
+  it("does not double-count an interpolated image ref as an unparseable pin", () => {
+    // `LITERAL_IMAGE_PIN` used to also match the tag half of
+    // `…/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.53}`, capturing the whole
+    // `${…}` expression. Harmless while non-parsing matches were dropped;
+    // 84 false findings the moment they are reported.
+    const scan = findVersionSites(
+      "    image: ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.53}\n",
+    );
+    expect(scan.sites).toHaveLength(1);
+    expect(scan.malformed).toHaveLength(0);
+  });
+
+  it("reads an alias out of a backtick-quoted prose mention", () => {
+    // `docker-compose.yml`'s header says `ghcr.io/appstrate/appstrate:latest`
+    // inside markdown backticks; a capture that swallowed the closing backtick
+    // read `latest\`` and missed the alias family by one character.
+    const scan = findVersionSites("# so `ghcr.io/appstrate/appstrate:latest` does not exist\n");
+    expect(scan.malformed).toHaveLength(0);
+    expect(scan.skipped).toBe(1);
   });
 });
 
@@ -207,7 +279,7 @@ describe("isStale", () => {
   });
 
   /** The version as the gate would read it out of a real compose line. */
-  const asShipped = (version: string): string => findVersionSites(compose(version))[0]!.version;
+  const asShipped = (version: string): string => sitesOf(compose(version))[0]!.version;
 
   it("rejects a fallback BEHIND the newest release", () => {
     expect(isStale(asShipped("1.0.0-beta.41"), src("1.0.0-beta.53", "floor"))).toBe(true);
@@ -238,5 +310,184 @@ describe("isStale", () => {
     expect(isStale(asShipped("1.0.0-beta.54"), src("1.0.0-beta.53", "exact"))).toBe(true);
     expect(isStale(asShipped("1.0.0-beta.52"), src("1.0.0-beta.53", "exact"))).toBe(true);
     expect(isStale(asShipped("1.0.0-beta.53"), src("1.0.0-beta.53", "exact"))).toBe(false);
+  });
+});
+
+/**
+ * The parse half of the ambient read, driven directly.
+ *
+ * `gitTags` composes a spawn with this; the spawn is exercised by the `gitTags`
+ * block above. The branch worth its own case is the non-zero exit: it ENDS the
+ * gate, and reaching it through the real command would mean running `git`
+ * somewhere that is not a repository — a fact about the runner's temp
+ * directory, not about this code.
+ */
+describe("parseGitTags", () => {
+  it("THROWS on a non-zero exit, carrying git's own stderr", () => {
+    // Mutation caught: deleting the `if (exitCode !== 0) throw` returns `[]`,
+    // which `resolveReleaseSource` reads as "no tags" — a gate that could not
+    // look, reporting that it looked and found nothing.
+    expect(() => parseGitTags(128, "", "fatal: not a git repository\n")).toThrow(
+      /git tag --list failed \(exit 128\)/,
+    );
+    expect(() => parseGitTags(128, "", "fatal: not a git repository\n")).toThrow(
+      /not a git repository/,
+    );
+  });
+
+  it("returns an EMPTY list on a clean exit with no output — the other half", () => {
+    // "Looked, found nothing" is a legitimate state `resolveReleaseSource`
+    // turns into its actionable throw. Conflating it with the case above is
+    // what makes a broken checkout look like an untagged one.
+    expect(parseGitTags(0, "", "")).toEqual([]);
+    expect(parseGitTags(0, "\n\n", "")).toEqual([]);
+  });
+
+  it("trims and drops the trailing newline git always emits", () => {
+    expect(parseGitTags(0, "v1.2.3\nv1.2.2\n", "")).toEqual(["v1.2.3", "v1.2.2"]);
+  });
+});
+
+/**
+ * `main()`'s decisions, every branch of them.
+ *
+ * All four of these END THE GATE, and none was reachable from a test before:
+ * `main` was not exported and read `trackedFiles` + `readFileSync` +
+ * `process.env` directly, so deleting the vacuity floor or the disagreement
+ * branch left the suite green. Each case below names the mutation it catches.
+ */
+describe("main", () => {
+  const source = (version: string, mode: ReleaseSource["mode"] = "floor"): ReleaseSource => ({
+    version,
+    mode,
+    origin: `test source ${version}`,
+  });
+
+  /** Runs `main` over synthetic files, capturing what it printed. */
+  const run = (
+    contents: Record<string, string>,
+    resolveSource: () => ReleaseSource = () => source("1.0.0-beta.53"),
+  ): { code: number; out: string; err: string } => {
+    const out: string[] = [];
+    const err: string[] = [];
+    const code = main({
+      files: Object.keys(contents),
+      readFile: (f) => contents[f]!,
+      resolveSource,
+      out: (m) => out.push(m),
+      err: (m) => err.push(m),
+    });
+    return { code, out: out.join("\n"), err: err.join("\n") };
+  };
+
+  it("passes when every site names the source version", () => {
+    const r = run({ "docker-compose.yml": compose("1.0.0-beta.53") });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("2 hardcoded version site(s)");
+    expect(r.out).toContain("0 unparseable");
+  });
+
+  it("FAILS on the vacuity floor — files matched, zero version sites", () => {
+    // Mutation caught: deleting the `sites.length === 0` branch. Without it
+    // `distinct[0]` is `undefined`, `isStale(undefined, …)` is falsy-ish and
+    // the gate prints "0 hardcoded version site(s) … all name undefined" at
+    // exit 0. This is the branch that fires when `${APPSTRATE_VERSION:-…}`
+    // changes shape and the gate quietly stops looking.
+    const r = run({ "docker-compose.yml": "services:\n  appstrate:\n    image: postgres:16\n" });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("pass vacuously");
+  });
+
+  it("accepts a file with sites alongside one with none — the other half", () => {
+    // The floor is about the TOTAL being zero, not about every file
+    // contributing. `test/setup/docker-compose.test.yml` legitimately has no
+    // version site; a per-file floor would fail the repo as it stands.
+    const r = run({
+      "docker-compose.yml": compose("1.0.0-beta.53"),
+      "test/setup/docker-compose.test.yml": "services:\n  db:\n    image: postgres:16\n",
+    });
+    expect(r.code).toBe(0);
+  });
+
+  it("FAILS on a malformed site even when every other site agrees", () => {
+    // Mutation caught: deleting the `malformed.length > 0` branch restores the
+    // measured defect — 81 sites agree, the 82nd names a tag GHCR does not
+    // have, and the gate exits 0.
+    const r = run({
+      "docker-compose.yml": compose("1.0.0-beta.53"),
+      "examples/self-hosting/docker-compose.yml": compose("1.0.0.beta.53"),
+    });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("examples/self-hosting/docker-compose.yml");
+    expect(r.err).toContain("1.0.0.beta.53");
+  });
+
+  it("FAILS when the shipped files disagree, naming the odd ones out", () => {
+    // Mutation caught: deleting the `distinct.length > 1` branch. `distinct[0]`
+    // is then the HIGHEST version (the list is sorted descending), so a repo
+    // where one file was bumped and four were not passes on the strength of the
+    // one that was.
+    const r = run({
+      "docker-compose.yml": compose("1.0.0-beta.53"),
+      "examples/self-hosting/docker-compose.yml": compose("1.0.0-beta.41"),
+    });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("disagree about the release version");
+    expect(r.err).toContain("examples/self-hosting/docker-compose.yml");
+    expect(r.err).toContain("1.0.0-beta.41");
+  });
+
+  it("FAILS when every site agrees on a version BEHIND the source", () => {
+    const r = run({ "docker-compose.yml": compose("1.0.0-beta.41") }, () =>
+      source("1.0.0-beta.53"),
+    );
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("is BEHIND the newest release");
+  });
+
+  it("PASSES on a version ahead of the floor, and says so", () => {
+    // The bump PR. An equality check here would fail exactly the change that
+    // fixes staleness — the PR #1032 deadlock shape.
+    const r = run({ "docker-compose.yml": compose("1.0.0-beta.54") }, () =>
+      source("1.0.0-beta.53"),
+    );
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("a release bump in flight");
+  });
+
+  it("FAILS the same 'ahead' input under the EXACT arm", () => {
+    // The arm `release.yml`'s preflight job takes. Same files, same tag, other
+    // verdict: at a tag push the images carry that tag and nothing else.
+    const r = run({ "docker-compose.yml": compose("1.0.0-beta.54") }, () =>
+      source("1.0.0-beta.53", "exact"),
+    );
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("must EQUAL the tag being released");
+  });
+
+  it("PASSES under the EXACT arm when the sites name the tag being released", () => {
+    const r = run({ "docker-compose.yml": compose("1.0.0-beta.53") }, () =>
+      source("1.0.0-beta.53", "exact"),
+    );
+    expect(r.code).toBe(0);
+  });
+
+  it("does not resolve the source at all when the vacuity floor fires", () => {
+    // Ordering, asserted: the floor is about this checkout's files and must not
+    // depend on a tag lookup that can itself throw. A source resolution before
+    // the floor turns "the pattern changed shape" into "no `v*` tag".
+    let resolved = 0;
+    const code = main({
+      files: ["docker-compose.yml"],
+      readFile: () => "services: {}\n",
+      resolveSource: () => {
+        resolved += 1;
+        return source("1.0.0-beta.53");
+      },
+      out: () => {},
+      err: () => {},
+    });
+    expect(code).toBe(1);
+    expect(resolved).toBe(0);
   });
 });

@@ -20,6 +20,30 @@
  *
  *   keys(envSchema)        ⊆ rows(ENV.md)
  *   keys(*.env.example)    ⊆ rows(ENV.md) ∪ INFRA_ALLOWLIST
+ *   required(envSchema)    ⊆ keys(EACH shipped .env.example)
+ *
+ * ─── Why the third line exists ───────────────────────────────────────
+ *
+ * The first two are subset checks in one direction, and a subset check is blind
+ * to what is MISSING from the smaller set. Measured: `CONNECT_SESSION_SECRET`
+ * is hard-required by the schema (`.min(1)`, keys ≥16 chars, no default — the
+ * process cannot boot without it) and every self-hosting compose file
+ * interpolates it fail-hard as `${CONNECT_SESSION_SECRET:?Set …}`. It was
+ * absent from `examples/self-hosting/.env.example`, so a user following the
+ * self-hosting guide got an ABORTED `docker compose up`, and nothing here could
+ * see it: an absent key is trivially a subset of the rows.
+ *
+ * "Required" means "the Zod schema rejects `undefined`" — asked of the schema
+ * itself (`shape[key].safeParse(undefined)`), not of a hand-kept list, so a key
+ * that gains or loses a default moves in and out of scope on its own. A key
+ * WITH a default is deliberately not forced into the examples: the whole point
+ * of a default is that an operator need not write it down, and an example file
+ * that restated all 94 of them would be noise.
+ *
+ * The population is EVERY shipped `.env.example` — `ENV_EXAMPLE_GLOBS`, the
+ * same list the second line uses — because each one is a starting point somebody
+ * copies. Narrowing it to the root file would have left exactly the file the
+ * defect was in unchecked.
  *
  * It deliberately does not check the reverse direction. A documented row with
  * no schema key and no `.env.example` entry is the normal shape of a var read
@@ -32,14 +56,11 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { envSchema } from "../packages/env/src/index.ts";
-import { trackedFiles } from "./lib/tracked-files.ts";
+import { ENV_EXAMPLE_GLOBS, trackedFiles } from "./lib/tracked-files.ts";
 
 const REPO_ROOT = join(import.meta.dir, "..");
 
 const ENV_DOC = "docs/ENV.md";
-
-/** Both shipped `.env.example` files — the root one and the self-hosting one. */
-const ENV_EXAMPLE_GLOBS = ["*.env.example"] as const;
 
 /**
  * Variables that appear in a shipped `.env.example` and deliberately have NO
@@ -80,9 +101,29 @@ const INFRA_ALLOWLIST: Record<string, string> = {
  * The second table in the file — "File limits — renamed from `DOCUMENT_*`" —
  * is deliberately excluded. Its rows are RETIRED names that boot now refuses,
  * mirroring `RETIRED_ENV_RENAMES` in the schema; counting them as documented
- * variables would let a retired spelling satisfy a live key's requirement. The
- * two tables are told apart by their header row (`| Variable |` vs `| Was |`),
- * not by line number.
+ * variables would let a retired spelling satisfy a live key's requirement.
+ *
+ * ─── Any table header closes the main table, not just `| Was` ────────
+ *
+ * That is what this comment used to CLAIM while the code tested for `| Was`
+ * specifically. Measured against the exported parser: a doc with the main
+ * table followed by a third table headed `| Name | Meaning |` returned
+ * `["LIVE_ONE", "SHOULD_NOT_COUNT"]` — every backticked name under the third
+ * header counted as documented. So adding, say, a "Deprecated / Replacement"
+ * table to `docs/ENV.md` would let a LIVE schema key lose its row and keep this
+ * gate green, because the retired spelling in the new table answers for it.
+ *
+ * The implementation now matches the comment, which is also the safer of the
+ * two behaviours: a table this parser has never seen is a table whose meaning
+ * it does not know, and the answer to "is this documentation?" for an unknown
+ * table is no. Adding a new table costs nothing; adding one whose rows SHOULD
+ * count means giving it the `| Variable |` header, which is a decision someone
+ * makes on purpose.
+ *
+ * Rows are told apart by shape rather than by position: a separator row is
+ * dashes and pipes, a variable row's first cell is a backticked
+ * `SCREAMING_SNAKE` name, and anything else that starts a table cell with plain
+ * text is a header row. Only a header row moves the in/out state.
  *
  * Pure — content in, names out — so `scripts/test/verify-env-docs.test.ts` can
  * drive it with synthetic Markdown.
@@ -91,21 +132,25 @@ export function readDocumentedVars(markdown: string): Set<string> {
   const documented = new Set<string>();
   let inMainTable = false;
 
+  /** `| --- | :--: | ---: |` — the row under every markdown table header. */
+  const SEPARATOR_ROW = /^\|[\s:|-]+$/;
+  /** `| \`SOME_VAR\` | …` — a documented variable. */
+  const VARIABLE_ROW = /^\|\s*`([A-Z][A-Z0-9_]*)`\s*\|/;
+  /** `| Variable | Required | …` — a header row, captured so it can be identified. */
+  const HEADER_ROW = /^\|\s*([A-Za-z][^|]*?)\s*\|/;
+
   for (const line of markdown.split("\n")) {
-    if (line.startsWith("| Variable")) {
-      inMainTable = true;
+    if (!line.startsWith("|")) continue;
+    if (SEPARATOR_ROW.test(line)) continue;
+
+    const variable = VARIABLE_ROW.exec(line);
+    if (variable) {
+      if (inMainTable) documented.add(variable[1]!);
       continue;
     }
-    // Any other table header ends the main table — today that is the retired
-    // `| Was | Now | Governs |` table, and any future one gets the same answer.
-    if (line.startsWith("|") && !inMainTable) continue;
-    if (line.startsWith("| Was")) {
-      inMainTable = false;
-      continue;
-    }
-    if (!inMainTable) continue;
-    const match = /^\|\s*`([A-Z][A-Z0-9_]*)`\s*\|/.exec(line);
-    if (match) documented.add(match[1]!);
+
+    const header = HEADER_ROW.exec(line);
+    if (header) inMainTable = header[1] === "Variable";
   }
 
   return documented;
@@ -125,6 +170,58 @@ export function readEnvExampleVars(content: string): Set<string> {
     if (match) names.add(match[1]!);
   }
   return names;
+}
+
+/**
+ * The schema keys the process CANNOT boot without.
+ *
+ * Asked of the schema rather than kept as a list: a key is required exactly
+ * when its own Zod type rejects `undefined`, which is the same question the
+ * boot path asks. `.default(…)` and `.optional()` both accept it; a bare
+ * `z.string().min(1)` does not. So a key that gains a default leaves this set
+ * on its own, and one that loses a default joins it — with no roster to
+ * remember, which is the property that makes the check survive.
+ *
+ * Exported so the test can drive it against synthetic schemas AND assert the
+ * real one's answer, without the test re-deriving "required" and therefore
+ * agreeing with a broken derivation.
+ */
+export function requiredSchemaKeys(
+  shape: Record<string, { safeParse: (v: unknown) => { success: boolean } }>,
+): Set<string> {
+  const required = new Set<string>();
+  for (const [name, type] of Object.entries(shape)) {
+    if (!type.safeParse(undefined).success) required.add(name);
+  }
+  return required;
+}
+
+/** A required schema key that a shipped `.env.example` does not mention. */
+export interface MissingRequired {
+  name: string;
+  file: string;
+}
+
+/**
+ * Every (required key, shipped example) pair where the example is silent.
+ *
+ * The direction the two subset checks cannot see — see the header. Pure, and
+ * taking the per-file key sets rather than the merged map, because the defect
+ * is per-FILE: `CONNECT_SESSION_SECRET` was present in the root `.env.example`
+ * and absent from the self-hosting one, and a merged population reports that as
+ * covered.
+ */
+export function findMissingRequired(
+  required: ReadonlySet<string>,
+  perFile: ReadonlyMap<string, ReadonlySet<string>>,
+): MissingRequired[] {
+  const missing: MissingRequired[] = [];
+  for (const [file, names] of [...perFile].sort(([a], [b]) => a.localeCompare(b))) {
+    for (const name of [...required].sort()) {
+      if (!names.has(name)) missing.push({ name, file });
+    }
+  }
+  return missing;
 }
 
 /** One undocumented variable, and which population demanded a row for it. */
@@ -167,14 +264,47 @@ export function findUndocumented(
   return findings;
 }
 
-function main(): number {
-  const schemaKeys = new Set(Object.keys(envSchema.shape));
-  const documented = readDocumentedVars(readFileSync(join(REPO_ROOT, ENV_DOC), "utf-8"));
+/**
+ * Everything `main` reaches for outside itself, so a test can reach in.
+ *
+ * The four branches that END this gate — both vacuity floors, the
+ * missing-required report and the undocumented report — were unreachable from
+ * a test while `main` was unexported and welded to `readFileSync` +
+ * `trackedFiles`. Deleting either floor left the suite green, and a deleted
+ * floor is precisely a gate that passes over an empty population. The defaults
+ * are the production wiring and are resolved inside the function, so importing
+ * this module still spawns no `git` and reads no file.
+ */
+export interface MainDeps {
+  /** The `.env.example` files to read. Default: every tracked one. */
+  exampleFiles?: readonly string[];
+  /** Reads one repo-relative path. Default: from disk. */
+  readFile?: (relativePath: string) => string;
+  /** The schema key set. Default: the real `envSchema`'s keys. */
+  schemaKeys?: ReadonlySet<string>;
+  /** The keys that reject `undefined`. Default: derived from the real `envSchema`. */
+  required?: ReadonlySet<string>;
+  out?: (message: string) => void;
+  err?: (message: string) => void;
+}
 
-  const exampleFiles = trackedFiles(ENV_EXAMPLE_GLOBS, "env example file", "fail");
+export function main(deps: MainDeps = {}): number {
+  const readFile =
+    deps.readFile ?? ((rel: string): string => readFileSync(join(REPO_ROOT, rel), "utf-8"));
+  const out = deps.out ?? ((m: string): void => console.log(m));
+  const err = deps.err ?? ((m: string): void => console.error(m));
+  const schemaKeys = deps.schemaKeys ?? new Set(Object.keys(envSchema.shape));
+  const required = deps.required ?? requiredSchemaKeys(envSchema.shape);
+  const documented = readDocumentedVars(readFile(ENV_DOC));
+
+  const exampleFiles =
+    deps.exampleFiles ?? trackedFiles(ENV_EXAMPLE_GLOBS, "env example file", "fail");
+  const perFile = new Map<string, ReadonlySet<string>>();
   const envExampleKeys = new Map<string, string>();
   for (const file of exampleFiles) {
-    for (const name of readEnvExampleVars(readFileSync(join(REPO_ROOT, file), "utf-8"))) {
+    const names = readEnvExampleVars(readFile(file));
+    perFile.set(file, names);
+    for (const name of names) {
       if (!envExampleKeys.has(name)) envExampleKeys.set(name, file);
     }
   }
@@ -186,17 +316,41 @@ function main(): number {
   // exactly this reason; here the schema is read off the OBJECT and cannot
   // empty without a TypeScript error, but the two text parsers can.
   if (documented.size === 0) {
-    console.error(
+    err(
       `\x1b[31m✗\x1b[0m verify-env-docs: parsed ZERO rows out of ${ENV_DOC} — the gate would ` +
         "pass vacuously. Did the main table's `| Variable |` header change shape?",
     );
     return 1;
   }
   if (envExampleKeys.size === 0) {
-    console.error(
+    err(
       `\x1b[31m✗\x1b[0m verify-env-docs: parsed ZERO variables out of ${exampleFiles.length} ` +
         ".env.example file(s) — the gate would pass vacuously.",
     );
+    return 1;
+  }
+
+  // Reported before the documentation findings: a self-hoster who copies an
+  // example missing a hard-required key does not get a confusing app, they get
+  // an aborted `docker compose up` (the compose templates interpolate these
+  // fail-hard as `${KEY:?…}`). That is a broken install, not a doc gap.
+  const missingRequired = findMissingRequired(required, perFile);
+  if (missingRequired.length > 0) {
+    err(
+      `\x1b[31m✗\x1b[0m verify-env-docs: ${missingRequired.length} hard-required schema ` +
+        `variable(s) are missing from a shipped .env.example.\n\n` +
+        `These keys have NO default — the platform refuses to boot without them, and the ` +
+        `self-hosting compose files interpolate them as \`\${KEY:?…}\`, so \`docker compose up\` ` +
+        `aborts before a container starts. An example file that omits one hands the operator a ` +
+        `broken install at step one.\n\n` +
+        `Fix: add the key to the file below, commented or not, with a generated value or the ` +
+        `command that generates one. If it should NOT be required, give it a default in ` +
+        `packages/env/src/index.ts — this check reads the schema, not a list.\n`,
+    );
+    for (const m of missingRequired) {
+      err(`  \x1b[1m${m.name}\x1b[0m  missing from \x1b[1m${m.file}\x1b[0m`);
+    }
+    err("");
     return 1;
   }
 
@@ -204,16 +358,17 @@ function main(): number {
 
   if (findings.length === 0) {
     const schemaBacked = [...documented].filter((n) => schemaKeys.has(n)).length;
-    console.log(
+    out(
       `\x1b[32m✓\x1b[0m verify-env-docs: ${ENV_DOC} documents all ${schemaKeys.size} schema ` +
         `vars and every var in ${exampleFiles.length} .env.example file(s) ` +
         `(${documented.size} rows: ${schemaBacked} schema-backed, ${documented.size - schemaBacked} ` +
-        `read straight from process.env; ${Object.keys(INFRA_ALLOWLIST).length} infra vars allowlisted).`,
+        `read straight from process.env; ${Object.keys(INFRA_ALLOWLIST).length} infra vars ` +
+        `allowlisted), and all ${required.size} hard-required vars appear in every example file.`,
     );
     return 0;
   }
 
-  console.error(
+  err(
     `\x1b[31m✗\x1b[0m verify-env-docs: ${findings.length} environment variable(s) have no row ` +
       `in ${ENV_DOC}.\n\n` +
       `${ENV_DOC} is hand-maintained on purpose — its Notes column carries cross-field boot\n` +
@@ -221,10 +376,10 @@ function main(): number {
       `never writes the file. Write the row yourself, from the code that reads the variable.\n`,
   );
   for (const f of findings) {
-    console.error(`  \x1b[1m${f.name}\x1b[0m  \x1b[33m[${f.source}]\x1b[0m`);
-    console.error(`    ${f.fix}`);
+    err(`  \x1b[1m${f.name}\x1b[0m  \x1b[33m[${f.source}]\x1b[0m`);
+    err(`    ${f.fix}`);
   }
-  console.error("");
+  err("");
   return 1;
 }
 

@@ -153,13 +153,28 @@ jobs:
     # both jobs aligned on post-merge validation.
     if: contains(github.event.pull_request.labels.*.name, 'integration') || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    # 20, matching the two other heavy jobs. It was 10, and the four runs before
-    # this one took 425-464s — under two minutes of headroom, which the ~5.2k
-    # test lines this branch adds consumed exactly. A timeout is not a budget to
-    # sit against: this job is the ONLY pre-merge exercise of 271 integration
-    # files, so a cancellation reads as a red gate for a suite that never ran.
-    # If it approaches 20 too, split the suite rather than raising this again —
-    # the number stops meaning anything once it is routinely re-raised.
+    # 20, matching the two other heavy jobs. It was 10, and it was raised on
+    # PRE-change durations (425-464s) — a guess about what the new tests would
+    # cost, not a measurement of it.
+    #
+    # MEASURED, on run 33080988225 of this branch:
+    #
+    #   Ran 11968 tests across 878 files. [961.51s]     ← the `bun test` step
+    #   Integration tests: 1015s                        ← the whole job
+    #
+    # 1015s of a 1200s ceiling is 85%, leaving ~3 minutes. That is the right
+    # margin for a suite this size and it is why the number stays at 20 — but it
+    # is a margin, not a budget: this job is the ONLY pre-merge exercise of the
+    # integration suite, so a cancellation reads as a red gate for a suite that
+    # never ran, and there is no headroom left to absorb a second raise.
+    #
+    # The earlier claim that these runs had "under two minutes of headroom"
+    # against the 10-minute ceiling was arithmetic on the pre-change figure and
+    # is dropped; 464s against 600s was ~2.3 minutes, and neither number
+    # described the suite as it now stands.
+    #
+    # When this approaches 20, split the suite — do not raise it again. The
+    # number stops meaning anything once it is routinely re-raised.
     timeout-minutes: 20
 
     steps:

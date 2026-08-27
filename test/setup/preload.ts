@@ -274,7 +274,7 @@ if (TIER0) {
   }
 }
 
-// ─── Module migrations + truncation registration ────────────
+// ─── Module discovery + truncation registration ─────────────
 // Auto-discover every module in the repo and wire up its test infrastructure.
 // We do this from the root preload (not per-module) so that `bun test` from
 // any directory sees a consistent state.
@@ -282,8 +282,12 @@ if (TIER0) {
 // Two layouts are recognised:
 //   - apps/api/src/modules/<name>/index.ts (built-in modules)
 //   - packages/module-<name>/src/index.ts (workspace-package modules)
-// Both share the same `drizzle/migrations/` and `test/tables.ts` conventions
-// (relative to the module's root directory).
+// Both share the same `test/tables.ts` convention (relative to the module's
+// root directory) — and only that one. Modules do NOT own migrations: their
+// tables live in the core schema and are created by the core migration step
+// above, as the code below says. This block used to promise a
+// `drizzle/migrations/` convention as well, which nothing here has read since
+// the tables moved.
 
 interface DiscoveredModule {
   /** Module root directory. */

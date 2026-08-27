@@ -47,6 +47,30 @@
  *      `v*` tag in the repo. The fallback must be greater than OR EQUAL TO it,
  *      never behind.
  *
+ * ─── Which CI job makes each arm fire ────────────────────────────────
+ *
+ * An arm is only a protection where something RUNS it, and the two arms are
+ * run by two different workflows on purpose — the floor cannot substitute for
+ * the exact one:
+ *
+ *   - FLOOR: `.github/workflows/check.yml` (`bun run check`), on every push to
+ *     and PR against `main`. It answers "is what we ship behind what we have
+ *     already released?".
+ *
+ *   - EXACT: the `verify-version` preflight job in `.github/workflows/release.yml`,
+ *     which every publishing job `needs:`. It answers "does what we ship name
+ *     the tag we are publishing RIGHT NOW?", and nothing else can: at the
+ *     moment `v1.2.3` is pushed, the newest tag the floor arm can see IS
+ *     `v1.2.3`, so a compose file left at `1.2.2` was already passing the floor
+ *     on the PR that merged it. The window between "merge the bump" and "push
+ *     the tag" is exactly where a half-done bump hides, and only a tag-time
+ *     comparison closes it.
+ *
+ * `check.yml` triggers on `push: branches: [main]` / `pull_request:` only, so
+ * it never sees a tag ref and never takes the exact arm. If the release
+ * preflight is ever removed, the exact arm stops being reachable in CI and this
+ * gate silently drops back to "not behind" — half of what the header claims.
+ *
  * The floor is deliberately not an equality, and that is the difference
  * between a gate and a deadlock. The release order is "bump in a PR, merge,
  * then tag", so during the bump PR the fallback is one release AHEAD of every
@@ -74,7 +98,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { compareVersionsDesc, isValidVersion, normalizeVersion } from "@appstrate/core/semver";
-import { COMPOSE_GLOBS, trackedFiles } from "./lib/tracked-files.ts";
+import { COMPOSE_GLOBS, ENV_EXAMPLE_GLOBS, trackedFiles } from "./lib/tracked-files.ts";
 
 const REPO_ROOT = join(import.meta.dir, "..");
 
@@ -105,9 +129,6 @@ export function isStale(found: string, source: ReleaseSource): boolean {
   return source.mode === "exact" ? found !== source.version : isBehind(found, source.version);
 }
 
-/** `.env.example` at the root and under `examples/` — both are shipped to operators. */
-const ENV_EXAMPLE_GLOBS = ["*.env.example"] as const;
-
 /** One hardcoded release version, and where it was written. */
 export interface VersionSite {
   file: string;
@@ -116,6 +137,37 @@ export interface VersionSite {
   text: string;
   /** The version itself, normalized for comparison. */
   version: string;
+}
+
+/**
+ * A value that sat in a version site and is neither a release version nor one
+ * of the tag families this gate deliberately ignores.
+ *
+ * This is its own outcome, not a third kind of skip, because the two failures
+ * it separates are the ones a silent `return` used to merge. `add()` bailed on
+ * anything `isValidVersion` rejected and recorded NOTHING, so a bump that
+ * touched 81 of 82 sites and mangled the 82nd — `${APPSTRATE_VERSION:-1.0.0.beta.54}`,
+ * dots where the `-beta` belongs — produced "81 hardcoded version site(s) …
+ * all name 1.0.0-beta.54" and exit 0, over a compose file naming a tag GHCR
+ * does not have. The count in the success line is the only trace, and nobody
+ * diffs a count. The vacuity floor cannot help: it fires when ALL sites vanish,
+ * and 81 of 82 is not zero.
+ */
+export interface MalformedSite {
+  file: string;
+  line: number;
+  /** The full matched text, for the error message. */
+  text: string;
+  /** Just the unparseable value, so the message can name what was wrong. */
+  raw: string;
+}
+
+/** What one file's content yielded: the versions, the junk, and the count of deliberate skips. */
+export interface Scan {
+  sites: Omit<VersionSite, "file">[];
+  malformed: Omit<MalformedSite, "file">[];
+  /** Matches skipped as a known non-version tag family — reported in the success line. */
+  skipped: number;
 }
 
 /**
@@ -136,40 +188,86 @@ const ENV_ASSIGNMENT = /^\s*#?\s*APPSTRATE_VERSION=(.+)$/;
  * an operator copies them. They were the third value in the drift (`beta.51`
  * against the compose files' `beta.41`), so leaving them out would leave the
  * measured defect half-closed.
+ *
+ * The character class excludes `$`, `{` and a backtick, and that is load-bearing
+ * now that a non-parsing capture is REPORTED rather than dropped. Without the
+ * first two, this pattern also matches the interpolated form — the tag part of
+ * `ghcr.io/appstrate/appstrate-pi:${APPSTRATE_VERSION:-1.0.0-beta.53}` captures
+ * as the whole `${…}` expression, which parses as nothing. `COMPOSE_FALLBACK`
+ * has already recorded that line's real version, so the second match was pure
+ * noise: 84 of them across the tracked files, every one of which would now be a
+ * false finding. The backtick excludes the markdown quoting in prose comments
+ * (`` `ghcr.io/appstrate/appstrate:latest` ``), which otherwise captures
+ * ``latest` `` and misses the alias family by one character.
  */
-const LITERAL_IMAGE_PIN = /ghcr\.io\/appstrate\/[a-z0-9-]+:([^\s"']+)/g;
+const LITERAL_IMAGE_PIN = /ghcr\.io\/appstrate\/[a-z0-9-]+:([^\s"'`${]+)/g;
 
 /**
- * Every hardcoded release version in `content`.
+ * Tag families `release.yml` also publishes, which are not claims about WHICH
+ * release and therefore cannot go stale.
  *
- * Non-version tag families are skipped rather than reported: `:latest`, `:1.0`
- * and `:sha-<sha>` are all tags `release.yml` publishes, and a compose file or
- * example pinned to one of them is making a deliberate choice this gate has no
- * opinion about. Only a value that parses as a full semver is a claim about
- * WHICH release, which is the only claim that can go stale.
+ * Read straight off the `docker/metadata-action` config in
+ * `.github/workflows/release.yml`: `flavor: latest=auto` gives `latest`,
+ * `type=semver,pattern={{major}}.{{minor}}` gives `1.0`, and
+ * `type=sha,prefix=sha-` gives `sha-<sha>`. Pinning to one of these is a
+ * deliberate operator choice about which CHANNEL to track — the same reasoning
+ * the #1201 image-trio boot guard applies — so the gate has no opinion about
+ * it. The list is closed on purpose: anything outside it is junk, not a family
+ * nobody thought of, and the fix for a genuinely new family is to add it here
+ * with the metadata-action line that produces it.
+ */
+const ALIAS_TAG_FAMILY = /^(?:latest|\d+\.\d+|sha-[0-9a-f]{7,40})$/;
+
+/**
+ * An angle-bracketed documentation placeholder, e.g. the `${APPSTRATE_VERSION:-<version>}`
+ * that `docker-compose.yml`'s own RELEASE CHECKLIST comment quotes when it
+ * explains the shape an operator has to bump. It is prose about the pattern,
+ * not an instance of it.
+ */
+const DOC_PLACEHOLDER = /^<[^>]*>$/;
+
+/**
+ * Every hardcoded release version in `content`, plus everything that looked
+ * like one and was not.
  *
- * Pure — content in, sites out — so `scripts/test/verify-release-version.test.ts`
+ * Three outcomes, not two — see {@link MalformedSite}. A value that parses as
+ * semver is a version site. A value in a known alias family or a documentation
+ * placeholder is COUNTED as skipped and otherwise ignored. Anything else
+ * matched the version-site shape without being a version, which is the shape a
+ * mangled bump leaves behind, and it is reported.
+ *
+ * Pure — content in, outcomes out — so `scripts/test/verify-release-version.test.ts`
  * can drive it with synthetic text instead of a tracked file.
  */
-export function findVersionSites(content: string): Omit<VersionSite, "file">[] {
+export function findVersionSites(content: string): Scan {
   const sites: Omit<VersionSite, "file">[] = [];
+  const malformed: Omit<MalformedSite, "file">[] = [];
+  let skipped = 0;
   const lines = content.split("\n");
 
   for (const [index, line] of lines.entries()) {
-    const add = (raw: string, text: string): void => {
+    const add = (rawInput: string, text: string): void => {
+      const raw = rawInput.trim();
       const version = normalizeVersion(raw);
-      if (!isValidVersion(version)) return;
-      sites.push({ line: index + 1, text, version });
+      if (isValidVersion(version)) {
+        sites.push({ line: index + 1, text, version });
+        return;
+      }
+      if (ALIAS_TAG_FAMILY.test(raw) || DOC_PLACEHOLDER.test(raw)) {
+        skipped += 1;
+        return;
+      }
+      malformed.push({ line: index + 1, text, raw });
     };
 
     for (const m of line.matchAll(COMPOSE_FALLBACK)) add(m[1]!, m[0]!);
     for (const m of line.matchAll(LITERAL_IMAGE_PIN)) add(m[1]!, m[0]!);
 
     const assignment = ENV_ASSIGNMENT.exec(line);
-    if (assignment) add(assignment[1]!.trim(), line.trim());
+    if (assignment) add(assignment[1]!, line.trim());
   }
 
-  return sites;
+  return { sites, malformed, skipped };
 }
 
 /** Where the release version came from, and how strictly it binds. */
@@ -214,17 +312,34 @@ export const gitTags: TagLister = () => {
     stdout: "pipe",
     stderr: "pipe",
   });
-  if (result.exitCode !== 0) {
-    throw new Error(
-      `git tag --list failed (exit ${result.exitCode}): ${result.stderr.toString().trim()}`,
-    );
+  return parseGitTags(result.exitCode, result.stdout.toString(), result.stderr.toString());
+};
+
+/**
+ * `git tag --list`'s result, turned into the list — or an error.
+ *
+ * Split out of {@link gitTags} for one reason: the non-zero-exit branch ENDS
+ * the gate, and a branch that ends a gate needs an assertion. Reaching it
+ * through the real spawn would mean running `git` somewhere that is not a
+ * repository, which is a test that depends on where the runner's temp
+ * directory happens to sit; taking the three values as arguments makes it a
+ * fact about this function.
+ *
+ * The distinction it draws is the one the header cares about: exit 0 with no
+ * output means "looked, found no tags", which is a legitimate state
+ * `resolveReleaseSource` handles; a non-zero exit means the gate could not
+ * LOOK, and passing on that is how a version gate stops comparing without
+ * saying so.
+ */
+export function parseGitTags(exitCode: number, stdout: string, stderr: string): string[] {
+  if (exitCode !== 0) {
+    throw new Error(`git tag --list failed (exit ${exitCode}): ${stderr.trim()}`);
   }
-  return result.stdout
-    .toString()
+  return stdout
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
-};
+}
 
 /**
  * The newest tag in `tags` that parses as semver, or `null`.
@@ -280,16 +395,71 @@ export function resolveReleaseSource(
   );
 }
 
-function main(): number {
-  const files = [
+/**
+ * Everything `main` reaches for outside itself, so a test can reach in.
+ *
+ * Every branch below ENDS THE GATE — the vacuity floor, the malformed report,
+ * the disagreement report, the staleness report — and each was previously
+ * unreachable from a test, because `main` was neither exported nor separable
+ * from `trackedFiles` + `readFileSync` + `process.env`. Deleting any one of
+ * them left the suite green, which is the same "passes without checking"
+ * failure the gate itself exists to prevent, one level up.
+ *
+ * The defaults ARE the production wiring, and they are resolved inside `main`
+ * rather than in the parameter list so that importing this module still spawns
+ * no `git` and reads no file.
+ */
+export interface MainDeps {
+  /** The files to scan. Default: every tracked compose and `.env.example` file. */
+  files?: readonly string[];
+  /** Reads one repo-relative path. Default: from disk. */
+  readFile?: (relativePath: string) => string;
+  /** The release source. Default: {@link resolveReleaseSource} over the real env + git tags. */
+  resolveSource?: () => ReleaseSource;
+  out?: (message: string) => void;
+  err?: (message: string) => void;
+}
+
+export function main(deps: MainDeps = {}): number {
+  const readFile =
+    deps.readFile ?? ((rel: string): string => readFileSync(join(REPO_ROOT, rel), "utf-8"));
+  const out = deps.out ?? ((m: string): void => console.log(m));
+  const err = deps.err ?? ((m: string): void => console.error(m));
+  const files = deps.files ?? [
     ...trackedFiles(COMPOSE_GLOBS, "compose file", "fail"),
     ...trackedFiles(ENV_EXAMPLE_GLOBS, "env example file", "fail"),
   ];
 
   const sites: VersionSite[] = [];
+  const malformed: MalformedSite[] = [];
+  let skipped = 0;
   for (const file of files) {
-    const content = readFileSync(join(REPO_ROOT, file), "utf-8");
-    for (const site of findVersionSites(content)) sites.push({ ...site, file });
+    const scan = findVersionSites(readFile(file));
+    for (const site of scan.sites) sites.push({ ...site, file });
+    for (const bad of scan.malformed) malformed.push({ ...bad, file });
+    skipped += scan.skipped;
+  }
+
+  // Reported before anything else, because a malformed site makes every count
+  // below a lie about a smaller population than the one on disk. See
+  // `MalformedSite`: this is the branch that catches a bump which touched 81 of
+  // 82 sites, where the vacuity floor (all-or-nothing) sees nothing wrong.
+  if (malformed.length > 0) {
+    err(
+      `\x1b[31m✗\x1b[0m verify-release-version: ${malformed.length} version site(s) hold a value ` +
+        `that is neither a release version nor a tag family this gate skips ` +
+        `(\`latest\`, \`MAJOR.MINOR\`, \`sha-…\`).\n\n` +
+        `A site the gate cannot parse is a site it cannot compare, and dropping it silently is ` +
+        `how a half-finished bump ships: the other ${sites.length} site(s) agree, the success ` +
+        `line counts only them, and the odd one out names an image tag GHCR does not have.\n`,
+    );
+    for (const m of malformed) {
+      err(
+        `  \x1b[1m${m.file}:${m.line}\x1b[0m  ${m.text}  → \`${m.raw}\` does not parse as a version`,
+      );
+    }
+    err("");
+    return 1;
   }
 
   // Vacuity floor, same rule as `trackedFiles`: zero sites means every
@@ -297,15 +467,15 @@ function main(): number {
   // changing shape (a compose rewrite, a rename of APPSTRATE_VERSION) is
   // exactly how this gate would stop looking without saying so.
   if (sites.length === 0) {
-    console.error(
+    err(
       "\x1b[31m✗\x1b[0m verify-release-version: found no hardcoded release version in any " +
-        `of the ${files.length} shipped compose/env-example files — the gate would pass ` +
+        `of the ${files.length} tracked compose and .env.example files — the gate would pass ` +
         "vacuously. Did the `${APPSTRATE_VERSION:-…}` shape change?",
     );
     return 1;
   }
 
-  const source = resolveReleaseSource(process.env);
+  const source = (deps.resolveSource ?? ((): ReleaseSource => resolveReleaseSource(process.env)))();
 
   // Disagreement between sites is its own defect and is reported first: a
   // half-done bump leaves some operators on one version and some on another,
@@ -313,14 +483,14 @@ function main(): number {
   // resolved.
   const distinct = [...new Set(sites.map((s) => s.version))].sort(compareVersionsDesc);
   if (distinct.length > 1) {
-    console.error(
+    err(
       `\x1b[31m✗\x1b[0m verify-release-version: the shipped files disagree about the release ` +
         `version — ${distinct.length} distinct values (${distinct.join(", ")}).\n` +
         `Every \`\${APPSTRATE_VERSION:-…}\` fallback and every literal image pin must name ONE ` +
         `version, and it must be ${source.version} (${source.origin}).\n`,
     );
     for (const s of sites.filter((s) => s.version !== source.version)) {
-      console.error(`  \x1b[1m${s.file}:${s.line}\x1b[0m  ${s.text}  → expected ${source.version}`);
+      err(`  \x1b[1m${s.file}:${s.line}\x1b[0m  ${s.text}  → expected ${source.version}`);
     }
     return 1;
   }
@@ -331,7 +501,7 @@ function main(): number {
       source.mode === "exact"
         ? `must EQUAL the tag being released (${source.version})`
         : `is BEHIND the newest release (${source.version})`;
-    console.error(
+    err(
       `\x1b[31m✗\x1b[0m verify-release-version: the shipped fallback version ${found} ${verdict}.\n\n` +
         `Source of truth: ${source.origin}.\n` +
         `A self-hoster who runs the documented \`docker compose up -d\` without setting ` +
@@ -341,17 +511,17 @@ function main(): number {
         `Fix: bump all ${sites.length} site(s) to ${source.version}:\n`,
     );
     for (const s of sites) {
-      console.error(`  \x1b[1m${s.file}:${s.line}\x1b[0m  ${s.text}`);
+      err(`  \x1b[1m${s.file}:${s.line}\x1b[0m  ${s.text}`);
     }
     return 1;
   }
 
   const ahead = source.mode === "floor" && isAhead(found, source.version);
-  console.log(
+  out(
     `\x1b[32m✓\x1b[0m verify-release-version: ${sites.length} hardcoded version site(s) across ` +
-      `${files.length} shipped compose/env-example files all name ${found}` +
+      `${files.length} tracked compose and .env.example files all name ${found}` +
       (ahead ? ` (ahead of ${source.origin} — a release bump in flight)` : ` (${source.origin})`) +
-      `.`,
+      `; ${skipped} alias-tag pin(s) skipped, 0 unparseable.`,
   );
   return 0;
 }
