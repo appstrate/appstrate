@@ -34,9 +34,9 @@
  *     initiation, keyed by the single-use OAuth `state`, consumed by Better
  *     Auth itself) does not resume our authorize endpoint — a plain
  *     dashboard social sign-in;
- *   - a magic-link verify whose token has no server-side binding AND whose
- *     request carries no pending-client cookie — a direct call against BA's
- *     public magic-link endpoint;
+ *   - a magic-link verify whose token has no server-side binding — a direct
+ *     call against BA's public magic-link endpoint (the ambient cookie plays
+ *     no part on this leg);
  *   - any other creation with no binding at all — core dashboard signup,
  *     invitation flow.
  *

@@ -29,8 +29,16 @@ export class OAuthCallbackError extends Error {
     public readonly body?: string,
     public readonly oauthError?: string,
     public readonly oauthErrorDescription?: string,
+    /**
+     * Standard `ErrorOptions`; pass `{ cause }` when raising this from a
+     * `catch` so the underlying network/parse error is not discarded.
+     * `preserve-caught-error` cannot see custom classes, so this is on us.
+     * Last, because every parameter before it is already positional and
+     * public — moving one would break every construction site.
+     */
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
     this.name = "OAuthCallbackError";
   }
 }

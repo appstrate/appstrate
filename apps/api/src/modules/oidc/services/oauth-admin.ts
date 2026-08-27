@@ -89,16 +89,27 @@ export class OAuthAdminValidationError extends Error {
 }
 
 /**
- * The retired scope spellings in `scopes`, each paired with what replaced it.
- * Empty when the list uses only current vocabulary — the normal case.
+ * Retired scope prefixes, each mapped to the prefix that replaced it. This is
+ * DATA, not a string compare: a resource rename that rewrites persisted scope
+ * strings adds one entry and is diagnosed by the same path as every other.
  *
- * DIAGNOSTIC ONLY — `documents:*` is not an alias: it is still rejected, and
+ * DIAGNOSTIC ONLY — a retired prefix is not an alias: it is still rejected and
  * comparisons stay exact. The one job here is to let an error message say
  * "this was renamed" instead of "unknown scope". `documents` → `files` is
- * issue #1177, data rewritten by migration `0046_legacy_permission_scope_strings`
- * — the only migration that has ever rewritten a value in a field this service
- * manages, so `scopes` is the only field that can go stale in an operator's env
- * without the operator having changed anything.
+ * issue #1177 (`0046_legacy_permission_scope_strings`); `applications` →
+ * `spaces` is `scripts/migration/0003-application-ids-to-space-ids.sql`.
+ * Scope strings are the only field this service manages that a data migration
+ * has ever rewritten, so `scopes` is the only field that can go stale in an
+ * operator's env without the operator having changed anything.
+ */
+const RETIRED_SCOPE_PREFIXES: Record<string, string> = {
+  documents: "files",
+  applications: "spaces",
+};
+
+/**
+ * The retired scope spellings in `scopes`, each paired with what replaced it.
+ * Empty when the list uses only current vocabulary — the normal case.
  *
  * Exported so the env-sync (`instance-client-sync.ts`) can tell a `scopes`
  * drift caused by a stale `OIDC_INSTANCE_CLIENTS` entry apart from a genuine
@@ -111,8 +122,9 @@ export function retiredScopeRenames(
   for (const scope of scopes) {
     const sep = scope.indexOf(":");
     if (sep <= 0) continue;
-    if (scope.slice(0, sep) !== "documents") continue;
-    out.push({ retired: scope, replacement: `files${scope.slice(sep)}` });
+    const prefix = RETIRED_SCOPE_PREFIXES[scope.slice(0, sep)];
+    if (!prefix) continue;
+    out.push({ retired: scope, replacement: `${prefix}${scope.slice(sep)}` });
   }
   return out;
 }
@@ -142,8 +154,8 @@ function assertValidScopes(scopes: readonly string[] | undefined): void {
     throw new OAuthAdminValidationError(
       "scopes",
       `OIDC: retired scope spellings rejected at service boundary: ${renames}. ` +
-        `These resources were renamed (issue #1177) and the stored values were ` +
-        `rewritten by migration 0046; the old spellings no longer grant anything. ` +
+        `These resources were renamed and the stored values were rewritten by a ` +
+        `data migration; the old spellings no longer grant anything. ` +
         `Replace them with the current names.`,
     );
   }

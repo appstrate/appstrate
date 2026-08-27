@@ -8,8 +8,8 @@
  *     schema per the "modules own no tables" rule — this module only reads
  *     and writes them).
  *   - REST surface under `/api/chat/*`: session CRUD, history READ, resume and
- *     stop. Messages are written by `POST /api/chat` alone (server-authoritative
- *     persistence — see routes.ts); there is no message-append endpoint.
+ *     stop. No route writes a message: persistence is server-authoritative and
+ *     its two writers both live in `persistence.ts` (see routes.ts).
  *     Auto-exposed over MCP through the `mcp` module's `invoke_operation`
  *     once documented in the OpenAPI spec — no dedicated MCP tool needed.
  *   - Full-page React UI exported from `@appstrate/module-chat/ui`
@@ -28,6 +28,7 @@ import { chatPaths, chatComponentSchemas } from "./openapi.ts";
 import { chatLoopbackStrategy } from "./loopback-auth.ts";
 import { buildChatPlatformDeps, type ChatPlatformDeps } from "./platform-services.ts";
 import { drainTurns } from "./inflight.ts";
+import { closeResumableStore, configureResumableStore } from "./resumable.ts";
 import { reconcileChatRun } from "./run-reconcile.ts";
 import { logger } from "./logger.ts";
 import { warnIfDefaultChatConcurrency } from "./pi-chat/concurrency.ts";
@@ -62,6 +63,9 @@ const chatModule: AppstrateModule = {
     // real socket to the llm-proxy at `CHAT_SELF_ORIGIN`), and the chat-model
     // resolution + usage metering.
     deps = buildChatPlatformDeps(ctx);
+    // Resume tiering comes from the platform's own Redis decision, not from a
+    // second read of the environment inside the module.
+    configureResumableStore(ctx.redisUrl);
     // Chat now runs entirely in-process, so its concurrency cap is a capacity
     // decision an operator must make deliberately. Say so at boot.
     warnIfDefaultChatConcurrency();
@@ -165,10 +169,13 @@ const chatModule: AppstrateModule = {
   ],
 
   // Graceful shutdown: await in-flight turns so a deploy/restart does not drop a
-  // reply that was mid-generation (bounded — a wedged turn cannot block exit).
+  // reply that was mid-generation (bounded — a wedged turn cannot block exit),
+  // THEN release the resumable store's Redis connection — the turns still
+  // draining are recording into it.
   async shutdown() {
     const drained = await drainTurns();
     if (drained > 0) logger.info("chat: drained in-flight turns on shutdown", { count: drained });
+    await closeResumableStore();
   },
 };
 

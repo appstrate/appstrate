@@ -9,8 +9,9 @@
  * which replays the recorded bytes + the still-live tail — so tokens continue
  * exactly where they were, ChatGPT-style.
  *
- * Store tiering follows progressive-infra: Redis when `REDIS_URL` is set (resume
- * survives across replicas), else an in-process map (single-replica resume —
+ * Store tiering follows progressive-infra: Redis when the platform hands one to
+ * `configureResumableStore` at init (resume survives across replicas), else an
+ * in-process map (single-replica resume —
  * same constraint as `stop-registry.ts`). The store is NOT what guarantees
  * data-safety: the assistant turn is persisted by `finalize-stream.ts`'s
  * independent drain regardless of the store, so even with no resume the reload
@@ -23,6 +24,7 @@
  */
 
 import { and, eq } from "drizzle-orm";
+import Redis from "ioredis";
 import { db } from "@appstrate/db/client";
 import { chatSessions } from "@appstrate/db/schema";
 import { notifySessionUpdate } from "./realtime.ts";
@@ -36,6 +38,8 @@ import { createIoredisResumableStreamStore } from "assistant-stream/resumable/io
 import { logger } from "./logger.ts";
 
 let context: ResumableStreamContext | null = null;
+let client: Redis | null = null;
+let redisUrl: string | null = null;
 
 /**
  * Retention for a turn's recorded bytes (both stores default to 24h).
@@ -53,31 +57,52 @@ let context: ResumableStreamContext | null = null;
  */
 const STREAM_TTL_MS = 30 * 60_000;
 
-/** Build the store once: Redis if reachable, else in-memory (single replica). */
+/**
+ * Retries ioredis attempts per command before rejecting.
+ *
+ * This client sits on a REQUEST path — `GET /api/chat/sessions/:id/stream`
+ * reads through it — so it takes the same finite budget as every other
+ * request-path client in the platform (`apps/api/src/lib/redis.ts`). `null`
+ * ("retry forever", what this store used to pass) means that while Redis is
+ * unreachable the resume read HANGS instead of failing, and the request hangs
+ * with it. A finite count turns a Redis outage into a fast rejection the route
+ * can answer.
+ */
+const MAX_RETRIES_PER_REQUEST = 3;
+
+/**
+ * Redis client for the resumable store, on the platform's request-path
+ * contract. Exported so the retry budget is assertable without a live Redis.
+ */
+export function createResumableRedis(url: string): Redis {
+  const redis = new Redis(url, {
+    maxRetriesPerRequest: MAX_RETRIES_PER_REQUEST,
+    enableReadyCheck: false,
+    connectTimeout: 10_000,
+    retryStrategy: (times: number) => Math.min(times * 200, 5_000),
+  });
+  redis.on("error", (err: Error) =>
+    logger.warn("chat resumable redis error", { error: err.message }),
+  );
+  return redis;
+}
+
+/**
+ * Point the store at the platform's Redis. Called once from `chatModule.init`
+ * with `ctx.redisUrl` — the module reads no `process.env` of its own, so the
+ * store and the rest of the platform can never disagree about which tier is
+ * running. `null` (progressive-infra tier 0) keeps the in-memory store.
+ */
+export function configureResumableStore(url: string | null): void {
+  redisUrl = url;
+}
+
+/** Build the store once: Redis when configured, else in-memory (single replica). */
 function buildStore(): ResumableStreamStore {
-  const url = process.env.REDIS_URL;
-  if (url) {
-    try {
-      // Lazy require so a missing/broken ioredis never blocks chat — resume
-      // simply degrades to single-replica in-memory.
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const Redis = require("ioredis") as typeof import("ioredis").default;
-      const client = new Redis(url, {
-        maxRetriesPerRequest: null,
-        enableReadyCheck: false,
-        connectTimeout: 10_000,
-        retryStrategy: (times: number) => Math.min(times * 200, 5_000),
-      });
-      client.on("error", (err: Error) =>
-        logger.warn("chat resumable redis error", { error: err.message }),
-      );
-      logger.info("chat resumable store: redis");
-      return createIoredisResumableStreamStore(client);
-    } catch (err) {
-      logger.warn("chat resumable: ioredis unavailable, using in-memory store", {
-        err: String(err),
-      });
-    }
+  if (redisUrl) {
+    client = createResumableRedis(redisUrl);
+    logger.info("chat resumable store: redis");
+    return createIoredisResumableStreamStore(client);
   }
   logger.info("chat resumable store: in-memory (single replica)");
   return createInMemoryResumableStreamStore();
@@ -88,6 +113,21 @@ export function getResumableContext(): ResumableStreamContext {
   if (!context)
     context = createResumableStreamContext({ store: buildStore(), ttlMs: STREAM_TTL_MS });
   return context;
+}
+
+/**
+ * Release the store's Redis connection on shutdown and drop the singleton, so
+ * a restarted module builds a fresh one. Without this the client (and its
+ * reconnect loop) outlived the module that opened it.
+ */
+export async function closeResumableStore(): Promise<void> {
+  const open = client;
+  context = null;
+  client = null;
+  if (!open) return;
+  // `quit()` drains in-flight commands; a client that cannot reach Redis
+  // rejects it (finite retry budget) and is torn down unconditionally.
+  await open.quit().catch(() => open.disconnect());
 }
 
 /**

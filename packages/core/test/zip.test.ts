@@ -8,6 +8,7 @@ import {
   unzipArtifact,
   stripWrapperPrefix,
 } from "../src/zip.ts";
+import { formatErrorChain } from "../src/errors.ts";
 
 // ─────────────────────────────────────────────
 // Helpers
@@ -652,5 +653,25 @@ describe("stripWrapperPrefix", () => {
     ]);
     const result = stripWrapperPrefix(files);
     expect(result).toBe(files);
+  });
+});
+
+describe("PackageZipError carries what actually failed", () => {
+  it("attaches the JSON SyntaxError as the cause of INVALID_MANIFEST", () => {
+    // Delete-to-fail: drop the `{ cause: err }` in `parsePackageZip` and a
+    // truncated manifest, a stray BOM and a trailing comma all report the same
+    // sentence — "manifest.json is not valid JSON" — with nothing saying where.
+    const zip = makeZip({ "manifest.json": '{ "name": "@test/a", ' });
+    try {
+      parsePackageZip(zip);
+      throw new Error("expected parsePackageZip to throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(PackageZipError);
+      const err = e as PackageZipError;
+      expect(err.code).toBe("INVALID_MANIFEST");
+      expect(err.cause).toBeInstanceOf(SyntaxError);
+      // Reachable, not merely stored: this is what a log line renders.
+      expect(formatErrorChain(err).length).toBeGreaterThan(err.message.length);
+    }
   });
 });

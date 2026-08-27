@@ -94,8 +94,26 @@ export class ApiError extends Error {
     retryAfter?: number;
     errors?: ValidationFieldError[];
     headers?: Record<string, string>;
+    /**
+     * The underlying failure, when this error is raised from a `catch`.
+     *
+     * ESLint's `preserve-caught-error` only inspects `throw new <builtin
+     * Error>`, so it cannot see a custom class — this parameter is what makes
+     * the obligation expressible for the one thrown ~20 times inside a catch.
+     * Same treatment `PackageZipError` got, adapted to this class's
+     * single-options-object shape.
+     *
+     * It is LOG-ONLY. {@link ApiError.toProblemDetail} reads `message` and
+     * never `cause`, because a cause routinely holds internal detail (SQL
+     * constraint names, upstream URLs) and the problem body is a public
+     * contract. The API error handler is what renders it, into the log.
+     */
+    cause?: unknown;
   }) {
-    super(opts.detail);
+    // Only pass ErrorOptions when there IS a cause, so an ApiError raised
+    // outside a catch carries no `cause` own property at all rather than one
+    // set to `undefined`.
+    super(opts.detail, opts.cause === undefined ? undefined : { cause: opts.cause });
     this.name = "ApiError";
     this.status = opts.status;
     this.code = opts.code;

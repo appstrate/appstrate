@@ -13,9 +13,8 @@
  * social callback, the single-use token binding for magic-link verify, and
  * the server-authored authoritative cookie header
  * (`headersWithAuthoritativePendingClient`) for the in-process register /
- * magic-link-request paths. The browser cookie remains load-bearing for:
- *   - the per-space social credential override (`ba-social-override-plugin`),
- *   - UX fallbacks (deploy-window compatibility for in-flight magic links).
+ * magic-link-request paths. The browser cookie remains load-bearing for the
+ * per-space social credential override (`ba-social-override-plugin`).
  *
  * Why a cookie and not AsyncLocalStorage: the social sign-in flow bounces the
  * browser off a third-party IdP (Google, GitHub) and lands on

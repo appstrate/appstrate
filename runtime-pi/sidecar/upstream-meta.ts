@@ -14,15 +14,6 @@
 
 import { UPSTREAM_HEADER_ALLOWLIST, type UpstreamMeta } from "@appstrate/mcp-transport";
 
-// Re-export the shared constants/types so existing in-tree imports
-// (sidecar/mcp.ts) keep resolving against `./upstream-meta` without a
-// churn-only rename pass.
-export {
-  UPSTREAM_META_KEY,
-  UPSTREAM_HEADER_ALLOWLIST,
-  type UpstreamMeta,
-} from "@appstrate/mcp-transport";
-
 /**
  * Project a `Headers` object into the allowlisted, lowercased
  * `Record<string, string>` we ship over MCP. Returns an empty object

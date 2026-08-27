@@ -321,7 +321,17 @@ router.delete("/:orgId", async (c) => {
     await deleteOrganization(orgId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to delete organization";
-    throw new ApiError({ status: 400, code: "delete_failed", title: "Bad Request", detail: msg });
+    // This catch spans three calls and logs nothing — a `delete_failed` used
+    // to produce ZERO log lines, so the only record was a message the client
+    // got and the operator did not. `cause` puts it in the request-scoped log
+    // (and carries any chain beneath it, which `msg` flattens away).
+    throw new ApiError({
+      status: 400,
+      code: "delete_failed",
+      title: "Bad Request",
+      detail: msg,
+      cause: err,
+    });
   }
 
   // org_id on audit_events is denormalized (no FK), so this tombstone persists

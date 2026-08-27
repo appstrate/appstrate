@@ -140,9 +140,16 @@ export async function resolveDefaultSpaceId(
       id: string;
       isDefault?: boolean;
     }
-    const body = (await res.json()) as { data?: Space[] } | Space[];
-    const spaces = Array.isArray(body) ? body : (body.data ?? []);
-    const id = (spaces.find((s) => s.isDefault) ?? spaces[0])?.id;
+    // `/api/spaces` answers with the same Stripe-canonical list envelope as
+    // `/api/models` (`{ object: "list", data, hasMore }` — apps/api
+    // `listResponse`, `data` required by the OpenAPI schema): `data` is the
+    // only shape. Same reader as `listModels` above, for the same reason.
+    const body = (await res.json()) as { data?: Space[] };
+    if (!Array.isArray(body.data)) {
+      logger.warn("chat: /api/spaces returned an unexpected shape (no data array)", { orgId });
+      return undefined; // not the contract — don't cache
+    }
+    const id = (body.data.find((s) => s.isDefault) ?? body.data[0])?.id;
     if (id) {
       spaceCache.set(orgId, id);
       return id;

@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`formatErrorChain`** (`./errors`) — renders an error and every `cause`
+  beneath it as one `": "`-joined string. It exists because `{ cause }` was
+  threaded through this codebase with nothing on the other end to print it, and
+  both obvious renderers are blind to it: V8 builds `.stack` at construction and
+  never walks the chain (measured on Bun 1.3 —
+  `new Error(o, { cause: i }).stack.includes(i.message)` is `false`), and pino's
+  `err` serializer — which DOES walk it, with no configuration needed — only
+  fires for a property named `err` holding an `Error`, against 194 log sites in
+  this repo that pass `error: getErrorMessage(err)`, a pre-flattened string.
+  Bounded: at most five `cause` links past the outermost error, and an
+  identity-tracked walk so a cyclic chain terminates (`[circular cause]`) rather
+  than hanging. Returns exactly `getErrorMessage(err)` when there is no cause,
+  so it is a drop-in at any existing site.
+  The chain is OPERATOR-facing — a `cause` routinely carries SQL constraint
+  names, upstream URLs and credential-adjacent context — so it belongs in a log
+  and never in an HTTP response body. `ApiError.toProblemDetail` reads `message`
+  and never `cause`; that boundary is asserted by tests on both sides.
+  Additive — no existing export changes shape, so this is a minor.
+
 - **`SIDECAR_AUTH_HEADER`** (`./sidecar-types`) — the request header carrying the
   per-run token that authenticates the agent container to its own sidecar,
   `x-appstrate-sidecar-auth`. It exists because the sidecar's control surface
@@ -40,6 +59,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   moves and no row starts or stops being recognised.
 
 ### Changed
+
+- **`ApiError` accepts an optional `cause`** (`./api-errors`) — a new optional
+  member on the constructor's options object, forwarded to `Error`'s
+  `ErrorOptions`. ESLint's `preserve-caught-error` only inspects
+  `throw new <builtin Error>`, so it is structurally blind to custom subclasses;
+  repo-wide that leaves 62 `throw new <CustomClass>` sites inside `catch` blocks
+  carrying no cause, and `ApiError` is the most-thrown of them. Without this
+  parameter the obligation was not merely unenforced, it was inexpressible.
+  Purely additive: omitting it leaves the constructed error with no `cause` own
+  property at all (not one set to `undefined`), so nothing existing changes
+  shape, and `toProblemDetail` is untouched — the cause is log-only.
 
 - **`CreateUploadUrlOptions.maxSize` is required, and `Storage.createUploadUrl`
   no longer takes `opts` optionally** (`./storage`) — a breaking type change

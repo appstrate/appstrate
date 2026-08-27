@@ -326,8 +326,13 @@ export function parsePackageZip(
   let manifestRaw: unknown;
   try {
     manifestRaw = JSON.parse(manifestText);
-  } catch {
-    throw new PackageZipError("INVALID_MANIFEST", "manifest.json is not valid JSON");
+  } catch (err) {
+    // `PackageZipError` gained its `ErrorOptions` parameter for exactly this:
+    // "is not valid JSON" is the same sentence for a truncated file, a BOM and
+    // a trailing comma. The SyntaxError's offset is what tells them apart.
+    throw new PackageZipError("INVALID_MANIFEST", "manifest.json is not valid JSON", undefined, {
+      cause: err,
+    });
   }
 
   const validation = validateManifest(manifestRaw, {

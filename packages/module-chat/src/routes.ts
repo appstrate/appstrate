@@ -5,10 +5,16 @@
  *
  * Sessions are personal: every query filters by (orgId, userId).
  *
- * Persistence is server-authoritative and `POST /api/chat` is its ONLY writer:
- * it stores the user turn before inference and the assistant turn when the
- * stream finalizes (`persistence.ts`, `finalize-stream.ts`). The routes below
- * therefore never accept a message — `GET /api/chat/sessions/:id` returns the
+ * Persistence is server-authoritative and has exactly TWO writers, both in
+ * `persistence.ts`. `POST /api/chat` is the only one on a request path: it
+ * stores the user turn before inference and the assistant turn when the stream
+ * finalizes (`finalize-stream.ts`). The second is `persistNotice`, which posts
+ * a server-authored message into a session with NO live turn — today only the
+ * orphaned-run reconciliation (`run-reconcile.ts`), driven by the
+ * `onRunStatusChange` event. The two never overlap: `persistNotice` takes the
+ * session row's lock and refuses while `active_stream_id` is set, so a turn
+ * owns its conversation from start to finalize. The routes below write no
+ * message at all — `GET /api/chat/sessions/:id` returns the
  * stored tree nodes for the client's read-only history adapter, in the
  * `{ id, parent_id, format, content }` shape assistant-ui's `ai-sdk/v6` format
  * adapter decodes.

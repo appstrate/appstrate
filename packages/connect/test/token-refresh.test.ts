@@ -227,6 +227,26 @@ describe("performRefreshTokenExchange — failure classification", () => {
     // treated as a dead refresh token — that would force a needless reconnect.
     expect((err as RefreshError).kind).toBe("transient");
   });
+
+  it("attaches the parse failure as the cause of a non-JSON 2xx body", async () => {
+    // Delete-to-fail: without `{ cause }` the thrown error says only
+    // "<label> returned non-JSON response". `response.json()` already consumed
+    // the stream at that point, so the `body` field built for this cannot be
+    // filled in and the SyntaxError is the only description of what came back.
+    const err = await captureError(
+      responding(
+        () =>
+          new Response("<html>gateway</html>", {
+            status: 200,
+            headers: { "Content-Type": "text/html" },
+          }),
+      ),
+    );
+    expect(err).toBeInstanceOf(RefreshError);
+    expect((err as RefreshError).message).toContain("non-JSON");
+    expect((err as RefreshError).cause).toBeInstanceOf(SyntaxError);
+    expect((err as RefreshError).status).toBe(200);
+  });
 });
 
 // A 2xx whose body carries no `access_token` is a FAILED refresh dressed as a

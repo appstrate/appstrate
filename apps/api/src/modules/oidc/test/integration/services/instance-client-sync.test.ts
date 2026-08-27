@@ -305,6 +305,30 @@ describe("syncInstanceClientsFromEnv — drift", () => {
     expect(message).not.toContain("DELETE FROM oauth_clients");
   });
 
+  // The rename map is DATA, so the SECOND rename that rewrites persisted scope
+  // strings — `applications:*` → `spaces:*`, `scripts/migration/0003` — lands on
+  // the same diagnostic instead of the destructive, non-working generic remedy.
+  // Its control is "still offers the delete remedy for an ordinary scope drift"
+  // above: without the retired branch the two cases are indistinguishable.
+  it("names the applications -> spaces rename on the drift path", async () => {
+    setDeclaration([validEntry({ scopes: ["openid", "profile", "files:read"] })]);
+    await syncInstanceClientsFromEnv();
+
+    // Env the operator never edited — still the pre-rename spelling.
+    setDeclaration([validEntry({ scopes: ["openid", "profile", "applications:read"] })]);
+    let caught: unknown;
+    try {
+      await syncInstanceClientsFromEnv();
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(InstanceClientSyncError);
+    const message = (caught as Error).message;
+    expect(message).toContain("applications:read -> spaces:read");
+    expect(message).toContain("OIDC_INSTANCE_CLIENTS");
+    expect(message).not.toContain("DELETE FROM oauth_clients");
+  });
+
   it("treats redirectUris as order-insensitive (no drift on reorder)", async () => {
     setDeclaration([
       validEntry({

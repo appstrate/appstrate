@@ -17,13 +17,21 @@
  * `message_id`), `format` = `"ai-sdk/v6"`, `parent_id` chains messages linearly.
  */
 
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions } from "@appstrate/db/schema";
 import { notFound } from "@appstrate/core/api-errors";
 import { uiMessageText } from "./message-text.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import type { UIMessage } from "ai";
+
+/**
+ * The slice of the Drizzle client the writers below use — satisfied by `db` and
+ * by an open transaction handle alike, so the same helpers serve the
+ * autocommit callers and the one that must run inside a transaction
+ * ({@link persistNotice}).
+ */
+type ChatDbClient = Pick<typeof db, "select" | "insert" | "update">;
 
 /** assistant-ui ai-sdk MessageFormatAdapter id — keep in sync with the client. */
 const CHAT_MESSAGE_FORMAT = "ai-sdk/v6";
@@ -75,8 +83,8 @@ export async function ensureSession(id: string, orgId: string, userId: string): 
 }
 
 /** Most recent message id in a session (the parent for the next turn), or null. */
-async function lastMessageId(sessionId: string): Promise<string | null> {
-  const [row] = await db
+async function lastMessageId(client: ChatDbClient, sessionId: string): Promise<string | null> {
+  const [row] = await client
     .select({ messageId: chatMessages.messageId })
     .from(chatMessages)
     .where(eq(chatMessages.sessionId, sessionId))
@@ -106,6 +114,7 @@ async function deterministicMessageId(
 }
 
 async function upsertMessage(
+  client: ChatDbClient,
   sessionId: string,
   message: UIMessage,
   parentId: string | null,
@@ -121,7 +130,7 @@ async function upsertMessage(
   const messageId = message.id || (await deterministicMessageId(sessionId, parentId, content));
   // `seq` feeds the read-state watermark. On a retried finalize the conflict
   // UPDATE returns the EXISTING row's seq, so the watermark stays idempotent.
-  const [row] = await db
+  const [row] = await client
     .insert(chatMessages)
     .values({
       sessionId,
@@ -143,9 +152,9 @@ async function upsertMessage(
  * Returns the user message id so the assistant turn can chain onto it.
  */
 export async function persistUserMessage(sessionId: string, message: UIMessage): Promise<string> {
-  const parentId = await lastMessageId(sessionId);
-  const { messageId, seq } = await upsertMessage(sessionId, message, parentId);
-  await touchSession(sessionId, "user", seq);
+  const parentId = await lastMessageId(db, sessionId);
+  const { messageId, seq } = await upsertMessage(db, sessionId, message, parentId);
+  await touchSession(db, sessionId, "user", seq);
   return messageId;
 }
 
@@ -158,8 +167,8 @@ export async function persistAssistantMessage(
   message: UIMessage,
   parentId: string | null,
 ): Promise<void> {
-  const { seq } = await upsertMessage(sessionId, message, parentId);
-  await touchSession(sessionId, "assistant", seq);
+  const { seq } = await upsertMessage(db, sessionId, message, parentId);
+  await touchSession(db, sessionId, "assistant", seq);
 }
 
 /**
@@ -182,27 +191,61 @@ export async function persistAssistantMessage(
  * relying on the `(session_id, message_id)` upsert — is what keeps the
  * `parent_id` chain intact: on a replay the notice is itself the last message,
  * so an upsert would re-parent it onto itself.
+ *
+ * THE SINGLE-WRITER GUARD IS HERE, not in the caller. A notice may only be
+ * written while no turn is generating (`active_stream_id IS NULL`) — a turn
+ * owns the conversation for its whole life, and a notice slipped in beside it
+ * chains onto the in-flight user message, bumps `lastAssistantSeq` and marks a
+ * session unread that its owner is actively watching. The caller used to read
+ * that column itself and then call this function, which is a read-then-write:
+ * `setActiveStream` could start a turn in the gap. The check now runs inside
+ * the same transaction as the insert, behind `SELECT … FOR UPDATE` on the
+ * session row — the same serialization point `cleanupSessionFiles` uses — so
+ * either this notice commits before the turn starts, or the turn wins and
+ * `active_stream_id` is no longer null when the lock is granted (Postgres
+ * re-checks the predicate against the updated row). Returns false in the
+ * second case, exactly as if the turn had started first.
  */
-export async function persistNotice(
-  sessionId: string,
-  messageId: string,
-  text: string,
-): Promise<boolean> {
-  const [existing] = await db
-    .select({ seq: chatMessages.seq })
-    .from(chatMessages)
-    .where(and(eq(chatMessages.sessionId, sessionId), eq(chatMessages.messageId, messageId)))
-    .limit(1);
-  if (existing) return false;
-  const message = {
-    id: messageId,
-    role: "assistant",
-    parts: [{ type: "text", text }],
-  } as UIMessage;
-  const parentId = await lastMessageId(sessionId);
-  const { seq } = await upsertMessage(sessionId, message, parentId);
-  await touchSession(sessionId, "assistant", seq);
-  return true;
+export async function persistNotice(input: {
+  sessionId: string;
+  /** Tenant scope — the session must belong to it, as every chat query does. */
+  orgId: string;
+  messageId: string;
+  text: string;
+}): Promise<boolean> {
+  const { sessionId, orgId, messageId, text } = input;
+  return db.transaction(async (tx) => {
+    const [idle] = await tx
+      .select({ id: chatSessions.id })
+      .from(chatSessions)
+      .where(
+        and(
+          eq(chatSessions.id, sessionId),
+          eq(chatSessions.orgId, orgId),
+          isNull(chatSessions.activeStreamId),
+        ),
+      )
+      .limit(1)
+      .for("update");
+    // No row = the session is gone, is another tenant's, or a turn owns it.
+    // Either way: not ours to write into.
+    if (!idle) return false;
+    const [existing] = await tx
+      .select({ seq: chatMessages.seq })
+      .from(chatMessages)
+      .where(and(eq(chatMessages.sessionId, sessionId), eq(chatMessages.messageId, messageId)))
+      .limit(1);
+    if (existing) return false;
+    const message = {
+      id: messageId,
+      role: "assistant",
+      parts: [{ type: "text", text }],
+    } as UIMessage;
+    const parentId = await lastMessageId(tx, sessionId);
+    const { seq } = await upsertMessage(tx, sessionId, message, parentId);
+    await touchSession(tx, sessionId, "assistant", seq);
+    return true;
+  });
 }
 
 /**
@@ -216,18 +259,19 @@ export async function persistNotice(
  * over SSE so connected clients refetch instead of polling.
  */
 async function touchSession(
+  client: ChatDbClient,
   sessionId: string,
   kind: "user" | "assistant",
   seq: number,
 ): Promise<void> {
-  const [session] = await db
+  const [session] = await client
     .select({ title: chatSessions.title, orgId: chatSessions.orgId, userId: chatSessions.userId })
     .from(chatSessions)
     .where(eq(chatSessions.id, sessionId))
     .limit(1);
   if (!session) return;
-  const title = session.title ?? (await deriveTitle(sessionId));
-  await db
+  const title = session.title ?? (await deriveTitle(client, sessionId));
+  await client
     .update(chatSessions)
     .set({
       updatedAt: new Date(),
@@ -257,8 +301,8 @@ async function touchSession(
 const TITLE_SCAN_LIMIT = 10;
 
 /** First user message's text, trimmed to 60 chars (57 + ellipsis). */
-async function deriveTitle(sessionId: string): Promise<string | null> {
-  const rows = await db
+async function deriveTitle(client: ChatDbClient, sessionId: string): Promise<string | null> {
+  const rows = await client
     .select({ content: chatMessages.content })
     .from(chatMessages)
     .where(

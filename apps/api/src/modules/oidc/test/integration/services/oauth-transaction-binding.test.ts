@@ -29,6 +29,7 @@ import { createClient, _resetClientCache } from "../../../services/oauth-admin.t
 import { oidcRealmResolver } from "../../../services/oidc-realm-resolver.ts";
 import {
   persistMagicLinkClientBinding,
+  resolvePendingClientBinding,
   MAGIC_LINK_VERIFY_PATH,
 } from "../../../services/oauth-transaction-binding.ts";
 import { enforceMagicLinkSignupPolicy } from "../../../auth/guards.ts";
@@ -105,6 +106,30 @@ describe("magic-link verify realm binding (CRIT-15)", () => {
   it("resolves platform for a verify with no binding and no cookie (direct BA magic-link)", async () => {
     const realm = await oidcRealmResolver(verifyLegCtx(`ml_${crypto.randomUUID()}`));
     expect(realm).toBe("platform");
+  });
+
+  it("refuses the ambient cookie on a verify with NO binding (unrelated tab must not leak in)", async () => {
+    // A direct, non-OIDC magic-link signup while an OIDC tab has left its
+    // global `oidc_pending_client` cookie behind: the cookie belongs to a
+    // different transaction, so it decides nothing here. The verify leg used
+    // to fall through to it, inheriting that client's realm and signup policy.
+    const ctx = verifyLegCtx(`ml_${crypto.randomUUID()}`, pendingClientCookie(appClientId));
+
+    expect(await resolvePendingClientBinding(ctx)).toEqual({ kind: "none" });
+    expect(await oidcRealmResolver(ctx)).toBe("platform");
+  });
+
+  it("control: the same verify WITH a server-side binding still binds its client", async () => {
+    const token = `ml_${crypto.randomUUID()}`;
+    await persistMagicLinkClientBinding(token, appClientId);
+    const ctx = verifyLegCtx(token, pendingClientCookie(appClientId));
+
+    expect(await resolvePendingClientBinding(ctx)).toEqual({
+      kind: "bound",
+      clientId: appClientId,
+      source: "magic-link",
+    });
+    expect(await oidcRealmResolver(ctx)).toBe(`end_user:${spaceId}`);
   });
 
   it("ignores an expired binding row", async () => {

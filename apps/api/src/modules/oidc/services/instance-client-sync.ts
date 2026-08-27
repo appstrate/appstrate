@@ -224,8 +224,8 @@ export async function syncInstanceClientsFromEnv(): Promise<void> {
       .join("\n");
 
     // A `scopes` drift where the DECLARATION still names a retired spelling is
-    // not operator drift at all: migration 0046 rewrote the stored row out from
-    // under an env value nobody edited. The generic remedy below is actively
+    // not operator drift at all: a data migration rewrote the stored row out
+    // from under an env value nobody edited. The generic remedy below is actively
     // harmful here — the DELETE drops the row every satellite session hangs off,
     // and the re-create immediately fails `assertValidScopes` on the same env
     // value, so the platform still does not boot and the row is gone. Say what
@@ -237,7 +237,7 @@ export async function syncInstanceClientsFromEnv(): Promise<void> {
       const renames = staleScopes.map((r) => `${r.retired} -> ${r.replacement}`).join(", ");
       throw new InstanceClientSyncError(
         `OIDC_INSTANCE_CLIENTS: client '${entry.clientId}' declares retired scope spellings (${renames}).\n` +
-          `  These resources were renamed (issue #1177) and migration 0046 rewrote the stored values,\n` +
+          `  These resources were renamed and a data migration rewrote the stored values,\n` +
           `  so the declaration and the row can no longer agree. Fix the ENV, not the database: update\n` +
           `  OIDC_INSTANCE_CLIENTS to the current spellings (${staleScopes.map((r) => r.replacement).join(", ")})\n` +
           `  and restart. Do NOT delete the oauth_clients row — the re-create would be rejected by the\n` +

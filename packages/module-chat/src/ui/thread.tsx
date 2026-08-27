@@ -39,7 +39,6 @@ import {
   InvokeOperationToolUI,
   SearchOperationsToolUI,
   DescribeOperationToolUI,
-  GetMeToolUI,
   RunAndWaitToolUI,
 } from "./tool-uis.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
@@ -66,7 +65,6 @@ export function Thread({ composerSlot }: { composerSlot?: React.ReactNode }) {
       <RunAndWaitToolUI />
       <SearchOperationsToolUI />
       <DescribeOperationToolUI />
-      <GetMeToolUI />
 
       {/* Empty: composer centered mid-screen for a strong first impression.
           Non-empty: classic scrollable transcript with a sticky footer. */}

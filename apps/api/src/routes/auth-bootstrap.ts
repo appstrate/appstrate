@@ -218,11 +218,17 @@ export function createAuthBootstrapRouter(): Hono {
               "Use an allowlisted email for the bootstrap owner.",
           });
         }
+        // The two branches above are diagnoses the code is confident of, and
+        // both are logged with `msg` already. This one is the fall-through —
+        // "something in Better Auth's signup threw" — so it is the branch that
+        // needs the original attached: the error handler renders the chain
+        // against this request's id, which the WARN line above cannot do.
         throw new ApiError({
           status: 500,
           code: "bootstrap_signup_failed",
           title: "Internal Server Error",
           detail: "Signup failed during bootstrap redemption.",
+          cause: err,
         });
       }
 
@@ -317,6 +323,9 @@ export function createAuthBootstrapRouter(): Hono {
           code: "bootstrap_org_failed",
           title: "Internal Server Error",
           detail: "Bootstrap org creation failed after signup; instance is in a partial state.",
+          // A 500 that leaves the instance half-provisioned: the operator will
+          // be reading logs, and the chain is what says which step failed.
+          cause: err,
         });
       }
 

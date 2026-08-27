@@ -299,11 +299,30 @@ export default tseslint.config(
       // Known limit, so nobody reads a clean run as more than it is: the rule
       // only inspects `throw new <builtin Error>`. It says nothing about
       // `throw new ApiError(...)` / `PackageZipError` / `ResolverError` and the
-      // ~24 other custom error classes this repo throws from `catch` blocks.
-      // Measured the same day: 61 such throws carry no `cause`, 19 of which do
-      // not reference the caught binding at all. Those are the same defect,
-      // unlinted — fixing them needs `cause` threaded through each class's
-      // constructor, which is not what this rule buys.
+      // ~27 other custom error classes this repo throws from `catch` blocks.
+      // Re-measured 2026-08-27 with a TypeScript AST walk over `git ls-files`
+      // (not a regex — prettier wraps these across lines): 75 such throws
+      // carried no `cause`, across 31 classes. 13 were fixed in the follow-up,
+      // leaving 62.
+      //
+      // And that limit is NOT closable with a lint rule. The obvious selector
+      // is expressible —
+      //   CatchClause ThrowStatement > NewExpression:not(:has(Property[key.name="cause"]))
+      // — but it fires on all 62, and most of them are correct: they inline
+      // `getErrorMessage(err)` into the message, or log it a line earlier, so
+      // the information IS preserved, just not as a `cause`. Narrowing it to
+      // the sites that lose the error outright needs "the throw expression
+      // does not reference the identifier bound by the enclosing catch", and
+      // esquery cannot compare a value in one node against a binding in an
+      // ancestor — the gap is 62 findings vs the 20 that measurement actually
+      // singles out. The strict alternative, "a bindingless `catch` that
+      // throws", is precise but measures the wrong thing: 21 sites match it and
+      // 19 throw a BUILTIN error, i.e. code this very rule already inspects and
+      // passes. A rule firing 60 times on correct code gets suppressed, and a
+      // suppressed rule is worse than none — so the obligation is carried at
+      // the CLASS instead: every custom error reachable from a `catch` takes an
+      // `options?: ErrorOptions` parameter whose docstring says why, which the
+      // editor shows at the construction site.
       "preserve-caught-error": "error",
     },
   },

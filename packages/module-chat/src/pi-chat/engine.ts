@@ -169,6 +169,8 @@ export function runPiChat(input: PiChatInput): Response {
       // 10-minute deadline).
       let mcpTools: Awaited<ReturnType<typeof buildPlatformMcpTools>> | undefined;
       let stepCap: ReturnType<typeof createStepCapController> | undefined;
+      /** Detach handle for the Pi event subscription — released in `finally`. */
+      let unsubscribe: (() => void) | undefined;
       try {
         // Open the stream NOW, before any of the turn's construction work. This
         // chunk carries nothing but a message id, and it is what flips the
@@ -398,7 +400,10 @@ export function runPiChat(input: PiChatInput): Response {
         });
         stepCap.attach(typedSession);
 
-        typedSession.subscribe((raw) => {
+        // Keep the detach handle: `write` targets a stream writer that closes
+        // when this producer returns, and a Pi event arriving after that
+        // answers `TypeError: Invalid state` from outside any try/catch here.
+        unsubscribe = typedSession.subscribe((raw) => {
           for (const chunk of mapper.map(raw as AgentSessionEvent)) write(chunk);
         });
 
@@ -428,7 +433,11 @@ export function runPiChat(input: PiChatInput): Response {
           // gracefully (the partial stream is already delivered) rather than
           // throwing into the client. A genuine engine error still flows to the
           // finish chunk via the mapper's captured stopReason.
-          void typedSession.abort?.().catch(() => {});
+          // AWAIT it: the concurrency slot is released when the response body
+          // drains, and returning while the Pi session is still winding down
+          // would hand that capacity to the next turn while this one still
+          // holds a live session (and can still emit).
+          await typedSession.abort?.().catch(() => {});
           if (!turnAbort.signal.aborted) throw err;
         }
 
@@ -514,6 +523,7 @@ export function runPiChat(input: PiChatInput): Response {
       } finally {
         clearTimeout(deadline);
         abortSignal.removeEventListener("abort", forwardAbort);
+        unsubscribe?.();
         await mcpTools?.close();
       }
     },

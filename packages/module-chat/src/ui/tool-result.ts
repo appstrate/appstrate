@@ -8,18 +8,6 @@
  * `{ content: [{ type:"text", text }] }`, a bare content array, or a JSON
  * string. `unwrapResult` peels those layers down to the actual payload so the
  * rest of the UI never has to know which shape arrived.
- *
- * It also peels the AI-SDK `ToolResultOutput` envelopes
- * `{ type:"content", value:[…] }` / `{ type:"json", value }`. Nothing in this
- * repo produces them any more, and — checked, because it is the obvious reason
- * to keep them — nothing ever PERSISTED them either: the retired ai-sdk path
- * stored each tool's `execute` result, already shaped as `{ content: […] }`,
- * while those envelopes were the model-facing `toModelOutput` channel, which
- * never reached a UIMessage. They stay as defensive peeling, not as history:
- * this function's contract is to accept whatever envelope arrives, and an
- * unpeeled one is not inert — `isErrorPayload` would look for `status`/`error`
- * at the top level, miss them inside `value`, and let a FAILED call render as
- * a success.
  */
 
 /** Lifecycle phase of a tool call, derived from status + result. */
@@ -90,8 +78,6 @@ export function unwrapResult(value: unknown, depth = 0): unknown {
   if (typeof value === "object") {
     const o = value as Record<string, unknown>;
     if (Array.isArray(o.content)) return unwrapResult(o.content, depth + 1);
-    if (o.type === "json" && "value" in o) return unwrapResult(o.value, depth + 1);
-    if (o.type === "content" && "value" in o) return unwrapResult(o.value, depth + 1);
     if (o.type === "text" && typeof o.text === "string") return unwrapResult(o.text, depth + 1);
     return o;
   }

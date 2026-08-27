@@ -59,6 +59,8 @@ import {
   type CallToolResult,
   type ReadResourceResult,
   type Resource,
+  UPSTREAM_META_KEY,
+  type UpstreamMeta,
 } from "@appstrate/mcp-transport";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { isTextShapedContentType } from "@appstrate/core/mime";
@@ -125,12 +127,7 @@ import {
   type ApiCallDeps,
   type ApiCallRequestBody,
 } from "./credential-proxy.ts";
-import {
-  UPSTREAM_META_KEY,
-  buildPreflightUpstreamMeta,
-  buildUpstreamMeta,
-  type UpstreamMeta,
-} from "./upstream-meta.ts";
+import { buildPreflightUpstreamMeta, buildUpstreamMeta } from "./upstream-meta.ts";
 
 /**
  * `_meta` payload attached to every `api_call` pre-flight error

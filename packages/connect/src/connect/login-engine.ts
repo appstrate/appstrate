@@ -168,8 +168,14 @@ export class LoginError extends Error {
       | "timeout"
       | "extract_failed"
       | "invalid_config",
+    /**
+     * Standard `ErrorOptions`; pass `{ cause }` when raising this from a
+     * `catch` so the underlying parse/URL error is not discarded.
+     * `preserve-caught-error` cannot see custom classes, so this is on us.
+     */
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
     this.name = "LoginError";
   }
 }
@@ -480,8 +486,12 @@ function resolveSelectorContext(context: string, bodyText: string, name: string)
   if (context === "$response.body") {
     try {
       return JSON.parse(bodyText);
-    } catch {
-      throw new LoginError(`'${name}' json parse failed`, "extract_failed");
+    } catch (err) {
+      // "json parse failed" is the same sentence whether the provider returned
+      // an HTML login wall, an empty body or truncated JSON. The SyntaxError
+      // is what distinguishes them, and a connect debug session has nothing
+      // else to go on — the body itself is not logged.
+      throw new LoginError(`'${name}' json parse failed`, "extract_failed", { cause: err });
     }
   }
   // Bare runtime expressions other than $response.body are intentionally
@@ -587,8 +597,9 @@ function applyOutput(
       let parsed: unknown;
       try {
         parsed = JSON.parse(bodyText);
-      } catch {
-        throw new LoginError(`'${name}' json parse failed`, "extract_failed");
+      } catch (err) {
+        // Same reasoning as `resolveSelectorContext` above.
+        throw new LoginError(`'${name}' json parse failed`, "extract_failed", { cause: err });
       }
       const v = readJsonPointer(parsed, pointer);
       return v === undefined ? undefined : stringifyValue(v);
@@ -722,8 +733,15 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
   let loginUrl: URL;
   try {
     loginUrl = new URL(url);
-  } catch {
-    throw new LoginError("url targets a blocked/internal address", "url_not_allowed");
+  } catch (err) {
+    // The `url_not_allowed` reason is shared with the real blocklist rejection
+    // below, so this branch's message describes THAT and not what happened
+    // here — the URL did not parse. The TypeError is the only thing in the
+    // thrown error that says so. (Message and reason left as-is: both are
+    // matched by callers; the cause is the additive half.)
+    throw new LoginError("url targets a blocked/internal address", "url_not_allowed", {
+      cause: err,
+    });
   }
   // Scheme floor: only http(s) may leave the engine. The literal `isBlockedUrl`
   // gate this check replaced also rejected non-http(s) schemes; the DNS-aware

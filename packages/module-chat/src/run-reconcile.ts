@@ -31,6 +31,10 @@
  * rather than merely the convenient one: chat persistence is single-writer, and
  * a notice inserted while a turn is mid-flight would chain onto the in-progress
  * user message and race the assistant message that turn is about to persist.
+ * This module does NOT evaluate it — `persistNotice` does, inside the same
+ * transaction as the insert and behind a row lock. Reading it here first and
+ * writing after would be exactly the read-then-write the rule exists to
+ * prevent: `setActiveStream` can start a turn in the gap between the two.
  *
  * Consequences, accepted deliberately:
  *  - a run still being awaited by its own live turn is skipped — that turn's
@@ -45,7 +49,7 @@
 
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { chatSessions, files, runs } from "@appstrate/db/schema";
+import { files, runs } from "@appstrate/db/schema";
 import { fileUri } from "@appstrate/core/file-uri";
 import { persistNotice } from "./persistence.ts";
 import { buildRunPageHref, UNNAMED_FILE } from "./ui/run-events.ts";
@@ -152,10 +156,10 @@ export async function stampChatSessionOnRun(
  * deliberate skip:
  *
  *  - the run was not launched from a chat session;
- *  - its session is gone;
- *  - a turn is generating on that session (see the liveness rationale above);
  *  - the run published no file, so there is nothing to announce;
- *  - the notice for this run is already in the transcript.
+ *  - `persistNotice` refused: the session is gone, a turn is generating on it
+ *    (see the liveness rationale above), or the notice is already in the
+ *    transcript.
  */
 export async function reconcileChatRun(input: { runId: string; orgId: string }): Promise<boolean> {
   const [run] = await db
@@ -170,16 +174,6 @@ export async function reconcileChatRun(input: { runId: string; orgId: string }):
   const chatSessionId = run?.chatSessionId;
   if (!run || !chatSessionId) return false;
 
-  const [session] = await db
-    .select({ activeStreamId: chatSessions.activeStreamId })
-    .from(chatSessions)
-    .where(and(eq(chatSessions.id, chatSessionId), eq(chatSessions.orgId, input.orgId)))
-    .limit(1);
-  if (!session) return false;
-  // A live turn owns the conversation: it is awaiting this very run (or writing
-  // its own reply) and is the single writer until it finalizes.
-  if (session.activeStreamId !== null) return false;
-
   const published = await db
     .select({ id: files.id, name: files.name, size: files.size })
     .from(files)
@@ -193,16 +187,17 @@ export async function reconcileChatRun(input: { runId: string; orgId: string }):
     .orderBy(asc(files.createdAt));
   if (published.length === 0) return false;
 
-  const posted = await persistNotice(
-    chatSessionId,
-    runNoticeMessageId(input.runId),
-    runNoticeText({
+  const posted = await persistNotice({
+    sessionId: chatSessionId,
+    orgId: input.orgId,
+    messageId: runNoticeMessageId(input.runId),
+    text: runNoticeText({
       runId: input.runId,
       packageId: run.packageId,
       status: run.status,
       files: published,
     }),
-  );
+  });
   if (posted) {
     logger.info("chat: announced an orphaned run's files in its session", {
       runId: input.runId,

@@ -28,7 +28,6 @@ import {
   PlusIcon,
   SearchIcon,
   Trash2Icon,
-  UserIcon,
   ZapIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -388,22 +387,6 @@ export const DescribeOperationToolUI = makeAssistantToolUI<Record<string, unknow
       Icon={BookOpenIcon}
       label="Description d'opération"
       idText={stringArg(props.args, "operation_id")}
-      args={props.args}
-      result={props.result}
-      isError={props.isError}
-      toolCallId={props.toolCallId}
-      timing={props.timing}
-    />
-  ),
-});
-
-export const GetMeToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
-  toolName: "get_me",
-  render: (props: AnyToolProps) => (
-    <ToolCallCard
-      phase={deriveToolPhase(props)}
-      Icon={UserIcon}
-      label="Contexte utilisateur"
       args={props.args}
       result={props.result}
       isError={props.isError}
