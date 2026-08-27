@@ -77,6 +77,7 @@ const integrationSpec: IntegrationSpawnSpec = {
 function buildSpec(llm: LlmProxyConfig): SidecarLaunchSpec {
   return {
     runToken: "run-token",
+    sidecarAuthToken: "sidecar-auth-token",
     proxyUrl: "http://user:pass@proxy.example:8080",
     llm,
     modelContextWindow: 200_000,
@@ -163,6 +164,7 @@ describe("sidecar env key classification (MMDS broker coverage)", () => {
       "PI_LLM_OAUTH_CONFIG_JSON",
       "PROXY_URL",
       "RUN_TOKEN",
+      "SIDECAR_AUTH_TOKEN",
     ]);
   });
 
@@ -177,11 +179,15 @@ describe("sidecar env key classification (MMDS broker coverage)", () => {
 });
 
 describe("agent env key classification", () => {
-  it("pins AGENT_SECRET_KEYS to exactly APPSTRATE_SINK_SECRET + MODEL_API_KEY", () => {
+  it("pins AGENT_SECRET_KEYS to the sink secret, the model key and the sidecar bearer", () => {
     // The agent env is built by buildRuntimePiEnv
     // (services/run-launcher/pi.ts). If it grows another secret-bearing
     // key, the author must add it to AGENT_SECRET_KEYS in
     // credential-split.ts AND update this pin consciously.
-    expect([...AGENT_SECRET_KEYS].sort()).toEqual(["APPSTRATE_SINK_SECRET", "MODEL_API_KEY"]);
+    expect([...AGENT_SECRET_KEYS].sort()).toEqual([
+      "APPSTRATE_SINK_SECRET",
+      "MODEL_API_KEY",
+      "SIDECAR_AUTH_TOKEN",
+    ]);
   });
 });

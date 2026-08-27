@@ -68,9 +68,25 @@ export interface RuntimePiEnvOptions {
   agentInput?: unknown;
   /** Sidecar URL reachable from the agent container. Required unless {@link noSidecar} — throws. */
   sidecarUrl?: string;
+  /**
+   * Per-run secret the container presents on every request to its sidecar's
+   * control surface (`SIDECAR_AUTH_HEADER`). Required unless {@link noSidecar}
+   * — throws, because a run that cannot authenticate to its sidecar would
+   * otherwise 401 on its first inference call instead of failing at launch.
+   *
+   * A DISCLOSURE the agent is meant to have, unlike the sink secret or the run
+   * token: it is the container's own identity toward its own sidecar, carries
+   * no platform authority, and is useless outside the run's network. The
+   * bootloader deletes it from `process.env` once captured, alongside
+   * `SIDECAR_URL` — see `runtime-pi/entrypoint.ts` §2d.
+   */
+  sidecarAuthToken?: string;
   /** Routes LLM traffic through this URL; MODEL_API_KEY becomes the placeholder. */
   sidecarProxyLlmUrl?: string;
-  /** Skips MCP wiring and `SIDECAR_URL`. Only valid with no providers and a static API key. */
+  /**
+   * Skips MCP wiring and `SIDECAR_URL`. Only valid with no providers and a static
+   * API key — and never on an {@link RuntimePiModelConfig.aliased} run, which throws.
+   */
   noSidecar?: boolean;
   outputSchema?: unknown;
   /** Forward-proxy URL. When set, HTTP(S)_PROXY + NO_PROXY are emitted. */
@@ -119,6 +135,22 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
     MODEL_ID: model.modelId,
   };
 
+  // Fail closed: the sidecar IS the masking. It terminates `pi-messages`, swaps
+  // the alias id for the real one, re-originates against the backing and projects
+  // the response back through a closed event union. Drop it and every one of
+  // those disappears at once — most concretely `MODEL_BASE_URL` below, which on
+  // the no-sidecar path is the backing vendor's own hostname, handed to code that
+  // can read its own environment. There is no aliased no-sidecar run to support:
+  // the alias contract IS the indirection the sidecar performs.
+  if (model.aliased && opts.noSidecar) {
+    throw new Error(
+      "buildRuntimePiEnv: an aliased run cannot be launched with noSidecar: true — " +
+        "the sidecar is the only thing masking the backing vendor, so refusing " +
+        "to place the backing's own endpoint inside the agent container. Route " +
+        "the run through the sidecar, or launch the model unaliased.",
+    );
+  }
+
   if (!opts.noSidecar) {
     // No fallback: a Docker-shaped default here would silently misroute
     // process/firecracker runs. `IsolationBoundary.sidecarEndpoints` owns topology.
@@ -128,7 +160,19 @@ export function buildRuntimePiEnv(opts: RuntimePiEnvOptions): Record<string, str
           "(pass the boundary's sidecarEndpoints.sidecarUrl, or set noSidecar: true)",
       );
     }
+    // Same fail-at-launch rule, for the credential half of "reach the sidecar".
+    // The sidecar's control surface denies by default, so a missing token here
+    // is not a degraded run — it is a run whose every LLM call and every tool
+    // call answers 401, discovered a minute later inside the container.
+    if (!opts.sidecarAuthToken) {
+      throw new Error(
+        "buildRuntimePiEnv: sidecarAuthToken is required for sidecar-backed runs " +
+          "(mint one per run and pass the SAME value in SidecarLaunchSpec.sidecarAuthToken, " +
+          "or set noSidecar: true)",
+      );
+    }
     env.SIDECAR_URL = opts.sidecarUrl;
+    env.SIDECAR_AUTH_TOKEN = opts.sidecarAuthToken;
   }
 
   if (opts.runId) env.AGENT_RUN_ID = opts.runId;

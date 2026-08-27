@@ -26,7 +26,8 @@
 
 import { describe, it, expect, mock } from "bun:test";
 import { Hono } from "hono";
-import { createApp, buildSidecarRuntimeDeps, type AppDeps } from "../app.ts";
+import { buildSidecarRuntimeDeps, type AppDeps } from "../app.ts";
+import { createTestApp } from "./helpers/authed-app.ts";
 import { mountMcp } from "../mcp.ts";
 import { buildApiCallHost } from "./helpers/api-call-host.ts";
 import { BlobStore } from "../blob-store.ts";
@@ -54,7 +55,7 @@ const defaultFetchCredentials = async (): Promise<CredentialsResponse> => ({
 });
 
 async function rpc(
-  app: ReturnType<typeof createApp>,
+  app: ReturnType<typeof createTestApp>,
   body: { method: string; params?: unknown },
 ): Promise<{ status: number; json: Record<string, unknown> }> {
   const res = await app.request("/mcp", {
@@ -478,7 +479,7 @@ describe("token-aware spill — env-var configuration via createApp", () => {
         ],
         runtimeDeps,
       );
-      const app = createApp({
+      const app = createTestApp({
         ...appDeps,
         runtimeDeps,
         additionalMcpToolsProvider: () => host.buildTools(),
@@ -512,7 +513,7 @@ describe("token-aware spill — env-var configuration via createApp", () => {
     const original = process.env.SIDECAR_INLINE_TOOL_OUTPUT_TOKENS;
     process.env.SIDECAR_INLINE_TOOL_OUTPUT_TOKENS = "not-a-number";
     try {
-      expect(() => createApp(makeDeps())).toThrow(/positive integer/);
+      expect(() => createTestApp(makeDeps())).toThrow(/positive integer/);
     } finally {
       if (original === undefined) delete process.env.SIDECAR_INLINE_TOOL_OUTPUT_TOKENS;
       else process.env.SIDECAR_INLINE_TOOL_OUTPUT_TOKENS = original;

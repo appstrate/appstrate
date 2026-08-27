@@ -1763,10 +1763,71 @@ function enforceAuthorizedUris(meta: ApiCallMeta, target: string): void {
  * scheme: within the authority both `*` and `**` compile to `[^/]*` (an
  * authority never contains a slash), so a host wildcard only ever matches
  * within the host component; only a `**` in the path expands to `.*`.
+ *
+ * That containment only holds against a NORMALISED target, so the target is
+ * re-serialised through WHATWG `URL` before the regex runs and an unparseable
+ * target is refused outright — see the inline note in the body for why `?`,
+ * `#` and userinfo defeat the raw-string form.
  */
 export function matchesAuthorizedUriSpec(pattern: string, target: string): boolean {
+  // SECURITY — normalise the target BEFORE matching. The authority fragment
+  // above is `[^/]*`, which is only containment if `/` is the ONLY character
+  // that can end an authority. It is not: `?` opens the query and `#` opens
+  // the fragment, and neither is a `/`, so in the RAW string both sail
+  // straight through `[^/]*` carrying an allowlisted-looking suffix:
+  //
+  //   pattern https://*.salesforce.com/**
+  //   target  https://attacker.example?.salesforce.com/steal   real host attacker.example
+  //   target  https://attacker.example#.salesforce.com/steal   real host attacker.example
+  //
+  // Both matched, and the caller then attached the integration's server-held
+  // credential to a request aimed at a host the operator never allowed (13
+  // shipped system integrations use wildcard-host patterns). `?`/`#` in the
+  // authority is not a shape any legitimate target has, so there is nothing
+  // to preserve here.
+  //
+  // Re-serialising through WHATWG `URL` collapses each form to its true
+  // origin: `?`/`#` gain the `/` that ends the authority — precisely the `/`
+  // the authority fragment cannot cross. Userinfo (`user@host`) is folded away
+  // by the same pass: it was NOT a bypass against these suffix-anchored host
+  // patterns (`foo.salesforce.com@attacker.example` does not end in
+  // `.salesforce.com`), but dropping it keeps the matcher host-based rather
+  // than leaving a second authority-detaching character to reason about.
+  //
+  // Fail closed on anything that is not a URL rather than testing the raw
+  // string: a target we cannot normalise is a target whose real host we cannot
+  // name, and every caller of this matcher is deciding whether to hand over a
+  // credential. `authorized_uris` targets are absolute URLs by spec, so an
+  // unparseable one is a malformed call, not a shape to accommodate.
+  const normalized = stripUserInfoAndFragment(target);
+  if (normalized === undefined) return false;
   const regex = new RegExp("^" + compileAuthorizedUriPattern(pattern) + "$");
-  return regex.test(target);
+  return regex.test(normalized);
+}
+
+/**
+ * Strip userinfo (`user:pass@`) and fragment (`#…`) from a URL, returning the
+ * WHATWG-normalised serialisation. Mirrors Fetch `Response.url` sanitisation.
+ * Two callers, both policy gates: {@link matchesAuthorizedUriSpec} normalises
+ * every target before allowlist matching, and the redirect-follower runs it on
+ * every hop before policy checks / re-fetch (block attacker-injected
+ * basic-auth, keep the allowlist matcher host-based).
+ *
+ * Returns `undefined` when the input does not parse as a URL. The matcher
+ * treats that as "no match" (fail closed); the redirect-follower resolves the
+ * `Location` through `new URL()` first, so for it that arm is defensive and it
+ * falls back to the unstripped string rather than dropping the hop.
+ */
+export function stripUserInfoAndFragment(url: string): string | undefined {
+  try {
+    const u = new URL(url);
+    u.username = "";
+    u.password = "";
+    u.hash = "";
+    return u.toString();
+  } catch {
+    return undefined;
+  }
 }
 
 /** Escape regex metacharacters, leaving the `*` wildcard chars intact. */

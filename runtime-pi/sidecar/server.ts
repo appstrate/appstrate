@@ -123,6 +123,10 @@ function readPositiveIntFromEnv(name: string): number | undefined {
 const config = {
   platformApiUrl: process.env.PLATFORM_API_URL || "http://localhost:3000",
   runToken: process.env.RUN_TOKEN || "",
+  // Per-run agent↔sidecar secret. Absent ⇒ the control surface answers 401 to
+  // everyone (see `SidecarConfig.sidecarAuthToken`) — there is no
+  // unauthenticated mode to fall back to.
+  sidecarAuthToken: process.env.SIDECAR_AUTH_TOKEN || undefined,
   proxyUrl: process.env.PROXY_URL || "",
   llm: readLlmConfigFromEnv(),
   modelContextWindow: readPositiveIntFromEnv("MODEL_CONTEXT_WINDOW"),
@@ -271,9 +275,10 @@ const integrationBootPromise =
           // A throw here (vs. a per-integration failure) means the whole boot
           // pass blew up — surface it as a non-OK report so the agent aborts
           // the run rather than running with a silently empty toolset.
-          // Same sink as the per-integration `failed[]` entries: the
-          // unauthenticated `GET /integrations/boot-report`. Scrub for the
-          // same reason (see `integrations-boot.ts`' per-spec catch).
+          // Same sink as the per-integration `failed[]` entries:
+          // `GET /integrations/boot-report`, which the agent relays into the
+          // org-visible run log. Scrub for the same reason (see
+          // `integrations-boot.ts`' per-spec catch).
           const error = scrubSecretMaterial(err instanceof Error ? err.message : String(err));
           logger.error("Integration boot raised", { error });
           integrationBootReport = {

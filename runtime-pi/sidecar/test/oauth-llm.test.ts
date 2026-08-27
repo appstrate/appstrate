@@ -14,7 +14,8 @@
  */
 
 import { describe, it, expect, mock, spyOn } from "bun:test";
-import { createApp, type AppDeps } from "../app.ts";
+import { type AppDeps } from "../app.ts";
+import { createTestApp } from "./helpers/authed-app.ts";
 import { logger } from "../logger.ts";
 import { OAuthTokenCache } from "../oauth-token-cache.ts";
 import type { OAuthTokenResponse } from "@appstrate/core/sidecar-types";
@@ -112,7 +113,7 @@ describe("/llm/* oauth — no forging", () => {
     const { fetchFn, calls } = setupFetchMock(upstreamOk);
     const deps = makeDeps(fetchFn);
     deps.config.llm = OAUTH_CFG;
-    const app = createApp(deps);
+    const app = createTestApp(deps);
 
     const res = await app.request("/llm/v1/messages", {
       method: "POST",
@@ -156,7 +157,7 @@ describe("/llm/* oauth — no forging", () => {
     const { fetchFn, calls } = setupFetchMock(upstreamOk);
     const deps = makeDeps(fetchFn);
     deps.config.llm = OAUTH_CFG;
-    const app = createApp(deps);
+    const app = createTestApp(deps);
 
     await app.request("/llm/v1/messages", {
       method: "POST",
@@ -171,7 +172,7 @@ describe("/llm/* oauth — no forging", () => {
     const { fetchFn, calls } = setupFetchMock(upstreamOk);
     const deps = makeDeps(fetchFn);
     deps.config.llm = OAUTH_CFG;
-    const app = createApp(deps);
+    const app = createTestApp(deps);
 
     await app.request("/llm/v1/messages", {
       method: "POST",
@@ -187,7 +188,7 @@ describe("/llm/* oauth — no forging", () => {
     const { fetchFn, calls } = setupFetchMock(upstreamOk);
     const deps = makeDeps(fetchFn);
     deps.config.llm = OAUTH_CFG;
-    const app = createApp(deps);
+    const app = createTestApp(deps);
 
     const body = JSON.stringify({ model: "claude-haiku-4-5", messages: [], metadata: { a: 1 } });
     await app.request("/llm/v1/messages", {
@@ -202,7 +203,7 @@ describe("/llm/* oauth — no forging", () => {
     const { fetchFn, calls } = setupFetchMock(upstreamOk);
     const deps = makeDeps(fetchFn);
     deps.config.llm = { ...OAUTH_CFG, baseUrl: "https://chatgpt.com/backend-api" };
-    const app = createApp(deps);
+    const app = createTestApp(deps);
     const compressed = new Uint8Array([0x28, 0xb5, 0x2f, 0xfd, 0xff, 0x00, 0x81, 0x7f]);
 
     await app.request("/llm/codex/responses", {
@@ -241,7 +242,7 @@ describe("/llm/* oauth — no forging", () => {
     try {
       const deps = makeDeps(fetchFn);
       deps.config.llm = OAUTH_CFG;
-      const app = createApp(deps);
+      const app = createTestApp(deps);
 
       const res = await app.request("/llm/codex/responses", { method: "GET" });
 
@@ -297,7 +298,7 @@ describe("/llm/* oauth — no forging", () => {
     try {
       const deps = makeDeps(fetchFn);
       deps.config.llm = OAUTH_CFG;
-      const app = createApp(deps);
+      const app = createTestApp(deps);
 
       const res = await app.request("/llm/codex/responses", { method: "GET" });
       expect(res.status).toBe(502);
@@ -338,7 +339,7 @@ describe("/llm/* oauth — no forging", () => {
     });
     const deps = makeDeps(fetchFn);
     deps.config.llm = OAUTH_CFG;
-    const app = createApp(deps);
+    const app = createTestApp(deps);
 
     const res = await app.request("/llm/v1/messages", {
       method: "POST",

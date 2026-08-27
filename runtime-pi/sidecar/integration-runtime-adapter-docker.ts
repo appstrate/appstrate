@@ -476,8 +476,9 @@ async function mkdirStagedParents(dir: string, root: string): Promise<void> {
  *
  *   - an EMPTY key emits `=<value>` and docker answers
  *     `no variable name on line '=<value>'` — quoting the whole line, i.e. the
- *     DECRYPTED credential, into `failed[].error` on the unauthenticated
- *     `GET /integrations/boot-report`;
+ *     DECRYPTED credential, into `failed[].error` on
+ *     `GET /integrations/boot-report` — relayed verbatim into the run's
+ *     org-visible `run_logs`, and readable by a prompt-injectable agent;
  *   - a key containing `=` silently sets a DIFFERENT variable, because docker
  *     splits each line on its first `=`;
  *   - a key containing `\n`, a leading `#` or leading whitespace re-opens the

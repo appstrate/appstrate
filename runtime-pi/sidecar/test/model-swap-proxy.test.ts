@@ -8,7 +8,8 @@
  */
 
 import { describe, it, expect, mock } from "bun:test";
-import { createApp, type AppDeps } from "../app.ts";
+import { type AppDeps } from "../app.ts";
+import { createTestApp } from "./helpers/authed-app.ts";
 import { parseModelSwapEnv } from "../model-swap.ts";
 
 // What an aliased run actually ships: the container speaks `pi-messages`, the
@@ -50,7 +51,7 @@ describe("/llm/* upstream failure (no alias)", () => {
 
     const deps = makeDeps(fetchFn);
     delete (deps.config.llm as { modelSwap?: unknown }).modelSwap;
-    const app = createApp(deps);
+    const app = createTestApp(deps);
     const res = await app.request("/llm/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -86,7 +87,7 @@ describe("/llm/* alias surface restriction", () => {
 
   it("refuses a vendor catalogue read and never reaches upstream", async () => {
     const { fetchFn, calls } = refusingFetch();
-    const app = createApp(makeDeps(fetchFn));
+    const app = createTestApp(makeDeps(fetchFn));
 
     const res = await app.request("/llm/v1/models", { method: "GET" });
 
@@ -110,7 +111,7 @@ describe("/llm/* alias surface restriction", () => {
 
   it("refuses a non-inference method on the inference path", async () => {
     const { fetchFn, calls } = refusingFetch();
-    const app = createApp(makeDeps(fetchFn));
+    const app = createTestApp(makeDeps(fetchFn));
 
     const res = await app.request("/llm/messages", { method: "GET" });
 
@@ -120,7 +121,7 @@ describe("/llm/* alias surface restriction", () => {
 
   it("refuses a sibling endpoint of the inference path (path is exact, not a prefix)", async () => {
     const { fetchFn, calls } = refusingFetch();
-    const app = createApp(makeDeps(fetchFn));
+    const app = createTestApp(makeDeps(fetchFn));
 
     const res = await app.request("/llm/messages/extra", {
       method: "POST",
@@ -146,7 +147,7 @@ describe("/llm/* alias surface restriction", () => {
 
     const deps = makeDeps(fetchFn);
     delete (deps.config.llm as { modelSwap?: unknown }).modelSwap;
-    const app = createApp(deps);
+    const app = createTestApp(deps);
 
     const res = await app.request("/llm/v1/models", { method: "GET" });
 
@@ -183,7 +184,7 @@ describe("/llm/* re-origination routing (aliased run)", () => {
     const fetchFn = mock(
       async () => new Response("{}", { status: 200 }),
     ) as unknown as typeof fetch;
-    const app = createApp(reoriginatingDeps(fetchFn));
+    const app = createTestApp(reoriginatingDeps(fetchFn));
 
     const res = await app.request("/llm/messages", {
       method: "POST",
@@ -218,7 +219,7 @@ describe("/llm/* re-origination routing (aliased run)", () => {
     const fetchFn = mock(
       async () => new Response("{}", { status: 200 }),
     ) as unknown as typeof fetch;
-    const app = createApp(reoriginatingDeps(fetchFn));
+    const app = createTestApp(reoriginatingDeps(fetchFn));
 
     for (const [method, path] of [
       // What the backing speaks. Keying the allowlist on `backingApiShape`
@@ -246,7 +247,7 @@ describe("/llm/* re-origination routing (aliased run)", () => {
     const deps = reoriginatingDeps(fetchFn);
     if (deps.config.llm?.authMode !== "api_key") throw new Error("expected api_key llm");
     deps.config.llm.modelSwap = parseModelSwapEnv(JSON.stringify(SWAP));
-    const app = createApp(deps);
+    const app = createTestApp(deps);
 
     const allowed = await app.request("/llm/messages", {
       method: "POST",

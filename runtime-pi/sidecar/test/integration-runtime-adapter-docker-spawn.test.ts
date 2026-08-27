@@ -218,6 +218,35 @@ describe("docker adapter spawn — credential env delivery", () => {
     }
   });
 
+  it("never hands the runner the sidecar's own agent-auth token", async () => {
+    // The defect this whole boundary exists for: the runner sits on the SAME
+    // per-run Docker network as the sidecar and resolves it by name, so the
+    // only thing keeping it off `/llm/*` is not holding SIDECAR_AUTH_TOKEN.
+    // The adapter builds runner env from the integration spec alone (env-file)
+    // plus the proxy / CA / workspace routing block — never from its own
+    // environ — and this pins that.
+    const previous = process.env.SIDECAR_AUTH_TOKEN;
+    process.env.SIDECAR_AUTH_TOKEN = "sat-must-not-leak";
+    try {
+      await withFakeDocker(async (calls) => {
+        await spawnWith(calls, spec({ spawnEnv: { OK: "value" } }));
+        const create = calls.find((c) => c.args[0] === "create")!;
+        // Not on argv, not in the docker CLI's own environ, not in the
+        // 0600 env-file docker bakes into the container config.
+        expect(create.args.join(" ")).not.toContain("sat-must-not-leak");
+        expect(create.env.SIDECAR_AUTH_TOKEN).toBeUndefined();
+        expect(create.envFileBody ?? "").not.toContain("sat-must-not-leak");
+        // Positive control: the env-file IS the delivery channel and it did
+        // carry this spawn's own value, so the three assertions above are
+        // about the token and not about an empty container config.
+        expect(create.envFileBody).toBe("OK=value");
+      });
+    } finally {
+      if (previous === undefined) delete process.env.SIDECAR_AUTH_TOKEN;
+      else process.env.SIDECAR_AUTH_TOKEN = previous;
+    }
+  });
+
   it("still delivers a well-formed env-file off the command line", async () => {
     await withFakeDocker(async (calls) => {
       await spawnWith(calls, spec({ spawnEnv: { API_TOKEN: "tok-123" } }));

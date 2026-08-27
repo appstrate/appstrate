@@ -17,7 +17,7 @@ const model = {
 // Sidecar-backed calls must pass the topology explicitly — buildRuntimePiEnv
 // throws instead of defaulting (the Docker magic string is gone; the
 // orchestrator's sidecarEndpoints is the single topology owner).
-const sidecar = { sidecarUrl: "http://sidecar:8080" };
+const sidecar = { sidecarUrl: "http://sidecar:8080", sidecarAuthToken: "sidecar-auth-token" };
 
 describe("buildRuntimePiEnv", () => {
   it("forwards explicit generation controls, including temperature zero", () => {

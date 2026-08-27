@@ -22,7 +22,8 @@
  */
 
 import { describe, it, expect, mock } from "bun:test";
-import { createApp, buildSidecarRuntimeDeps, type AppDeps } from "../app.ts";
+import { buildSidecarRuntimeDeps, type AppDeps } from "../app.ts";
+import { createTestApp } from "./helpers/authed-app.ts";
 import { buildApiCallHost } from "./helpers/api-call-host.ts";
 import type { CredentialsResponse } from "../helpers.ts";
 
@@ -65,7 +66,7 @@ async function makeApp(overrides?: Partial<AppDeps>, token = "tok-abc") {
     ],
     runtimeDeps,
   );
-  return createApp({
+  return createTestApp({
     ...appDeps,
     runtimeDeps,
     additionalMcpToolsProvider: () => host.buildTools(),
@@ -73,7 +74,7 @@ async function makeApp(overrides?: Partial<AppDeps>, token = "tok-abc") {
 }
 
 async function rpc(
-  app: ReturnType<typeof createApp>,
+  app: ReturnType<typeof createTestApp>,
   body: { method: string; params?: unknown },
 ): Promise<{ status: number; json: Record<string, unknown> }> {
   const res = await app.request("/mcp", {

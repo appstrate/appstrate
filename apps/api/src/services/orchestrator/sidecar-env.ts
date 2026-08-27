@@ -86,6 +86,10 @@ export function applySpecToSidecarEnv(
   spec: SidecarLaunchSpec,
   target: Record<string, string>,
 ): void {
+  // The agent↔sidecar secret. Same value the launcher put in the agent
+  // container's own `SIDECAR_AUTH_TOKEN`; the sidecar compares the two.
+  // Absent on a connect-run, which never serves the agent surface.
+  if (spec.sidecarAuthToken) target.SIDECAR_AUTH_TOKEN = spec.sidecarAuthToken;
   if (spec.proxyUrl) target.PROXY_URL = spec.proxyUrl;
   if (spec.modelContextWindow != null) {
     target.MODEL_CONTEXT_WINDOW = String(spec.modelContextWindow);

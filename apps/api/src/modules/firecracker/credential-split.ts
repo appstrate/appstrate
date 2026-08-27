@@ -54,6 +54,10 @@ export const MMDS_SAFETY_MARGIN_BYTES = 4_096;
  */
 export const SIDECAR_SECRET_KEYS: readonly string[] = [
   "RUN_TOKEN",
+  // Agent↔sidecar bearer. Not platform authority, but whoever holds it spends
+  // the org's provider credential through `/llm/*` — it must not sit at rest
+  // on the config drive.
+  "SIDECAR_AUTH_TOKEN",
   "PI_API_KEY",
   "PI_LLM_OAUTH_CONFIG_JSON",
   "CONNECT_LOGIN_JSON",
@@ -62,12 +66,17 @@ export const SIDECAR_SECRET_KEYS: readonly string[] = [
 ];
 
 /**
- * Agent-env keys that carry secrets: the HMAC sink signing secret, and —
- * on skipSidecar (direct-provider) runs — the REAL model API key
+ * Agent-env keys that carry secrets: the HMAC sink signing secret, the
+ * agent↔sidecar bearer (the other half of the sidecar's SIDECAR_AUTH_TOKEN),
+ * and — on skipSidecar (direct-provider) runs — the REAL model API key
  * (sidecar-backed runs only ever put the placeholder in the agent env,
  * which is harmless to broker too).
  */
-export const AGENT_SECRET_KEYS: readonly string[] = ["APPSTRATE_SINK_SECRET", "MODEL_API_KEY"];
+export const AGENT_SECRET_KEYS: readonly string[] = [
+  "APPSTRATE_SINK_SECRET",
+  "MODEL_API_KEY",
+  "SIDECAR_AUTH_TOKEN",
+];
 
 /** MMDS store contents (snake_case wire — the guest supervisor reads these). */
 export interface MmdsPayload {

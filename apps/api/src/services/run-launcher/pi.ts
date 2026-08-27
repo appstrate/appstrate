@@ -22,6 +22,7 @@
  * server-side finalize race.
  */
 
+import { randomBytes } from "node:crypto";
 import { logger } from "../../lib/logger.ts";
 import type { AppstrateRunPlan } from "./types.ts";
 import { buildPlatformSystemPrompt } from "./prompt-builder.ts";
@@ -318,8 +319,22 @@ async function runPlatformContainerImpl(
       };
     }
 
+    // Agent↔sidecar bearer for THIS run. Minted here, in the one frame that
+    // feeds both halves of the pair (`sidecarSpec` → the sidecar's env,
+    // `buildRuntimePiEnv` → the agent container's), so the two can never be
+    // set from different values. Never persisted, never logged, and never
+    // handed to an integration runner — the sidecar keeps it in its config
+    // object and builds runner env from the integration spec alone.
+    //
+    // Deliberately NOT `plan.runToken`, and not derived from it: the agent
+    // container must stay unable to call the platform back (zero-knowledge),
+    // so this secret carries no platform authority and no path to one.
+    // `skipSidecar` runs have no sidecar to authenticate to.
+    const sidecarAuthToken = skipSidecar ? undefined : randomBytes(32).toString("base64url");
+
     const sidecarSpec: SidecarLaunchSpec = {
       runToken: plan.runToken,
+      ...(sidecarAuthToken ? { sidecarAuthToken } : {}),
       proxyUrl: plan.proxyUrl ?? undefined,
       llm: sidecarLlm,
       // Propagate the resolved model's context window so the sidecar's
@@ -394,6 +409,11 @@ async function runPlatformContainerImpl(
       // owns the topology (Docker DNS alias, host loopback port, in-guest
       // loopback for microVMs) and pi.ts stays backend-agnostic.
       sidecarUrl: skipSidecar ? undefined : boundary.sidecarEndpoints.sidecarUrl,
+      // Other half of the pair minted above. `buildRuntimePiEnv` throws when a
+      // sidecar-backed run reaches it without one, the same way it does for
+      // `sidecarUrl` — a run that cannot authenticate to its sidecar must not
+      // start rather than 401 on its first inference call.
+      sidecarAuthToken,
       // Sidecar-backed runs route LLM traffic through the sidecar proxy
       // (sidecarProxyLlmUrl below). No-sidecar runs talk to the upstream
       // directly, so buildRuntimePiEnv derives MODEL_BASE_URL from the

@@ -68,6 +68,7 @@ describe("parseRuntimeEnv — happy path", () => {
       MODEL_MAX_TOKENS: "32768",
       AGENT_INPUT: '{"foo":"bar","n":1}',
       SIDECAR_URL: "http://sidecar:8080",
+      SIDECAR_AUTH_TOKEN: "sidecar-auth-token",
       OUTPUT_SCHEMA: '{"type":"object"}',
     });
     expect(env.workspaceDir).toBe("/agent");
@@ -86,6 +87,22 @@ describe("parseRuntimeEnv — happy path", () => {
     expect(env.modelMaxTokens).toBe(32_768);
     expect(env.agentInput).toEqual({ foo: "bar", n: 1 });
     expect(env.sidecarUrl).toBe("http://sidecar:8080");
+    expect(env.sidecarAuthToken).toBe("sidecar-auth-token");
+  });
+
+  it("refuses a SIDECAR_URL with no SIDECAR_AUTH_TOKEN", () => {
+    // The sidecar denies by default, so a container handed only the URL would
+    // boot and then 401 on every LLM and tool call. Fatal at parse instead.
+    expect(() => parseRuntimeEnv({ ...VALID, SIDECAR_URL: "http://sidecar:8080" })).toThrow(
+      /SIDECAR_AUTH_TOKEN: required/,
+    );
+    // Control: the same environment WITH the token parses, and the same
+    // environment with NEITHER parses too (a no-sidecar run owes no token).
+    expect(
+      parseRuntimeEnv({ ...VALID, SIDECAR_URL: "http://sidecar:8080", SIDECAR_AUTH_TOKEN: "t" })
+        .sidecarAuthToken,
+    ).toBe("t");
+    expect(parseRuntimeEnv({ ...VALID }).sidecarAuthToken).toBeUndefined();
   });
 
   it("forwards a TRACEPARENT env var through to env.traceparent", () => {

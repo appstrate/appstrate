@@ -14,7 +14,8 @@ import { describe, it, expect, mock } from "bun:test";
 import { PROXY_INJECTED_FIELD } from "@appstrate/connect/integration-credentials";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { createApp, buildSidecarRuntimeDeps, type AppDeps } from "../app.ts";
+import { buildSidecarRuntimeDeps, type AppDeps } from "../app.ts";
+import { createTestApp } from "./helpers/authed-app.ts";
 import { buildApiCallHost } from "./helpers/api-call-host.ts";
 import { MAX_MCP_ENVELOPE_SIZE } from "../helpers.ts";
 
@@ -46,7 +47,7 @@ function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
  * surfaces as a JSON-RPC error response we can assert on.
  */
 async function rpc(
-  app: ReturnType<typeof createApp>,
+  app: ReturnType<typeof createTestApp>,
   body: { method: string; params?: unknown },
 ): Promise<{ status: number; json: Record<string, unknown> }> {
   const res = await app.request("/mcp", {
@@ -78,7 +79,7 @@ describe("ALL /mcp — Host header validation (DNS-rebinding defence)", () => {
   // on `localhost`, so an exact-match list would reject every legit
   // call.
 
-  function rawMcp(app: ReturnType<typeof createApp>, host: string | null) {
+  function rawMcp(app: ReturnType<typeof createTestApp>, host: string | null) {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream",
@@ -92,27 +93,27 @@ describe("ALL /mcp — Host header validation (DNS-rebinding defence)", () => {
   }
 
   it("accepts the docker bridge alias (sidecar:8080)", async () => {
-    const res = await rawMcp(createApp(makeDeps()), "sidecar:8080");
+    const res = await rawMcp(createTestApp(makeDeps()), "sidecar:8080");
     expect(res.status).toBe(200);
   });
 
   it("accepts localhost with a dynamic port (process orchestrator)", async () => {
-    const res = await rawMcp(createApp(makeDeps()), "localhost:51123");
+    const res = await rawMcp(createTestApp(makeDeps()), "localhost:51123");
     expect(res.status).toBe(200);
   });
 
   it("accepts 127.0.0.1 with a dynamic port", async () => {
-    const res = await rawMcp(createApp(makeDeps()), "127.0.0.1:62000");
+    const res = await rawMcp(createTestApp(makeDeps()), "127.0.0.1:62000");
     expect(res.status).toBe(200);
   });
 
   it("accepts portless hostnames (Hono test default)", async () => {
-    const res = await rawMcp(createApp(makeDeps()), "localhost");
+    const res = await rawMcp(createTestApp(makeDeps()), "localhost");
     expect(res.status).toBe(200);
   });
 
   it("rejects unknown hosts with 403 + JSON-RPC error envelope", async () => {
-    const res = await rawMcp(createApp(makeDeps()), "evil.example.com:8080");
+    const res = await rawMcp(createTestApp(makeDeps()), "evil.example.com:8080");
     expect(res.status).toBe(403);
     const body = (await res.json()) as {
       jsonrpc: string;
@@ -125,21 +126,21 @@ describe("ALL /mcp — Host header validation (DNS-rebinding defence)", () => {
   });
 
   it("rejects a Host header that matches the suffix only (e.g. notlocalhost)", async () => {
-    const res = await rawMcp(createApp(makeDeps()), "notlocalhost:8080");
+    const res = await rawMcp(createTestApp(makeDeps()), "notlocalhost:8080");
     expect(res.status).toBe(403);
   });
 
   it("rejects a missing Host header", async () => {
     // `app.request()` won't send a Host header unless we set one
     // explicitly. The validator must fail closed in that case.
-    const res = await rawMcp(createApp(makeDeps()), null);
+    const res = await rawMcp(createTestApp(makeDeps()), null);
     expect(res.status).toBe(403);
   });
 });
 
 describe("POST /mcp — initialize", () => {
   it("returns server capabilities advertising tools support", async () => {
-    const app = createApp(makeDeps());
+    const app = createTestApp(makeDeps());
     const res = await rpc(app, {
       method: "initialize",
       params: {
@@ -157,7 +158,7 @@ describe("POST /mcp — initialize", () => {
 
 describe("POST /mcp — tools/list", () => {
   it("advertises run_history and recall_memory (no api_call)", async () => {
-    const app = createApp(makeDeps());
+    const app = createTestApp(makeDeps());
     const res = await rpc(app, { method: "tools/list" });
     expect(res.status).toBe(200);
     const result = res.json.result as { tools: Array<{ name: string }> };
@@ -166,7 +167,7 @@ describe("POST /mcp — tools/list", () => {
   });
 
   it("declares input schemas matching the legacy contracts", async () => {
-    const app = createApp(makeDeps());
+    const app = createTestApp(makeDeps());
     const res = await rpc(app, { method: "tools/list" });
     const result = res.json.result as {
       tools: Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }>;
@@ -182,7 +183,7 @@ describe("POST /mcp — tools/list", () => {
   // value re-appears here, agents start sending it again and the platform
   // 400s every call. Lock it to the canonical AFPS values.
   it("advertises run_history.fields as exactly [checkpoint, result]", async () => {
-    const app = createApp(makeDeps());
+    const app = createTestApp(makeDeps());
     const res = await rpc(app, { method: "tools/list" });
     const result = res.json.result as {
       tools: Array<{
@@ -204,7 +205,7 @@ describe("POST /mcp — tools/call run_history", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const app = createTestApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
 
     const res = await rpc(app, {
       method: "tools/call",
@@ -234,7 +235,7 @@ describe("POST /mcp — tools/call recall_memory", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const app = createTestApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
 
     const res = await rpc(app, {
       method: "tools/call",
@@ -254,7 +255,7 @@ describe("POST /mcp — tools/call recall_memory", () => {
 
   it("omits empty q from the upstream URL", async () => {
     const fetchFn = mock(async () => new Response('{"memories":[]}', { status: 200 }));
-    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const app = createTestApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
 
     await rpc(app, {
       method: "tools/call",
@@ -268,7 +269,7 @@ describe("POST /mcp — tools/call recall_memory", () => {
 
 describe("POST /mcp — protocol errors", () => {
   it("returns -32601 MethodNotFound for unsupported methods", async () => {
-    const app = createApp(makeDeps());
+    const app = createTestApp(makeDeps());
     const res = await rpc(app, { method: "sampling/createMessage" });
     expect(res.status).toBe(200);
     const error = res.json.error as { code: number };
@@ -276,7 +277,7 @@ describe("POST /mcp — protocol errors", () => {
   });
 
   it("rejects unknown tool names with InvalidParams (spec-canonical -32602)", async () => {
-    const app = createApp(makeDeps());
+    const app = createTestApp(makeDeps());
     const res = await rpc(app, {
       method: "tools/call",
       params: { name: "totally-not-a-tool" },
@@ -299,7 +300,7 @@ describe("POST /mcp — per-request transport (stateless mode)", () => {
   // exchanges back-to-back on the same Hono app.
 
   it("handles two consecutive tools/list calls on the same app", async () => {
-    const app = createApp(makeDeps());
+    const app = createTestApp(makeDeps());
 
     const first = await rpc(app, { method: "tools/list" });
     expect(first.status).toBe(200);
@@ -321,7 +322,7 @@ describe("POST /mcp — per-request transport (stateless mode)", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const app = createTestApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
 
     const args = { limit: 1 };
 
@@ -365,7 +366,7 @@ describe("POST /mcp — request body size cap", () => {
   // multi-GB JSON-RPC envelope.
 
   it("rejects requests whose declared Content-Length exceeds the cap", async () => {
-    const app = createApp(makeDeps());
+    const app = createTestApp(makeDeps());
     // We don't send the actual oversize body — the declared length
     // alone must be sufficient to reject.
     const res = await app.request("/mcp", {
@@ -404,7 +405,7 @@ describe("POST /mcp — request body size cap", () => {
   });
 
   it("rejects requests whose streamed body exceeds the cap", async () => {
-    const app = createApp(makeDeps());
+    const app = createTestApp(makeDeps());
     // Build an oversized body without a declared Content-Length so the
     // streaming path is exercised. Pad just past the envelope cap.
     const giant = "x".repeat(MAX_MCP_ENVELOPE_SIZE + 1024);
@@ -432,7 +433,7 @@ describe("POST /mcp — request body size cap", () => {
   });
 
   it("accepts a small request just under the cap", async () => {
-    const app = createApp(makeDeps());
+    const app = createTestApp(makeDeps());
     const res = await rpc(app, { method: "tools/list" });
     expect(res.status).toBe(200);
     expect(res.json.error).toBeUndefined();
@@ -459,7 +460,7 @@ describe("POST /mcp — bounded response read", () => {
           headers: { "Content-Type": "application/json" },
         }),
     );
-    const app = createApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const app = createTestApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
     const res = await rpc(app, {
       method: "tools/call",
       params: { name: "run_history", arguments: { limit: 1 } },
@@ -508,7 +509,7 @@ describe("POST /mcp — api_call", () => {
       ],
       runtimeDeps,
     );
-    return createApp({
+    return createTestApp({
       ...appDeps,
       runtimeDeps,
       additionalMcpToolsProvider: () => host.buildTools(),
@@ -572,7 +573,7 @@ describe("POST /mcp — api_call", () => {
   });
 
   it("registers no api_call tool when no integration opts in", async () => {
-    const app = createApp(makeDeps());
+    const app = createTestApp(makeDeps());
     const res = await rpc(app, { method: "tools/list" });
     const result = res.json.result as { tools: Array<{ name: string }> };
     expect(result.tools.some((t) => t.name.endsWith("__api_call"))).toBe(false);

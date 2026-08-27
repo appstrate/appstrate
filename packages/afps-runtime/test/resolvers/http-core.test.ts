@@ -167,4 +167,91 @@ describe("matchesAuthorizedUriSpec", () => {
     // `**` in the host cannot swallow the `/` that ends the authority.
     expect(matchesAuthorizedUriSpec(pat, "https://api.acme.com/v1/health")).toBe(false);
   });
+
+  // The authority fragment is `[^/]*`, so the ONLY separator it cannot cross
+  // is `/`. `?`, `#` and `@` also end an authority and are not `/` — matching
+  // the RAW target string therefore let an attacker host wear an allowlisted
+  // suffix. Each case below pairs the bypass with BOTH controls (a real host
+  // that must still match, an attacker host that must still be refused) so a
+  // change that breaks matching outright cannot masquerade as a fix.
+  // `https://*.salesforce.com/**` is a shipped system-integration pattern.
+  const SALESFORCE = "https://*.salesforce.com/**";
+
+  it("`?` cannot smuggle an allowlisted suffix past the authority boundary", () => {
+    // Real host is `attacker.example`; everything after `?` is the query.
+    expect(
+      matchesAuthorizedUriSpec(SALESFORCE, "https://attacker.example?.salesforce.com/steal"),
+    ).toBe(false);
+    expect(
+      matchesAuthorizedUriSpec("https://*.zendesk.com/**", "https://evil.test?.zendesk.com/x"),
+    ).toBe(false);
+    // Positive control — a genuine subdomain still matches.
+    expect(matchesAuthorizedUriSpec(SALESFORCE, "https://foo.salesforce.com/ok")).toBe(true);
+    // Negative control — a bare attacker host was always refused.
+    expect(matchesAuthorizedUriSpec(SALESFORCE, "https://attacker.example/steal")).toBe(false);
+  });
+
+  it("`#` cannot smuggle an allowlisted suffix past the authority boundary", () => {
+    // Real host is `attacker.example`; everything after `#` is the fragment
+    // and is never even sent on the wire.
+    expect(
+      matchesAuthorizedUriSpec(SALESFORCE, "https://attacker.example#.salesforce.com/steal"),
+    ).toBe(false);
+    expect(matchesAuthorizedUriSpec(SALESFORCE, "https://foo.salesforce.com/ok")).toBe(true);
+    expect(matchesAuthorizedUriSpec(SALESFORCE, "https://attacker.example/steal")).toBe(false);
+  });
+
+  it("userinfo `@` cannot make an attacker host wear an allowlisted name", () => {
+    // Checked as part of the `?`/`#` fix: `@` also detaches an authority, but
+    // it was NOT a bypass against a suffix-anchored host pattern — the
+    // authority `foo.salesforce.com@attacker.example` does not END in
+    // `.salesforce.com`. Pinned so normalisation can never make it one.
+    // Real host is `attacker.example`; `foo.salesforce.com` is userinfo.
+    expect(
+      matchesAuthorizedUriSpec(SALESFORCE, "https://foo.salesforce.com@attacker.example/x"),
+    ).toBe(false);
+    expect(
+      matchesAuthorizedUriSpec(SALESFORCE, "https://foo.salesforce.com:tok@attacker.example/x"),
+    ).toBe(false);
+    // A fragment already stripped means the fragment can't re-add the host.
+    expect(matchesAuthorizedUriSpec(SALESFORCE, "https://foo.salesforce.com/ok")).toBe(true);
+    expect(matchesAuthorizedUriSpec(SALESFORCE, "https://attacker.example/steal")).toBe(false);
+  });
+
+  it("refuses a target that is not a parseable URL", () => {
+    // Fail closed: a target whose real host we cannot name never gets the
+    // integration credential. A raw-string matcher happily admitted these —
+    // `[^/]*` does not care that a space is illegal in an authority — but
+    // `new URL()` rejects them, so there is no host to authorise.
+    expect(matchesAuthorizedUriSpec(SALESFORCE, "https://a b.salesforce.com/x")).toBe(false);
+    expect(matchesAuthorizedUriSpec("https://**", "https://not a host/x")).toBe(false);
+    expect(matchesAuthorizedUriSpec(SALESFORCE, "not a url")).toBe(false);
+    expect(matchesAuthorizedUriSpec(SALESFORCE, "//foo.salesforce.com/ok")).toBe(false);
+    // Positive controls — real URLs still match both patterns.
+    expect(matchesAuthorizedUriSpec(SALESFORCE, "https://foo.salesforce.com/ok")).toBe(true);
+    expect(matchesAuthorizedUriSpec("https://**", "https://foo.salesforce.com/ok")).toBe(true);
+    // Negative control — a parseable attacker host is still refused.
+    expect(matchesAuthorizedUriSpec(SALESFORCE, "https://attacker.example/steal")).toBe(false);
+  });
+
+  it("normalisation leaves path/query wildcards working", () => {
+    const pat = "https://*.salesforce.com/services/data/**";
+    expect(
+      matchesAuthorizedUriSpec(
+        pat,
+        "https://foo.salesforce.com/services/data/v59.0/query?q=SELECT+Id",
+      ),
+    ).toBe(true);
+    // Single-segment `*` still stops at a slash after normalisation.
+    expect(matchesAuthorizedUriSpec("https://api.acme.com/*", "https://api.acme.com/users")).toBe(
+      true,
+    );
+    expect(
+      matchesAuthorizedUriSpec("https://api.acme.com/*", "https://api.acme.com/users/42"),
+    ).toBe(false);
+    // …and the path is still not a place to hide a host.
+    expect(matchesAuthorizedUriSpec(pat, "https://attacker.example/services/data/v59.0")).toBe(
+      false,
+    );
+  });
 });

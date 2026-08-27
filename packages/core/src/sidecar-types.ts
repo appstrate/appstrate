@@ -27,8 +27,44 @@ export type ManifestDeliveryHttp = NonNullable<
  * own environment at boot and uses it for the lifetime of the run. The
  * platform sends every field as an env var when spawning the container.
  */
+/**
+ * Header the AGENT container stamps on every request to its sidecar's control
+ * surface (`/llm/*`, `/mcp`, `/integrations/boot-report`, `/runtime-events`),
+ * carrying {@link SidecarConfig.sidecarAuthToken}.
+ *
+ * A dedicated header rather than `Authorization`: on `/llm/*` that slot already
+ * carries the vendor credential placeholder the sidecar swaps for the real key,
+ * so reusing it would collide with the one thing that surface exists to do.
+ *
+ * Container → sidecar only: the `/llm/*` passthrough strips it (and the
+ * `x-appstrate-pi-sdk` sibling) from the forwarded header set, so the sidecar's
+ * own credential never travels next to it.
+ */
+export const SIDECAR_AUTH_HEADER = "x-appstrate-sidecar-auth";
+
 export interface SidecarConfig {
   runToken: string;
+  /**
+   * Per-run secret the AGENT container must present on
+   * {@link SIDECAR_AUTH_HEADER} to reach the sidecar's control surface.
+   *
+   * NOT {@link runToken} and carries none of its authority: it authenticates
+   * "I am the agent container talking to my own sidecar" and nothing else. The
+   * zero-knowledge boundary is unchanged — the agent still holds no token that
+   * can call the platform back, and this one cannot be used to derive one.
+   *
+   * It exists because the per-run Docker network is NOT a boundary between the
+   * agent and its siblings: `integration-runtime-adapter-docker.ts` attaches
+   * every third-party integration runner to the same bridge and hands it
+   * `http://sidecar:<port>`. Without this token a `source.kind: "local"`
+   * integration reaches the LLM proxy with one `curl` and spends the org's
+   * provider credential unattributed.
+   *
+   * Absent ⇒ the sidecar cannot authenticate anyone and answers 401 on the
+   * whole control surface (`/health` excepted). There is no unauthenticated
+   * fallback.
+   */
+  sidecarAuthToken?: string;
   platformApiUrl: string;
   proxyUrl?: string;
   llm?: LlmProxyConfig;
@@ -63,6 +99,14 @@ export interface SidecarConfig {
  */
 export interface SidecarLaunchSpec {
   runToken: string;
+  /**
+   * See {@link SidecarConfig.sidecarAuthToken}. Minted per run by the launcher
+   * and handed to BOTH sides of the pair: here (→ the sidecar's
+   * `SIDECAR_AUTH_TOKEN` env var) and to `buildRuntimePiEnv` (→ the agent
+   * container's `SIDECAR_AUTH_TOKEN`). Omitted only for a connect-run, whose
+   * sidecar exits before it ever serves the agent surface.
+   */
+  sidecarAuthToken?: string;
   proxyUrl?: string;
   llm?: LlmProxyConfig;
   /** See {@link SidecarConfig.modelContextWindow}. */

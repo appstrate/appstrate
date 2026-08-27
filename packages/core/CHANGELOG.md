@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`SIDECAR_AUTH_HEADER`** (`./sidecar-types`) — the request header carrying the
+  per-run token that authenticates the agent container to its own sidecar,
+  `x-appstrate-sidecar-auth`. It exists because the sidecar's control surface
+  used to have no inbound auth at all, on the stated ground that "the security
+  boundary is the per-run Docker network" — which stopped being true once
+  integration runner containers were attached to that same network and handed
+  the `sidecar` hostname. A runner could therefore reach `/llm/*` and spend the
+  org's real provider credential unattributed. The surface now denies by
+  default, exempting only `/health`.
+  Published because both halves of the boundary must agree on the spelling and
+  they are built in different packages: the platform mints the token and stamps
+  it into the agent env, the sidecar reads it back. A literal in two places is
+  how that drifts.
+  Additive — no existing export changes shape, so this is a minor.
+
 ### Removed
 
 - **`PUBLISHED_FILE_LOG_EVENTS`** (`./file-uri`) — a one-element array whose
