@@ -75,11 +75,16 @@ export function applyAuth(
   }
 
   const name = http?.name ?? "Authorization";
-  const prefix = http?.prefix ?? "Bearer";
-  // Prefixes are declared with or without a trailing space ("Bearer" vs
-  // "Bearer "); normalise to exactly one separating space.
-  const value = prefix ? `${prefix.trimEnd()} ${token}` : token;
-  headers[name] = value;
+  // AFPS §7.6: `prefix` is a LITERAL, concatenated verbatim — an auth scheme
+  // carries its own separator ("Bearer "), a vendor composite carries none
+  // ("Token token="). Same contract as the runtime injector
+  // (`planHttpDeliveryInjection`) and the per-auth-type default table, so the
+  // probe sends the byte-for-byte header a real run would; a bare scheme is
+  // refused at install time by `integrationManifestSchema`. Normalising here
+  // instead would re-diverge the probe from the runtime, and did: it inserted
+  // a space into "Token token=" that no run ever sends.
+  const prefix = http?.prefix ?? "Bearer ";
+  headers[name] = `${prefix}${token}`;
   return { url, headers };
 }
 

@@ -45,7 +45,7 @@ const MANIFEST = {
         http: {
           in: "header",
           name: "Authorization",
-          prefix: "Bearer",
+          prefix: "Bearer ",
           value: "{$credential.access_token}",
         },
       },
@@ -169,7 +169,7 @@ describe("integration OAuth2 — refresh_token connect-time guard", () => {
             http: {
               in: "header",
               name: "Authorization",
-              prefix: "Bearer",
+              prefix: "Bearer ",
               value: "{$credential.access_token}",
             },
           },
