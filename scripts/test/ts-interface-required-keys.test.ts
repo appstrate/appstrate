@@ -50,6 +50,19 @@ describe("getTypeShape — required / optional partition", () => {
     expect([...nested!.optional]).toEqual([]);
   });
 
+  it("does not read `| null` as optional — only `| undefined` is absence", () => {
+    // The partition is read from `?` OR a member type that admits `undefined`,
+    // because those are the same fact to a consumer and the reverse check must
+    // not depend on which spelling the author picked. `| null` is a THIRD fact
+    // and stays on the required side: it guarantees the KEY and only says the
+    // value may be empty. Blurring the two would exempt every nullable field in
+    // the tree from the reverse check — `ResolvedRunConfig` is nullable
+    // throughout, so it would empty out entirely.
+    const shape = getTypeShape("ResolvedRunConfig");
+    expect(shape.required.has("generation")).toBe(true); // ModelGenerationSettings | null
+    expect(shape.optional.has("generation")).toBe(false);
+  });
+
   it("a name the type does not declare is in neither set", () => {
     const shape = getTypeShape("ResolvedRunConfig");
     expect(shape.required.has("no_such_field")).toBe(false);

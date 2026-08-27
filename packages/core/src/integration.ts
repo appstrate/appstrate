@@ -35,6 +35,7 @@ import {
   apiUploadToolNameFor as deriveApiUploadToolName,
   assertUniqueApiToolAuthTokens,
 } from "@appstrate/afps-shared/api-tool-naming";
+import { isBareAuthSchemePrefix } from "@appstrate/afps-shared/delivery-http";
 import { normaliseMcpToolBody } from "@appstrate/afps-shared/mcp-naming";
 import { isToolsWildcard, TOOLS_WILDCARD, type ManifestIntegrationEntry } from "./dependencies.ts";
 
@@ -95,17 +96,6 @@ export const RESERVED_INTEGRATION_UPLOAD_PROTOCOLS = [
  *      lock (any connected auth may serve the tool at runtime; see
  *      {@link connectableAuthKeysForAgent}).
  */
-/**
- * Header names whose value is an RFC 9110 `credentials` production — an auth
- * scheme token, one SP, then the credentials. Only in these positions is a
- * bare token prefix a defect; anywhere else (`Cookie: session=`) it is an
- * ordinary literal.
- */
-const AUTH_SCHEME_HEADERS = new Set(["authorization", "proxy-authorization"]);
-
-/** RFC 9110 `token` grammar — matches a prefix that is nothing but a scheme. */
-const BARE_AUTH_SCHEME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
-
 /**
  * Walk an arbitrary JSON-Schema-like object tree and emit the path of every
  * `$ref` whose string value does NOT start with `#`. Used by the §7.5 / §8.7
@@ -187,12 +177,13 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
     // every upstream rejects as a malformed credential. The injector
     // (`planHttpDeliveryInjection`) concatenates verbatim and repairs nothing,
     // so the defect is caught here — where the manifest author can act on it —
-    // instead of at request time inside a run.
+    // instead of at request time inside a run. The grammar itself lives in
+    // `@appstrate/afps-shared`: the portable runtime gates a hand-authored
+    // creds file the same way, and one rule may not have two spellings.
     const httpPrefix = httpDelivery?.prefix;
     if (
       typeof httpPrefix === "string" &&
-      AUTH_SCHEME_HEADERS.has((httpDelivery?.name ?? "").toLowerCase()) &&
-      BARE_AUTH_SCHEME.test(httpPrefix)
+      isBareAuthSchemePrefix(httpDelivery?.name ?? "", httpPrefix)
     ) {
       ctx.addIssue({
         code: "custom",

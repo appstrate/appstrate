@@ -2,6 +2,9 @@
 // Copyright 2026 Appstrate
 
 import { describe, it, expect } from "bun:test";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   LocalIntegrationResolver,
   RemoteAppstrateIntegrationResolver,
@@ -627,6 +630,106 @@ describe("LocalIntegrationResolver", () => {
     await tools[0]!.execute({ method: "GET", target: "https://api.acme.com/v1/me" }, ctx);
     const h = calls[0]!.init.headers as Record<string, string>;
     expect(h["Authorization"]).toBe("Token secret");
+  });
+
+  // The creds file is hand-authored and never passes through a manifest
+  // validator, so the install-time bare-auth-scheme gate cannot see it. These
+  // pin the load-time twin (`assertUsableCredsFile`).
+  it("refuses a bare auth-scheme headerPrefix in the creds file, naming the fix", () => {
+    expect(
+      () =>
+        new LocalIntegrationResolver({
+          creds: {
+            version: 1,
+            integrations: {
+              "@acme/api": {
+                fields: { api_key: "secret" },
+                injection: { headerName: "Authorization", headerPrefix: "Bearer" },
+              },
+            },
+          },
+        }),
+    ).toThrow(/headerPrefix "Bearer" is a bare auth scheme.*Write "Bearer "\./s);
+  });
+
+  it("refuses it when headerName is omitted too — the override defaults to Authorization", () => {
+    expect(
+      () =>
+        new LocalIntegrationResolver({
+          creds: {
+            version: 1,
+            integrations: {
+              "@acme/api": { fields: { api_key: "secret" }, injection: { headerPrefix: "Basic" } },
+            },
+          },
+        }),
+    ).toThrow(/Write "Basic "\./);
+  });
+
+  it("refuses it when the creds file is read from disk — the `appstrate run --creds-file` path", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "afps-creds-"));
+    try {
+      const file = join(dir, "creds.json");
+      await writeFile(
+        file,
+        JSON.stringify({
+          version: 1,
+          integrations: {
+            "@acme/api": {
+              fields: { api_key: "secret" },
+              injection: { headerName: "Authorization", headerPrefix: "Bearer" },
+            },
+          },
+        }),
+      );
+      const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+      const integ = makePackage("@acme/api", "1.0.0", "integration", {
+        "integration.json": JSON.stringify(apiKeyIntegrationManifest("@acme/api").integration),
+      });
+      const bundle = makeBundle(root, [integ]);
+      const resolver = new LocalIntegrationResolver({ creds: file });
+      await expect(
+        resolver.resolve([{ name: "@acme/api", version: "^1" }], bundle),
+      ).rejects.toThrow(/Write "Bearer "\./);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("injects a separator-carrying prefix, and leaves a bare one outside auth position alone", async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const root = makePackage("@acme/agent", "1.0.0", "agent", {});
+    const integ = makePackage("@acme/api", "1.0.0", "integration", {
+      "integration.json": JSON.stringify(apiKeyIntegrationManifest("@acme/api").integration),
+    });
+    const bundle = makeBundle(root, [integ]);
+    const fetchImpl = ((url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return Promise.resolve(new Response("{}", { status: 200 }));
+    }) as typeof fetch;
+    const injections = [
+      { headerName: "Authorization", headerPrefix: "Bearer " },
+      // Outside a credentials position the same bare token is an ordinary
+      // literal, so the gate must not reach it.
+      { headerName: "Cookie", headerPrefix: "session" },
+    ];
+    for (const injection of injections) {
+      const resolver = new LocalIntegrationResolver({
+        resolveHost: async () => ["203.0.113.7"],
+        creds: {
+          version: 1,
+          integrations: { "@acme/api": { fields: { api_key: "secret" }, injection } },
+        },
+        fetch: fetchImpl,
+      });
+      const tools = await resolver.resolve([{ name: "@acme/api", version: "^1" }], bundle);
+      const { ctx } = makeCtx();
+      await tools[0]!.execute({ method: "GET", target: "https://api.acme.com/v1/me" }, ctx);
+    }
+    expect((calls[0]!.init.headers as Record<string, string>)["Authorization"]).toBe(
+      "Bearer secret",
+    );
+    expect((calls[1]!.init.headers as Record<string, string>)["Cookie"]).toBe("sessionsecret");
   });
 
   it("skips integrations without apiCall and fails on missing creds", async () => {

@@ -24,6 +24,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`integrationManifestSchema` refuses a bare auth-scheme
+  `delivery.http.prefix`** (`./integration`) — a new hard rejection of a
+  manifest that validated on 9.0.0, so an integration that installed before now
+  fails to install. AFPS §7.6 defines `prefix` as a LITERAL prepended to the
+  rendered credential, and the injector concatenates it verbatim, so
+  `prefix: "Bearer"` under `Authorization` (or `Proxy-Authorization`) sends
+  `Authorization: BearerTOKEN` — a malformed credential every upstream answers
+  with a 401 that names nothing. Appstrate used to splice the missing separator
+  in at request time; that read-time repair is gone, so the defect is caught
+  where the manifest author can still act on it, and the message names the fix
+  (`Write "Bearer ".`). The rejection is narrow: only a prefix that is nothing
+  but an RFC 9110 `token`, and only in those two header positions. A composite
+  (`"Token token="`), a cookie one (`"session="`), and any prefix on any other
+  header are untouched — there a bare token is an ordinary literal.
+
+  Manifests already stored are NOT revalidated on read, so this fixes nothing
+  that is already installed: `scripts/migration/0005-afps-bare-auth-scheme-prefix.sql`
+  moves `packages.draft_manifest` and `package_versions.manifest`, with a
+  `WHERE` that is exactly the condition the validator now refuses.
+
+- **`@appstrate/afps-shared` dependency range moved to `^0.6.0`.** The grammar
+  behind the rule above is `isBareAuthSchemePrefix`, exported from the new
+  `@appstrate/afps-shared/delivery-http` — the leaf that already owns the
+  `delivery.http` projection both core and `@appstrate/afps-runtime` read. It
+  lives there rather than here because the runtime has a second authoring
+  surface for the same value (a hand-written local creds file, which no
+  manifest validator ever sees) and must refuse the identical form; a copy of
+  the token grammar on each side is the shape this change exists to retire, and
+  the runtime deliberately carries no `@appstrate/core` runtime dependency.
+  Nothing in core's own surface moves.
+
+  **Publish `afps-shared@0.6.0` before this release** — `verify-package-resolves.ts`
+  packs and installs the real tarball outside the monorepo, so an unpublished
+  leaf fails the publish rather than the first consumer's `npm install`.
+
 - **`CreateUploadUrlOptions.maxSize` is required, and `Storage.createUploadUrl`
   no longer takes `opts` optionally** (`./storage`) — a breaking type change
   with no runtime behaviour change for any caller that already declared a size.

@@ -56,7 +56,7 @@ function deliveryHttp(
 
 /**
  * Apply the manifest's auth delivery to a probe request. Header delivery sets
- * `<name>: <prefix> <token>`; query delivery appends `<name>=<token>`. Falls
+ * `<name>: <prefix><token>`; query delivery appends `<name>=<token>`. Falls
  * back to a Bearer Authorization header when no delivery is declared.
  */
 export function applyAuth(
@@ -77,12 +77,21 @@ export function applyAuth(
   const name = http?.name ?? "Authorization";
   // AFPS §7.6: `prefix` is a LITERAL, concatenated verbatim — an auth scheme
   // carries its own separator ("Bearer "), a vendor composite carries none
-  // ("Token token="). Same contract as the runtime injector
-  // (`planHttpDeliveryInjection`) and the per-auth-type default table, so the
+  // ("Token token="). Same concatenation as the runtime injector
+  // (`planHttpDeliveryInjection`), so for a manifest that declares a prefix the
   // probe sends the byte-for-byte header a real run would; a bare scheme is
   // refused at install time by `integrationManifestSchema`. Normalising here
   // instead would re-diverge the probe from the runtime, and did: it inserted
   // a space into "Token token=" that no run ever sends.
+  //
+  // The `?? "Bearer "` fallback is the PROBE's own and is NOT the runtime's
+  // per-auth-type default table (which yields "" for api_key). No probe reaches
+  // it today — all four manifests in `AUTH_PROBES` declare their prefix — so
+  // that divergence is unreachable, not resolved. Route this through
+  // `resolveHttpDelivery` before probing an integration whose `delivery.http`
+  // declares no prefix: five shipped api_key ones (activecampaign, brevo,
+  // fathom, shopify, shortcut) are that shape, and this line would send them a
+  // "Bearer " no run sends.
   const prefix = http?.prefix ?? "Bearer ";
   headers[name] = `${prefix}${token}`;
   return { url, headers };

@@ -64,9 +64,12 @@ export type HttpDeliveryInjectionDecision =
  * AFPS §7.6 defines `prefix` as a literal prepended to the rendered value, so
  * it is concatenated verbatim — an `Authorization` scheme carries its own
  * separator (`"Bearer "`, `"Basic "`), exactly like a composite prefix
- * (`"Token token="`) or a cookie one (`"session="`). A bare scheme is a
- * manifest defect and is refused at install time by the integration manifest
- * validator (`@appstrate/core/integration`); nothing repairs it here.
+ * (`"Token token="`) or a cookie one (`"session="`). A bare scheme is a defect
+ * in whatever authored it, and each of the two authoring surfaces refuses it
+ * up front through the one shared predicate
+ * (`@appstrate/afps-shared/delivery-http:isBareAuthSchemePrefix`): a manifest
+ * at install time (`@appstrate/core/integration`), a local creds file when it
+ * is read ({@link ./integration-api-call.ts}). Nothing repairs it here.
  */
 export function planHttpDeliveryInjection(
   plan: Pick<HttpDeliveryPlan, "headerName" | "headerPrefix" | "value" | "allowServerOverride">,

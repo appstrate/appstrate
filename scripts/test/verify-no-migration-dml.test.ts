@@ -552,6 +552,28 @@ ALTER TABLE "runs" DROP COLUMN "old";`;
     expect(flags(dropColumn)).toBe(true);
   });
 
+  it("does not report a dynamic MERGE's WHEN actions as statements of their own", () => {
+    // The same fold as above, in the second pass. Here the duplicates are
+    // worse: all three findings quote the identical `EXECUTE format(…)`, so the
+    // author is shown one line three times over.
+    const sql = `DO $$ BEGIN EXECUTE format('MERGE INTO t USING s ON t.id = s.id
+  WHEN MATCHED THEN UPDATE SET x = 1
+  WHEN NOT MATCHED THEN INSERT (id) VALUES (s.id)'); END $$;`;
+    const findings = findDml(sql);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.statement).toStartWith(`EXECUTE format('MERGE INTO t`);
+  });
+
+  it("resumes reporting after a dynamic MERGE's own statement ends", () => {
+    // The bound, as in the literal pass: the skip stops at the MERGE's `;`, so
+    // a second command built on the next line is still its own finding.
+    const sql = `DO $$ BEGIN
+  EXECUTE format('MERGE INTO t USING s ON t.id = s.id WHEN MATCHED THEN UPDATE SET x = 1');
+  EXECUTE format('DELETE FROM u');
+END $$;`;
+    expect(findDml(sql).map((f) => f.line)).toEqual([2, 3]);
+  });
+
   it("ignores `MERGE` in a comment and in an identifier that starts with it", () => {
     expect(
       flags(`-- we could MERGE the two tables here\nALTER TABLE "runs" ADD COLUMN "c" text;`),
@@ -559,6 +581,82 @@ ALTER TABLE "runs" DROP COLUMN "old";`;
     expect(flags(`CREATE INDEX "idx_runs_merged" ON "runs" USING btree ("merged_at");`)).toBe(
       false,
     );
+  });
+});
+
+describe("findDml — a DO body is code however it is quoted", () => {
+  // `DO [LANGUAGE lang] code` takes a STRING CONSTANT, and `$$ … $$` is only
+  // one way to spell one. `DO '…'` is the same statement and mutates the same
+  // rows on every replay — but was invisible, because `sanitize` blanked its
+  // body with every other literal and no dynamic span ever opened on `DO`.
+  it("flags every statement in a single-quoted DO body", () => {
+    const findings = findDml(`DO 'BEGIN UPDATE t SET x = 99; DELETE FROM t WHERE id = 2; END';`);
+    expect(findings.map((f) => f.statement)).toEqual([
+      `UPDATE t SET x = 99;`,
+      `DELETE FROM t WHERE id = 2;`,
+    ]);
+  });
+
+  it("flags a single-quoted DO body with LANGUAGE written before or after it", () => {
+    // Postgres accepts the two items in either order, so neither position may
+    // be the one that hides the body.
+    expect(flags(`DO LANGUAGE plpgsql 'BEGIN DELETE FROM "runs"; END';`)).toBe(true);
+    expect(flags(`DO 'BEGIN DELETE FROM "runs"; END' LANGUAGE plpgsql;`)).toBe(true);
+  });
+
+  it("licences a single-quoted DO body exactly as it licences a `$$` one", () => {
+    // Why the body is read in pass 1 rather than as a dynamic span: pass 2
+    // applies no carve-out, so `0051`'s shape written with the other quote
+    // would become an unconditional finding. Both spellings, so neither is the
+    // exception.
+    const body = `BEGIN UPDATE "runs" SET "c" = 1; END`;
+    const promote = `ALTER TABLE "runs" ALTER COLUMN "c" SET NOT NULL;`;
+    expect(flags(`DO '${body}';--> statement-breakpoint\n${promote}`)).toBe(false);
+    expect(flags(`DO $$ ${body} $$;--> statement-breakpoint\n${promote}`)).toBe(false);
+  });
+
+  it("reads a licence clause out of a single-quoted DO body", () => {
+    // The other direction of the same symmetry — the `$$` case is covered under
+    // `licencedTables`. A promotion written in a `DO '…'` runs at apply time,
+    // so it is a real promotion.
+    const sql = `DO 'BEGIN ALTER TABLE "runs" ALTER COLUMN "c" SET NOT NULL; END';`;
+    expect(licencedTables(sanitize(sql))).toEqual(new Set(["runs"]));
+  });
+
+  it("does NOT read an ordinary literal as code because a `DO` appears nearby", () => {
+    // The control, and the shape it has to survive: `ON CONFLICT DO UPDATE`
+    // puts that word directly in front of a statement's own clauses. The
+    // enclosing INSERT is the one finding; the `'DELETE FROM runs'` parked in
+    // the conflict action is a VALUE and must stay blanked.
+    const sql = `INSERT INTO "orgs" ("id") VALUES ('o1')
+  ON CONFLICT ("id") DO UPDATE SET "note" = 'DELETE FROM runs';`;
+    const findings = findDml(sql);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.statement).toStartWith(`INSERT INTO "orgs"`);
+  });
+});
+
+describe("findDml — an E'…' escape string does not desynchronise the scanner", () => {
+  // `sanitize` walks a literal to find its terminating quote. Only `E'…'`
+  // processes backslashes, and missing that ends the literal at the wrong quote
+  // — which inverts every blanking decision in the REST of the file, and does
+  // it silently: the gate then reports nothing at all.
+  it("still flags the statement after an E-string containing an escaped quote", () => {
+    const sql = `ALTER TABLE "t" ALTER COLUMN "c" SET DEFAULT E'don\\'t';--> statement-breakpoint
+DELETE FROM "t";`;
+    expect(flags(sql)).toBe(true);
+  });
+
+  it("does not read a backslash in an ordinary literal as an escape", () => {
+    // The control, and why the rule cannot be unconditional: a standard string
+    // does NOT process backslashes, so `'\'` is a one-character value that ends
+    // at its second quote — and `'\s+'` is real, in `0046`. Reading either as
+    // an escape swallows the terminator, and the rest of the file with it.
+    for (const value of [String.raw`'\'`, String.raw`'\s+'`]) {
+      const sql = `ALTER TABLE "t" ALTER COLUMN "c" SET DEFAULT ${value};--> statement-breakpoint
+DELETE FROM "t";`;
+      expect(flags(sql)).toBe(true);
+    }
   });
 });
 
@@ -679,6 +777,50 @@ DO $$ BEGIN DELETE FROM "runs"; END $$;`;
     const findings = findDml(sql);
     expect(findings).toHaveLength(1);
     expect(findings[0]?.statement).toStartWith(`DELETE FROM "runs"`);
+  });
+
+  it("does not flag DML inside a `BEGIN ATOMIC` body", () => {
+    // PostgreSQL 14's standard `LANGUAGE sql` body, and the form a SQL-language
+    // helper is written in today. It is a DEFINITION exactly as a dollar-quoted
+    // one is — reporting it was a false positive whose only remedy was the
+    // `EXECUTE format(…)` bypass this gate closes elsewhere.
+    const sql = `CREATE FUNCTION f() RETURNS int LANGUAGE sql BEGIN ATOMIC
+  SELECT 1;
+  INSERT INTO "audit" ("kind") VALUES ('run');
+END;`;
+    expect(flags(sql)).toBe(false);
+  });
+
+  it("finds the end of a `BEGIN ATOMIC` body past a `CASE … END` inside it", () => {
+    // The body's end is found by COUNTING `CASE`/`END`, never by matching the
+    // first `END`: an atomic body admits no nested block, but a `CASE` in one
+    // of its expressions closes with the same word. Stopping at that one ends
+    // the span early and the `INSERT` after it reads as an apply-time write.
+    const sql = `CREATE FUNCTION f() RETURNS int LANGUAGE sql BEGIN ATOMIC
+  SELECT CASE WHEN true THEN 1 ELSE 2 END;
+  INSERT INTO "audit" ("kind") VALUES ('run');
+END;`;
+    expect(flags(sql)).toBe(false);
+  });
+
+  it("STILL flags a DO block that follows a `BEGIN ATOMIC` body", () => {
+    // The negative control for the span's other end: the exemption must stop at
+    // the body's own `END`, or the rest of the file rides through on it.
+    const sql = `CREATE FUNCTION f() RETURNS int LANGUAGE sql BEGIN ATOMIC
+  SELECT 1;
+END;--> statement-breakpoint
+DO $$ BEGIN DELETE FROM "runs"; END $$;`;
+    expect(flags(sql)).toBe(true);
+  });
+
+  it("fails closed on an unterminated `BEGIN ATOMIC` body", () => {
+    // No `END` closes it, so no span is produced and what is inside is
+    // reported. A body span guessed from a malformed definition would be a way
+    // to exempt the rest of the file.
+    const sql = `CREATE FUNCTION f() RETURNS int LANGUAGE sql BEGIN ATOMIC
+  SELECT 1;
+  INSERT INTO "audit" ("kind") VALUES ('run');`;
+    expect(flags(sql)).toBe(true);
   });
 
   it("does not let a string-bodied CREATE FUNCTION swallow a later DO block", () => {
@@ -824,6 +966,35 @@ describe("sanitize", () => {
     const out = sanitize(`SELECT 'it''s here', "kept";`);
     expect(out).toContain("kept");
     expect(out).not.toContain("here");
+  });
+
+  it("ends an `E'…'` literal at its real terminator, not at an escaped quote", () => {
+    // The offsets are the whole point: a literal that ends two quotes late
+    // leaves the walker blanking code and keeping prose for the rest of the
+    // file. `kept` on the far side is what proves it resynchronised.
+    const sql = String.raw`SELECT E'don\'t', "kept";`;
+    const out = sanitize(sql);
+    expect(out).toHaveLength(sql.length);
+    expect(out).toContain("kept");
+    expect(out).not.toContain("don");
+  });
+
+  it("does not treat a backslash as an escape outside an `E'…'` string", () => {
+    // `'\'` is a complete one-character value in a standard string. Reading its
+    // backslash as an escape runs the literal on to the next quote.
+    const sql = String.raw`SELECT '\', "kept";`;
+    const out = sanitize(sql);
+    expect(out).toHaveLength(sql.length);
+    expect(out).toContain("kept");
+  });
+
+  it("reads a `DO '…'` body as code and an ordinary literal as prose", () => {
+    // Both directions in one assertion, because the risk of the first is
+    // exactly the second: a `'…'` that is a VALUE must not start being read as
+    // code because the file also contains the word `DO`.
+    const out = sanitize(`DO 'BEGIN DELETE FROM t; END';\nSELECT 'DELETE FROM t';`);
+    expect(out).toContain("BEGIN DELETE FROM t; END");
+    expect(out.split("\n")[1]).not.toContain("DELETE");
   });
 
   it("keeps the body and blanks the delimiters under `keepLiterals`", () => {

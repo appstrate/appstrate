@@ -89,6 +89,37 @@ export const GRANDFATHERED: readonly string[] = [
 ];
 
 /**
+ * An `E'…'` escape string, the one literal form where `\` escapes what follows.
+ * Matched against the last two sanitized bytes, so `CASE'x'` is not one.
+ */
+const E_STRING = /(?:^|[^A-Za-z0-9_$"])[Ee]$/;
+
+/**
+ * Is the literal starting at the end of `prefix` the CODE of a `DO` block?
+ *
+ * `DO [LANGUAGE lang_name] code` takes a **string constant**, and the two ways
+ * to write one are `$$ … $$` and `'…'` (LANGUAGE may precede or follow the
+ * code). Postgres executes both at apply time, against the rows that exist, so
+ * §2 treats both the same and so must this: `DO 'BEGIN UPDATE t SET x = 99;
+ * END';` rewrites rows exactly as the dollar-quoted spelling does.
+ *
+ * Read as a lookback rather than as a span opener so the body lands in the
+ * FIRST pass, where the same-table carve-out lives — `0051`'s shape written
+ * with the other quote must stay licenced, not become an unconditional
+ * finding. `startsStatement` guards the one word this matches: `ON CONFLICT DO
+ * UPDATE` and `CREATE RULE … DO INSTEAD` put no literal behind `DO` at all,
+ * and neither opens a statement there.
+ */
+const DO_BODY = /\bDO\s*(?:LANGUAGE\s+(?:"[^"]*"|[A-Za-z_][A-Za-z0-9_$]*)\s+)?$/i;
+const DO_LOOKBACK = 64;
+
+function opensDoBody(prefix: string): boolean {
+  const tail = prefix.slice(-DO_LOOKBACK);
+  const head = DO_BODY.exec(tail);
+  return head !== null && startsStatement(prefix, prefix.length - tail.length + head.index);
+}
+
+/**
  * Blank out everything SQL does not execute, keeping every byte offset.
  *
  * Comments and string literals are replaced by spaces (newlines survive, so
@@ -98,7 +129,12 @@ export const GRANDFATHERED: readonly string[] = [
  * is not a statement either.
  *
  * Dollar-quoted bodies (`$$ … $$`) are deliberately NOT blanked: a `DO $$ …
- * INSERT … END $$` block is exactly the shape this gate must still see.
+ * INSERT … END $$` block is exactly the shape this gate must still see. A `DO`
+ * body written as a plain string is the SAME statement — `DO [LANGUAGE lang]
+ * code` takes a string constant, and `$$…$$` is only one way to spell it — so
+ * `opensDoBody` exempts that literal from blanking too and re-reads it with
+ * this same walker. Without it, `DO 'BEGIN UPDATE t …; END';` mutates rows on
+ * every replay and this gate sees an empty statement.
  *
  * `--> statement-breakpoint` is drizzle's separator and is itself a comment.
  * It becomes a `;` (same width) so it keeps acting as a boundary once the
@@ -136,21 +172,37 @@ export function sanitize(sql: string, options: { readonly keepLiterals?: boolean
       const end = source.indexOf("*/", i + 2);
       blank((end === -1 ? source.length : end + 2) - i);
     } else if (rest.startsWith("'")) {
-      // `''` is an escaped quote, not a terminator.
+      // `''` is an escaped quote, not a terminator — and inside an `E'…'`
+      // string so is `\'`. Reading a backslash as ordinary text there ends the
+      // literal at the wrong quote and inverts every blanking decision in the
+      // rest of the file, silently: `E'don\'t'; DELETE FROM t;` reports
+      // nothing. Only `E'…'` processes backslashes — a standard literal may
+      // legally end on one (`'\'`), so this cannot be unconditional.
+      const escapes = E_STRING.test(out.slice(-2));
       let end = i + 1;
       while (end < source.length) {
-        if (source[end] !== "'") end += 1;
+        if (escapes && source[end] === "\\") end += 2;
+        else if (source[end] !== "'") end += 1;
         else if (source[end + 1] === "'") end += 2;
         else break;
       }
       const stop = Math.min(end + 1, source.length);
+      const body = Math.max(stop - 1 - (i + 1), 0);
       if (options.keepLiterals === true) {
         // The delimiters go, the body stays. Blanking the quotes rather than
         // keeping them also leaves the token in front of the body being either
         // the `(` of `format(` or the `EXECUTE` itself, which is precisely what
         // `startsStatement` reads to decide the keyword opens a statement.
         blank(1);
-        keep(Math.max(stop - 1 - i, 0));
+        keep(body);
+        blank(stop - i);
+      } else if (opensDoBody(out)) {
+        // A `DO` body executes at apply time whichever way it is quoted, so it
+        // is read as code here exactly as a `$$…$$` one already is — including
+        // through the carve-out, which pass 2 could not have given it.
+        blank(1);
+        out += sanitize(source.slice(i, i + body), options);
+        i += body;
         blank(stop - i);
       } else {
         blank(stop - i);
@@ -241,12 +293,12 @@ const DML = /\b(UPDATE|INSERT|DELETE|TRUNCATE|MERGE)\b/gi;
  * is now closed by default and opened for one verb, so a fourth DML verb added
  * to the vocabulary later cannot inherit an exemption nobody argued for.
  *
- * This is also why `dmlTarget` parses neither a `TRUNCATE` nor a `MERGE`, and
- * why `TRUNCATE`'s comma-separated form (`TRUNCATE a, b, c`) needs no
- * handling: `dmlTarget` is reached only through the carve-out, so with no
- * exemption available there is no target to match against, and every table
- * touched is reported through the statement text either way. A `MERGE INTO
- * <table>` branch there would be a branch nothing can call.
+ * This is also why `dmlTarget` parses ONLY an `UPDATE`, and why `TRUNCATE`'s
+ * comma-separated form (`TRUNCATE a, b, c`) needs no handling: `dmlTarget` is
+ * reached only through the carve-out, so with no exemption available there is
+ * no target to match against, and every table touched is reported through the
+ * statement text either way. A `DELETE FROM` / `INSERT INTO` / `MERGE INTO`
+ * branch there would be a branch nothing can call.
  */
 const LICENCEABLE = /^UPDATE$/i;
 
@@ -261,6 +313,11 @@ const LICENCEABLE = /^UPDATE$/i;
  * findings quoting a fragment. The `MERGE` is already reported in full and is
  * never licenceable, so the rest of its statement is skipped: the author is
  * told about the statement once, at the keyword that names it.
+ *
+ * Both passes need that skip. A `MERGE` inside a command string is the same
+ * statement with the same `WHEN` actions, and there the duplicates are worse —
+ * every one of them quotes the identical `EXECUTE format(…)`, so the author is
+ * shown one line three times.
  */
 const MERGE_VERB = /^MERGE$/i;
 
@@ -277,12 +334,18 @@ function normalizeTable(raw: string): string {
   return (parts.at(-1) ?? raw).replaceAll('"', "").toLowerCase();
 }
 
-/** The table a DML statement writes to, or `null` if it cannot be read. */
+/**
+ * The table an `UPDATE` writes to, or `null` if it cannot be read.
+ *
+ * Only an `UPDATE`, because that is the only verb that reaches here: it is
+ * called behind `LICENCEABLE`, and every other verb has skipped the carve-out
+ * by then. A `DELETE FROM` / `INSERT INTO` branch would be a branch nothing can
+ * call — see `LICENCEABLE` for the same argument about `TRUNCATE` and `MERGE`.
+ */
 function dmlTarget(sanitized: string, index: number): string | null {
-  const head = new RegExp(
-    `^(?:UPDATE|DELETE\\s+FROM|INSERT\\s+INTO)\\s+(?:ONLY\\s+)?(${QUALIFIED})`,
-    "i",
-  ).exec(sanitized.slice(index));
+  const head = new RegExp(`^UPDATE\\s+(?:ONLY\\s+)?(${QUALIFIED})`, "i").exec(
+    sanitized.slice(index),
+  );
   return head?.[1] === undefined ? null : normalizeTable(head[1]);
 }
 
@@ -317,33 +380,67 @@ function statementEnd(sanitized: string, index: number): number {
  * the workaround an author reaches for next is `EXECUTE format(…)` — the one
  * bypass `dynamicSqlSpans` exists to close.
  *
- * A `DO $$ … $$` block is the counter-case and is deliberately NOT matched
- * here: it executes at apply time, on the rows that exist, which is exactly
- * what §2 forbids. `0021`, `0023`, `0040` and `0051` are that shape. The whole
- * distinction is therefore the `CREATE … FUNCTION` in front of the dollar
- * quote, and nothing else.
+ * A `DO` block is the counter-case and is deliberately NOT matched here: it
+ * executes at apply time, on the rows that exist, which is exactly what §2
+ * forbids. `0021`, `0023`, `0040` and `0051` are that shape. The distinction is
+ * the `CREATE … FUNCTION` in front of the body — never how the body is quoted,
+ * which is why `sanitize` reads a `DO '…'` code string as code too.
+ *
+ * Both ways of writing a body are matched, because "a `CREATE FUNCTION` body"
+ * is what §2 exempts and neither spelling is the exception:
+ *
+ *   - a dollar quote (`$$ … $$`, `$fn$ … $fn$`), which is every PL/pgSQL body;
+ *   - `BEGIN ATOMIC … END`, the standard `LANGUAGE sql` body PostgreSQL 14
+ *     added and the form a `LANGUAGE sql` helper is now written in. Missing it
+ *     reported the definition's own statements as apply-time writes — a false
+ *     positive whose only remedy was the `EXECUTE format(…)` bypass this gate
+ *     closes elsewhere. Its end is found by counting, not by matching the first
+ *     `END`: an atomic body admits no nested block, but a `CASE … END` inside
+ *     one of its expressions is ordinary and closes with the same word.
  *
  * A body written as a plain string (`AS 'BEGIN … END'` — legal, and how a
- * `LANGUAGE sql` one-liner is usually spelled) opens no dollar quote, so the
- * next one in the file belongs to something else — very possibly a `DO` block
- * this must not swallow. The `;` guard rejects that case: for a dollar-quoted
- * body the statement's first `;` is INSIDE the body and therefore after the
- * opening tag, and for any other body it is the terminator and comes first.
+ * `LANGUAGE sql` one-liner is usually spelled) needs no span at all: `sanitize`
+ * blanks it, so it is invisible to both scans, which is the same verdict for
+ * both directions. It opens no dollar quote either, so the next one in the file
+ * belongs to something else — very possibly a `DO` block this must not swallow.
+ * The `;` guard rejects that case, and bounds `BEGIN ATOMIC` too: for either
+ * real body the statement's first `;` is INSIDE it and therefore after the
+ * opening token, and for any other body it is the terminator and comes first.
  */
 const FUNCTION_DEFINITION = /\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:FUNCTION|PROCEDURE)\b/gi;
 const DOLLAR_TAG = /\$[A-Za-z0-9_]*\$/g;
+const ATOMIC_OPEN = /\bBEGIN\s+ATOMIC\b/gi;
+const ATOMIC_TOKEN = /\b(CASE|END)\b/gi;
+
+function dollarBody(sanitized: string, from: number): Span | null {
+  DOLLAR_TAG.lastIndex = from;
+  const open = DOLLAR_TAG.exec(sanitized);
+  if (open === null) return null;
+  if (open.index >= statementEnd(sanitized, from)) return null;
+  const close = sanitized.indexOf(open[0], open.index + open[0].length);
+  return close === -1 ? null : [open.index, close + open[0].length];
+}
+
+function atomicBody(sanitized: string, from: number): Span | null {
+  ATOMIC_OPEN.lastIndex = from;
+  const open = ATOMIC_OPEN.exec(sanitized);
+  if (open === null) return null;
+  if (open.index >= statementEnd(sanitized, from)) return null;
+  ATOMIC_TOKEN.lastIndex = open.index + open[0].length;
+  let depth = 1;
+  for (let t = ATOMIC_TOKEN.exec(sanitized); t !== null; t = ATOMIC_TOKEN.exec(sanitized)) {
+    depth += t[1]?.toUpperCase() === "CASE" ? 1 : -1;
+    if (depth === 0) return [open.index, t.index + t[0].length];
+  }
+  // Unterminated: no span, so the statements inside are reported. Fail closed.
+  return null;
+}
 
 function functionBodies(sanitized: string): Span[] {
   const bodies: Span[] = [];
   for (const definition of sanitized.matchAll(FUNCTION_DEFINITION)) {
-    DOLLAR_TAG.lastIndex = definition.index;
-    const open = DOLLAR_TAG.exec(sanitized);
-    if (open === null) continue;
-    // The tag must come before the statement's first `;` — see above.
-    if (open.index >= statementEnd(sanitized, definition.index)) continue;
-    const close = sanitized.indexOf(open[0], open.index + open[0].length);
-    if (close === -1) continue;
-    bodies.push([open.index, close + open[0].length]);
+    const body = dollarBody(sanitized, definition.index) ?? atomicBody(sanitized, definition.index);
+    if (body !== null) bodies.push(body);
   }
   return bodies;
 }
@@ -634,12 +731,18 @@ export function findDml(sql: string): Finding[] {
   // Pass 2 — what the file builds and then executes.
   const dynamic = sanitize(sql, { keepLiterals: true });
   const spans = dynamicSqlSpans(sanitized);
+  let dynamicMergeEnd = -1;
   for (const match of dynamic.matchAll(DML)) {
     const index = match.index;
     const span = spans.find(([start, end]) => index >= start && index < end);
     if (span === undefined) continue;
+    // A MERGE folds its WHEN actions in here too — `format('MERGE … WHEN
+    // MATCHED THEN UPDATE … WHEN NOT MATCHED THEN INSERT …')` is one statement,
+    // and without this it is three findings quoting the same `EXECUTE`.
+    if (index < dynamicMergeEnd) continue;
     if (!startsStatement(dynamic, index)) continue;
     if (within(definitions, index)) continue;
+    if (MERGE_VERB.test(match[1] ?? "")) dynamicMergeEnd = statementEnd(dynamic, index);
     // Quoted from the `EXECUTE` / `format(`, not from the verb: the statement
     // an author has to go and find is the one that builds the command, and
     // slicing from inside the literal would quote it with a dangling `');`.

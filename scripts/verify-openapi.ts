@@ -303,6 +303,42 @@ interface DriftExemptions {
   forward: Set<string>;
   /** `KNOWN_REVERSE_DRIFT` — spec-required while the type is optional. */
   reverse: Set<string>;
+  /**
+   * Which of those labels actually suppressed a finding on this run — the
+   * liveness evidence collected below and asserted after the comparison.
+   *
+   * An exemption that suppresses nothing names nothing: the field was renamed,
+   * dropped from the type, or the divergence was fixed — and the entry then
+   * silently pre-approves whatever lands at that name tomorrow. Recorded per
+   * direction because the two registers are keyed alike and a field can appear
+   * in both.
+   *
+   * "Still needed", not merely "still exists", and that is the opposite call
+   * from `GRANDFATHERED` in `scripts/verify-no-migration-dml.ts` — for a
+   * reason. That list records a historical fact about an immutable file, so
+   * re-deriving it from today's rules would be wrong. These two record a LIVE
+   * divergence between a spec and a type that are both edited every week; when
+   * the divergence goes, the justification goes with it, and the entry is
+   * exactly the stale claim its own doc-comment demands it not become.
+   */
+  used: { forward: Set<string>; reverse: Set<string> };
+}
+
+/**
+ * The register label that exempts `field` at `label`, or `null` if none does.
+ *
+ * An entry may be written as the dotted path or, at the top level only, as the
+ * bare field name — both spellings are in use, and the liveness check has to
+ * report back the one the author actually wrote.
+ */
+function exemptionFor(
+  register: Set<string>,
+  label: string,
+  field: string,
+  prefix: string,
+): string | null {
+  if (register.has(label)) return label;
+  return !prefix && register.has(field) ? field : null;
 }
 
 /**
@@ -333,14 +369,19 @@ function compareShapeToSchema(
   // `ResolvedRunConfig.generation` / `.input` acquired their "compatibility
   // with older servers" tolerance while the spec required both.
   //
-  // Only a field the type declares WITH `?` counts. A field the type omits
-  // entirely is a different fact (the type models a subset of the wire, which
-  // is legal and common), and `required` ∪ `optional` is the declared set —
-  // which is why `optional` is carried through rather than inferred as the
-  // complement of `required`.
+  // Only a field the type declares as absent-able counts — `x?: T` or
+  // `x: T | undefined`, which `getTypeShape` reads as one fact. A field the
+  // type omits entirely is a different fact (the type models a subset of the
+  // wire, which is legal and common), and `required` ∪ `optional` is the
+  // declared set — which is why `optional` is carried through rather than
+  // inferred as the complement of `required`.
   for (const field of norm.required) {
     const label = prefix ? `${prefix}.${field}` : field;
-    if (exempt.reverse.has(label) || (!prefix && exempt.reverse.has(field))) continue;
+    const exempted = exemptionFor(exempt.reverse, label, field, prefix);
+    if (exempted !== null) {
+      if (shape.optional.has(field)) exempt.used.reverse.add(exempted);
+      continue;
+    }
     if (shape.optional.has(field)) {
       issues.push(`Field "${label}": OpenAPI=required, shared-type=optional`);
     }
@@ -348,7 +389,14 @@ function compareShapeToSchema(
 
   for (const field of shape.required) {
     const label = prefix ? `${prefix}.${field}` : field;
-    if (exempt.forward.has(label) || (!prefix && exempt.forward.has(field))) continue;
+    const exempted = exemptionFor(exempt.forward, label, field, prefix);
+    if (exempted !== null) {
+      // Same drift test as the two branches below, read for liveness only.
+      if (specProps.has(field) ? !norm.required.has(field) : !norm.open) {
+        exempt.used.forward.add(exempted);
+      }
+      continue;
+    }
     if (!specProps.has(field)) {
       // An open object (additionalProperties / Record) legitimately omits the key.
       if (!norm.open) {
@@ -1965,6 +2013,8 @@ interface ResponseDrift {
 }
 
 const responseDrifts: ResponseDrift[] = [];
+/** Accepted-divergence entries that suppressed nothing — see `DriftExemptions.used`. */
+const deadExemptions: string[] = [];
 let responseCompared = 0;
 
 for (const entry of responseTypeRegistry) {
@@ -2022,11 +2072,22 @@ for (const entry of responseTypeRegistry) {
   const exempt: DriftExemptions = {
     forward: new Set<string>(KNOWN_DRIFT[driftKey] ?? []),
     reverse: new Set<string>(KNOWN_REVERSE_DRIFT[driftKey] ?? []),
+    used: { forward: new Set<string>(), reverse: new Set<string>() },
   };
 
   responseCompared++;
   const issues: string[] = [];
   compareShapeToSchema(shape, specSchema, "", exempt, issues);
+
+  for (const [register, listed, used] of [
+    ["KNOWN_DRIFT", exempt.forward, exempt.used.forward],
+    ["KNOWN_REVERSE_DRIFT", exempt.reverse, exempt.used.reverse],
+  ] as const) {
+    for (const field of listed) {
+      if (used.has(field)) continue;
+      deadExemptions.push(`${register}["${driftKey}"] → "${field}"`);
+    }
+  }
 
   if (issues.length > 0) {
     responseDrifts.push({ description: entry.description, issues });
@@ -2058,6 +2119,45 @@ if (responseDrifts.length === 0) {
       `  Both registers live in apps/api/src/openapi/response-type-registry.ts and ` +
       `each entry must carry its justification.`,
   );
+}
+
+// Liveness of the two accepted-divergence registers — the same discipline the
+// checks around it already apply to their own exemptions (`EXEMPT_SCHEMAS`
+// below, `GRANDFATHERED` in scripts/verify-no-migration-dml.ts): an exemption
+// that names nothing silently excuses whatever lands at that name tomorrow.
+// Two ways to name nothing, and neither is visible without this:
+//
+//   - a KEY no registry entry resolves to — the schema was renamed, or the
+//     entry it belonged to was removed. Nothing ever reads the list under it;
+//   - a FIELD that suppressed no finding — it left the type, or the divergence
+//     was fixed. The justification beside it now describes nothing.
+//
+// The pair is deliberately stricter than `GRANDFATHERED`, which checks
+// existence only; `DriftExemptions.used` states why the two calls differ.
+{
+  const registryKeys = new Set(
+    responseTypeRegistry
+      .map((e) => e.specSchemaName ?? e.path)
+      .filter((k): k is string => k !== undefined),
+  );
+  const orphanKeys = [
+    ...Object.keys(KNOWN_DRIFT).map((k) => [`KNOWN_DRIFT`, k] as const),
+    ...Object.keys(KNOWN_REVERSE_DRIFT).map((k) => [`KNOWN_REVERSE_DRIFT`, k] as const),
+  ]
+    .filter(([, key]) => !registryKeys.has(key))
+    .map(([register, key]) => `${register}["${key}"] — no responseTypeRegistry entry`);
+
+  const dead = [...orphanKeys, ...deadExemptions].sort();
+  if (dead.length > 0) {
+    exitCode = 1;
+    console.log(`\n  ${dead.length} accepted-divergence entr(y|ies) that excuse nothing:\n`);
+    for (const d of dead) console.log(`  ERROR  ${d}`);
+    console.log(
+      `\n  Delete each one. The drift it recorded is gone (or the field/schema is), ` +
+        `so the entry now\n  pre-approves whatever lands at that name next. ` +
+        `apps/api/src/openapi/response-type-registry.ts.`,
+    );
+  }
 }
 
 /**

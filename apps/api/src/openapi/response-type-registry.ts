@@ -251,6 +251,14 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
  * or inline `path`. Each listed field is a deliberate, reviewed exception:
  * the shared-type marks it required but the spec intentionally leaves it
  * optional. Keep every entry justified with a comment.
+ *
+ * This register and {@link KNOWN_REVERSE_DRIFT} are both checked for LIVENESS
+ * on every run: a key that resolves to no `responseTypeRegistry` entry, and a
+ * field that suppressed no finding, each fail verify-openapi. An entry whose
+ * drift is gone stops recording a divergence and starts pre-approving whatever
+ * lands at that name next — the same argument `GRANDFATHERED` makes in
+ * `scripts/verify-no-migration-dml.ts`, applied one notch tighter because these
+ * two describe files that are still edited.
  */
 export const KNOWN_DRIFT: Record<string, string[]> = {
   // OrganizationMember requires `orgId`, but the OrgMember response schema does
@@ -280,6 +288,8 @@ export const KNOWN_DRIFT: Record<string, string[]> = {
  * inaccurate claim the check exists to catch, so the distinction is the point.
  *
  * A field the type does not declare at all is not drift and needs no entry: the
- * check only fires on a member declared with `?`.
+ * check fires only on a member the type says may be absent — `x?: T` or
+ * `x: T | undefined`, which it reads as the same fact. A `| null` member is not
+ * one of those: it guarantees the key and only permits an empty value.
  */
 export const KNOWN_REVERSE_DRIFT: Record<string, string[]> = {};
