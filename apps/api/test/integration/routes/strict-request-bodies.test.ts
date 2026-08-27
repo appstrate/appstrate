@@ -26,14 +26,23 @@ import oidcModule from "../../../src/modules/oidc/index.ts";
 const app = getTestApp({ modules: [webhooksModule, oidcModule] });
 
 /** Assert the RFC 9457 shape a strict-schema refusal produces. */
-async function expectUnknownField(res: Response): Promise<void> {
+interface ValidationFailure {
+  code?: string;
+  detail?: string;
+  errors?: Array<{ code?: string; field?: string }>;
+}
+
+// Returns the parsed body so a caller can assert on it WITHOUT `res.clone()`.
+// Cloning here fails `tsc`: `app.request()` hands back Hono's `Response`, and
+// `.clone()` on it resolves to undici's, which is not assignable to the DOM
+// `Response` this parameter names. Reading the body once and passing the value
+// on sidesteps the mismatch instead of casting past it.
+async function expectUnknownField(res: Response): Promise<ValidationFailure> {
   expect(res.status).toBe(400);
-  const body = (await res.json()) as {
-    code?: string;
-    errors?: Array<{ code?: string }>;
-  };
+  const body = (await res.json()) as ValidationFailure;
   expect(body.code).toBe("validation_failed");
   expect(body.errors?.some((e) => e.code === "unknown_field")).toBe(true);
+  return body;
 }
 
 describe("unknown request-body fields are refused, not stripped", () => {
@@ -126,5 +135,36 @@ describe("unknown request-body fields are refused, not stripped", () => {
     };
     await expectUnknownField(await put({ ...base, tls: true }));
     expect((await put(base)).status).toBe(200);
+  });
+
+  // The two routes that pass a `param` to `readJsonBody`. That param is the
+  // fallback field name for a Zod issue with an empty path — and Zod reports
+  // `unrecognized_keys` with an EMPTY path, so both used to answer a 400 that
+  // blamed the field the request had spelled correctly. Live half of
+  // `test/unit/unknown-key-field-naming.test.ts`.
+  it("skills — PUT /api/agents/{scope}/{name}/skills names the extra key, not `skillIds`", async () => {
+    const packageId = "@strictbodies/skillsbody";
+    await seedPackage({ id: packageId, orgId: ctx.orgId, type: "agent" });
+
+    const res = await app.request(`/api/agents/${packageId}/skills`, {
+      method: "PUT",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ skillIds: [], extra: 1 }),
+    });
+
+    const body = await expectUnknownField(res);
+    expect(body.errors![0]!.field).toBe("extra");
+    expect(body.detail).toStartWith("extra: ");
+  });
+
+  it("github import — POST /api/packages/import-github names the extra key, not `url`", async () => {
+    const res = await app.request("/api/packages/import-github", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ url: "https://github.com/acme/repo", branch: "main" }),
+    });
+
+    const body = await expectUnknownField(res);
+    expect(body.errors![0]!.field).toBe("branch");
   });
 });

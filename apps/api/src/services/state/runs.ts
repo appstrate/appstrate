@@ -387,6 +387,23 @@ async function nextRunNumber(
  * uncommitted row). The lock forces the second max+insert to wait for the
  * first to commit, so it observes the freshly inserted row. Released
  * automatically at transaction end.
+ *
+ * The key interpolates `scope.orgId` / `scope.spaceId` WITHOUT `?? ""`
+ * defaults, and that is safe rather than merely type-correct. `hashtext()`
+ * takes an untyped literal, so a caller that slipped an `undefined` past the
+ * type system would hash the nine characters `undefined` — a DIFFERENT lock,
+ * silently, with nothing raised anywhere. Nothing can: `SpaceScope`
+ * (`lib/scope.ts`) declares both fields as required `string`; its constructors
+ * `getSpaceScope` / `getOrgScope` throw on a falsy value rather than return
+ * one; no call site reaches `createRun` through an `as` cast or a JSON-parsed
+ * object (every one threads `{ orgId, spaceId }` from `string`-typed pipeline
+ * params); and the module contract (`PlatformServices` in
+ * `@appstrate/core/module`) exposes no run-creation surface, so no out-of-tree
+ * JS caller exists either. The sibling `ActorScope` deliberately carries NO
+ * `orgId`, but it is not structurally assignable to `SpaceScope` — passing one
+ * here is a compile error, not an `"undefined"` lock. The same reasoning
+ * covers `orgRunConcurrencyLockKey` below. If a dynamically-typed caller is
+ * ever added, a defined-key guard has to land WITH it.
  */
 async function acquireRunNumberLock(tx: DbTx, scope: SpaceScope, packageId: string): Promise<void> {
   const lockKey = `run_number:${scope.orgId}:${scope.spaceId}:${packageId}`;

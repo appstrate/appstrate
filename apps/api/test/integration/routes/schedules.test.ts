@@ -315,6 +315,34 @@ describe("Schedules API", () => {
         param: "generation_config_override",
       });
     });
+
+    // The OTHER refusal from the same helper: nothing resolves to a model at
+    // all. Its four route-local copies threw with NO `param`; the hoisted
+    // `validateGenerationOverride` gives it the same `param` its sibling
+    // refusal always carried. That is a deliberate response-shape change —
+    // `param` is optional in `ProblemDetail` and no consumer branches on its
+    // absence — and these two cases are what pin it on the schedule surfaces.
+    it("names the generation_config_override field when no model resolves at all", async () => {
+      const fid = agentId("sched-no-model");
+      await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await publish(fid);
+
+      const res = await app.request(`/api/agents/${fid}/schedules`, {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cron_expression: "0 9 * * *",
+          generation_config_override: { temperature: 0.4 },
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({
+        code: "invalid_request",
+        param: "generation_config_override",
+        detail: "A model must be configured before generation settings can be saved",
+      });
+    });
   });
 
   describe("connection_overrides shape (flat per-integration map)", () => {
@@ -449,6 +477,32 @@ describe("Schedules API", () => {
 
       expect(res.status).toBe(200);
       expect(await res.json()).toMatchObject({ generation_config_override: {} });
+    });
+
+    // Update half of the same pin — see the create-route case above.
+    it("names the generation_config_override field when no model resolves at all", async () => {
+      const fid = agentId("sched-update-no-model");
+      const agent = await seedAgent({ id: fid, orgId: ctx.orgId });
+      await publish(fid);
+      const schedule = await seedSchedule({
+        packageId: agent.id,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+      });
+
+      const res = await app.request(`/api/schedules/${schedule.id}`, {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ generation_config_override: { temperature: 0.4 } }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({
+        code: "invalid_request",
+        param: "generation_config_override",
+        detail: "A model must be configured before generation settings can be saved",
+      });
     });
   });
 

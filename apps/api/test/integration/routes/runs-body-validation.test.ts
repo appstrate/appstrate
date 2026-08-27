@@ -72,9 +72,10 @@ describe("POST /api/agents/:scope/:name/run — body validation", () => {
     // `config` is the field #1179 removed from this body with no alias: a
     // caller pinned to the previous shape used to get a 201 and a run with
     // other parameters. The barrier is generic — it refuses any undeclared
-    // field, and names none.
+    // field — and it NAMES the offending key: Zod reports `unrecognized_keys`
+    // with an empty path, which used to render as the useless pointer `"body"`.
     const res = await post({ input: {}, config: { days: 30 } });
-    await expectRejectedField(res, "body");
+    await expectRejectedField(res, "config");
   });
 
   it("rejects a malformed JSON body with 400 instead of launching without input", async () => {
@@ -121,7 +122,7 @@ describe("POST /api/agents/:scope/:name/run — body validation", () => {
       },
       body: JSON.stringify({ input: {}, config: { days: 30 } }),
     });
-    await expectRejectedField(res, "body");
+    await expectRejectedField(res, "config");
   });
 
   it("accepts every declared field", async () => {
@@ -174,7 +175,7 @@ describe("POST /api/runs/inline/validate — body validation", () => {
 
   it("rejects an unknown field with 400", async () => {
     const res = await post({ manifest: validManifest(), prompt: "do", nope: 1 });
-    await expectRejectedField(res, "body");
+    await expectRejectedField(res, "nope");
   });
 
   it("rejects dependency_overrides — accepted and silently ignored before #1187", async () => {
@@ -187,7 +188,7 @@ describe("POST /api/runs/inline/validate — body validation", () => {
       prompt: "do",
       dependency_overrides: { "@acme/skill": "draft" },
     });
-    await expectRejectedField(res, "body");
+    await expectRejectedField(res, "dependency_overrides");
   });
 
   it("accepts `generation` — honoured on this surface, now documented too", async () => {

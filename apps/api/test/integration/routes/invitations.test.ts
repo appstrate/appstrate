@@ -2,7 +2,7 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { and, eq } from "drizzle-orm";
-import { organizationMembers, orgInvitations, user } from "@appstrate/db/schema";
+import { auditEvents, organizationMembers, orgInvitations, user } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
@@ -108,6 +108,24 @@ describe("Invitations API", () => {
       );
       const row = await getDbRow(orgInvitations, eq(orgInvitations.id, inv.id));
       expect(row?.status).toBe("accepted");
+
+      // Acceptance ATTRIBUTION lives in the audit log, not on the row: the
+      // `accepted_by` / `accepted_at` columns were dropped in migration 0055
+      // on the stated grounds that "who accepted it and when is in the audit
+      // log, which outlives the row" (`schema/organizations.ts`,
+      // `services/invitations.ts`). Nothing asserted that substitute, and for
+      // a while nothing wrote it either — the sibling invitation mutations all
+      // record one. This is the assertion that keeps the claim true.
+      const audit = await getDbRow(
+        auditEvents,
+        and(eq(auditEvents.action, "org.invitation_accepted"), eq(auditEvents.resourceId, inv.id))!,
+      );
+      expect(audit.orgId).toBe(ctx.orgId);
+      expect(audit.resourceType).toBe("invitation");
+      expect(audit.actorType).toBe("user");
+      expect(audit.actorId).toBe(member.id); // WHO
+      expect(audit.createdAt).toBeInstanceOf(Date); // WHEN
+      expect(audit.after).toMatchObject({ email: "existing@test.com", role: "admin" });
     });
 
     it("marks the invitation accepted (and rejects a second accept with 410)", async () => {

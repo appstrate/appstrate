@@ -969,6 +969,19 @@ export async function assertExplicitModelExists(
  * settings are per-model request controls, so there is nothing to validate them
  * against and nothing to clamp them to; storing them would mean persisting a
  * value the next resolution could contradict.
+ *
+ * RESPONSE-SHAPE CHANGE, DELIBERATE. All four route-local copies threw the
+ * `!selectedModel` refusal with NO `param` — only their `ModelGenerationError`
+ * sibling carried one. Hoisting them here gives BOTH refusals the same `param`,
+ * so the 400 on `PUT /agents/{scope}/{name}/model`, `PUT /spaces/{spaceId}/
+ * packages/{scope}/{name}` and both schedule surfaces now carries a `param` it
+ * did not carry before. Kept rather than reverted: the two refusals come from
+ * one body field and now describe it identically, `param` is optional in the
+ * `ProblemDetail` schema (`openapi/schemas.ts`), and no consumer branches on
+ * its ABSENCE — `apps/web` reads `param` only for the two `locked_*_field`
+ * codes (`hooks/use-mutations.ts`), and `api/client.ts` passes it through
+ * untouched. Each of the four surfaces pins its own `param` in the integration
+ * tests, so a silent revert fails.
  */
 export function validateGenerationOverride(
   override: ModelGenerationSettings,

@@ -26,9 +26,14 @@ interface ProblemBody {
 
 /**
  * Assert a body-validation refusal (`validation_failed`) AND which field it
- * blamed. `field` is the rendered Zod path — `"body"` for a whole-body issue
- * such as a `.strict()` unrecognized key, `"connection_overrides.@acme/gmail"`
- * for a nested one.
+ * blamed. `field` is the rendered Zod path —
+ * `"connection_overrides.@acme/gmail"` for a nested issue, and for a
+ * `.strict()` unrecognized key the OFFENDING KEY itself (`"config"`,
+ * `"source_code"`, …). That last case used to render as the flat `"body"`:
+ * Zod reports `unrecognized_keys` with an EMPTY path and the names in
+ * `issue.keys`, which `zodIssuesToFieldErrors` (`@appstrate/core/api-errors`)
+ * now reads. `"body"` remains the pointer for a genuinely path-less issue with
+ * no caller-supplied `param` — a whole-body type failure, say.
  */
 export async function expectRejectedField(res: Response, field: string): Promise<void> {
   expect(res.status).toBe(400);

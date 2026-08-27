@@ -1278,9 +1278,13 @@ describe("Agents API", () => {
 
     // The "no model resolves" refusal was written out four times across
     // `agents.ts`, `spaces.ts` and the two schedule handlers — same literal
-    // message, and only two of the four pointed the RFC 9457 `param` at the
-    // field the client actually sent. All four now go through one
-    // `validateGenerationOverride`, so every route names its own wire field.
+    // message, and NONE of the four carried an RFC 9457 `param` (only their
+    // `ModelGenerationError` sibling did). All four now go through one
+    // `validateGenerationOverride`, which gives both refusals the same `param`,
+    // so every route names its own wire field. That is a deliberate change to
+    // the 400 body — see the rationale on `validateGenerationOverride` — and
+    // this case plus its three siblings (`spaces.test.ts`, two in
+    // `schedules.test.ts`) are what pin it.
     it("names the generation field when no model resolves at all", async () => {
       await seedModelAgent();
 

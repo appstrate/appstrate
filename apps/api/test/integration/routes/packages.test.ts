@@ -774,7 +774,7 @@ describe("Packages API", () => {
         }),
       });
 
-      await expectRejectedField(rejectedCreate, "body");
+      await expectRejectedField(rejectedCreate, "source_code");
 
       const createRes = await app.request("/api/packages/integrations", {
         method: "POST",
@@ -800,7 +800,7 @@ describe("Packages API", () => {
         }),
       });
 
-      await expectRejectedField(updateRes, "body");
+      await expectRejectedField(updateRes, "source_code");
 
       // The control for that refusal, and the only place this file pins that
       // `.strict()` left the ordinary update path alone: the same body MINUS

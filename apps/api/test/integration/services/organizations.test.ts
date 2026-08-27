@@ -17,7 +17,9 @@ import {
   updateMemberRole,
   getOrgSettings,
   listOrgsWithUnsupportedApiVersion,
+  orgSettingsPatchSchema,
 } from "../../../src/services/organizations.ts";
+import { orgSettingsSchema } from "@appstrate/core/permissions";
 import { toSlug } from "@appstrate/core/naming";
 import { CURRENT_API_VERSION, listSupportedVersions } from "../../../src/lib/api-versions.ts";
 
@@ -76,6 +78,44 @@ describe("organizations service", () => {
 
       const settings = await getOrgSettings(org.id);
       expect(settings.api_version).toBe(CURRENT_API_VERSION);
+    });
+  });
+
+  // ── org settings: which schema actually guards the shape ──
+  //
+  // The rationale on `orgSettingsPatchSchema` claims the base schema in
+  // `@appstrate/core/permissions` is never a parser, so all the closure lives
+  // on the patch schema. Both halves are asserted here, because a future
+  // reader who believes the base is a read-path validator will reach for the
+  // wrong lever.
+  describe("org settings schema boundary", () => {
+    it("the base schema STRIPS unknown keys — it never tolerates them", () => {
+      const parsed = orgSettingsSchema.safeParse({ api_version: "2026-01-01", future_key: 1 });
+
+      expect(parsed.success).toBe(true);
+      expect(parsed.data).toEqual({ api_version: "2026-01-01" });
+      expect(parsed.data).not.toHaveProperty("future_key");
+    });
+
+    it("the patch schema is the one that refuses an unknown key", () => {
+      expect(orgSettingsPatchSchema.safeParse({ dashboard_sso_enabled: true }).success).toBe(true);
+      expect(orgSettingsPatchSchema.safeParse({ future_key: 1 }).success).toBe(false);
+    });
+
+    it("getOrgSettings casts the stored row — it does not parse it", async () => {
+      const org = await createOrganization("Cast Org", "cast-org", userId);
+      await db
+        .update(organizations)
+        .set({ orgSettings: { api_version: CURRENT_API_VERSION, future_key: "kept" } })
+        .where(eq(organizations.id, org.id));
+
+      // A key no schema declares survives the read verbatim. If this ever
+      // starts failing, a parse was introduced on the read path and the
+      // rationale on `orgSettingsPatchSchema` needs revisiting.
+      expect(await getOrgSettings(org.id)).toEqual({
+        api_version: CURRENT_API_VERSION,
+        future_key: "kept",
+      } as never);
     });
   });
 

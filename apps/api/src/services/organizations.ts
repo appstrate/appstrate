@@ -154,9 +154,19 @@ import { orgSettingsSchema as orgSettingsBaseSchema } from "@appstrate/core/perm
  * `.strict()`: an unknown key is a 400, never a silently dropped setting. It
  * lives HERE rather than at the route because `openapi/zod-schema-registry.ts`
  * documents this body too, and it built its own `orgSettingsSchema.partial()`
- * — two expressions of one shape that could disagree. The base schema in
- * `@appstrate/core/permissions` stays open on purpose: it also READS stored
- * settings rows, which may legitimately carry keys a newer writer added.
+ * — two expressions of one shape that could disagree.
+ *
+ * This is the ONLY place the shape is enforced, and it has to be: the base
+ * schema in `@appstrate/core/permissions` never parses anything. It has
+ * exactly two consumers — this `.partial().strict()` derivation, and the
+ * `OrgSettings` type alias in `packages/shared-types` (`z.infer`, erased at
+ * runtime). Nothing validates a stored row through it: `getOrgSettings` below
+ * CASTS the JSONB column and returns it. So the base being a plain
+ * `z.object()` is not a read-path affordance — a plain `z.object()` STRIPS
+ * unknown keys rather than tolerating them, and would drop exactly the
+ * newer-writer keys such a rationale would be protecting. Its strictness is
+ * simply unobservable, and the closure that matters is the one on this line.
+ * `test/integration/services/organizations.test.ts` pins both halves.
  */
 export const orgSettingsPatchSchema = orgSettingsBaseSchema.partial().strict();
 import type { OrgSettings } from "@appstrate/shared-types";
