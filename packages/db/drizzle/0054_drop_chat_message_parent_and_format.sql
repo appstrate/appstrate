@@ -1,0 +1,45 @@
+-- Drop `chat_messages.parent_id` and `chat_messages.format`: two columns that
+-- carry no information. The table's own doc comment has said so since 0052,
+-- which left them alone because a column still echoed to the client cannot be
+-- dropped from one side. `packages/module-chat` stops echoing them in this
+-- same change, so they go now.
+--
+-- ═══ WHY THEY CARRY NOTHING ═══
+--
+-- `format` — one writer, one constant. `upsertMessage`
+-- (`packages/module-chat/src/persistence.ts`) is the ONLY statement that has
+-- ever inserted into or updated this table, and it wrote the module-private
+-- constant `"ai-sdk/v6"` at both the insert and the conflict-update. Every row
+-- that exists therefore holds that one value. It discriminated something back
+-- when the CLIENT chose its own format adapter and POSTed the node it wanted
+-- stored; that path was deleted. If a second storage format ever ships, the
+-- column comes back with a CHECK.
+--
+-- `parent_id` — a re-encoding of `seq`. It was written as
+-- `lastMessageId(sessionId)` — itself an `ORDER BY seq DESC LIMIT 1` — for a
+-- user turn or a server notice, and as the prompting user turn for an assistant
+-- turn. No FK, no uniqueness, and no reader anywhere: all three reads of this
+-- table sort by `seq` (the full thread ASC, the previous message DESC LIMIT 1,
+-- the title scan ASC), the history DTO merely echoed the value back, and the
+-- SPA's decoder (`packages/module-chat/src/ui/sessions.ts`) destructures
+-- `{ id, content }` and nothing else. If branching ever ships, what it needs is
+-- a per-branch pointer WITH a self-FK, not this column revived.
+--
+-- ═══ NO DATA SCRIPT ═══
+--
+-- Nothing to move (`docs/NO_TRANSITIONAL_CODE.md` §2). A constant and a value
+-- derived from `seq` are exactly what the single server-chosen format and
+-- `ORDER BY seq` already say, so there is no row content to rewrite anywhere
+-- else first. This file is DDL only.
+--
+-- ═══ LOCK AND COST ═══
+--
+-- `DROP COLUMN` is metadata-only in Postgres — the attribute is flagged
+-- dropped, the heap is not rewritten — so the ACCESS EXCLUSIVE lock it takes on
+-- `chat_messages` covers a catalog update, not a scan. It is held to COMMIT
+-- like every lock in drizzle's batched transaction, so the bound that matters
+-- is the rest of the batch, not these two statements. Both are one-way: the
+-- values are gone, and there is deliberately no path back (§1 — a retired shape
+-- must fail, not fall back).
+ALTER TABLE "chat_messages" DROP COLUMN "parent_id";--> statement-breakpoint
+ALTER TABLE "chat_messages" DROP COLUMN "format";

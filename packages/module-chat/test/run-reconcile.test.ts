@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { and, asc, eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions, files, runs } from "@appstrate/db/schema";
 import { truncateAll } from "../../../apps/api/test/helpers/db.ts";
@@ -172,18 +172,6 @@ describe("orphaned chat run reconciliation", () => {
 
     const rows = await messages(sessionId);
     expect(rows).toHaveLength(1);
-    // The replay must not have re-parented the notice onto itself either.
-    const [row] = await db
-      .select({ parentId: chatMessages.parentId })
-      .from(chatMessages)
-      .where(
-        and(
-          eq(chatMessages.sessionId, sessionId),
-          eq(chatMessages.messageId, runNoticeMessageId(runId)),
-        ),
-      )
-      .limit(1);
-    expect(row!.parentId).toBeNull();
   });
 
   it("stays silent while a turn is live on the session", async () => {

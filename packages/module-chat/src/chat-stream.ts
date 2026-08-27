@@ -426,10 +426,10 @@ export async function handleChatStream(
     finalizeChatStream({
       engineResponse,
       streamId,
-      parentId: userMessageId ?? null,
+      precedingMessageId: userMessageId ?? null,
       onAssistant:
         sessionId && userMessageId
-          ? (assistant, parentId) => persistAssistantMessage(sessionId, assistant, parentId)
+          ? (assistant, preceding) => persistAssistantMessage(sessionId, assistant, preceding)
           : undefined,
       onSettled: () => {
         unregisterStopController(streamId);

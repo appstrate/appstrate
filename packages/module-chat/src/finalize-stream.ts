@@ -41,15 +41,15 @@ interface FinalizeChatStreamOptions {
   /** Resumable producer key — the id stored as `chat_sessions.active_stream_id`. */
   streamId: string;
   /**
-   * Persist the turn's assistant message, chained onto {@link parentId}. Called
-   * at most once — a turn carries exactly one assistant message (see
-   * `stream-parse.ts`). Omit when there is no session to persist into (the
-   * stream is still drained so the source completes). Runs to completion
-   * independently of the client connection.
+   * Persist the turn's assistant message, following
+   * {@link precedingMessageId}. Called at most once — a turn carries exactly
+   * one assistant message (see `stream-parse.ts`). Omit when there is no
+   * session to persist into (the stream is still drained so the source
+   * completes). Runs to completion independently of the client connection.
    */
-  onAssistant?: (message: UIMessage, parentId: string | null) => unknown;
-  /** Parent for the assistant message — the user turn's message id. */
-  parentId?: string | null;
+  onAssistant?: (message: UIMessage, precedingMessageId: string | null) => unknown;
+  /** The message the assistant turn follows — the user turn's message id. */
+  precedingMessageId?: string | null;
   /** Best-effort teardown after persistence settles (close MCP, unregister stop, clear active stream). */
   onSettled?: () => void;
   /** Injection seam for tests — defaults to the process-wide resumable context. */
@@ -57,7 +57,7 @@ interface FinalizeChatStreamOptions {
 }
 
 export async function finalizeChatStream(opts: FinalizeChatStreamOptions): Promise<Response> {
-  const { engineResponse, streamId, onAssistant, parentId, onSettled } = opts;
+  const { engineResponse, streamId, onAssistant, precedingMessageId, onSettled } = opts;
 
   const sourceBody = engineResponse.body;
   if (!sourceBody) {
@@ -80,7 +80,7 @@ export async function finalizeChatStream(opts: FinalizeChatStreamOptions): Promi
       // failure can be retried without re-reading the (now drained) branch.
       const assistant = await extractAssistantMessage(forPersist);
       if (!assistant) return;
-      const persist = () => onAssistant(assistant, parentId ?? null);
+      const persist = () => onAssistant(assistant, precedingMessageId ?? null);
       try {
         await persist();
       } catch (firstErr) {

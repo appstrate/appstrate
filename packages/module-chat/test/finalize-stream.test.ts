@@ -66,7 +66,7 @@ describe("finalizeChatStream — disconnect survival", () => {
     expect(res.status).toBe(200);
   });
 
-  it("persists the turn's assistant message once, chained onto the user turn", async () => {
+  it("persists the turn's assistant message once, after the user turn", async () => {
     const engineResponse = engine(async ({ writer }) => {
       writer.write({ type: "start", messageId: "asst_1" });
       writer.write({ type: "text-start", id: "t1" });
@@ -75,22 +75,22 @@ describe("finalizeChatStream — disconnect survival", () => {
       writer.write({ type: "finish" });
     });
 
-    const saved: { id: string; parentId: string | null }[] = [];
+    const saved: { id: string; precedingMessageId: string | null }[] = [];
     let settled!: () => void;
     const done = new Promise<void>((r) => (settled = r));
 
     const res = await finalizeChatStream({
       engineResponse,
       streamId: crypto.randomUUID(),
-      parentId: "user_1",
-      onAssistant: (m, parentId) => saved.push({ id: m.id, parentId }),
+      precedingMessageId: "user_1",
+      onAssistant: (m, precedingMessageId) => saved.push({ id: m.id, precedingMessageId }),
       onSettled: () => settled(),
     });
     await res.body!.pipeTo(new WritableStream());
     await done;
 
-    // One turn, one assistant row, chained onto the user message that prompted it.
-    expect(saved).toEqual([{ id: "asst_1", parentId: "user_1" }]);
+    // One turn, one assistant row, handed the user message that prompted it.
+    expect(saved).toEqual([{ id: "asst_1", precedingMessageId: "user_1" }]);
   });
 
   it("retries the persist once when the first attempt fails, then saves the turn", async () => {
@@ -110,7 +110,7 @@ describe("finalizeChatStream — disconnect survival", () => {
     const res = await finalizeChatStream({
       engineResponse,
       streamId: crypto.randomUUID(),
-      parentId: null,
+      precedingMessageId: null,
       onAssistant: (m) => {
         attempts += 1;
         if (attempts === 1) throw new Error("transient DB error");

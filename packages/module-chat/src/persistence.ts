@@ -14,7 +14,7 @@
  * Storage stays byte-compatible with assistant-ui's `ai-sdk/v6`
  * MessageFormatAdapter so the existing client history-adapter LOAD path keeps
  * working unchanged: `content` = the UIMessage WITHOUT its `id` (the id lives in
- * `message_id`), `format` = `"ai-sdk/v6"`, `parent_id` chains messages linearly.
+ * `message_id`). Ordering is `chat_messages.seq` and nothing else.
  */
 
 import { and, desc, eq, sql } from "drizzle-orm";
@@ -24,9 +24,6 @@ import { notFound } from "@appstrate/core/api-errors";
 import { uiMessageText } from "./message-text.ts";
 import { notifySessionUpdate } from "./realtime.ts";
 import type { UIMessage } from "ai";
-
-/** assistant-ui ai-sdk MessageFormatAdapter id — keep in sync with the client. */
-const CHAT_MESSAGE_FORMAT = "ai-sdk/v6";
 
 /** Storage content = UIMessage minus its id (the id rides in `message_id`). */
 function toContent(message: UIMessage): Record<string, unknown> {
@@ -74,7 +71,7 @@ export async function ensureSession(id: string, orgId: string, userId: string): 
   }
 }
 
-/** Most recent message id in a session (the parent for the next turn), or null. */
+/** Most recent message id in a session — the one a new message follows, or null. */
 async function lastMessageId(sessionId: string): Promise<string | null> {
   const [row] = await db
     .select({ messageId: chatMessages.messageId })
@@ -87,28 +84,38 @@ async function lastMessageId(sessionId: string): Promise<string | null> {
 
 /**
  * Deterministic message id for a UIMessage that arrives without one. Derived
- * from (sessionId, parentId, content) so it is:
+ * from (sessionId, precedingMessageId, content) so it is:
  *   - STABLE across retries of the same finalize — a retried assistant persist
  *     produces the same id, so the upsert dedupes on the conflict target
  *     instead of inserting a fresh row every attempt (duplicate messages).
- *   - DISTINCT across turns — a different parent/content hashes differently,
- *     preserving the earlier fix where an empty id collided across turns.
+ *   - DISTINCT across turns — a different predecessor/content hashes
+ *     differently, preserving the earlier fix where an empty id collided across
+ *     turns.
  */
 async function deterministicMessageId(
   sessionId: string,
-  parentId: string | null,
+  precedingMessageId: string | null,
   content: unknown,
 ): Promise<string> {
-  const material = `${sessionId}\u0000${parentId ?? ""}\u0000${JSON.stringify(content)}`;
+  const material = `${sessionId}\u0000${precedingMessageId ?? ""}\u0000${JSON.stringify(content)}`;
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(material));
   const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
   return `gen_${hex.slice(0, 32)}`;
 }
 
+/**
+ * The single write path into `chat_messages`.
+ *
+ * `precedingMessageId` — the message this one follows — is HASH MATERIAL only;
+ * no column stores it. The `parent_id` column that used to was dropped in
+ * migration 0054: it re-encoded `seq`, which is what every reader sorts by. The
+ * argument survives because it is what keeps a DERIVED id distinct across
+ * turns; see `deterministicMessageId`.
+ */
 async function upsertMessage(
   sessionId: string,
   message: UIMessage,
-  parentId: string | null,
+  precedingMessageId: string | null,
 ): Promise<{ messageId: string; seq: number }> {
   // The row is keyed by (sessionId, messageId). The assistant UIMessage parsed
   // from the stream can arrive WITHOUT an id (the engine's start chunk may omit
@@ -118,47 +125,46 @@ async function upsertMessage(
   // would mint a new id each attempt and insert a duplicate row — so derive a
   // stable, content-addressed id when one is missing.
   const content = toContent(message) as typeof chatMessages.$inferInsert.content;
-  const messageId = message.id || (await deterministicMessageId(sessionId, parentId, content));
+  const messageId =
+    message.id || (await deterministicMessageId(sessionId, precedingMessageId, content));
   // `seq` feeds the read-state watermark. On a retried finalize the conflict
   // UPDATE returns the EXISTING row's seq, so the watermark stays idempotent.
   const [row] = await db
     .insert(chatMessages)
-    .values({
-      sessionId,
-      messageId,
-      parentId,
-      format: CHAT_MESSAGE_FORMAT,
-      content,
-    })
+    .values({ sessionId, messageId, content })
     .onConflictDoUpdate({
       target: [chatMessages.sessionId, chatMessages.messageId],
-      set: { parentId, content, format: CHAT_MESSAGE_FORMAT },
+      set: { content },
     })
     .returning({ seq: chatMessages.seq });
   return { messageId, seq: row!.seq };
 }
 
 /**
- * Persist the user turn BEFORE inference starts, chained onto the last message.
- * Returns the user message id so the assistant turn can chain onto it.
+ * Persist the user turn BEFORE inference starts. Returns the user message id so
+ * the assistant turn can derive its own id from it.
  */
 export async function persistUserMessage(sessionId: string, message: UIMessage): Promise<string> {
-  const parentId = await lastMessageId(sessionId);
-  const { messageId, seq } = await upsertMessage(sessionId, message, parentId);
+  const { messageId, seq } = await upsertMessage(
+    sessionId,
+    message,
+    await lastMessageId(sessionId),
+  );
   await touchSession(sessionId, "user", seq);
   return messageId;
 }
 
 /**
- * Persist the turn's assistant message when the stream finalizes, chained onto
- * `parentId` — the user turn that prompted it.
+ * Persist the turn's assistant message when the stream finalizes.
+ * `precedingMessageId` is the user turn that prompted it — hash material for a
+ * derived id when the stream carried none (see `upsertMessage`).
  */
 export async function persistAssistantMessage(
   sessionId: string,
   message: UIMessage,
-  parentId: string | null,
+  precedingMessageId: string | null,
 ): Promise<void> {
-  const { seq } = await upsertMessage(sessionId, message, parentId);
+  const { seq } = await upsertMessage(sessionId, message, precedingMessageId);
   await touchSession(sessionId, "assistant", seq);
 }
 
@@ -169,8 +175,8 @@ export async function persistAssistantMessage(
  * deliverables).
  *
  * Goes through the same single writer as every other message (`upsertMessage` →
- * `touchSession`), so ordering, the `parent_id` chain, the title derivation and
- * the unread watermark behave identically. Persisted with the ASSISTANT role
+ * `touchSession`), so ordering, the title derivation and the unread watermark
+ * behave identically. Persisted with the ASSISTANT role
  * (not `system`): the engine's history projection (`buildStructuredPiTurn`)
  * keeps only `user` and `assistant` — a mid-transcript system message would be
  * dropped on the next turn, and refused outright by `chatStreamSchema` on the
@@ -179,9 +185,9 @@ export async function persistAssistantMessage(
  * `messageId` is CALLER-CHOSEN and must be derived from the event, not random:
  * an already-present id makes this a no-op (returns false) so a replayed
  * reconciliation cannot append a second copy. The early return — rather than
- * relying on the `(session_id, message_id)` upsert — is what keeps the
- * `parent_id` chain intact: on a replay the notice is itself the last message,
- * so an upsert would re-parent it onto itself.
+ * relying on the `(session_id, message_id)` upsert — is what makes the replay
+ * cost nothing: the upsert would rewrite the row and re-run `touchSession`,
+ * re-flagging a session its owner has already read.
  */
 export async function persistNotice(
   sessionId: string,
@@ -199,8 +205,7 @@ export async function persistNotice(
     role: "assistant",
     parts: [{ type: "text", text }],
   } as UIMessage;
-  const parentId = await lastMessageId(sessionId);
-  const { seq } = await upsertMessage(sessionId, message, parentId);
+  const { seq } = await upsertMessage(sessionId, message, await lastMessageId(sessionId));
   await touchSession(sessionId, "assistant", seq);
   return true;
 }

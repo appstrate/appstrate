@@ -36,23 +36,18 @@ export const chatComponentSchemas = {
   // One stored conversation node returned by `GET /sessions/{id}` so the
   // client can seed `useChat({ messages })` on load. Written server-side
   // (user turn before inference, assistant turn on finalize); `content` is the
-  // ai-sdk/v6 format-encoded message (UIMessage minus its id).
+  // ai-sdk/v6 format-encoded message (UIMessage minus its id). The list is
+  // returned in insertion order — the transcript carries no ordering field of
+  // its own.
   ChatMessage: {
     type: "object",
-    required: ["id", "parent_id", "format", "content"],
+    required: ["id", "content"],
     properties: {
       id: {
         type: "string",
         minLength: 1,
         maxLength: 200,
         description: "Server-generated message id",
-      },
-      parent_id: { type: ["string", "null"], maxLength: 200 },
-      format: {
-        type: "string",
-        minLength: 1,
-        maxLength: 100,
-        description: "Storage format adapter id (e.g. ai-sdk/v6)",
       },
       content: { description: "Opaque encoded message" },
     },
