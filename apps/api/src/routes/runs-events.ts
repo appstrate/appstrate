@@ -13,7 +13,9 @@
  * The middleware populates `c.get("run")` with the sink context; handlers
  * consume that and never dereference `c.get("user")` (there isn't one).
  *
- * Spec: docs/specs/REMOTE_CLI_UNIFIED_RUNNER_PLAN.md §6.5.2.
+ * Contract: this router plus `services/run-event-ingestion.ts`, which owns
+ * the signed-event validation. There is no `docs/specs/` directory in this
+ * repo.
  */
 
 import { Hono } from "hono";

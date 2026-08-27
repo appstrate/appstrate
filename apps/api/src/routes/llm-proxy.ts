@@ -2,7 +2,7 @@
 
 /**
  * `/api/llm-proxy/<api>/*` — server-side LLM model injection for
- * remote-backed AFPS runs (docs/specs/REMOTE_CLI_EXECUTION_SPEC.md §Phase 3).
+ * remote-backed AFPS runs.
  *
  * Three protocol families ship today. Each shape's path mirrors the upstream
  * SDK's own convention, so a stored `baseUrl` produces the same final URL

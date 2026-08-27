@@ -536,13 +536,14 @@ const config: KnipConfig = {
     "packages/ui": {
       includeEntryExports: true,
       // The `./components/*` wildcard target is deliberately NOT an entry.
-      // `packages/ui` is private with exactly one in-repo consumer
-      // (`apps/web`), so the published-package carve-out does not apply and
-      // "no in-repo reader" *is* evidence of death — but declaring the
-      // wildcard as an entry made every design-system component reachable
-      // without an importer, so a component nobody renders could never be
-      // reported. apps/web imports each component by its own subpath, which
-      // puts the live ones in the graph on their own.
+      // `packages/ui` is private, and its only in-repo consumers are
+      // `apps/web` and `packages/module-chat` — so the published-package
+      // carve-out does not apply and "no in-repo reader" *is* evidence of
+      // death. Declaring the wildcard as an entry made every design-system
+      // component reachable without an importer, so a component nobody
+      // renders could never be reported. Both consumers import each component
+      // by its own subpath, which puts the live ones in the graph on their
+      // own.
       entry: [...manifestEntries("packages/ui", ["./components/*"])],
     },
     // Playwright specs, discovered by the runner, not imported.

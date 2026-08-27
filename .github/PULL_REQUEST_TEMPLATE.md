@@ -12,6 +12,6 @@
 
 ## Checklist
 
-- [ ] `bun run check` passes (TypeScript + ESLint + Prettier + OpenAPI validation)
+- [ ] `bun run check` passes (the full 18-task gate — see `CLAUDE.md`)
 - [ ] `bun test` passes
 - [ ] I have read the [Contributing Guide](../CONTRIBUTING.md)

@@ -6,6 +6,125 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+
+- **BREAKING (operators): the boot-time self-heal for the RFC 8707 oauth
+  `resources` columns is gone — a database whose `__drizzle_migrations`
+  watermark is ahead of its real schema now REFUSES TO BOOT.** Until now
+  `reconcileOAuthResourceColumns()` re-ran migration `0006`'s DDL on every boot
+  of every deployment, forever, so a drifted database silently worked. Nothing
+  recorded when that repair could stop shipping.
+
+  **If the check fires, the API will not start.** Apply
+  `scripts/migration/0004-oauth-resources-watermark-drift.sql` to the database
+  and restart; the boot error names the file. The repair is idempotent and a
+  few seconds of additive DDL.
+
+  **Most upgrades will not see it, and that is not reassurance.** The self-heal
+  ran on every boot of every release up to this one, so a database that drifted
+  earlier already had these columns restored and will pass the check with its
+  watermark still corrupt. The check is a signature for one migration, not a
+  drift detector: it catches a drift that first appears from here on, or a
+  restore of a backup taken before the heal. Run the ledger diagnostic in the
+  script's header to see the real extent on any database you suspect.
+
+  Refusing rather than warning is deliberate: drizzle's postgres-js migrator
+  applies by `max(created_at)`, so a corrupted watermark skipped **every**
+  migration below it, not just `0006`. A process that kept running would serve
+  from a schema nobody can enumerate and fail later at unrelated queries naming
+  none of this. The check is a signature, not a proof — a watermark corrupted
+  _after_ `0006` applied leaves these columns present and passes — so the script
+  also ships the diagnostic query for the true extent of the drift. It
+  deliberately does not touch the ledger: lowering a watermark makes the
+  migrator replay migrations that did apply, and most are not idempotent.
+
+  Tier 0 (PGlite) cannot reach this state — `applyCorePGliteMigrations` keys on
+  the journal tag, not on a watermark.
+
+- **BREAKING (internal API): `GET /internal/mcp-server-bundle/{scope}/{name}`
+  now returns `400` when `?version=` is absent on a non-system mcp-server**,
+  where it used to serve the latest non-yanked version. That fallback existed
+  for pre-#588 sidecars: the platform, `PI_IMAGE` and `SIDECAR_IMAGE` are a
+  version contract, and `@appstrate/env` fails boot on a disagreeing trio, so a
+  sidecar that old cannot be paired with this platform by tag. It silently
+  reintroduced the exact manifest/bytes skew #588 closed.
+
+  This is a container-to-host route; no external client calls it, and the
+  sidecar in the matching image sends the parameter for every package that has
+  a version to send. System mcp-servers have none — they are served from the
+  in-memory boot registry by id alone — and still omit it, which is why the
+  parameter stays optional in the spec rather than becoming `required`.
+
+  The guard is not airtight, and this entry does not lean on it. Digest pinning
+  is supported, and `findRuntimeImageTagMismatch` skips a digest-pinned ref
+  outright; the guard also says nothing about containers already running when
+  the platform restarts, which is why the release notes carry a drain step. So
+  a pre-#588 sidecar CAN reach this platform, and it now 400s on every
+  local-source integration instead of silently running skewed bytes. The load-
+  bearing argument is the other one: nothing in a matching image omits the
+  parameter, because the resolver only leaves it unset for system mcp-servers,
+  which the route answers before it reads the query at all.
+
+- **BREAKING (installer): `APPSTRATE_AUTO_INSTALL` is retired — `scripts/bootstrap.sh`
+  now refuses to run while it is set.** The variable was a fourth trigger for a
+  decision three live signals already make (`--yes`, `CI=true|1|yes`, stdout is
+  not a TTY), and its only justification was preserving the pre-two-step
+  "always auto-install" default for IaC written against it. Its only in-repo
+  writer was the CI scenario covering the legacy path itself.
+
+  It is a hard failure, not a silent ignore, because silence is the expensive
+  answer here: an Ansible / cloud-init run that still exports it would fall
+  through to the two-step path and exit 0 having dropped the binary and
+  installed nothing — a provisioning run that reports success and provisions
+  no instance. The guard runs before the first download and names the
+  replacement. **Replace `APPSTRATE_AUTO_INSTALL=1` with `--yes`**
+  (`curl -fsSL https://get.appstrate.dev | bash -s -- --yes`); CI runners and
+  non-TTY contexts already select unattended mode on their own and need no
+  change. An explicitly blanked `APPSTRATE_AUTO_INSTALL=` carries no intent and
+  stays a no-op, matching `RETIRED_ENV_RENAMES` in `@appstrate/env`.
+  `APPSTRATE_NO_LAUNCH=1` is untouched.
+
+### Fixed
+
+- **The weekly system-package conformance monitor can fail again.** The job
+  captured the harness's exit code into a step output, used it only to decide
+  whether to file a tracking issue, and never re-raised it — so
+  `.github/workflows/conformance-monitor.yml` reported success while the
+  harness reported `4 fail`, and issue #1206 sat open and uncommented for
+  three days behind a green run. The code is now re-raised by a final step
+  that runs _after_ the issue is filed, keeping the ordering that made the
+  capture necessary in the first place: a job that dies on the harness never
+  reaches the reporting step, so a red run would otherwise destroy its own
+  diagnostics.
+
+- **`@appstrate/clickup-mcp` 1.2.1 → 1.2.2 and `@appstrate/gmail-mcp`
+  2.3.1 → 2.3.2 declare the tools their servers actually expose.** ClickUp
+  advertises `clickup_create_task_comment`, `clickup_merge_document` and
+  `clickup_merge_document_page` (all three named as deferred follow-up in
+  #1172 and confirmed by the monitor since); Gmail has added
+  `update_message_labels` (`gmail.modify`, like the other label mutations)
+  and `get_draft` (`gmail.readonly`, like `list_drafts`) upstream. Both
+  packages are version-bumped and their archives rebuilt — a published
+  version is immutable, so an unbumped manifest fix never reaches production
+  (#928).
+
+- **The `refresh-strategy` waiver list is a ratchet instead of a wall.**
+  `UNVERIFIED_CEILING` was an upper bound, so it caught a growing backlog but
+  waved through a shrinking one — verify a provider, remove its entry, and the
+  ceiling silently kept the free seat for the next waiver. It is now an
+  equality: the backlog cannot grow, and it cannot shrink without the ceiling
+  being lowered in the same commit. The burn-down procedure — what "verifying
+  one entry" actually means, and which four things to edit — is documented on
+  the list itself.
+
+## [1.0.0-beta.53] - 2026-08-26
+
+No entries were recorded for this release. `CHANGELOG.md` is byte-identical at
+`v1.0.0-beta.52` and `v1.0.0-beta.53`, so everything below shipped in beta.52
+or earlier.
+
+## [1.0.0-beta.52] - 2026-08-25
+
 ### Changed
 
 - **BREAKING: run and schedule `GET` routes now enforce a read permission.**
@@ -595,82 +714,6 @@ latest, sidecar latest}` is byte-for-byte the same input as the supported
 
 ### Removed
 
-- **BREAKING (operators): the boot-time self-heal for the RFC 8707 oauth
-  `resources` columns is gone — a database whose `__drizzle_migrations`
-  watermark is ahead of its real schema now REFUSES TO BOOT.** Until now
-  `reconcileOAuthResourceColumns()` re-ran migration `0006`'s DDL on every boot
-  of every deployment, forever, so a drifted database silently worked. Nothing
-  recorded when that repair could stop shipping.
-
-  **If the check fires, the API will not start.** Apply
-  `scripts/migration/0004-oauth-resources-watermark-drift.sql` to the database
-  and restart; the boot error names the file. The repair is idempotent and a
-  few seconds of additive DDL.
-
-  **Most upgrades will not see it, and that is not reassurance.** The self-heal
-  ran on every boot of every release up to this one, so a database that drifted
-  earlier already had these columns restored and will pass the check with its
-  watermark still corrupt. The check is a signature for one migration, not a
-  drift detector: it catches a drift that first appears from here on, or a
-  restore of a backup taken before the heal. Run the ledger diagnostic in the
-  script's header to see the real extent on any database you suspect.
-
-  Refusing rather than warning is deliberate: drizzle's postgres-js migrator
-  applies by `max(created_at)`, so a corrupted watermark skipped **every**
-  migration below it, not just `0006`. A process that kept running would serve
-  from a schema nobody can enumerate and fail later at unrelated queries naming
-  none of this. The check is a signature, not a proof — a watermark corrupted
-  _after_ `0006` applied leaves these columns present and passes — so the script
-  also ships the diagnostic query for the true extent of the drift. It
-  deliberately does not touch the ledger: lowering a watermark makes the
-  migrator replay migrations that did apply, and most are not idempotent.
-
-  Tier 0 (PGlite) cannot reach this state — `applyCorePGliteMigrations` keys on
-  the journal tag, not on a watermark.
-
-- **BREAKING (internal API): `GET /internal/mcp-server-bundle/{scope}/{name}`
-  now returns `400` when `?version=` is absent on a non-system mcp-server**,
-  where it used to serve the latest non-yanked version. That fallback existed
-  for pre-#588 sidecars: the platform, `PI_IMAGE` and `SIDECAR_IMAGE` are a
-  version contract, and `@appstrate/env` fails boot on a disagreeing trio, so a
-  sidecar that old cannot be paired with this platform by tag. It silently
-  reintroduced the exact manifest/bytes skew #588 closed.
-
-  This is a container-to-host route; no external client calls it, and the
-  sidecar in the matching image sends the parameter for every package that has
-  a version to send. System mcp-servers have none — they are served from the
-  in-memory boot registry by id alone — and still omit it, which is why the
-  parameter stays optional in the spec rather than becoming `required`.
-
-  The guard is not airtight, and this entry does not lean on it. Digest pinning
-  is supported, and `findRuntimeImageTagMismatch` skips a digest-pinned ref
-  outright; the guard also says nothing about containers already running when
-  the platform restarts, which is why the release notes carry a drain step. So
-  a pre-#588 sidecar CAN reach this platform, and it now 400s on every
-  local-source integration instead of silently running skewed bytes. The load-
-  bearing argument is the other one: nothing in a matching image omits the
-  parameter, because the resolver only leaves it unset for system mcp-servers,
-  which the route answers before it reads the query at all.
-
-- **BREAKING (installer): `APPSTRATE_AUTO_INSTALL` is retired — `scripts/bootstrap.sh`
-  now refuses to run while it is set.** The variable was a fourth trigger for a
-  decision three live signals already make (`--yes`, `CI=true|1|yes`, stdout is
-  not a TTY), and its only justification was preserving the pre-two-step
-  "always auto-install" default for IaC written against it. Its only in-repo
-  writer was the CI scenario covering the legacy path itself.
-
-  It is a hard failure, not a silent ignore, because silence is the expensive
-  answer here: an Ansible / cloud-init run that still exports it would fall
-  through to the two-step path and exit 0 having dropped the binary and
-  installed nothing — a provisioning run that reports success and provisions
-  no instance. The guard runs before the first download and names the
-  replacement. **Replace `APPSTRATE_AUTO_INSTALL=1` with `--yes`**
-  (`curl -fsSL https://get.appstrate.dev | bash -s -- --yes`); CI runners and
-  non-TTY contexts already select unattended mode on their own and need no
-  change. An explicitly blanked `APPSTRATE_AUTO_INSTALL=` carries no intent and
-  stays a no-op, matching `RETIRED_ENV_RENAMES` in `@appstrate/env`.
-  `APPSTRATE_NO_LAUNCH=1` is untouched.
-
 - **Three columns that were written and never read**, with their writers
   (migrations `0044` and `0045`). The `last_refresh_failure_at` columns on
   `model_provider_credentials` and on `integration_connections` were stamped
@@ -718,37 +761,6 @@ latest, sidecar latest}` is byte-for-byte the same input as the supported
   never answers `400` to.
 
 ### Fixed
-
-- **The weekly system-package conformance monitor can fail again.** The job
-  captured the harness's exit code into a step output, used it only to decide
-  whether to file a tracking issue, and never re-raised it — so
-  `.github/workflows/conformance-monitor.yml` reported success while the
-  harness reported `4 fail`, and issue #1206 sat open and uncommented for
-  three days behind a green run. The code is now re-raised by a final step
-  that runs _after_ the issue is filed, keeping the ordering that made the
-  capture necessary in the first place: a job that dies on the harness never
-  reaches the reporting step, so a red run would otherwise destroy its own
-  diagnostics.
-
-- **`@appstrate/clickup-mcp` 1.2.1 → 1.2.2 and `@appstrate/gmail-mcp`
-  2.3.1 → 2.3.2 declare the tools their servers actually expose.** ClickUp
-  advertises `clickup_create_task_comment`, `clickup_merge_document` and
-  `clickup_merge_document_page` (all three named as deferred follow-up in
-  #1172 and confirmed by the monitor since); Gmail has added
-  `update_message_labels` (`gmail.modify`, like the other label mutations)
-  and `get_draft` (`gmail.readonly`, like `list_drafts`) upstream. Both
-  packages are version-bumped and their archives rebuilt — a published
-  version is immutable, so an unbumped manifest fix never reaches production
-  (#928).
-
-- **The `refresh-strategy` waiver list is a ratchet instead of a wall.**
-  `UNVERIFIED_CEILING` was an upper bound, so it caught a growing backlog but
-  waved through a shrinking one — verify a provider, remove its entry, and the
-  ceiling silently kept the free seat for the next waiver. It is now an
-  equality: the backlog cannot grow, and it cannot shrink without the ceiling
-  being lowered in the same commit. The burn-down procedure — what "verifying
-  one entry" actually means, and which four things to edit — is documented on
-  the list itself.
 
 - **`appstrate run` validates the resolved input against the agent's schema
   again.** The `config` → `input` collapse (#1179) deleted the CLI's validation
@@ -1058,68 +1070,6 @@ latest, sidecar latest}` is byte-for-byte the same input as the supported
   `idx_runs_package_started` covers it, and that cover was itself absent from
   production at the time.
 
-### Security
-
-- **The agent bundle export now requires each dependency type's read scope** —
-  `GET /api/agents/{scope}/{name}/bundle` gated on `agents:read` alone. That
-  covers the root agent, whose files the export narrows to `manifest.json` +
-  `prompt.md`, but a dependency goes into the archive as its ENTIRE stored file
-  map: a bundle carrying a skill hands out exactly the bytes
-  `GET /api/packages/skills/{id}/files[/content]` serves, which #1123/#1124
-  settled need `skills:read`. This route was the last looser door to the same
-  content — a credential `403`'d on the file explorer was served the identical
-  bytes here. The guard now runs against the ASSEMBLED bundle rather than the
-  root manifest, so transitive dependencies are covered by construction and an
-  unrecognised type fails closed. It gates on SCOPE, not visibility:
-  dependency resolution stays org-scoped, so a bundle can still reach a skill
-  that is not installed in the calling application, exactly like the run it
-  mirrors.
-
-  **Behaviour change for scoped credentials.** A credential holding
-  `agents:read` but NOT `skills:read` now gets `403` where it used to get
-  `200`, on both `?source=draft` and the published export, whenever the agent
-  declares a skill dependency. In practice that is a scoped API key or OIDC
-  token — every org role (owner, admin, member, viewer) carries both scopes, so
-  no dashboard user is affected. An agent with no skill dependency is still
-  exported to an `agents:read`-only key. Audit the scopes of any key that
-  exports bundles from CI before upgrading.
-
-- **Package file responses are never served from a fresh browser cache** —
-  `Cache-Control: private, max-age=300` on the file explorer routes let a
-  browser serve authenticated, tenant-scoped, RBAC-gated artifact bytes for
-  five minutes with zero server contact. A revoked `<type>:read`, a member
-  removed from the org, or a package uninstalled from the application all left
-  the cached `200` being handed out until it expired, and `Vary` cannot rescue
-  that — revocation changes no request header. Every response on both routes is
-  now `private, no-cache`, which was already the behaviour for drafts,
-  dist-tags, semver ranges and yanked versions. `no-cache` still permits the
-  304 round-trip; it only forbids serving without one, and forcing that
-  round-trip re-runs `hasPackageAccess` and the read-permission guard on every
-  hit. **The trade**: a repeat view of the same file now pays a conditional
-  request instead of reading the local cache. That revalidation answers a
-  version's 304 from one DB read, with no storage GET and no unzip.
-
-- **Package `GET` routes now enforce a read permission (#1123)** — every
-  `GET` under `/api/packages` was gated on `hasPackageAccess` alone, which
-  answers "is this package installed in this application, or a system
-  package?" and nothing about what the caller may do. An API key scoped
-  **without** `skills:read` could read a skill's manifest and its full
-  `SKILL.md` (the detail route serves the authored `content`), and pull the
-  published ZIP through `/{scope}/{name}/{version}/download`. Every `GET`
-  on the router now requires the matching `agents:read` / `skills:read` /
-  `integrations:read` / `mcp-servers:read`, and `/{version}/download`
-  additionally goes through `hasPackageAccess` like the rest of the surface —
-  it previously served artifact bytes for packages not installed in the
-  calling application.
-
-  **The read-permission change is breaking for API keys.** No org role loses
-  access through the new RBAC guard (every role, down to `viewer`, holds all
-  four read scopes), but a key minted without the matching `*:read` scope now
-  gets `403` where it used to get `200`. Separately, the download visibility
-  fix affects every caller: a package not installed in the calling application
-  now returns `404`, including for org-role sessions. Audit issued key scopes
-  before upgrading.
-
 ### Added
 
 - **`integration_dropped` — a run that starts without an integration it
@@ -1143,11 +1093,6 @@ latest, sidecar latest}` is byte-for-byte the same input as the supported
   Nothing about which runs start changes: a healthy run writes zero rows, and
   the marker swallows its own write failures so it can neither slow down nor
   fail a kickoff that is otherwise ready.
-
-- **Opt-in observability module (#847)** — OpenTelemetry moves out of core
-  behind the `@appstrate/core/telemetry` façade into a workspace module
-  `@appstrate/module-observability`. Core ships zero OTel footprint; add the
-  module to `MODULES` and set `OTEL_ENABLED` to activate tracing/metrics.
 
 ### Changed
 
@@ -1174,36 +1119,6 @@ latest, sidecar latest}` is byte-for-byte the same input as the supported
   offending client by its own id, so a one-line env var does not have to be
   read by counting braces. Client secrets and system `client_id`s are redacted
   from the message, so it is safe to paste into a ticket.
-
-- **`@appstrate/core` released as 6.2.0** — 6.1.0 was already published to npm,
-  so the four export subpaths added since (`./package-files` and
-  `./mcp-server-meta` from #1118, `./model-generation` from #1099, `./url` from
-  #1122) could not be resolved by out-of-tree consumers installing from npm,
-  even though the code ships in the tarball. Additive only, so a minor;
-  `CORE_VERSION` moves with it. **Maintainers**: bump `cloud` and
-  `connect-helper` to `^6.2.0` right after the `core@6.2.0` tag is pushed —
-  leaving them at 6.1.0 makes the next core release compute a delta of 2 and
-  hard-fail the lockstep gate.
-
-- **Inline `run_and_wait` manifests are concise without becoming limited** —
-  callers may omit AFPS boilerplate and provide only a task-specific
-  `display_name`; the shared client derives the canonical name and fills
-  runtime/output defaults before the existing full validation boundary. Any
-  supplied field remains an exact override, including `runtime_tools: []` and
-  complete deterministic schemas. The chat prompt prefers `run_and_wait` for
-  launch-and-wait flows while keeping the fire-and-forget `runInline` and
-  `runAgent` operations fully discoverable and invokable.
-
-### Removed
-
-- **`source_code` from the package create/update contract** — the
-  `sourceFileName` plumbing behind it has been unreachable since the `tool`
-  package type was dropped: no route config declared it, so `source_code` was
-  never on the wire and sending one in a request body was already a no-op (such
-  a body is still accepted, now stripped by non-strict Zod instead of parsed
-  and ignored). No runtime behaviour changes — the published OpenAPI spec
-  simply stops advertising a field that never existed at runtime, which
-  `detect:breaking` reports as 27 response-field removals.
 
 ### Fixed
 
@@ -1321,6 +1236,117 @@ latest, sidecar latest}` is byte-for-byte the same input as the supported
   also stamps the run's `metadata.degraded_integrations[]`, so the finished run
   shows a reconnect banner instead of the gap living only in the agent's
   transcript.
+
+## Released before v1.0.0-beta.52
+
+The entries below were already present at `v1.0.0-beta.51` and shipped in that
+release or an earlier one. They were accumulated under a single `[Unreleased]`
+heading across several releases, so this file cannot attribute them to
+individual versions; `git log v1.0.0-beta.N-1..v1.0.0-beta.N -- CHANGELOG.md`
+is the authority for any given release.
+
+### Security
+
+- **The agent bundle export now requires each dependency type's read scope** —
+  `GET /api/agents/{scope}/{name}/bundle` gated on `agents:read` alone. That
+  covers the root agent, whose files the export narrows to `manifest.json` +
+  `prompt.md`, but a dependency goes into the archive as its ENTIRE stored file
+  map: a bundle carrying a skill hands out exactly the bytes
+  `GET /api/packages/skills/{id}/files[/content]` serves, which #1123/#1124
+  settled need `skills:read`. This route was the last looser door to the same
+  content — a credential `403`'d on the file explorer was served the identical
+  bytes here. The guard now runs against the ASSEMBLED bundle rather than the
+  root manifest, so transitive dependencies are covered by construction and an
+  unrecognised type fails closed. It gates on SCOPE, not visibility:
+  dependency resolution stays org-scoped, so a bundle can still reach a skill
+  that is not installed in the calling application, exactly like the run it
+  mirrors.
+
+  **Behaviour change for scoped credentials.** A credential holding
+  `agents:read` but NOT `skills:read` now gets `403` where it used to get
+  `200`, on both `?source=draft` and the published export, whenever the agent
+  declares a skill dependency. In practice that is a scoped API key or OIDC
+  token — every org role (owner, admin, member, viewer) carries both scopes, so
+  no dashboard user is affected. An agent with no skill dependency is still
+  exported to an `agents:read`-only key. Audit the scopes of any key that
+  exports bundles from CI before upgrading.
+
+- **Package file responses are never served from a fresh browser cache** —
+  `Cache-Control: private, max-age=300` on the file explorer routes let a
+  browser serve authenticated, tenant-scoped, RBAC-gated artifact bytes for
+  five minutes with zero server contact. A revoked `<type>:read`, a member
+  removed from the org, or a package uninstalled from the application all left
+  the cached `200` being handed out until it expired, and `Vary` cannot rescue
+  that — revocation changes no request header. Every response on both routes is
+  now `private, no-cache`, which was already the behaviour for drafts,
+  dist-tags, semver ranges and yanked versions. `no-cache` still permits the
+  304 round-trip; it only forbids serving without one, and forcing that
+  round-trip re-runs `hasPackageAccess` and the read-permission guard on every
+  hit. **The trade**: a repeat view of the same file now pays a conditional
+  request instead of reading the local cache. That revalidation answers a
+  version's 304 from one DB read, with no storage GET and no unzip.
+
+- **Package `GET` routes now enforce a read permission (#1123)** — every
+  `GET` under `/api/packages` was gated on `hasPackageAccess` alone, which
+  answers "is this package installed in this application, or a system
+  package?" and nothing about what the caller may do. An API key scoped
+  **without** `skills:read` could read a skill's manifest and its full
+  `SKILL.md` (the detail route serves the authored `content`), and pull the
+  published ZIP through `/{scope}/{name}/{version}/download`. Every `GET`
+  on the router now requires the matching `agents:read` / `skills:read` /
+  `integrations:read` / `mcp-servers:read`, and `/{version}/download`
+  additionally goes through `hasPackageAccess` like the rest of the surface —
+  it previously served artifact bytes for packages not installed in the
+  calling application.
+
+  **The read-permission change is breaking for API keys.** No org role loses
+  access through the new RBAC guard (every role, down to `viewer`, holds all
+  four read scopes), but a key minted without the matching `*:read` scope now
+  gets `403` where it used to get `200`. Separately, the download visibility
+  fix affects every caller: a package not installed in the calling application
+  now returns `404`, including for org-role sessions. Audit issued key scopes
+  before upgrading.
+
+### Added
+
+- **Opt-in observability module (#847)** — OpenTelemetry moves out of core
+  behind the `@appstrate/core/telemetry` façade into a workspace module
+  `@appstrate/module-observability`. Core ships zero OTel footprint; add the
+  module to `MODULES` and set `OTEL_ENABLED` to activate tracing/metrics.
+
+### Changed
+
+- **`@appstrate/core` released as 6.2.0** — 6.1.0 was already published to npm,
+  so the four export subpaths added since (`./package-files` and
+  `./mcp-server-meta` from #1118, `./model-generation` from #1099, `./url` from
+  #1122) could not be resolved by out-of-tree consumers installing from npm,
+  even though the code ships in the tarball. Additive only, so a minor;
+  `CORE_VERSION` moves with it. **Maintainers**: bump `cloud` and
+  `connect-helper` to `^6.2.0` right after the `core@6.2.0` tag is pushed —
+  leaving them at 6.1.0 makes the next core release compute a delta of 2 and
+  hard-fail the lockstep gate.
+
+- **Inline `run_and_wait` manifests are concise without becoming limited** —
+  callers may omit AFPS boilerplate and provide only a task-specific
+  `display_name`; the shared client derives the canonical name and fills
+  runtime/output defaults before the existing full validation boundary. Any
+  supplied field remains an exact override, including `runtime_tools: []` and
+  complete deterministic schemas. The chat prompt prefers `run_and_wait` for
+  launch-and-wait flows while keeping the fire-and-forget `runInline` and
+  `runAgent` operations fully discoverable and invokable.
+
+### Removed
+
+- **`source_code` from the package create/update contract** — the
+  `sourceFileName` plumbing behind it has been unreachable since the `tool`
+  package type was dropped: no route config declared it, so `source_code` was
+  never on the wire and sending one in a request body was already a no-op (such
+  a body is still accepted, now stripped by non-strict Zod instead of parsed
+  and ignored). No runtime behaviour changes — the published OpenAPI spec
+  simply stops advertising a field that never existed at runtime, which
+  `detect:breaking` reports as 27 response-field removals.
+
+### Fixed
 
 - **Saving an integration destroyed its `INTEGRATION.md`** — `draft_content` is
   overloaded for integrations: the importer stores the bundle's

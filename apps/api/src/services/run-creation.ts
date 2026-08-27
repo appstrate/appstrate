@@ -14,7 +14,9 @@
  * `beforeUsage` hook), the connection-cascade resolver, the state-layer
  * `createRun` insert, and the `onRunStatusChange` event.
  *
- * Spec: docs/specs/REMOTE_CLI_UNIFIED_RUNNER_PLAN.md §6.2.
+ * The unified run-creation contract is this file plus its callers
+ * (`routes/runs.ts`, `routes/runs-remote.ts`); there is no `docs/specs/`
+ * directory in this repo.
  */
 
 import { encrypt } from "@appstrate/connect";

@@ -147,13 +147,14 @@ Each run creates an isolated, ephemeral environment with two containers and a de
     ║  │ - NO PLATFORM_API_URL │ ← no ExtraHosts  ║
     ║  │ - NO credentials      │                  ║
     ║  │ - NO SIDECAR_URL      │ ← deleted from   ║
-    ║  │                       │   env after boot ║
+    ║  │ - NO SIDECAR_AUTH_    │   env after boot ║
+    ║  │      TOKEN            │                  ║
     ║  │ - Runs LLM agent code │                  ║
     ║  └───────────────────────┘                  ║
     ╚═════════════════════════════════════════════╝
 ```
 
-**What the agent can reach:** The sidecar container. The sidecar URL is injected into the container env at boot, read by `runtime-pi/entrypoint.ts` to (a) build the typed Pi tools (`<provider>_call`, `run_history`), and (b) configure the Pi SDK's chat-completion endpoint (`MODEL_BASE_URL=${SIDECAR_URL}/llm`). After both wirings complete, `SIDECAR_URL` is `delete`d from `process.env` — the LLM-facing bash extension never sees it. Authenticated provider traffic flows exclusively through the typed MCP tools; the SDK's own completion traffic flows through the placeholder-substituting `/llm/*` proxy. The agent never holds a real LLM or provider key.
+**What the agent can reach:** The sidecar container. The sidecar URL is injected into the container env at boot, read by `runtime-pi/entrypoint.ts` to (a) build the typed Pi tools (`{ns}__api_call`, `run_history`, `recall_memory` — see [How the agent makes authenticated API calls](#how-the-agent-makes-authenticated-api-calls) for the naming), and (b) configure the Pi SDK's chat-completion endpoint (`MODEL_BASE_URL=${SIDECAR_URL}/llm`). After both wirings complete, `SIDECAR_URL` **and** `SIDECAR_AUTH_TOKEN` are `delete`d from `process.env` — the LLM-facing bash extension never sees either. Deleting the URL removes only the convenience (`NO_PROXY` still names the sidecar host); deleting the per-run bearer is what removes the capability. Full design: `docs/architecture/SIDECAR.md`. Authenticated provider traffic flows exclusively through the typed MCP tools; the SDK's own completion traffic flows through the placeholder-substituting `/llm/*` proxy. The agent never holds a real LLM or provider key.
 
 **What the agent cannot reach:** The platform API, the host machine, other run networks, the internet (except through the sidecar proxy), environment variables containing tokens, **or the sidecar URL itself** (deleted from env after runtime bootstrap).
 
@@ -565,7 +566,7 @@ All external inputs are validated using Zod schemas before processing:
 | File uploads         | Extension allowlist, size limit, count limit             | `schema.ts:validateFileInputs()`    |
 | Agent output         | Schema-typed `output` tool + AJV validation at ingestion | `schema.ts:validateOutput()`        |
 | Package imports      | Size limit, manifest validation, content validation      | `bundle-import.ts`                  |
-| Agent IDs            | Slug regex at DB level and Zod level                     | `schema.ts`, `001_initial.sql`      |
+| Agent IDs            | Slug regex at DB level and Zod level                     | `schema.ts`, `0000_init.sql`        |
 
 **Output validation:** When an agent defines `output.schema`, the schema becomes the input schema of the `output` runtime tool (`packages/core/src/runtime-tool-defs.ts`) — the model sees the exact JSON Schema in the tool definition and the tool call is AJV-validated in-container. At ingestion, the platform re-validates the result against the schema (`run-event-ingestion.ts`); on mismatch — or when the agent never called `output` despite required fields — the run is marked **failed**. This dual-layer approach (tool-level + platform-level) prevents malformed output from being persisted as a successful run.
 
@@ -579,11 +580,11 @@ All external inputs are validated using Zod schemas before processing:
 
 Token bucket rate limiting prevents abuse:
 
-| Endpoint                   | Limit     | Scope    |
-| -------------------------- | --------- | -------- |
-| `POST /api/agents/:id/run` | 20/minute | Per user |
-| `POST /api/agents/import`  | 10/minute | Per user |
-| `POST /api/agents`         | 10/minute | Per user |
+| Endpoint                              | Limit     | Scope    |
+| ------------------------------------- | --------- | -------- |
+| `POST /api/agents/{scope}/{name}/run` | 20/minute | Per user |
+| `POST /api/agents/import`             | 10/minute | Per user |
+| `POST /api/agents`                    | 10/minute | Per user |
 
 ### Run timeout
 

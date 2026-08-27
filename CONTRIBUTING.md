@@ -81,16 +81,16 @@ stamps disagree.
 
 ### Useful Commands
 
-| Command                        | Description                                         |
-| ------------------------------ | --------------------------------------------------- |
-| `bun run setup`                | One-command dev bootstrap (first time)              |
-| `bun run dev`                  | Start API + web (turbo, hot-reload)                 |
-| `bun run check`                | TypeScript + ESLint + Prettier + OpenAPI validation |
-| `bun test`                     | All tests (~4500) — requires Docker                 |
-| `bun test apps/api/test/unit/` | Unit tests only (fast, no DB)                       |
-| `bun run build`                | Build frontend + shared packages                    |
-| `bun run db:migrate`           | Apply database migrations                           |
-| `bun run verify:openapi`       | OpenAPI spec validation                             |
+| Command                        | Description                                                    |
+| ------------------------------ | -------------------------------------------------------------- |
+| `bun run setup`                | One-command dev bootstrap (first time)                         |
+| `bun run dev`                  | Start API + web (turbo, hot-reload)                            |
+| `bun run check`                | The full quality gate — 18 tasks, listed in `CLAUDE.md`        |
+| `bun test`                     | All tests (~11,400 `it()` across ~875 files) — requires Docker |
+| `bun test apps/api/test/unit/` | Unit tests only (fast, no DB)                                  |
+| `bun run build`                | Build frontend + shared packages                               |
+| `bun run db:migrate`           | Apply database migrations                                      |
+| `bun run verify:openapi`       | OpenAPI spec validation                                        |
 
 **Working on the Firecracker execution backend?** It's an opt-in built-in module (`apps/api/src/modules/firecracker/`, not in the default `MODULES`). The privileged engine runs as the `appstrate-runner` daemon (`bun run firecracker:runner`) and needs a Linux KVM host (`/dev/kvm`) — on macOS, run it inside a Lima VM with nested virtualization. Guest artifacts build via `bun run firecracker:build:{kernel,rootfs}`. Architecture + dev workflow: [`docs/architecture/FIRECRACKER.md`](./docs/architecture/FIRECRACKER.md).
 

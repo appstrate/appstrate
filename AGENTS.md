@@ -4,16 +4,16 @@ Appstrate is an open-source platform for running autonomous AI agents in sandbox
 
 ## Build & Development
 
-| Command                  | Description                                                        |
-| ------------------------ | ------------------------------------------------------------------ |
-| `bun install`            | Install dependencies (use `--frozen-lockfile` in CI)               |
-| `bun run dev`            | Start API (:3000) + Vite build --watch (turborepo)                 |
-| `bun test`               | Run all tests (bun:test framework, requires Docker)                |
-| `bun run check`          | TypeScript + ESLint + Prettier + OpenAPI validation                |
-| `bun run build`          | Build everything (turbo build)                                     |
-| `bun run db:generate`    | Generate Drizzle migrations from schema changes                    |
-| `bun run db:migrate`     | Apply migrations manually (rarely needed — boot migrates on start) |
-| `bun run verify:openapi` | Validate OpenAPI spec (structural + lint, 0 errors required)       |
+| Command                  | Description                                                                                                                                                |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bun install`            | Install dependencies (use `--frozen-lockfile` in CI)                                                                                                       |
+| `bun run dev`            | Start API (:3000) + Vite build --watch (turborepo)                                                                                                         |
+| `bun test`               | Run all tests (bun:test framework, requires Docker)                                                                                                        |
+| `bun run check`          | The quality gate — 18 task names, NOT 4. `CLAUDE.md` § "Development Workflow" lists them and says how to count the turbo fan-out; do not re-list them here |
+| `bun run build`          | Build everything (turbo build)                                                                                                                             |
+| `bun run db:generate`    | Generate Drizzle migrations from schema changes                                                                                                            |
+| `bun run db:migrate`     | Apply migrations manually (rarely needed — boot migrates on start)                                                                                         |
+| `bun run verify:openapi` | Validate OpenAPI spec (structural + lint, 0 errors required)                                                                                               |
 
 **Runtime**: Bun everywhere -- NOT Node.js. Bun auto-loads `.env`.
 
@@ -60,7 +60,7 @@ appstrate/
 │   ├── api/src/              # Hono API server (:3000)
 │   │   ├── routes/           # Route handlers (one file per domain)
 │   │   ├── services/         # Business logic, Docker, adapters, scheduler
-│   │   ├── modules/          # Built-in modules (core-providers, firecracker, mcp, oidc, webhooks) -- routes + RBAC, NO owned schemas
+│   │   ├── modules/          # Built-in modules -- routes + RBAC, NO owned schemas; modules/README.md owns the list
 │   │   ├── openapi/          # OpenAPI 3.1 spec (source of truth for every endpoint)
 │   │   └── middleware/       # Auth, rate-limit, guards
 │   ├── cli/                  # @appstrate/cli -- channel-aware install + self-update + doctor
@@ -72,7 +72,7 @@ appstrate/
 ├── packages/
 │   ├── core/                 # @appstrate/core -- shared validation, storage, utilities (published on npm)
 │   ├── afps-shared/          # @appstrate/afps-shared -- zero-internal-dep leaf: bundle/SSRF/credential helpers (published on npm; must be released BEFORE any core release that bumps its range)
-│   ├── ui/                   # @appstrate/ui -- React design system (shadcn components, schema-form, widgets) -- private workspace pkg, consumed by web
+│   ├── ui/                   # @appstrate/ui -- React design system (shadcn components, schema-form, widgets) -- private workspace pkg, consumed by apps/web AND packages/module-chat
 │   ├── afps-runtime/         # @appstrate/afps-runtime -- portable AFPS bundle runner + signing + conformance + `afps` CLI
 │   ├── runner-pi/            # @appstrate/runner-pi -- Pi run driver + container-env builder (SIDECAR_OPERATOR_ENV_KEYS lives here)
 │   ├── mcp-transport/        # @appstrate/mcp-transport -- MCP SDK adapter consumed by sidecar + runtime-pi
@@ -83,7 +83,7 @@ appstrate/
 │   ├── module-*/             # @appstrate/module-{chat,claude-code,codex,observability} -- workspace npm modules (opt-in via MODULES)
 │   └── connect/              # @appstrate/connect -- OAuth2/PKCE, API key, credential encryption (v1 envelope + multi-key keyring)
 ├── runtime-pi/               # Docker image: Pi Coding Agent SDK + sidecar (MCP server) + per-runtime MCP runner images
-└── system-packages/          # System package `.afps` archives (skills, mcp-servers, integrations, agents)
+└── system-packages/          # System package `.afps` archives -- integrations + one mcp-server (`ls system-packages/` for today's set)
 ```
 
 ### Stack
@@ -132,7 +132,7 @@ appstrate/
 
 ### Frontend Patterns
 
-- i18next: `fr` (default) + `en`, namespaces: `common`, `agents`, `settings`
+- i18next: `fr` (default) + `en`. The namespace list lives in `apps/web/CLAUDE.md` (first bullet) — it sits next to the `apps/web/src/locales/{lang}/` files it names, so it is the copy that gets updated when a namespace is added
 - **Typed API client only** — `apps/web/src/api/client.ts`: `$api.useQuery("get", "/api/end-users", { params })` / `$api.useMutation(...)` (openapi-react-query) and raw `client.GET(...)` (openapi-fetch), typed against `api/schema.d.ts` (regenerate with `bun run generate:api`). The legacy fetch barrel `api.ts` is **deleted** and its import specifiers are **banned by ESLint** (`eslint.config.mjs`) — code written against it will not lint
 - React Query keys: typed-client hooks use `[method, path, init]` (org/space scope rides in `init`). Run/schedule/package caches keep pinned legacy keys because the SSE patcher invalidates by those names
 - Feature gating: `useAppConfig()` reads `window.__APP_CONFIG__` (injected at serve time)
@@ -147,26 +147,25 @@ appstrate/
 
 ### Agent runtime — MCP-only
 
-- The sidecar exposes `/mcp` (Streamable HTTP, stateless JSON-RPC) as the agent's exclusive cross-boundary surface
-- AFPS tool surface (registered as Pi tools at container boot, `runtime-pi/mcp/direct.ts`):
-  - Per spawned integration: `{ns}__api_call({ method, target, headers?, body?, responseMode? })` — credential-injecting outbound proxy. Credentials are injected server-side; URLs validated against `auths.{key}.authorized_uris`.
-  - Per spawned integration (when an auth declares `_meta["dev.appstrate/api"].auths.{key}.upload_protocols`): `{ns}__api_upload` — multipart/resumable upload tool.
-  - First-party: `run_history({ limit?, fields? })` (past-run metadata via per-run signed token) and `recall_memory({ query?, limit? })` (search the unified `package_persistence` archive).
-- The agent's primary completions are served by the `/llm/*` HTTP passthrough route the Pi SDK calls natively; sub-agent flows are handled by spawning a separate run via the platform API
-- Zero-knowledge enforcement: after MCP bootstrap, `runtime-pi` deletes `process.env.SIDECAR_URL` so the bash extension cannot discover the sidecar
+**`docs/architecture/SIDECAR.md` owns this surface** — the tool list, the argument shapes, the auth token, the SSRF tiers and the `/llm/*` behaviour all live there, next to the retry and egress detail that only makes sense alongside them. Do not re-describe them here; a second copy drifts and this one already had. The shape, so you can recognise it:
+
+- The sidecar exposes `/mcp` (Streamable HTTP, stateless JSON-RPC) as the agent's exclusive cross-boundary surface, alongside `/health`, `GET /integrations/boot-report` and `ALL /llm/*`
+- Tools are registered as Pi tools at container boot (`runtime-pi/mcp/direct.ts`): `{ns}__api_call` (+ `{ns}__api_upload`) per opted-in integration auth, plus the first-party `run_history` and `recall_memory`
+- Every route except `/health` requires the per-run `x-appstrate-sidecar-auth` token; deny-by-default middleware in `runtime-pi/sidecar/app.ts`
+- Zero-knowledge enforcement: after MCP bootstrap, `runtime-pi` deletes BOTH `process.env.SIDECAR_URL` and `process.env.SIDECAR_AUTH_TOKEN` — the URL removes the convenience, the token removes the capability
 - The legacy HTTP `/proxy` and `/run-history` routes are fully retired — runners 1.x are not compatible
 
-### Memory model — `note` / `pin` / `recall_memory` (ADR-011/012/013)
+### Memory model — `note` / `pin` / `recall_memory`
 
 - Single `package_persistence` table with `(actor_type, actor_id)` scope (`member` / `end_user` / `shared`) and orthogonal `(key, pinned)` attributes
 - Three quadrants: archive (key=null, pinned=false), pinned memo (key=null, pinned=true), pinned named slot (key=string, pinned=true)
-- Write tools: `note(content, scope?)` (system tool `@appstrate/note@1.0.0`), `pin(key, content, scope?)` (system tool `@appstrate/pin@1.0.0`)
+- Write tools: `note(content, scope?)` and `pin(key, content, scope?)` are **runtime tools**, defined in `packages/core/src/runtime-tool-defs.ts` and selected per agent via `runtime_tools`. They are not packages — there is no `@appstrate/note` or `@appstrate/pin` in `system-packages/`
 - Legacy `add-memory` / `set-checkpoint` system tools are retired; `runs.state` + `package_memories` are merged into `package_persistence`
 - Wire format: `RunResult.pinned: Record<string, PinnedSlot>` (top-level `RunResult.checkpoint` mirror was dropped)
 
 ### AFPS bundle runtime — `@appstrate/afps-runtime`
 
-- Portable bundle runner (`packages/afps-runtime/`) drives the platform's run pipeline and ships a standalone `afps` CLI: `run` / `test` / `sign` / `verify` / `keygen` / `inspect` / `render`
+- Portable bundle runner (`packages/afps-runtime/`) drives the platform's run pipeline and ships a standalone `afps` CLI, which is **bundle tooling only**: `keygen` / `sign` / `verify` / `inspect` / `render` / `bundle` / `conformance` (`packages/afps-runtime/src/cli/index.ts`). It has no `run` and no `test` — live LLM execution is `appstrate run`, which bundles this runtime
 - Multi-package `.afps-bundle` format with Merkle-root integrity (per-file RECORD SRI → per-package SRI → bundle-level SRI on canonical map)
 - Endpoints: `GET /api/agents/:scope/:name/bundle` (export) + `POST /api/packages/import-bundle` (accepts `.afps-bundle` and legacy `.afps`)
 - Signature policy via `AFPS_SIGNATURE_POLICY` env (`off` | `warn` | `required`) and `AFPS_TRUST_ROOT` allowlist
@@ -186,13 +185,14 @@ bun test packages/afps-runtime/   # AFPS bundle runtime tests
 
 ### Test Conventions
 
-- **Framework**: `bun:test` -- NOT vitest/jest
-- **Test function**: `it()` -- NOT `test()`
-- **DB isolation**: `beforeEach(async () => { await truncateAll(); })`
-- **App testing**: `app.request()` via Hono -- NOT `Bun.serve()`, no port binding
-- **Auth in tests**: Real Better Auth sign-up -> session cookie (not mock auth)
-- **DB cleanup**: `DELETE FROM` in FK-safe order (not `TRUNCATE` -- avoids deadlocks)
-- **No `mock.module()`**: Use dependency injection instead (global module mocking breaks other tests)
+**`.claude/skills/testing/SKILL.md` owns the conventions table** — framework,
+`it()` vs `test()`, file naming, DB isolation and cleanup, `app.request()` vs
+`Bun.serve()`, real-auth sign-up, and the `mock.module()` ban with the injection
+patterns that replace it. It also owns the tier/preload wiring those rules
+depend on, which is why it is the copy that stays right. Read it before writing
+a test; the two rules worth carrying in your head are `bun:test` with `it()`
+(never vitest/jest, never `test()`), and **no `mock.module()`** — use dependency
+injection.
 
 ### Test Helpers (`apps/api/test/helpers/`)
 
@@ -203,7 +203,7 @@ bun test packages/afps-runtime/   # AFPS bundle runtime tests
 | `db.ts`         | `truncateAll()` -- DELETE FROM all tables in FK-safe order   |
 | `seed.ts`       | 15+ factories: `seedPackage()`, `seedRun()`, etc.            |
 | `assertions.ts` | `assertDbHas()`, `assertDbMissing()`, `assertDbCount()`      |
-| `redis.ts`      | `getRedis()`, `flushRedis()`                                 |
+| `redis.ts`      | `flushRedis()`, `closeRedis()`                               |
 
 ### Writing a New Test
 
@@ -251,6 +251,15 @@ describe("GET /api/my-resource", () => {
 its steps report false green or false red locally, and each one below has cost
 real time. Establish which you are looking at BEFORE changing code.
 
+The task list itself lives in `CLAUDE.md` § "Development Workflow" — that copy
+sits next to the rest of the workflow and is the one kept in step with
+`package.json`. Two of its steps are recent enough to surprise you: `verify:release-version`
+fails when the `${APPSTRATE_VERSION:-…}` fallback baked into the shipped compose
+files falls behind the newest `v*` tag (it went twelve releases stale before the
+gate existed), and `verify:env-docs` fails when `docs/ENV.md` drifts from the
+`@appstrate/env` schema or `.env.example`. Both are release/ops correctness, not
+code style — do not "fix" either by editing the gate.
+
 ### `verify:dead-code` (knip) — what it does and does not derive
 
 Fixed 2026-08-23. This section is kept because the failure mode is easy to
@@ -261,21 +270,30 @@ Until then, `bun run check` failed locally on `//#verify:dead-code` with ~161
 untouched `main` as well as on any branch. None of it was real, and because the
 `pre-push` hook runs `bun run check`, it blocked every local push.
 
-The cause, read out of knip 5.88.1's own `dist/`:
+The cause was read out of knip 5.88.1's `dist/` — the version pinned when this
+was diagnosed. The pin is now **6.32.2**, and each claim below was re-verified
+against that `dist/`:
 
-- `ConfigurationChief.js:27` is the **only** place entry defaults are produced,
-  and they are filename patterns: `{index,cli,main}.{exts}` at the package root
-  and under `src/`.
-- Nothing in that `dist/` reads `manifest.exports`, `manifest.main` or
-  `manifest.module`. The one read of `manifest.bin` collects binary **names**
-  for the `ignoreBinaries` check, not entry paths.
-- Declaring `entry` for a workspace **replaces** the filename defaults above.
+- `ConfigurationChief.js` is the **only** place entry defaults are produced, and
+  they are filename patterns: `{index,cli,main}.{exts}` at the package root and
+  under `src/`. Still true at 6.32.2 (`defaultBaseFilenamePattern`,
+  `getDefaultWorkspaceConfig`, lines 17–29 — the line number moved from :27).
+- Declaring `entry` for a workspace **replaces** those filename defaults. Still
+  true at 6.32.2 — `getDefaultWorkspaceConfig` supplies them only when the
+  workspace config does not.
+- **No longer true at 6.32.2**: 5.88.1 read nothing from the package manifest,
+  so knip could not derive an entry from `exports` / `main` / `module`. 6.x does
+  — `getEntrySpecifiersFromManifest()` (`util/package-json.js`) walks `main`,
+  `module`, `browser`, `bin`, `types`/`typings` and the full `exports` map, and
+  `graph/build.js` adds each resolved file as a production entry. Do not act on
+  this by deleting `manifestEntries()` calls without measuring: the config's
+  explicit list is also what documents intent, and the gate is green as written.
 
-So knip never derives an entry from a package manifest, and a workspace that
-declares `entry` loses even the filename defaults. Every workspace here that
-declared one had silently lost its real entry points, and each loss cascaded:
-`packages/afps-runtime/bin/afps.ts` unreachable makes its whole `src/**` look
-dead, which was most of the 161.
+So under 5.88.1 knip never derived an entry from a package manifest, and a
+workspace that declared `entry` lost even the filename defaults. Every workspace
+here that declared one had silently lost its real entry points, and each loss
+cascaded: `packages/afps-runtime/bin/afps.ts` unreachable makes its whole
+`src/**` look dead, which was most of the 161.
 
 **The rule when you touch `knip.config.ts`:** a workspace that declares `entry`
 must carry every `exports` target, every `bin` target, and `main`/`module` if
@@ -318,7 +336,8 @@ explained.
 An earlier version of this section blamed `git worktree`, on the strength of one
 clone that came back clean. That was wrong. Measured and refuted since, each
 independently: worktree vs `git clone`, `--frozen-lockfile` vs a plain
-`bun install`, the knip version (5.88.1 on both sides), the presence of a `.env`,
+`bun install`, the knip version (5.88.1 on both sides at the time; the pin is
+6.32.2 today), the presence of a `.env`,
 the turbo cache (the task is `"cache": false`, and CI logs `cache bypass`), and
 the bun version (1.3.11 local vs the `packageManager`-pinned 1.3.14 — tested at
 1.3.14, identical output). CI was green throughout with the same config, and

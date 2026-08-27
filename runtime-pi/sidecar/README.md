@@ -18,10 +18,10 @@ Sidecars are spawned per-run with all runtime configuration (run token, platform
 
 The `/mcp` endpoint advertises two first-party tools, both backed by the platform's per-run-token internal endpoints:
 
-| Tool            | Purpose                                                                                                                                                                                            |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `run_history`   | Past-run metadata via the platform's per-run-token internal endpoint.                                                                                                                              |
-| `recall_memory` | Read the unified `package_persistence` archive — enumerates prior `note()` appends and (optionally) named pinned slots set via `pin()`. Replaces the legacy "Memory" prompt section (ADR-012/013). |
+| Tool            | Purpose                                                                                                                                                                              |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `run_history`   | Past-run metadata via the platform's per-run-token internal endpoint.                                                                                                                |
+| `recall_memory` | Read the unified `package_persistence` archive — enumerates prior `note()` appends and (optionally) named pinned slots set via `pin()`. Replaces the legacy "Memory" prompt section. |
 
 Outbound credentialled HTTP access is exposed per integration as `{ns}__api_call` (credential-injecting outbound proxy, validated against `authorizedUris`), spawned alongside the first-party tools — see "AFPS Integrations runtime" in the platform-level `CLAUDE.md`.
 

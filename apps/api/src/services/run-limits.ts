@@ -7,9 +7,10 @@
  *   - PLATFORM_RUN_LIMITS — applies to every run (classic + inline)
  *   - INLINE_RUN_LIMITS   — additional caps for POST /api/runs/inline
  *
- * Defaults are generous / non-breaking for existing deployments (see
- * docs/specs/INLINE_RUNS.md §7). Invalid JSON or shape => fail-fast at boot
- * via a thrown error from {@link initRunLimits}.
+ * Defaults are generous / non-breaking for existing deployments. The Zod
+ * validators below are the contract — there is no `docs/specs/` directory in
+ * this repo. Invalid JSON or shape => fail-fast at boot via a thrown error
+ * from {@link initRunLimits}.
  */
 
 import { z } from "zod";

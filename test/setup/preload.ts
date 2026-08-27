@@ -3,8 +3,10 @@
  *
  * 1. Starts test containers (PostgreSQL + Redis + MinIO + DinD) if not already running
  * 2. Sets environment variables for the test database and Redis
- * 3. Runs Drizzle migrations against the test database (core + all modules)
- * 4. Registers module-owned tables for truncation
+ * 3. Runs the core Drizzle migrations against the test database. Modules own no
+ *    tables, so this one step creates every table in the schema — including the
+ *    ones modules read and write (see apps/api/src/modules/README.md).
+ * 4. Registers the tables a module reads/writes for truncation
  *
  * Module discovery — two roots:
  *   - apps/api/src/modules/<name>/ (built-in modules, entry: index.ts)
@@ -12,10 +14,9 @@
  *
  * Each module directory contributes:
  *   - the entry file — default-exports an AppstrateModule (used by getTestApp)
- *   - drizzle/migrations/NNNN_name.sql — applied in file-name order (alphabetical)
  *   - test/tables.ts — default-exports a string[] of tables for truncateAll()
  *
- * All three are optional. Running core tests alone still picks up installed
+ * Both are optional. Running core tests alone still picks up installed
  * modules because anything in either root is part of the repo — there is no
  * "module disabled" state in tests, unlike production (MODULES env var).
  */

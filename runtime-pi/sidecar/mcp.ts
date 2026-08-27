@@ -1190,7 +1190,7 @@ function buildSidecarTools(options: MountMcpOptions): {
   // `recall_memory` MCP tool — backs the agent's archive memory store.
   // Pinned memories are already in the system prompt; this tool fetches
   // the archive (everything else) on demand so the working context stays
-  // small. See ADR-012.
+  // small.
   const recallMemory: AppstrateToolDefinition = {
     // Name + description + inputSchema are derived from the canonical
     // `recall_memory` descriptor in `@appstrate/runner-pi/runtime-tools`
