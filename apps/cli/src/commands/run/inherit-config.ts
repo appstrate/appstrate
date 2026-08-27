@@ -140,8 +140,8 @@ export function mergeRunConfig(inputs: MergeRunConfigInputs): InheritedRunConfig
     generation: inherited?.generation ?? null,
     proxyId,
     versionPin,
-    inputValues: inherited?.input?.values ?? {},
-    lockedInputFields: inherited?.input?.locked_fields ?? [],
+    inputValues: inherited?.input.values ?? {},
+    lockedInputFields: inherited?.input.locked_fields ?? [],
     inherited: inherited !== null,
   };
 }

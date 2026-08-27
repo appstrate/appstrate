@@ -225,7 +225,7 @@ export function RunDetailPage() {
 
   const enrichedRun = run;
   const date = run.started_at ? formatDateField(run.started_at) : "";
-  const isInline = enrichedRun.package_ephemeral === true;
+  const isInline = enrichedRun.package_ephemeral;
   const hasInlineName = !!enrichedRun.agent_name?.trim();
   const inlineName = inlineRunDisplayName(enrichedRun.agent_name, t("runs.inlineBadge"));
 

@@ -10,7 +10,9 @@
  * `getPropertiesOfType` flattens `extends` / intersection types, so a type like
  * `EnrichedRun = RunWireDto & {…}` reports the full merged property set. A
  * property is treated as required iff it does NOT carry the `Optional` symbol
- * flag (i.e. it is not declared with `?`).
+ * flag (i.e. it is not declared with `?`); one that does carry it lands in
+ * `optional` instead. Both sets are reported because step 7 compares the two
+ * required-ness declarations in both directions.
  */
 import { join } from "node:path";
 import { readFileSync, existsSync } from "node:fs";
@@ -81,6 +83,13 @@ function getProgram(): {
  */
 export interface TypeShape {
   required: Set<string>;
+  /**
+   * Properties declared with `?`. Kept alongside `required` because step 7
+   * compares in both directions, and the two are not complements: a name
+   * absent from BOTH sets is a name the type does not declare at all, which
+   * neither direction may report.
+   */
+  optional: Set<string>;
   nested: Map<string, TypeShape>;
 }
 
@@ -123,14 +132,16 @@ function buildShape(
   seen: Set<ts.Type>,
 ): TypeShape {
   const required = new Set<string>();
+  const optionalKeys = new Set<string>();
   const nested = new Map<string, TypeShape>();
-  if (depth > 8 || seen.has(type)) return { required, nested };
+  if (depth > 8 || seen.has(type)) return { required, optional: optionalKeys, nested };
   seen.add(type);
 
   for (const prop of checker.getPropertiesOfType(type)) {
     const name = prop.getName();
     const optional = !!(prop.flags & ts.SymbolFlags.Optional);
-    if (!optional) required.add(name);
+    if (optional) optionalKeys.add(name);
+    else required.add(name);
 
     const decl = prop.valueDeclaration ?? prop.declarations?.[0];
     if (!decl) continue;
@@ -142,7 +153,7 @@ function buildShape(
     if (target) nested.set(name, buildShape(checker, target, depth + 1, seen));
   }
   seen.delete(type);
-  return { required, nested };
+  return { required, optional: optionalKeys, nested };
 }
 
 /**

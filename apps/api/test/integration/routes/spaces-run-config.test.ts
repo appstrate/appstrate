@@ -127,7 +127,10 @@ describe("GET /api/spaces/:spaceId/packages/:scope/:name/run-config", () => {
     expect(body.version_pin).toBeNull();
     expect(body.modelId).toBeNull();
     expect(body.proxyId).toBeNull();
+    // A row with nothing stored still emits both members — the CLI reads them
+    // unguarded, so "empty" is the empty shape, never an absent key.
     expect(body.generation).toBeNull();
+    expect(body.input).toEqual({ values: {}, locked_fields: [] });
   });
 
   it("returns 401 without authentication", async () => {

@@ -12,6 +12,7 @@ import {
   mergeRunConfig,
   RunConfigFetchError,
 } from "../src/commands/run/inherit-config.ts";
+import type { ResolvedRunConfig } from "@appstrate/shared-types";
 
 function stubFetch(opts: {
   status?: number;
@@ -34,9 +35,11 @@ describe("fetchRunConfigPayload", () => {
   it("returns the parsed payload on 200", async () => {
     const fetchImpl = stubFetch({
       body: {
+        ...stubPayload(),
         modelId: "claude-sonnet",
-        proxyId: null,
         version_pin: "1.0.0",
+        generation: { temperature: 0.2 },
+        input: { values: { dry_run: true }, locked_fields: ["dry_run"] },
       },
     });
     const payload = await fetchRunConfigPayload({
@@ -50,6 +53,10 @@ describe("fetchRunConfigPayload", () => {
     });
     expect(payload?.modelId).toBe("claude-sonnet");
     expect(payload?.version_pin).toBe("1.0.0");
+    // `generation` and `input` are required members of the wire shape — the
+    // endpoint always emits them, and `mergeRunConfig` reads them unguarded.
+    expect(payload?.generation).toEqual({ temperature: 0.2 });
+    expect(payload?.input).toEqual({ values: { dry_run: true }, locked_fields: ["dry_run"] });
   });
 
   it("returns null on 404 (no inheritance)", async () => {
@@ -103,11 +110,7 @@ describe("fetchRunConfigPayload", () => {
 
 describe("mergeRunConfig — priority order", () => {
   it("flag model wins over env model wins over inherited model", () => {
-    const inherited = {
-      modelId: "inherited-model",
-      proxyId: null,
-      version_pin: null,
-    };
+    const inherited = { ...stubPayload(), modelId: "inherited-model" };
     expect(mergeRunConfig({ inherited, hasExplicitSpec: false }).modelId).toBe("inherited-model");
     expect(
       mergeRunConfig({ inherited, hasExplicitSpec: false, envModel: "env-model" }).modelId,
@@ -123,13 +126,23 @@ describe("mergeRunConfig — priority order", () => {
   });
 
   it("explicit spec disables versionPin inheritance", () => {
-    const inherited = {
-      modelId: null,
-      proxyId: null,
-      version_pin: "1.2.3",
-    };
+    const inherited = { ...stubPayload(), version_pin: "1.2.3" };
     expect(mergeRunConfig({ inherited, hasExplicitSpec: false }).versionPin).toBe("1.2.3");
     expect(mergeRunConfig({ inherited, hasExplicitSpec: true }).versionPin).toBeNull();
+  });
+
+  it("passes the generation settings and the stored input layer through", () => {
+    const merged = mergeRunConfig({
+      inherited: {
+        ...stubPayload(),
+        generation: { temperature: 0.2 },
+        input: { values: { dry_run: true }, locked_fields: ["dry_run"] },
+      },
+      hasExplicitSpec: false,
+    });
+    expect(merged.generation).toEqual({ temperature: 0.2 });
+    expect(merged.inputValues).toEqual({ dry_run: true });
+    expect(merged.lockedInputFields).toEqual(["dry_run"]);
   });
 
   it("inherited=null produces a no-op merge", () => {
@@ -138,13 +151,19 @@ describe("mergeRunConfig — priority order", () => {
     expect(merged.modelId).toBeNull();
     expect(merged.proxyId).toBeNull();
     expect(merged.versionPin).toBeNull();
+    expect(merged.generation).toBeNull();
+    expect(merged.inputValues).toEqual({});
+    expect(merged.lockedInputFields).toEqual([]);
   });
 });
 
-function stubPayload() {
+/** A fully-populated wire payload — every member the endpoint always emits. */
+function stubPayload(): ResolvedRunConfig {
   return {
+    generation: null,
     modelId: null,
     proxyId: null,
-    versionPin: null,
+    version_pin: null,
+    input: { values: {}, locked_fields: [] },
   };
 }

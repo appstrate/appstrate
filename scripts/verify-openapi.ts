@@ -22,8 +22,11 @@
  *    `expectedEndpoints` array, whose only unique signal this was.
  * 6. Response schema presence — every 2xx JSON response (except 204) must declare a schema
  * 7. Shared-type ↔ OpenAPI response required-field comparison — for each registered
- *    (spec-schema ↔ @appstrate/shared-types interface) pair, asserts every type-required field
- *    is also required in the spec response schema (catches spec-optional / type-required drift)
+ *    (spec-schema ↔ @appstrate/shared-types interface) pair, asserts the two agree on which
+ *    fields are guaranteed, in BOTH directions: every type-required field is required in the
+ *    spec (spec-optional / type-required drift), and every spec-required field the type
+ *    declares with `?` is reported too (spec-required / type-optional drift). Accepted
+ *    divergences live in KNOWN_DRIFT and KNOWN_REVERSE_DRIFT respectively.
  *
  * Module-owned paths and schemas are loaded dynamically from built-in modules.
  * The set of modules validated matches `MODULES` (default: all built-in).
@@ -43,6 +46,7 @@ import {
 import {
   responseTypeRegistry,
   KNOWN_DRIFT,
+  KNOWN_REVERSE_DRIFT,
   EXEMPT_SCHEMAS,
 } from "../apps/api/src/openapi/response-type-registry.ts";
 // Relative, like every other cross-workspace import in this file: the root
@@ -293,19 +297,27 @@ function normalizeSpecSchema(
   return { properties, required, open, items };
 }
 
+/** The two accepted-divergence registers, resolved for one registry entry. */
+interface DriftExemptions {
+  /** `KNOWN_DRIFT` — spec-optional while the type is required. */
+  forward: Set<string>;
+  /** `KNOWN_REVERSE_DRIFT` — spec-required while the type is optional. */
+  reverse: Set<string>;
+}
+
 /**
  * Recursively compare a shared-type {@link TypeShape} against a spec schema,
- * collecting required-field drift at every nesting level (nested objects and
- * array element types — not just the top level). Recursion descends only where
- * the shared-type exposes a closed nested shape AND the spec side is a closed
- * object; open objects (`additionalProperties:true` / JSONB / Record) short-
- * circuit so dynamic payloads never false-positive.
+ * collecting required-field drift in BOTH directions at every nesting level
+ * (nested objects and array element types — not just the top level). Recursion
+ * descends only where the shared-type exposes a closed nested shape AND the
+ * spec side is a closed object; open objects (`additionalProperties:true` /
+ * JSONB / Record) short-circuit so dynamic payloads never false-positive.
  */
 function compareShapeToSchema(
   shape: TypeShape,
   specSchema: any,
   prefix: string,
-  known: Set<string>,
+  exempt: DriftExemptions,
   issues: string[],
   depth = 0,
 ): void {
@@ -313,9 +325,30 @@ function compareShapeToSchema(
   const norm = normalizeSpecSchema(specSchema);
   if (!norm) return;
   const specProps = new Set(Object.keys(norm.properties));
+
+  // Reverse direction: the spec guarantees the field, the type says it may be
+  // absent. Harmless on the wire — but the type is the record a consumer reads,
+  // and an optional member is a standing invitation to write a `?? fallback`
+  // for a case the server cannot produce. That is exactly how
+  // `ResolvedRunConfig.generation` / `.input` acquired their "compatibility
+  // with older servers" tolerance while the spec required both.
+  //
+  // Only a field the type declares WITH `?` counts. A field the type omits
+  // entirely is a different fact (the type models a subset of the wire, which
+  // is legal and common), and `required` ∪ `optional` is the declared set —
+  // which is why `optional` is carried through rather than inferred as the
+  // complement of `required`.
+  for (const field of norm.required) {
+    const label = prefix ? `${prefix}.${field}` : field;
+    if (exempt.reverse.has(label) || (!prefix && exempt.reverse.has(field))) continue;
+    if (shape.optional.has(field)) {
+      issues.push(`Field "${label}": OpenAPI=required, shared-type=optional`);
+    }
+  }
+
   for (const field of shape.required) {
     const label = prefix ? `${prefix}.${field}` : field;
-    if (known.has(label) || (!prefix && known.has(field))) continue;
+    if (exempt.forward.has(label) || (!prefix && exempt.forward.has(field))) continue;
     if (!specProps.has(field)) {
       // An open object (additionalProperties / Record) legitimately omits the key.
       if (!norm.open) {
@@ -332,9 +365,9 @@ function compareShapeToSchema(
     if (childShape) {
       const childNorm = normalizeSpecSchema(norm.properties[field]);
       if (childNorm?.items) {
-        compareShapeToSchema(childShape, childNorm.items, `${label}[]`, known, issues, depth + 1);
+        compareShapeToSchema(childShape, childNorm.items, `${label}[]`, exempt, issues, depth + 1);
       } else {
-        compareShapeToSchema(childShape, norm.properties[field], label, known, issues, depth + 1);
+        compareShapeToSchema(childShape, norm.properties[field], label, exempt, issues, depth + 1);
       }
     }
   }
@@ -1906,12 +1939,22 @@ if (schemaGaps.length === 0 && staleResponseSchema.length === 0) {
 // 7. Shared-Type ↔ OpenAPI Response Required-Field Comparison
 // ═══════════════════════════════════════════════════
 //
-// Catches the "spec marks a response field optional that the shared-type marks
-// required" class of drift: the SPA trusts the generated type and reads the
-// field unconditionally, but the spec permits the server to omit it. For each
-// registered (spec-schema ↔ shared-type) pair, assert that every type-required
-// field is also required in the spec — restricted to fields the spec declares
-// as properties, and skipping accepted exceptions in KNOWN_DRIFT.
+// Asserts the spec and the shared-type agree on which response fields are
+// guaranteed. Both directions are drift, for different reasons:
+//
+//   spec-optional + type-required — the SPA trusts the generated type and reads
+//     the field unconditionally, but the spec permits the server to omit it.
+//     Exceptions: KNOWN_DRIFT.
+//   spec-required + type-optional — the server always sends the field, so this
+//     is invisible on the wire, but the type is the record consumers read and a
+//     `?` invites a `?? fallback` branch for a case that cannot happen. This is
+//     how ResolvedRunConfig came to carry a "compatibility with older servers"
+//     tolerance against a CLI with no version negotiation.
+//     Exceptions: KNOWN_REVERSE_DRIFT.
+//
+// Both are restricted to fields the spec declares as properties; the reverse
+// direction is further restricted to fields the TYPE declares (with `?`), so a
+// type that models a subset of the wire is never reported.
 
 console.log(`\n  7. Shared-Type <> OpenAPI Response Required-Field Comparison`);
 console.log(`  ------------------------------------------------------------`);
@@ -1976,11 +2019,14 @@ for (const entry of responseTypeRegistry) {
     continue;
   }
 
-  const known = new Set<string>(KNOWN_DRIFT[driftKey] ?? []);
+  const exempt: DriftExemptions = {
+    forward: new Set<string>(KNOWN_DRIFT[driftKey] ?? []),
+    reverse: new Set<string>(KNOWN_REVERSE_DRIFT[driftKey] ?? []),
+  };
 
   responseCompared++;
   const issues: string[] = [];
-  compareShapeToSchema(shape, specSchema, "", known, issues);
+  compareShapeToSchema(shape, specSchema, "", exempt, issues);
 
   if (issues.length > 0) {
     responseDrifts.push({ description: entry.description, issues });
@@ -1990,7 +2036,10 @@ for (const entry of responseTypeRegistry) {
 console.log(`  Compared: ${responseCompared}/${responseTypeRegistry.length} registry entries\n`);
 
 if (responseDrifts.length === 0) {
-  console.log(`  OK — every registered response schema requires what its shared-type requires.`);
+  console.log(
+    `  OK — every registered response schema and its shared-type agree on which ` +
+      `fields are guaranteed (compared both directions).`,
+  );
 } else {
   exitCode = 1;
   console.log(`  ${responseDrifts.length} entry(ies) with required-field drift:\n`);
@@ -2002,9 +2051,12 @@ if (responseDrifts.length === 0) {
     console.log();
   }
   console.log(
-    `  Tighten the spec response schema's required array to match the shared-type, ` +
-      `or record the divergence in KNOWN_DRIFT in ` +
-      `apps/api/src/openapi/response-type-registry.ts with a justification.`,
+    `  "OpenAPI=optional": tighten the spec response schema's required array, or ` +
+      `record the divergence in KNOWN_DRIFT.\n` +
+      `  "shared-type=optional": drop the \`?\` in @appstrate/shared-types (and the ` +
+      `now-dead null-guards it invited), or record it in KNOWN_REVERSE_DRIFT.\n` +
+      `  Both registers live in apps/api/src/openapi/response-type-registry.ts and ` +
+      `each entry must carry its justification.`,
   );
 }
 
