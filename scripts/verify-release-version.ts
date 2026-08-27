@@ -182,12 +182,32 @@ export interface ReleaseSource {
 }
 
 /**
- * The newest `v*` tag, or `null` when the ref namespace has none.
+ * Lists the repo's `v*` tags, newest first — the ONE ambient input this module
+ * has, isolated behind a function type so callers can supply it.
  *
- * `--sort=-v:refname` is git's own semver-aware ordering, which puts
- * `v1.0.0-beta.53` above `v1.0.0-beta.9` where a lexical sort would not.
+ * `scripts/test/verify-release-version.test.ts` passes a literal list. That is
+ * not a stylistic preference: the tests used to call the real git command, so
+ * they asserted on whatever tags the checkout happened to carry, and they
+ * FAILED in the `Unit tests` job — `.github/workflows/test.yml` checks out with
+ * `actions/checkout` defaults (no `fetch-tags`), so the ref namespace is empty
+ * there and the "no source" throw fired inside a test that expected a floor.
+ * The same emptiness occurs in a shallow clone, a container, or a fresh
+ * worktree. A unit test must not be able to read a different answer depending
+ * on where it runs.
  */
-function newestTag(): string | null {
+export type TagLister = () => string[];
+
+/**
+ * The real lister: `v*` tags from this checkout, in git's own semver-aware
+ * order (`--sort=-v:refname` puts `v1.0.0-beta.53` above `v1.0.0-beta.9`,
+ * where a lexical sort would not).
+ *
+ * Returns `[]` for a checkout with no tags — "no tags" is a legitimate state
+ * this function reports, not an error it raises. A git failure (no repo, git
+ * missing) IS an error and throws, because that is the gate being unable to
+ * look rather than looking and finding nothing.
+ */
+export const gitTags: TagLister = () => {
   const result = Bun.spawnSync({
     cmd: ["git", "tag", "--list", "v*", "--sort=-v:refname"],
     cwd: REPO_ROOT,
@@ -199,11 +219,23 @@ function newestTag(): string | null {
       `git tag --list failed (exit ${result.exitCode}): ${result.stderr.toString().trim()}`,
     );
   }
-  // Prereleases sort BELOW their release in `v:refname`, which is correct, but
-  // a tag that is not valid semver would sort anywhere — drop those first.
-  for (const tag of result.stdout.toString().split("\n")) {
-    const candidate = tag.trim();
-    if (candidate && isValidVersion(normalizeVersion(candidate))) return candidate;
+  return result.stdout
+    .toString()
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+};
+
+/**
+ * The newest tag in `tags` that parses as semver, or `null`.
+ *
+ * Prereleases sort BELOW their release in `v:refname`, which is correct, but a
+ * tag that is not valid semver would sort anywhere — drop those first rather
+ * than let one become the floor.
+ */
+function newestTag(tags: string[]): string | null {
+  for (const tag of tags) {
+    if (isValidVersion(normalizeVersion(tag))) return tag;
   }
   return null;
 }
@@ -212,10 +244,14 @@ function newestTag(): string | null {
  * The release version this checkout must not be behind.
  *
  * Throws rather than degrading when neither source is available — see the
- * header. `env` is a parameter so the test can drive both arms without
- * mutating `process.env` for the whole test process.
+ * header. Both inputs are parameters: `env` so the test can drive both arms
+ * without mutating `process.env` for the whole test process, `listTags` so it
+ * never depends on the checkout's tags (see {@link TagLister}).
  */
-export function resolveReleaseSource(env: Record<string, string | undefined>): ReleaseSource {
+export function resolveReleaseSource(
+  env: Record<string, string | undefined>,
+  listTags: TagLister = gitTags,
+): ReleaseSource {
   const refName = env.GITHUB_REF_NAME?.trim();
   if (env.GITHUB_REF_TYPE === "tag" && refName && isValidVersion(normalizeVersion(refName))) {
     return {
@@ -225,7 +261,7 @@ export function resolveReleaseSource(env: Record<string, string | undefined>): R
     };
   }
 
-  const tag = newestTag();
+  const tag = newestTag(listTags());
   if (tag) {
     return {
       version: normalizeVersion(tag),

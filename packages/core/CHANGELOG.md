@@ -61,18 +61,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **`isMultipleFileField` now agrees with `isFileField`** (`./form`) — the two
-  predicates were two implementations. `isFileField` delegates to the canonical
-  `@appstrate/afps-shared/file-field` rule ("`format: "uri"` plus a DECLARED
-  `contentMediaType`"); `isMultipleFileField` kept a local copy testing
+  predicates were two rules. `isFileField` asked "`format: "uri"` plus a
+  DECLARED `contentMediaType`"; `isMultipleFileField` tested
   `!!items.contentMediaType`. `{ type: "array", items: { format: "uri",
 contentMediaType: "" } }` is the input that separated them — a file field that
   was not multiple — and `mapAfpsToRjsf` therefore emitted `ui:widget: "file"`
   WITHOUT `multiple` for it, i.e. a single-file picker bound to an array
-  property. Both now share one predicate, so an empty-but-present
-  `contentMediaType` is a file field on both. Whether the media type is
-  well-formed is the manifest validator's job, not a UI predicate's; this is the
-  reading `apps/api`'s inline-run synthesiser already documents and relies on.
-  No export was added or removed.
+  property. Both are now derived from ONE single-file-node predicate, so an
+  empty-but-present `contentMediaType` is a file field on both. Whether the
+  media type is well-formed is the manifest validator's job, not a UI
+  predicate's; this is the reading `apps/api`'s inline-run synthesiser already
+  documents and relies on. No export was added or removed.
+
+  That predicate stays a copy of `@appstrate/afps-shared/file-field`'s rather
+  than an import of it, deliberately: core ships as source, so a consumer's
+  `tsc` compiles these files against the `@appstrate/afps-shared@^0.5.0` its own
+  install resolves, and published 0.5.0 exports only `isFileField` from that
+  subpath. Importing the rest typechecks in the monorepo and breaks every
+  consumer on npm. `packages/core/test/form.test.ts` asserts the two agree
+  table-wide so they cannot drift while they are apart; merging them needs an
+  `@appstrate/afps-shared` release exporting the helpers and a floor bump here,
+  in that order.
 
 - **`guardedFetch` follows the WHATWG 301/302 method rule** (`./ssrf`) — the
   downgrade clause read `(301 | 302) && method !== "HEAD" → GET`, so a 302'd

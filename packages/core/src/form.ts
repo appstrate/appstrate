@@ -20,12 +20,6 @@
 // ─── JSON Schema Types (from @types/json-schema, draft-07 — compatible with 2020-12) ─
 
 import type { JSONSchema7, JSONSchema7Type, JSONSchema7TypeName } from "json-schema";
-import {
-  isFileField as isFileFieldShared,
-  isMultipleFileField as isMultipleFileFieldShared,
-  resolveItems,
-  resolveType,
-} from "@appstrate/afps-shared/file-field";
 export type { JSONSchema7, JSONSchema7Type, JSONSchema7TypeName };
 
 /** A JSON Schema object with typed properties — the root of input/output schemas. */
@@ -73,23 +67,110 @@ export interface SchemaWrapper {
 }
 
 // ─── File Field Detection ────────────────────────────────────────────────────
+//
+// DELIBERATELY A PARALLEL IMPLEMENTATION of `@appstrate/afps-shared/file-field`,
+// not an import of it. Do not "deduplicate" this back into an import — that is
+// the change CI rejects.
+//
+// WHY. `@appstrate/core` is PUBLISHED to npm as source (`src/**` as `.ts`, no
+// build step, no `.d.ts` barrier), so a consumer's own `tsc` compiles these
+// files against whatever `@appstrate/afps-shared` its install resolves. Our
+// floor is the `^0.5.0` range in `packages/core/package.json`, and published
+// 0.5.0 exports `isFileField` from `./file-field` and NOTHING else — no
+// `isMultipleFileField`, no `resolveItems`, no `resolveType`. Importing those
+// typechecks here (the workspace resolves afps-shared to local source) and
+// fails for every consumer on npm (TS2305/TS2459). `scripts/verify-package-
+// resolves.ts` — CI job "Package resolves for consumers (packages/core)" —
+// packs the real artifact into a clean npm project and is what catches it.
+//
+// WHAT WOULD LET THEM MERGE. Publish an `@appstrate/afps-shared` release that
+// exports the four helpers, then raise core's floor to it (`packages/core/
+// package.json` → `dependencies["@appstrate/afps-shared"]`). Only then can this
+// block become `export { isFileField, isMultipleFileField } from
+// "@appstrate/afps-shared/file-field"`.
+//
+// HOW THE COPIES ARE HELD TOGETHER MEANWHILE. Both sides derive every predicate
+// from ONE single-file-node rule, so `isFileField` and `isMultipleFileField`
+// cannot disagree about the same array node — the defect this replaced, where
+// core's `isMultipleFileField` tested `!!items.contentMediaType` (truthiness)
+// while `isFileField` tested "declared", so `contentMediaType: ""` rendered a
+// single-file picker bound to an array property. `packages/core/test/
+// form.test.ts` pins that input AND asserts table-wide parity against the
+// shared module, which the workspace resolves to local source — so a future
+// divergence on either side fails a core test at dev time, long before the
+// published floor could hide it.
 
 /**
- * Detect a file field: format "uri" + contentMediaType present (single or array).
- * Delegates to the canonical `@appstrate/afps-shared` predicate (single source
- * of truth) — the observable behaviour is unchanged for core consumers.
+ * Narrow a schema node to an indexable object, or `undefined`.
+ *
+ * Typed as `unknown`-in on purpose, mirroring the shared module: callers reach
+ * `@appstrate/core/form` through `asJSONSchemaObject` casts of JSONB columns and
+ * dynamic manifests, so a node can carry values `JSONSchema7` says are
+ * impossible. Reading it structurally is what keeps the two rules identical at
+ * RUNTIME and not merely where the types happen to agree.
  */
-export function isFileField(prop: JSONSchema7): boolean {
-  return isFileFieldShared(prop);
+function asNode(schema: unknown): Record<string, unknown> | undefined {
+  return schema && typeof schema === "object" ? (schema as Record<string, unknown>) : undefined;
 }
 
 /**
- * Detect a multiple-files field (array of file URIs). Delegates to the same
- * canonical predicate as {@link isFileField}, so the two cannot disagree about
- * one node.
+ * A single file field: `format: "uri"` + a DECLARED `contentMediaType`.
+ *
+ * "Declared" is `!= null && !== false`, deliberately NOT truthiness: the
+ * keyword's presence is what marks the field as a file, and whether its value is
+ * a well-formed media type is the manifest validator's job, not this predicate's.
+ * `contentMediaType: ""` is therefore a file field — the reading
+ * `apps/api/src/services/inline-run.ts` documents and relies on.
+ */
+function isSingleFileNode(schema: unknown): boolean {
+  const node = asNode(schema);
+  if (!node) return false;
+  return node.format === "uri" && node.contentMediaType != null && node.contentMediaType !== false;
+}
+
+/**
+ * Resolve a node's `items` schema, handling the JSON Schema boolean / tuple
+ * forms (`items: false` → none; `items: [first, …]` → first object entry).
+ */
+function resolveItems(schema: unknown): Record<string, unknown> | undefined {
+  const node = asNode(schema);
+  const items = node?.items;
+  if (!items || typeof items === "boolean") return undefined;
+  if (Array.isArray(items)) {
+    const first = items[0];
+    return first && typeof first === "object" ? (first as Record<string, unknown>) : undefined;
+  }
+  if (typeof items === "object") return items as Record<string, unknown>;
+  return undefined;
+}
+
+/** Resolve a node's `type` (JSON Schema allows a union array — first wins). */
+function resolveType(schema: unknown): string | undefined {
+  const node = asNode(schema);
+  if (!node) return undefined;
+  if (typeof node.type === "string") return node.type;
+  if (Array.isArray(node.type) && node.type.length > 0 && typeof node.type[0] === "string") {
+    return node.type[0];
+  }
+  return undefined;
+}
+
+/**
+ * Detect an AFPS file field: a single string-URI node with `contentMediaType`,
+ * OR an array whose items are such a node.
+ */
+export function isFileField(prop: JSONSchema7): boolean {
+  return isSingleFileNode(prop) || isMultipleFileField(prop);
+}
+
+/**
+ * Detect a MULTIPLE-files field: an array whose `items` are a single file node.
+ *
+ * Shares {@link isSingleFileNode} with {@link isFileField} by construction, so
+ * the two can never disagree about the same array node.
  */
 export function isMultipleFileField(prop: JSONSchema7): boolean {
-  return isMultipleFileFieldShared(prop);
+  return resolveType(prop) === "array" && isSingleFileNode(resolveItems(prop));
 }
 
 /** Whether a schema has any file fields (format: "uri" + contentMediaType). */

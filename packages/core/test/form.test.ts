@@ -2,12 +2,17 @@
 
 import { describe, it, expect } from "bun:test";
 import {
+  isFileField as sharedIsFileField,
+  isMultipleFileField as sharedIsMultipleFileField,
+} from "@appstrate/afps-shared/file-field";
+import {
   asJSONSchemaObject,
   getOrderedKeys,
   isFileField,
   isMultipleFileField,
   mapAfpsToRjsf,
   authorDefaults,
+  type JSONSchema7,
   type JSONSchemaObject,
   type SchemaWrapper,
 } from "../src/form.ts";
@@ -67,6 +72,72 @@ describe("isFileField / isMultipleFileField", () => {
       schema: { type: "object", properties: { links: prop } },
     });
     expect(uiSchema.links).toBeUndefined();
+  });
+});
+
+// `@appstrate/core/form` carries its own copy of the AFPS file-field rule
+// instead of importing `@appstrate/afps-shared/file-field`, because core ships
+// as SOURCE to npm and its declared floor — `@appstrate/afps-shared@^0.5.0` —
+// exports only `isFileField` from that subpath. See the block comment above
+// `isFileField` in `../src/form.ts` for the full reasoning and for what would
+// let the two merge.
+//
+// This is the thing that keeps the parallel copies honest. The import below
+// resolves to LOCAL workspace source (tests are not part of the published
+// `files` list, so nothing here reaches a consumer), so editing one side and
+// not the other fails here at dev time — the drift that produced the
+// `contentMediaType: ""` bug is exactly what this table would have caught.
+describe("file-field rule parity with @appstrate/afps-shared", () => {
+  const nodes: Array<[string, unknown]> = [
+    ["single file", { type: "string", format: "uri", contentMediaType: "application/pdf" }],
+    ["single file, EMPTY media type", { type: "string", format: "uri", contentMediaType: "" }],
+    ["uri without contentMediaType", { type: "string", format: "uri" }],
+    ["plain string", { type: "string" }],
+    [
+      "array of files",
+      { type: "array", items: { type: "string", format: "uri", contentMediaType: "image/png" } },
+    ],
+    [
+      "array of files, EMPTY media type",
+      { type: "array", items: { type: "string", format: "uri", contentMediaType: "" } },
+    ],
+    ["array of plain URIs", { type: "array", items: { type: "string", format: "uri" } }],
+    ["array with items: false", { type: "array", items: false }],
+    [
+      "tuple items, first is a file",
+      { type: "array", items: [{ format: "uri", contentMediaType: "text/csv" }] },
+    ],
+    [
+      "union type, array first",
+      {
+        type: ["array", "null"],
+        items: { type: "string", format: "uri", contentMediaType: "image/png" },
+      },
+    ],
+    // Impossible under `JSONSchema7`, reachable through `asJSONSchemaObject`
+    // casts of JSONB columns and dynamic manifests — which is why both rules
+    // read the node structurally rather than trusting the declared type.
+    ["contentMediaType: false", { format: "uri", contentMediaType: false }],
+    ["not an object", "nope"],
+    ["null", null],
+  ];
+
+  for (const [label, node] of nodes) {
+    it(`agrees on: ${label}`, () => {
+      expect(isFileField(node as JSONSchema7)).toBe(sharedIsFileField(node));
+      expect(isMultipleFileField(node as JSONSchema7)).toBe(sharedIsMultipleFileField(node));
+    });
+  }
+
+  // Control: the table must contain both answers, or "agrees" would hold for a
+  // pair of predicates that always returned the same constant.
+  it("covers both answers", () => {
+    const answers = nodes.map(([, node]) => sharedIsFileField(node));
+    expect(answers).toContain(true);
+    expect(answers).toContain(false);
+    const multiple = nodes.map(([, node]) => sharedIsMultipleFileField(node));
+    expect(multiple).toContain(true);
+    expect(multiple).toContain(false);
   });
 });
 

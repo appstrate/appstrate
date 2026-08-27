@@ -13,6 +13,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   findVersionSites,
+  gitTags,
   isStale,
   resolveReleaseSource,
   type ReleaseSource,
@@ -74,32 +75,118 @@ describe("findVersionSites", () => {
   });
 });
 
+// Every case here injects the tag list. These tests USED to call the real `git
+// tag --list` through `resolveReleaseSource({})`, which made them assert on
+// whatever the checkout happened to carry: green on a developer's full clone,
+// red in `.github/workflows/test.yml`'s `Unit tests` job, whose
+// `actions/checkout` has no `fetch-tags` and therefore no tags at all. Adding
+// `fetch-tags` to that workflow would have fixed the symptom and left a unit
+// test that still breaks in the next shallow clone, container or fresh
+// worktree. The ambient read is the defect; injection removes it.
 describe("resolveReleaseSource", () => {
+  /** A checkout carrying tags — deliberately unordered-looking, see below. */
+  const tags = ["v1.2.3", "v1.2.2", "v1.0.0-beta.53"];
+  /** A checkout with no `v*` tags: shallow clone, CI default, fresh worktree. */
+  const noTags: string[] = [];
+
   it("takes the tag being released, EXACTLY, on a tag push", () => {
     // Same value release.yml feeds the Dockerfile as APP_VERSION.
-    const source = resolveReleaseSource({
-      GITHUB_REF_TYPE: "tag",
-      GITHUB_REF_NAME: "v1.2.3",
-    });
+    const source = resolveReleaseSource(
+      { GITHUB_REF_TYPE: "tag", GITHUB_REF_NAME: "v1.2.3" },
+      () => noTags,
+    );
     expect(source).toMatchObject({ version: "1.2.3", mode: "exact" });
+  });
+
+  it("prefers the release ref over the tag list — the ref is the release identity", () => {
+    // Control for the case above: with tags present AND a tag ref, the ref
+    // still wins. Without this half, "exact" could be an artefact of the empty
+    // list rather than of the ref being read at all.
+    const source = resolveReleaseSource(
+      { GITHUB_REF_TYPE: "tag", GITHUB_REF_NAME: "v0.9.0" },
+      () => tags,
+    );
+    expect(source).toMatchObject({ version: "0.9.0", mode: "exact" });
   });
 
   it("ignores a BRANCH ref — a PR run is not a release", () => {
     // `GITHUB_REF_NAME` is populated on every run; only `GITHUB_REF_TYPE=tag`
     // makes it a release identity. Reading the name alone would make a branch
     // called `v2` a release, and would make `1234/merge` unparseable noise.
-    const source = resolveReleaseSource({
-      GITHUB_REF_TYPE: "branch",
-      GITHUB_REF_NAME: "1234/merge",
-    });
-    expect(source.mode).toBe("floor");
+    const source = resolveReleaseSource(
+      { GITHUB_REF_TYPE: "branch", GITHUB_REF_NAME: "1234/merge" },
+      () => tags,
+    );
+    expect(source).toMatchObject({ version: "1.2.3", mode: "floor" });
+  });
+
+  it("ignores a branch NAMED like a tag", () => {
+    const source = resolveReleaseSource(
+      { GITHUB_REF_TYPE: "branch", GITHUB_REF_NAME: "v9.9.9" },
+      () => tags,
+    );
+    expect(source).toMatchObject({ version: "1.2.3", mode: "floor" });
   });
 
   it("falls back to the newest repo tag, as a FLOOR", () => {
-    const source = resolveReleaseSource({});
-    expect(source.mode).toBe("floor");
-    expect(source.version).toMatch(/^\d+\.\d+\.\d+/);
-    expect(source.origin).toContain("newest git tag");
+    const source = resolveReleaseSource({}, () => tags);
+    expect(source).toMatchObject({ version: "1.2.3", mode: "floor" });
+    expect(source.origin).toContain("newest git tag v1.2.3");
+  });
+
+  it("takes the FIRST semver-parseable tag, skipping ones that sort anywhere", () => {
+    // The list arrives in git's `-v:refname` order, so position 0 is already
+    // the newest — but a non-semver tag has no defined position in that order
+    // and must not become the floor by being first.
+    const source = resolveReleaseSource({}, () => ["v-nightly", "vNEXT", ...tags]);
+    expect(source).toMatchObject({ version: "1.2.3", mode: "floor" });
+  });
+
+  it("THROWS when there is neither a release ref nor a tag, naming the fix", () => {
+    // The gate refuses to degrade to "consistency only" — see the module
+    // header. This is the arm the `Unit tests` job was hitting by accident.
+    expect(() => resolveReleaseSource({}, () => noTags)).toThrow(/no `v\*` tag and no release ref/);
+    expect(() => resolveReleaseSource({}, () => noTags)).toThrow(/fetch-tags/);
+  });
+});
+
+// The one place the real ambient read is exercised. It asserts only what holds
+// in EVERY checkout — including one with zero tags, which is the state that
+// broke the suite — so it can verify that `git tag --list` runs and that its
+// output is parsed into the shape `resolveReleaseSource` consumes, without
+// depending on which tags exist.
+describe("gitTags", () => {
+  it("reads this checkout's `v*` tags without requiring any to exist", () => {
+    const tags = gitTags();
+    expect(Array.isArray(tags)).toBe(true);
+    for (const tag of tags) {
+      expect(tag).toMatch(/^v\S+$/);
+    }
+    // No blank entries: the trailing newline of `git tag --list` is dropped,
+    // which is what would otherwise make an empty repo look like it has one
+    // tag named "".
+    expect(tags).not.toContain("");
+  });
+
+  it("is accepted by resolveReleaseSource as its default source", () => {
+    // Composes the real lister with the resolver WITHOUT asserting a version:
+    // with tags it yields a floor, without them it throws the actionable
+    // error. Both are correct, and asserting either one specifically is what
+    // made the suite depend on the checkout.
+    const attempt = (): ReleaseSource | "no source" => {
+      try {
+        return resolveReleaseSource({}, gitTags);
+      } catch {
+        return "no source";
+      }
+    };
+    const result = attempt();
+    if (result === "no source") {
+      expect(gitTags()).toHaveLength(0);
+    } else {
+      expect(result.mode).toBe("floor");
+      expect(gitTags().length).toBeGreaterThan(0);
+    }
   });
 });
 

@@ -2,9 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Canonical AFPS file-field predicate — the SINGLE source of truth shared by
- * `@appstrate/core/form` (apps/web SchemaForm, apps/api) and
- * `@appstrate/afps-runtime`'s platform-prompt composer.
+ * Canonical AFPS file-field predicate, used by `@appstrate/afps-runtime`'s
+ * platform-prompt composer.
  *
  * AFPS file fields are JSON Schema string nodes carrying `format: "uri"` plus a
  * `contentMediaType` (single file), or an array whose `items` are such nodes
@@ -17,6 +16,21 @@
  * Accepts a permissive `unknown` input narrowed internally so both the
  * JSONSchema7-typed core call site and the `unknown`-typed runtime call site
  * compile against one definition.
+ *
+ * ── `@appstrate/core/form` HAS A PARALLEL COPY OF THIS RULE, ON PURPOSE ──
+ * Only `isFileField` is exported from the `@appstrate/afps-shared@0.5.0` on
+ * npm, which is the floor `@appstrate/core` declares (`^0.5.0`). Core ships as
+ * source, so a consumer's `tsc` compiles core's files against THAT install —
+ * importing `isMultipleFileField` / `resolveItems` / `resolveType` from here
+ * typechecks in this workspace and fails on npm. Core therefore carries its own
+ * copy, derived from the same single-file-node rule; `packages/core/test/
+ * form.test.ts` asserts the two agree table-wide, so a change made HERE and not
+ * there (or vice versa) fails that test.
+ *
+ * Merging them is a release operation, in this order: publish an
+ * `@appstrate/afps-shared` release exporting these helpers → raise core's
+ * `dependencies["@appstrate/afps-shared"]` floor to it → replace core's copy
+ * with an import. Not before.
  */
 
 /** Narrow an `unknown` schema node to an indexable object, or `undefined`. */
@@ -79,10 +93,12 @@ export function isFileField(schema: unknown): boolean {
  *
  * Shares {@link isSingleFileNode} with {@link isFileField} by construction, so
  * the two can never disagree about the same array node — they did, when
- * `@appstrate/core/form` carried its own copy that tested
- * `!!items.contentMediaType`: for `contentMediaType: ""` the field was a file
- * field that was not multiple, and the RJSF adapter rendered a single-file
- * widget bound to an array property.
+ * `@appstrate/core/form`'s `isMultipleFileField` tested
+ * `!!items.contentMediaType` (truthiness) against an `isFileField` that tested
+ * "declared": for `contentMediaType: ""` the field was a file field that was
+ * not multiple, and the RJSF adapter rendered a single-file widget bound to an
+ * array property. Core's copy is now derived the same way; see the header for
+ * why it is still a copy.
  */
 export function isMultipleFileField(schema: unknown): boolean {
   return resolveType(schema) === "array" && isSingleFileNode(resolveItems(schema));

@@ -87,20 +87,36 @@ export function createResumableRedis(url: string): Redis {
   return redis;
 }
 
+/** How the store obtains its client. See {@link configureResumableStore}. */
+export type ResumableRedisFactory = (url: string) => Redis;
+
+let createClient: ResumableRedisFactory = createResumableRedis;
+
 /**
  * Point the store at the platform's Redis. Called once from `chatModule.init`
  * with `ctx.redisUrl` — the module reads no `process.env` of its own, so the
  * store and the rest of the platform can never disagree about which tier is
  * running. `null` (progressive-infra tier 0) keeps the in-memory store.
+ *
+ * `factory` exists so a test can hold the client this module opens and observe
+ * that shutdown really closed it — the module owns the client's whole lifetime
+ * and hands out no reference to it, so without this seam "did it close?" is
+ * unobservable and the only assertion left is the weaker "was the singleton
+ * replaced?". Production never passes it; `mock.module()` is banned repo-wide
+ * (see the root CLAUDE.md), so injection is the way.
  */
-export function configureResumableStore(url: string | null): void {
+export function configureResumableStore(
+  url: string | null,
+  factory: ResumableRedisFactory = createResumableRedis,
+): void {
   redisUrl = url;
+  createClient = factory;
 }
 
 /** Build the store once: Redis when configured, else in-memory (single replica). */
 function buildStore(): ResumableStreamStore {
   if (redisUrl) {
-    client = createResumableRedis(redisUrl);
+    client = createClient(redisUrl);
     logger.info("chat resumable store: redis");
     return createIoredisResumableStreamStore(client);
   }
@@ -125,8 +141,13 @@ export async function closeResumableStore(): Promise<void> {
   context = null;
   client = null;
   if (!open) return;
-  // `quit()` drains in-flight commands; a client that cannot reach Redis
-  // rejects it (finite retry budget) and is torn down unconditionally.
+  // `quit()` drains in-flight commands, and it does NOT need a deadline of its
+  // own: ioredis only sends the QUIT command on a client whose connection is
+  // `ready`/`connect`, and short-circuits to an immediate teardown otherwise.
+  // Measured against an unreachable host with this client's options, from all
+  // three reachable states (fresh, mid-reconnect-backoff, after a rejected
+  // command): resolves in ≤1 ms, with the socket flipping to `end` just after.
+  // The `.catch` is the belt for a reject, not for a hang.
   await open.quit().catch(() => open.disconnect());
 }
 

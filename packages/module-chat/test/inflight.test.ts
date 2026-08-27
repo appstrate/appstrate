@@ -27,9 +27,25 @@ describe("inflight turn registry", () => {
   });
 
   it("is bounded by the timeout when a turn never settles", async () => {
-    trackTurn(new Promise<void>(() => {})); // never resolves
+    // The registry is a module singleton, and `bun test` shares module state
+    // across every file in a run — so a turn left pending here stays pending
+    // for the whole run, and the next suite that calls `chatModule.shutdown()`
+    // waits out its 25s drain budget against a 5s per-test timeout. That is how
+    // `resumable-lifecycle.test.ts` passed alone and timed out in CI. The turn
+    // must be wedged for the assertion and released after it.
+    let release!: () => void;
+    const wedged = new Promise<void>((resolve) => (release = resolve));
+    trackTurn(wedged);
+
     const start = Date.now();
     await drainTurns(50);
     expect(Date.now() - start).toBeLessThan(2000);
+
+    release();
+    // Deregistration is `promise.finally`, so it lands a microtask later — the
+    // drain is what waits for it, and its 0 return is the proof the registry is
+    // clean for whatever runs next.
+    expect(await drainTurns(1000)).toBe(1);
+    expect(await drainTurns(1000)).toBe(0);
   });
 });
