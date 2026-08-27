@@ -352,6 +352,112 @@ describe("guardedFetch — SSRF", () => {
     await expect(run(DEFAULT_MAX_REDIRECTS + 1)).rejects.toBeInstanceOf(SsrfBlockedError);
   });
 
+  // A `ReadableStream` body is single-use, and hop 0 consumes it. Any hop that
+  // PRESERVES the body is therefore about to re-send a locked stream — the
+  // runtime raises an opaque `TypeError: body already used` from inside
+  // `fetch`, naming neither the stream nor the redirect.
+  //
+  // This is reachable in production: `apps/api/src/services/credential-proxy/core.ts`
+  // forwards its caller's body straight through (setting `duplex: "half"` for
+  // the stream case) and takes the default redirect budget. 307/308 have always
+  // preserved method + body, so the shape predates the 301/302 conformance fix
+  // — that fix only widened which statuses land on it.
+  describe("a stream body cannot be replayed across a redirect", () => {
+    /** One 3xx of the given status, then a terminal 200. */
+    function redirectThenOk(status: number, location: string): RequestInit[] {
+      const seen: RequestInit[] = [];
+      let n = 0;
+      globalThis.fetch = (async (_input: string | URL | Request, reqInit?: RequestInit) => {
+        seen.push(reqInit ?? {});
+        n += 1;
+        return n === 1
+          ? new Response(null, { status, headers: { location } })
+          : new Response("done", { status: 200 });
+      }) as unknown as typeof fetch;
+      return seen;
+    }
+
+    function stream(text: string): ReadableStream<Uint8Array> {
+      return new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(text));
+          controller.close();
+        },
+      });
+    }
+
+    // 307 (always preserved the body) and 302+PUT (preserved since the WHATWG
+    // conformance fix) are the two ways in.
+    for (const [status, method] of [
+      [307, "POST"],
+      [308, "PUT"],
+      [302, "PUT"],
+      [301, "PATCH"],
+    ] as const) {
+      it(`${status} + ${method} names the stream instead of failing in the transport`, async () => {
+        redirectThenOk(status, "https://same.example/next");
+        await expect(
+          guardedFetch(
+            "https://same.example/thing",
+            { method, body: stream("payload") },
+            { resolve: resolverFor({ "same.example": ["203.0.113.7"] }) },
+          ),
+        ).rejects.toThrow(/ReadableStream and was already consumed/);
+      });
+    }
+
+    // Acceptance control 1 — a REPLAYABLE body on the very same hop still
+    // follows through, so the guard is about the stream and not about "any
+    // body on a body-preserving redirect".
+    it("a string body on the same redirect is replayed and followed", async () => {
+      const seen = redirectThenOk(307, "https://same.example/next");
+      const res = await guardedFetch(
+        "https://same.example/thing",
+        { method: "POST", body: "payload" },
+        { resolve: resolverFor({ "same.example": ["203.0.113.7"] }) },
+      );
+      expect(res.status).toBe(200);
+      expect(seen).toHaveLength(2);
+      expect(seen[1]!.method).toBe("POST");
+      expect(seen[1]!.body).toBe("payload");
+    });
+
+    // Acceptance control 2 — a hop that DROPS the body never reaches the guard,
+    // so a streaming POST through a 303/302 still completes.
+    it("a redirect that downgrades to GET drops the stream and completes", async () => {
+      for (const status of [302, 303] as const) {
+        const seen = redirectThenOk(status, "https://same.example/next");
+        const res = await guardedFetch(
+          "https://same.example/thing",
+          { method: "POST", body: stream("payload") },
+          { resolve: resolverFor({ "same.example": ["203.0.113.7"] }) },
+        );
+        expect(res.status).toBe(200);
+        expect(seen[1]!.method).toBe("GET");
+        expect(seen[1]!.body).toBeUndefined();
+      }
+    });
+
+    // Acceptance control 3 — no redirect at all: a streaming request is
+    // untouched by any of this.
+    it("a stream body with no redirect in the chain is sent as-is", async () => {
+      const seen: RequestInit[] = [];
+      globalThis.fetch = (async (_input: string | URL | Request, reqInit?: RequestInit) => {
+        seen.push(reqInit ?? {});
+        return new Response("done", { status: 200 });
+      }) as unknown as typeof fetch;
+      const body = stream("payload");
+      const res = await guardedFetch(
+        "https://same.example/thing",
+        { method: "PUT", body },
+        { resolve: resolverFor({ "same.example": ["203.0.113.7"] }) },
+      );
+      expect(res.status).toBe(200);
+      expect(seen).toHaveLength(1);
+      expect(seen[0]!.body).toBe(body);
+    });
+  });
+
   it("stops after maxRedirects", async () => {
     globalThis.fetch = (async () =>
       new Response(null, {

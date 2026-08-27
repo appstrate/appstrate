@@ -72,9 +72,20 @@ const MANIFEST: IntegrationManifest = localIntegrationManifest({
 
 // The local-source integration references an mcp-server package; the launcher
 // resolves its runnable server config. Injected here so the unit test needs no DB.
-const fakeMcpResolver: McpServerResolver = async () => ({
-  server: { type: "python", entry_point: "./server.py" },
-});
+const SERVER_ID = "@scope/connect-it";
+const SERVER_VERSION = "1.4.2";
+const resolverCalls: { packageId: string; orgId: string; pin: string | null }[] = [];
+// The real resolver honours the `source.server.version` RANGE and answers with
+// a CONCRETE published version; the fixture mirrors that contract (a resolver
+// that echoed the range back would produce a `?version=^1.0.0` the byte route
+// 404s).
+const fakeMcpResolver: McpServerResolver = async (packageId, orgId, pin) => {
+  resolverCalls.push({ packageId, orgId, pin });
+  return {
+    server: { type: "python", entry_point: "./server.py" },
+    version: SERVER_VERSION,
+  };
+};
 
 /**
  * Mirror of the sidecar's result-channel encryption
@@ -209,8 +220,22 @@ describe("buildConnectLoginSpec", () => {
     const spec = await buildConnectLoginSpec(execution(), fakeMcpResolver);
     expect(spec.integrationId).toBe("@scope/connect-it");
     expect(spec.toolAllowlist).toEqual([]);
-    // The runnable server config comes from the referenced mcp-server package.
-    expect(spec.manifest.server).toEqual({ type: "python", entry_point: "./server.py" });
+    // The runnable server config comes from the referenced mcp-server package —
+    // INCLUDING which package it is and which concrete version, without which
+    // the sidecar cannot fetch the bytes (it hard-fails a local spec that names
+    // no `packageId`, and the byte route rejects an absent `?version=`).
+    expect(spec.manifest.server).toEqual({
+      type: "python",
+      entry_point: "./server.py",
+      packageId: SERVER_ID,
+      version: SERVER_VERSION,
+    });
+    // The pin handed to the resolver is the manifest RANGE, scoped to the run's org.
+    expect(resolverCalls.at(-1)).toEqual({
+      packageId: SERVER_ID,
+      orgId: "o",
+      pin: "^1.0.0",
+    });
     expect(spec.connectLogin).toBeDefined();
     expect(spec.connectLogin!).toMatchObject({
       toolName: "login",
@@ -249,6 +274,19 @@ describe("buildConnectLoginSpec", () => {
     };
     ex.manifest = remote as unknown as IntegrationManifest;
     await expect(buildConnectLoginSpec(ex, fakeMcpResolver)).rejects.toThrow(/no spawnable server/);
+  });
+
+  it("omits server.version for a system mcp-server (byte route serves it by id alone)", async () => {
+    const systemResolver: McpServerResolver = async () => ({
+      server: { type: "python", entry_point: "./server.py" },
+      version: null,
+    });
+    const spec = await buildConnectLoginSpec(execution(), systemResolver);
+    expect(spec.manifest.server).toEqual({
+      type: "python",
+      entry_point: "./server.py",
+      packageId: SERVER_ID,
+    });
   });
 
   it("throws when the referenced mcp-server cannot be resolved", async () => {

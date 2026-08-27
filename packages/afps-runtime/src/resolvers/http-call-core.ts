@@ -1142,7 +1142,12 @@ function decodeBase64Body(
     decoded = new Uint8Array(buf.byteLength);
     decoded.set(buf);
   } catch (err) {
-    throw new ResolverError("RESOLVER_BODY_INVALID", "Invalid base64 in fromBytes", {
+    // `undefined` is the `details` bag: `cause` belongs in the 4th argument
+    // (`ErrorOptions`), which is what sets `error.cause` and lets
+    // `formatErrorChain` walk it. Passed positionally as `details` it was
+    // serialized onto the wire as `details.cause` instead, and `error.cause`
+    // stayed unset while ESLint's `preserve-caught-error` read as satisfied.
+    throw new ResolverError("RESOLVER_BODY_INVALID", "Invalid base64 in fromBytes", undefined, {
       cause: err,
     });
   }
@@ -1838,28 +1843,129 @@ function compileUriComponent(part: string, crossSlash: boolean): string {
   return escapeUriLiteral(part).replace(/\*\*|\*/g, (m) => (m === "**" ? doubleStar : "[^/]*"));
 }
 
-function compileAuthorizedUriPattern(pattern: string): string {
-  const schemeMatch = pattern.match(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//);
-  if (!schemeMatch) {
+const URI_PATTERN_SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
+
+/**
+ * Count non-overlapping occurrences of `needle` in `haystack`.
+ * `needle` is always one of the wildcard placeholders below (never empty).
+ */
+function countOccurrences(haystack: string, needle: string): number {
+  let count = 0;
+  let from = 0;
+  for (;;) {
+    const at = haystack.indexOf(needle, from);
+    if (at === -1) return count;
+    count += 1;
+    from = at + needle.length;
+  }
+}
+
+/**
+ * Put the PATTERN through the same WHATWG normalisation the target goes
+ * through, so the two sides are compared in one representation.
+ *
+ * {@link matchesAuthorizedUriSpec} normalises the target (that is what closes
+ * the `?`/`#` authority-smuggling bypass). Normalising only ONE side breaks
+ * every literal whose canonical form differs from how its author spelled it —
+ * both measured before this existed:
+ *
+ *   - `("https://api.example.com", "https://api.example.com")` → false.
+ *     `URL.toString()` gives the empty path a `/`, the compiled pattern is
+ *     `$`-anchored without one, and AFPS documents "literal URLs (no
+ *     wildcards) → exact equality".
+ *   - `("https://a.com/v1/{id}", "https://a.com/v1/{id}")` → false. The target
+ *     percent-encodes to `%7Bid%7D`; the raw pattern still says `{id}`. Same
+ *     class for space, `|`, `^` and a backtick.
+ *
+ * The pattern cannot simply go through `new URL()`: `*` and `**` are not
+ * URL-legal in every position they may appear. So each wildcard is first
+ * masked with an all-lowercase ASCII placeholder — which survives host
+ * lowercasing and path percent-encoding untouched — the masked pattern is
+ * normalised, and the placeholders are restored. If a placeholder does not
+ * come back out exactly as many times as it went in (IDNA folding, an
+ * unforeseen encoding pass), or the masked pattern does not parse at all, we
+ * return `undefined` and the caller compiles the raw pattern as before.
+ *
+ * Because both sides are now canonical, three things that used to be
+ * non-matches now match. All three are the WHATWG reading of "same URL" and
+ * none of them widens the authority boundary:
+ *
+ *   1. **Default ports are elided on both sides.** `https://*.wrike.com/api/**`
+ *      now matches `https://www.wrike.com:443/api/x` (`:443` IS the https
+ *      authority), and — new here — a pattern that spells `:443` explicitly
+ *      finally matches anything at all; before, `https://*.wrike.com:443/api/**`
+ *      matched neither the ported nor the unported target. A NON-default port
+ *      is still part of the host component and still has to match.
+ *   2. **Scheme and host are case-folded on both sides.** Target-side folding
+ *      already happened; the pattern side did not, so `https://*.SALESFORCE.com/**`
+ *      matched nothing. Host and scheme are case-insensitive per RFC 3986; the
+ *      PATH remains case-sensitive on both sides.
+ *   3. **Dot-segments are resolved before matching.** This one TIGHTENS:
+ *      `https://slack.com/api/../../evil` no longer matches
+ *      `https://slack.com/api/**`, because the request that actually goes on
+ *      the wire is for `/evil`. A traversal that stays inside the prefix
+ *      (`/api/v1/../chat` → `/api/chat`) still matches, as it should.
+ *
+ * A path-less literal also now matches its own trailing-slash form
+ * (`https://api.example.com` ≡ `https://api.example.com/`) — the same URL by
+ * every reading, and the shape (a) above was reported against.
+ */
+function normalizeAuthorizedUriPattern(pattern: string): string | undefined {
+  // Pick placeholders the pattern does not already contain, so restoring them
+  // cannot resurrect a wildcard the author wrote literally.
+  let n = 0;
+  let single = "zzurisinglezz";
+  let double = "zzuridoublezz";
+  while (pattern.includes(single) || pattern.includes(double)) {
+    n += 1;
+    single = `zzurisingle${n}zz`;
+    double = `zzuridouble${n}zz`;
+  }
+  // `**` before `*` — same ordered alternation the compiler uses.
+  const masked = pattern.replace(/\*\*|\*/g, (m) => (m === "**" ? double : single));
+  const normalized = stripUserInfoAndFragment(masked);
+  if (normalized === undefined) return undefined;
+  if (
+    countOccurrences(normalized, single) !== countOccurrences(masked, single) ||
+    countOccurrences(normalized, double) !== countOccurrences(masked, double)
+  ) {
+    return undefined;
+  }
+  return normalized.split(double).join("**").split(single).join("*");
+}
+
+function compileAuthorizedUriPattern(rawPattern: string): string {
+  const rawSchemeMatch = rawPattern.match(URI_PATTERN_SCHEME_RE);
+  if (!rawSchemeMatch) {
     // No `scheme://authority` prefix — compile the whole pattern as a path
     // (preserves the historical `**` → `.*` behavior for opaque targets).
-    return compileUriComponent(pattern, true);
+    // Nothing to normalise: there is no URL here to canonicalise.
+    return compileUriComponent(rawPattern, true);
   }
-  const scheme = schemeMatch[0];
+  // The bare `scheme://**` catch-all is decided on the RAW pattern, BEFORE
+  // normalisation: `new URL("https://<placeholder>")` would hand back a
+  // trailing `/`, turning the catch-all into `^https://[^/]*/$` and breaking
+  // the "any host, any path" contract the SSRF-gate branch tests rely on.
+  if (rawPattern.slice(rawSchemeMatch[0].length) === "**") {
+    // Scheme is case-insensitive and the target's is lowercased by `URL`.
+    return escapeUriLiteral(rawSchemeMatch[0].toLowerCase()) + ".*";
+  }
+  // Fall back to the raw pattern when it cannot be canonicalised — a pattern
+  // we cannot normalise matches strictly LESS than before, never more, since
+  // the target side stays normalised either way.
+  const pattern = normalizeAuthorizedUriPattern(rawPattern) ?? rawPattern;
+  const schemeMatch = pattern.match(URI_PATTERN_SCHEME_RE);
+  const scheme = schemeMatch ? schemeMatch[0] : rawSchemeMatch[0];
   const afterScheme = pattern.slice(scheme.length);
   const slashIdx = afterScheme.indexOf("/");
-  // `https://**` with NO path is the explicit "any host, any path" catch-all
-  // (historical behaviour, relied on by the SSRF-gate branch tests). It carries
-  // no literal host suffix, so there is nothing for an attacker to smuggle past
-  // (the authority-confusion attack needs a fixed suffix like `.example.com`
-  // AFTER the `**`), and any actual internal host it admits is still refused
-  // downstream by the SSRF gate. So compile the bare form as a full `.*`.
-  // Anything WITH a path (`https://**/health`) keeps the authority
-  // boundary-contained: `**` in the host is `[^/]*` and cannot swallow the `/`
-  // that ends the authority.
-  if (slashIdx === -1 && afterScheme === "**") {
-    return escapeUriLiteral(scheme) + ".*";
-  }
+  // The bare `scheme://**` catch-all ("any host, any path", relied on by the
+  // SSRF-gate branch tests) is handled above, on the raw pattern. Anything
+  // WITH a path (`https://**/health`) keeps the authority boundary-contained:
+  // `**` in the host is `[^/]*` and cannot swallow the `/` that ends the
+  // authority. It carries no literal host suffix either, so there is nothing
+  // for an attacker to smuggle past (the authority-confusion attack needs a
+  // fixed suffix like `.example.com` AFTER the `**`), and any actual internal
+  // host it admits is still refused downstream by the SSRF gate.
   const authority = slashIdx === -1 ? afterScheme : afterScheme.slice(0, slashIdx);
   const rest = slashIdx === -1 ? "" : afterScheme.slice(slashIdx);
   return (

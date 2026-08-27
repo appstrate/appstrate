@@ -1139,6 +1139,58 @@ function buildSidecarTools(options: MountMcpOptions): {
     }
   }
 
+  /**
+   * One first-party platform fetch, shaped into a tool result. Both
+   * `run_history` and `recall_memory` are the same call against the same
+   * upstream, so they share one body.
+   *
+   * Cancellation and deadline are composed: `callerSignal` is the MCP
+   * request's own abort (client gone, transport closed) and must keep working,
+   * `OUTBOUND_TIMEOUT_MS` is the same bound every other outbound call in the
+   * sidecar already carries. `/mcp` has no server-side deadline of its own, so
+   * without it a platform that accepts the connection and never answers hangs
+   * this tool call — and with it the agent — for the rest of the run.
+   *
+   * The deadline bounds the WHOLE request, headers and body alike, which is
+   * what we want (there is no long-lived stream here to keep open). That means
+   * it stays armed while {@link responseToToolResult} reads the body: headers
+   * at 29s plus a slow body aborts mid-read, one `await` past the header-time
+   * failure. So BOTH live inside this one `try` — a mid-body abort produced a
+   * raw handler rejection when only the `fetch` was guarded, while the exact
+   * same failure a second earlier produced a structured `isError` result. One
+   * deadline, one failure shape.
+   */
+  async function platformToolFetch(
+    tool: string,
+    url: string,
+    callerSignal: AbortSignal,
+  ): Promise<{
+    content: Array<
+      | { type: "text"; text: string }
+      | { type: "resource_link"; uri: string; name: string; mimeType?: string }
+    >;
+    isError?: boolean;
+    structuredContent?: Record<string, unknown>;
+    _meta?: Record<string, unknown>;
+  }> {
+    try {
+      const res = await fetchFn(url, {
+        headers: { Authorization: `Bearer ${config.runToken}` },
+        signal: AbortSignal.any([callerSignal, AbortSignal.timeout(OUTBOUND_TIMEOUT_MS)]),
+      });
+      return await responseToToolResult(res, {
+        source: tool,
+        ...(blobStore ? { blobStore } : {}),
+        tokenBudget,
+      });
+    } catch (err) {
+      return {
+        content: [{ type: "text", text: upstreamFetchErrorText(tool, err) }],
+        isError: true,
+      };
+    }
+  }
+
   const runHistory: AppstrateToolDefinition = {
     // Name + description + inputSchema are derived from the canonical
     // `run_history` descriptor in `@appstrate/runner-pi/runtime-tools`
@@ -1158,32 +1210,7 @@ function buildSidecarTools(options: MountMcpOptions): {
       const qs = params.size > 0 ? `?${params.toString()}` : "";
 
       const url = `${config.platformApiUrl}/internal/run-history${qs}`;
-      let res: Response;
-      try {
-        res = await fetchFn(url, {
-          headers: { Authorization: `Bearer ${config.runToken}` },
-          // Caller cancellation and deadline, composed: `extra.signal` is the
-          // MCP request's own abort (client gone, transport closed) and must
-          // keep working, `OUTBOUND_TIMEOUT_MS` is the same bound every other
-          // outbound call in the sidecar already carries. `/mcp` has no
-          // server-side deadline of its own, so without this a platform that
-          // accepts the connection and never answers hangs this tool call —
-          // and with it the agent — for the rest of the run. Bounding the
-          // whole request is right here: `responseToToolResult` reads the body
-          // immediately, there is no long-lived stream to cap.
-          signal: AbortSignal.any([extra.signal, AbortSignal.timeout(OUTBOUND_TIMEOUT_MS)]),
-        });
-      } catch (err) {
-        return {
-          content: [{ type: "text", text: upstreamFetchErrorText("run_history", err) }],
-          isError: true,
-        };
-      }
-      return responseToToolResult(res, {
-        source: "run_history",
-        ...(blobStore ? { blobStore } : {}),
-        tokenBudget,
-      });
+      return platformToolFetch("run_history", url, extra.signal);
     },
   };
 
@@ -1210,25 +1237,7 @@ function buildSidecarTools(options: MountMcpOptions): {
       const qs = params.size > 0 ? `?${params.toString()}` : "";
 
       const url = `${config.platformApiUrl}/internal/memories${qs}`;
-      let res: Response;
-      try {
-        res = await fetchFn(url, {
-          headers: { Authorization: `Bearer ${config.runToken}` },
-          // Same composed cancellation + deadline as `run_history` above —
-          // same upstream, same hang, see there for the reasoning.
-          signal: AbortSignal.any([extra.signal, AbortSignal.timeout(OUTBOUND_TIMEOUT_MS)]),
-        });
-      } catch (err) {
-        return {
-          content: [{ type: "text", text: upstreamFetchErrorText("recall_memory", err) }],
-          isError: true,
-        };
-      }
-      return responseToToolResult(res, {
-        source: "recall_memory",
-        ...(blobStore ? { blobStore } : {}),
-        tokenBudget,
-      });
+      return platformToolFetch("recall_memory", url, extra.signal);
     },
   };
 
