@@ -79,7 +79,7 @@ describe("inline run launched from the chat with an attached file", () => {
     const bytes = new TextEncoder().encode(content);
     const up = await createUpload({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
       name,
       size: bytes.byteLength,
@@ -101,7 +101,7 @@ describe("inline run launched from the chat with an attached file", () => {
     const uploadId = await stageUpload("brief.txt", "the attached brief");
     const resolved = await resolveChatAttachment({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       chatSessionId: sessionId,
       uri: `upload://${uploadId}`,

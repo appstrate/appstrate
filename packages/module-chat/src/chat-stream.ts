@@ -24,7 +24,7 @@ import { z } from "zod";
 import { parseBody, invalidRequest } from "@appstrate/core/api-errors";
 import { isAttachmentUri } from "@appstrate/core/file-uri";
 import { logger } from "./logger.ts";
-import { listModels, pickModel, resolveDefaultApplicationId } from "./llm.ts";
+import { listModels, pickModel, resolveDefaultSpaceId } from "./llm.ts";
 import { platformMcpUrl } from "./platform-mcp.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
@@ -199,7 +199,7 @@ export async function handleChatStream(
   const headers = forwardedHeaders(c);
   // Single platform-call seam: re-enter the platform app in-process (or loopback
   // fetch when not wired) for every PLATFORM read the turn makes (/api/models,
-  // /api/applications, and the MCP hops; `/api/me/context` dispatches directly).
+  // /api/spaces, and the MCP hops; `/api/me/context` dispatches directly).
   // Auth + RBAC run each hop.
   //
   // Inference is the exception and does NOT ride this seam: the proxy binding
@@ -236,18 +236,18 @@ export async function handleChatStream(
   };
 
   // ── Preamble phase A (parallel) ──────────────────────────────────────────
-  // The model list and the default application id are independent reads, so
+  // The model list and the default space id are independent reads, so
   // fire them together rather than back-to-back. `listModels` resolves the row
-  // the turn binds to; the app id scopes the MCP + integration reads that follow. Pin from the header when the caller
+  // the turn binds to; the space id scopes the MCP + integration reads that follow. Pin from the header when the caller
   // already supplied one (no lookup needed).
   const modelId = c.req.header("X-Model-Id") ?? body.modelId;
-  const pinnedAppId = c.req.header("x-application-id");
+  const pinnedSpaceId = c.req.header("x-space-id");
   const phaseAStart = Date.now();
-  const [models, applicationId] = await Promise.all([
+  const [models, spaceId] = await Promise.all([
     listModels(origin, inferenceHeaders, platformFetch),
-    pinnedAppId
-      ? Promise.resolve(pinnedAppId)
-      : resolveDefaultApplicationId(origin, headers, orgId, platformFetch),
+    pinnedSpaceId
+      ? Promise.resolve(pinnedSpaceId)
+      : resolveDefaultSpaceId(origin, headers, orgId, platformFetch),
   ]);
   const chosen = pickModel(models, modelId);
   let generationSettings;
@@ -272,15 +272,15 @@ export async function handleChatStream(
   // to its stable `appfile://` URI, BEFORE the turn is persisted (persistence
   // stores only `appfile://`) and before it reaches the engine (the model is
   // shown the attachment as a text line, never a raw file URL). Needs the session
-  // (the file container) and the resolved application id, both known here;
+  // (the file container) and the resolved space id, both known here;
   // nothing has been opened yet, so a quota/cap rejection surfaces as a clean
   // error with no MCP/stop-controller to leak. Only the last message can carry
   // fresh uploads — earlier turns already hold rewritten `appfile://` URIs.
-  if (sessionId && lastMessage && applicationId) {
+  if (sessionId && lastMessage && spaceId) {
     lastMessage = await materializeUserAttachments(lastMessage, (uri) =>
       deps.resolveChatAttachment({
         orgId,
-        applicationId,
+        spaceId,
         userId: user.id,
         chatSessionId: sessionId,
         uri,
@@ -332,7 +332,7 @@ export async function handleChatStream(
   const contextBlock = await buildCallerContextBlock(c, {
     origin,
     headers,
-    applicationId,
+    spaceId,
     user,
     deps,
     // UI language forwarded by the client; validated/defaulted in the builder.
@@ -476,7 +476,7 @@ export async function handleChatStream(
     Authorization: `Bearer ${mcpToken}`,
     "x-org-id": orgId,
   };
-  if (applicationId) mcpHeaders["x-application-id"] = applicationId;
+  if (spaceId) mcpHeaders["x-space-id"] = spaceId;
   try {
     return await finalize(
       runEngine({

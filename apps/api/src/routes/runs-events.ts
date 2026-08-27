@@ -451,7 +451,7 @@ export function createRunsEventsRouter() {
     // the run's creator + end-user, and the run's producing package.
     const attribution = await getRunAttribution(run.orgId, run.id);
     const { row, deduped } = await createFileFromStream(
-      { orgId: run.orgId, applicationId: run.applicationId },
+      { orgId: run.orgId, spaceId: run.spaceId },
       run.id,
       { userId: attribution?.userId ?? null, endUserId: attribution?.endUserId ?? null },
       runRow.packageId,
@@ -465,7 +465,7 @@ export function createRunsEventsRouter() {
       const actor = actorFromIds(attribution?.userId ?? null, attribution?.endUserId ?? null);
       await recordAudit({
         orgId: run.orgId,
-        applicationId: run.applicationId,
+        spaceId: run.spaceId,
         actorType: actor ? actor.type : "system",
         actorId: actor?.id ?? null,
         action: "file.published",

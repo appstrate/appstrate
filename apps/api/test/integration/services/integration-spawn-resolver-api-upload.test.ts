@@ -79,7 +79,7 @@ async function seedConnection(ctx: TestContext, authKey = "primary") {
     integrationId: INTEG,
     authKey,
     accountId: "default",
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     endUserId: null,
     credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k-1" } }),
@@ -103,11 +103,11 @@ async function seedAndResolve(
     source: "local",
     draftManifest: integManifest(opts),
   });
-  await seedInstalledPackage(ctx.defaultAppId, INTEG);
+  await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
   await seedConnection(ctx);
   const { specs } = await resolveIntegrationSpawns({
     orgId: ctx.orgId,
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     actor: { type: "user", id: ctx.user.id },
     agentManifest: agentManifest(opts.tools),
   });
@@ -215,11 +215,11 @@ describe("resolveIntegrationSpawns — api_upload companion (#881)", () => {
       source: "local",
       draftManifest: manifest,
     });
-    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
     await seedConnection(ctx, longAuthKey);
     const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest([canonicalCall], longAuthKey),
     });
@@ -265,11 +265,11 @@ describe("resolveIntegrationSpawns — api_upload companion (#881)", () => {
       source: "local",
       draftManifest: manifest,
     });
-    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
     await seedConnection(ctx, longAuthKey);
     const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest([legacyCall], longAuthKey),
     });

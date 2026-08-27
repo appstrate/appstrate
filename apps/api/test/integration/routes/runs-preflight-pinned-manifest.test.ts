@@ -27,7 +27,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import { integrationConnections, packages } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
@@ -96,7 +96,7 @@ describe("POST /api/agents/:scope/:name/run — preflight reads the PINNED integ
       .update(packages)
       .set({ draftManifest: integManifest("9.9.9", ["read", "write"]) })
       .where(eq(packages.id, INTEG));
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INTEG);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEG);
 
     await seedAgent({
       id: AGENT,
@@ -112,7 +112,7 @@ describe("POST /api/agents/:scope/:name/run — preflight reads the PINNED integ
         integrations_configuration: { [INTEG]: { tools: ["search"] } },
       },
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
 
     // One accessible oauth2 connection granted `read` only: enough for the
     // pinned manifest, short of the drifted draft's demand.
@@ -120,7 +120,7 @@ describe("POST /api/agents/:scope/:name/run — preflight reads the PINNED integ
       integrationId: INTEG,
       authKey: "primary",
       accountId: "acct-pinrun",
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,
       credentialsEncrypted: encryptCredentialEnvelope({ outputs: { access_token: "tok" } }),

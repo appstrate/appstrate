@@ -43,7 +43,7 @@ import { assignWorkspaceNames } from "../../../src/services/run-file-naming.ts";
 import { processStorageDeletionJobs } from "../../../src/services/storage-deletion.ts";
 import { finalizeRun, getRunSinkContext } from "../../../src/services/run-event-ingestion.ts";
 
-type Scope = { orgId: string; applicationId: string };
+type Scope = { orgId: string; spaceId: string };
 
 /** Run `fn` with an env var temporarily overridden (env cache reset around it). */
 async function withEnv(key: string, value: string, fn: () => Promise<void>): Promise<void> {
@@ -69,7 +69,7 @@ async function stageUpload(
 ): Promise<string> {
   const up = await createUpload({
     orgId: scope.orgId,
-    applicationId: scope.applicationId,
+    spaceId: scope.spaceId,
     createdBy,
     name,
     size: bytes.byteLength,
@@ -90,7 +90,7 @@ async function seedRunRow(scope: Scope, extra: { input?: Record<string, unknown>
   await db.insert(runs).values({
     id,
     orgId: scope.orgId,
-    applicationId: scope.applicationId,
+    spaceId: scope.spaceId,
     status: "running",
     input: extra.input ?? null,
     runOrigin: "platform",
@@ -128,7 +128,7 @@ describe("files hardening — cross-phase interactions", () => {
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "hardening" });
-    scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     userActor = { type: "user", id: ctx.user.id };
   });
 

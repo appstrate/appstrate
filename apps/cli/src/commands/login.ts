@@ -18,11 +18,11 @@
  *      box. Issue #209. Auto-pin on one org, interactive picker on
  *      many, offer inline creation on zero. Non-interactive escapes:
  *      `--org <id-or-slug>`, `--create-org <name>`, `--no-org`.
- *   8. Cascade: pin an application on the profile so subsequent
- *      `X-Application-Id`-requiring routes (`/api/agents`, `/api/runs`, …)
- *      work out of the box. Issue #217. Auto-pins the default app
+ *   8. Cascade: pin a space on the profile so subsequent
+ *      `X-Space-Id`-requiring routes (`/api/agents`, `/api/runs`, …)
+ *      work out of the box. Issue #217. Auto-pins the default space
  *      (the server provisions one per org). Non-interactive escapes:
- *      `--app <id>`, `--create-app <name>`, `--no-app`.
+ *      `--space <id>`, `--create-space <name>`, `--no-space`.
  */
 
 import open from "open";
@@ -51,12 +51,12 @@ import { CLI_CLIENT_ID, CLI_SCOPE } from "../lib/cli-client.ts";
 import { decodeAccessTokenIdentity } from "../lib/jwt-identity.ts";
 import { listOrgs, createOrg, resolveOrgRef, type Org } from "../lib/orgs.ts";
 import {
-  listApplications,
-  createApplication,
-  resolveApplicationRef,
-  findDefaultApplication,
-  type Application,
-} from "../lib/applications.ts";
+  listSpaces,
+  createSpace,
+  resolveSpaceRef,
+  findDefaultSpace,
+  type Space,
+} from "../lib/spaces.ts";
 
 interface LoginOptions {
   profile?: string;
@@ -67,12 +67,12 @@ interface LoginOptions {
   createOrg?: string;
   /** `--no-org` — explicitly skip the whole pin step. */
   noOrg?: boolean;
-  /** `--app <id>` — non-interactive app pin, fails if no match. */
-  app?: string;
-  /** `--create-app <name>` — non-interactive inline creation + pin. */
-  createApp?: string;
-  /** `--no-app` — explicitly skip the app-pinning step. */
-  noApp?: boolean;
+  /** `--space <id>` — non-interactive space pin, fails if no match. */
+  space?: string;
+  /** `--create-space <name>` — non-interactive inline creation + pin. */
+  createSpace?: string;
+  /** `--no-space` — explicitly skip the space-pinning step. */
+  noSpace?: boolean;
   /**
    * `--device-name <name>` — human-friendly label rendered in the
    * dashboard's authorized-devices list. Defaults to `os.hostname()`
@@ -145,7 +145,7 @@ function makeDefaultDeps(io: CommandIO): Required<LoginDeps> {
 /**
  * `io` is a trailing parameter rather than another `LoginDeps` member: it is
  * threaded through every helper below, including the ones that never prompt
- * (`pinAppOnProfile`), whereas `LoginDeps` is documented — and injected by
+ * (`pinSpaceOnProfile`), whereas `LoginDeps` is documented — and injected by
  * tests — as the interactive-prompt seam alone. The default keeps `cli.ts`'s
  * single-argument call site working untouched.
  */
@@ -260,7 +260,7 @@ async function runLogin(
     refreshExpiresAt: Date.now() + token.refreshExpiresIn * 1000,
   });
 
-  // Preserve the previous `orgId` / `applicationId` when re-logging-in as the
+  // Preserve the previous `orgId` / `spaceId` when re-logging-in as the
   // SAME user. Without this, a re-login whose step-7 / step-8 list call
   // happens to flake (network, server blip) would silently drop the pins
   // the user had carefully set — surprising regression. Only carry them
@@ -269,15 +269,15 @@ async function runLogin(
   const existingProfile = (await readConfig()).profiles[profileName];
   const sameUser = existingProfile?.userId === identity.userId;
   const preservedOrgId = sameUser && existingProfile?.orgId ? existingProfile.orgId : undefined;
-  const preservedAppId =
-    sameUser && existingProfile?.applicationId ? existingProfile.applicationId : undefined;
+  const preservedSpaceId =
+    sameUser && existingProfile?.spaceId ? existingProfile.spaceId : undefined;
 
   await setProfile(profileName, {
     instance,
     userId: identity.userId,
     email: identity.email,
     ...(preservedOrgId ? { orgId: preservedOrgId } : {}),
-    ...(preservedAppId ? { applicationId: preservedAppId } : {}),
+    ...(preservedSpaceId ? { spaceId: preservedSpaceId } : {}),
   });
 
   // Step 7 — pin an organization. Issue #209. Credentials are already
@@ -286,22 +286,22 @@ async function runLogin(
   // a hint to the user, never as a hard failure.
   const pinned = await pinOrgOnProfile(profileName, opts, io);
 
-  // Step 8 — cascade into application pinning. Issue #217. Requires an
-  // `orgId` in context (listApplications is org-scoped), so we gate on
+  // Step 8 — cascade into space pinning. Issue #217. Requires an
+  // `orgId` in context (listSpaces is org-scoped), so we gate on
   // `pinned` rather than re-fetching from the keyring.
-  const pinnedApp = await pinAppOnProfile(profileName, opts, pinned, io);
+  const pinnedSpace = await pinSpaceOnProfile(profileName, opts, pinned, io);
 
   const orgSuffix = pinned ? ` to "${pinned.name}" (${pinned.id})` : "";
-  const appSuffix = pinnedApp ? ` / app "${pinnedApp.name}" (${pinnedApp.id})` : "";
-  outro(`Logged in as ${identity.email}${orgSuffix}${appSuffix}`, io);
+  const spaceSuffix = pinnedSpace ? ` / space "${pinnedSpace.name}" (${pinnedSpace.id})` : "";
+  outro(`Logged in as ${identity.email}${orgSuffix}${spaceSuffix}`, io);
 
   if (!pinned) {
     io.stdout.write(
       `No org pinned — pass -H "X-Org-Id: …" on each call, or run \`appstrate org switch\` later.\n`,
     );
-  } else if (!pinnedApp && !opts.noApp) {
+  } else if (!pinnedSpace && !opts.noSpace) {
     io.stdout.write(
-      `No app pinned — pass -H "X-Application-Id: …" on each call, or run \`appstrate app switch\` later.\n`,
+      `No space pinned — pass -H "X-Space-Id: …" on each call, or run \`appstrate space switch\` later.\n`,
     );
   }
 }
@@ -315,19 +315,19 @@ async function runLogin(
  * has already persisted the rest of the profile via `setProfile()`.
  */
 /**
- * Pin `orgId` on the profile, clearing any previously pinned `applicationId`
- * when the org actually changes. An `applicationId` is only meaningful inside
+ * Pin `orgId` on the profile, clearing any previously pinned `spaceId`
+ * when the org actually changes. A `spaceId` is only meaningful inside
  * its owning org, so a re-login that switches orgs (`--org <other>`, picker
- * choosing a different org, `--create-org`) must not leave the OLD org's app
- * pinned — the app-pin cascade (`pinAppOnProfile`) re-populates it immediately
- * afterward for the new org. Same-org re-logins keep the preserved app pin.
+ * choosing a different org, `--create-org`) must not leave the OLD org's space
+ * pinned — the space-pin cascade (`pinSpaceOnProfile`) re-populates it immediately
+ * afterward for the new org. Same-org re-logins keep the preserved space pin.
  */
-async function pinOrgResettingStaleApp(profileName: string, orgId: string): Promise<void> {
+async function pinOrgResettingStaleSpace(profileName: string, orgId: string): Promise<void> {
   const existing = await getProfile(profileName);
   const orgChanged = existing?.orgId !== undefined && existing.orgId !== orgId;
   await updateProfile(profileName, {
     orgId,
-    ...(orgChanged ? { applicationId: undefined } : {}),
+    ...(orgChanged ? { spaceId: undefined } : {}),
   });
 }
 
@@ -345,7 +345,7 @@ async function pinOrgOnProfile(
   // they want a fresh org. Don't second-guess them with a prompt.
   if (opts.createOrg !== undefined) {
     const created = await createOrg(profileName, { name: opts.createOrg });
-    await pinOrgResettingStaleApp(profileName, created.id);
+    await pinOrgResettingStaleSpace(profileName, created.id);
     return created;
   }
 
@@ -362,13 +362,13 @@ async function pinOrgOnProfile(
   // `--org <id-or-slug>` — explicit non-interactive selection.
   if (opts.org !== undefined) {
     const match = resolveOrgRef(orgs, opts.org);
-    await pinOrgResettingStaleApp(profileName, match.id);
+    await pinOrgResettingStaleSpace(profileName, match.id);
     return match;
   }
 
   if (orgs.length === 1) {
     const only = orgs[0]!;
-    await pinOrgResettingStaleApp(profileName, only.id);
+    await pinOrgResettingStaleSpace(profileName, only.id);
     return only;
   }
 
@@ -376,84 +376,84 @@ async function pinOrgOnProfile(
     const input = await deps.promptCreateOrg();
     if (!input) return null;
     const created = await createOrg(profileName, input);
-    await pinOrgResettingStaleApp(profileName, created.id);
+    await pinOrgResettingStaleSpace(profileName, created.id);
     return created;
   }
 
   // ≥2 orgs — delegate the (possibly non-TTY) decision to the picker.
   const chosen = await deps.pickOrg(orgs);
   if (!chosen) return null;
-  await pinOrgResettingStaleApp(profileName, chosen.id);
+  await pinOrgResettingStaleSpace(profileName, chosen.id);
   return chosen;
 }
 
 /**
- * Resolve the app-pin branch of the login cascade. Issue #217.
+ * Resolve the space-pin branch of the login cascade. Issue #217.
  *
- * Gated on a successful org pin: `GET /api/applications` needs an
+ * Gated on a successful org pin: `GET /api/spaces` needs an
  * `X-Org-Id` header, so when no org is pinned (user passed `--no-org`,
  * or the cascade failed) we return null without a network call.
  *
  * Unlike `pinOrgOnProfile` this does NOT expose an interactive picker at
- * login time — the server provisions exactly one default application per
- * org, so the non-flag path is fully deterministic. Users with ≥2 apps
+ * login time — the server provisions exactly one default space per
+ * org, so the non-flag path is fully deterministic. Users with ≥2 spaces
  * and no clear default get a stderr hint and pin manually via
- * `appstrate app switch` afterwards.
+ * `appstrate space switch` afterwards.
  */
-async function pinAppOnProfile(
+async function pinSpaceOnProfile(
   profileName: string,
   opts: LoginOptions,
   orgPinned: Org | null,
   io: CommandIO,
-): Promise<Application | null> {
-  if (opts.noApp) return null;
+): Promise<Space | null> {
+  if (opts.noSpace) return null;
   if (!orgPinned) return null;
 
-  if (opts.createApp !== undefined) {
-    const created = await createApplication(profileName, opts.createApp);
-    await updateProfile(profileName, { applicationId: created.id });
+  if (opts.createSpace !== undefined) {
+    const created = await createSpace(profileName, opts.createSpace);
+    await updateProfile(profileName, { spaceId: created.id });
     return created;
   }
 
-  let apps: Application[];
+  let spaces: Space[];
   try {
-    apps = await listApplications(profileName);
+    spaces = await listSpaces(profileName);
   } catch (err) {
-    io.stderr.write(`Failed to list applications: ${getErrorMessage(err)}\n`);
+    io.stderr.write(`Failed to list spaces: ${getErrorMessage(err)}\n`);
     return null;
   }
 
-  // `--app <id>` — explicit non-interactive selection.
-  if (opts.app !== undefined) {
-    const match = resolveApplicationRef(apps, opts.app);
-    await updateProfile(profileName, { applicationId: match.id });
+  // `--space <id>` — explicit non-interactive selection.
+  if (opts.space !== undefined) {
+    const match = resolveSpaceRef(spaces, opts.space);
+    await updateProfile(profileName, { spaceId: match.id });
     return match;
   }
 
-  if (apps.length === 0) {
+  if (spaces.length === 0) {
     // Should be impossible in practice — every org has a server-provisioned
-    // default app. Surface defensively in case of partial state.
+    // default space. Surface defensively in case of partial state.
     io.stderr.write(
-      "No applications found on the pinned organization — run `appstrate app create <name>` to create one.\n",
+      "No spaces found on the pinned organization — run `appstrate space create <name>` to create one.\n",
     );
     return null;
   }
 
-  if (apps.length === 1) {
-    const only = apps[0]!;
-    await updateProfile(profileName, { applicationId: only.id });
+  if (spaces.length === 1) {
+    const only = spaces[0]!;
+    await updateProfile(profileName, { spaceId: only.id });
     return only;
   }
 
-  // ≥2 apps — pin the server-provisioned default. If none is marked,
-  // surface a hint; pinning silently to apps[0] would be too guessy.
-  const def = findDefaultApplication(apps);
+  // ≥2 spaces — pin the server-provisioned default. If none is marked,
+  // surface a hint; pinning silently to spaces[0] would be too guessy.
+  const def = findDefaultSpace(spaces);
   if (def) {
-    await updateProfile(profileName, { applicationId: def.id });
+    await updateProfile(profileName, { spaceId: def.id });
     return def;
   }
   io.stderr.write(
-    "Multiple applications but none marked default — run `appstrate app switch` to pin one.\n",
+    "Multiple spaces but none marked default — run `appstrate space switch` to pin one.\n",
   );
   return null;
 }

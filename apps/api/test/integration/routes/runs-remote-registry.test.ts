@@ -19,7 +19,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import { buildMinimalZip, uploadPackageZip } from "../../../src/services/package-storage.ts";
 import { runs, packages, packageVersions, packageDistTags } from "@appstrate/db/schema";
 import { validateManifest } from "@appstrate/core/validation";
@@ -71,7 +71,7 @@ async function seedPublishedAgent(ctx: TestContext, version = "1.2.3") {
     PROMPT,
   );
   await uploadPackageZip("@acme/briefing", version, zip);
-  await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, "@acme/briefing");
+  await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
 }
 
 /**
@@ -114,7 +114,7 @@ async function seedFileInputAgent(ctx: TestContext, version = "3.0.0") {
     .insert(packageDistTags)
     .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
   await uploadPackageZip("@acme/briefing", version, buildMinimalZip(manifest, PROMPT));
-  await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, "@acme/briefing");
+  await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
 }
 
 describe("POST /api/runs/remote — kind: registry", () => {
@@ -143,7 +143,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         stage: "published",
         spec: "1.2.3",
       },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
 
@@ -173,7 +173,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published" },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
 
@@ -223,11 +223,11 @@ describe("POST /api/runs/remote — kind: registry", () => {
       .insert(packageDistTags)
       .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
     await uploadPackageZip("@acme/briefing", version, buildMinimalZip(manifest, PROMPT));
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, "@acme/briefing");
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: version },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
 
@@ -273,11 +273,11 @@ describe("POST /api/runs/remote — kind: registry", () => {
       .insert(packageDistTags)
       .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
     await uploadPackageZip("@acme/briefing", version, buildMinimalZip(manifest, PROMPT));
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, "@acme/briefing");
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: version },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
 
@@ -317,11 +317,11 @@ describe("POST /api/runs/remote — kind: registry", () => {
       .insert(packageDistTags)
       .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
     await uploadPackageZip("@acme/briefing", version, buildMinimalZip(manifest, PROMPT));
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, "@acme/briefing");
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: version },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
 
@@ -346,11 +346,11 @@ describe("POST /api/runs/remote — kind: registry", () => {
       } as unknown as Record<string, unknown>,
       draftContent: "draft prompt",
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, "@acme/draft-only");
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/draft-only");
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/draft-only", stage: "draft" },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
 
@@ -380,14 +380,11 @@ describe("POST /api/runs/remote — kind: registry", () => {
       } as unknown as Record<string, unknown>,
       draftContent: "draft prompt",
     });
-    await installPackage(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      "@acme/broken-draft",
-    );
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/broken-draft");
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/broken-draft", stage: "draft" },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
     expect(res.status).toBe(400);
@@ -398,7 +395,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
   it("rejects a missing package with 404", async () => {
     const res = await post({
       source: { kind: "registry", packageId: "@acme/does-not-exist", stage: "published" },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
     expect(res.status).toBe(404);
@@ -407,7 +404,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
   });
 
   it("rejects an uninstalled package with 404", async () => {
-    // Seed an org-owned package + version but DON'T install it in the app.
+    // Seed an org-owned package + version but DON'T install it in the space.
     await seedPackage({
       orgId: ctx.orgId,
       id: "@acme/briefing",
@@ -425,12 +422,12 @@ describe("POST /api/runs/remote — kind: registry", () => {
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published" },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
     expect(res.status).toBe(404);
     const body = (await res.json()) as { code?: string };
-    expect(body.code).toBe("package_not_installed_in_app");
+    expect(body.code).toBe("package_not_installed_in_space");
   });
 
   it("rejects an unresolvable spec with 404", async () => {
@@ -442,7 +439,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         stage: "published",
         spec: "9.9.9",
       },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
     expect(res.status).toBe(404);
@@ -467,7 +464,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         stage: "published",
         spec: "1.0.0",
       },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
     expect(res.status).toBe(410);
@@ -484,7 +481,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         stage: "draft",
         spec: "1.0.0",
       },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
     expect(res.status).toBe(400);
@@ -497,7 +494,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: "1.2.3" },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
       // Mirrors the platform run route: the freeze KEY gate runs on remote too.
       dependency_overrides: { "@acme/not-a-dep": "draft" },
@@ -511,7 +508,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: "1.2.3" },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
       dependency_overrides: { "@acme/briefing": "not a version!!" },
     });
@@ -536,7 +533,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
       } as unknown as Record<string, unknown>,
       draftContent: "helper",
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, "@acme/helper");
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/helper");
 
     // Agent declaring a skill dependency — its id is a valid override KEY.
     const manifest = {
@@ -568,11 +565,11 @@ describe("POST /api/runs/remote — kind: registry", () => {
       .insert(packageDistTags)
       .values({ packageId: "@acme/briefing", tag: "latest", versionId: versionRow.id });
     await uploadPackageZip("@acme/briefing", "2.0.0", buildMinimalZip(manifest, PROMPT));
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, "@acme/briefing");
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@acme/briefing");
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: "2.0.0" },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
       dependency_overrides: { "@acme/helper": "draft" },
     });
@@ -588,7 +585,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: "3.0.0" },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: { file: "appfile://file_abc123" },
     });
 
@@ -606,7 +603,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: "3.0.0" },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: { file: "upload://upl_abc123" },
     });
 
@@ -622,7 +619,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
 
     const res = await post({
       source: { kind: "registry", packageId: "@acme/briefing", stage: "published", spec: "3.0.0" },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: { file: "data:application/pdf;name=report.pdf;base64,JVBERi0=" },
     });
 
@@ -649,7 +646,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         spec: "1.2.3",
         modelId: "gpt-4o",
       },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
 
@@ -674,7 +671,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         spec: "1.2.3",
         proxyId: "none",
       },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
 
@@ -695,7 +692,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         prompt: PROMPT,
         modelId: "gpt-4o",
       },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
 
@@ -733,7 +730,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         },
         prompt: PROMPT,
       },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
 
@@ -753,7 +750,7 @@ describe("POST /api/runs/remote — kind: registry", () => {
         spec: "1.2.3",
         integrity: "sha256-totally-bogus-hint",
       },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       input: {},
     });
     // Drift hint is observational only — the run still succeeds.

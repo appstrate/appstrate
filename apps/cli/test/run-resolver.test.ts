@@ -70,7 +70,7 @@ describe("buildIntegrationResolver", () => {
       buildIntegrationResolver("remote", {
         instance: "https://x.com",
         bearerToken: "",
-        applicationId: "app_x",
+        spaceId: "spc_x",
       }),
     ).toThrow(ResolverConfigError);
   });
@@ -88,7 +88,7 @@ describe("buildIntegrationResolver", () => {
     const resolver = buildIntegrationResolver("remote", {
       instance: "https://x.com",
       bearerToken: "ask_x",
-      applicationId: "app_x",
+      spaceId: "spc_x",
     });
     expect(typeof resolver.resolve).toBe("function");
   });
@@ -97,7 +97,7 @@ describe("buildIntegrationResolver", () => {
     const resolver = buildIntegrationResolver("remote", {
       instance: "https://x.com",
       bearerToken: "eyJhbGciOiJSUzI1NiJ9.test.jwt",
-      applicationId: "app_x",
+      spaceId: "spc_x",
       endUserId: "eu_x",
     });
     expect(typeof resolver.resolve).toBe("function");

@@ -28,14 +28,14 @@ import { readJsonBody } from "../lib/request-body.ts";
 import { parseListPagination } from "../lib/list-query.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { getActor, actorFromIds, type Actor } from "../lib/actor.ts";
-import { getAppScope, type AppScope } from "../lib/scope.ts";
+import { getSpaceScope, type SpaceScope } from "../lib/scope.ts";
 import { getOrgMember } from "../services/organizations.ts";
 import { getEndUser } from "../services/end-users.ts";
 import { assertExplicitModelExists, resolveModel } from "../services/org-models.ts";
 import {
   getInstalledPackageSettings,
   type InstalledPackageSettings,
-} from "../services/application-packages.ts";
+} from "../services/space-packages.ts";
 import { resolveAndValidateScheduleInput } from "../services/input-resolution.ts";
 import { getPackage } from "../services/package-catalog.ts";
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
@@ -157,9 +157,9 @@ async function assertScheduleTargetValid(args: {
  * Load a schedule in the caller's scope, or 404 with the message the three
  * `/schedules/:id` routes have always answered. `viewer` is passed only by the
  * read route, whose visibility narrows to the actor's own schedules; the write
- * routes are admin-scoped and deliberately look up the whole application.
+ * routes are admin-scoped and deliberately look up the whole space.
  */
-async function loadScheduleOr404(id: string, scope: AppScope, viewer?: Actor) {
+async function loadScheduleOr404(id: string, scope: SpaceScope, viewer?: Actor) {
   const schedule = await getSchedule(id, scope, viewer);
   if (!schedule) {
     throw notFound(`Schedule '${id}' not found`);
@@ -181,13 +181,13 @@ const actorSchema = z
   });
 
 /**
- * Resolves + validates a selected schedule actor against the org/app scope.
- * Validates org membership (user) or app ownership (end-user) so a schedule
+ * Resolves + validates a selected schedule actor against the org/space scope.
+ * Validates org membership (user) or space ownership (end-user) so a schedule
  * can never be pinned to an identity outside the caller's tenant. Returns
  * `fallback` when no actor was selected (the create-route default).
  */
 async function resolveScheduleActor(
-  scope: AppScope,
+  scope: SpaceScope,
   selected: { user_id?: string; end_user_id?: string } | undefined,
   fallback?: Actor,
 ): Promise<Actor> {
@@ -212,7 +212,7 @@ async function resolveScheduleActor(
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
       throw invalidRequest(
-        "actor.end_user_id is not an end-user of this application",
+        "actor.end_user_id is not an end-user of this space",
         "actor.end_user_id",
       );
     }
@@ -281,9 +281,9 @@ function validateGenerationOverride(
 export function createSchedulesRouter() {
   const router = new Hono<AppEnv>();
 
-  // GET /api/schedules — list all schedules (app-scoped)
+  // GET /api/schedules — list all schedules (space-scoped)
   router.get("/schedules", requirePermission("schedules", "read"), async (c) => {
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     // The caller is the VIEWER of the run counters (`unread_count` is
     // recipient-scoped), never the schedules' own execution actor.
     const schedules = await listSchedules(scope, getActor(c));
@@ -296,7 +296,7 @@ export function createSchedulesRouter() {
     requirePermission("schedules", "read"),
     requireAgent(),
     async (c) => {
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       const agent = c.get("package");
       const schedules = await listPackageSchedules(scope, agent.id, getActor(c));
       return c.json(listResponse(schedules));
@@ -317,9 +317,9 @@ export function createSchedulesRouter() {
       // Request-local refusals first — no lookup needed to answer them.
       assertFirable(data.cron_expression, data.timezone);
 
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
 
-      const packageSettings = await getInstalledPackageSettings(scope.applicationId, agent.id);
+      const packageSettings = await getInstalledPackageSettings(scope.spaceId, agent.id);
       await assertScheduleTargetValid({
         agent,
         versionOverride: data.version_override,
@@ -328,7 +328,7 @@ export function createSchedulesRouter() {
       });
 
       // #738: actor defaults to the caller; an admin may override it from the
-      // form (validated against this org/app scope).
+      // form (validated against this org/space scope).
       const actor = await resolveScheduleActor(scope, data.actor, getActor(c));
 
       // Reject a `model_id_override` that references no real model up front, so
@@ -385,14 +385,14 @@ export function createSchedulesRouter() {
   // GET /api/schedules/:id — get a single schedule
   router.get("/schedules/:id", requirePermission("schedules", "read"), async (c) => {
     const id = c.req.param("id")!;
-    const schedule = await loadScheduleOr404(id, getAppScope(c), getActor(c));
+    const schedule = await loadScheduleOr404(id, getSpaceScope(c), getActor(c));
     return c.json(schedule);
   });
 
   // PUT /api/schedules/:id — update a schedule
   router.put("/schedules/:id", requirePermission("schedules", "write"), async (c) => {
     const id = c.req.param("id")!;
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     const existing = await loadScheduleOr404(id, scope);
 
     const data = await readJsonBody(c, updateScheduleSchema);
@@ -409,13 +409,10 @@ export function createSchedulesRouter() {
       );
     }
 
-    // The agent's per-application settings — read once and shared by the
+    // The agent's per-space settings — read once and shared by the
     // locked-field refusal and the generation-config reconciliation below,
     // which can both run on the same request.
-    const packageSettings = await getInstalledPackageSettings(
-      scope.applicationId,
-      existing.packageId,
-    );
+    const packageSettings = await getInstalledPackageSettings(scope.spaceId, existing.packageId);
 
     // Same resolve-and-validate the create route runs, for the same stated
     // reason: refuse at THIS write rather than silently at every tick. A PUT
@@ -426,7 +423,7 @@ export function createSchedulesRouter() {
     // Gated on the patch actually MOVING the manifest decision, which is
     // exactly `input` and `version_override` — the only two request fields
     // `assertScheduleTargetValid` reads (its other two arguments, the agent
-    // and the app-level `packageSettings`, are not patchable from here). Run
+    // and the space-level `packageSettings`, are not patchable from here). Run
     // unconditionally, it also judged patches that cannot invalidate anything,
     // and its resolve step 404s `no_published_version` on an agent that has
     // never been published. Schedules on such agents exist — POST accepted
@@ -498,7 +495,7 @@ export function createSchedulesRouter() {
     }
 
     // #738: re-point the actor when the caller selected one (validated against
-    // this org/app scope). `undefined` leaves the existing actor untouched.
+    // this org/space scope). `undefined` leaves the existing actor untouched.
     const actor = data.actor ? await resolveScheduleActor(scope, data.actor) : undefined;
 
     // Only a *real* identity change invalidates frozen connection picks. Picking
@@ -572,7 +569,7 @@ export function createSchedulesRouter() {
   // DELETE /api/schedules/:id — delete a schedule
   router.delete("/schedules/:id", requirePermission("schedules", "delete"), async (c) => {
     const id = c.req.param("id")!;
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     await loadScheduleOr404(id, scope);
     await deleteSchedule(scope, id);
     await recordAuditFromContext(c, {
@@ -586,7 +583,7 @@ export function createSchedulesRouter() {
   // GET /api/schedules/:id/runs — list runs for a schedule
   router.get("/schedules/:id/runs", requirePermission("schedules", "read"), async (c) => {
     const scheduleId = c.req.param("id")!;
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     const { limit, offset } = parseListPagination(c, { defaultLimit: 20 });
     const result = await listScheduleRuns(scope, scheduleId, {
       limit,

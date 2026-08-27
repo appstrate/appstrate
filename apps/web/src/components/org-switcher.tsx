@@ -4,8 +4,8 @@ import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChevronsUpDown, Check, Plus, Star, Library } from "lucide-react";
 import { useOrg } from "../hooks/use-org";
-import { useApplications } from "../hooks/use-applications";
-import { useCurrentApplicationId, useAppSwitcher } from "../hooks/use-current-application";
+import { useSpaces } from "../hooks/use-spaces";
+import { useCurrentSpaceId, useSpaceSwitcher } from "../hooks/use-current-space";
 import { usePermissions } from "../hooks/use-permissions";
 import {
   DropdownMenu,
@@ -45,13 +45,13 @@ export function OrgSwitcher() {
   const navigate = useNavigate();
   const { currentOrg, orgs, switchOrg, loading } = useOrg();
   const { isMobile } = useSidebar();
-  const { data: applications } = useApplications();
-  const currentAppId = useCurrentApplicationId();
-  const { switchApp } = useAppSwitcher();
+  const { data: spaces } = useSpaces();
+  const currentSpaceId = useCurrentSpaceId();
+  const { switchSpace } = useSpaceSwitcher();
   const { isAdmin } = usePermissions();
 
-  const currentApp = applications?.find((a) => a.id === currentAppId) ?? null;
-  const hasMultipleApps = (applications?.length ?? 0) > 1;
+  const currentSpace = spaces?.find((s) => s.id === currentSpaceId) ?? null;
+  const hasMultipleSpaces = (spaces?.length ?? 0) > 1;
 
   if (loading) {
     return (
@@ -79,8 +79,10 @@ export function OrgSwitcher() {
               <OrgAvatar name={currentOrg.name} className="aspect-square size-8 text-sm" />
               <div className="grid flex-1 text-left text-sm leading-tight">
                 <span className="truncate font-semibold">{currentOrg.name}</span>
-                {currentApp && (
-                  <span className="text-muted-foreground truncate text-xs">{currentApp.name}</span>
+                {currentSpace && (
+                  <span className="text-muted-foreground truncate text-xs">
+                    {currentSpace.name}
+                  </span>
                 )}
               </div>
               <ChevronsUpDown className="ml-auto" />
@@ -116,32 +118,32 @@ export function OrgSwitcher() {
               );
             })}
             <DropdownMenuSeparator />
-            {hasMultipleApps && (
+            {hasMultipleSpaces && (
               <DropdownMenuSub>
                 <DropdownMenuSubTrigger
-                  data-testid="app-submenu-trigger"
+                  data-testid="space-submenu-trigger"
                   className="flex items-center gap-2"
                 >
-                  <span className="flex-1 truncate">{currentApp?.name}</span>
+                  <span className="flex-1 truncate">{currentSpace?.name}</span>
                 </DropdownMenuSubTrigger>
                 <DropdownMenuSubContent className="min-w-48 rounded-lg">
                   <DropdownMenuLabel className="text-muted-foreground text-xs">
-                    {t("switcher.appAriaLabel")}
+                    {t("switcher.spaceAriaLabel")}
                   </DropdownMenuLabel>
-                  {(applications ?? []).map((app) => {
-                    const isActive = app.id === currentAppId;
+                  {(spaces ?? []).map((space) => {
+                    const isActive = space.id === currentSpaceId;
                     return (
                       <DropdownMenuItem
-                        key={app.id}
-                        data-testid={`app-item-${app.id}`}
+                        key={space.id}
+                        data-testid={`space-item-${space.id}`}
                         className="flex items-center justify-between gap-2"
                         onSelect={() => {
-                          if (!isActive) switchApp(app.id);
+                          if (!isActive) switchSpace(space.id);
                         }}
                       >
                         <span className="flex items-center gap-1.5 truncate">
-                          {app.name}
-                          {app.isDefault && (
+                          {space.name}
+                          {space.isDefault && (
                             <Star size={12} className="shrink-0 fill-amber-500 text-amber-500" />
                           )}
                         </span>

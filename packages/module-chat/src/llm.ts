@@ -103,53 +103,53 @@ export function pickModel(models: OrgModel[], modelId?: string): OrgModel {
 }
 
 /**
- * App-scoped operations (agents, runs, …) need an application context. A
- * session carries none by default, so resolve the org's default application
- * and forward it as `X-Application-Id` on the MCP request. Cached per org —
- * the default app rarely changes.
+ * Space-scoped operations (agents, runs, …) need a space context. A
+ * session carries none by default, so resolve the org's default space
+ * and forward it as `X-Space-Id` on the MCP request. Cached per org —
+ * the default space rarely changes.
  */
 // Only RESOLVED ids are cached — never a miss. A miss (transient failure OR an
 // empty 200) is left uncached so the next turn retries: an empty
-// `/api/applications` is anomalous (every org normally has a default app), so
-// caching it would strip app-scoped MCP tools org-wide.
-const appCache = new Map<string, string>();
+// `/api/spaces` is anomalous (every org normally has a default space), so
+// caching it would strip space-scoped MCP tools org-wide.
+const spaceCache = new Map<string, string>();
 
-export async function resolveDefaultApplicationId(
+export async function resolveDefaultSpaceId(
   origin: string,
   headers: Record<string, string>,
   orgId: string,
   // Required (no default): callers must pass the platform's in-process dispatch
-  // so the default-application lookup rides the loopback-auth seam. A plain
+  // so the default-space lookup rides the loopback-auth seam. A plain
   // `fetch` default would silently bypass it — symmetry with listModels.
   fetchImpl: typeof fetch,
 ): Promise<string | undefined> {
-  const cached = appCache.get(orgId);
+  const cached = spaceCache.get(orgId);
   if (cached !== undefined) return cached;
   try {
-    const res = await fetchImpl(`${origin}/api/applications`, { headers });
+    const res = await fetchImpl(`${origin}/api/spaces`, { headers });
     if (!res.ok) {
-      // A persistent miss silently strips every app-scoped MCP tool for the
+      // A persistent miss silently strips every space-scoped MCP tool for the
       // turn — leave a breadcrumb so it isn't invisible.
-      logger.warn("chat: default-application lookup returned non-ok", {
+      logger.warn("chat: default-space lookup returned non-ok", {
         orgId,
         status: res.status,
       });
       return undefined; // transient — don't cache
     }
-    interface App {
+    interface Space {
       id: string;
       isDefault?: boolean;
     }
-    const body = (await res.json()) as { data?: App[] } | App[];
-    const apps = Array.isArray(body) ? body : (body.data ?? []);
-    const id = (apps.find((a) => a.isDefault) ?? apps[0])?.id;
+    const body = (await res.json()) as { data?: Space[] } | Space[];
+    const spaces = Array.isArray(body) ? body : (body.data ?? []);
+    const id = (spaces.find((s) => s.isDefault) ?? spaces[0])?.id;
     if (id) {
-      appCache.set(orgId, id);
+      spaceCache.set(orgId, id);
       return id;
     }
     return undefined; // empty 200 — anomalous, don't cache
   } catch (err) {
-    logger.warn("chat: default-application lookup failed", { orgId, err: String(err) });
+    logger.warn("chat: default-space lookup failed", { orgId, err: String(err) });
     return undefined; // network error — transient, don't cache
   }
 }

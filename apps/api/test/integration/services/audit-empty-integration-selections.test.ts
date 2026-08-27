@@ -22,12 +22,7 @@ import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageVersion, seedSchedule } from "../../helpers/seed.ts";
 import { mcpServerManifest } from "../../helpers/integration-manifests.ts";
-import {
-  applicationPackages,
-  packageDistTags,
-  packageVersions,
-  packages,
-} from "@appstrate/db/schema";
+import { spacePackages, packageDistTags, packageVersions, packages } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
 import {
   auditEmptyIntegrationSelections,
@@ -143,14 +138,14 @@ describe("auditEmptyIntegrationSelections", () => {
   it("an installed draft is reported but does not block when only explicitly selectable", async () => {
     await seedSplitAgent();
     await db
-      .insert(applicationPackages)
-      .values({ applicationId: ctx.defaultAppId, packageId: AGENT_ID, versionId: null });
+      .insert(spacePackages)
+      .values({ spaceId: ctx.defaultSpaceId, packageId: AGENT_ID, versionId: null });
 
     const findings = await auditEmptyIntegrationSelections();
     const reachable = findings.filter(isReachable);
     expect(reachable).toHaveLength(1);
     expect(reachable[0]?.artifact).toBe("draft");
-    expect(reachable[0]?.installedIn).toEqual([ctx.defaultAppId]);
+    expect(reachable[0]?.installedIn).toEqual([ctx.defaultSpaceId]);
     expect(reachable[0]?.activeIn).toEqual([]);
     expect(findings.filter(isBlocking)).toHaveLength(0);
   });
@@ -158,13 +153,13 @@ describe("auditEmptyIntegrationSelections", () => {
   it("a healthy install pin leaves its explicitly selectable broken draft as a warning", async () => {
     const { goodVersionId } = await seedSplitAgent();
     await db
-      .insert(applicationPackages)
-      .values({ applicationId: ctx.defaultAppId, packageId: AGENT_ID, versionId: goodVersionId });
+      .insert(spacePackages)
+      .values({ spaceId: ctx.defaultSpaceId, packageId: AGENT_ID, versionId: goodVersionId });
 
     const reachable = (await auditEmptyIntegrationSelections()).filter(isReachable);
     expect(reachable).toHaveLength(1);
     expect(reachable[0]?.artifact).toBe("draft");
-    expect(reachable[0]?.installedIn).toEqual([ctx.defaultAppId]);
+    expect(reachable[0]?.installedIn).toEqual([ctx.defaultSpaceId]);
     expect(reachable[0]?.activeIn).toEqual([]);
     expect(reachable.filter(isBlocking)).toHaveLength(0);
   });
@@ -179,16 +174,16 @@ describe("auditEmptyIntegrationSelections", () => {
     await db
       .insert(packageDistTags)
       .values({ packageId: AGENT_ID, tag: "latest", versionId: broken.id });
-    await db.insert(applicationPackages).values({
-      applicationId: ctx.defaultAppId,
+    await db.insert(spacePackages).values({
+      spaceId: ctx.defaultSpaceId,
       packageId: AGENT_ID,
       versionId: goodVersionId,
     });
 
     const findings = await auditEmptyIntegrationSelections();
     const latest = findings.find((f) => f.artifact === "2.0.0");
-    expect(latest?.installedIn).toEqual([ctx.defaultAppId]);
-    expect(latest?.activeIn).toEqual([ctx.defaultAppId]);
+    expect(latest?.installedIn).toEqual([ctx.defaultSpaceId]);
+    expect(latest?.activeIn).toEqual([ctx.defaultSpaceId]);
     expect(latest && isBlocking(latest)).toBe(true);
   });
 
@@ -202,20 +197,20 @@ describe("auditEmptyIntegrationSelections", () => {
     await db
       .insert(packageDistTags)
       .values({ packageId: AGENT_ID, tag: "latest", versionId: goodVersionId });
-    await db.insert(applicationPackages).values({
-      applicationId: ctx.defaultAppId,
+    await db.insert(spacePackages).values({
+      spaceId: ctx.defaultSpaceId,
       packageId: AGENT_ID,
       versionId: goodVersionId,
     });
 
     const findings = await auditEmptyIntegrationSelections();
     const old = findings.find((f) => f.artifact === historical.version);
-    expect(old?.installedIn).toEqual([ctx.defaultAppId]);
+    expect(old?.installedIn).toEqual([ctx.defaultSpaceId]);
     expect(old?.activeIn).toEqual([]);
     expect(old && isBlocking(old)).toBe(false);
   });
 
-  it("blocks when an application version pin targets an otherwise historical version", async () => {
+  it("blocks when a space version pin targets an otherwise historical version", async () => {
     const { goodVersionId } = await seedSplitAgent();
     const pinnedBroken = await seedPackageVersion({
       packageId: AGENT_ID,
@@ -225,8 +220,8 @@ describe("auditEmptyIntegrationSelections", () => {
     await db
       .insert(packageDistTags)
       .values({ packageId: AGENT_ID, tag: "latest", versionId: goodVersionId });
-    await db.insert(applicationPackages).values({
-      applicationId: ctx.defaultAppId,
+    await db.insert(spacePackages).values({
+      spaceId: ctx.defaultSpaceId,
       packageId: AGENT_ID,
       versionId: pinnedBroken.id,
     });
@@ -234,7 +229,7 @@ describe("auditEmptyIntegrationSelections", () => {
     const pinned = (await auditEmptyIntegrationSelections()).find(
       (f) => f.artifact === pinnedBroken.version,
     );
-    expect(pinned?.activeIn).toEqual([ctx.defaultAppId]);
+    expect(pinned?.activeIn).toEqual([ctx.defaultSpaceId]);
     expect(pinned && isBlocking(pinned)).toBe(true);
   });
 
@@ -273,8 +268,8 @@ describe("auditEmptyIntegrationSelections", () => {
       );
     await seedSplitAgent();
     await db
-      .insert(applicationPackages)
-      .values({ applicationId: ctx.defaultAppId, packageId: AGENT_ID, versionId: null });
+      .insert(spacePackages)
+      .values({ spaceId: ctx.defaultSpaceId, packageId: AGENT_ID, versionId: null });
 
     const validationErrors = await validateAgentIntegrationSelections({
       manifest: agentManifest(AGENT_ID, "1.1.0"),
@@ -296,7 +291,7 @@ describe("auditEmptyIntegrationSelections", () => {
       const schedule = await seedSchedule({
         packageId: AGENT_ID,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         enabled: true,
         ...(versionOverride === null ? {} : { versionOverride }),

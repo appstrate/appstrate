@@ -46,7 +46,7 @@ interface BaseEnvelope {
  *
  * `scope` is the unified-persistence dimension:
  * - `"actor"` (default): memory belongs to the run's actor (member or end_user).
- * - `"shared"`: memory is app-wide, visible to every actor.
+ * - `"shared"`: memory is space-wide, visible to every actor.
  *
  * Emitters MAY omit the field entirely; consumers MUST treat absent
  * `scope` as `"actor"` so the fail-safe is per-actor isolation rather
@@ -72,7 +72,7 @@ export interface MemoryAddedEvent extends BaseEnvelope {
  * reducer beyond being aggregated under {@link RunResult.pinned}.
  *
  * `scope` defaults to `"actor"` (per-run-actor isolation) when omitted.
- * Agents that genuinely want app-wide pinned slots (cron-scheduled jobs,
+ * Agents that genuinely want space-wide pinned slots (cron-scheduled jobs,
  * single-tenant catalogues) opt in by passing `"shared"`.
  */
 export interface PinnedSetEvent extends BaseEnvelope {

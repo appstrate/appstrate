@@ -230,7 +230,7 @@ Inside the sidecar, the MCP `tools/call` handler delegates to the pure `executeA
 The platform API (`/internal/integration-credentials/{scope}/{name}`) enforces additional controls:
 
 - **Run must be active** — tokens for completed/failed runs are rejected (`internal.ts`)
-- **Integration must be declared and installed** — `assertAgentDeclaresIntegration` rejects any integration absent from the running agent's `dependencies.integrations`, and a second check rejects one that is not active in the run's application. An agent cannot reach credentials it did not declare.
+- **Integration must be declared and installed** — `assertAgentDeclaresIntegration` rejects any integration absent from the running agent's `dependencies.integrations`, and a second check rejects one that is not active in the run's space. An agent cannot reach credentials it did not declare.
 - **Access is logged** — every credential fetch is recorded with run ID, integration package ID, and the resolved auth/delivery-plan counts
 
 ### Credential encryption at rest
@@ -499,48 +499,55 @@ for (const runId of orphanIds) {
 
 ## Layer 6 — Data Isolation (Two-Tier Scoping)
 
-**Files:** `apps/api/src/middleware/org-context.ts`, `apps/api/src/middleware/app-context.ts`, `apps/api/src/services/state/`, all route handlers
+**Files:** `apps/api/src/middleware/org-context.ts`, `apps/api/src/middleware/space-context.ts`, `apps/api/src/services/state/`, all route handlers
 
-Data access uses a **two-tier isolation model**: all resources are scoped by `orgId`, and app-scoped resources are additionally scoped by `applicationId`. The org-context middleware (`X-Org-Id`) validates organization membership, and the app-context middleware (`X-Application-Id`) validates the application belongs to the org.
+Data access uses a **two-tier isolation model**: all resources are scoped by `orgId`, and space-scoped resources are additionally scoped by `spaceId`. The org-context middleware (`X-Org-Id`) validates organization membership, and the space-context middleware (`X-Space-Id`) validates the space belongs to the org.
 
-| Table                              | Scoping          | SELECT         | INSERT                | UPDATE                | DELETE                |
-| ---------------------------------- | ---------------- | -------------- | --------------------- | --------------------- | --------------------- |
-| `runs`                             | Org + App        | App members    | Own user + app member | —                     | —                     |
-| `run_logs`                         | Org              | Org members    | Org members           | —                     | —                     |
-| `application_packages`             | App              | App members    | App admins            | App admins            | App admins            |
-| `packages`                         | Org              | Org members    | Org admins            | Org admins            | Org admins            |
-| `package_schedules`                | Org + App        | App members    | Own user + app member | Own user + app member | Own user + app member |
-| `webhooks`                         | Org + App        | App admins     | App admins            | App admins            | App admins            |
-| `api_keys`                         | Org + App        | App admins     | App admins            | —                     | App admins            |
-| `application_provider_credentials` | App              | App members    | App admins            | App admins            | App admins            |
-| `user_provider_connections`        | Org + Credential | Own user + org | Own user + org member | Own user + org member | Own user + org member |
+| Table               | Scoping     | SELECT        | INSERT                  | UPDATE                  | DELETE                  |
+| ------------------- | ----------- | ------------- | ----------------------- | ----------------------- | ----------------------- |
+| `runs`              | Org + Space | Space members | Own user + space member | —                       | —                       |
+| `run_logs`          | Org         | Org members   | Org members             | —                       | —                       |
+| `space_packages`    | Space       | Space members | Space admins            | Space admins            | Space admins            |
+| `packages`          | Org         | Org members   | Org admins              | Org admins              | Org admins              |
+| `package_schedules` | Org + Space | Space members | Own user + space member | Own user + space member | Own user + space member |
+| `webhooks`          | Org + Space | Space admins  | Space admins            | Space admins            | Space admins            |
+| `api_keys`          | Org + Space | Space admins  | Space admins            | —                       | Space admins            |
 
-App-context middleware resolves the application from the `X-Application-Id` header (session auth) or from the API key's `applicationId`:
+Credential connections carry the same model with a per-actor owner on top, so they get their own row:
+
+| Table                     | Scoping | SELECT                    | INSERT                  | UPDATE                        | DELETE |
+| ------------------------- | ------- | ------------------------- | ----------------------- | ----------------------------- | ------ |
+| `integration_connections` | Space   | Owner or shared, in space | Own user + space member | Owner (metadata: + org admin) | Owner  |
+
+Three things that row cannot say in a cell:
+
+- **`Scoping` is `Space`, not `Org + Space`, because the table has no `org_id` column** (`packages/db/src/schema/integrations.ts:49`) — `space_id` is `NOT NULL` with `ON DELETE CASCADE` (`:61`). The org tier is still enforced, procedurally rather than by a predicate: `/api/integrations` is in `SPACE_SCOPED_PREFIXES` (`middleware/space-context.ts:40`) so the space is validated against the org before a handler runs, and the service re-asserts it with `assertSpaceInScope` (`services/spaces.ts:81`) before every write. Same shape as `space_packages` above.
+- **Reads admit shared rows; writes never do.** A connection's owner is exactly one of `user_id` / `end_user_id` (DB CHECK `integration_conn_exactly_one_owner`), and `shared_with_org = true` widens **reads** to any actor in the same space — `actorOrSharedFilter` on SELECT vs `actorFilter` on UPDATE/DELETE (`apps/api/src/lib/actor.ts:44`, `:96`). Non-owned rows come back with `identity_claims: null` (`services/integration-connections.ts:2438`).
+- **The UPDATE cell has two answers.** A credential rewrite is owner-only in SQL (`services/integration-connections.ts:2204`). The metadata `PATCH` is SQL-unscoped and gated entirely at the route — owner **or** org admin, with `shared_with_org` itself restricted to the owner (`routes/integrations.ts:1183`–`:1223`). The system token-refresh write-back is keyed by id alone (`:2274`), reached only from a row already resolved through a scoped read.
+
+Space-context middleware resolves the space from the `X-Space-Id` header (session auth) or from the API key's own `spaceId`:
 
 ```typescript
-// app-context.ts — verify application belongs to org
-const app = await db
-  .select({ id: applications.id, isDefault: applications.isDefault })
-  .from(applications)
-  .where(and(eq(applications.id, applicationId), eq(applications.orgId, orgId)))
+// space-context.ts — verify the space belongs to the org
+assertSpaceId(spaceId); // `spc_` + canonical UUID, or 400
+const [space] = await db
+  .select({ id: spaces.id, orgId: spaces.orgId, isDefault: spaces.isDefault })
+  .from(spaces)
+  .where(and(eq(spaces.id, spaceId), eq(spaces.orgId, orgId)))
   .limit(1);
-if (!app) throw notFound("Application not found in this organization");
-c.set("applicationId", applicationId);
+if (!space) throw notFound(`Space '${spaceId}' not found in this organization`);
+c.set("spaceId", spaceId);
 
-// Every app-scoped query filters by both orgId and applicationId
+// Every space-scoped query filters by both orgId and spaceId
 const rows = await db
   .select()
   .from(runs)
-  .where(
-    and(
-      eq(runs.packageId, packageId),
-      eq(runs.orgId, orgId),
-      eq(runs.applicationId, applicationId),
-    ),
-  );
+  .where(and(eq(runs.packageId, packageId), eq(runs.orgId, orgId), eq(runs.spaceId, spaceId)));
 ```
 
-**Standard:** Two-tier org+app-scoped queries implement access control satisfying **NIST SP 800-53** controls **AC-3** (Access Enforcement) and **AC-4** (Information Flow Enforcement).
+A pinned space (API key, OIDC JWT) wins over the header: when both are present and disagree the request is a **403**, so a bearer token scoped to space A cannot reach space B in the same org by sending `X-Space-Id: B`.
+
+**Standard:** Two-tier org+space-scoped queries implement access control satisfying **NIST SP 800-53** controls **AC-3** (Access Enforcement) and **AC-4** (Information Flow Enforcement).
 
 ---
 

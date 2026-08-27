@@ -19,7 +19,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
-  applications,
+  spaces,
   files,
   uploads,
   runs,
@@ -36,7 +36,7 @@ import {
 } from "../../../src/services/files.ts";
 import { deleteOrganization } from "../../../src/services/organizations.ts";
 import { createEndUser, deleteEndUser } from "../../../src/services/end-users.ts";
-import { createApplication, deleteApplication } from "../../../src/services/applications.ts";
+import { createSpace, deleteSpace } from "../../../src/services/spaces.ts";
 import { createUpload } from "../../../src/services/uploads.ts";
 import {
   enqueueStorageDeletion,
@@ -48,7 +48,7 @@ import {
 
 const app = getTestApp();
 
-type Scope = { orgId: string; applicationId: string };
+type Scope = { orgId: string; spaceId: string };
 
 /** Seed a minimal run row (terminal by default so org delete isn't blocked). */
 async function seedRunRow(
@@ -60,7 +60,7 @@ async function seedRunRow(
   await db.insert(runs).values({
     id,
     orgId: scope.orgId,
-    applicationId: scope.applicationId,
+    spaceId: scope.spaceId,
     endUserId,
     status,
     startedAt: new Date(),
@@ -100,7 +100,7 @@ describe("storage-deletion outbox", () => {
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "sdjorg" });
-    scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     void app;
   });
 
@@ -329,7 +329,7 @@ describe("storage-deletion outbox", () => {
 
     const up = await createUpload({
       orgId: scope.orgId,
-      applicationId: scope.applicationId,
+      spaceId: scope.spaceId,
       createdBy: ctx.user.id,
       name: "u.txt",
       size: 4,
@@ -375,11 +375,11 @@ describe("storage-deletion outbox", () => {
     expect(runKeys.has(`${runId}/manifest.json`)).toBe(true);
   });
 
-  it("deleteApplication keeps the org quota exact and queues all cascade-owned storage", async () => {
-    const appRow = await createApplication(scope.orgId, { name: "Disposable" }, ctx.user.id);
-    const appScope = { orgId: scope.orgId, applicationId: appRow.id };
-    const runId = await seedRunRow(appScope);
-    const doc = await publishDoc(appScope, runId, "app-doc.txt", "application bytes");
+  it("deleteSpace keeps the org quota exact and queues all cascade-owned storage", async () => {
+    const spaceRow = await createSpace(scope.orgId, { name: "Disposable" }, ctx.user.id);
+    const spaceScope = { orgId: scope.orgId, spaceId: spaceRow.id };
+    const runId = await seedRunRow(spaceScope);
+    const doc = await publishDoc(spaceScope, runId, "space-doc.txt", "space bytes");
     const { inKey: docKey } = split(doc.storageKey);
     const [before] = await db
       .select({ used: organizations.filesBytesUsed })
@@ -387,27 +387,31 @@ describe("storage-deletion outbox", () => {
       .where(eq(organizations.id, scope.orgId));
     expect(before!.used).toBe(doc.size);
 
-    await deleteApplication(scope.orgId, appRow.id);
+    await deleteSpace(scope.orgId, spaceRow.id);
 
-    expect(await db.select().from(applications).where(eq(applications.id, appRow.id))).toHaveLength(
-      0,
-    );
+    expect(await db.select().from(spaces).where(eq(spaces.id, spaceRow.id))).toHaveLength(0);
     const [after] = await db
       .select({ used: organizations.filesBytesUsed })
       .from(organizations)
       .where(eq(organizations.id, scope.orgId));
     expect(after!.used).toBe(0);
-    expect(
-      await db.select().from(storageDeletionJobs).where(eq(storageDeletionJobs.storageKey, docKey)),
-    ).toHaveLength(1);
+    const fileJobs = await db
+      .select({ reason: storageDeletionJobs.reason })
+      .from(storageDeletionJobs)
+      .where(eq(storageDeletionJobs.storageKey, docKey));
+    expect(fileJobs).toHaveLength(1);
+    // `reason` is persisted vocabulary, not a label: the operator id-rewrite
+    // script matches on it, so the stored string is part of the contract.
+    expect(fileJobs[0]!.reason).toBe("space_deleted");
 
     const workspaceJobs = await db
-      .select({ storageKey: storageDeletionJobs.storageKey })
+      .select({ storageKey: storageDeletionJobs.storageKey, reason: storageDeletionJobs.reason })
       .from(storageDeletionJobs)
       .where(eq(storageDeletionJobs.bucket, "run-workspace"));
     expect(new Set(workspaceJobs.map((job) => job.storageKey))).toEqual(
       new Set([`${runId}.afps`, `${runId}/manifest.json`]),
     );
+    expect(new Set(workspaceJobs.map((job) => job.reason))).toEqual(new Set(["space_deleted"]));
   });
 
   it("deleteEndUser purges owned bytes but preserves its surviving run workspace", async () => {
@@ -421,7 +425,7 @@ describe("storage-deletion outbox", () => {
     // A staged upload attributed to the end-user (endUserId, no dashboard user).
     const up = await createUpload({
       orgId: scope.orgId,
-      applicationId: scope.applicationId,
+      spaceId: scope.spaceId,
       createdBy: null,
       endUserId: endUser.id,
       name: "eu.txt",

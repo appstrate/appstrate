@@ -42,7 +42,7 @@ interface Props {
   open: boolean;
   onClose: () => void;
   client: OAuthClient | null;
-  level?: "org" | "application";
+  level?: "org" | "space";
 }
 
 interface FormData {
@@ -61,7 +61,7 @@ function OAuthClientFormBody({
   onClose,
 }: {
   client: OAuthClient | null;
-  level?: "org" | "application";
+  level?: "org" | "space";
   onClose: () => void;
 }) {
   const { t } = useTranslation(["settings", "common"]);
@@ -71,7 +71,7 @@ function OAuthClientFormBody({
   const effectiveLevel = client?.level === "instance" ? undefined : client?.level;
   const formLevel = effectiveLevel ?? level;
   const isOrgLevel = formLevel === "org";
-  const isAppLevel = formLevel === "application";
+  const isSpaceLevel = formLevel === "space";
   const createMutation = useCreateOAuthClient(effectiveLevel ?? level);
   const updateMutation = useUpdateOAuthClient();
   const { data: availableScopes } = useOAuthScopes();
@@ -87,7 +87,7 @@ function OAuthClientFormBody({
     () => new Set(client?.scopes?.length ? client.scopes : REQUIRED_SCOPES),
   );
   const [isFirstParty, setIsFirstParty] = useState(client?.isFirstParty ?? false);
-  // Unified signup opt-in (instance/org/application). Secure-by-default:
+  // Unified signup opt-in (instance/org/space). Secure-by-default:
   // brand-new clients start with the flag off. On org-level clients the
   // `signupRole` controls the role assigned to the auto-joined user.
   const [allowSignup, setAllowSignup] = useState(client?.allowSignup ?? false);
@@ -359,7 +359,7 @@ function OAuthClientFormBody({
           </div>
         )}
 
-        {(isOrgLevel || isAppLevel) && (
+        {(isOrgLevel || isSpaceLevel) && (
           <div className="space-y-3 rounded-md border p-3">
             <label className="flex items-start gap-2 text-sm">
               <input

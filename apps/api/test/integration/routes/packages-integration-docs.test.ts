@@ -157,7 +157,7 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
         draftManifest: integrationManifest(id),
         draftContent: DOC,
       });
-      await seedInstalledPackage(ctx.defaultAppId, id);
+      await seedInstalledPackage(ctx.defaultSpaceId, id);
       await uploadPackageFiles("integrations", ctx.orgId, id, {
         "manifest.json": encoder.encode(JSON.stringify(integrationManifest(id), null, 2)),
         "INTEGRATION.md": encoder.encode(DOC),
@@ -237,7 +237,7 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
         draftManifest: integrationManifest(id),
         draftContent: JSON.stringify(integrationManifest(id), null, 2),
       });
-      await seedInstalledPackage(ctx.defaultAppId, id);
+      await seedInstalledPackage(ctx.defaultSpaceId, id);
       await uploadPackageFiles("integrations", ctx.orgId, id, {
         "manifest.json": encoder.encode(JSON.stringify(integrationManifest(id), null, 2)),
         "server/index.js": encoder.encode("export default 1;"),
@@ -302,7 +302,7 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
         draftManifest: integrationManifest(id, "2.0.0"),
         draftContent: "# Draft docs, edited since publish\n",
       });
-      await seedInstalledPackage(ctx.defaultAppId, id);
+      await seedInstalledPackage(ctx.defaultSpaceId, id);
 
       const zip = zipArtifact(
         {
@@ -356,7 +356,7 @@ describe("integration INTEGRATION.md survives the manifest-shaped write paths", 
       draftManifest: integrationManifest(id),
       draftContent: JSON.stringify(integrationManifest(id), null, 2),
     });
-    await seedInstalledPackage(ctx.defaultAppId, id);
+    await seedInstalledPackage(ctx.defaultSpaceId, id);
     await uploadPackageFiles("integrations", ctx.orgId, id, {
       "manifest.json": encoder.encode("{}"),
       "INTEGRATION.md": encoder.encode(DOC),

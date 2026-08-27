@@ -7,7 +7,7 @@ import { client } from "../api/client";
 import { authStore, type AuthProfile } from "../stores/auth-store";
 import { toUnlinkError } from "../lib/auth-errors";
 import { orgStore } from "../stores/org-store";
-import { appStore } from "../stores/app-store";
+import { spaceStore } from "../stores/space-store";
 import i18n from "../i18n";
 
 async function fetchProfile(): Promise<AuthProfile | null> {
@@ -29,9 +29,9 @@ async function fetchProfile(): Promise<AuthProfile | null> {
 }
 
 /**
- * Centralized session teardown. Resets the auth store AND the org/app scope
+ * Centralized session teardown. Resets the auth store AND the org/space scope
  * stores (clearing their persisted localStorage ids) so a subsequent login
- * can never carry over a stale `X-Org-Id` / `X-Application-Id` header from
+ * can never carry over a stale `X-Org-Id` / `X-Space-Id` header from
  * the previous user — the scoping-header builder reads straight off these
  * stores, so leaving them set would leak the old scope onto the first
  * requests after re-login.
@@ -39,7 +39,7 @@ async function fetchProfile(): Promise<AuthProfile | null> {
 function clearSession() {
   authStore.setState({ user: null, profile: null, loading: false });
   orgStore.getState().setId(null);
-  appStore.getState().setId(null);
+  spaceStore.getState().setId(null);
 }
 
 function setAuthenticatedUser(

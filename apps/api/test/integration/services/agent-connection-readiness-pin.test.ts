@@ -110,7 +110,7 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
       .update(packages)
       .set({ draftManifest: integManifest("9.9.9", ["read"]) })
       .where(eq(packages.id, INTEG));
-    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
 
     // One accessible oauth2 connection granted `read` only — sufficient for the
     // draft's requirement, short of the published one's.
@@ -118,7 +118,7 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
       integrationId: INTEG,
       authKey: "primary",
       accountId: "acct-readiness",
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,
       credentialsEncrypted: encryptCredentialEnvelope({ outputs: { access_token: "tok" } }),
@@ -136,7 +136,7 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
     });
 
     const readiness = await resolveAgentConnectionReadiness({
-      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       agentPackageId: AGENT,
       actor: { type: "user", id: ctx.user.id },
       isAdmin: true,
@@ -172,7 +172,7 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
     });
 
     const base = {
-      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       agentPackageId: AGENT,
       actor: { type: "user", id: ctx.user.id } as const,
       isAdmin: true,

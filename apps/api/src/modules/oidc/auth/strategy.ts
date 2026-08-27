@@ -104,7 +104,7 @@ export const oidcAuthStrategy: AuthStrategy = {
       const actorToLevel: Record<string, string> = {
         user: "instance",
         dashboard_user: "org",
-        end_user: "application",
+        end_user: "space",
       };
       const expectedLevel = claims.actorType ? actorToLevel[claims.actorType] : undefined;
       if (expectedLevel && client.level !== expectedLevel) {
@@ -247,7 +247,7 @@ async function resolveDashboardUser(claims: AccessTokenClaims): Promise<AuthReso
 }
 
 async function resolveEndUser(claims: AccessTokenClaims): Promise<AuthResolution | null> {
-  if (!claims.endUserId || !claims.applicationId) {
+  if (!claims.endUserId || !claims.spaceId) {
     logger.debug("OIDC strategy: end_user token missing required claims", { module: "oidc" });
     return null;
   }
@@ -259,12 +259,12 @@ async function resolveEndUser(claims: AccessTokenClaims): Promise<AuthResolution
     });
     return null;
   }
-  if (endUser.applicationId !== claims.applicationId) {
-    logger.warn("OIDC strategy: claim applicationId mismatch", {
+  if (endUser.spaceId !== claims.spaceId) {
+    logger.warn("OIDC strategy: claim spaceId mismatch", {
       module: "oidc",
       endUserId: claims.endUserId,
-      claimApp: claims.applicationId,
-      realApp: endUser.applicationId,
+      claimSpaceId: claims.spaceId,
+      realSpaceId: endUser.spaceId,
     });
     return null;
   }
@@ -312,11 +312,11 @@ async function resolveEndUser(claims: AccessTokenClaims): Promise<AuthResolution
     // ignores role-based visibility entirely when `endUser` is in context.
     orgRole: "member",
     authMethod: "oauth2-end-user",
-    applicationId: endUser.applicationId,
+    spaceId: endUser.spaceId,
     permissions,
     endUser: {
       id: endUser.endUserId,
-      applicationId: endUser.applicationId,
+      spaceId: endUser.spaceId,
       email: endUser.email ?? undefined,
       name: endUser.name ?? undefined,
     },

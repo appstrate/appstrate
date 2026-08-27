@@ -14,7 +14,7 @@ import { logger } from "../lib/logger.ts";
 import type { ApiKeyInfo } from "@appstrate/shared-types";
 import type { OrgRole } from "../types/index.ts";
 import { toISO, toISORequired } from "../lib/date-helpers.ts";
-import type { AppScope, OrgScope } from "../lib/scope.ts";
+import type { SpaceScope, OrgScope } from "../lib/scope.ts";
 
 const API_KEY_PREFIX = "ask_";
 
@@ -49,7 +49,7 @@ interface ValidatedApiKey {
   name: string;
   orgId: string;
   orgSlug: string;
-  applicationId: string;
+  spaceId: string;
   scopes: string[];
   creatorRole: OrgRole;
 }
@@ -67,7 +67,7 @@ export async function validateApiKey(rawKey: string): Promise<ValidatedApiKey | 
     .select({
       id: apiKeys.id,
       orgId: apiKeys.orgId,
-      applicationId: apiKeys.applicationId,
+      spaceId: apiKeys.spaceId,
       createdBy: apiKeys.createdBy,
       scopes: apiKeys.scopes,
       expiresAt: apiKeys.expiresAt,
@@ -117,7 +117,7 @@ export async function validateApiKey(rawKey: string): Promise<ValidatedApiKey | 
     name: row.userName,
     orgId: row.orgId,
     orgSlug: row.orgSlug,
-    applicationId: row.applicationId,
+    spaceId: row.spaceId,
     scopes: row.scopes,
     creatorRole: row.creatorRole as OrgRole,
   };
@@ -125,7 +125,7 @@ export async function validateApiKey(rawKey: string): Promise<ValidatedApiKey | 
 
 /** Create a new API key record. Returns the record ID. */
 export async function createApiKeyRecord(params: {
-  scope: AppScope;
+  scope: SpaceScope;
   name: string;
   keyHash: string;
   keyPrefix: string;
@@ -137,7 +137,7 @@ export async function createApiKeyRecord(params: {
   await db.insert(apiKeys).values({
     id,
     orgId: params.scope.orgId,
-    applicationId: params.scope.applicationId,
+    spaceId: params.scope.spaceId,
     name: params.name,
     keyHash: params.keyHash,
     keyPrefix: params.keyPrefix,
@@ -152,19 +152,18 @@ export async function createApiKeyRecord(params: {
  * List active (non-revoked) API keys.
  *
  * Session callers typically pass `OrgScope` — admins manage keys org-wide
- * from the dashboard, optionally narrowing via the `applicationId` option.
- * API-key callers pass their own `AppScope`: the listing is forced to the
- * key's bound app so a key in App A cannot enumerate sibling apps' keys.
+ * from the dashboard, optionally narrowing via the `spaceId` option.
+ * API-key callers pass their own `SpaceScope`: the listing is forced to the
+ * key's bound space so a key in Space A cannot enumerate sibling spaces' keys.
  */
 export async function listApiKeys(
-  scope: OrgScope | AppScope,
-  opts: { applicationId?: string } = {},
+  scope: OrgScope | SpaceScope,
+  opts: { spaceId?: string } = {},
 ): Promise<ApiKeyInfo[]> {
   const conditions = [eq(apiKeys.orgId, scope.orgId), isNull(apiKeys.revokedAt)];
-  const appFilter =
-    "applicationId" in scope ? scope.applicationId : (opts.applicationId ?? undefined);
-  if (appFilter) {
-    conditions.push(eq(apiKeys.applicationId, appFilter));
+  const spaceFilter = "spaceId" in scope ? scope.spaceId : (opts.spaceId ?? undefined);
+  if (spaceFilter) {
+    conditions.push(eq(apiKeys.spaceId, spaceFilter));
   }
 
   const rows = await db
@@ -205,18 +204,18 @@ export async function listApiKeys(
  * Revoke (soft-delete) an API key.
  *
  * Session callers (admins) pass `OrgScope` for org-wide reach; API-key
- * callers pass their own `AppScope` so a key in App A can only revoke keys
- * within App A. Issue #172 (extension): passing the wrong scope type is
+ * callers pass their own `SpaceScope` so a key in Space A can only revoke keys
+ * within Space A. Issue #172 (extension): passing the wrong scope type is
  * now a compile-time error instead of a missing argument.
  */
-export async function revokeApiKey(scope: OrgScope | AppScope, keyId: string): Promise<boolean> {
+export async function revokeApiKey(scope: OrgScope | SpaceScope, keyId: string): Promise<boolean> {
   const conditions = [
     eq(apiKeys.id, keyId),
     eq(apiKeys.orgId, scope.orgId),
     isNull(apiKeys.revokedAt),
   ];
-  if ("applicationId" in scope) {
-    conditions.push(eq(apiKeys.applicationId, scope.applicationId));
+  if ("spaceId" in scope) {
+    conditions.push(eq(apiKeys.spaceId, scope.spaceId));
   }
 
   const rows = await db

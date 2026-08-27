@@ -24,10 +24,10 @@
  *      exactly once for this request. The bypass is scoped — it does
  *      NOT skip an active `AUTH_ALLOWED_SIGNUP_DOMAINS` allowlist (see
  *      `packages/db/src/auth.ts`).
- *   8. Create the bootstrap org. The post-bootstrap hook (default app
+ *   8. Create the bootstrap org. The post-bootstrap hook (default space
  *      + hello-world agent) fires uniformly via `triggerPostBootstrapOrg`.
  *      Its failures are logged + surfaced in the response `warnings`
- *      array so the operator can self-heal (createDefaultApplication
+ *      array so the operator can self-heal (createDefaultSpace
  *      is idempotent — first manual call after login backfills).
  *   9. Mark the in-memory consume flag so a concurrent retry sees an
  *      already-redeemed instance even before the org row is committed.
@@ -289,11 +289,11 @@ export function createAuthBootstrapRouter(): Hono {
             orgId: result.orgId,
             slug: result.slug,
           });
-          // Best-effort post-bootstrap (default app + agent). On failure
+          // Best-effort post-bootstrap (default space + agent). On failure
           // we still return 200 — the org/user exist and login works —
           // but surface a `warnings` array so the SPA can show a "default
-          // app provisioning failed, retry by visiting /settings/apps"
-          // banner. `createDefaultApplication` is idempotent so any
+          // space provisioning failed, retry by visiting /settings/spaces"
+          // banner. `createDefaultSpace` is idempotent so any
           // subsequent call (manual or boot-time backfill) self-heals.
           await triggerPostBootstrapOrg({
             orgId: result.orgId,
@@ -303,7 +303,7 @@ export function createAuthBootstrapRouter(): Hono {
           }).catch((err: unknown) => {
             const msg = getErrorMessage(err);
             logger.error("bootstrap-redeem: post-hook failed", { error: msg });
-            warnings.push("default_app_provisioning_failed");
+            warnings.push("default_space_provisioning_failed");
           });
         }
       } catch (err) {

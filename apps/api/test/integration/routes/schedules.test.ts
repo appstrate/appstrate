@@ -19,7 +19,7 @@ import {
   seedOrgModelProviderOAuth,
 } from "../../helpers/seed.ts";
 import { publishAndInstall, seedDivergedAgent } from "../../helpers/schedule-fixtures.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import { schedulesPaths } from "../../../src/openapi/paths/schedules.ts";
 import { responses } from "../../../src/openapi/responses.ts";
 
@@ -49,7 +49,7 @@ describe("Schedules API", () => {
     await publishAndInstall({
       id,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
     });
   }
@@ -73,7 +73,7 @@ describe("Schedules API", () => {
       await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         cronExpression: "0 * * * *",
         name: "Hourly",
@@ -372,7 +372,7 @@ describe("Schedules API", () => {
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         cronExpression: "0 * * * *",
         name: "co-sched",
@@ -399,7 +399,7 @@ describe("Schedules API", () => {
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         cronExpression: "0 * * * *",
         name: "Old Name",
@@ -427,7 +427,7 @@ describe("Schedules API", () => {
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         generationConfigOverride: { temperature: 0.7 },
       });
@@ -482,7 +482,7 @@ describe("Schedules API", () => {
       await publish(fid);
       const eu = await seedEndUser({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         externalId: `ext-${Date.now()}`,
         name: "End User",
       });
@@ -575,7 +575,7 @@ describe("Schedules API", () => {
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         cronExpression: "0 * * * *",
         connectionOverrides: { "@acme/slack": "conn_keep" },
@@ -620,7 +620,7 @@ describe("Schedules API", () => {
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         cronExpression: "0 * * * *",
         connectionOverrides: { "@acme/slack": "conn_old" },
@@ -645,7 +645,7 @@ describe("Schedules API", () => {
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         cronExpression: "0 * * * *",
       });
@@ -669,7 +669,7 @@ describe("Schedules API", () => {
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         cronExpression: "0 * * * *",
       });
@@ -690,7 +690,7 @@ describe("Schedules API", () => {
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         cronExpression: "0 * * * *",
         name: "Hourly Run",
@@ -725,7 +725,7 @@ describe("Schedules API", () => {
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: otherCtx.orgId,
-        applicationId: otherCtx.defaultAppId,
+        spaceId: otherCtx.defaultSpaceId,
         userId: otherCtx.user.id,
         cronExpression: "0 * * * *",
       });
@@ -744,7 +744,7 @@ describe("Schedules API", () => {
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         cronExpression: "0 * * * *",
       });
@@ -753,7 +753,7 @@ describe("Schedules API", () => {
       await seedRun({
         packageId: agent.id,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         scheduleId: schedule.id,
         status: "success",
@@ -777,7 +777,7 @@ describe("Schedules API", () => {
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         cronExpression: "0 * * * *",
       });
@@ -846,7 +846,7 @@ describe("Schedules API", () => {
       await seedDivergedAgent({
         id: fid,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         published: manifest(fid, published),
         draft: manifest(fid, draft),
@@ -907,7 +907,7 @@ describe("Schedules API", () => {
     it("404s a never-published agent at the write, exactly as POST …/run does", async () => {
       const fid = agentId("never-published");
       await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, fid);
 
       const res = await post(fid, {});
 
@@ -996,11 +996,11 @@ describe("Schedules API", () => {
       async function seedLegacy(name: string): Promise<string> {
         const fid = agentId(name);
         const agent = await seedAgent({ id: fid, orgId: ctx.orgId, createdBy: ctx.user.id });
-        await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, fid);
+        await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, fid);
         const schedule = await seedSchedule({
           packageId: agent.id,
           orgId: ctx.orgId,
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
           userId: ctx.user.id,
           cronExpression: "0 * * * *",
           name: "Legacy",
@@ -1100,7 +1100,7 @@ describe("Schedules API", () => {
       const schedule = await seedSchedule({
         packageId: agent.id,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         cronExpression: "0 * * * *",
       });

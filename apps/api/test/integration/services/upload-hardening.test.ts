@@ -55,7 +55,7 @@ const hashingSink: UploadStreamSink = async (stream) => {
 };
 
 async function seedUpload(
-  ctx: { orgId: string; applicationId: string },
+  ctx: { orgId: string; spaceId: string },
   opts: {
     id: string;
     createdBy?: string | null;
@@ -66,12 +66,12 @@ async function seedUpload(
   },
 ): Promise<string> {
   const bytes = opts.bytes ?? PDF_BYTES;
-  const storagePath = `${ctx.applicationId}/${opts.id}/file.pdf`;
+  const storagePath = `${ctx.spaceId}/${opts.id}/file.pdf`;
   await storagePut(UPLOAD_BUCKET, storagePath, bytes);
   await db.insert(uploads).values({
     id: opts.id,
     orgId: ctx.orgId,
-    applicationId: ctx.applicationId,
+    spaceId: ctx.spaceId,
     createdBy: opts.createdBy ?? null,
     endUserId: opts.endUserId ?? null,
     sha256: opts.sha256 ?? null,
@@ -110,7 +110,7 @@ describe("upload ownership gate (peek + consume)", () => {
   });
 
   it("a non-creator same-org actor is rejected as not-found; the creator succeeds", async () => {
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const creator: Actor = { type: "user", id: ctx.user.id };
     const stranger: Actor = { type: "user", id: "u_stranger" };
     await seedUpload(scope, { id: "upl_own_1", createdBy: ctx.user.id });
@@ -135,9 +135,9 @@ describe("upload ownership gate (peek + consume)", () => {
   });
 
   it("an end-user creator is matched by endUserId, not createdBy", async () => {
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
-    const aliceEu = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
-    const bobEu = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+    const aliceEu = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
+    const bobEu = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
     await seedUpload(scope, { id: "upl_eu_1", endUserId: aliceEu.id });
     const alice: Actor = { type: "end_user", id: aliceEu.id };
     const bob: Actor = { type: "end_user", id: bobEu.id };
@@ -158,7 +158,7 @@ describe("upload SHA-256 integrity", () => {
 
   it("proxy sink accepts matching bytes and rejects a mismatch (no visible object)", async () => {
     const good = new Uint8Array([1, 2, 3, 4, 5]);
-    const path = `${ctx.defaultAppId}/upl_sha_ok/blob`;
+    const path = `${ctx.defaultSpaceId}/upl_sha_ok/blob`;
     const key = `${UPLOAD_BUCKET}/${path}`;
     await writeProxyUploadContent(
       key,
@@ -170,7 +170,7 @@ describe("upload SHA-256 integrity", () => {
     expect(await storageExists(UPLOAD_BUCKET, path)).toBe(true);
 
     // Mismatched: declare the hash of `good` but stream different bytes.
-    const badPath = `${ctx.defaultAppId}/upl_sha_bad/blob`;
+    const badPath = `${ctx.defaultSpaceId}/upl_sha_bad/blob`;
     const badKey = `${UPLOAD_BUCKET}/${badPath}`;
     const bad = new Uint8Array([9, 9, 9, 9, 9]);
     await expect(
@@ -181,7 +181,7 @@ describe("upload SHA-256 integrity", () => {
   });
 
   it("consume rejects when the streamed hash disagrees with the row's declared sha256", async () => {
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const actor: Actor = { type: "user", id: ctx.user.id };
     // Row claims a sha256 that does NOT match the stored PDF bytes.
     await seedUpload(scope, {
@@ -193,13 +193,13 @@ describe("upload SHA-256 integrity", () => {
       consumeUploadStream("upl_sha_consume", { ...scope, actor }, hashingSink),
     ).rejects.toMatchObject({ status: 400, code: "checksum_mismatch" });
     // First-consume rollback: the object was dropped so a re-PUT is possible.
-    expect(await storageExists(UPLOAD_BUCKET, `${ctx.defaultAppId}/upl_sha_consume/file.pdf`)).toBe(
-      false,
-    );
+    expect(
+      await storageExists(UPLOAD_BUCKET, `${ctx.defaultSpaceId}/upl_sha_consume/file.pdf`),
+    ).toBe(false);
   });
 
   it("consume passes when the declared sha256 matches the bytes", async () => {
-    const scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const actor: Actor = { type: "user", id: ctx.user.id };
     await seedUpload(scope, {
       id: "upl_sha_match",
@@ -210,7 +210,7 @@ describe("upload SHA-256 integrity", () => {
     expect(meta.sha256).toBe(sha256Hex(PDF_BYTES));
     // Streamed bytes readable (retained for reuse).
     expect(
-      await storageDownload(UPLOAD_BUCKET, `${ctx.defaultAppId}/upl_sha_match/file.pdf`),
+      await storageDownload(UPLOAD_BUCKET, `${ctx.defaultSpaceId}/upl_sha_match/file.pdf`),
     ).not.toBeNull();
   });
 });
@@ -226,7 +226,7 @@ describe("createUpload staging budget", () => {
     await withEnv({ UPLOAD_MAX_ACTIVE_PER_ACTOR: "2" }, async () => {
       const base = {
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id,
         mime: "application/pdf",
         size: 10,
@@ -250,7 +250,7 @@ describe("createUpload staging budget", () => {
     await withEnv({ UPLOAD_MAX_ACTIVE_PER_ACTOR: "1" }, async () => {
       const base = {
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id,
         mime: "application/pdf",
         size: 10,
@@ -271,7 +271,7 @@ describe("createUpload staging budget", () => {
     await withEnv({ UPLOAD_MAX_ACTIVE_PER_ACTOR: "1" }, async () => {
       const base = {
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id,
         mime: "application/pdf",
         size: 10,
@@ -306,7 +306,7 @@ describe("createUpload staging budget", () => {
       async () => {
         const base = {
           orgId: ctx.orgId,
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
           createdBy: ctx.user.id,
           mime: "application/pdf",
         };
@@ -337,7 +337,7 @@ describe("createUpload staging budget", () => {
       async () => {
         const base = {
           orgId: ctx.orgId,
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
           createdBy: ctx.user.id,
           mime: "application/pdf",
         };
@@ -366,7 +366,7 @@ describe("createUpload signed size", () => {
     // `s > 0` special case entirely.
     const created = await createUpload({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
       name: "sized.pdf",
       mime: "application/pdf",

@@ -10,7 +10,7 @@
  *
  *   - `/api/models`       → one openai-completions model (llm-proxy-routed)
  *   - `/api/me/context`   → a small caller-context payload
- *   - `/api/applications` → the default application id
+ *   - `/api/spaces` → the default space id
  *
  * The engine itself is injected. Production always gets `runPiChat`, which would
  * open a real Pi session against a real provider; here a scripted engine returns
@@ -73,7 +73,7 @@ async function waitForAssistantPersist(sessionId: string, timeoutMs = 8_000): Pr
 // `/api/me/context` was fetched and rendered into the system prompt.
 const CONTEXT_ORG_MARKER = "ChatHandlerTestOrg";
 
-const APP_ID = "app_chat_handler_test";
+const SPACE_ID = "spc_chat_handler_test";
 const MODEL_PRESET_ID = "model_chat_handler_test";
 
 /**
@@ -121,8 +121,8 @@ function scriptedDispatch(
     const path = new URL(req.url).pathname;
     if (path === "/api/models") return modelsResponse(apiShape);
     if (path === "/api/me/context") return context();
-    if (path === "/api/applications") {
-      return Response.json({ data: [{ id: APP_ID, isDefault: true }] });
+    if (path === "/api/spaces") {
+      return Response.json({ data: [{ id: SPACE_ID, isDefault: true }] });
     }
     return new Response("unexpected dispatch: " + path, { status: 404 });
   };
@@ -236,7 +236,7 @@ describe("handleChatStream", () => {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-application-id": APP_ID,
+        "x-space-id": SPACE_ID,
         "x-org-id": ctx.orgId,
       },
       body: JSON.stringify({

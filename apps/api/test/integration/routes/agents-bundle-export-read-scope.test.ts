@@ -25,11 +25,11 @@
  * is a no-op for sessions.
  *
  * What deliberately did NOT change: dependency resolution stays org-scoped in
- * both catalogs, so a skill that is not installed in the calling application is
+ * both catalogs, so a skill that is not installed in the calling space is
  * still exported. That is the rule the RUN path uses (`DraftPackageCatalog` is
  * shared with `RunPackageCatalog`), and narrowing the export to
  * `hasPackageAccess` would make it stricter than the run it mirrors. The skill
- * below is therefore never installed in the app — the fix has to be about SCOPE,
+ * below is therefore never installed in the space — the fix has to be about SCOPE,
  * not visibility, and the positive controls prove it.
  */
 
@@ -45,7 +45,7 @@ import {
 } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageVersion, seedApiKey } from "../../helpers/seed.ts";
 import { getTestApp } from "../../helpers/app.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import { uploadPackageFiles } from "../../../src/services/package-items/storage.ts";
 import { buildAgentPackage } from "../../../src/services/package-storage.ts";
 import { packageDistTags } from "@appstrate/db/schema";
@@ -124,7 +124,7 @@ async function publish(
 async function keyWithScopes(ctx: TestContext, scopes: string[]): Promise<string> {
   const key = await seedApiKey({
     orgId: ctx.orgId,
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     createdBy: ctx.user.id,
     scopes,
   });
@@ -142,7 +142,7 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "scopeorg" });
 
-    // Root agent: declares the skill, installed in the default app.
+    // Root agent: declares the skill, installed in the default space.
     await seedPackage({
       id: AGENT_ID,
       type: "agent",
@@ -151,13 +151,13 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
       draftManifest: agentManifest(AGENT_ID, { withSkillDep: true }),
       draftContent: "You are the agent.",
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT_ID);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT_ID);
     await publish(AGENT_ID, "1.0.0", agentManifest(AGENT_ID, { withSkillDep: true }), {
       "prompt.md": enc("You are the agent."),
     });
 
     // Dependency skill: draft bytes in the package-items bucket + a published
-    // version. Deliberately NOT installed in the application — the export
+    // version. Deliberately NOT installed in the space — the export
     // reaches it exactly like a run does, and must keep doing so.
     await seedPackage({
       id: SKILL_ID,
@@ -214,7 +214,7 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
     expect(res.status).toBe(200);
     const bundle = readBundleFromBuffer(new Uint8Array(await res.arrayBuffer()));
     expect(bundle.packages.size).toBe(2);
-    // The skill is NOT installed in this application and is still exported —
+    // The skill is NOT installed in this space and is still exported —
     // the guard added is about SCOPE, never about narrowing reach to
     // `hasPackageAccess` (which would break the run this export mirrors).
     const skill = bundle.packages.get(`${SKILL_ID}@1.0.0`);
@@ -267,7 +267,7 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
       draftManifest: agentManifest(BARE_AGENT_ID, { withSkillDep: false }),
       draftContent: "Bare agent.",
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, BARE_AGENT_ID);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, BARE_AGENT_ID);
     const rawKey = await keyWithScopes(ctx, ["agents:read"]);
 
     const res = await app.request(`/api/agents/${BARE_AGENT_ID}/bundle?source=draft`, {
@@ -286,7 +286,7 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
     // routes a `"draft"` dependency override to it), so the fix stayed out of
     // its query on purpose. This pins the behaviour that tightening it would
     // have broken: a run resolves a draft skill that is not installed in the
-    // calling application, with no `skills:read` anywhere in the picture.
+    // calling space, with no `skills:read` anywhere in the picture.
     const agent: LoadedPackage = {
       id: AGENT_ID,
       manifest: agentManifest(AGENT_ID, { withSkillDep: true }) as unknown as AgentManifest,
@@ -302,7 +302,7 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
     expect(new TextDecoder().decode(skill!.files.get("SKILL.md"))).toContain(SKILL_SECRET);
 
     // The skill row and its bytes plainly exist (asserted above), so this 404
-    // is the app-install boundary and nothing else — the run reached bytes the
+    // is the space-install boundary and nothing else — the run reached bytes the
     // file explorer refuses to show. That asymmetry is the run path's own rule,
     // deliberately left alone.
     //

@@ -19,16 +19,16 @@
  * to the real streams; tests inject a per-test sink instead of swapping the
  * process-wide ones (issue #1180).
  *
- * Cascade invariant (issue #217): the pinned `applicationId` is always scoped to
+ * Cascade invariant (issue #217): the pinned `spaceId` is always scoped to
  * the pinned `orgId`. `org switch` and `org create` therefore clear the
- * stale app pin and re-pin the new org's default application in the same
+ * stale space pin and re-pin the new org's default space in the same
  * atomic operation — otherwise the next `appstrate api` call would 404
- * with "Application not found in this organization".
+ * with "Space not found in this organization".
  */
 
 import { resolveActiveProfile, requireLoggedIn, updateProfile } from "../lib/config.ts";
 import { listOrgs, createOrg, resolveOrgRef, type Org } from "../lib/orgs.ts";
-import { listApplications, findDefaultApplication, type Application } from "../lib/applications.ts";
+import { listSpaces, findDefaultSpace, type Space } from "../lib/spaces.ts";
 import { askText, select, exitWithError } from "../lib/ui.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 
@@ -148,14 +148,14 @@ export async function orgSwitchCommand(
       chosen = picked;
     }
 
-    // Clear the stale app pin first: it belongs to the previous org and
-    // would immediately 404 on the next app-scoped call. Re-pin the new
-    // org's default app in the same commit below.
-    await updateProfile(profileName, { orgId: chosen.id, applicationId: undefined });
-    const repinned = await repinAppAfterOrgChange(profileName);
-    const appSuffix = repinned ? ` / app "${repinned.name}" (${repinned.id})` : "";
+    // Clear the stale space pin first: it belongs to the previous org and
+    // would immediately 404 on the next space-scoped call. Re-pin the new
+    // org's default space in the same commit below.
+    await updateProfile(profileName, { orgId: chosen.id, spaceId: undefined });
+    const repinned = await repinSpaceAfterOrgChange(profileName);
+    const spaceSuffix = repinned ? ` / space "${repinned.name}" (${repinned.id})` : "";
     io.stdout.write(
-      `Pinned "${chosen.name}" (${chosen.id})${appSuffix} on profile "${profileName}".\n`,
+      `Pinned "${chosen.name}" (${chosen.id})${spaceSuffix} on profile "${profileName}".\n`,
     );
   } catch (err) {
     exitWithError(err, io);
@@ -185,13 +185,13 @@ export async function orgCreateCommand(
       input = prompted;
     }
     const created = await createOrg(profileName, input);
-    // Server auto-provisions a default application on org creation — clear
-    // any stale app pin from the previous org and re-pin the new default.
-    await updateProfile(profileName, { orgId: created.id, applicationId: undefined });
-    const repinned = await repinAppAfterOrgChange(profileName);
-    const appSuffix = repinned ? ` / app "${repinned.name}" (${repinned.id})` : "";
+    // Server auto-provisions a default space on org creation — clear
+    // any stale space pin from the previous org and re-pin the new default.
+    await updateProfile(profileName, { orgId: created.id, spaceId: undefined });
+    const repinned = await repinSpaceAfterOrgChange(profileName);
+    const spaceSuffix = repinned ? ` / space "${repinned.name}" (${repinned.id})` : "";
     io.stdout.write(
-      `Created "${created.name}" (${created.id})${appSuffix} and pinned it on profile "${profileName}".\n`,
+      `Created "${created.name}" (${created.id})${spaceSuffix} and pinned it on profile "${profileName}".\n`,
     );
   } catch (err) {
     exitWithError(err, io);
@@ -199,22 +199,22 @@ export async function orgCreateCommand(
 }
 
 /**
- * After the org pin changes, pick the new org's default application
- * and pin it on the profile. Returns the pinned app, or null when there
- * is nothing sensible to pin (no apps, or ≥2 without a default) — the
- * command continues regardless; the user can run `app switch` manually.
+ * After the org pin changes, pick the new org's default space
+ * and pin it on the profile. Returns the pinned space, or null when there
+ * is nothing sensible to pin (no spaces, or ≥2 without a default) — the
+ * command continues regardless; the user can run `space switch` manually.
  *
  * Swallows network errors: the org pin already succeeded and forcing the
- * user to re-run `org switch` over a transient `/api/applications` blip
- * would be a worse UX than an unpinned app.
+ * user to re-run `org switch` over a transient `/api/spaces` blip
+ * would be a worse UX than an unpinned space.
  */
-async function repinAppAfterOrgChange(profileName: string): Promise<Application | null> {
+async function repinSpaceAfterOrgChange(profileName: string): Promise<Space | null> {
   try {
-    const apps = await listApplications(profileName);
-    if (apps.length === 0) return null;
-    const chosen = findDefaultApplication(apps) ?? (apps.length === 1 ? apps[0]! : null);
+    const spaces = await listSpaces(profileName);
+    if (spaces.length === 0) return null;
+    const chosen = findDefaultSpace(spaces) ?? (spaces.length === 1 ? spaces[0]! : null);
     if (!chosen) return null;
-    await updateProfile(profileName, { applicationId: chosen.id });
+    await updateProfile(profileName, { spaceId: chosen.id });
     return chosen;
   } catch {
     return null;

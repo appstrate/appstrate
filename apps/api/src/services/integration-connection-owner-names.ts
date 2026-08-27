@@ -36,7 +36,7 @@ type OwnerNameLookup = (row: ConnectionOwnerRef) => string | null;
  * Two batched lookups (users + end-users) over the distinct owner ids in
  * `rows`, returned as a synchronous lookup. Issues no query for an owner
  * kind that does not appear in `rows`, so the single-kind case (the common
- * one — a dashboard-only application) costs one query, not two.
+ * one — a dashboard-only space) costs one query, not two.
  */
 export async function resolveConnectionOwnerNames(
   rows: ReadonlyArray<ConnectionOwnerRef>,

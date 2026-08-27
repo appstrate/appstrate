@@ -4,7 +4,7 @@
  * Operator surface for the transactional storage-deletion outbox
  * (`storage_deletion_jobs`). Gated by the platform-admin allowlist
  * (`AUTH_PLATFORM_ADMIN_EMAILS`) — there is no org-scoped admin route family,
- * and these jobs are instance-global (they outlive the org/app that created
+ * and these jobs are instance-global (they outlive the org/space that created
  * them), so platform-admin is the correct boundary.
  *
  *   GET  /api/admin/storage-deletion-jobs?status=pending|dead|completed
@@ -14,7 +14,7 @@
  * the threshold is a visibility line, not an abandon point).
  *
  * The listing is deliberately CROSS-ORG (bucket + in-bucket key, which encodes
- * the owning application id and the stored filename). That is the instance
+ * the owning space id and the stored filename). That is the instance
  * operator's job — but it is also why the guard below is the strictest in the
  * codebase and why both routes are rate-limited.
  */
@@ -42,7 +42,7 @@ import { listStorageDeletionJobs, retryStorageDeletionJob } from "../services/st
  *     single trivial scope used to walk straight through this guard and read
  *     the cross-org outbox. An allowlist is a *who*, never a *how*.
  *  2. `sessionRealm === "platform"` — the Better Auth `user` table is shared
- *     with third-party application end-users, whose `email` is self-declared
+ *     with third-party space end-users, whose `email` is self-declared
  *     at signup. Without the realm check, an end-user who signs up with an
  *     allowlisted operator's address becomes a platform admin. The global
  *     `requirePlatformRealm` middleware already enforces this for session

@@ -47,14 +47,14 @@ describe("realtime service (integration)", () => {
 
       addSubscriber({
         id,
-        filter: { orgId: "org-lifecycle", applicationId: "app-lifecycle" },
+        filter: { orgId: "org-lifecycle", spaceId: "space-lifecycle" },
         send,
       });
 
       // Subscriber should receive matching events.
       await pgNotify("run_update", {
         org_id: "org-lifecycle",
-        application_id: "app-lifecycle",
+        space_id: "space-lifecycle",
         id: "exec1",
         status: "running",
       });
@@ -67,7 +67,7 @@ describe("realtime service (integration)", () => {
 
       await pgNotify("run_update", {
         org_id: "org-lifecycle",
-        application_id: "app-lifecycle",
+        space_id: "space-lifecycle",
         id: "exec2",
         status: "running",
       });
@@ -79,16 +79,16 @@ describe("realtime service (integration)", () => {
   // ── run_update dispatching ────────────────────────────
 
   describe("run_update", () => {
-    it("dispatches to subscriber matching orgId and applicationId", async () => {
+    it("dispatches to subscriber matching orgId and spaceId", async () => {
       const send = mock((_e: RealtimeEvent) => {});
       const id = "sub-org-match";
       trackSubscriber(id);
 
-      addSubscriber({ id, filter: { orgId: "org1", applicationId: "app1" }, send });
+      addSubscriber({ id, filter: { orgId: "org1", spaceId: "space1" }, send });
 
       await pgNotify("run_update", {
         org_id: "org1",
-        application_id: "app1",
+        space_id: "space1",
         id: "exec-1",
         status: "running",
         package_id: "pkg-1",
@@ -101,7 +101,7 @@ describe("realtime service (integration)", () => {
       // Verify snake_case is converted to camelCase.
       expect(eventData(call, "run_update")).toMatchObject({
         orgId: "org1",
-        applicationId: "app1",
+        spaceId: "space1",
         id: "exec-1",
         status: "running",
         packageId: "pkg-1",
@@ -116,18 +116,18 @@ describe("realtime service (integration)", () => {
 
       addSubscriber({
         id: "sub-org1",
-        filter: { orgId: "org-alpha", applicationId: "app-alpha" },
+        filter: { orgId: "org-alpha", spaceId: "space-alpha" },
         send: sendOrg1,
       });
       addSubscriber({
         id: "sub-org2",
-        filter: { orgId: "org-beta", applicationId: "app-beta" },
+        filter: { orgId: "org-beta", spaceId: "space-beta" },
         send: sendOrg2,
       });
 
       await pgNotify("run_update", {
         org_id: "org-alpha",
-        application_id: "app-alpha",
+        space_id: "space-alpha",
         id: "exec-x",
         status: "success",
       });
@@ -137,33 +137,33 @@ describe("realtime service (integration)", () => {
       expect(sendOrg2).not.toHaveBeenCalled();
     });
 
-    it("does not dispatch to subscriber with different applicationId (cross-app isolation)", async () => {
-      const sendApp1 = mock((_e: RealtimeEvent) => {});
-      const sendApp2 = mock((_e: RealtimeEvent) => {});
-      trackSubscriber("sub-app1");
-      trackSubscriber("sub-app2");
+    it("does not dispatch to subscriber with different spaceId (cross-space isolation)", async () => {
+      const sendSpace1 = mock((_e: RealtimeEvent) => {});
+      const sendSpace2 = mock((_e: RealtimeEvent) => {});
+      trackSubscriber("sub-space1");
+      trackSubscriber("sub-space2");
 
       addSubscriber({
-        id: "sub-app1",
-        filter: { orgId: "org-shared", applicationId: "app-one" },
-        send: sendApp1,
+        id: "sub-space1",
+        filter: { orgId: "org-shared", spaceId: "space-one" },
+        send: sendSpace1,
       });
       addSubscriber({
-        id: "sub-app2",
-        filter: { orgId: "org-shared", applicationId: "app-two" },
-        send: sendApp2,
+        id: "sub-space2",
+        filter: { orgId: "org-shared", spaceId: "space-two" },
+        send: sendSpace2,
       });
 
       await pgNotify("run_update", {
         org_id: "org-shared",
-        application_id: "app-one",
+        space_id: "space-one",
         id: "exec-iso",
         status: "running",
       });
       await wait();
 
-      expect(sendApp1).toHaveBeenCalledTimes(1);
-      expect(sendApp2).not.toHaveBeenCalled();
+      expect(sendSpace1).toHaveBeenCalledTimes(1);
+      expect(sendSpace2).not.toHaveBeenCalled();
     });
 
     it("filters by runId when set", async () => {
@@ -173,14 +173,14 @@ describe("realtime service (integration)", () => {
 
       addSubscriber({
         id,
-        filter: { orgId: "org-ef", applicationId: "app-ef", runId: "target-exec" },
+        filter: { orgId: "org-ef", spaceId: "space-ef", runId: "target-exec" },
         send,
       });
 
       // Non-matching run ID should be filtered out.
       await pgNotify("run_update", {
         org_id: "org-ef",
-        application_id: "app-ef",
+        space_id: "space-ef",
         id: "other-exec",
         status: "running",
       });
@@ -190,7 +190,7 @@ describe("realtime service (integration)", () => {
       // Matching run ID should be dispatched.
       await pgNotify("run_update", {
         org_id: "org-ef",
-        application_id: "app-ef",
+        space_id: "space-ef",
         id: "target-exec",
         status: "success",
       });
@@ -206,14 +206,14 @@ describe("realtime service (integration)", () => {
 
       addSubscriber({
         id,
-        filter: { orgId: "org-pf", applicationId: "app-pf", packageId: "target-pkg" },
+        filter: { orgId: "org-pf", spaceId: "space-pf", packageId: "target-pkg" },
         send,
       });
 
       // Non-matching package ID should be filtered out.
       await pgNotify("run_update", {
         org_id: "org-pf",
-        application_id: "app-pf",
+        space_id: "space-pf",
         id: "exec-a",
         status: "running",
         package_id: "wrong-pkg",
@@ -224,7 +224,7 @@ describe("realtime service (integration)", () => {
       // Matching package ID should be dispatched.
       await pgNotify("run_update", {
         org_id: "org-pf",
-        application_id: "app-pf",
+        space_id: "space-pf",
         id: "exec-b",
         status: "running",
         package_id: "target-pkg",
@@ -245,13 +245,13 @@ describe("realtime service (integration)", () => {
 
       addSubscriber({
         id,
-        filter: { orgId: "org-log", applicationId: "app-log", isAdmin: false },
+        filter: { orgId: "org-log", spaceId: "space-log", isAdmin: false },
         send,
       });
 
       await pgNotify("run_log_insert", {
         org_id: "org-log",
-        application_id: "app-log",
+        space_id: "space-log",
         run_id: "exec-log-1",
         level: "debug",
         message: "debug info",
@@ -263,7 +263,7 @@ describe("realtime service (integration)", () => {
       // Non-debug logs should still be received.
       await pgNotify("run_log_insert", {
         org_id: "org-log",
-        application_id: "app-log",
+        space_id: "space-log",
         run_id: "exec-log-1",
         level: "info",
         message: "info log",
@@ -281,13 +281,13 @@ describe("realtime service (integration)", () => {
 
       addSubscriber({
         id,
-        filter: { orgId: "org-log-admin", applicationId: "app-log-admin", isAdmin: true },
+        filter: { orgId: "org-log-admin", spaceId: "space-log-admin", isAdmin: true },
         send,
       });
 
       await pgNotify("run_log_insert", {
         org_id: "org-log-admin",
-        application_id: "app-log-admin",
+        space_id: "space-log-admin",
         run_id: "exec-log-2",
         level: "debug",
         message: "debug for admin",
@@ -306,14 +306,14 @@ describe("realtime service (integration)", () => {
 
       addSubscriber({
         id,
-        filter: { orgId: "org-lef", applicationId: "app-lef", runId: "target-log-exec" },
+        filter: { orgId: "org-lef", spaceId: "space-lef", runId: "target-log-exec" },
         send,
       });
 
       // Non-matching run_id.
       await pgNotify("run_log_insert", {
         org_id: "org-lef",
-        application_id: "app-lef",
+        space_id: "space-lef",
         run_id: "other-exec",
         level: "info",
         message: "wrong exec",
@@ -324,7 +324,7 @@ describe("realtime service (integration)", () => {
       // Matching run_id.
       await pgNotify("run_log_insert", {
         org_id: "org-lef",
-        application_id: "app-lef",
+        space_id: "space-lef",
         run_id: "target-log-exec",
         level: "info",
         message: "right exec",
@@ -341,13 +341,13 @@ describe("realtime service (integration)", () => {
       // isAdmin omitted (undefined) — should behave as non-admin.
       addSubscriber({
         id,
-        filter: { orgId: "org-default", applicationId: "app-default" },
+        filter: { orgId: "org-default", spaceId: "space-default" },
         send,
       });
 
       await pgNotify("run_log_insert", {
         org_id: "org-default",
-        application_id: "app-default",
+        space_id: "space-default",
         run_id: "exec-d",
         level: "debug",
         message: "debug hidden",
@@ -357,7 +357,7 @@ describe("realtime service (integration)", () => {
 
       await pgNotify("run_log_insert", {
         org_id: "org-default",
-        application_id: "app-default",
+        space_id: "space-default",
         run_id: "exec-d",
         level: "warn",
         message: "warn visible",
@@ -370,19 +370,19 @@ describe("realtime service (integration)", () => {
   // ── run_metric dispatching ───────────────────────────────
 
   describe("run_metric", () => {
-    it("dispatches to subscriber matching orgId, applicationId, and runId", async () => {
+    it("dispatches to subscriber matching orgId, spaceId, and runId", async () => {
       const send = mock((_e: RealtimeEvent) => {});
       const id = "sub-metric-match";
       trackSubscriber(id);
       addSubscriber({
         id,
-        filter: { orgId: "org-m", applicationId: "app-m", runId: "exec-m", isAdmin: true },
+        filter: { orgId: "org-m", spaceId: "space-m", runId: "exec-m", isAdmin: true },
         send,
       });
 
       await pgNotify("run_metric", {
         org_id: "org-m",
-        application_id: "app-m",
+        space_id: "space-m",
         run_id: "exec-m",
         package_id: "@scope/agent",
         token_usage: { input_tokens: 10, output_tokens: 5 },
@@ -395,7 +395,7 @@ describe("realtime service (integration)", () => {
       expect(call.event).toBe("run_metric");
       expect(eventData(call, "run_metric")).toEqual({
         orgId: "org-m",
-        applicationId: "app-m",
+        spaceId: "space-m",
         runId: "exec-m",
         packageId: "@scope/agent",
         tokenUsage: { input_tokens: 10, output_tokens: 5 },
@@ -410,13 +410,13 @@ describe("realtime service (integration)", () => {
       trackSubscriber(id);
       addSubscriber({
         id,
-        filter: { orgId: "org-mr", applicationId: "app-mr", runId: "target", isAdmin: true },
+        filter: { orgId: "org-mr", spaceId: "space-mr", runId: "target", isAdmin: true },
         send,
       });
 
       await pgNotify("run_metric", {
         org_id: "org-mr",
-        application_id: "app-mr",
+        space_id: "space-mr",
         run_id: "other",
         package_id: "@scope/agent",
         token_usage: null,
@@ -427,7 +427,7 @@ describe("realtime service (integration)", () => {
 
       await pgNotify("run_metric", {
         org_id: "org-mr",
-        application_id: "app-mr",
+        space_id: "space-mr",
         run_id: "target",
         package_id: "@scope/agent",
         token_usage: null,
@@ -445,7 +445,7 @@ describe("realtime service (integration)", () => {
         id,
         filter: {
           orgId: "org-mp",
-          applicationId: "app-mp",
+          spaceId: "space-mp",
           packageId: "@scope/want",
           isAdmin: true,
         },
@@ -454,7 +454,7 @@ describe("realtime service (integration)", () => {
 
       await pgNotify("run_metric", {
         org_id: "org-mp",
-        application_id: "app-mp",
+        space_id: "space-mp",
         run_id: "rA",
         package_id: "@scope/skip",
         token_usage: null,
@@ -465,7 +465,7 @@ describe("realtime service (integration)", () => {
 
       await pgNotify("run_metric", {
         org_id: "org-mp",
-        application_id: "app-mp",
+        space_id: "space-mp",
         run_id: "rB",
         package_id: "@scope/want",
         token_usage: null,
@@ -482,18 +482,18 @@ describe("realtime service (integration)", () => {
       trackSubscriber("sub-metric-orgB");
       addSubscriber({
         id: "sub-metric-orgA",
-        filter: { orgId: "org-A", applicationId: "app-A", isAdmin: true },
+        filter: { orgId: "org-A", spaceId: "space-A", isAdmin: true },
         send: sendA,
       });
       addSubscriber({
         id: "sub-metric-orgB",
-        filter: { orgId: "org-B", applicationId: "app-B", isAdmin: true },
+        filter: { orgId: "org-B", spaceId: "space-B", isAdmin: true },
         send: sendB,
       });
 
       await pgNotify("run_metric", {
         org_id: "org-A",
-        application_id: "app-A",
+        space_id: "space-A",
         run_id: "x",
         package_id: "@scope/p",
         token_usage: null,
@@ -523,7 +523,7 @@ describe("realtime service (integration)", () => {
         id,
         filter: {
           orgId: "org-ch",
-          applicationId: "app-ch",
+          spaceId: "space-ch",
           isAdmin: true,
           channels: new Set(["run_update"]),
         },
@@ -532,7 +532,7 @@ describe("realtime service (integration)", () => {
 
       await pgNotify("run_log_insert", {
         org_id: "org-ch",
-        application_id: "app-ch",
+        space_id: "space-ch",
         run_id: "exec-ch",
         level: "info",
         message: "should not be delivered",
@@ -543,7 +543,7 @@ describe("realtime service (integration)", () => {
       // The declared channel still flows — this is a filter, not a mute.
       await pgNotify("run_update", {
         org_id: "org-ch",
-        application_id: "app-ch",
+        space_id: "space-ch",
         id: "exec-ch",
         status: "running",
       });
@@ -559,20 +559,20 @@ describe("realtime service (integration)", () => {
 
       addSubscriber({
         id,
-        filter: { orgId: "org-ch2", applicationId: "app-ch2", isAdmin: true },
+        filter: { orgId: "org-ch2", spaceId: "space-ch2", isAdmin: true },
         send,
       });
 
       await pgNotify("run_update", {
         org_id: "org-ch2",
-        application_id: "app-ch2",
+        space_id: "space-ch2",
         id: "exec-ch2",
         status: "running",
       });
       await wait();
       await pgNotify("run_log_insert", {
         org_id: "org-ch2",
-        application_id: "app-ch2",
+        space_id: "space-ch2",
         run_id: "exec-ch2",
         level: "info",
         message: "still delivered",
@@ -580,7 +580,7 @@ describe("realtime service (integration)", () => {
       await wait();
       await pgNotify("run_metric", {
         org_id: "org-ch2",
-        application_id: "app-ch2",
+        space_id: "space-ch2",
         run_id: "exec-ch2",
         package_id: "pkg-ch2",
       });
@@ -602,7 +602,7 @@ describe("realtime service (integration)", () => {
         id: "sub-ch-filtered",
         filter: {
           orgId: "org-ch3",
-          applicationId: "app-ch3",
+          spaceId: "space-ch3",
           isAdmin: true,
           channels: new Set(["run_update"]),
         },
@@ -610,13 +610,13 @@ describe("realtime service (integration)", () => {
       });
       addSubscriber({
         id: "sub-ch-unfiltered",
-        filter: { orgId: "org-ch3", applicationId: "app-ch3", isAdmin: true },
+        filter: { orgId: "org-ch3", spaceId: "space-ch3", isAdmin: true },
         send: unfiltered,
       });
 
       await pgNotify("run_log_insert", {
         org_id: "org-ch3",
-        application_id: "app-ch3",
+        space_id: "space-ch3",
         run_id: "exec-ch3",
         level: "info",
         message: "one wants it, one does not",
@@ -640,11 +640,11 @@ describe("realtime service (integration)", () => {
       const id = "sub-idempotent";
       trackSubscriber(id);
 
-      addSubscriber({ id, filter: { orgId: "org-idem", applicationId: "app-idem" }, send });
+      addSubscriber({ id, filter: { orgId: "org-idem", spaceId: "space-idem" }, send });
 
       await pgNotify("run_update", {
         org_id: "org-idem",
-        application_id: "app-idem",
+        space_id: "space-idem",
         id: "exec-idem",
         status: "running",
       });

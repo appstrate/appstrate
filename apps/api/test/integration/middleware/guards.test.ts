@@ -10,7 +10,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedRun } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 
 const app = getTestApp();
 
@@ -24,10 +24,7 @@ describe("requireAgent (via agent config route)", () => {
 
   it("loads agent when it exists", async () => {
     await seedPackage({ id: "@testorg/my-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
-    await installPackage(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      "@testorg/my-agent",
-    );
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@testorg/my-agent");
 
     const res = await app.request("/api/agents/@testorg/my-agent/input-settings", {
       method: "PUT",
@@ -57,10 +54,7 @@ describe("requireMutableAgent (via agent skills route)", () => {
 
   it("allows modification of local agent with no running runs", async () => {
     await seedPackage({ id: "@testorg/my-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
-    await installPackage(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      "@testorg/my-agent",
-    );
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@testorg/my-agent");
 
     const res = await app.request("/api/agents/@testorg/my-agent/skills", {
       method: "PUT",
@@ -72,15 +66,12 @@ describe("requireMutableAgent (via agent skills route)", () => {
 
   it("rejects modification of agent with running runs (409)", async () => {
     await seedPackage({ id: "@testorg/busy-agent", orgId: ctx.orgId, createdBy: ctx.user.id });
-    await installPackage(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-      "@testorg/busy-agent",
-    );
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@testorg/busy-agent");
 
     await seedRun({
       packageId: "@testorg/busy-agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "running",
     });

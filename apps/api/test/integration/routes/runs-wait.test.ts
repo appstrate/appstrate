@@ -42,7 +42,7 @@ describe("GET /api/runs/:id?wait — long-poll", () => {
     return seedRun({
       packageId: "@waitorg/wait-agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status,
     });
@@ -193,7 +193,7 @@ describe("GET /api/runs/:id?wait — long-poll", () => {
     const run = await seedRun({
       packageId: "@waitother/agent",
       orgId: otherCtx.orgId,
-      applicationId: otherCtx.defaultAppId,
+      spaceId: otherCtx.defaultSpaceId,
       userId: otherCtx.user.id,
       status: "running",
     });

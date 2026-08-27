@@ -120,7 +120,7 @@ function buildBaseOpts(over: Partial<RunRemoteOptions> = {}): RunRemoteOptions {
   return {
     instance: "https://app.example.com",
     bearerToken: "ask_test_key",
-    applicationId: "app_1",
+    spaceId: "spc_1",
     orgId: "org_1",
     scope: "@system",
     name: "hello-world",
@@ -140,7 +140,7 @@ function recordSummary(over: Partial<RemoteRunRecord> = {}): RemoteRunRecord {
     id: "run_test_1",
     status: "success",
     packageId: "@system/hello-world",
-    applicationId: "app_1",
+    spaceId: "spc_1",
     orgId: "org_1",
     result: { output: { ok: true } },
     error: null,
@@ -303,10 +303,10 @@ describe("runRemote — happy path", () => {
     expect(outcome.logs.map((l) => l.id)).toEqual([1, 2]);
     expect(outcome.record.cost).toBe(0.0123);
 
-    // Trigger headers carry the bearer + X-Application-Id + X-Org-Id
+    // Trigger headers carry the bearer + X-Space-Id + X-Org-Id
     const trigger = calls.find((c) => c.method === "POST" && c.url.includes("/run"))!;
     expect(trigger.headers["authorization"]).toBe("Bearer ask_test_key");
-    expect(trigger.headers["x-application-id"]).toBe("app_1");
+    expect(trigger.headers["x-space-id"]).toBe("spc_1");
     expect(trigger.headers["x-org-id"]).toBe("org_1");
     expect(JSON.parse(trigger.body!)).toEqual({ input: { greeting: "hi" } });
 
@@ -1484,7 +1484,7 @@ describe("runRemote — appstrate.error advisory routing", () => {
         {
           instance: "https://app.example.com",
           bearerToken: "ask_test_key",
-          applicationId: "app_1",
+          spaceId: "spc_1",
           orgId: "org_1",
           scope: "@system",
           name: "hello-world",

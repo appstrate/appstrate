@@ -11,7 +11,7 @@
  *   - `GET /api/orgs` and `POST /api/orgs` both run without org context
  *     (no `X-Org-Id`), so they work right after a fresh login before
  *     the profile has a pinned org. See `apps/api/src/routes/organizations.ts`.
- *   - Creating an org server-side also provisions a default application
+ *   - Creating an org server-side also provisions a default space
  *     + hello-world agent, so the user lands on a fully-working setup.
  */
 

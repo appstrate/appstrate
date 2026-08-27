@@ -4,13 +4,13 @@ import { pgTable, text, timestamp, bigint, uuid, index } from "drizzle-orm/pg-co
 import { sql } from "drizzle-orm";
 import { user } from "./auth.ts";
 import { organizations } from "./organizations.ts";
-import { applications, endUsers } from "./applications.ts";
+import { spaces, endUsers } from "./spaces.ts";
 
 /**
  * Tracks direct-upload requests before the binary has been consumed by a run.
  *
  * Flow:
- *  1. Client POST /api/uploads { name, size, mime, applicationId } → creates row, returns { uploadId, url, method, headers }
+ *  1. Client POST /api/uploads { name, size, mime, spaceId } → creates row, returns { uploadId, url, method, headers }
  *  2. Client PUT url ← binary (to S3 directly, or to /api/uploads/_content for FS)
  *  3. Client POST /api/agents/:id/run { input: { file: "upload://upl_xxx" } }
  *  4. Run pipeline streams upload:// into the run workspace, marks `consumedAt`
@@ -28,9 +28,9 @@ export const uploads = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    applicationId: text("application_id")
+    spaceId: text("space_id")
       .notNull()
-      .references(() => applications.id, { onDelete: "cascade" }),
+      .references(() => spaces.id, { onDelete: "cascade" }),
     /** Better Auth user who requested the upload (null = end-user / unattributed). */
     createdBy: text("created_by").references(() => user.id, { onDelete: "set null" }),
     /**
@@ -76,7 +76,7 @@ export const uploads = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    index("idx_uploads_app").on(table.applicationId),
+    index("idx_uploads_space").on(table.spaceId),
     // Partial index matching the GC sweep predicate so consumed rows never
     // hit the index and the hot set stays tiny as uploads accumulate.
     index("idx_uploads_expires_unconsumed")

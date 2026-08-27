@@ -95,7 +95,17 @@ function extractGuard(): string {
   return sql.slice(start, end + "END $$;".length);
 }
 
-/** The eleven tables the guard probes, per its own `FOREACH` list. */
+/**
+ * The eleven tables the guard probes, per its own `FOREACH` list.
+ *
+ * These are the names as of 0047 — `application_smtp_configs` /
+ * `application_social_providers` were renamed to `space_*` later, by
+ * `0053_applications_to_spaces.sql`. This list must keep spelling them the way
+ * 0047 does: the guard's text is read out of the shipped `.sql`, so a table
+ * created here under any other name is a table the guard's `FOREACH` never
+ * probes, and the "data present raises" case would stop raising for a reason
+ * that has nothing to do with the guard.
+ */
 const AT_RISK = [
   "application_smtp_configs",
   "application_social_providers",

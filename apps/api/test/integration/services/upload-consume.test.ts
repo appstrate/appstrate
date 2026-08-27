@@ -46,13 +46,13 @@ const PDF_BYTES = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0
  */
 const TEST_ACTOR: Actor = { type: "user", id: "usr_upload_consume_test" };
 
-/** `{ orgId, applicationId, actor }` for a test context. */
-function access(ctx: { orgId: string; defaultAppId: string }): {
+/** `{ orgId, spaceId, actor }` for a test context. */
+function access(ctx: { orgId: string; defaultSpaceId: string }): {
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   actor: Actor;
 } {
-  return { orgId: ctx.orgId, applicationId: ctx.defaultAppId, actor: TEST_ACTOR };
+  return { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, actor: TEST_ACTOR };
 }
 
 /**
@@ -73,7 +73,7 @@ const drainSink: UploadStreamSink = async (stream) => {
 };
 
 async function seedUpload(
-  ctx: { orgId: string; applicationId: string },
+  ctx: { orgId: string; spaceId: string },
   opts: {
     id: string;
     bytes: Buffer;
@@ -83,7 +83,7 @@ async function seedUpload(
     sizeOverride?: number;
   },
 ): Promise<string> {
-  const storagePath = `${ctx.applicationId}/${opts.id}/file.pdf`;
+  const storagePath = `${ctx.spaceId}/${opts.id}/file.pdf`;
   const storageKey = `${UPLOAD_BUCKET}/${storagePath}`;
   if (!opts.skipStoragePut) {
     await storagePut(UPLOAD_BUCKET, storagePath, opts.bytes);
@@ -91,7 +91,7 @@ async function seedUpload(
   await db.insert(uploads).values({
     id: opts.id,
     orgId: ctx.orgId,
-    applicationId: ctx.applicationId,
+    spaceId: ctx.spaceId,
     createdBy: null,
     storageKey,
     name: "file.pdf",
@@ -345,7 +345,7 @@ describe("consumeUploadStream", () => {
   it("retains the storage object after a successful consume (reuse source)", async () => {
     const ctx = await createTestContext({ orgSlug: "org-cleanup-ok" });
     const id = "upl_cleanup_ok_1";
-    const storagePath = `${ctx.defaultAppId}/${id}/file.pdf`;
+    const storagePath = `${ctx.defaultSpaceId}/${id}/file.pdf`;
     await seedUpload(access(ctx), { id, bytes: PDF_BYTES });
     expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(true);
 
@@ -361,7 +361,7 @@ describe("consumeUploadStream", () => {
   it("deletes the storage object after a post-claim failure (release path)", async () => {
     const ctx = await createTestContext({ orgSlug: "org-cleanup-err" });
     const id = "upl_cleanup_err_1";
-    const storagePath = `${ctx.defaultAppId}/${id}/file.pdf`;
+    const storagePath = `${ctx.defaultSpaceId}/${id}/file.pdf`;
     await seedUpload(access(ctx), { id, bytes: PDF_BYTES, sizeOverride: PDF_BYTES.length + 1 });
     expect(await storageExists(UPLOAD_BUCKET, storagePath)).toBe(true);
 
@@ -389,7 +389,7 @@ describe("cleanupExpiredUploads", () => {
   it("sweeps consumed rows older than the 24h retention window", async () => {
     const ctx = await createTestContext({ orgSlug: "org-gc-consumed" });
     const id = "upl_gc_old_1";
-    const storagePath = `${ctx.defaultAppId}/${id}/file.pdf`;
+    const storagePath = `${ctx.defaultSpaceId}/${id}/file.pdf`;
     await seedUpload(access(ctx), { id, bytes: PDF_BYTES });
     // Simulate a row consumed past the 24h retention window AND past the 1h
     // in-flight-consume grace the sweep adds on top of it.
@@ -435,7 +435,7 @@ describe("cleanupExpiredUploads", () => {
   it("does not delete an upload out from under a re-consume that is still streaming", async () => {
     const ctx = await createTestContext({ orgSlug: "org-gc-inflight" });
     const id = "upl_gc_inflight_1";
-    const storagePath = `${ctx.defaultAppId}/${id}/file.pdf`;
+    const storagePath = `${ctx.defaultSpaceId}/${id}/file.pdf`;
     await seedUpload(access(ctx), { id, bytes: PDF_BYTES });
     // A re-consume never touches the row, so nothing the sweep could lock would
     // reveal it — only the grace margin keeps the object alive while it streams.

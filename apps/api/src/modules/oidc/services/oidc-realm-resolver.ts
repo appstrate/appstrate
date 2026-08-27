@@ -9,9 +9,9 @@
  * (`resolvePendingClientBinding` — OAuth callback state, magic-link token
  * binding, or the server-authored pending-client cookie on the register
  * path), looks up the client's signup policy (which already resolves
- * `applicationId` from the `level=application` branch), and returns:
+ * `spaceId` from the `level=space` branch), and returns:
  *
- *   - `"end_user:<applicationId>"` when the binding pins an application-level
+ *   - `"end_user:<spaceId>"` when the binding pins a space-level
  *     client. This is the single-user-pool isolation fix that prevents the
  *     newly minted BA user from being replayable against platform routes.
  *   - `"platform"` for org-level clients (whose users are real platform
@@ -25,7 +25,7 @@
  * never silently downgrade an un-resolvable OIDC flow to a full `platform`
  * user (that user would pass `requirePlatformRealm` on every platform
  * route). So a binding that names an unknown/disabled client, an
- * application-level client with no `applicationId`, or an OAuth transaction
+ * space-level client with no `spaceId`, or an OAuth transaction
  * whose authorize destination carries no `client_id`, ABORTS user creation
  * instead of defaulting to `platform`. The ONLY path that resolves to
  * `platform` is one POSITIVELY established as non-OIDC:
@@ -89,13 +89,13 @@ export async function oidcRealmResolver(ctx: RealmResolutionContext): Promise<st
   // org / instance clients ARE platform audiences — their users are real
   // platform members. This is a legitimate `platform` resolution, not a
   // fallback.
-  if (policy.level !== "application") return "platform";
-  if (!policy.applicationId) {
-    // Application-level client without an applicationId is a data-integrity
-    // anomaly (the create schema requires `referenced_application_id`).
-    // Refuse rather than downgrade an application flow to `platform`.
+  if (policy.level !== "space") return "platform";
+  if (!policy.spaceId) {
+    // Space-level client without a spaceId is a data-integrity
+    // anomaly (the create schema requires `referenced_space_id`).
+    // Refuse rather than downgrade a space flow to `platform`.
     throw realmUnresolved();
   }
 
-  return `end_user:${policy.applicationId}`;
+  return `end_user:${policy.spaceId}`;
 }

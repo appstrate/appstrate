@@ -85,7 +85,7 @@ describe("syncInstanceClientsFromEnv — create", () => {
     expect(row!.tokenEndpointAuthMethod).toBe("client_secret_basic");
     expect(row!.requirePKCE).toBe(true);
     expect(row!.referencedOrgId).toBeNull();
-    expect(row!.referencedApplicationId).toBeNull();
+    expect(row!.referencedSpaceId).toBeNull();
     expect(row!.allowSignup).toBe(false);
   });
 

@@ -15,13 +15,13 @@ import { QueryClient } from "@tanstack/react-query";
 import { runKeys, invalidateRunDetails, invalidateRunLogs } from "../query-keys.ts";
 
 const ORG = "org_1";
-const APP = "app_1";
+const SPACE = "spc_1";
 const RUN = "run_1";
 
 function seededClient() {
   const qc = new QueryClient();
-  qc.setQueryData(runKeys.detail(ORG, APP, RUN), { id: RUN });
-  qc.setQueryData(runKeys.logs(ORG, APP, RUN), []);
+  qc.setQueryData(runKeys.detail(ORG, SPACE, RUN), { id: RUN });
+  qc.setQueryData(runKeys.logs(ORG, SPACE, RUN), []);
   return qc;
 }
 
@@ -37,21 +37,21 @@ describe("run log cache invalidation", () => {
     // is re-keyed under `["run", …]`), the helper is redundant and this fails.
     const qc = seededClient();
     await qc.invalidateQueries({ queryKey: runKeys.all });
-    expect(isInvalidated(qc, runKeys.detail(ORG, APP, RUN))).toBe(true);
-    expect(isInvalidated(qc, runKeys.logs(ORG, APP, RUN))).toBe(false);
+    expect(isInvalidated(qc, runKeys.detail(ORG, SPACE, RUN))).toBe(true);
+    expect(isInvalidated(qc, runKeys.logs(ORG, SPACE, RUN))).toBe(false);
   });
 
   it("marks the run's logs stale so the terminal transition refetches them", async () => {
     const qc = seededClient();
-    await invalidateRunLogs(qc, ORG, APP, RUN);
-    expect(isInvalidated(qc, runKeys.logs(ORG, APP, RUN))).toBe(true);
+    await invalidateRunLogs(qc, ORG, SPACE, RUN);
+    expect(isInvalidated(qc, runKeys.logs(ORG, SPACE, RUN))).toBe(true);
   });
 
   it("touches only the run it was given", async () => {
     const qc = seededClient();
-    qc.setQueryData(runKeys.logs(ORG, APP, "run_2"), []);
-    await invalidateRunLogs(qc, ORG, APP, RUN);
-    expect(isInvalidated(qc, runKeys.logs(ORG, APP, "run_2"))).toBe(false);
+    qc.setQueryData(runKeys.logs(ORG, SPACE, "run_2"), []);
+    await invalidateRunLogs(qc, ORG, SPACE, RUN);
+    expect(isInvalidated(qc, runKeys.logs(ORG, SPACE, "run_2"))).toBe(false);
   });
 });
 
@@ -59,12 +59,12 @@ describe("run detail cache invalidation", () => {
   it("marks a cached run stale when deleting one of its files", async () => {
     const qc = seededClient();
     await invalidateRunDetails(qc);
-    expect(isInvalidated(qc, runKeys.detail(ORG, APP, RUN))).toBe(true);
+    expect(isInvalidated(qc, runKeys.detail(ORG, SPACE, RUN))).toBe(true);
   });
 
   it("does not invalidate the separate run-log family", async () => {
     const qc = seededClient();
     await invalidateRunDetails(qc);
-    expect(isInvalidated(qc, runKeys.logs(ORG, APP, RUN))).toBe(false);
+    expect(isInvalidated(qc, runKeys.logs(ORG, SPACE, RUN))).toBe(false);
   });
 });

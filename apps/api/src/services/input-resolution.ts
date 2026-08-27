@@ -13,7 +13,7 @@
  * The API's layers, last one wins:
  *
  *   author default   (manifest `input.schema` JSON Schema `default` keyword)
- *     -> editor default   (`application_packages.input_settings.values`)
+ *     -> editor default   (`space_packages.input_settings.values`)
  *       -> the overlay   <- REFUSED on a locked field
  *
  * The top layer is the single `overlay`, and which source fills it is what

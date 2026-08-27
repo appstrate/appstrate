@@ -49,7 +49,7 @@ async function seedRun(
     id: runId,
     packageId,
     orgId: ctx.orgId,
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     status: "running",
     runOrigin: "remote",
     sinkSecretEncrypted: encrypt(RUN_SECRET),
@@ -169,7 +169,7 @@ describe("recordBootHeartbeat — boot-window synthetic keep-alive gating", () =
     const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
     const before = Date.now();
     await createRun(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       {
         id: runId,
         packageId: agentId,
@@ -198,7 +198,7 @@ describe("recordBootHeartbeat — boot-window synthetic keep-alive gating", () =
     // meaningless (and the sweep filters on an open sink anyway).
     const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
     await createRun(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       {
         id: runId,
         packageId: agentId,

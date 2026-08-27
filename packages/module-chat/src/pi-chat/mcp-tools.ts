@@ -134,7 +134,7 @@ export interface PiTurnBudget {
 interface BuildPlatformMcpToolsOptions {
   /** Platform MCP endpoint (`/api/mcp/o/:org?context=injected`). */
   url: string;
-  /** Auth + scoping headers (short-lived MCP loopback bearer + org/app ids). */
+  /** Auth + scoping headers (short-lived MCP loopback bearer + org/space ids). */
   headers: Record<string, string>;
   /** Emits a UI chunk into the live turn stream (used for run_and_wait cards). */
   writeChunk: (chunk: UIMessageChunk) => void;

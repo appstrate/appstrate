@@ -13,7 +13,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { insertShadowPackage } from "../../../src/services/inline-run.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import type { AgentManifest } from "../../../src/types/index.ts";
 
 const app = getTestApp();
@@ -42,7 +42,7 @@ describe("ephemeral filter — catalog endpoints hide inline shadows", () => {
       createdBy: ctx.user.id,
     });
     await installPackage(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       "@ephemfilter/real-agent",
     );
 
@@ -90,7 +90,7 @@ describe("ephemeral filter — catalog endpoints hide inline shadows", () => {
     expect(shadow).toBeDefined();
 
     await expect(
-      installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, shadow!.id),
+      installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, shadow!.id),
     ).rejects.toMatchObject({
       status: 404,
     });

@@ -44,7 +44,7 @@ import { createMemoryIO } from "./helpers/memory-io.ts";
 interface Responders {
   listOrgs?: () => Response;
   createOrg?: (body: unknown) => Response;
-  listApplications?: () => Response;
+  listSpaces?: () => Response;
 }
 
 function installFetch(responders: Responders): void {
@@ -62,16 +62,16 @@ function installFetch(responders: Responders): void {
     if (url.endsWith("/api/orgs")) {
       return responders.listOrgs?.() ?? new Response("missing listOrgs stub", { status: 501 });
     }
-    if (url.endsWith("/api/applications")) {
-      // Default: the new org has exactly one server-provisioned default app.
+    if (url.endsWith("/api/spaces")) {
+      // Default: the new org has exactly one server-provisioned default space.
       return (
-        responders.listApplications?.() ??
+        responders.listSpaces?.() ??
         new Response(
           JSON.stringify({
             object: "list",
             data: [
               {
-                id: "app_cascade_default",
+                id: "spc_cascade_default",
                 orgId: "org_2",
                 name: "Default",
                 isDefault: true,
@@ -100,16 +100,16 @@ afterEach(async () => {
   await configHome.teardown();
 });
 
-function seedLoggedIn(orgId?: string, profile = "default", applicationId?: string): Promise<void> {
-  return seedLoggedInProfile(profile, { email: "alice@example.com", orgId, applicationId });
+function seedLoggedIn(orgId?: string, profile = "default", spaceId?: string): Promise<void> {
+  return seedLoggedInProfile(profile, { email: "alice@example.com", orgId, spaceId });
 }
 
 async function pinnedOrgId(profile = "default"): Promise<string | undefined> {
   return (await readConfig()).profiles[profile]?.orgId;
 }
 
-async function pinnedAppId(profile = "default"): Promise<string | undefined> {
-  return (await readConfig()).profiles[profile]?.applicationId;
+async function pinnedSpaceId(profile = "default"): Promise<string | undefined> {
+  return (await readConfig()).profiles[profile]?.spaceId;
 }
 
 const twoOrgs = {
@@ -389,31 +389,31 @@ describe("org create", () => {
   });
 });
 
-// ─── App cascade on org change (issue #217) ───────────────────────────
+// ─── Space cascade on org change (issue #217) ─────────────────────────
 //
-// An `applicationId` pinned to org A is invalid under org B — the server returns
-// 404 on the next app-scoped call. `org switch` and `org create` must
-// both (a) clear the stale app pin and (b) re-pin the new org's default
-// app so `appstrate api` keeps working without manual intervention.
+// A `spaceId` pinned to org A is invalid under org B — the server returns
+// 404 on the next space-scoped call. `org switch` and `org create` must
+// both (a) clear the stale space pin and (b) re-pin the new org's default
+// space so `appstrate api` keeps working without manual intervention.
 
-describe("org switch — cascade: re-pins new org's default app", () => {
-  it("pins the new org AND pins the new org's default app in one call", async () => {
+describe("org switch — cascade: re-pins new org's default space", () => {
+  it("pins the new org AND pins the new org's default space in one call", async () => {
     const { io, stdout } = createMemoryIO();
-    // Start pinned to org_1 with an app pin that only exists under org_1.
-    await seedLoggedIn("org_1", "default", "app_stale_from_org_1");
+    // Start pinned to org_1 with a space pin that only exists under org_1.
+    await seedLoggedIn("org_1", "default", "spc_stale_from_org_1");
     installFetch({
       listOrgs: () =>
         new Response(JSON.stringify(twoOrgs), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
-      listApplications: () =>
+      listSpaces: () =>
         new Response(
           JSON.stringify({
             object: "list",
             data: [
               {
-                id: "app_for_org_2",
+                id: "spc_for_org_2",
                 orgId: "org_2",
                 name: "Org 2 Default",
                 isDefault: true,
@@ -428,22 +428,22 @@ describe("org switch — cascade: re-pins new org's default app", () => {
     await orgSwitchCommand({ profile: "default", ref: "org_2" }, {}, io);
 
     expect(await pinnedOrgId()).toBe("org_2");
-    expect(await pinnedAppId()).toBe("app_for_org_2");
+    expect(await pinnedSpaceId()).toBe("spc_for_org_2");
     const out = stdout();
     expect(out).toContain('Pinned "Beta"');
-    expect(out).toContain('/ app "Org 2 Default"');
+    expect(out).toContain('/ space "Org 2 Default"');
   });
 
-  it("clears the stale app pin even when the new org has no default app", async () => {
+  it("clears the stale space pin even when the new org has no default space", async () => {
     const { io } = createMemoryIO();
-    await seedLoggedIn("org_1", "default", "app_stale");
+    await seedLoggedIn("org_1", "default", "spc_stale");
     installFetch({
       listOrgs: () =>
         new Response(JSON.stringify(twoOrgs), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
-      listApplications: () =>
+      listSpaces: () =>
         new Response(JSON.stringify({ object: "list", data: [] }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -454,32 +454,32 @@ describe("org switch — cascade: re-pins new org's default app", () => {
 
     expect(await pinnedOrgId()).toBe("org_2");
     // Crucially, the stale pin is gone even though no new default was found.
-    expect(await pinnedAppId()).toBeUndefined();
+    expect(await pinnedSpaceId()).toBeUndefined();
   });
 
-  it("tolerates a failing /api/applications call — org pin still commits", async () => {
+  it("tolerates a failing /api/spaces call — org pin still commits", async () => {
     const { io } = createMemoryIO();
-    await seedLoggedIn("org_1", "default", "app_stale");
+    await seedLoggedIn("org_1", "default", "spc_stale");
     installFetch({
       listOrgs: () =>
         new Response(JSON.stringify(twoOrgs), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
-      listApplications: () => new Response("boom", { status: 500 }),
+      listSpaces: () => new Response("boom", { status: 500 }),
     });
 
     await orgSwitchCommand({ profile: "default", ref: "org_2" }, {}, io);
 
     expect(await pinnedOrgId()).toBe("org_2");
-    expect(await pinnedAppId()).toBeUndefined();
+    expect(await pinnedSpaceId()).toBeUndefined();
   });
 });
 
-describe("org create — cascade: re-pins new org's default app", () => {
-  it("pins the newly created org AND pins the auto-provisioned default app", async () => {
+describe("org create — cascade: re-pins new org's default space", () => {
+  it("pins the newly created org AND pins the auto-provisioned default space", async () => {
     const { io, stdout } = createMemoryIO();
-    await seedLoggedIn(undefined, "default", "app_stale");
+    await seedLoggedIn(undefined, "default", "spc_stale");
     installFetch({
       createOrg: () =>
         new Response(
@@ -492,13 +492,13 @@ describe("org create — cascade: re-pins new org's default app", () => {
           }),
           { status: 201, headers: { "Content-Type": "application/json" } },
         ),
-      listApplications: () =>
+      listSpaces: () =>
         new Response(
           JSON.stringify({
             object: "list",
             data: [
               {
-                id: "app_new_default",
+                id: "spc_new_default",
                 orgId: "org_new",
                 name: "Default",
                 isDefault: true,
@@ -513,7 +513,7 @@ describe("org create — cascade: re-pins new org's default app", () => {
     await orgCreateCommand({ profile: "default", name: "Fresh" }, {}, io);
 
     expect(await pinnedOrgId()).toBe("org_new");
-    expect(await pinnedAppId()).toBe("app_new_default");
-    expect(stdout()).toContain('/ app "Default"');
+    expect(await pinnedSpaceId()).toBe("spc_new_default");
+    expect(stdout()).toContain('/ space "Default"');
   });
 });

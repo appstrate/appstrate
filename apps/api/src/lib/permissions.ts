@@ -129,9 +129,9 @@ const OWNER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "api-keys:read",
   "api-keys:create",
   "api-keys:revoke",
-  "applications:read",
-  "applications:write",
-  "applications:delete",
+  "spaces:read",
+  "spaces:write",
+  "spaces:delete",
   "end-users:read",
   "end-users:write",
   "end-users:delete",
@@ -190,7 +190,7 @@ const MEMBER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   // members, not just admins). Usage metered per call in `llm_usage`.
   "llm-proxy:call",
   // Developer tools
-  "applications:read",
+  "spaces:read",
   "end-users:read",
   "end-users:write",
 ]);
@@ -210,7 +210,7 @@ const VIEWER_PERMISSIONS: ReadonlySet<Permission> = new Set<Permission>([
   "persistence:read",
   "models:read",
   "proxies:read",
-  "applications:read",
+  "spaces:read",
   "end-users:read",
   "integrations:read",
 ]);
@@ -279,16 +279,16 @@ export const API_KEY_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permissio
   "integrations:uninstall",
   "integrations:connect",
   "integrations:disconnect",
-  // Applications & End-Users
-  "applications:read",
-  "applications:write",
-  "applications:delete",
+  // Spaces & End-Users
+  "spaces:read",
+  "spaces:write",
+  "spaces:delete",
   "end-users:read",
   "end-users:write",
   "end-users:delete",
   // Credential proxy — BYOI ("Bring Your Own Instance") for remote
   // AFPS runs. High-value scope: one compromised API key can reach every
-  // provider in the application. NOT granted by default; callers must
+  // provider in the space. NOT granted by default; callers must
   // explicitly add it when minting the key.
   "credential-proxy:call",
   // LLM proxy — server-side LLM model injection for remote-backed

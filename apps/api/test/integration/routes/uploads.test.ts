@@ -49,7 +49,7 @@ describe("POST /api/uploads", () => {
       .where(and(eq(auditEvents.action, "upload.created"), eq(auditEvents.resourceId, body.id!)));
     expect(auditRows).toHaveLength(1);
     expect(auditRows[0]!.orgId).toBe(ctx.orgId);
-    expect(auditRows[0]!.applicationId).toBe(ctx.defaultAppId);
+    expect(auditRows[0]!.spaceId).toBe(ctx.defaultSpaceId);
     expect(auditRows[0]!.resourceType).toBe("upload");
     expect(auditRows[0]!.actorType).toBe("user");
     expect(auditRows[0]!.actorId).toBe(ctx.user.id);

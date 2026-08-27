@@ -23,7 +23,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { eventData } from "../../helpers/sse.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedRun } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import { persistRunEvent } from "../../../src/services/run-launcher/appstrate-event-sink.ts";
 import {
   addSubscriber,
@@ -52,11 +52,11 @@ describe("run_metric end-to-end (event write-through → SSE)", () => {
     _resetRunMetricBroadcasterForTests();
     ctx = await createTestContext();
     await seedAgent({ id: agentId, orgId: ctx.orgId, createdBy: ctx.user.id });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, agentId);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, agentId);
     const run = await seedRun({
       packageId: agentId,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "running",
     });
@@ -81,7 +81,7 @@ describe("run_metric end-to-end (event write-through → SSE)", () => {
 
   /** Drive one metric through the ingestion write-through (ledger on). */
   function persistMetric(e: RunEvent) {
-    return persistRunEvent(db, { orgId: ctx.orgId, applicationId: ctx.defaultAppId }, runId, e, {
+    return persistRunEvent(db, { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, runId, e, {
       writeLedger: true,
     });
   }
@@ -92,7 +92,7 @@ describe("run_metric end-to-end (event write-through → SSE)", () => {
     subscriberIds.push(id);
     addSubscriber({
       id,
-      filter: { orgId: ctx.orgId, applicationId: ctx.defaultAppId, runId, isAdmin: true },
+      filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
       send,
     });
 
@@ -105,7 +105,7 @@ describe("run_metric end-to-end (event write-through → SSE)", () => {
     expect(frame.data).toMatchObject({
       runId,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       packageId: agentId,
       tokenUsage: { input_tokens: 100, output_tokens: 50 },
     });
@@ -118,7 +118,7 @@ describe("run_metric end-to-end (event write-through → SSE)", () => {
     subscriberIds.push(id);
     addSubscriber({
       id,
-      filter: { orgId: ctx.orgId, applicationId: ctx.defaultAppId, runId, isAdmin: true },
+      filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
       send,
     });
 
@@ -146,7 +146,7 @@ describe("run_metric end-to-end (event write-through → SSE)", () => {
     subscriberIds.push(id);
     addSubscriber({
       id,
-      filter: { orgId: ctx.orgId, applicationId: ctx.defaultAppId, runId, isAdmin: true },
+      filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
       send,
     });
 
@@ -170,12 +170,12 @@ describe("run_metric end-to-end (event write-through → SSE)", () => {
 
     addSubscriber({
       id: "ours",
-      filter: { orgId: ctx.orgId, applicationId: ctx.defaultAppId, runId, isAdmin: true },
+      filter: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId, runId, isAdmin: true },
       send: sendOurs,
     });
     addSubscriber({
       id: "other",
-      filter: { orgId: "alien-org", applicationId: "alien-app", isAdmin: true },
+      filter: { orgId: "alien-org", spaceId: "alien-space", isAdmin: true },
       send: sendOther,
     });
 

@@ -67,7 +67,7 @@ export async function applyCorePGliteMigrations(
     // theoretical.
     //
     // A replay is not a harmless no-op. `0040_config_into_input.sql` wraps every
-    // `application_packages.input_settings` row unconditionally and deliberately
+    // `space_packages.input_settings` row unconditionally and deliberately
     // — its header explains why a shape-sniffing guard is unsound — so a second
     // pass nests each row again into
     // `{"values":{"values":…,"locked":[]},"locked":[]}`.

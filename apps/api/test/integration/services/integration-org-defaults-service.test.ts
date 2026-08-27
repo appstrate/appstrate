@@ -3,12 +3,12 @@
 /**
  * E-extra — integration org-defaults service.
  *
- * Org-wide default connection per (application, integration): the cross-agent
+ * Org-wide default connection per (space, integration): the cross-agent
  * governance baseline. CRUD round-trip + org isolation.
  *
  * `upsertOrgDefault` delegates target validation to `validatePinTarget` with
  * `requireShared: true`, so the seeded connection must be `sharedWithOrg=true`,
- * belong to the application, and reference the integration.
+ * belong to the space, and reference the integration.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -23,7 +23,7 @@ import {
   listOrgDefaultsForResolver,
   deleteOrgDefault,
 } from "../../../src/services/integration-org-defaults-service.ts";
-import type { AppScope } from "../../../src/lib/scope.ts";
+import type { SpaceScope } from "../../../src/lib/scope.ts";
 
 const INTEGRATION_ID = "@official/gmail";
 
@@ -48,12 +48,12 @@ function integrationManifest(): Record<string, unknown> {
 
 describe("integration-org-defaults-service", () => {
   let ctx: TestContext;
-  let scope: AppScope;
+  let scope: SpaceScope;
 
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "orgdef" });
-    scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     await seedPackage({
       id: INTEGRATION_ID,
       orgId: ctx.orgId,
@@ -64,14 +64,14 @@ describe("integration-org-defaults-service", () => {
   });
 
   /** Seed a sharedWithOrg connection (the only valid org-default target). */
-  async function seedSharedConnection(applicationId = ctx.defaultAppId): Promise<string> {
+  async function seedSharedConnection(spaceId = ctx.defaultSpaceId): Promise<string> {
     const [row] = await db
       .insert(integrationConnections)
       .values({
         integrationId: INTEGRATION_ID,
         authKey: "primary",
         accountId: "acct-shared",
-        applicationId,
+        spaceId,
         userId: ctx.user.id,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
         scopesGranted: [],
@@ -102,7 +102,7 @@ describe("integration-org-defaults-service", () => {
     expect(fetched!.auth_key).toBe("primary");
 
     // listOrgDefaultsForResolver shape
-    const resolverMap = await listOrgDefaultsForResolver(ctx.defaultAppId);
+    const resolverMap = await listOrgDefaultsForResolver(ctx.defaultSpaceId);
     expect(resolverMap[INTEGRATION_ID]).toEqual({ connectionId: connId, enforce: true });
 
     // delete
@@ -139,7 +139,7 @@ describe("integration-org-defaults-service", () => {
 
   it("getOrgDefault returns null when no default is set", async () => {
     expect(await getOrgDefault(scope, INTEGRATION_ID)).toBeNull();
-    expect(await listOrgDefaultsForResolver(ctx.defaultAppId)).toEqual({});
+    expect(await listOrgDefaultsForResolver(ctx.defaultSpaceId)).toEqual({});
   });
 
   it("org isolation: one org cannot read another org's default", async () => {
@@ -150,13 +150,13 @@ describe("integration-org-defaults-service", () => {
       createdBy: ctx.user.id,
     });
 
-    // A second org with its own application — must not see org 1's default.
+    // A second org with its own space — must not see org 1's default.
     const otherCtx = await createTestContext({ orgSlug: "orgdef-other" });
-    const otherScope: AppScope = {
+    const otherScope: SpaceScope = {
       orgId: otherCtx.orgId,
-      applicationId: otherCtx.defaultAppId,
+      spaceId: otherCtx.defaultSpaceId,
     };
     expect(await getOrgDefault(otherScope, INTEGRATION_ID)).toBeNull();
-    expect(await listOrgDefaultsForResolver(otherCtx.defaultAppId)).toEqual({});
+    expect(await listOrgDefaultsForResolver(otherCtx.defaultSpaceId)).toEqual({});
   });
 });

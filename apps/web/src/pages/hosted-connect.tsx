@@ -24,7 +24,7 @@ import type { IntegrationManifestAuth } from "../hooks/use-integrations";
  * non-session auth: `/api/integrations/connect/*` short-circuits the whole
  * auth pipeline server-side (`skipAuth` in `lib/auth-pipeline.ts`) and both
  * handlers derive scope + actor from the page-cookie claims alone, so the
- * `X-Org-Id` / `X-Application-Id` the client middleware may inject from a
+ * `X-Org-Id` / `X-Space-Id` the client middleware may inject from a
  * leftover localStorage selection is never read.
  */
 

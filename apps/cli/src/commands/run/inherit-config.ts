@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Fetch the per-application run-config (model / generation / proxy /
- * version pin / stored input layer) for `<applicationId, packageId>` and
+ * Fetch the per-space run-config (model / generation / proxy /
+ * version pin / stored input layer) for `<spaceId, packageId>` and
  * merge it with the user's CLI flags + env vars. Source of truth lives server-side at
- * `GET /api/applications/{applicationId}/packages/{scope}/{name}/run-config`
+ * `GET /api/spaces/{spaceId}/packages/{scope}/{name}/run-config`
  * — the UI consumes the same payload, so a CLI run with no overrides
  * targets the same model and version the dashboard would.
  *
@@ -16,7 +16,7 @@
  *
  * 404 from the run-config endpoint is "no inheritance, fall back to
  * flags + defaults" — typical for a system agent that hasn't been
- * installed in the application. Anything else bubbles as a hard error.
+ * installed in the space. Anything else bubbles as a hard error.
  */
 
 import { CLI_USER_AGENT } from "../../lib/version.ts";
@@ -34,12 +34,12 @@ export interface InheritedRunConfig {
   /** Pinned version label, when the user did not provide an explicit @spec. */
   versionPin: string | null;
   /**
-   * `application_packages.input_settings.values` — layer 2 of the platform's
+   * `space_packages.input_settings.values` — layer 2 of the platform's
    * input resolution. Empty when nothing was inherited.
    */
   inputValues: Record<string, unknown>;
   /**
-   * `application_packages.input_settings.locked` — input fields the editor
+   * `space_packages.input_settings.locked` — input fields the editor
    * froze. Empty when nothing was inherited.
    */
   lockedInputFields: string[];
@@ -50,7 +50,7 @@ export interface InheritedRunConfig {
 interface FetchRunConfigInput {
   instance: string;
   bearerToken: string;
-  applicationId: string;
+  spaceId: string;
   orgId?: string;
   scope: string;
   name: string;
@@ -65,7 +65,7 @@ export class RunConfigFetchError extends Error {
 }
 
 /**
- * Call `GET /api/applications/{applicationId}/packages/{scope}/{name}/run-config`
+ * Call `GET /api/spaces/{spaceId}/packages/{scope}/{name}/run-config`
  * and return the parsed payload. Returns `null` on 404 (no inheritance);
  * any other non-2xx surfaces as `RunConfigFetchError`.
  */
@@ -74,16 +74,16 @@ export async function fetchRunConfigPayload(
 ): Promise<ResolvedRunConfig | null> {
   const fetchFn = input.fetchImpl ?? fetch;
   const instance = normalizeInstance(input.instance);
-  // applicationId is `app_<uuid>` — safe characters, no encoding needed.
+  // spaceId is `spc_<uuid>` — safe characters, no encoding needed.
   // scope is `@<slug>` — must NOT be percent-encoded (see bundle-fetch.ts:buildBundleUrl):
   // Hono's `:scope{@[^/]+}` route rejects `%40scope` as 404. Both scope
   // and name are validated upstream to a strict `[a-z0-9-]` charset.
-  const url = `${instance}/api/applications/${input.applicationId}/packages/${input.scope}/${input.name}/run-config`;
+  const url = `${instance}/api/spaces/${input.spaceId}/packages/${input.scope}/${input.name}/run-config`;
 
   const headers: Record<string, string> = {
     Authorization: `Bearer ${input.bearerToken}`,
     "User-Agent": CLI_USER_AGENT,
-    "X-Application-Id": input.applicationId,
+    "X-Space-Id": input.spaceId,
   };
   if (input.orgId) headers["X-Org-Id"] = input.orgId;
 
@@ -118,12 +118,12 @@ interface MergeRunConfigInputs {
  * `modelId` / `proxyId`: first-non-null wins (`flag > env > inherited`).
  * Mirrors the platform's per-run override precedence on
  * `POST /api/agents/.../run` where the request body's `modelId` /
- * `proxyId` win over the value persisted in `application_packages` —
+ * `proxyId` win over the value persisted in `space_packages` —
  * the CLI just adds an `env` rung so `APPSTRATE_MODEL_ID` /
  * `APPSTRATE_PROXY` keep working in CI.
  *
  * `versionPin`: an explicit `@spec` in the package id always wins;
- * otherwise the per-app pin feeds into the bundle URL. Identical to
+ * otherwise the per-space pin feeds into the bundle URL. Identical to
  * the platform's `?version=` query param semantics.
  *
  * `inputValues` / `lockedInputFields`: passed through untouched — they are

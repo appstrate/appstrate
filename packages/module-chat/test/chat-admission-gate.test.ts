@@ -64,7 +64,7 @@ const MODELS_PAYLOAD = {
 function fakeContext(opts: {
   orgId: string;
   user: { id: string; email: string; name: string };
-  applicationId: string;
+  spaceId: string;
   body: unknown;
 }): Context<ChatEnv> {
   const vars: Record<string, unknown> = {
@@ -73,7 +73,7 @@ function fakeContext(opts: {
     orgRole: "member",
     permissions: [],
   };
-  const headers = new Headers({ "x-application-id": opts.applicationId });
+  const headers = new Headers({ "x-space-id": opts.spaceId });
   return {
     get: (k: string) => vars[k],
     req: {
@@ -130,7 +130,7 @@ describe("chat admission gate (handleChatStream)", () => {
     const c = fakeContext({
       orgId: ctx.orgId,
       user: { id: ctx.user.id, email: ctx.user.email, name: ctx.user.name ?? "U" },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       // No `id` → ephemeral turn: `ensureSession` never runs, so a rejected turn
       // is guaranteed to write ZERO rows (session AND message).
       body: { messages: [userTurn("u1", "hello")] },
@@ -163,7 +163,7 @@ describe("chat admission gate (handleChatStream)", () => {
     const c = fakeContext({
       orgId: ctx.orgId,
       user: { id: ctx.user.id, email: ctx.user.email, name: ctx.user.name ?? "U" },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       body: { id: sessionId, messages: [userTurn("u1", "hello")] },
     });
     const res = await handleChatStream(c, fakeDeps({ checkUsageAllowed: async () => REJECTION }));
@@ -196,7 +196,7 @@ describe("chat admission gate (handleChatStream)", () => {
     const c = fakeContext({
       orgId: ctx.orgId,
       user: { id: ctx.user.id, email: ctx.user.email, name: ctx.user.name ?? "U" },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       body: { messages: [userTurn("u1", "hello")] },
     });
     // A subscription model whose credential is dead short-circuits to the
@@ -235,7 +235,7 @@ describe("chat admission gate (handleChatStream)", () => {
     const c = fakeContext({
       orgId: ctx.orgId,
       user: { id: ctx.user.id, email: ctx.user.email, name: ctx.user.name ?? "U" },
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       body: { id: sessionId, messages: [userTurn("u1", "hello")] },
     });
     const res = await handleChatStream(

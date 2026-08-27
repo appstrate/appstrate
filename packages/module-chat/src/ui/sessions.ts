@@ -2,7 +2,7 @@
 
 /**
  * Thin REST helpers over the chat session API. Auth = the host shell's scoping
- * headers (org/app). The server is the single writer of messages, so there is
+ * headers (org/space). The server is the single writer of messages, so there is
  * no client message-write helper — only session list/CRUD + history load.
  */
 

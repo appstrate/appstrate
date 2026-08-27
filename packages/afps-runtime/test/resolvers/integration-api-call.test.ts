@@ -880,7 +880,7 @@ describe("RemoteAppstrateIntegrationResolver", () => {
     const resolver = new RemoteAppstrateIntegrationResolver({
       instance: "https://app.appstrate.com",
       apiKey: "ask_test",
-      applicationId: "app_1",
+      spaceId: "spc_1",
       orgId: "org_1",
       sessionId: "sess_1",
       fetch: ((url: string, init: RequestInit) => {
@@ -895,7 +895,7 @@ describe("RemoteAppstrateIntegrationResolver", () => {
     expect(calls[0]!.url).toBe("https://app.appstrate.com/api/credential-proxy/proxy");
     const h = calls[0]!.init.headers as Record<string, string>;
     expect(h.Authorization).toBe("Bearer ask_test");
-    expect(h["X-Application-Id"]).toBe("app_1");
+    expect(h["X-Space-Id"]).toBe("spc_1");
     expect(h["X-Org-Id"]).toBe("org_1");
     expect(h["X-Integration-Id"]).toBe("@acme/api");
     expect(h["X-Target"]).toBe("https://api.acme.com/v1/me");
@@ -911,7 +911,7 @@ describe("RemoteAppstrateIntegrationResolver", () => {
     const resolver = new RemoteAppstrateIntegrationResolver({
       instance: "https://app.appstrate.com",
       apiKey: "ask_test",
-      applicationId: "app_1",
+      spaceId: "spc_1",
       fetch: ((url: string, init: RequestInit) => {
         calls.push({ url, init });
         return Promise.resolve(new Response("{}", { status: 200 }));

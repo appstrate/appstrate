@@ -146,7 +146,7 @@ export async function seedLoggedInProfile(
   profile = "default",
   overrides: SeedProfileOverrides = {},
 ): Promise<void> {
-  const { instance, userId, email, orgId, applicationId, tokens } = overrides;
+  const { instance, userId, email, orgId, spaceId, tokens } = overrides;
 
   await setProfile(profile, {
     instance: instance ?? "https://app.example.com",
@@ -156,7 +156,7 @@ export async function seedLoggedInProfile(
     // entirely, so "no org pinned" stays literally absent from `config.toml`
     // rather than becoming an empty key the resolution cascade would see.
     orgId,
-    applicationId,
+    spaceId,
   });
 
   const now = Date.now();

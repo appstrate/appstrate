@@ -60,7 +60,7 @@ export function fileFixture(overrides: Partial<FileDto> & { name: string }): Fil
     id: `file_${overrides.name}`,
     uri: `appfile://file_${overrides.name}`,
     purpose: "agent_output",
-    applicationId: "app_1",
+    spaceId: "spc_1",
     run_id: null,
     chat_session_id: null,
     packageId: "@acme/reporter",

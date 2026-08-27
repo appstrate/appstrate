@@ -6,14 +6,14 @@
  *
  * The `deviceAuthorization()` plugin mints BA sessions directly via its
  * internal adapter — without our `oidcGuardsPlugin` hook on
- * `/device/approve`, an end-user of `level="application"` OIDC client
+ * `/device/approve`, an end-user of `level="space"` OIDC client
  * could approve an `appstrate-cli` (instance-level) device code and obtain
  * a session attached to their identity. The request-time `requirePlatformRealm`
  * middleware would reject the resulting token on every downstream platform
  * route, but the right place to refuse the attempt is at approve time.
  *
  * This test exercises the specific pathway the production flow follows:
- * one user signed up with `realm="end_user:<applicationId>"` tries to approve a
+ * one user signed up with `realm="end_user:<spaceId>"` tries to approve a
  * device code issued for the instance-level CLI client. Expected: 403
  * `access_denied`; the device code row stays `pending`.
  */
@@ -84,8 +84,8 @@ describe("device-flow realm enforcement on /device/approve", () => {
     await ensureCliClient();
   });
 
-  it("rejects approval by an end-user realm (realm=end_user:<applicationId>, client level=instance)", async () => {
-    const { cookie } = await signUpUserWithRealm("enduser@example.com", "end_user:app_some_id");
+  it("rejects approval by an end-user realm (realm=end_user:<spaceId>, client level=instance)", async () => {
+    const { cookie } = await signUpUserWithRealm("enduser@example.com", "end_user:spc_some_id");
     const { userCode } = await requestDeviceCode();
 
     const approveRes = await app.request("/api/auth/device/approve", {

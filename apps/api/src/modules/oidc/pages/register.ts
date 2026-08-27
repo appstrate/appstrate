@@ -12,7 +12,7 @@ import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password
 import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
 import { renderSocialButtons, renderSocialSignInScript } from "./social-sign-in-script.ts";
-import type { ResolvedAppBranding } from "../services/branding.ts";
+import type { ResolvedSpaceBranding } from "../services/branding.ts";
 
 interface RegisterPageProps {
   queryString: string;
@@ -20,7 +20,7 @@ interface RegisterPageProps {
   email?: string;
   name?: string;
   csrfToken: string;
-  branding: ResolvedAppBranding;
+  branding: ResolvedSpaceBranding;
   socialProviders?: { google?: boolean; github?: boolean };
   /**
    * Kept for type-parity with `LoginPageProps.allowSignup` so route

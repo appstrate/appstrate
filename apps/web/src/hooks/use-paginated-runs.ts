@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { client } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
-import { useCurrentApplicationId } from "./use-current-application";
+import { useCurrentSpaceId } from "./use-current-space";
 import { paginatedRunsKeys } from "../lib/query-keys";
 import type { EnrichedRun, ListEnvelope, RunStatus } from "@appstrate/shared-types";
 
@@ -35,7 +35,7 @@ export function usePaginatedRuns({
   offset,
 }: UsePaginatedRunsOptions) {
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
 
   // Key segment only — the typed call below selects the matching spec path.
   const endpoint = scheduleId
@@ -47,16 +47,7 @@ export function usePaginatedRuns({
   return useQuery({
     // Key pinned to the legacy shape: use-global-run-sync (and run mutations)
     // invalidate by the ["paginated-runs"] prefix.
-    queryKey: paginatedRunsKeys.list(
-      orgId,
-      applicationId,
-      endpoint,
-      user,
-      kind,
-      status,
-      limit,
-      offset,
-    ),
+    queryKey: paginatedRunsKeys.list(orgId, spaceId, endpoint, user, kind, status, limit, offset),
     // `user`/`kind`/`status` are only declared (and only ever passed by
     // callers) on the global /api/runs view.
     queryFn: async (): Promise<ListEnvelope<EnrichedRun>> => {
@@ -81,6 +72,6 @@ export function usePaginatedRuns({
       return data!;
     },
     placeholderData: (prev) => prev,
-    enabled: !!applicationId && (scheduleId ? !!scheduleId : packageId ? !!packageId : true),
+    enabled: !!spaceId && (scheduleId ? !!scheduleId : packageId ? !!packageId : true),
   });
 }

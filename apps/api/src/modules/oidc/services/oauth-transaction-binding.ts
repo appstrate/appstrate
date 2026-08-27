@@ -8,7 +8,7 @@
  * `oidc_pending_client` cookie. A signed cookie proves the SERVER minted the
  * value, but not that it belongs to THIS transaction: the caller fully
  * controls whether their browser presents it (strip it → the resolver sees
- * "no OIDC flow" and mints a full `platform`-realm user for an application
+ * "no OIDC flow" and mints a full `platform`-realm user for a space
  * signup), and the single global cookie at `Path=/` is clobbered by a
  * concurrent flow in a second tab. The fix is to derive the client from a
  * binding keyed by the transaction identifier that Better Auth itself
@@ -85,7 +85,7 @@ const MAGIC_LINK_BINDING_PREFIX = "oidc-pending-client:";
 /**
  * Magic-link tokens live 15 minutes (`expiresIn` in `packages/db/src/auth.ts`).
  * The binding must strictly outlive the token so a still-valid link can never
- * dangle without its binding (which would downgrade an application signup to
+ * dangle without its binding (which would downgrade a space signup to
  * the cookie fallback).
  */
 const MAGIC_LINK_BINDING_TTL_MS = 16 * 60 * 1000;

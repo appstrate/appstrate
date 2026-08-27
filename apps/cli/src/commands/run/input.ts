@@ -3,7 +3,7 @@
 /**
  * Input resolution + validation for a LOCAL `appstrate run`.
  *
- * The platform resolves an agent's declared defaults and the per-application
+ * The platform resolves an agent's declared defaults and the per-space
  * stored values on every launch, then validates the result against the
  * manifest's `input.schema`. A local run reaches none of those code paths, so
  * this module runs the same two steps with the same shared implementations
@@ -25,10 +25,10 @@ import { exitWithError } from "../../lib/ui.ts";
 import type { CommandIO } from "../../lib/io.ts";
 
 /**
- * The per-application input layer a REMOTE package carries with it — what
- * `application_packages.input_settings` stores, as delivered by the
+ * The per-space input layer a REMOTE package carries with it — what
+ * `space_packages.input_settings` stores, as delivered by the
  * `run-config` endpoint. Absent for a bundle read off disk: that target has
- * no application row behind it, so there is nothing to inherit.
+ * no space row behind it, so there is nothing to inherit.
  */
 export interface StoredInputLayer {
   /** Editor-set values — layer 2 of the platform's input resolution. */
@@ -131,7 +131,7 @@ export function validateLocalInput(
   exitWithError(
     `Resolved input does not match the agent's manifest input schema:\n${summary}\n\n` +
       `The value checked is the resolved one — author defaults, then the\n` +
-      `stored per-application values, then your --input / --input-file.\n` +
+      `stored per-space values, then your --input / --input-file.\n` +
       `Fix the stored input in the dashboard, or pass a corrected\n` +
       `--input <json> / --input-file <path> override.`,
     io,

@@ -23,7 +23,7 @@ import { collectAgentReadinessErrors } from "../../../src/services/agent-readine
 import { getPackage } from "../../../src/services/package-catalog.ts";
 import { resolveAgentRunVersion } from "../../../src/services/agent-version-resolver.ts";
 import { createVersionFromDraft } from "../../../src/services/package-versions.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { seedPackage } from "../../helpers/seed.ts";
@@ -48,7 +48,7 @@ describe("readiness: missing_skill projects off the effective manifest", () => {
     const errors = await collectAgentReadinessErrors({
       agent,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: null,
     });
     return errors.filter((e) => e.code === "missing_skill").map((e) => e.field);
@@ -62,7 +62,7 @@ describe("readiness: missing_skill projects off the effective manifest", () => {
       createdBy: ctx.user.id,
       draftManifest: { name: id, version: "1.0.0", type: "skill" },
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, id);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
   }
 
   /**
@@ -86,7 +86,7 @@ describe("readiness: missing_skill projects off the effective manifest", () => {
       },
       draftContent: "prompt",
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
     await createVersionFromDraft({ packageId: AGENT, orgId: ctx.orgId, userId: ctx.user.id });
 
     await db

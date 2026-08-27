@@ -9,7 +9,7 @@
  *   3. Helper POSTs credentials to /pair/redeem with the pairing token as Bearer.
  *
  * Invariants tested here:
- *   - Bearer auth works without any session cookie / X-Org-Id / X-Application-Id.
+ *   - Bearer auth works without any session cookie / X-Org-Id / X-Space-Id.
  *   - The pairing's userId/orgId/providerId are pinned at mint time and
  *     override anything the request body claims (no cross-org or
  *     cross-provider divert via tampered helper).
@@ -127,7 +127,7 @@ describe("POST /api/model-providers-oauth/pair/redeem — pairing-bearer track",
     expect(res.status).toBe(410);
   });
 
-  it("does NOT require X-Org-Id / X-Application-Id headers (pairing carries them)", async () => {
+  it("does NOT require X-Org-Id / X-Space-Id headers (pairing carries them)", async () => {
     const pairing = await mintPairing(ctx, "test-oauth");
 
     // No authHeaders(ctx) — bearer-only.

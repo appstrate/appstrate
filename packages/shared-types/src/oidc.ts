@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Public wire types for the OIDC module's per-application auth config —
+ * Public wire types for the OIDC module's per-space auth config —
  * shared between the API service layer, OpenAPI schemas, and the frontend.
  * Defined here (not in `apps/api/src/modules/oidc`) because the frontend
  * cannot cross the module boundary to import from the API.
  *
- * Wire shape for `/api/applications/:id/smtp-config` and
- * `/api/applications/:id/social-providers/:provider`.
+ * Wire shape for `/api/spaces/:id/smtp-config` and
+ * `/api/spaces/:id/social-providers/:provider`.
  */
 
 export type SocialProviderId = "google" | "github";
 
 export interface SmtpConfigView {
-  applicationId: string;
+  spaceId: string;
   host: string;
   port: number;
   username: string;
@@ -25,7 +25,7 @@ export interface SmtpConfigView {
 }
 
 export interface SocialProviderView {
-  applicationId: string;
+  spaceId: string;
   provider: SocialProviderId;
   clientId: string;
   scopes: string[] | null;

@@ -108,7 +108,7 @@ describe("ensureInstanceClient", () => {
     expect(row!.level).toBe("instance");
     expect(row!.skipConsent).toBe(true); // isFirstParty
     expect(row!.referencedOrgId).toBeNull();
-    expect(row!.referencedApplicationId).toBeNull();
+    expect(row!.referencedSpaceId).toBeNull();
     expect(row!.redirectUris).toEqual(["http://localhost:3000/auth/callback"]);
   });
 
@@ -212,7 +212,7 @@ describe("ensureInstanceClient", () => {
       scopes: ["openid", "profile", "email", "offline_access"],
       level: "instance",
       referencedOrgId: null,
-      referencedApplicationId: null,
+      referencedSpaceId: null,
       metadata: JSON.stringify({ level: "instance", clientId }),
       skipConsent: true,
       allowSignup: true,
@@ -291,7 +291,7 @@ describe("ensureInstanceClient", () => {
       scopes: ["openid", "profile", "email", "offline_access"],
       level: "instance",
       referencedOrgId: null,
-      referencedApplicationId: null,
+      referencedSpaceId: null,
       metadata: JSON.stringify({ level: "instance", clientId }),
       skipConsent: true,
       allowSignup: true,
@@ -448,8 +448,8 @@ describe("instance token strategy", () => {
       },
     });
     // Should work since the user is a member of the org
-    // (may need X-Application-Id too depending on route, but the auth + org resolution should pass)
-    expect([200, 400]).toContain(res.status); // 400 if missing X-Application-Id, but NOT 401/403
+    // (may need X-Space-Id too depending on route, but the auth + org resolution should pass)
+    expect([200, 400]).toContain(res.status); // 400 if missing X-Space-Id, but NOT 401/403
   });
 
   it("rejects instance token when user does not exist", async () => {

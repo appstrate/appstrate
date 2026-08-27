@@ -11,7 +11,7 @@
  *   - `appstrate whoami`:  server-authoritative identity check.
  *   - `appstrate token`:   print access + refresh token metadata (debug).
  *   - `appstrate org`:     manage the pinned organization (`X-Org-Id`).
- *   - `appstrate app`:     manage the pinned application (`X-Application-Id`).
+ *   - `appstrate space`:   manage the pinned space (`X-Space-Id`).
  *   - `appstrate api`:     authenticated HTTP passthrough for coding agents.
  *
  * Global flags:
@@ -44,11 +44,11 @@ import {
   orgCreateCommand,
 } from "./commands/org.ts";
 import {
-  appListCommand,
-  appSwitchCommand,
-  appCurrentCommand,
-  appCreateCommand,
-} from "./commands/app.ts";
+  spaceListCommand,
+  spaceSwitchCommand,
+  spaceCurrentCommand,
+  spaceCreateCommand,
+} from "./commands/space.ts";
 import { modelsListCommand } from "./commands/models.ts";
 import { registerOpenapiCommand } from "./commands/openapi.ts";
 import { runCommand } from "./commands/run.ts";
@@ -340,23 +340,23 @@ program
   )
   .option(
     "--create-org <name>",
-    "Create a new organization with this name after login and pin it (non-interactive). A default application and hello-world agent are provisioned server-side.",
+    "Create a new organization with this name after login and pin it (non-interactive). A default space and hello-world agent are provisioned server-side.",
   )
   .option(
     "--no-org",
     "Skip the post-login org-pinning step entirely. Subsequent calls must pass `-H X-Org-Id: …` or pin later via `appstrate org switch`.",
   )
   .option(
-    "--app <id>",
-    "Pin this application on the profile after login (non-interactive). Fails if no match.",
+    "--space <id>",
+    "Pin this space on the profile after login (non-interactive). Fails if no match.",
   )
   .option(
-    "--create-app <name>",
-    "Create a new application with this name after login and pin it (non-interactive).",
+    "--create-space <name>",
+    "Create a new space with this name after login and pin it (non-interactive).",
   )
   .option(
-    "--no-app",
-    "Skip the post-login app-pinning step entirely. Subsequent calls must pass `-H X-Application-Id: …` or pin later via `appstrate app switch`.",
+    "--no-space",
+    "Skip the post-login space-pinning step entirely. Subsequent calls must pass `-H X-Space-Id: …` or pin later via `appstrate space switch`.",
   )
   .option(
     "--device-name <name>",
@@ -373,9 +373,9 @@ program
       // commander 14). `--org <value>` sets it to a string, neither leaves
       // it undefined — so `opts.org === false` is the unambiguous skip signal.
       noOrg: opts.org === false,
-      app: typeof opts.app === "string" ? opts.app : undefined,
-      createApp: typeof opts.createApp === "string" ? opts.createApp : undefined,
-      noApp: opts.app === false,
+      space: typeof opts.space === "string" ? opts.space : undefined,
+      createSpace: typeof opts.createSpace === "string" ? opts.createSpace : undefined,
+      noSpace: opts.space === false,
       deviceName: typeof opts.deviceName === "string" ? opts.deviceName : undefined,
     });
   });
@@ -457,49 +457,49 @@ orgGroup
     });
   });
 
-// ─── `appstrate app …` — manage the pinned application (issue #217) ────
+// ─── `appstrate space …` — manage the pinned space (issue #217) ────────
 
-const appGroup = program
-  .command("app")
-  .description("Manage the pinned application for the active profile");
+const spaceGroup = program
+  .command("space")
+  .description("Manage the pinned space for the active profile");
 
-appGroup
+spaceGroup
   .command("list")
-  .description("List applications in the pinned organization")
+  .description("List spaces in the pinned organization")
   .action(async () => {
     const globalOpts = program.opts<{ profile?: string }>();
-    await appListCommand({ profile: globalOpts.profile });
+    await spaceListCommand({ profile: globalOpts.profile });
   });
 
-appGroup
+spaceGroup
   .command("current")
-  .description("Print the pinned application id, or exit 1 if none is pinned")
+  .description("Print the pinned space id, or exit 1 if none is pinned")
   .action(async () => {
     const globalOpts = program.opts<{ profile?: string }>();
-    await appCurrentCommand({ profile: globalOpts.profile });
+    await spaceCurrentCommand({ profile: globalOpts.profile });
   });
 
-appGroup
+spaceGroup
   .command("switch [ref]")
   .description(
-    "Re-pin the active application on the profile. With no argument, show an interactive picker.",
+    "Re-pin the active space on the profile. With no argument, show an interactive picker.",
   )
   .action(async (ref: string | undefined) => {
     const globalOpts = program.opts<{ profile?: string }>();
-    await appSwitchCommand({
+    await spaceSwitchCommand({
       profile: globalOpts.profile,
       ref: typeof ref === "string" ? ref : undefined,
     });
   });
 
-appGroup
+spaceGroup
   .command("create [name]")
   .description(
-    "Create a new application (and pin it on the profile). With no argument, prompt interactively.",
+    "Create a new space (and pin it on the profile). With no argument, prompt interactively.",
   )
   .action(async (name: string | undefined) => {
     const globalOpts = program.opts<{ profile?: string }>();
-    await appCreateCommand({
+    await spaceCreateCommand({
       profile: globalOpts.profile,
       name: typeof name === "string" ? name : undefined,
     });
@@ -530,7 +530,7 @@ modelsGroup
 program
   .command("api <target> [extra]")
   .description(
-    "Authenticated HTTP passthrough to the Appstrate API. Injects the active profile's bearer token + X-Org-Id + X-Application-Id so coding agents (Claude Code, Cursor, Aider, …) can call the API without ever seeing the raw token.\n" +
+    "Authenticated HTTP passthrough to the Appstrate API. Injects the active profile's bearer token + X-Org-Id + X-Space-Id so coding agents (Claude Code, Cursor, Aider, …) can call the API without ever seeing the raw token.\n" +
       "\n" +
       "Invocation forms (all curl-compatible):\n" +
       "  appstrate api GET /api/x             # explicit method + path\n" +
@@ -606,7 +606,7 @@ program
   )
   .option(
     "-L, --location",
-    "Follow redirects to whatever host the server names in Location. Cross-origin hops drop Authorization/Cookie (WHATWG fetch) but STILL forward your -H headers and X-Org-Id/X-Application-Id.",
+    "Follow redirects to whatever host the server names in Location. Cross-origin hops drop Authorization/Cookie (WHATWG fetch) but STILL forward your -H headers and X-Org-Id/X-Space-Id.",
   )
   .option(
     "-k, --insecure",
@@ -945,11 +945,11 @@ program
   )
   .option(
     "--proxy <id>",
-    "Proxy id to associate with the run (overrides per-app run-config inheritance)",
+    "Proxy id to associate with the run (overrides per-space run-config inheritance)",
   )
   .option(
     "--no-inherit",
-    "Skip the per-app run-config inheritance — run with flags + env vars + defaults only (deterministic CI)",
+    "Skip the per-space run-config inheritance — run with flags + env vars + defaults only (deterministic CI)",
   )
   .option(
     "-v, --verbose",

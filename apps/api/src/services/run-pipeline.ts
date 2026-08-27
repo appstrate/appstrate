@@ -108,8 +108,8 @@ interface RunPipelineParams {
   dependencyOverrides?: Record<string, string> | null;
   /** Schedule ID — set only for scheduled runs. */
   scheduleId?: string;
-  /** Application ID — required for all runs. */
-  applicationId: string;
+  /** Space ID — required for all runs. */
+  spaceId: string;
   /** API key ID that triggered the run (if auth via API key). */
   apiKeyId?: string;
   /**
@@ -167,7 +167,7 @@ interface RunPipelineSuccess {
  * Validate agent readiness against the PINNED integration manifests.
  * Shared by the POST /run route and the scheduler's triggerScheduledRun.
  *
- * Returns nothing: readiness is a gate, and the per-application run settings
+ * Returns nothing: readiness is a gate, and the per-space run settings
  * (model, generation config, proxy) are read by each origin from the
  * `InstalledPackageSettings` row it already loaded to resolve the input
  * layers — projecting them back through here only duplicated that read.
@@ -180,7 +180,7 @@ interface RunPipelineSuccess {
  */
 export async function resolveRunPreflight(params: {
   agent: LoadedPackage;
-  applicationId: string;
+  spaceId: string;
   orgId: string;
   actor: Actor | null;
   connectionOverrides?: ConnectionOverrides | null;
@@ -200,7 +200,7 @@ export async function resolveRunPreflight(params: {
    */
   manifestCache?: IntegrationManifestCache;
 }): Promise<void> {
-  const { agent, applicationId, orgId, actor } = params;
+  const { agent, spaceId, orgId, actor } = params;
 
   // --- Seed the manifest memo with the PINNED integration manifests ---
   //
@@ -255,7 +255,7 @@ export async function resolveRunPreflight(params: {
   await validateAgentReadiness({
     agent,
     orgId,
-    applicationId,
+    spaceId,
     actor,
     ...(params.connectionOverrides ? { runOverrides: params.connectionOverrides } : {}),
     ...(params.scheduleConnectionOverrides
@@ -358,7 +358,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
     proxyId,
     overrideVersionLabel,
     scheduleId,
-    applicationId,
+    spaceId,
     apiKeyId,
   } = params;
   // Per-call-graph manifest memo: reuse the caller's Map (run route — shares
@@ -470,7 +470,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
           agentManifest: agent.manifest as Record<string, unknown>,
           packageId: agent.id,
           actor,
-          scope: { orgId, applicationId },
+          scope: { orgId, spaceId },
           runOverrides: params.connectionOverrides ?? null,
           scheduleOverrides: params.scheduleConnectionOverrides ?? null,
           manifestCache,
@@ -524,7 +524,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
         runId,
         agent,
         orgId,
-        applicationId,
+        spaceId,
         actor,
         input: input ?? undefined,
         files,
@@ -600,7 +600,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   const createStart = Date.now();
   await runWithSpan("appstrate.run.create", { attributes: spanAttributes }, () =>
     createRun(
-      { orgId, applicationId },
+      { orgId, spaceId },
       {
         id: runId,
         packageId: agent.id,
@@ -651,13 +651,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   // (via `synthesiseFinalize`), and rethrows, so the caller surfaces the error.
   if (params.pendingFiles?.length) {
     if (actor) {
-      await materializeRunUploads(
-        { orgId, applicationId },
-        actor,
-        runId,
-        agent.id,
-        params.pendingFiles,
-      );
+      await materializeRunUploads({ orgId, spaceId }, actor, runId, agent.id, params.pendingFiles);
     } else {
       // Invariant: an actor-less run should never carry pending uploads (the
       // input-parser only stages them for a real actor). Unreachable today, but
@@ -718,7 +712,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<R
   executeAgentInBackground({
     runId,
     orgId,
-    applicationId,
+    spaceId,
     agent,
     context,
     plan,

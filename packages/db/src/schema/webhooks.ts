@@ -12,7 +12,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { organizations } from "./organizations.ts";
-import { applications } from "./applications.ts";
+import { spaces } from "./spaces.ts";
 import { packages } from "./packages.ts";
 
 // Webhooks tables — centralized into the core schema (formerly owned by the
@@ -24,19 +24,19 @@ import { packages } from "./packages.ts";
 // Webhooks are polymorphic across scoping level, mirroring the OIDC
 // `oauth_clients` model:
 //
-//   - `level: "org"` — the webhook subscribes to events from any application
-//     in the org. `applicationId` is NULL.
-//   - `level: "application"` — the webhook subscribes to events from a single
-//     application pinned at creation. `applicationId` is NOT NULL.
+//   - `level: "org"` — the webhook subscribes to events from any space
+//     in the org. `spaceId` is NULL.
+//   - `level: "space"` — the webhook subscribes to events from a single
+//     space pinned at creation. `spaceId` is NOT NULL.
 export const webhooks = pgTable(
   "webhooks",
   {
     id: text("id").primaryKey(), // wh_ prefix
-    level: text("level").notNull().$type<"org" | "application">(),
+    level: text("level").notNull().$type<"org" | "space">(),
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    applicationId: text("application_id").references(() => applications.id, {
+    spaceId: text("space_id").references(() => spaces.id, {
       onDelete: "cascade",
     }),
     url: text("url").notNull(),
@@ -58,12 +58,12 @@ export const webhooks = pgTable(
   },
   (table) => [
     index("idx_webhooks_org_id").on(table.orgId),
-    index("idx_webhooks_app_enabled").on(table.applicationId, table.enabled),
+    index("idx_webhooks_space_enabled").on(table.spaceId, table.enabled),
     // Preserved verbatim from the module's raw-SQL migration (0000_initial.sql).
-    check("webhooks_level_values", sql`level IN ('org', 'application')`),
+    check("webhooks_level_values", sql`level IN ('org', 'space')`),
     check(
       "webhooks_level_check",
-      sql`(level = 'org' AND application_id IS NULL) OR (level = 'application' AND application_id IS NOT NULL)`,
+      sql`(level = 'org' AND space_id IS NULL) OR (level = 'space' AND space_id IS NOT NULL)`,
     ),
     // Closed vocabulary (migration 0051). The routes validate the INPUT with
     // `z.enum(["full", "summary"])` and then narrow the OUTPUT again on the way

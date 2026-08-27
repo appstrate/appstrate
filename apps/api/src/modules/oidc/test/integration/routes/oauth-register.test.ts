@@ -26,13 +26,13 @@ async function registerClient(
   overrides: { name?: string; redirectUris?: string[] } = {},
 ): Promise<{ clientId: string; clientSecret: string }> {
   const body = {
-    level: "application" as const,
+    level: "space" as const,
     name: overrides.name ?? "Register Test App",
     redirectUris: overrides.redirectUris ?? ["https://acme.example.com/oauth/callback"],
-    referencedApplicationId: ctx.defaultAppId,
+    referencedSpaceId: ctx.defaultSpaceId,
     // Register-page tests exercise the happy path — secure-by-default is
     // `false`, which since `a2aae3af` closes the register route on every
-    // level (incl. application). Opt in explicitly.
+    // level (incl. space). Opt in explicitly.
     allowSignup: true,
   };
   const res = await app.request("/api/oauth/clients", {

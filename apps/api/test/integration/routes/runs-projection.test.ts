@@ -61,7 +61,7 @@ describe("Enriched run projection", () => {
     const run = await seedRun({
       packageId: agent.id,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "success",
       runNumber: 7,
@@ -130,7 +130,7 @@ describe("Enriched run projection", () => {
     expect(body.dependency_overrides).toEqual({ "@acme/skill": "draft" });
     expect(body.started_at).toBeString();
     expect(body.orgId).toBe(ctx.orgId);
-    expect(body.applicationId).toBe(ctx.defaultAppId);
+    expect(body.spaceId).toBe(ctx.defaultSpaceId);
     expect(body.userId).toBe(ctx.user.id);
     // Enrichment computed alongside the projection.
     expect(body.file_counts).toEqual({ input: 0, output: 0 });

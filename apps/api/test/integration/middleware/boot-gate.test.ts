@@ -105,7 +105,7 @@ describe("boot gate", () => {
   it("becomes transparent once the server is marked ready", async () => {
     const app = buildGatedApp();
 
-    // Same app instance across the transition — Hono's matcher is already
+    // Same space instance across the transition — Hono's matcher is already
     // built by the requests above, which is exactly why no route may be
     // registered after the bind.
     expect((await app.request("/api/agents")).status).toBe(503);

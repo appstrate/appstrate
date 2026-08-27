@@ -22,7 +22,7 @@ import type { ModelCost } from "@appstrate/core/module";
 export interface RunSinkContext {
   id: string;
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   packageId: string;
   runOrigin: "platform" | "remote";
   sinkSecretEncrypted: string;

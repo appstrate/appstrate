@@ -92,7 +92,7 @@ export interface RemoteRunRecord {
   id: string;
   status: RunStatus;
   packageId: string;
-  applicationId: string;
+  spaceId: string;
   orgId: string;
   input?: unknown;
   result?: unknown;
@@ -170,8 +170,8 @@ export interface RunRemoteOptions {
   instance: string;
   /** Bearer token (`ask_…` or OIDC JWT). */
   bearerToken: string;
-  /** Application id (`X-Application-Id`). */
-  applicationId: string;
+  /** Space id (`X-Space-Id`). */
+  spaceId: string;
   /** Organization id (`X-Org-Id`). Required for cookie/JWT auth contexts. */
   orgId?: string | undefined;
 
@@ -535,7 +535,7 @@ interface HttpDeps {
 function platformHeaders(opts: RunRemoteOptions, extra: Record<string, string> = {}): Headers {
   const h = new Headers({
     Authorization: `Bearer ${opts.bearerToken}`,
-    "X-Application-Id": opts.applicationId,
+    "X-Space-Id": opts.spaceId,
     Accept: "application/json",
     ...extra,
   });

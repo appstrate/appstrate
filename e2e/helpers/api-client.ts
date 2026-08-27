@@ -2,7 +2,7 @@
 
 /**
  * Typed API client for E2E tests.
- * Wraps Playwright's APIRequestContext with auth headers and org/app context.
+ * Wraps Playwright's APIRequestContext with auth headers and org/space context.
  */
 
 import type { APIRequestContext, APIResponse } from "@playwright/test";
@@ -10,7 +10,7 @@ import type { APIRequestContext, APIResponse } from "@playwright/test";
 interface ApiClientOptions {
   cookie: string;
   orgId: string;
-  applicationId: string;
+  spaceId: string;
 }
 
 export interface ApiClient {
@@ -19,17 +19,17 @@ export interface ApiClient {
   put(path: string, data?: unknown): Promise<APIResponse>;
   patch(path: string, data?: unknown): Promise<APIResponse>;
   delete(path: string): Promise<APIResponse>;
-  /** Create a new client with a different applicationId (same auth + org) */
-  withApp(applicationId: string): ApiClient;
-  /** Create a new client with different org + app context */
-  withContext(orgId: string, applicationId: string): ApiClient;
+  /** Create a new client with a different spaceId (same auth + org) */
+  withSpace(spaceId: string): ApiClient;
+  /** Create a new client with different org + space context */
+  withContext(orgId: string, spaceId: string): ApiClient;
 }
 
 export function createApiClient(request: APIRequestContext, options: ApiClientOptions): ApiClient {
   const headers = (extra?: Record<string, string>) => ({
     Cookie: options.cookie,
     "X-Org-Id": options.orgId,
-    "X-Application-Id": options.applicationId,
+    "X-Space-Id": options.spaceId,
     ...extra,
   });
 
@@ -58,17 +58,17 @@ export function createApiClient(request: APIRequestContext, options: ApiClientOp
     delete(path: string) {
       return request.delete(`/api${path}`, { headers: headers() });
     },
-    withApp(applicationId: string) {
-      return createApiClient(request, { ...options, applicationId });
+    withSpace(spaceId: string) {
+      return createApiClient(request, { ...options, spaceId });
     },
-    withContext(orgId: string, applicationId: string) {
-      return createApiClient(request, { ...options, orgId, applicationId });
+    withContext(orgId: string, spaceId: string) {
+      return createApiClient(request, { ...options, orgId, spaceId });
     },
   };
 }
 
 /**
- * Create an API client for org-only routes (no X-Application-Id header).
+ * Create an API client for org-only routes (no X-Space-Id header).
  */
 export function createOrgOnlyClient(
   request: APIRequestContext,

@@ -10,14 +10,14 @@
  *
  * Covers:
  *   - Default signup (no OIDC cookie) tags the user with `realm="platform"`.
- *   - Signup via the OIDC register page with an application-level client
- *     tags the user with `realm="end_user:<applicationId>"`.
+ *   - Signup via the OIDC register page with a space-level client
+ *     tags the user with `realm="end_user:<spaceId>"`.
  *   - A platform-realm cookie session is accepted on `/api/orgs`.
  *   - An end-user-realm cookie session is rejected on `/api/orgs` with
  *     403 (platform realm guard).
  *   - An end-user-realm cookie session is accepted on `/api/oauth/*`
  *     paths (realm-agnostic surface).
- *   - Token mint for an application-level client refuses a user whose
+ *   - Token mint for a space-level client refuses a user whose
  *     realm is `"platform"` (cross-audience attempt).
  */
 
@@ -38,23 +38,23 @@ import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
 
-async function registerApplicationClient(
+async function registerSpaceClient(
   ctx: TestContext,
-): Promise<{ clientId: string; clientSecret: string; applicationId: string }> {
+): Promise<{ clientId: string; clientSecret: string; spaceId: string }> {
   const res = await app.request("/api/oauth/clients", {
     method: "POST",
     headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
     body: JSON.stringify({
-      level: "application",
+      level: "space",
       name: "Realm Test Satellite",
       redirectUris: ["https://realm.example.com/callback"],
-      referencedApplicationId: ctx.defaultAppId,
+      referencedSpaceId: ctx.defaultSpaceId,
       allowSignup: true,
     }),
   });
   expect(res.status).toBe(201);
   const body = (await res.json()) as { clientId: string; clientSecret: string };
-  return { ...body, applicationId: ctx.defaultAppId };
+  return { ...body, spaceId: ctx.defaultSpaceId };
 }
 
 async function signUpBA(
@@ -133,7 +133,7 @@ describe("realm isolation", () => {
     // payload carries the updated realm.
     await db
       .update(userTable)
-      .set({ realm: `end_user:${ctx.defaultAppId}` })
+      .set({ realm: `end_user:${ctx.defaultSpaceId}` })
       .where(eq(userTable.id, userId));
     const cookie = await signInBA(email, password);
 
@@ -144,13 +144,13 @@ describe("realm isolation", () => {
   });
 
   it("end-user-realm cookie session is accepted on /api/oauth/* (realm-agnostic)", async () => {
-    const { clientId } = await registerApplicationClient(ctx);
+    const { clientId } = await registerSpaceClient(ctx);
     const email = "euser3@example.com";
     const password = "Sup3rSecretPass!";
     const { userId } = await signUpBA(email, password);
     await db
       .update(userTable)
-      .set({ realm: `end_user:${ctx.defaultAppId}` })
+      .set({ realm: `end_user:${ctx.defaultSpaceId}` })
       .where(eq(userTable.id, userId));
     const cookie = await signInBA(email, password);
 
@@ -181,7 +181,7 @@ describe("realm isolation", () => {
 // ─── Cross-audience token-mint rejection ───────────────────────────────────
 //
 // Covers `assertUserRealm` in `auth/plugins.ts`: the three claim builders
-// (instance / org / application) reject users whose realm does not match
+// (instance / org / space) reject users whose realm does not match
 // the client's audience. These are the fallback of the request-time
 // realm guard — even if an attacker somehow bypassed the middleware, the
 // token mint itself refuses to issue a cross-audience JWT.
@@ -200,7 +200,7 @@ async function sha256Base64Url(input: string): Promise<string> {
 
 /**
  * Drive the full OAuth 2.1 + PKCE flow for the given session cookie and
- * application-level client, returning the `/oauth2/token` response. The
+ * space-level client, returning the `/oauth2/token` response. The
  * realm enforcement lives in `customAccessTokenClaims` → claim builder
  * → `assertUserRealm`, which fires at the token exchange — so the caller
  * asserts on `res.status` here. Happy-path token shape is already covered
@@ -317,8 +317,8 @@ describe("realm isolation — token-mint cross-audience rejection", () => {
     ctx = await createTestContext({ orgSlug: "realmmint" });
   });
 
-  it("application-level client rejects a platform-realm user at /oauth2/token", async () => {
-    const { clientId, clientSecret } = await registerApplicationClient(ctx);
+  it("space-level client rejects a platform-realm user at /oauth2/token", async () => {
+    const { clientId, clientSecret } = await registerSpaceClient(ctx);
     const email = "platformer@example.com";
     const password = "Sup3rSecretPass!";
     // Stays realm="platform" — the default.
@@ -335,20 +335,20 @@ describe("realm isolation — token-mint cross-audience rejection", () => {
     expect(body.error).toBe("access_denied");
   });
 
-  it("application-level client rejects an end-user realm for a different application", async () => {
+  it("space-level client rejects an end-user realm for a different space", async () => {
     // Create a SECOND app on the same org to act as the "wrong" audience.
-    const { seedApplication } = await import("../../../../../../test/helpers/seed.ts");
-    const otherApp = await seedApplication({ orgId: ctx.orgId, name: "Other App" });
+    const { seedSpace } = await import("../../../../../../test/helpers/seed.ts");
+    const otherSpace = await seedSpace({ orgId: ctx.orgId, name: "Other Space" });
 
-    const { clientId, clientSecret } = await registerApplicationClient(ctx);
+    const { clientId, clientSecret } = await registerSpaceClient(ctx);
     const email = "crossapp@example.com";
     const password = "Sup3rSecretPass!";
     const { userId } = await signUpBA(email, password);
     // Stamp the user as end_user of the OTHER app — mismatched with the
-    // client's `referencedApplicationId` (= ctx.defaultAppId).
+    // client's `referencedSpaceId` (= ctx.defaultSpaceId).
     await db
       .update(userTable)
-      .set({ realm: `end_user:${otherApp.id}` })
+      .set({ realm: `end_user:${otherSpace.id}` })
       .where(eq(userTable.id, userId));
     const cookie = await signInBA(email, password);
 

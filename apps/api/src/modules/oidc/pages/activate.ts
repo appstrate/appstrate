@@ -27,11 +27,11 @@
 
 import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
-import type { ResolvedAppBranding } from "../services/branding.ts";
+import type { ResolvedSpaceBranding } from "../services/branding.ts";
 
 /** Common props across the three renders — all of them need branding. */
 interface ActivateBaseProps {
-  branding: ResolvedAppBranding;
+  branding: ResolvedSpaceBranding;
   /** Optional error message displayed above the form. */
   error?: string;
 }
@@ -111,7 +111,7 @@ export function renderActivateConsentPage(props: ActivateConsentPageProps): RawH
       votre compte ${props.branding.name} avec le code
       <span class="client">${props.userCodeDisplay}</span>.
     </p>
-    <p>Cette application aura accès à :</p>
+    <p>Cette space aura accès à :</p>
     <ul class="scopes">
       ${scopeItems}
     </ul>

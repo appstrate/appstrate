@@ -12,10 +12,10 @@
  *     BEFORE issuing the request (proactive refresh), OR
  *   - the request returns `401` (reactive refresh + single retry).
  *
- * Inject `X-Org-Id` + `X-Application-Id` when the profile is pinned to a
- * specific organization / application — matches the dashboard SPA's
+ * Inject `X-Org-Id` + `X-Space-Id` when the profile is pinned to a
+ * specific organization / space — matches the dashboard SPA's
  * header contract (`apps/web/src/lib/api.ts`) so routes that use
- * `requireOrgMembership` + `requireAppContext` work identically from
+ * `requireOrgMembership` + `requireSpaceContext` work identically from
  * the CLI.
  */
 
@@ -144,7 +144,7 @@ interface AuthContext {
   instance: string;
   accessToken: string;
   orgId?: string;
-  applicationId?: string;
+  spaceId?: string;
 }
 
 /**
@@ -165,7 +165,7 @@ export async function resolveAuthContext(profileName: string): Promise<AuthConte
     instance: normalizeInstance(profile.instance),
     accessToken: token,
     orgId: profile.orgId,
-    applicationId: profile.applicationId,
+    spaceId: profile.spaceId,
   };
 }
 
@@ -280,7 +280,7 @@ export async function apiFetchRaw(
       headers["Content-Type"] = "application/json";
     }
     if (profile.orgId) headers["X-Org-Id"] = profile.orgId;
-    if (profile.applicationId) headers["X-Application-Id"] = profile.applicationId;
+    if (profile.spaceId) headers["X-Space-Id"] = profile.spaceId;
     return fetch(`${normalizeInstance(profile.instance)}${path}`, { ...init, headers });
   };
 

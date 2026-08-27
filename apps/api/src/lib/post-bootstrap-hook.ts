@@ -11,8 +11,8 @@
  *
  * Side effects (all isolated — failures are logged, never re-raised):
  *   1. Emit `onOrgCreate` so module listeners (cloud free-tier, audit) see it.
- *   2. Create the default Application for the new org.
- *   3. Provision the hello-world default agent inside that Application.
+ *   2. Create the default Space for the new org.
+ *   3. Provision the hello-world default agent inside that Space.
  *
  * Lives outside `boot.ts` so the redeem route can call it without
  * pulling in the boot module's heavy import graph.
@@ -20,7 +20,7 @@
 
 import { logger } from "./logger.ts";
 import { emitEvent } from "./modules/module-loader.ts";
-import { createDefaultApplication } from "../services/applications.ts";
+import { createDefaultSpace } from "../services/spaces.ts";
 import { provisionDefaultAgentForOrg } from "../services/default-agent.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 
@@ -34,15 +34,15 @@ interface PostBootstrapOrgArgs {
 export async function triggerPostBootstrapOrg(args: PostBootstrapOrgArgs): Promise<void> {
   const { orgId, slug, userId, userEmail } = args;
   await emitEvent("onOrgCreate", orgId, userEmail);
-  const defaultApp = await createDefaultApplication(orgId, userId).catch((err) => {
-    logger.warn("Failed to create default application for bootstrap org", {
+  const defaultSpace = await createDefaultSpace(orgId, userId).catch((err) => {
+    logger.warn("Failed to create default space for bootstrap org", {
       orgId,
       error: getErrorMessage(err),
     });
     return null;
   });
-  if (defaultApp) {
-    await provisionDefaultAgentForOrg(orgId, slug, userId, defaultApp.id).catch((err) => {
+  if (defaultSpace) {
+    await provisionDefaultAgentForOrg(orgId, slug, userId, defaultSpace.id).catch((err) => {
       logger.warn("Failed to provision default agent for bootstrap org", {
         orgId,
         error: getErrorMessage(err),

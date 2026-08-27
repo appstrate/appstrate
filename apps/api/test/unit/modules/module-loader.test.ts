@@ -653,7 +653,7 @@ describe("module-loader", () => {
           orgId: "o",
           runId: "r",
           packageId: "a",
-          applicationId: "app",
+          spaceId: "spc_x",
           status: "success",
         }),
       ).resolves.toBeUndefined();

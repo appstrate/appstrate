@@ -76,7 +76,7 @@ export function isRunLaunchOp(opId: string | undefined): opId is RunLaunchOp {
 /**
  * Minimal log-line shape shared by the SSE `run_log` frame and the
  * `GET /runs/:id/logs` list rows — both carry the same `run_logs` columns
- * (the SSE event adds org/app ids we ignore). `level` is open-coded rather
+ * (the SSE event adds org/space ids we ignore). `level` is open-coded rather
  * than enum'd so a future level can't drop a line; `data` may be a record,
  * the literal `"[payload too large]"`, or absent (non-verbose subscribers).
  */
@@ -209,7 +209,7 @@ export function mergeLogs(
 }
 
 /**
- * Build the per-run SSE URL. Returns `undefined` when org/app context is
+ * Build the per-run SSE URL. Returns `undefined` when org/space context is
  * missing (the caller then renders the static card instead of live run progress).
  * `verbose=true` is REQUIRED: the server strips `run_log.data` for non-verbose
  * subscribers, so without it the panel would show empty lines.
@@ -217,27 +217,27 @@ export function mergeLogs(
 export function buildRunSseUrl(args: {
   runId: string;
   orgId: string | undefined;
-  applicationId: string | undefined;
+  spaceId: string | undefined;
 }): string | undefined {
-  const { runId, orgId, applicationId } = args;
-  if (!orgId || !applicationId) return undefined;
+  const { runId, orgId, spaceId } = args;
+  if (!orgId || !spaceId) return undefined;
   const qs = new URLSearchParams({
     orgId,
-    applicationId,
+    spaceId,
     verbose: "true",
   });
   return `/api/realtime/runs/${encodeURIComponent(runId)}?${qs.toString()}`;
 }
 
-/** Read org/app ids out of the chat host's forwarded headers (case-tolerant). */
-export function orgAppFromHeaders(headers: Record<string, string> | undefined): {
+/** Read org/space ids out of the chat host's forwarded headers (case-tolerant). */
+export function orgSpaceFromHeaders(headers: Record<string, string> | undefined): {
   orgId: string | undefined;
-  applicationId: string | undefined;
+  spaceId: string | undefined;
 } {
   const h = headers ?? {};
   return {
     orgId: h["X-Org-Id"] ?? h["x-org-id"],
-    applicationId: h["X-Application-Id"] ?? h["x-application-id"],
+    spaceId: h["X-Space-Id"] ?? h["x-space-id"],
   };
 }
 

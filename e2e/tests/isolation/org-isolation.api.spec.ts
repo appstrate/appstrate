@@ -13,7 +13,7 @@ import {
   createWebhook,
   createEndUser,
   createApiKey,
-  createApplication,
+  createSpace,
   createSchedule,
 } from "../../helpers/seed.ts";
 
@@ -147,29 +147,29 @@ test.describe("Cross-org API key isolation", () => {
 });
 
 // ═══════════════════════════════════════════════
-// Applications
+// Spaces
 // ═══════════════════════════════════════════════
 
-test.describe("Cross-org application isolation", () => {
-  test("OrgB cannot list OrgA applications", async ({ orgClientA, orgClientB }) => {
-    await createApplication(orgClientA, "OrgA Custom App");
+test.describe("Cross-org space isolation", () => {
+  test("OrgB cannot list OrgA spaces", async ({ orgClientA, orgClientB }) => {
+    await createSpace(orgClientA, "OrgA Custom Space");
 
-    const res = await orgClientB.get("/applications");
+    const res = await orgClientB.get("/spaces");
     expect(res.status()).toBe(200);
     const body = await res.json();
     const names = (body.data ?? []).map((a: { name: string }) => a.name);
-    expect(names).not.toContain("OrgA Custom App");
+    expect(names).not.toContain("OrgA Custom Space");
   });
 
-  test("OrgB cannot access OrgA application by ID", async ({ orgClientA, orgClientB }) => {
-    const app = await createApplication(orgClientA, "OrgA Private App");
-    const res = await orgClientB.get(`/applications/${app.id}`);
+  test("OrgB cannot access OrgA space by ID", async ({ orgClientA, orgClientB }) => {
+    const space = await createSpace(orgClientA, "OrgA Private Space");
+    const res = await orgClientB.get(`/spaces/${space.id}`);
     expect(res.status()).toBe(404);
   });
 
-  test("OrgB cannot delete OrgA application", async ({ orgClientA, orgClientB }) => {
-    const app = await createApplication(orgClientA, "OrgA Delete Target");
-    const res = await orgClientB.delete(`/applications/${app.id}`);
+  test("OrgB cannot delete OrgA space", async ({ orgClientA, orgClientB }) => {
+    const space = await createSpace(orgClientA, "OrgA Delete Target");
+    const res = await orgClientB.delete(`/spaces/${space.id}`);
     expect(res.status()).toBe(404);
   });
 });
@@ -248,33 +248,29 @@ test.describe("Cross-org notification isolation", () => {
 });
 
 // ═══════════════════════════════════════════════
-// X-Application-Id validation (middleware enforcement)
+// X-Space-Id validation (middleware enforcement)
 // ═══════════════════════════════════════════════
 
-test.describe("X-Application-Id middleware enforcement", () => {
-  test("OrgB cannot use OrgA applicationId as X-Application-Id", async ({
-    request,
-    ctxA,
-    ctxB,
-  }) => {
-    // Try to access agents using OrgB's cookie + orgId but OrgA's applicationId
+test.describe("X-Space-Id middleware enforcement", () => {
+  test("OrgB cannot use OrgA spaceId as X-Space-Id", async ({ request, ctxA, ctxB }) => {
+    // Try to access agents using OrgB's cookie + orgId but OrgA's spaceId
     const res = await request.get("/api/agents", {
       headers: {
         Cookie: ctxB.auth.cookie,
         "X-Org-Id": ctxB.org.orgId,
-        "X-Application-Id": ctxA.org.defaultAppId, // OrgA's app!
+        "X-Space-Id": ctxA.org.defaultSpaceId, // OrgA's space!
       },
     });
-    // Should fail because OrgA's app doesn't belong to OrgB
+    // Should fail because OrgA's space doesn't belong to OrgB
     expect(res.status()).toBe(404);
   });
 
-  test("Missing X-Application-Id on app-scoped route returns 400", async ({ request, ctxA }) => {
+  test("Missing X-Space-Id on space-scoped route returns 400", async ({ request, ctxA }) => {
     const res = await request.get("/api/agents", {
       headers: {
         Cookie: ctxA.auth.cookie,
         "X-Org-Id": ctxA.org.orgId,
-        // No X-Application-Id
+        // No X-Space-Id
       },
     });
     expect(res.status()).toBe(400);

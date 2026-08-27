@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Per-application social auth: resolver + admin CRUD.
+ * Per-space social auth: resolver + admin CRUD.
  *
  * Resolver:
- *  - `level=application` → reads `application_social_providers` for the
- *    referenced app. Absent → `null` (that provider's button is hidden on the
+ *  - `level=space` → reads `space_social_providers` for the
+ *    referenced space. Absent → `null` (that provider's button is hidden on the
  *    tenant's login pages; no fallback to env creds).
  *  - `level=org` / `level=instance` → NOT handled here. The env-based creds
  *    baked into the BA singleton at boot (see `packages/db/src/auth.ts`)
- *    continue to apply; a `null` return from this resolver means "no per-app
+ *    continue to apply; a `null` return from this resolver means "no per-space
  *    override" and the env getters take over.
  *
  * Admin:
- *  - CRUD keyed by (applicationId, provider). Views never expose the client
+ *  - CRUD keyed by (spaceId, provider). Views never expose the client
  *    secret. Mutations invalidate the resolver cache.
  *
  * Rotation:
@@ -26,7 +26,7 @@ import { eq, and } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { decryptCredentials, encryptCredentials } from "@appstrate/connect";
 import type { SocialProviderId, SocialProviderView } from "@appstrate/shared-types";
-import { applicationSocialProviders } from "@appstrate/db/schema";
+import { spaceSocialProviders } from "@appstrate/db/schema";
 import type { OAuthClientRecord } from "./oauth-admin.ts";
 import { createTtlCache } from "./ttl-cache.ts";
 import { logger } from "../../../lib/logger.ts";
@@ -38,7 +38,7 @@ interface ResolvedSocialProvider {
   clientId: string;
   clientSecret: string;
   scopes: string[] | null;
-  source: "per-app";
+  source: "per-space";
 }
 
 interface UpsertSocialProviderInput {
@@ -66,12 +66,12 @@ void _assertAllProvidersListed;
 
 const cache = createTtlCache<ResolvedSocialProvider>("oidc:social-cache-invalidate");
 
-function cacheKey(applicationId: string, provider: SocialProviderId): string {
-  return `${applicationId}:${provider}`;
+function cacheKey(spaceId: string, provider: SocialProviderId): string {
+  return `${spaceId}:${provider}`;
 }
 
 export interface SpiedSocialResolve {
-  applicationId: string;
+  spaceId: string;
   provider: SocialProviderId;
   hit: boolean;
 }
@@ -81,11 +81,11 @@ export function _setSocialSpy(fn: ((e: SpiedSocialResolve) => void) | null): voi
   socialResolveSpy = fn;
 }
 
-type SocialRow = typeof applicationSocialProviders.$inferSelect;
+type SocialRow = typeof spaceSocialProviders.$inferSelect;
 
 function mapRow(row: SocialRow): SocialProviderView {
   return {
-    applicationId: row.applicationId,
+    spaceId: row.spaceId,
     provider: row.provider,
     clientId: row.clientId,
     scopes: row.scopes,
@@ -95,19 +95,16 @@ function mapRow(row: SocialRow): SocialProviderView {
 }
 
 async function resolvePerApp(
-  applicationId: string,
+  spaceId: string,
   provider: SocialProviderId,
 ): Promise<ResolvedSocialProvider | null> {
-  const key = cacheKey(applicationId, provider);
+  const key = cacheKey(spaceId, provider);
   const value = await cache.getOrLoad(key, async () => {
     const [row] = await db
       .select()
-      .from(applicationSocialProviders)
+      .from(spaceSocialProviders)
       .where(
-        and(
-          eq(applicationSocialProviders.applicationId, applicationId),
-          eq(applicationSocialProviders.provider, provider),
-        ),
+        and(eq(spaceSocialProviders.spaceId, spaceId), eq(spaceSocialProviders.provider, provider)),
       )
       .limit(1);
     if (!row) return null;
@@ -115,8 +112,8 @@ async function resolvePerApp(
     try {
       decrypted = decryptCredentials<{ clientSecret: string }>(row.clientSecretEncrypted);
     } catch (err) {
-      logger.error("oidc social: decryption failed for per-app creds, treating as unconfigured", {
-        applicationId,
+      logger.error("oidc social: decryption failed for per-space creds, treating as unconfigured", {
+        spaceId,
         provider,
         error: getErrorMessage(err),
       });
@@ -126,33 +123,33 @@ async function resolvePerApp(
       clientId: row.clientId,
       clientSecret: decrypted.clientSecret,
       scopes: row.scopes,
-      source: "per-app",
+      source: "per-space",
     };
   });
-  if (socialResolveSpy) socialResolveSpy({ applicationId, provider, hit: value !== null });
+  if (socialResolveSpy) socialResolveSpy({ spaceId, provider, hit: value !== null });
   return value;
 }
 
-/** Resolve per-app OAuth creds. Returns `null` for non-application clients or when absent. */
+/** Resolve per-space OAuth creds. Returns `null` for non-space clients or when absent. */
 export async function resolveSocialProviderForClient(
-  client: Pick<OAuthClientRecord, "level" | "referencedApplicationId">,
+  client: Pick<OAuthClientRecord, "level" | "referencedSpaceId">,
   provider: SocialProviderId,
 ): Promise<ResolvedSocialProvider | null> {
-  if (client.level !== "application") return null;
-  if (!client.referencedApplicationId) return null;
-  return resolvePerApp(client.referencedApplicationId, provider);
+  if (client.level !== "space") return null;
+  if (!client.referencedSpaceId) return null;
+  return resolvePerApp(client.referencedSpaceId, provider);
 }
 
-/** Invalidate cached entries for an application (both providers when `provider` omitted). */
+/** Invalidate cached entries for a space (both providers when `provider` omitted). */
 export async function invalidateSocialCache(
-  applicationId: string,
+  spaceId: string,
   provider?: SocialProviderId,
 ): Promise<void> {
   if (provider) {
-    await cache.delete(cacheKey(applicationId, provider));
+    await cache.delete(cacheKey(spaceId, provider));
     return;
   }
-  await Promise.all(SOCIAL_PROVIDER_IDS.map((p) => cache.delete(cacheKey(applicationId, p))));
+  await Promise.all(SOCIAL_PROVIDER_IDS.map((p) => cache.delete(cacheKey(spaceId, p))));
 }
 
 /** Test-only: clear the entire cache. */
@@ -163,31 +160,28 @@ export function _clearSocialCacheForTesting(): void {
 // ───────────────────────── Admin CRUD ─────────────────────────
 
 export async function getSocialProvider(
-  applicationId: string,
+  spaceId: string,
   provider: SocialProviderId,
 ): Promise<SocialProviderView | null> {
   const [row] = await db
     .select()
-    .from(applicationSocialProviders)
+    .from(spaceSocialProviders)
     .where(
-      and(
-        eq(applicationSocialProviders.applicationId, applicationId),
-        eq(applicationSocialProviders.provider, provider),
-      ),
+      and(eq(spaceSocialProviders.spaceId, spaceId), eq(spaceSocialProviders.provider, provider)),
     )
     .limit(1);
   return row ? mapRow(row) : null;
 }
 
 export async function upsertSocialProvider(
-  applicationId: string,
+  spaceId: string,
   provider: SocialProviderId,
   input: UpsertSocialProviderInput,
 ): Promise<SocialProviderView> {
   const clientSecretEncrypted = encryptCredentials({ clientSecret: input.clientSecret });
   const now = new Date();
   const values = {
-    applicationId,
+    spaceId,
     provider,
     clientId: input.clientId,
     clientSecretEncrypted,
@@ -195,30 +189,27 @@ export async function upsertSocialProvider(
     updatedAt: now,
   };
   const [row] = await db
-    .insert(applicationSocialProviders)
+    .insert(spaceSocialProviders)
     .values({ ...values, createdAt: now })
     .onConflictDoUpdate({
-      target: [applicationSocialProviders.applicationId, applicationSocialProviders.provider],
+      target: [spaceSocialProviders.spaceId, spaceSocialProviders.provider],
       set: values,
     })
     .returning();
-  await invalidateSocialCache(applicationId, provider);
+  await invalidateSocialCache(spaceId, provider);
   return mapRow(row!);
 }
 
 export async function deleteSocialProvider(
-  applicationId: string,
+  spaceId: string,
   provider: SocialProviderId,
 ): Promise<boolean> {
   const deleted = await db
-    .delete(applicationSocialProviders)
+    .delete(spaceSocialProviders)
     .where(
-      and(
-        eq(applicationSocialProviders.applicationId, applicationId),
-        eq(applicationSocialProviders.provider, provider),
-      ),
+      and(eq(spaceSocialProviders.spaceId, spaceId), eq(spaceSocialProviders.provider, provider)),
     )
-    .returning({ applicationId: applicationSocialProviders.applicationId });
-  await invalidateSocialCache(applicationId, provider);
+    .returning({ spaceId: spaceSocialProviders.spaceId });
+  await invalidateSocialCache(spaceId, provider);
   return deleted.length > 0;
 }

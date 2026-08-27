@@ -112,7 +112,7 @@ async function seedSinkRun(
     id: runId,
     packageId: AGENT,
     orgId: ctx.orgId,
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     status: "running",
     runOrigin: overrides.runOrigin ?? "platform",
     modelSource: overrides.modelSource ?? "system",

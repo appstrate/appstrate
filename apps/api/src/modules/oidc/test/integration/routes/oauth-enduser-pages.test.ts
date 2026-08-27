@@ -37,10 +37,10 @@ async function registerClient(
   } = {},
 ): Promise<{ clientId: string; clientSecret: string }> {
   const body = {
-    level: "application" as const,
+    level: "space" as const,
     name: overrides.name ?? "Acme Portal",
     redirectUris: overrides.redirectUris ?? ["https://acme.example.com/oauth/callback"],
-    referencedApplicationId: ctx.defaultAppId,
+    referencedSpaceId: ctx.defaultSpaceId,
     // Default to JIT ON for the end-user page happy-path tests — they
     // simulate brand-new end-user sign-ups that would otherwise be rejected
     // by the secure-by-default gate.
@@ -265,7 +265,7 @@ describe("Public end-user pages — /api/oauth/*", () => {
     const conflictEmail = `c3conflict-${Date.now()}@example.com`;
     await db.insert(endUsers).values({
       id: prefixedId("eu"),
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       orgId: ctx.org.id,
       externalId: conflictEmail,
       email: conflictEmail,
@@ -785,7 +785,7 @@ describe("Public end-user pages — /api/oauth/*", () => {
     });
   });
 
-  describe("Application-level signup policy (unified with org/instance)", () => {
+  describe("Space-level signup policy (unified with org/instance)", () => {
     // Symmetric to the org-level tests above — since commit a2aae3af the
     // `allowSignup` flag is honored uniformly across all client levels
     // (SOTA alignment with FusionAuth/Auth0/Okta: CTA hidden when closed,
@@ -1029,7 +1029,7 @@ describe("Public end-user pages — /api/oauth/*", () => {
       setRealmResolver(oidcRealmResolver);
     });
 
-    it("POST /register tags the user with realm='end_user:<applicationId>' for an application-level client", async () => {
+    it("POST /register tags the user with realm='end_user:<spaceId>' for a space-level client", async () => {
       const { clientId } = await registerClient(ctx);
       const email = `realm-roundtrip+${crypto.randomUUID().slice(0, 8)}@example.com`;
 
@@ -1083,7 +1083,7 @@ describe("Public end-user pages — /api/oauth/*", () => {
         .where(eq(userTable.email, email))
         .limit(1);
       expect(userRow).toBeDefined();
-      expect(userRow!.realm).toBe(`end_user:${ctx.defaultAppId}`);
+      expect(userRow!.realm).toBe(`end_user:${ctx.defaultSpaceId}`);
 
       // Sessions are created inline on signup when SMTP is disabled;
       // when enabled the session appears only after email verification.
@@ -1093,7 +1093,7 @@ describe("Public end-user pages — /api/oauth/*", () => {
         .from(sessionTable)
         .where(eq(sessionTable.userId, userRow!.id));
       for (const s of sessionRows) {
-        expect(s.realm).toBe(`end_user:${ctx.defaultAppId}`);
+        expect(s.realm).toBe(`end_user:${ctx.defaultSpaceId}`);
       }
     });
 

@@ -11,7 +11,7 @@ import {
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedApiKey, seedApplication } from "../../helpers/seed.ts";
+import { seedApiKey, seedSpace } from "../../helpers/seed.ts";
 import { apiKeys } from "@appstrate/db/schema";
 
 const app = getTestApp();
@@ -44,7 +44,7 @@ describe("API Keys API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "Test Key",
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
         }),
       });
 
@@ -66,13 +66,13 @@ describe("API Keys API", () => {
   });
 
   describe("POST /api/api-keys", () => {
-    it("creates an API key with name and applicationId", async () => {
+    it("creates an API key with name and spaceId", async () => {
       const res = await app.request("/api/api-keys", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "My API Key",
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
         }),
       });
 
@@ -89,7 +89,7 @@ describe("API Keys API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "Prefixed Key",
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
         }),
       });
 
@@ -108,7 +108,7 @@ describe("API Keys API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "To Delete",
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
         }),
       });
       const { id } = (await createRes.json()) as any;
@@ -129,7 +129,7 @@ describe("API Keys API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "Ephemeral Key",
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
         }),
       });
       const { id } = (await createRes.json()) as any;
@@ -157,7 +157,7 @@ describe("API Keys API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "Scoped Key",
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
           scopes: ["agents:read", "agents:run", "runs:read"],
         }),
       });
@@ -176,7 +176,7 @@ describe("API Keys API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "Full Access Key",
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
         }),
       });
 
@@ -194,7 +194,7 @@ describe("API Keys API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "Session Scope Key",
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
           scopes: ["agents:read", "org:delete", "billing:manage", "members:invite"],
         }),
       });
@@ -212,7 +212,7 @@ describe("API Keys API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "Invalid Scope Key",
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
           scopes: ["agents:read", "not-a-scope", "invalid:permission"],
         }),
       });
@@ -236,7 +236,7 @@ describe("API Keys API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "Never Minted",
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
           scopes: ["documents:read"],
         }),
       });
@@ -256,7 +256,7 @@ describe("API Keys API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "Listed Scoped Key",
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
           scopes: ["agents:read", "agents:run"],
         }),
       });
@@ -302,21 +302,21 @@ describe("API Keys API", () => {
   });
 
   // Issue #172 (extension) — `revokeApiKey(keyId, orgId)` filtered by org
-  // only, letting an API key in App A revoke any key in the org (other
-  // apps included). The fix passes the caller's bound applicationId for
+  // only, letting an API key in Space A revoke any key in the org (other
+  // spaces included). The fix passes the caller's bound spaceId for
   // API-key auth; sessions stay org-wide.
-  describe("API key cross-app revoke (issue #172 extension)", () => {
-    it("API key in App A cannot revoke a key in App B (same org)", async () => {
-      const otherApp = await seedApplication({ orgId: ctx.orgId, name: "Other App" });
+  describe("API key cross-space revoke (issue #172 extension)", () => {
+    it("API key in Space A cannot revoke a key in Space B (same org)", async () => {
+      const otherSpace = await seedSpace({ orgId: ctx.orgId, name: "Other Space" });
       const callerKey = await seedApiKey({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id,
         scopes: ["api-keys:revoke"],
       });
       const victimKey = await seedApiKey({
         orgId: ctx.orgId,
-        applicationId: otherApp.id,
+        spaceId: otherSpace.id,
         createdBy: ctx.user.id,
         name: "Victim Key",
       });
@@ -334,16 +334,16 @@ describe("API Keys API", () => {
       expect(row?.revokedAt).toBeNull();
     });
 
-    it("API key can still revoke another key in its own application", async () => {
+    it("API key can still revoke another key in its own space", async () => {
       const callerKey = await seedApiKey({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id,
         scopes: ["api-keys:revoke"],
       });
       const peerKey = await seedApiKey({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id,
         name: "Peer Key",
       });
@@ -356,10 +356,10 @@ describe("API Keys API", () => {
     });
 
     it("session admin can revoke any key in the org (regression guard)", async () => {
-      const otherApp = await seedApplication({ orgId: ctx.orgId, name: "Other App 2" });
+      const otherSpace = await seedSpace({ orgId: ctx.orgId, name: "Other Space 2" });
       const victimKey = await seedApiKey({
         orgId: ctx.orgId,
-        applicationId: otherApp.id,
+        spaceId: otherSpace.id,
         createdBy: ctx.user.id,
         name: "Victim Key Session",
       });
@@ -380,7 +380,7 @@ describe("API Keys API", () => {
     it.each(["bearer", "BEARER", "BeArEr"])("authenticates with %s", async (scheme) => {
       const apiKey = await seedApiKey({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id,
       });
 
@@ -393,7 +393,7 @@ describe("API Keys API", () => {
     it("tolerates more than one SP between scheme and token", async () => {
       const apiKey = await seedApiKey({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id,
       });
 

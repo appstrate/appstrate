@@ -4,7 +4,7 @@
  * /api/credential-proxy/proxy — public authenticated credential proxy.
  *
  * Used by external runners (CLI, GitHub Action, third-party agents) to
- * reach an application's integrations without copying raw credentials out
+ * reach a space's integrations without copying raw credentials out
  * of Appstrate. The CLI's `RemoteAppstrateIntegrationResolver` is the
  * canonical consumer; in-container runs reach the same credential-proxy
  * core via the sidecar's MCP `{ns}__api_call` tools instead.
@@ -17,7 +17,7 @@
  *     sessions are rejected because the drive-by CSRF threat model
  *     doesn't fit an endpoint that reaches third-party providers.
  *   - Explicit `credential-proxy:call` scope — NOT granted by default
- *   - Per-application scope (principal cannot reach providers in another app)
+ *   - Per-space scope (principal cannot reach providers in another space)
  *   - Rate-limit: 100 req/min per principal (configurable via
  *     `CREDENTIAL_PROXY_LIMITS.rate_per_min`)
  *   - Session binding keyed on a namespaced principal id (`apikey:<id>`
@@ -49,7 +49,7 @@ import { getActor } from "../lib/actor.ts";
 import { logger } from "../lib/logger.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { requireAppContext } from "../middleware/app-context.ts";
+import { requireSpaceContext } from "../middleware/space-context.ts";
 import {
   ApiError,
   invalidRequest,
@@ -75,7 +75,7 @@ export function createCredentialProxyRouter() {
   const router = new Hono<AppEnv>();
   const limits = getCredentialProxyLimits();
 
-  router.use("/*", requireAppContext());
+  router.use("/*", requireSpaceContext());
 
   // Accept any HTTP method — the proxy preserves `req.method` on the
   // upstream fetch. A POST-only route would silently 404 GET/PUT/DELETE
@@ -125,7 +125,7 @@ export function createCredentialProxyRouter() {
         throw invalidRequest("X-Session-Id must be a UUID v4");
       }
 
-      const applicationIdEarly = c.get("applicationId");
+      const spaceIdEarly = c.get("spaceId");
       const apiKeyIdEarly = c.get("apiKeyId");
       const userIdEarly = c.get("user").id;
       // Namespaced principal id — keeps JWT-user and API-key buckets
@@ -138,7 +138,7 @@ export function createCredentialProxyRouter() {
           principalId,
           boundTo: binding.boundTo,
           authMethod,
-          applicationId: applicationIdEarly,
+          spaceId: spaceIdEarly,
         });
         throw forbidden("X-Session-Id is bound to a different principal");
       }
@@ -151,7 +151,7 @@ export function createCredentialProxyRouter() {
         );
       }
 
-      const applicationId = c.get("applicationId");
+      const spaceId = c.get("spaceId");
       const orgId = c.get("orgId");
       const apiKeyId = c.get("apiKeyId");
       const userId = c.get("user").id;
@@ -160,7 +160,7 @@ export function createCredentialProxyRouter() {
       // The actor selects which `integration_connections` row is decrypted:
       //   - `Appstrate-User` impersonation → the end-user's connection
       //   - dashboard / CLI-JWT / API-key callers → the platform user's
-      //     own connection (or any `shared_with_org` connection in the app).
+      //     own connection (or any `shared_with_org` connection in the space).
       // `X-Connection-Id` (when present) pins a specific connection id,
       // validated against the actor's accessible set in the resolver.
       const actor = getActor(c);
@@ -253,7 +253,7 @@ export function createCredentialProxyRouter() {
         // duplex: "half" and 401-retry is suppressed (body unreplayable);
         // authRefreshed is surfaced on the result instead.
         const result = await proxyCall({
-          applicationId,
+          spaceId,
           actor,
           ...(explicitConnectionId ? { connectionId: explicitConnectionId } : {}),
           integrationId,
@@ -279,7 +279,7 @@ export function createCredentialProxyRouter() {
           apiKeyId,
           userId,
           endUserId: endUser?.id,
-          applicationId,
+          spaceId,
           integrationId,
           method,
           target,
@@ -350,7 +350,7 @@ export function createCredentialProxyRouter() {
             authMethod,
             apiKeyId,
             userId,
-            applicationId,
+            spaceId,
             integrationId,
             target,
           });
@@ -366,7 +366,7 @@ export function createCredentialProxyRouter() {
           authMethod,
           apiKeyId,
           userId,
-          applicationId,
+          spaceId,
           integrationId,
           error: getErrorMessage(err),
         });
@@ -385,7 +385,7 @@ const PROXY_CONTROL_HEADERS = new Set([
   "x-session-id",
   "x-substitute-body",
   "x-run-id",
-  "x-application-id",
+  "x-space-id",
   "x-connection-id",
   // Streaming transport hints — consumed by this route, must not reach upstream.
   "x-stream-request",

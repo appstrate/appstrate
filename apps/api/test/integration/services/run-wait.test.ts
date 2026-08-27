@@ -31,12 +31,12 @@ import {
 
 describe("waitForRunTerminal", () => {
   let ctx: TestContext;
-  let scope: { orgId: string; applicationId: string };
+  let scope: { orgId: string; spaceId: string };
 
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "waitsvc" });
-    scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     await seedAgent({ id: "@waitsvc/agent", orgId: ctx.orgId, createdBy: ctx.user.id });
   });
 
@@ -44,7 +44,7 @@ describe("waitForRunTerminal", () => {
     return seedRun({
       packageId: "@waitsvc/agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status,
     });

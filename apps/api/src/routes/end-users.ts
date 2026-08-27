@@ -22,7 +22,7 @@ import { setCursorLinkHeader } from "../lib/pagination-link.ts";
 import { parseListPagination } from "../lib/list-query.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
-import { getAppScope } from "../lib/scope.ts";
+import { getSpaceScope } from "../lib/scope.ts";
 
 // Strict: reject unknown top-level keys. End-user identity is a sensitive
 // write surface — silently dropping an unexpected field could mask a client
@@ -67,7 +67,7 @@ export function createEndUsersRouter() {
     idempotency(),
     requirePermission("end-users", "write"),
     async (c) => {
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       const data = await readJsonBody(c, createEndUserSchema);
 
       const created = await createEndUser(scope, {
@@ -89,14 +89,14 @@ export function createEndUsersRouter() {
     },
   );
 
-  // GET /api/end-users — list end-users in the application (cursor-based pagination)
+  // GET /api/end-users — list end-users in the space (cursor-based pagination)
   router.get("/", rateLimit(300), requirePermission("end-users", "read"), async (c) => {
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     // Keyset-paginated on `startingAfter`/`endingBefore`, so only the helper's
     // `limit` applies. A bare `Number("abc")` here used to hand `NaN` to the
     // query builder, and drizzle's pg dialect emits the `limit` clause only for
     // a `number >= 0` — `NaN` is not, so the clause vanished and the request
-    // returned the application's ENTIRE end-user table. Out-of-range or
+    // returned the space's ENTIRE end-user table. Out-of-range or
     // unparseable now falls back to the documented default of 20.
     const { limit } = parseListPagination(c, { defaultLimit: 20 });
     const startingAfter = c.req.query("startingAfter");
@@ -131,7 +131,7 @@ export function createEndUsersRouter() {
 
   // GET /api/end-users/:id — get a single end-user
   router.get("/:id", rateLimit(300), requirePermission("end-users", "read"), async (c) => {
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     const endUserId = c.req.param("id")!;
     const result = await getEndUser(scope, endUserId);
     return c.json(result);
@@ -139,7 +139,7 @@ export function createEndUsersRouter() {
 
   // PATCH /api/end-users/:id — update an end-user
   router.patch("/:id", rateLimit(60), requirePermission("end-users", "write"), async (c) => {
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     const endUserId = c.req.param("id")!;
 
     const data = await readJsonBody(c, updateEndUserSchema);
@@ -160,7 +160,7 @@ export function createEndUsersRouter() {
 
   // DELETE /api/end-users/:id — delete an end-user and all connections
   router.delete("/:id", rateLimit(60), requirePermission("end-users", "delete"), async (c) => {
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     const endUserId = c.req.param("id")!;
 
     await deleteEndUser(scope, endUserId);

@@ -1,5 +1,5 @@
 import { pgTable, text, timestamp, bigserial, jsonb, uuid, index } from "drizzle-orm/pg-core";
-import { applications } from "./applications.ts";
+import { spaces } from "./spaces.ts";
 
 /**
  * Append-only audit log for state-changing operations. Insert via
@@ -24,7 +24,7 @@ export const auditEvents = pgTable(
   {
     id: bigserial("id", { mode: "number" }).primaryKey(),
     orgId: uuid("org_id").notNull(),
-    applicationId: text("application_id").references(() => applications.id, {
+    spaceId: text("space_id").references(() => spaces.id, {
       onDelete: "set null",
     }),
     actorType: text("actor_type").notNull(),

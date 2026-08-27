@@ -71,7 +71,7 @@ async function apiKeyHeaders(scopes: string[]): Promise<Record<string, string>> 
   const ctx = await createTestContext();
   const key = await seedApiKey({
     orgId: ctx.orgId,
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     createdBy: ctx.user.id,
     scopes,
   });

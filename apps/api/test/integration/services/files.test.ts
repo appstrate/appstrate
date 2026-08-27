@@ -5,7 +5,7 @@
  *
  *  - `createFileFromUpload` materialization: durable row + bucket object +
  *    org byte-counter increment + sha256 + audit trail.
- *  - `getFileForActor` container ACL: same-app OK, cross-org / cross-app
+ *  - `getFileForActor` container ACL: same-space OK, cross-org / cross-space
  *    404, end-user guard.
  *  - Routes: metadata, proxy-stream content download, list + filter, delete by
  *    creator vs admin vs neither.
@@ -77,7 +77,7 @@ const app = getTestApp();
 
 /** Stage an upload row + write its bytes into the uploads bucket (FS). */
 async function stageUpload(
-  scope: { orgId: string; applicationId: string },
+  scope: { orgId: string; spaceId: string },
   createdBy: string | null,
   name: string,
   bytes: Uint8Array,
@@ -85,7 +85,7 @@ async function stageUpload(
 ): Promise<string> {
   const up = await createUpload({
     orgId: scope.orgId,
-    applicationId: scope.applicationId,
+    spaceId: scope.spaceId,
     createdBy,
     name,
     size: bytes.byteLength,
@@ -102,7 +102,7 @@ async function stageUpload(
 
 /** Seed a minimal run row in the given scope. */
 async function seedRunRow(
-  scope: { orgId: string; applicationId: string },
+  scope: { orgId: string; spaceId: string },
   extra: {
     endUserId?: string;
     input?: Record<string, unknown>;
@@ -114,7 +114,7 @@ async function seedRunRow(
   await db.insert(runs).values({
     id,
     orgId: scope.orgId,
-    applicationId: scope.applicationId,
+    spaceId: scope.spaceId,
     status: "running",
     endUserId: extra.endUserId ?? null,
     packageId: extra.packageId ?? null,
@@ -166,7 +166,7 @@ async function fileObjectKeys(prefix?: string): Promise<string[]> {
 
 /** Publish an `agent_output` from a run's streaming channel (Phase 2). */
 function publishStream(
-  scope: { orgId: string; applicationId: string },
+  scope: { orgId: string; spaceId: string },
   runId: string,
   name: string,
   content: string,
@@ -186,13 +186,13 @@ function publishStream(
 
 describe("files service + routes", () => {
   let ctx: TestContext;
-  let scope: { orgId: string; applicationId: string };
+  let scope: { orgId: string; spaceId: string };
   let userActor: Actor;
 
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "docsorg" });
-    scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     userActor = { type: "user", id: ctx.user.id };
   });
 
@@ -238,13 +238,13 @@ describe("files service + routes", () => {
     expect(audit[0]!.actorId).toBe(ctx.user.id);
   });
 
-  it("enforces the container ACL: cross-org and cross-app resolve to null", async () => {
+  it("enforces the container ACL: cross-org and cross-space resolve to null", async () => {
     const bytes = new TextEncoder().encode("scoped");
     const uploadId = await stageUpload(scope, ctx.user.id, "s.txt", bytes);
     const runId = await seedRunRow(scope);
     const doc = await createFileFromUpload(scope, userActor, uploadId, { runId });
 
-    // Same app: resolvable, downloadable by its creator.
+    // Same space: resolvable, downloadable by its creator.
     const ok = await getFileForActor(scope, userActor, doc.id);
     expect(ok?.row.id).toBe(doc.id);
     expect(ok?.capabilities.download).toBe(true);
@@ -252,24 +252,24 @@ describe("files service + routes", () => {
     // Cross-org (different org scope): 404.
     const other = await createTestContext({ orgSlug: "otherorg" });
     const crossOrg = await getFileForActor(
-      { orgId: other.orgId, applicationId: other.defaultAppId },
+      { orgId: other.orgId, spaceId: other.defaultSpaceId },
       userActor,
       doc.id,
     );
     expect(crossOrg).toBeNull();
 
-    // Cross-app (same org, foreign app id): 404.
-    const crossApp = await getFileForActor(
-      { orgId: ctx.orgId, applicationId: "app_does_not_exist" },
+    // Cross-space (same org, foreign space id): 404.
+    const crossSpace = await getFileForActor(
+      { orgId: ctx.orgId, spaceId: "spc_does_not_exist" },
       userActor,
       doc.id,
     );
-    expect(crossApp).toBeNull();
+    expect(crossSpace).toBeNull();
   });
 
   it("end-user only sees files on their own runs", async () => {
-    const euOwner = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
-    const euOther = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+    const euOwner = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
+    const euOther = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
     const ownerActor: Actor = { type: "end_user", id: euOwner.id };
 
     const bytes = new TextEncoder().encode("end-user doc");
@@ -394,7 +394,7 @@ describe("files service + routes", () => {
   it("a file ref in input that belongs to another org is not returned (org scope holds)", async () => {
     // A durable file in a DIFFERENT org.
     const other = await createTestContext({ orgSlug: "otherorg2" });
-    const otherScope = { orgId: other.orgId, applicationId: other.defaultAppId };
+    const otherScope = { orgId: other.orgId, spaceId: other.defaultSpaceId };
     const otherActor: Actor = { type: "user", id: other.user.id };
     const otherRun = await seedRunRow(otherScope);
     const upX = await stageUpload(
@@ -745,7 +745,7 @@ describe("files service + routes", () => {
     await addOrgMember(ctx.orgId, memberB.id, "member");
     const actorB: Actor = { type: "user", id: memberB.id };
 
-    // Member B's RUN-contained file (org+app-visible to members).
+    // Member B's RUN-contained file (org+space-visible to members).
     const runB = await seedRunRow(scope);
     const upRun = await stageUpload(
       scope,
@@ -781,7 +781,7 @@ describe("files service + routes", () => {
     expect(idsB).toContain(chatDoc.id);
 
     // An end-user sees neither (isolation unchanged).
-    const eu = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+    const eu = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
     const asEu = await listFilesForActor(scope, { type: "end_user", id: eu.id }, {});
     expect(asEu.data).toHaveLength(0);
   });
@@ -905,7 +905,7 @@ describe("files service + routes", () => {
         let objectCount = 0;
         const deadline = Date.now() + 2_000;
         while (Date.now() < deadline) {
-          objectCount = (await fileObjectKeys(`${scope.applicationId}/`)).length;
+          objectCount = (await fileObjectKeys(`${scope.spaceId}/`)).length;
           if (objectCount >= 2) break;
           await Bun.sleep(10);
         }
@@ -1061,16 +1061,16 @@ describe("files service + routes", () => {
     // The narrowest key the platform can mint: `validateScopes` accepts an
     // empty scope list, so this key is a legitimate, fully authenticated
     // principal of the org — it just holds no grant. Before `files:read`
-    // existed it could list and download every agent_output of the app.
+    // existed it could list and download every agent_output of the space.
     const unscoped = await seedApiKey({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
       scopes: [],
     });
     const unscopedHeaders = {
       Authorization: `Bearer ${unscoped.rawKey}`,
-      "X-Application-Id": ctx.defaultAppId,
+      "X-Space-Id": ctx.defaultSpaceId,
     };
     for (const path of paths) {
       const res = await app.request(path, { headers: unscopedHeaders });
@@ -1082,14 +1082,14 @@ describe("files service + routes", () => {
     // grant is per action, not per family.
     const deleteOnly = await seedApiKey({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
       scopes: ["files:delete"],
     });
     const deleteOnlyRes = await app.request(paths[1]!, {
       headers: {
         Authorization: `Bearer ${deleteOnly.rawKey}`,
-        "X-Application-Id": ctx.defaultAppId,
+        "X-Space-Id": ctx.defaultSpaceId,
       },
     });
     expect(deleteOnlyRes.status).toBe(403);
@@ -1097,13 +1097,13 @@ describe("files service + routes", () => {
     // With the scope, the same principal reads normally.
     const scoped = await seedApiKey({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
       scopes: ["files:read"],
     });
     const scopedHeaders = {
       Authorization: `Bearer ${scoped.rawKey}`,
-      "X-Application-Id": ctx.defaultAppId,
+      "X-Space-Id": ctx.defaultSpaceId,
     };
     for (const path of paths) {
       const res = await app.request(path, { headers: scopedHeaders });
@@ -1116,12 +1116,12 @@ describe("files service + routes", () => {
   });
 
   it("end-user (impersonated via API key) reads own docs, is blocked from others', and deletes own", async () => {
-    const eu = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
-    const euOther = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+    const eu = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
+    const euOther = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
     const euActor: Actor = { type: "end_user", id: eu.id };
     const key = await seedApiKey({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
       // Reads now require the family grant; the DELETE below deliberately does
       // NOT (it is authorized by the file's creator capability).
@@ -1129,7 +1129,7 @@ describe("files service + routes", () => {
     });
     const euHeaders = {
       Authorization: `Bearer ${key.rawKey}`,
-      "X-Application-Id": ctx.defaultAppId,
+      "X-Space-Id": ctx.defaultSpaceId,
       "Appstrate-User": eu.id,
     };
 
@@ -1330,7 +1330,7 @@ describe("files service + routes", () => {
   });
 
   it("deleteEndUser detaches a file a live run still consumes, and deletes the rest", async () => {
-    const eu = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+    const eu = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
     const producer = await seedRunRow(scope, { endUserId: eu.id });
     const { row: consumed } = await publishStream(scope, producer, "kept.txt", "kept bytes", {
       userId: null,
@@ -1462,7 +1462,7 @@ describe("files service + routes", () => {
         db.insert(files).values({
           id: `file_${crypto.randomUUID()}`,
           orgId: ctx.orgId,
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
           purpose: "agent_output",
           runId,
           chatSessionId: sessionId,
@@ -1483,7 +1483,7 @@ describe("files service + routes", () => {
       await db.insert(files).values({
         id: `file_${crypto.randomUUID()}`,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         purpose: "agent_output",
         runId,
         chatSessionId: sessionId,
@@ -1556,8 +1556,8 @@ describe("files service + routes", () => {
   });
 
   it("a detached file is not readable by another end-user", async () => {
-    const euOwner = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
-    const euOther = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+    const euOwner = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
+    const euOther = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
     const ownerActor: Actor = { type: "end_user", id: euOwner.id };
 
     // An end-user's run produces a doc; a live consumer keeps it alive on delete.

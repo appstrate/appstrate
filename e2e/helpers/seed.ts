@@ -11,7 +11,7 @@ import type { ApiClient } from "./api-client.ts";
 import type { APIRequestContext } from "@playwright/test";
 import { createOrgOnlyClient } from "./api-client.ts";
 
-// ─── Auth ────────────────────────────────────────
+// ─── Auth ───────────────────────────────────────
 
 export interface AuthResult {
   userId: string;
@@ -63,7 +63,7 @@ export interface OrgResult {
   orgId: string;
   orgName: string;
   orgSlug: string;
-  defaultAppId: string;
+  defaultSpaceId: string;
 }
 
 export async function createOrg(
@@ -90,47 +90,47 @@ export async function createOrg(
   const body = await res.json();
   const orgId = body.id;
 
-  // Fetch apps to find the default one (retry once on connection reset)
-  let defaultApp: { id: string } | undefined;
+  // Fetch spaces to find the default one (retry once on connection reset)
+  let defaultSpace: { id: string } | undefined;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const appsRes = await request.get("/api/applications", {
+      const spacesRes = await request.get("/api/spaces", {
         headers: { Cookie: cookie, "X-Org-Id": orgId },
       });
-      const appsBody = await appsRes.json();
-      defaultApp = appsBody.data?.find((a: { isDefault: boolean }) => a.isDefault);
-      if (defaultApp) break;
+      const spacesBody = await spacesRes.json();
+      defaultSpace = spacesBody.data?.find((a: { isDefault: boolean }) => a.isDefault);
+      if (defaultSpace) break;
     } catch {
-      if (attempt === 2) throw new Error("Failed to fetch applications after 3 attempts");
+      if (attempt === 2) throw new Error("Failed to fetch spaces after 3 attempts");
       await new Promise((r) => setTimeout(r, 500));
     }
   }
-  if (!defaultApp) {
-    throw new Error("No default application found after org creation");
+  if (!defaultSpace) {
+    throw new Error("No default space found after org creation");
   }
 
   return {
     orgId,
     orgName: name,
     orgSlug: slug,
-    defaultAppId: defaultApp.id,
+    defaultSpaceId: defaultSpace.id,
   };
 }
 
-// ─── Applications ───────────────────────────────
+// ─── Spaces ─────────────────────────────────────
 
-export async function createApplication(
+export async function createSpace(
   client: ApiClient | ReturnType<typeof createOrgOnlyClient>,
   name: string,
 ): Promise<{ id: string; name: string; isDefault: boolean }> {
-  const res = await client.post("/applications", { name });
+  const res = await client.post("/spaces", { name });
   if (res.status() !== 201) {
-    throw new Error(`Create application failed (${res.status()}): ${await res.text()}`);
+    throw new Error(`Create space failed (${res.status()}): ${await res.text()}`);
   }
   return res.json();
 }
 
-// ─── Agents (Packages) ─────────────────────────
+// ─── Agents (Packages) ──────────────────────────
 
 export async function createAgent(
   client: ApiClient,
@@ -158,7 +158,7 @@ export async function createAgent(
 }
 
 /**
- * Create an agent declaring an `input` schema — needed to test per-app
+ * Create an agent declaring an `input` schema — needed to test per-space
  * isolation of the editor's stored input values. The values a `PUT
  * /agents/{scope}/{name}/input-settings` stores are validated against this
  * schema, so an agent with no input schema cannot store arbitrary values.
@@ -202,15 +202,15 @@ export async function createWebhook(
   overrides: {
     url?: string;
     events?: string[];
-    level?: "org" | "application";
-    applicationId?: string;
+    level?: "org" | "space";
+    spaceId?: string;
   } = {},
 ): Promise<{ id: string; url: string; secret: string }> {
   const res = await client.post("/webhooks", {
     level: overrides.level ?? "org",
     url: overrides.url ?? "https://example.com/hook",
     events: overrides.events ?? ["run.success"],
-    ...(overrides.applicationId ? { applicationId: overrides.applicationId } : {}),
+    ...(overrides.spaceId ? { spaceId: overrides.spaceId } : {}),
   });
 
   if (res.status() !== 201) {
@@ -271,26 +271,26 @@ export async function createSchedule(
   return res.json();
 }
 
-// ─── Application Packages (install/uninstall) ───
+// ─── Space Packages (install/uninstall) ─────────
 
-export async function installPackageInApp(
+export async function installPackageInSpace(
   client: ApiClient | ReturnType<typeof createOrgOnlyClient>,
-  applicationId: string,
+  spaceId: string,
   packageId: string,
 ): Promise<void> {
-  const res = await client.post(`/applications/${applicationId}/packages`, { packageId });
+  const res = await client.post(`/spaces/${spaceId}/packages`, { packageId });
   if (res.status() !== 201 && res.status() !== 200) {
     throw new Error(`Install package failed (${res.status()}): ${await res.text()}`);
   }
 }
 
-export async function uninstallPackageFromApp(
+export async function uninstallPackageFromSpace(
   client: ApiClient | ReturnType<typeof createOrgOnlyClient>,
-  applicationId: string,
+  spaceId: string,
   scope: string,
   name: string,
 ): Promise<void> {
-  const res = await client.delete(`/applications/${applicationId}/packages/${scope}/${name}`);
+  const res = await client.delete(`/spaces/${spaceId}/packages/${scope}/${name}`);
   if (res.status() !== 204 && res.status() !== 200) {
     throw new Error(`Uninstall package failed (${res.status()}): ${await res.text()}`);
   }

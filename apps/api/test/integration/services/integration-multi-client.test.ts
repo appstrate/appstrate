@@ -2,7 +2,7 @@
 
 /**
  * Multiple OAuth clients per integration (issue #723): a system client
- * (SYSTEM_INTEGRATIONS) and the org's custom per-application client
+ * (SYSTEM_INTEGRATIONS) and the org's custom per-space client
  * coexist. A connection pins WHICH client minted it via `client_ref` — a flat
  * client id (system env id or `integration_oauth_clients.id`); token refresh
  * resolves the same client's credentials by that id (system-first then DB-by-id,
@@ -34,7 +34,7 @@ import {
   initSystemIntegrations,
   __resetSystemIntegrationsForTest,
 } from "../../../src/services/integration-client-registry.ts";
-import type { AppScope } from "../../../src/lib/scope.ts";
+import type { SpaceScope } from "../../../src/lib/scope.ts";
 import type { Actor } from "@appstrate/connect";
 import type { AfpsManifestAuth } from "../../../src/services/integration-manifest-helpers.ts";
 
@@ -55,13 +55,13 @@ const PUBLIC_AUTH: AfpsManifestAuth = {
 
 describe("integration multi-client", () => {
   let ctx: TestContext;
-  let scope: AppScope;
+  let scope: SpaceScope;
   let actor: Actor;
 
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "multiclient" });
-    scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     actor = { type: "user", id: ctx.user.id };
     await seedPackage({ id: INTEGRATION, orgId: ctx.orgId, type: "integration", source: "local" });
     __resetSystemIntegrationsForTest();
@@ -70,7 +70,7 @@ describe("integration multi-client", () => {
   afterEach(() => __resetSystemIntegrationsForTest());
 
   /**
-   * Insert a custom per-application OAuth client row directly; return its id.
+   * Insert a custom per-space OAuth client row directly; return its id.
    * `isDefault` defaults to true (the first registered custom wins, mirroring
    * `createIntegrationOAuthClient`); pass false to seed an additional non-default
    * client without tripping the one-default partial unique.
@@ -83,7 +83,7 @@ describe("integration multi-client", () => {
     const [row] = await db
       .insert(integrationOauthClients)
       .values({
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         integrationId: INTEGRATION,
         authKey: AUTH_KEY,
         clientId,
@@ -172,7 +172,7 @@ describe("integration multi-client", () => {
       seedSystemClient("sys-secret");
       const c = await resolveIntegrationClientById(
         SYSTEM_ID,
-        ctx.defaultAppId,
+        ctx.defaultSpaceId,
         INTEGRATION,
         AUTH_KEY,
         undefined,
@@ -188,7 +188,7 @@ describe("integration multi-client", () => {
       const customId = await seedCustomClient("custom-client-id", "custom-secret");
       const c = await resolveIntegrationClientById(
         customId,
-        ctx.defaultAppId,
+        ctx.defaultSpaceId,
         INTEGRATION,
         AUTH_KEY,
         undefined,
@@ -200,11 +200,11 @@ describe("integration multi-client", () => {
       });
     });
 
-    it("does NOT resolve a custom id belonging to another application (escalation guard)", async () => {
+    it("does NOT resolve a custom id belonging to another space (escalation guard)", async () => {
       const customId = await seedCustomClient("custom-client-id", "custom-secret");
       const c = await resolveIntegrationClientById(
         customId,
-        "app_someone_else",
+        "spc_someone_else",
         INTEGRATION,
         AUTH_KEY,
         undefined,
@@ -216,7 +216,7 @@ describe("integration multi-client", () => {
       const customId = await seedCustomClient("custom-client-id", "custom-secret");
       const c = await resolveIntegrationClientById(
         customId,
-        ctx.defaultAppId,
+        ctx.defaultSpaceId,
         "@other/integration",
         AUTH_KEY,
         undefined,
@@ -227,7 +227,7 @@ describe("integration multi-client", () => {
     it("returns null when the id resolves to neither a system nor a custom client", async () => {
       const c = await resolveIntegrationClientById(
         "unknown-id",
-        ctx.defaultAppId,
+        ctx.defaultSpaceId,
         INTEGRATION,
         AUTH_KEY,
         undefined,
@@ -251,7 +251,7 @@ describe("integration multi-client", () => {
       ]);
       const c = await resolveIntegrationClientById(
         SYSTEM_ID,
-        ctx.defaultAppId,
+        ctx.defaultSpaceId,
         INTEGRATION,
         AUTH_KEY,
         undefined,
@@ -263,7 +263,7 @@ describe("integration multi-client", () => {
       seedSystemClient("should-be-ignored");
       const c = await resolveIntegrationClientById(
         SYSTEM_ID,
-        ctx.defaultAppId,
+        ctx.defaultSpaceId,
         INTEGRATION,
         AUTH_KEY,
         "none",
@@ -281,7 +281,7 @@ describe("integration multi-client", () => {
       const customId = await seedCustomClient("custom-client-id", "custom-secret");
       const c = await resolveIntegrationClientById(
         customId,
-        ctx.defaultAppId,
+        ctx.defaultSpaceId,
         INTEGRATION,
         AUTH_KEY,
         "none",
@@ -301,7 +301,7 @@ describe("integration multi-client", () => {
         INTEGRATION,
         AUTH_KEY,
         OAUTH2_AUTH,
-        ctx.defaultAppId,
+        ctx.defaultSpaceId,
         SYSTEM_ID,
       );
       expect(ctxOut).not.toBeNull();
@@ -315,7 +315,7 @@ describe("integration multi-client", () => {
         INTEGRATION,
         AUTH_KEY,
         OAUTH2_AUTH,
-        ctx.defaultAppId,
+        ctx.defaultSpaceId,
         customId,
       );
       expect(ctxOut).not.toBeNull();
@@ -328,7 +328,7 @@ describe("integration multi-client", () => {
         INTEGRATION,
         AUTH_KEY,
         OAUTH2_AUTH,
-        ctx.defaultAppId,
+        ctx.defaultSpaceId,
         "removed-id",
       );
       expect(ctxOut).toBeNull();
@@ -342,7 +342,7 @@ describe("integration multi-client", () => {
         INTEGRATION,
         AUTH_KEY,
         OAUTH2_AUTH,
-        ctx.defaultAppId,
+        ctx.defaultSpaceId,
         null,
       );
       expect(ctxOut).toBeNull();
@@ -354,7 +354,7 @@ describe("integration multi-client", () => {
         INTEGRATION,
         AUTH_KEY,
         PUBLIC_AUTH,
-        ctx.defaultAppId,
+        ctx.defaultSpaceId,
         SYSTEM_ID,
       );
       expect(ctxOut).not.toBeNull();
@@ -372,7 +372,7 @@ describe("integration multi-client", () => {
         INTEGRATION,
         AUTH_KEY,
         OAUTH2_AUTH,
-        ctx.defaultAppId,
+        ctx.defaultSpaceId,
         pinned,
       );
       expect(ctxOut!.clientSecret).toBe("rt-secret");
@@ -477,7 +477,7 @@ describe("integration multi-client", () => {
         customClients: [
           {
             id: "11111111-1111-4111-8111-111111111111",
-            applicationId: ctx.defaultAppId,
+            spaceId: ctx.defaultSpaceId,
             integration_package_id: INTEGRATION,
             auth_key: AUTH_KEY,
             client_id: "org-client-id",
@@ -538,7 +538,7 @@ describe("integration multi-client", () => {
       return {
         customClients: specs.map((s) => ({
           id: s.id,
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
           integration_package_id: INTEGRATION,
           auth_key: AUTH_KEY,
           client_id: s.clientId,
@@ -590,7 +590,7 @@ describe("integration multi-client", () => {
     it("rejects a second auto-provisioned client for the same auth (one-auto)", async () => {
       async function seedAuto(clientId: string): Promise<void> {
         await db.insert(integrationOauthClients).values({
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
           integrationId: INTEGRATION,
           authKey: AUTH_KEY,
           clientId,

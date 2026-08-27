@@ -60,7 +60,7 @@ function moduleCtx(): ModuleInitContext {
 
 let app: ReturnType<typeof getTestApp>;
 
-/** Seed a run in `status` inside the context's org + default application. */
+/** Seed a run in `status` inside the context's org + default space. */
 async function seedRunInOrg(
   ctx: Awaited<ReturnType<typeof createTestContext>>,
   status: "pending" | "running" | "success",
@@ -69,7 +69,7 @@ async function seedRunInOrg(
   await seedRun({
     packageId: pkg.id,
     orgId: ctx.orgId,
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     status,
   });
 }

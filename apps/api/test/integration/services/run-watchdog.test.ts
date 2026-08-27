@@ -78,7 +78,7 @@ async function seedRun(
     id: runId,
     packageId,
     orgId: ctx.orgId,
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     status: overrides.status ?? "running",
     runOrigin: "remote",
     sinkSecretEncrypted: encrypt(RUN_SECRET),

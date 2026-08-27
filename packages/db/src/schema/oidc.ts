@@ -10,7 +10,7 @@
  * Backs the Better Auth `jwt` + `@better-auth/oauth-provider` +
  * device-authorization plugins, plus a shadow profile table
  * (`oidc_end_user_profiles`) linking the core `end_users` row to the global
- * Better Auth `user` row, and per-application SMTP / social-provider config.
+ * Better Auth `user` row, and per-space SMTP / social-provider config.
  *
  * The Drizzle export stays named `oauthClient` (singular) so the Better Auth
  * oauth-provider plugin's internal model id (`oauthClient`) resolves via the
@@ -37,7 +37,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { user, session } from "./auth.ts";
-import { endUsers, applications } from "./applications.ts";
+import { endUsers, spaces } from "./spaces.ts";
 import { organizations } from "./organizations.ts";
 
 // ─── Better Auth: jwt plugin ──────────────────────────────────────────────────
@@ -106,16 +106,16 @@ export const oauthClient = pgTable(
     // ─── Appstrate polymorphic fields ────────────────────────────────────────
     // Defaults to `instance` so self-registered clients (RFC 7591 DCR /
     // CIMD) — which Better Auth inserts without the platform's polymorphic
-    // discriminator — land as instance-level public clients (no org/app
+    // discriminator — land as instance-level public clients (no org/space
     // reference, satisfying the level CHECK below). Admin-managed creation
     // always sets `level` explicitly, so the default never applies there.
-    level: text("level", { enum: ["org", "application", "instance"] })
+    level: text("level", { enum: ["org", "space", "instance"] })
       .notNull()
       .default("instance"),
     referencedOrgId: uuid("referenced_org_id").references(() => organizations.id, {
       onDelete: "cascade",
     }),
-    referencedApplicationId: text("referenced_application_id").references(() => applications.id, {
+    referencedSpaceId: text("referenced_space_id").references(() => spaces.id, {
       onDelete: "cascade",
     }),
     allowSignup: boolean("allow_signup").default(false).notNull(),
@@ -125,11 +125,11 @@ export const oauthClient = pgTable(
   },
   (t) => [
     index("idx_oauth_clients_org").on(t.referencedOrgId),
-    index("idx_oauth_clients_app").on(t.referencedApplicationId),
+    index("idx_oauth_clients_space").on(t.referencedSpaceId),
     // Raw-SQL CHECKs preserved verbatim from the module's 0000/0001 migrations.
     check(
       "oauth_clients_level_check",
-      sql`(level = 'org' AND referenced_org_id IS NOT NULL AND referenced_application_id IS NULL) OR (level = 'application' AND referenced_application_id IS NOT NULL AND referenced_org_id IS NULL) OR (level = 'instance' AND referenced_org_id IS NULL AND referenced_application_id IS NULL)`,
+      sql`(level = 'org' AND referenced_org_id IS NOT NULL AND referenced_space_id IS NULL) OR (level = 'space' AND referenced_space_id IS NOT NULL AND referenced_org_id IS NULL) OR (level = 'instance' AND referenced_org_id IS NULL AND referenced_space_id IS NULL)`,
     ),
     check("oauth_clients_signup_role_check", sql`signup_role IN ('admin', 'member', 'viewer')`),
   ],
@@ -256,14 +256,14 @@ export const oidcEndUserProfiles = pgTable(
   ],
 );
 
-// ─── Per-application SMTP configuration ──────────────────────────────────────
+// ─── Per-space SMTP configuration ────────────────────────────────────────────
 
-export const applicationSmtpConfigs = pgTable(
-  "application_smtp_configs",
+export const spaceSmtpConfigs = pgTable(
+  "space_smtp_configs",
   {
-    applicationId: text("application_id")
+    spaceId: text("space_id")
       .primaryKey()
-      .references(() => applications.id, { onDelete: "cascade" }),
+      .references(() => spaces.id, { onDelete: "cascade" }),
     host: text("host").notNull(),
     port: integer("port").notNull(),
     username: text("username").notNull(),
@@ -278,20 +278,20 @@ export const applicationSmtpConfigs = pgTable(
   },
   () => [
     check(
-      "application_smtp_configs_secure_mode_check",
+      "space_smtp_configs_secure_mode_check",
       sql`secure_mode IN ('auto', 'tls', 'starttls', 'none')`,
     ),
   ],
 );
 
-// ─── Per-application social auth providers ───────────────────────────────────
+// ─── Per-space social auth providers ─────────────────────────────────────────
 
-export const applicationSocialProviders = pgTable(
-  "application_social_providers",
+export const spaceSocialProviders = pgTable(
+  "space_social_providers",
   {
-    applicationId: text("application_id")
+    spaceId: text("space_id")
       .notNull()
-      .references(() => applications.id, { onDelete: "cascade" }),
+      .references(() => spaces.id, { onDelete: "cascade" }),
     provider: text("provider", { enum: ["google", "github"] }).notNull(),
     clientId: text("client_id").notNull(),
     clientSecretEncrypted: text("client_secret_encrypted").notNull(),
@@ -300,7 +300,7 @@ export const applicationSocialProviders = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    primaryKey({ columns: [t.applicationId, t.provider] }),
-    check("application_social_providers_provider_check", sql`provider IN ('google', 'github')`),
+    primaryKey({ columns: [t.spaceId, t.provider] }),
+    check("space_social_providers_provider_check", sql`provider IN ('google', 'github')`),
   ],
 );

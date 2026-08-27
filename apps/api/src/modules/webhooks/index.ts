@@ -55,8 +55,8 @@ const webhooksModule: AppstrateModule = {
   },
 
   // Webhooks are org-scoped routes. The request body (level: "org" |
-  // "application") determines the scope of the individual webhook resource;
-  // the surrounding route no longer requires X-Application-Id.
+  // "space") determines the scope of the individual webhook resource;
+  // the surrounding route no longer requires X-Space-Id.
 
   openApiPaths() {
     return webhooksPaths;
@@ -113,7 +113,7 @@ const webhooksModule: AppstrateModule = {
   events: {
     onRunStatusChange: (params: RunStatusChangeParams) => {
       dispatchRunWebhook(
-        { orgId: params.orgId, applicationId: params.applicationId },
+        { orgId: params.orgId, spaceId: params.spaceId },
         params.status,
         params.runId,
         params.packageId,
@@ -129,7 +129,7 @@ const webhooksModule: AppstrateModule = {
     },
     onRunConnectionMissing: (params: RunConnectionMissingParams) => {
       dispatchRunConnectionMissingWebhook(
-        { orgId: params.orgId, applicationId: params.applicationId },
+        { orgId: params.orgId, spaceId: params.spaceId },
         params.packageId,
         params.actor,
         params.errors,

@@ -26,7 +26,7 @@ const USER_MENU = "Menu utilisateur";
 
 /**
  * Browser context for a freshly registered user with NO organization: session
- * cookie only, no org/app localStorage. `OrgGate` sends it to onboarding.
+ * cookie only, no org/space localStorage. `OrgGate` sends it to onboarding.
  */
 async function orglessPage(browser: Browser, cookie: string): Promise<Page> {
   const context = await browser.newContext();

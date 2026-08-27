@@ -135,7 +135,7 @@ describe("createS3Storage — proxy-upload mode (issue #829)", () => {
 
   it("signs an app-domain URL when no public endpoint is configured", async () => {
     const storage = createS3Storage(proxyConfig);
-    const descriptor = await storage.createUploadUrl("uploads", "app_1/upl_1/file.pdf", {
+    const descriptor = await storage.createUploadUrl("uploads", "spc_1/upl_1/file.pdf", {
       mime: "application/pdf",
       maxSize: 123,
       expiresIn: 600,
@@ -153,7 +153,7 @@ describe("createS3Storage — proxy-upload mode (issue #829)", () => {
     const token = new URL(descriptor.url).searchParams.get("token")!;
     const payload = verifyFsUploadToken(token, "proxy-test-secret");
     expect(payload).not.toBeNull();
-    expect(payload!.k).toBe("uploads/app_1/upl_1/file.pdf");
+    expect(payload!.k).toBe("uploads/spc_1/upl_1/file.pdf");
     expect(payload!.s).toBe(123);
     expect(payload!.m).toBe("application/pdf");
   });

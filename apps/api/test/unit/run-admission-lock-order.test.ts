@@ -7,7 +7,7 @@
  * participant must follow:
  *
  *   run_concurrency:<org> → organizations row → packages row → files rows
- *                         → run_number:<org>:<app>:<package>
+ *                         → run_number:<org>:<space>:<package>
  *
  * The cycle this pins closed: `createRun` used to `SELECT … FROM files … FOR
  * UPDATE` and only THEN take the per-org advisory key, while
@@ -70,7 +70,7 @@ describe("run-admission lock order", () => {
   it("createRun takes the per-org admission key before locking input files", () => {
     const body = functionBody(
       "services/state/runs.ts",
-      "export async function createRun(scope: AppScope, params: CreateRunParams)",
+      "export async function createRun(scope: SpaceScope, params: CreateRunParams)",
     );
     // `enforceOrgConcurrencyCap` is where the advisory key is acquired;
     // `.from(files)` … `.for("update")` is the input-file row lock.
@@ -81,7 +81,7 @@ describe("run-admission lock order", () => {
   it("createRun takes the per-org admission key before the per-package run_number key", () => {
     const body = functionBody(
       "services/state/runs.ts",
-      "export async function createRun(scope: AppScope, params: CreateRunParams)",
+      "export async function createRun(scope: SpaceScope, params: CreateRunParams)",
     );
     assertOrder(
       body,
@@ -94,7 +94,7 @@ describe("run-admission lock order", () => {
   it("deletePackageRuns takes the per-org admission key before reaching files", () => {
     const body = functionBody(
       "services/state/runs.ts",
-      "export async function deletePackageRuns(scope: AppScope, packageId: string)",
+      "export async function deletePackageRuns(scope: SpaceScope, packageId: string)",
     );
     assertOrder(
       body,

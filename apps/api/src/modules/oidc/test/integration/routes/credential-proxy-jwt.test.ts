@@ -45,7 +45,7 @@ interface Principal {
   userId: string;
   cookie: string;
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   accessToken: string;
 }
 
@@ -66,10 +66,10 @@ async function createJwtPrincipal(): Promise<Principal> {
     .set({ realm: "platform" })
     .where(eq(sessionTable.userId, testUser.id));
 
-  // Org + owner membership + default application via the shared
+  // Org + owner membership + default space via the shared
   // helper — owners inherit `credential-proxy:call` from the role-grant
   // matrix.
-  const { org, defaultAppId } = await createTestOrg(testUser.id);
+  const { org, defaultSpaceId } = await createTestOrg(testUser.id);
 
   // Device-flow dance — code, approve, exchange.
   const codeRes = await app.request("/api/auth/device/code", {
@@ -115,7 +115,7 @@ async function createJwtPrincipal(): Promise<Principal> {
     userId: testUser.id,
     cookie: testUser.cookie,
     orgId: org.id,
-    applicationId: defaultAppId,
+    spaceId: defaultSpaceId,
     accessToken: tokens.access_token,
   };
 }
@@ -140,7 +140,7 @@ describe("POST /api/credential-proxy/proxy — auth gate", () => {
       method: "POST",
       headers: {
         Authorization: `Bearer ${p.accessToken}`,
-        "X-Application-Id": p.applicationId,
+        "X-Space-Id": p.spaceId,
         "X-Org-Id": p.orgId,
         "X-Target": "https://example.test/echo",
         "X-Session-Id": crypto.randomUUID(),
@@ -162,7 +162,7 @@ describe("POST /api/credential-proxy/proxy — auth gate", () => {
       method: "POST",
       headers: {
         Cookie: p.cookie,
-        "X-Application-Id": p.applicationId,
+        "X-Space-Id": p.spaceId,
         "X-Org-Id": p.orgId,
         "X-Integration-Id": "@test/example",
         "X-Target": "https://example.test/echo",
@@ -185,7 +185,7 @@ describe("POST /api/credential-proxy/proxy — auth gate", () => {
       method: "POST",
       headers: {
         Authorization: "Bearer not-a-real-token",
-        "X-Application-Id": "app_x",
+        "X-Space-Id": "spc_x",
         "X-Integration-Id": "@test/example",
         "X-Target": "https://example.test/echo",
         "X-Session-Id": crypto.randomUUID(),
@@ -209,7 +209,7 @@ describe("POST /api/credential-proxy/proxy — auth gate", () => {
       method: "POST",
       headers: {
         Authorization: `Bearer ${p.accessToken}`,
-        "X-Application-Id": p.applicationId,
+        "X-Space-Id": p.spaceId,
         "X-Org-Id": p.orgId,
         "X-Integration-Id": "@missing/provider",
         "X-Target": "https://example.test/echo",

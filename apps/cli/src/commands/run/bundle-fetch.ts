@@ -26,7 +26,7 @@ export class BundleFetchError extends Error {
   constructor(
     public readonly code:
       | "package_not_found"
-      | "package_not_installed_in_app"
+      | "package_not_installed_in_space"
       | "version_not_found"
       | "integrity_mismatch"
       | "bundle_fetch_failed",
@@ -41,7 +41,7 @@ export class BundleFetchError extends Error {
 interface BundleFetchInput {
   instance: string;
   bearerToken: string;
-  applicationId: string;
+  spaceId: string;
   orgId?: string;
   /** `@scope/name`. */
   packageId: string;
@@ -84,7 +84,7 @@ export async function fetchBundleForRun(input: BundleFetchInput): Promise<Bundle
   const headers: Record<string, string> = {
     Authorization: `Bearer ${input.bearerToken}`,
     "User-Agent": CLI_USER_AGENT,
-    "X-Application-Id": input.applicationId,
+    "X-Space-Id": input.spaceId,
   };
   if (input.orgId) headers["X-Org-Id"] = input.orgId;
 
@@ -97,18 +97,18 @@ export async function fetchBundleForRun(input: BundleFetchInput): Promise<Bundle
     // catch-all (which left users staring at the message wondering whether
     // their agent existed at all).
     const errorCode = parseProblemCode(text);
-    if (errorCode === "agent_not_installed_in_app") {
+    if (errorCode === "agent_not_installed_in_space") {
       throw new BundleFetchError(
-        "package_not_installed_in_app",
-        `Package ${input.packageId} exists in your organization catalog but is not installed in the pinned application`,
-        `Install it from the dashboard, or run:\n  appstrate api -X POST /api/applications/${input.applicationId}/packages -d '{"packageId":"${input.packageId}"}'`,
+        "package_not_installed_in_space",
+        `Package ${input.packageId} exists in your organization catalog but is not installed in the pinned space`,
+        `Install it from the dashboard, or run:\n  appstrate api -X POST /api/spaces/${input.spaceId}/packages -d '{"packageId":"${input.packageId}"}'`,
       );
     }
     if (/version/i.test(text) && input.spec) {
       throw new BundleFetchError(
         "version_not_found",
         `No version of ${input.packageId} matches "${input.spec}"`,
-        "Check the spec or remove it to fall back to the version installed for this app.",
+        "Check the spec or remove it to fall back to the version installed for this space.",
       );
     }
     throw new BundleFetchError(

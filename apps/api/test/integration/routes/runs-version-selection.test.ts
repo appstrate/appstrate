@@ -23,7 +23,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedPackage, seedPackageVersion, seedRun } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 
 const app = getTestApp();
 
@@ -36,7 +36,7 @@ describe("POST /api/agents/:scope/:name/run — version selector", () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "verorg" });
     await seedAgent({ id: AGENT, orgId: ctx.orgId, createdBy: ctx.user.id });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
   });
 
   async function run(version?: string) {
@@ -85,7 +85,7 @@ describe("POST /api/agents/:scope/:name/run — version selector", () => {
  * An agent was published once while its manifest depended on `skill-x@^2.0.0`
  * (a version of skill-x that was never published). Its draft was later
  * rewritten to depend on skill-y instead, and never republished. Both skills
- * are installed and enabled in the application.
+ * are installed and enabled in the space.
  *
  * Pre-fix, every published run answered `400 missing_skill: Required skill
  * '@verorg/dep-x' is not installed` — pointing at a skill that IS installed and
@@ -115,7 +115,7 @@ describe("POST /api/agents/:scope/:name/run — published deps diverged from the
         createdBy: ctx.user.id,
         draftManifest: { name: id, version: "1.0.0", type: "skill" },
       });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, id);
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
     }
 
     // Draft declares dep-y only; the published snapshot still declares dep-x.
@@ -130,7 +130,7 @@ describe("POST /api/agents/:scope/:name/run — published deps diverged from the
         dependencies: { skills: { [DEP_Y]: "^1.0.0" } },
       },
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, DRIFTED);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, DRIFTED);
 
     const version = await seedPackageVersion({
       packageId: DRIFTED,
@@ -194,7 +194,7 @@ describe("GET /api/runs/:id — version_ref persistence", () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "verorg" });
     await seedAgent({ id: AGENT, orgId: ctx.orgId, createdBy: ctx.user.id });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
   });
 
   async function getRunWire(runId: string) {
@@ -210,7 +210,7 @@ describe("GET /api/runs/:id — version_ref persistence", () => {
     const row = await seedRun({
       packageId: AGENT,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       versionLabel: "2.1.0",
       versionRef: "draft",
@@ -225,7 +225,7 @@ describe("GET /api/runs/:id — version_ref persistence", () => {
     const row = await seedRun({
       packageId: AGENT,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       versionLabel: "2.1.0",
       versionRef: "2.1.0",
@@ -238,7 +238,7 @@ describe("GET /api/runs/:id — version_ref persistence", () => {
     const row = await seedRun({
       packageId: AGENT,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       versionLabel: null,
     });

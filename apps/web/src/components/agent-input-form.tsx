@@ -32,7 +32,7 @@ export interface AgentInputFormHandle {
 interface AgentInputFormProps {
   /** The agent's single parameter schema (AFPS wrapper). */
   wrapper: SchemaWrapper | undefined;
-  /** Stored values + locks for this application — the platform layers. */
+  /** Stored values + locks for this space — the platform layers. */
   settings: AgentInputSettings;
   /** Current caller-editable values (locked fields are never part of this). */
   value: Record<string, unknown>;

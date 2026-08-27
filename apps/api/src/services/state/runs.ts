@@ -54,7 +54,7 @@ import { enqueueStorageDeletion } from "../storage-deletion.ts";
 import { runWorkspaceDeletionJobs } from "../run-workspace-storage.ts";
 import { normalizeScope } from "@appstrate/core/naming";
 import type { LlmUsageLedgerRow, ModelCost } from "@appstrate/core/module";
-import type { AppScope, OrgScope } from "../../lib/scope.ts";
+import type { SpaceScope, OrgScope } from "../../lib/scope.ts";
 import {
   modelGenerationSettingsSchema,
   type ModelGenerationSettings,
@@ -143,7 +143,7 @@ const enrichedRunColumns = {
   endUserId: runs.endUserId,
   apiKeyId: runs.apiKeyId,
   orgId: runs.orgId,
-  applicationId: runs.applicationId,
+  spaceId: runs.spaceId,
   scheduleId: runs.scheduleId,
   status: runs.status,
   input: runs.input,
@@ -279,7 +279,7 @@ function runRowToWireDto(row: RunProjection): RunWireDto {
     endUserId: row.endUserId,
     apiKeyId: row.apiKeyId,
     orgId: row.orgId,
-    applicationId: row.applicationId,
+    spaceId: row.spaceId,
     scheduleId: row.scheduleId,
     status: row.status,
     input: row.input,
@@ -363,7 +363,7 @@ type DbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 async function nextRunNumber(
   executor: Db | DbTx,
-  scope: AppScope,
+  scope: SpaceScope,
   packageId: string,
 ): Promise<number> {
   const [maxRow] = await executor
@@ -372,7 +372,7 @@ async function nextRunNumber(
     .where(
       scopedWhere(runs, {
         orgId: scope.orgId,
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         extra: [eq(runs.packageId, packageId)],
       }),
     );
@@ -380,7 +380,7 @@ async function nextRunNumber(
 }
 
 /**
- * Serialize `run_number` allocation per (org, application, package) with a
+ * Serialize `run_number` allocation per (org, space, package) with a
  * transaction-scoped Postgres advisory lock. Without it, two concurrent runs
  * of the same package both `SELECT max(run_number)+1`, read the same value and
  * insert colliding numbers (READ COMMITTED lets neither see the other's
@@ -388,8 +388,8 @@ async function nextRunNumber(
  * first to commit, so it observes the freshly inserted row. Released
  * automatically at transaction end.
  */
-async function acquireRunNumberLock(tx: DbTx, scope: AppScope, packageId: string): Promise<void> {
-  const lockKey = `run_number:${scope.orgId ?? ""}:${scope.applicationId ?? ""}:${packageId}`;
+async function acquireRunNumberLock(tx: DbTx, scope: SpaceScope, packageId: string): Promise<void> {
+  const lockKey = `run_number:${scope.orgId ?? ""}:${scope.spaceId ?? ""}:${packageId}`;
   await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
 }
 
@@ -403,7 +403,7 @@ async function acquireRunNumberLock(tx: DbTx, scope: AppScope, packageId: string
  * run-teardown family, and every transaction that takes it takes it FIRST:
  *
  *   run_concurrency:<org>  →  organizations row  →  packages row  →  files rows
- *                          →  run_number:<org>:<app>:<package>
+ *                          →  run_number:<org>:<space>:<package>
  *
  * (Each participant takes the subset it needs, never a different order.)
  *
@@ -438,7 +438,7 @@ export function orgRunConcurrencyLockKey(orgId: string): string {
  * A no-op when the run-limits registry is not initialized (e.g. an isolated
  * unit test that never booted it) — there is no cap to enforce.
  */
-async function enforceOrgConcurrencyCap(tx: DbTx, scope: AppScope): Promise<void> {
+async function enforceOrgConcurrencyCap(tx: DbTx, scope: SpaceScope): Promise<void> {
   let cap: number;
   try {
     cap = getPlatformRunLimits().max_concurrent_per_org;
@@ -474,7 +474,7 @@ interface CreateRunParams {
   input: Record<string, unknown> | null;
   /**
    * Existing durable files referenced by the run input. These rows are
-   * locked, revalidated in the app scope, and linked to the new run inside the
+   * locked, revalidated in the space scope, and linked to the new run inside the
    * same transaction as the run INSERT. This closes the resolve/create race:
    * either every input file is protected by a link, or no run is created.
    */
@@ -568,7 +568,7 @@ interface CreateRunParams {
   modelCredentialId?: string | null;
 }
 
-export async function createRun(scope: AppScope, params: CreateRunParams): Promise<void> {
+export async function createRun(scope: SpaceScope, params: CreateRunParams): Promise<void> {
   const { id, packageId, actor, input } = params;
 
   await db.transaction(async (tx) => {
@@ -597,7 +597,7 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
           and(
             inArray(files.id, consumedFileIds),
             eq(files.orgId, scope.orgId),
-            eq(files.applicationId, scope.applicationId),
+            eq(files.spaceId, scope.spaceId),
           ),
         )
         .for("update");
@@ -609,7 +609,7 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
       }
     }
 
-    // Last of the admission locks: `run_number` is per (org, app, package) and
+    // Last of the admission locks: `run_number` is per (org, space, package) and
     // nothing outside this file takes it, but it is still acquired after the
     // per-org key so the two are always seen in the same order.
     await acquireRunNumberLock(tx, scope, packageId);
@@ -639,7 +639,7 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
         params.generationConfigOverride == null
           ? null
           : modelGenerationSettingsSchema.parse(params.generationConfigOverride),
-      applicationId: scope.applicationId,
+      spaceId: scope.spaceId,
       apiKeyId: params.apiKeyId,
       runNumber,
       agentScope: params.agentScope ?? null,
@@ -701,7 +701,7 @@ export async function createRun(scope: AppScope, params: CreateRunParams): Promi
  * Single INSERT with status=failed — triggers one pg_notify for realtime.
  */
 export async function createFailedRun(
-  scope: AppScope,
+  scope: SpaceScope,
   id: string,
   packageId: string,
   actor: Actor | null,
@@ -721,7 +721,7 @@ export async function createFailedRun(
       userId: actor?.type === "user" ? actor.id : null,
       endUserId: actor?.type === "end_user" ? actor.id : null,
       orgId: scope.orgId,
-      applicationId: scope.applicationId,
+      spaceId: scope.spaceId,
       status: "failed",
       input: null,
       error,
@@ -737,7 +737,7 @@ export async function createFailedRun(
 }
 
 export async function updateRun(
-  scope: AppScope,
+  scope: SpaceScope,
   id: string,
   updates: {
     status?: string;
@@ -770,7 +770,7 @@ export async function updateRun(
     .where(
       scopedWhere(runs, {
         orgId: scope.orgId,
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         extra,
       }),
     );
@@ -939,7 +939,7 @@ export async function getRunAttribution(
   status: RunStatus;
   runOrigin: "platform" | "remote";
   modelSource: string | null;
-  applicationId: string;
+  spaceId: string;
   userId: string | null;
   endUserId: string | null;
   apiKeyId: string | null;
@@ -951,7 +951,7 @@ export async function getRunAttribution(
       status: runs.status,
       runOrigin: runs.runOrigin,
       modelSource: runs.modelSource,
-      applicationId: runs.applicationId,
+      spaceId: runs.spaceId,
       userId: runs.userId,
       endUserId: runs.endUserId,
       apiKeyId: runs.apiKeyId,
@@ -963,7 +963,7 @@ export async function getRunAttribution(
 }
 
 export async function getRecentRuns(
-  scope: AppScope,
+  scope: SpaceScope,
   packageId: string,
   actor: Actor | null,
   options: {
@@ -978,14 +978,14 @@ export async function getRecentRuns(
   const conditions = [
     eq(runs.packageId, packageId),
     eq(runs.orgId, scope.orgId),
-    eq(runs.applicationId, scope.applicationId),
+    eq(runs.spaceId, scope.spaceId),
     eq(runs.status, "success"),
   ];
   // Actor isolation is mandatory — never leak cross-actor checkpoints.
   // Scheduled / system runs (`actor === null`) read the shared (actor-less)
   // bucket only: the branch always pushes a predicate. Leaving the null
   // branch predicate-less would read EVERY actor's successful runs for this
-  // (org, app, package) — cross-actor checkpoint leakage (CRIT-14).
+  // (org, space, package) — cross-actor checkpoint leakage (CRIT-14).
   if (actor) {
     conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
   } else {
@@ -1024,14 +1024,14 @@ export async function getRecentRuns(
 }
 
 /**
- * The given actor's most recent runs in an application (own runs only, newest
+ * The given actor's most recent runs in a space (own runs only, newest
  * first) — feeds the chat module's caller-context block. Unlike `getRecentRuns`
  * this spans all packages and all statuses (so failures surface), and returns a
  * minimal wire-shape (snake_case) tuned for the system prompt. Actor isolation
  * is mandatory: a user never sees another actor's runs.
  */
 export async function listRecentForActor(
-  scope: AppScope,
+  scope: SpaceScope,
   actor: Actor | null,
   options: { limit?: number } = {},
 ): Promise<
@@ -1044,7 +1044,7 @@ export async function listRecentForActor(
   }>
 > {
   const limit = options.limit ?? 5;
-  const conditions = [eq(runs.orgId, scope.orgId), eq(runs.applicationId, scope.applicationId)];
+  const conditions = [eq(runs.orgId, scope.orgId), eq(runs.spaceId, scope.spaceId)];
   if (actor) {
     conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
   }
@@ -1078,11 +1078,11 @@ export async function listRecentForActor(
   );
 }
 
-export async function getLastRun(scope: AppScope, packageId: string, actor: Actor | null) {
+export async function getLastRun(scope: SpaceScope, packageId: string, actor: Actor | null) {
   const conditions = [
     eq(runs.packageId, packageId),
     eq(runs.orgId, scope.orgId),
-    eq(runs.applicationId, scope.applicationId),
+    eq(runs.spaceId, scope.spaceId),
   ];
   if (actor) {
     conditions.push(actorFilter(actor, { userId: runs.userId, endUserId: runs.endUserId }));
@@ -1104,9 +1104,9 @@ export async function getLastRun(scope: AppScope, packageId: string, actor: Acto
 
 /**
  * Append a log entry for a run. Only org-scoped — `run_logs` is keyed on
- * `runId` (unique globally) + `orgId` only; no application column exists.
- * Callers that hold an `AppScope` can still pass it — `OrgScope` is the
- * structural supertype so `AppScope` flows through naturally.
+ * `runId` (unique globally) + `orgId` only; no space column exists.
+ * Callers that hold a `SpaceScope` can still pass it — `OrgScope` is the
+ * structural supertype so `SpaceScope` flows through naturally.
  */
 export async function appendRunLog(
   scope: OrgScope,
@@ -1209,7 +1209,7 @@ export async function recordBootHeartbeat(runId: string): Promise<BootHeartbeatO
  */
 async function countActiveRunsForPackage(
   handle: Db | DbTx,
-  scope: AppScope,
+  scope: SpaceScope,
   packageId: string,
   actor?: Actor,
 ): Promise<number> {
@@ -1217,7 +1217,7 @@ async function countActiveRunsForPackage(
     eq(runs.packageId, packageId),
     eq(runs.orgId, scope.orgId),
     inArray(runs.status, [...activeRunStatusValues]),
-    eq(runs.applicationId, scope.applicationId),
+    eq(runs.spaceId, scope.spaceId),
   ];
 
   if (actor) {
@@ -1232,7 +1232,7 @@ async function countActiveRunsForPackage(
 }
 
 export async function getRunningRunsForPackage(
-  scope: AppScope,
+  scope: SpaceScope,
   packageId: string,
   actor?: Actor,
 ): Promise<number> {
@@ -1240,8 +1240,8 @@ export async function getRunningRunsForPackage(
 }
 
 /**
- * Count in-flight runs across ALL applications in an org. Used by the
- * per-org concurrency limiter — genuinely org-scoped, no applicationId
+ * Count in-flight runs across ALL spaces in an org. Used by the
+ * per-org concurrency limiter — genuinely org-scoped, no spaceId
  * filter. Signature stays org-scoped so the caller can't accidentally
  * scope it narrower.
  */
@@ -1258,14 +1258,14 @@ export async function getRunningRunCountForOrg(scope: OrgScope): Promise<number>
   return row?.count ?? 0;
 }
 
-export async function getRunningRunCounts(scope: AppScope): Promise<Record<string, number>> {
+export async function getRunningRunCounts(scope: SpaceScope): Promise<Record<string, number>> {
   const rows = await db
     .select({ packageId: runs.packageId, count: count() })
     .from(runs)
     .where(
       scopedWhere(runs, {
         orgId: scope.orgId,
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         extra: [inArray(runs.status, [...activeRunStatusValues])],
       }),
     )
@@ -1278,11 +1278,11 @@ export async function getRunningRunCounts(scope: AppScope): Promise<Record<strin
   return counts;
 }
 
-export async function getRun(scope: AppScope, id: string) {
+export async function getRun(scope: SpaceScope, id: string) {
   const conditions = [
     eq(runs.id, id),
     eq(runs.orgId, scope.orgId),
-    eq(runs.applicationId, scope.applicationId),
+    eq(runs.spaceId, scope.spaceId),
   ];
 
   const [row] = await db
@@ -1293,7 +1293,7 @@ export async function getRun(scope: AppScope, id: string) {
       endUserId: runs.endUserId,
       orgId: runs.orgId,
       packageId: runs.packageId,
-      applicationId: runs.applicationId,
+      spaceId: runs.spaceId,
       // Raw input snapshot (file fields keep their `upload://` URIs) — read
       // by the `rerun_from` path to replay the same input on a new run.
       input: runs.input,
@@ -1310,11 +1310,11 @@ export async function getRun(scope: AppScope, id: string) {
  * active run — checked INSIDE the transaction, under the per-org run-admission
  * advisory lock, so a run admitted concurrently cannot be deleted mid-flight.
  */
-export async function deletePackageRuns(scope: AppScope, packageId: string): Promise<number> {
+export async function deletePackageRuns(scope: SpaceScope, packageId: string): Promise<number> {
   // Enumeration, files teardown and the runs delete are ONE transaction,
   // opened by taking the run-admission lock and then the org row — the same
   // serialization point every file write takes (`createFileFromStream`) and the
-  // same org-first order the organization / application / end-user cascades use.
+  // same org-first order the organization / space / end-user cascades use.
   //
   // Splitting it (teardown, commit, delete) left a window in which a file
   // published by a still-live sidecar — or by an at-least-once retry of the
@@ -1356,7 +1356,7 @@ export async function deletePackageRuns(scope: AppScope, packageId: string): Pro
     }
 
     // Lock the parent package before enumerating its runs — same guard as the
-    // application / end-user cascades, so a concurrent package delete cannot
+    // space / end-user cascades, so a concurrent package delete cannot
     // interleave with this teardown.
     await tx
       .select({ id: packages.id })
@@ -1371,7 +1371,7 @@ export async function deletePackageRuns(scope: AppScope, packageId: string): Pro
       .where(
         scopedWhere(runs, {
           orgId: scope.orgId,
-          applicationId: scope.applicationId,
+          spaceId: scope.spaceId,
           extra: [eq(runs.packageId, packageId)],
         }),
       );
@@ -1387,7 +1387,7 @@ export async function deletePackageRuns(scope: AppScope, packageId: string): Pro
     // by nothing else, so once these rows go they are referenced by no
     // surviving row and no sweep can ever find them. Enqueue their deletion in
     // the SAME transaction — the outbox contract every other run-deleting path
-    // already honours (`deleteApplication`, `deleteOrganization`); this one
+    // already honours (`deleteSpace`, `deleteOrganization`); this one
     // simply never did, and leaked a bundle + input files per deleted run.
     await enqueueStorageDeletion(
       tx,
@@ -1444,7 +1444,7 @@ export async function listRunsWithFilter(
 }
 
 export async function listPackageRuns(
-  scope: AppScope,
+  scope: SpaceScope,
   packageId: string,
   options: {
     limit?: number;
@@ -1457,7 +1457,7 @@ export async function listPackageRuns(
   const conditions = [
     eq(runs.packageId, packageId),
     eq(runs.orgId, scope.orgId),
-    eq(runs.applicationId, scope.applicationId),
+    eq(runs.spaceId, scope.spaceId),
   ];
   if (endUserId) {
     conditions.push(eq(runs.endUserId, endUserId));
@@ -1466,7 +1466,7 @@ export async function listPackageRuns(
 }
 
 /**
- * List runs across all packages in an org+application, paginated, with
+ * List runs across all packages in an org+space, paginated, with
  * optional kind / status / date / end-user filters. Powers the global
  * `GET /api/runs` view. Joins `packages.ephemeral` so the response carries
  * the inline flag — UI uses it for the "Inline" badge.
@@ -1498,7 +1498,7 @@ interface ListGlobalRunsOptions {
 }
 
 export async function listGlobalRuns(
-  scope: AppScope,
+  scope: SpaceScope,
   options: ListGlobalRunsOptions = {},
 ): Promise<RunListPage> {
   const {
@@ -1513,7 +1513,7 @@ export async function listGlobalRuns(
     actor = null,
   } = options;
 
-  const conditions = [eq(runs.orgId, scope.orgId), eq(runs.applicationId, scope.applicationId)];
+  const conditions = [eq(runs.orgId, scope.orgId), eq(runs.spaceId, scope.spaceId)];
   if (status) conditions.push(eq(runs.status, status));
   if (startDate) conditions.push(gte(runs.startedAt, startDate));
   if (endDate) conditions.push(lte(runs.startedAt, endDate));
@@ -1585,7 +1585,7 @@ export async function listGlobalRuns(
 }
 
 export async function listScheduleRuns(
-  scope: AppScope,
+  scope: SpaceScope,
   scheduleId: string,
   options: { limit?: number; offset?: number; actor?: Actor | null } = {},
 ) {
@@ -1593,7 +1593,7 @@ export async function listScheduleRuns(
   return listRunsWithFilter(
     scopedWhere(runs, {
       orgId: scope.orgId,
-      applicationId: scope.applicationId,
+      spaceId: scope.spaceId,
       extra: [eq(runs.scheduleId, scheduleId)],
     })!,
     limit,
@@ -1602,11 +1602,11 @@ export async function listScheduleRuns(
   );
 }
 
-export async function getRunFull(scope: AppScope, id: string, actor: Actor | null = null) {
+export async function getRunFull(scope: SpaceScope, id: string, actor: Actor | null = null) {
   const conditions = [
     eq(runs.id, id),
     eq(runs.orgId, scope.orgId),
-    eq(runs.applicationId, scope.applicationId),
+    eq(runs.spaceId, scope.spaceId),
   ];
 
   // `packages.draftManifest` + `draftContent` (the agent's full prompt) are
@@ -1636,7 +1636,7 @@ export async function getRunFull(scope: AppScope, id: string, actor: Actor | nul
   let inlinePrompt: string | null = null;
   if (isInline && row.run.packageId) {
     // Same reachability as the LEFT JOIN this replaces (the run is already
-    // org+app scoped), with the tenant predicate restated on the package read
+    // org+space scoped), with the tenant predicate restated on the package read
     // itself — org-owned shadow row or system package, never another tenant's.
     const [pkg] = await db
       .select({ manifest: packages.draftManifest, content: packages.draftContent })
@@ -1671,8 +1671,8 @@ export async function getRunFull(scope: AppScope, id: string, actor: Actor | nul
  * `IN (...)` filter so the check constraint's domain stays the single
  * source of truth — no numeric severity column needed.
  *
- * Org-scoped by design — `run_logs` has no `applicationId` column, and
- * the object-args shape is the module-facing public contract. App-scoped
+ * Org-scoped by design — `run_logs` has no `spaceId` column, and
+ * the object-args shape is the module-facing public contract. Space-scoped
  * callers must verify run ownership via `getRun(scope, runId)` first.
  */
 export const RUN_LOG_LEVELS = ["debug", "info", "warn", "error"] as const;
@@ -1724,8 +1724,8 @@ export async function listRunLogs(args: {
  * A row whose `data` is null reads back as `null` and MUST NOT be turned
  * into an empty object by the caller.
  *
- * Org-scoped like {@link listRunLogs} — `run_logs` has no `applicationId`
- * column; app-scoped callers verify run ownership separately.
+ * Org-scoped like {@link listRunLogs} — `run_logs` has no `spaceId`
+ * column; space-scoped callers verify run ownership separately.
  */
 export async function readLastEmittedOutput(args: {
   runId: string;

@@ -22,7 +22,7 @@ import { computeTokenCost, type TokenPricingStatus } from "@appstrate/afps-runti
 import { type CredentialSource } from "../llm-usage-ledger.ts";
 import { recordLlmUsageReliably } from "../llm-usage-retry.ts";
 import { resolvePricingStatus } from "../pricing-provenance.ts";
-import type { AppScope } from "../../lib/scope.ts";
+import type { SpaceScope } from "../../lib/scope.ts";
 import { appendRunLog, updateRun } from "../state/runs.ts";
 import { logger } from "../../lib/logger.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -39,7 +39,7 @@ const FILE_PUBLISHED_EVENT_TYPE = "file.published";
  */
 export async function persistRunEvent(
   executor: Db,
-  scope: AppScope,
+  scope: SpaceScope,
   runId: string,
   event: RunEvent,
   opts: {
@@ -179,7 +179,7 @@ function resolveLogLevel(value: unknown): "debug" | "info" | "warn" | "error" | 
  * model advancing) — so reorder and replay are safe.
  */
 export async function writeRunnerLedgerRow(
-  scope: AppScope,
+  scope: SpaceScope,
   runId: string,
   row: {
     /** Cost as the CONTAINER computed it — see {@link resolveRunnerCost}. */

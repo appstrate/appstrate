@@ -12,7 +12,7 @@ import { useRunAgent, useCancelRun } from "../hooks/use-mutations";
 import { Spinner } from "../components/spinner";
 import { useRunRealtime, type RunMetricEvent, type RunLogEvent } from "../hooks/use-realtime";
 import { useCurrentOrgId } from "../hooks/use-org";
-import { useCurrentApplicationId } from "../hooks/use-current-application";
+import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { buildLogEntries, buildTurnRows } from "../components/log-utils";
 import { RunModal } from "../components/run-modal";
 import { PageHeader } from "../components/page-header";
@@ -63,7 +63,7 @@ export function RunDetailPage() {
   const location = useLocation();
   const stateNumber = (location.state as { runNumber?: number } | null)?.runNumber;
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   const { data: agent } = usePackageDetail("agent", isInlinePath ? undefined : packageId);
   const { data: run, isLoading, error } = useRun(runId);
   const runNumber = run?.runNumber ?? stateNumber;
@@ -95,7 +95,7 @@ export function RunDetailPage() {
     const terminal = !!status && !(ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(status);
     if (run && runId && terminal) {
       markRead.mutate({ params: { path: { runId } } });
-      void invalidateRunLogs(qc, orgId, applicationId, runId);
+      void invalidateRunLogs(qc, orgId, spaceId, runId);
     }
   }, [status, runId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -150,7 +150,7 @@ export function RunDetailPage() {
 
   // Per-run SSE for log inserts + live metric updates. Status patches
   // come from `useGlobalRunSync` (mounted in MainLayout), which writes
-  // directly into the same `["run", orgId, applicationId, runId]`
+  // directly into the same `["run", orgId, spaceId, runId]`
   // cache key. Terminal-status refetch is also already triggered
   // globally via `invalidateRunAndNotificationQueries`.
   useRunRealtime(isRunning ? runId : null, {
@@ -171,7 +171,7 @@ export function RunDetailPage() {
           ...newLog,
           data: (newLog.data ?? null) as RunLogEntry["data"],
         };
-        qc.setQueryData<RunLogEntry[]>(runKeys.logs(orgId, applicationId, runId), (prev) => {
+        qc.setQueryData<RunLogEntry[]>(runKeys.logs(orgId, spaceId, runId), (prev) => {
           if (!prev) return [entry];
           if (prev.some((l) => l.id === entry.id)) return prev;
           return [...prev, entry];
@@ -184,11 +184,11 @@ export function RunDetailPage() {
         // sink's own tag is built from — it carries no legacy spelling.
         if (entry.type === "result" && isPublishedFileLogEvent(entry.event)) {
           void qc.invalidateQueries({ queryKey: ["get", "/api/files"] });
-          void qc.invalidateQueries({ queryKey: runKeys.detail(orgId, applicationId, runId) });
+          void qc.invalidateQueries({ queryKey: runKeys.detail(orgId, spaceId, runId) });
           invalidateOrgStorage(qc);
         }
       },
-      [qc, orgId, applicationId, runId],
+      [qc, orgId, spaceId, runId],
     ),
     onMetric: useCallback(
       (metric: RunMetricEvent) => {
@@ -205,7 +205,7 @@ export function RunDetailPage() {
         // live `cost` paired with the stale (or absent) status of the
         // previous read is how a run nothing could price ends up showing a
         // confident $0.0000 for its whole duration.
-        qc.setQueryData<EnrichedRun>(runKeys.detail(orgId, applicationId, runId), (prev) => {
+        qc.setQueryData<EnrichedRun>(runKeys.detail(orgId, spaceId, runId), (prev) => {
           if (!prev) return prev;
           return {
             ...prev,
@@ -215,7 +215,7 @@ export function RunDetailPage() {
           };
         });
       },
-      [qc, orgId, applicationId, runId],
+      [qc, orgId, spaceId, runId],
     ),
   });
 

@@ -32,7 +32,7 @@ export const chatSessions = pgTable(
     // `user` rows today, but any FUTURE user-deletion feature MUST route through
     // a service that first enumerates this user's session files into the
     // storage-deletion outbox (`storage_deletion_jobs`) — same contract as
-    // application / end-user deletion (see applications.ts / end-users.ts).
+    // space / end-user deletion (see spaces.ts / end-users.ts).
     // A raw `DELETE FROM "user"` would cascade the files with no outbox
     // job and orphan their S3 objects forever.
     userId: text("user_id")

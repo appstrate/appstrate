@@ -108,7 +108,7 @@ async function seedRunWithSink(
     id: runId,
     packageId,
     orgId: ctx.orgId,
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     status: "running",
     runOrigin: "platform",
     sinkSecretEncrypted: encrypt(RUN_SECRET),

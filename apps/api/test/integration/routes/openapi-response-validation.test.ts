@@ -15,7 +15,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedEndUser, seedApiKey, seedAgent } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import { buildOpenApiSpec } from "../../../src/openapi/index.ts";
 import { createOpenApiValidator } from "../../helpers/openapi-validator.ts";
 
@@ -61,7 +61,7 @@ describe("OpenAPI response validation", () => {
     });
   });
 
-  // ── Agents list (auth + app-scoped) ────────────────────────
+  // ── Agents list (auth + space-scoped) ────────────────────────
 
   describe("GET /api/agents -> 200 (empty list)", () => {
     it("response body conforms to OpenAPI schema", async () => {
@@ -117,14 +117,14 @@ describe("OpenAPI response validation", () => {
     });
   });
 
-  // ── Applications list (auth + org-scoped) ──────────────────
+  // ── Spaces list (auth + org-scoped) ──────────────────
 
-  describe("GET /api/applications -> 200", () => {
+  describe("GET /api/spaces -> 200", () => {
     it("response body conforms to OpenAPI schema", async () => {
-      const schema = getResponseSchema("/api/applications", "GET", "200");
+      const schema = getResponseSchema("/api/spaces", "GET", "200");
       expect(schema).not.toBeNull();
 
-      const res = await app.request("/api/applications", {
+      const res = await app.request("/api/spaces", {
         headers: authHeaders(ctx),
       });
       expect(res.status).toBe(200);
@@ -133,10 +133,10 @@ describe("OpenAPI response validation", () => {
       const result = validateResponse(body, schema);
 
       if (!result.valid) {
-        console.error("GET /api/applications validation errors:", result.errors);
+        console.error("GET /api/spaces validation errors:", result.errors);
       }
       if (result.extraFields.length > 0) {
-        console.warn("GET /api/applications extra fields not in spec:", result.extraFields);
+        console.warn("GET /api/spaces extra fields not in spec:", result.extraFields);
       }
 
       expect(result.valid).toBe(true);
@@ -148,24 +148,24 @@ describe("OpenAPI response validation", () => {
     });
   });
 
-  // ── Installed packages list (auth + app-scoped) ────────────
+  // ── Installed packages list (auth + space-scoped) ────────────
   // Regression guard: this envelope goes through `listResponse()`, which always
   // emits `hasMore`. The spec previously omitted it (the same drift fixed for
-  // GET /api/applications), so `extraFields` would flag the undocumented field.
+  // GET /api/spaces), so `extraFields` would flag the undocumented field.
 
-  describe("GET /api/applications/{applicationId}/packages -> 200", () => {
+  describe("GET /api/spaces/{spaceId}/packages -> 200", () => {
     it("response body conforms to OpenAPI schema (incl. hasMore envelope field)", async () => {
       const pkg = await seedAgent({
         id: "@openapi-test/installed-agent",
         orgId: ctx.orgId,
         createdBy: ctx.user.id,
       });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, pkg.id);
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, pkg.id);
 
-      const schema = getResponseSchema("/api/applications/{applicationId}/packages", "GET", "200");
+      const schema = getResponseSchema("/api/spaces/{spaceId}/packages", "GET", "200");
       expect(schema).not.toBeNull();
 
-      const res = await app.request(`/api/applications/${ctx.defaultAppId}/packages`, {
+      const res = await app.request(`/api/spaces/${ctx.defaultSpaceId}/packages`, {
         headers: authHeaders(ctx),
       });
       expect(res.status).toBe(200);
@@ -187,7 +187,7 @@ describe("OpenAPI response validation", () => {
     });
   });
 
-  // ── Agent detail (auth + app-scoped) ───────────────────────
+  // ── Agent detail (auth + space-scoped) ───────────────────────
   // Detail endpoints carry richer projections than the list envelopes — cover
   // one here so the AgentDetail schema is exercised against a real response,
   // including the AFPS dependency groups (skills / mcp_servers / integrations).
@@ -209,7 +209,7 @@ describe("OpenAPI response validation", () => {
           },
         },
       });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, pkg.id);
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, pkg.id);
 
       const schema = getResponseSchema("/api/packages/agents/{scope}/{name}", "GET", "200");
       expect(schema).not.toBeNull();
@@ -238,25 +238,25 @@ describe("OpenAPI response validation", () => {
       ]);
     });
 
-    it("each application item conforms to ApplicationObject schema", async () => {
-      const appSchema = dereference((openApiSpec as any).components.schemas.ApplicationObject);
-      expect(appSchema).toBeDefined();
+    it("each space item conforms to SpaceObject schema", async () => {
+      const spaceSchema = dereference((openApiSpec as any).components.schemas.SpaceObject);
+      expect(spaceSchema).toBeDefined();
 
-      const res = await app.request("/api/applications", {
+      const res = await app.request("/api/spaces", {
         headers: authHeaders(ctx),
       });
       const body = (await res.json()) as any;
 
-      // At least the default app from createTestContext
+      // At least the default space from createTestContext
       expect(body.data.length).toBeGreaterThanOrEqual(1);
 
       for (const item of body.data) {
-        const result = validateResponse(item, appSchema);
+        const result = validateResponse(item, spaceSchema);
         if (!result.valid) {
-          console.error(`ApplicationObject validation errors for ${item.id}:`, result.errors);
+          console.error(`SpaceObject validation errors for ${item.id}:`, result.errors);
         }
         if (result.extraFields.length > 0) {
-          console.warn(`ApplicationObject extra fields for ${item.id}:`, result.extraFields);
+          console.warn(`SpaceObject extra fields for ${item.id}:`, result.extraFields);
         }
         expect(result.valid).toBe(true);
         expect(result.extraFields).toEqual([]);
@@ -264,7 +264,7 @@ describe("OpenAPI response validation", () => {
     });
   });
 
-  // ── Organizations list (auth, no org/app header needed) ────
+  // ── Organizations list (auth, no org/space header needed) ────
 
   describe("GET /api/orgs -> 200", () => {
     it("response body conforms to OpenAPI schema", async () => {
@@ -316,7 +316,7 @@ describe("OpenAPI response validation", () => {
     });
   });
 
-  // ── Profile (auth, no org/app header needed) ───────────────
+  // ── Profile (auth, no org/space header needed) ───────────────
 
   describe("GET /api/profile -> 200", () => {
     it("response body conforms to OpenAPI schema", async () => {
@@ -344,7 +344,7 @@ describe("OpenAPI response validation", () => {
     });
   });
 
-  // ── Notifications unread count (auth + app-scoped) ─────────
+  // ── Notifications unread count (auth + space-scoped) ─────────
 
   describe("GET /api/notifications/unread-count -> 200", () => {
     it("response body conforms to OpenAPI schema", async () => {
@@ -376,7 +376,7 @@ describe("OpenAPI response validation", () => {
     });
   });
 
-  // ── Notifications unread counts by agent (auth + app-scoped) ─
+  // ── Notifications unread counts by agent (auth + space-scoped) ─
 
   describe("GET /api/notifications/unread-counts-by-agent -> 200", () => {
     it("response body conforms to OpenAPI schema", async () => {
@@ -410,7 +410,7 @@ describe("OpenAPI response validation", () => {
     });
   });
 
-  // ── End-users CRUD (auth + app-scoped) ─────────────────────
+  // ── End-users CRUD (auth + space-scoped) ─────────────────────
 
   describe("POST /api/end-users -> 201", () => {
     it("response body conforms to OpenAPI schema", async () => {
@@ -449,7 +449,7 @@ describe("OpenAPI response validation", () => {
       expect(schema).not.toBeNull();
 
       // Seed an end-user so the list is non-empty
-      await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+      await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
 
       const res = await app.request("/api/end-users", {
         headers: authHeaders(ctx),
@@ -479,7 +479,7 @@ describe("OpenAPI response validation", () => {
       const schema = getResponseSchema("/api/end-users/{id}", "GET", "200");
       expect(schema).not.toBeNull();
 
-      const eu = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+      const eu = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
 
       const res = await app.request(`/api/end-users/${eu.id}`, {
         headers: authHeaders(ctx),
@@ -502,14 +502,14 @@ describe("OpenAPI response validation", () => {
     });
   });
 
-  // ── Schedules list (auth + app-scoped) ─────────────────────
+  // ── Schedules list (auth + space-scoped) ─────────────────────
 
   describe("PATCH /api/end-users/{id} -> 200", () => {
     it("response body conforms to OpenAPI schema", async () => {
       const schema = getResponseSchema("/api/end-users/{id}", "PATCH", "200");
       expect(schema).not.toBeNull();
 
-      const eu = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+      const eu = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
 
       const res = await app.request(`/api/end-users/${eu.id}`, {
         method: "PATCH",
@@ -535,7 +535,7 @@ describe("OpenAPI response validation", () => {
 
   describe("DELETE /api/end-users/{id} -> 204", () => {
     it("returns an empty body as specified", async () => {
-      const eu = await seedEndUser({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+      const eu = await seedEndUser({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
 
       const res = await app.request(`/api/end-users/${eu.id}`, {
         method: "DELETE",
@@ -631,7 +631,7 @@ describe("OpenAPI response validation", () => {
     });
   });
 
-  // ── API Keys (auth + app-scoped) ───────────────────────────
+  // ── API Keys (auth + space-scoped) ───────────────────────────
 
   describe("GET /api/api-keys -> 200", () => {
     it("response body conforms to OpenAPI schema", async () => {
@@ -639,7 +639,7 @@ describe("OpenAPI response validation", () => {
       expect(schema).not.toBeNull();
 
       // Seed an API key so the list is non-empty
-      await seedApiKey({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+      await seedApiKey({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
 
       const res = await app.request("/api/api-keys", {
         headers: authHeaders(ctx),

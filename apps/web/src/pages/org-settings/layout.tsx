@@ -15,20 +15,20 @@ import {
   Users,
 } from "lucide-react";
 import { SettingsLayout, type SettingsSection } from "../../components/settings-layout";
-import { AppSettingsSwitcher } from "../../components/app-settings-switcher";
+import { SpaceSettingsSwitcher } from "../../components/space-settings-switcher";
 import type { BreadcrumbEntry } from "../../components/page-header";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useAppConfig } from "../../hooks/use-app-config";
-import { useCurrentApplicationId } from "../../hooks/use-current-application";
-import { useApplication } from "../../hooks/use-applications";
+import { useCurrentSpaceId } from "../../hooks/use-current-space";
+import { useSpace } from "../../hooks/use-spaces";
 import { useOrgSettings } from "../../hooks/use-org-settings";
 
 export function OrgSettingsLayout() {
   const { t } = useTranslation(["settings", "common"]);
   const { isAdmin } = usePermissions();
   const { features } = useAppConfig();
-  const applicationId = useCurrentApplicationId();
-  const { data: application } = useApplication(applicationId ?? "");
+  const spaceId = useCurrentSpaceId();
+  const { data: space } = useSpace(spaceId ?? "");
   const location = useLocation();
 
   const oidcEnabled = !!features.oidc;
@@ -46,9 +46,9 @@ export function OrgSettingsLayout() {
           label: t("orgSettings.tabMembers", { count: 0 }),
         },
         {
-          to: "/org-settings/applications",
+          to: "/org-settings/spaces",
           icon: LayoutGrid,
-          label: t("applications.pageTitle"),
+          label: t("spaces.pageTitle"),
         },
         {
           to: "/org-settings/models",
@@ -85,31 +85,31 @@ export function OrgSettingsLayout() {
         },
       ],
     },
-    ...(isAdmin && application
+    ...(isAdmin && space
       ? [
           {
-            label: t("orgSettings.sectionApplication"),
+            label: t("orgSettings.sectionSpace"),
             items: [
               {
-                to: "/org-settings/app/general",
+                to: "/org-settings/space/general",
                 icon: Settings,
-                label: t("appSettings.tabGeneral"),
+                label: t("spaceSettings.tabGeneral"),
               },
               {
-                to: "/org-settings/app/api-keys",
+                to: "/org-settings/space/api-keys",
                 icon: KeyRound,
                 label: t("orgSettings.tabApiKeys"),
               },
               {
-                to: "/org-settings/app/auth",
+                to: "/org-settings/space/auth",
                 icon: Shield,
-                label: t("appSettings.tabAuth"),
+                label: t("spaceSettings.tabAuth"),
                 show: oidcEnabled,
               },
               {
-                to: "/org-settings/app/oauth",
+                to: "/org-settings/space/oauth",
                 icon: KeyRound,
-                label: t("appSettings.tabOauth"),
+                label: t("spaceSettings.tabOauth"),
                 show: oidcEnabled,
               },
             ],
@@ -122,12 +122,12 @@ export function OrgSettingsLayout() {
   const activeItem =
     allItems.find((i) => location.pathname === i.to) ??
     allItems.find((i) => location.pathname.startsWith(i.to + "/"));
-  const isAppRoute = location.pathname.startsWith("/org-settings/app/");
+  const isSpaceRoute = location.pathname.startsWith("/org-settings/space/");
 
   const breadcrumbs: BreadcrumbEntry[] = [
     { label: t("nav.orgSection", { ns: "common" }), href: "/" },
     { label: t("orgSettings.pageTitle"), href: "/org-settings" },
-    ...(isAppRoute ? [{ label: application?.name ?? "", node: <AppSettingsSwitcher /> }] : []),
+    ...(isSpaceRoute ? [{ label: space?.name ?? "", node: <SpaceSettingsSwitcher /> }] : []),
     ...(activeItem ? [{ label: activeItem.label }] : []),
   ];
 

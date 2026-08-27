@@ -31,7 +31,7 @@ import { loadTokens } from "../src/lib/keyring.ts";
 import { readConfig } from "../src/lib/config.ts";
 import { loginCommand } from "../src/commands/login.ts";
 import type { Org } from "../src/lib/orgs.ts";
-import type { Application } from "../src/lib/applications.ts";
+import type { Space } from "../src/lib/spaces.ts";
 import {
   installFakeKeyring,
   useTempConfigHome,
@@ -64,13 +64,13 @@ interface ResponderMap {
   cliToken?: () => Response;
   listOrgs?: () => Response;
   createOrg?: (body: unknown) => Response;
-  listApplications?: () => Response;
-  createApplication?: (body: unknown) => Response;
+  listSpaces?: () => Response;
+  createSpace?: (body: unknown) => Response;
 }
 
-function appRow(overrides: Partial<Application> = {}): Application {
+function spaceRow(overrides: Partial<Space> = {}): Space {
   return {
-    id: "app_default",
+    id: "spc_default",
     orgId: "org_created",
     name: "Default",
     isDefault: true,
@@ -121,18 +121,18 @@ function installDefaultResponders(overrides: ResponderMap = {}): void {
         }),
         { status: 201, headers: { "Content-Type": "application/json" } },
       ),
-    // By default, the app cascade sees a single default app — mirrors
+    // By default, the space cascade sees a single default space — mirrors
     // the real server behavior where `POST /api/orgs` provisions one.
     // NOTE: the cascade only runs when an org is pinned. Test suites that
     // need the cascade to fire must either override `listOrgs` to return
     // a non-empty list, or pass `--create-org <name>`.
-    listApplications: () =>
-      new Response(JSON.stringify({ object: "list", data: [appRow()] }), {
+    listSpaces: () =>
+      new Response(JSON.stringify({ object: "list", data: [spaceRow()] }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       }),
-    createApplication: () =>
-      new Response(JSON.stringify(appRow({ id: "app_forced", name: "Forced" })), {
+    createSpace: () =>
+      new Response(JSON.stringify(spaceRow({ id: "spc_forced", name: "Forced" })), {
         status: 201,
         headers: { "Content-Type": "application/json" },
       }),
@@ -151,11 +151,11 @@ function installDefaultResponders(overrides: ResponderMap = {}): void {
       return resolved.createOrg(parsed);
     }
     if (url.endsWith("/api/orgs")) return resolved.listOrgs();
-    if (url.endsWith("/api/applications") && method === "POST") {
+    if (url.endsWith("/api/spaces") && method === "POST") {
       const parsed = body ? JSON.parse(body) : {};
-      return resolved.createApplication(parsed);
+      return resolved.createSpace(parsed);
     }
-    if (url.endsWith("/api/applications")) return resolved.listApplications();
+    if (url.endsWith("/api/spaces")) return resolved.listSpaces();
     return new Response("not mocked: " + url, { status: 501 });
   };
   globalThis.fetch = stub as unknown as typeof fetch;
@@ -178,9 +178,9 @@ async function readPinnedOrgId(profile = "default"): Promise<string | undefined>
   return cfg.profiles[profile]?.orgId;
 }
 
-async function readPinnedAppId(profile = "default"): Promise<string | undefined> {
+async function readPinnedSpaceId(profile = "default"): Promise<string | undefined> {
   const cfg = await readConfig();
-  return cfg.profiles[profile]?.applicationId;
+  return cfg.profiles[profile]?.spaceId;
 }
 
 describe("login org-pin branch", () => {
@@ -592,14 +592,14 @@ describe("login org-pin branch", () => {
   });
 });
 
-// ─── App cascade (issue #217) ─────────────────────────────────────────
+// ─── Space cascade (issue #217) ───────────────────────────────────────
 //
 // Every org-pin outcome that leaves an `orgId` on the profile triggers
-// a second fetch to `/api/applications` and re-pins the default app.
+// a second fetch to `/api/spaces` and re-pins the default space.
 // The coverage below pairs with `login org-pin branch` above — it
-// asserts the SAME flows, plus the app-specific escapes.
+// asserts the SAME flows, plus the space-specific escapes.
 
-describe("login app-pin cascade", () => {
+describe("login space-pin cascade", () => {
   // Shared: `listOrgs` returning exactly one org so the cascade has an
   // `orgId` to work with. Every test in this block inherits it unless it
   // overrides explicitly.
@@ -613,15 +613,15 @@ describe("login app-pin cascade", () => {
       { status: 200, headers: { "Content-Type": "application/json" } },
     );
 
-  it("auto-pins the default application after org pin (one app)", async () => {
+  it("auto-pins the default space after org pin (one space)", async () => {
     const { io, stdout } = createMemoryIO();
     installDefaultResponders({
       listOrgs: oneOrg,
-      listApplications: () =>
+      listSpaces: () =>
         new Response(
           JSON.stringify({
             object: "list",
-            data: [appRow({ id: "app_only", name: "Only", isDefault: true })],
+            data: [spaceRow({ id: "spc_only", name: "Only", isDefault: true })],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
@@ -635,23 +635,23 @@ describe("login app-pin cascade", () => {
       io,
     );
 
-    expect(await readPinnedAppId()).toBe("app_only");
+    expect(await readPinnedSpaceId()).toBe("spc_only");
     const out = stdout();
-    expect(out).toContain('/ app "Only"');
-    expect(out).toContain("app_only");
+    expect(out).toContain('/ space "Only"');
+    expect(out).toContain("spc_only");
   });
 
-  it("pins the isDefault app when ≥2 applications exist", async () => {
+  it("pins the isDefault space when ≥2 spaces exist", async () => {
     const { io } = createMemoryIO();
     installDefaultResponders({
       listOrgs: oneOrg,
-      listApplications: () =>
+      listSpaces: () =>
         new Response(
           JSON.stringify({
             object: "list",
             data: [
-              appRow({ id: "app_staging", name: "Staging", isDefault: false }),
-              appRow({ id: "app_default", name: "Default", isDefault: true }),
+              spaceRow({ id: "spc_staging", name: "Staging", isDefault: false }),
+              spaceRow({ id: "spc_default", name: "Default", isDefault: true }),
             ],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
@@ -660,20 +660,20 @@ describe("login app-pin cascade", () => {
 
     await loginCommand({ profile: "default", instance: "https://app.example.com" }, io);
 
-    expect(await readPinnedAppId()).toBe("app_default");
+    expect(await readPinnedSpaceId()).toBe("spc_default");
   });
 
-  it("warns on stderr and leaves applicationId unset when ≥2 apps but no default", async () => {
+  it("warns on stderr and leaves spaceId unset when ≥2 spaces but no default", async () => {
     const { io, stdout, stderr } = createMemoryIO();
     installDefaultResponders({
       listOrgs: oneOrg,
-      listApplications: () =>
+      listSpaces: () =>
         new Response(
           JSON.stringify({
             object: "list",
             data: [
-              appRow({ id: "app_a", name: "A", isDefault: false }),
-              appRow({ id: "app_b", name: "B", isDefault: false }),
+              spaceRow({ id: "spc_a", name: "A", isDefault: false }),
+              spaceRow({ id: "spc_b", name: "B", isDefault: false }),
             ],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
@@ -682,12 +682,12 @@ describe("login app-pin cascade", () => {
 
     await loginCommand({ profile: "default", instance: "https://app.example.com" }, io);
 
-    expect(await readPinnedAppId()).toBeUndefined();
+    expect(await readPinnedSpaceId()).toBeUndefined();
     expect(stderr()).toContain("none marked default");
-    expect(stdout()).toContain("No app pinned");
+    expect(stdout()).toContain("No space pinned");
   });
 
-  it("warns on stderr when the org has zero applications", async () => {
+  it("warns on stderr when the org has zero spaces", async () => {
     const { io, stderr } = createMemoryIO();
     installDefaultResponders({
       listOrgs: () =>
@@ -699,7 +699,7 @@ describe("login app-pin cascade", () => {
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
-      listApplications: () =>
+      listSpaces: () =>
         new Response(JSON.stringify({ object: "list", data: [] }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
@@ -708,11 +708,11 @@ describe("login app-pin cascade", () => {
 
     await loginCommand({ profile: "default", instance: "https://app.example.com" }, io);
 
-    expect(await readPinnedAppId()).toBeUndefined();
-    expect(stderr()).toContain("No applications found");
+    expect(await readPinnedSpaceId()).toBeUndefined();
+    expect(stderr()).toContain("No spaces found");
   });
 
-  it("honors --app <id> for non-interactive pinning", async () => {
+  it("honors --space <id> for non-interactive pinning", async () => {
     const { io } = createMemoryIO();
     installDefaultResponders({
       listOrgs: () =>
@@ -724,13 +724,13 @@ describe("login app-pin cascade", () => {
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
-      listApplications: () =>
+      listSpaces: () =>
         new Response(
           JSON.stringify({
             object: "list",
             data: [
-              appRow({ id: "app_1", name: "One", isDefault: true }),
-              appRow({ id: "app_2", name: "Two", isDefault: false }),
+              spaceRow({ id: "spc_1", name: "One", isDefault: true }),
+              spaceRow({ id: "spc_2", name: "Two", isDefault: false }),
             ],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
@@ -741,15 +741,15 @@ describe("login app-pin cascade", () => {
       {
         profile: "default",
         instance: "https://app.example.com",
-        app: "app_2",
+        space: "spc_2",
       },
       io,
     );
 
-    expect(await readPinnedAppId()).toBe("app_2");
+    expect(await readPinnedSpaceId()).toBe("spc_2");
   });
 
-  it("exits with an actionable error when --app <id> does not match", async () => {
+  it("exits with an actionable error when --space <id> does not match", async () => {
     const { io } = createMemoryIO();
     installDefaultResponders({
       listOrgs: () =>
@@ -761,11 +761,11 @@ describe("login app-pin cascade", () => {
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
-      listApplications: () =>
+      listSpaces: () =>
         new Response(
           JSON.stringify({
             object: "list",
-            data: [appRow({ id: "app_1", isDefault: true })],
+            data: [spaceRow({ id: "spc_1", isDefault: true })],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
@@ -776,14 +776,14 @@ describe("login app-pin cascade", () => {
         {
           profile: "default",
           instance: "https://app.example.com",
-          app: "app_does_not_exist",
+          space: "spc_does_not_exist",
         },
         io,
       ),
     ).rejects.toBeInstanceOf(ExitError);
   });
 
-  it("honors --create-app <name> and skips the list fetch", async () => {
+  it("honors --create-space <name> and skips the list fetch", async () => {
     const { io } = createMemoryIO();
     let createBody: unknown;
     let listCalled = false;
@@ -797,14 +797,14 @@ describe("login app-pin cascade", () => {
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
-      listApplications: () => {
+      listSpaces: () => {
         listCalled = true;
         return new Response(JSON.stringify({ object: "list", data: [] }), { status: 200 });
       },
-      createApplication: (body) => {
+      createSpace: (body) => {
         createBody = body;
         return new Response(
-          JSON.stringify(appRow({ id: "app_forced", name: "Forced", isDefault: false })),
+          JSON.stringify(spaceRow({ id: "spc_forced", name: "Forced", isDefault: false })),
           { status: 201, headers: { "Content-Type": "application/json" } },
         );
       },
@@ -814,22 +814,22 @@ describe("login app-pin cascade", () => {
       {
         profile: "default",
         instance: "https://app.example.com",
-        createApp: "Forced",
+        createSpace: "Forced",
       },
       io,
     );
 
     expect(listCalled).toBe(false);
     expect(createBody).toEqual({ name: "Forced" });
-    expect(await readPinnedAppId()).toBe("app_forced");
+    expect(await readPinnedSpaceId()).toBe("spc_forced");
   });
 
-  it("with --no-app skips the app cascade entirely (no fetch, no hint)", async () => {
+  it("with --no-space skips the space cascade entirely (no fetch, no hint)", async () => {
     const { io, stdout } = createMemoryIO();
-    let appsCalled = false;
+    let spacesCalled = false;
     installDefaultResponders({
-      listApplications: () => {
-        appsCalled = true;
+      listSpaces: () => {
+        spacesCalled = true;
         return new Response(JSON.stringify({ object: "list", data: [] }), { status: 200 });
       },
     });
@@ -838,23 +838,23 @@ describe("login app-pin cascade", () => {
       {
         profile: "default",
         instance: "https://app.example.com",
-        noApp: true,
+        noSpace: true,
       },
       io,
     );
 
-    expect(appsCalled).toBe(false);
-    expect(await readPinnedAppId()).toBeUndefined();
-    // No "No app pinned" hint when the user opted out.
-    expect(stdout()).not.toContain("No app pinned");
+    expect(spacesCalled).toBe(false);
+    expect(await readPinnedSpaceId()).toBeUndefined();
+    // No "No space pinned" hint when the user opted out.
+    expect(stdout()).not.toContain("No space pinned");
   });
 
-  it("skips the app cascade when no org was pinned (no X-Org-Id to fetch with)", async () => {
+  it("skips the space cascade when no org was pinned (no X-Org-Id to fetch with)", async () => {
     const { io, stdout } = createMemoryIO();
-    let appsCalled = false;
+    let spacesCalled = false;
     installDefaultResponders({
-      listApplications: () => {
-        appsCalled = true;
+      listSpaces: () => {
+        spacesCalled = true;
         return new Response(JSON.stringify({ object: "list", data: [] }), { status: 200 });
       },
     });
@@ -868,14 +868,14 @@ describe("login app-pin cascade", () => {
       io,
     );
 
-    expect(appsCalled).toBe(false);
-    expect(await readPinnedAppId()).toBeUndefined();
-    // The "No org pinned" hint fires; the app hint does not (skipped upstream).
+    expect(spacesCalled).toBe(false);
+    expect(await readPinnedSpaceId()).toBeUndefined();
+    // The "No org pinned" hint fires; the space hint does not (skipped upstream).
     expect(stdout()).toContain("No org pinned");
-    expect(stdout()).not.toContain("No app pinned");
+    expect(stdout()).not.toContain("No space pinned");
   });
 
-  it("tolerates a failing /api/applications call — login succeeds org-pinned but app-unpinned", async () => {
+  it("tolerates a failing /api/spaces call — login succeeds org-pinned but space-unpinned", async () => {
     const { io, stderr } = createMemoryIO();
     installDefaultResponders({
       listOrgs: () =>
@@ -887,7 +887,7 @@ describe("login app-pin cascade", () => {
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
-      listApplications: () => new Response("boom", { status: 500 }),
+      listSpaces: () => new Response("boom", { status: 500 }),
     });
 
     await loginCommand(
@@ -899,13 +899,13 @@ describe("login app-pin cascade", () => {
     );
 
     expect(await readPinnedOrgId()).toBe("org_1");
-    expect(await readPinnedAppId()).toBeUndefined();
-    expect(stderr()).toContain("Failed to list applications");
+    expect(await readPinnedSpaceId()).toBeUndefined();
+    expect(stderr()).toContain("Failed to list spaces");
   });
 
-  it("preserves a prior applicationId across same-user re-login when /api/applications flakes", async () => {
+  it("preserves a prior spaceId across same-user re-login when /api/spaces flakes", async () => {
     const { io } = createMemoryIO();
-    // First login — default-path cascade pins app_default via the
+    // First login — default-path cascade pins spc_default via the
     // shared responder defaults.
     installDefaultResponders({
       listOrgs: () =>
@@ -917,19 +917,19 @@ describe("login app-pin cascade", () => {
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
-      listApplications: () =>
+      listSpaces: () =>
         new Response(
           JSON.stringify({
             object: "list",
-            data: [appRow({ id: "app_pinned", name: "Pinned", isDefault: true })],
+            data: [spaceRow({ id: "spc_pinned", name: "Pinned", isDefault: true })],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
     });
     await loginCommand({ profile: "default", instance: "https://app.example.com" }, io);
-    expect(await readPinnedAppId()).toBe("app_pinned");
+    expect(await readPinnedSpaceId()).toBe("spc_pinned");
 
-    // Second login — app fetch flakes. Without preservation we'd drop
+    // Second login — space fetch flakes. Without preservation we'd drop
     // the pin silently.
     installDefaultResponders({
       listOrgs: () =>
@@ -941,14 +941,14 @@ describe("login app-pin cascade", () => {
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
-      listApplications: () => new Response("boom", { status: 500 }),
+      listSpaces: () => new Response("boom", { status: 500 }),
     });
     await loginCommand({ profile: "default", instance: "https://app.example.com" }, io);
 
-    expect(await readPinnedAppId()).toBe("app_pinned");
+    expect(await readPinnedSpaceId()).toBe("spc_pinned");
   });
 
-  it("does NOT preserve applicationId when re-logging-in as a different user", async () => {
+  it("does NOT preserve spaceId when re-logging-in as a different user", async () => {
     const { io } = createMemoryIO();
     // First login — user A pins.
     installDefaultResponders({
@@ -961,17 +961,17 @@ describe("login app-pin cascade", () => {
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
-      listApplications: () =>
+      listSpaces: () =>
         new Response(
           JSON.stringify({
             object: "list",
-            data: [appRow({ id: "app_A", isDefault: true })],
+            data: [spaceRow({ id: "spc_A", isDefault: true })],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
     });
     await loginCommand({ profile: "default", instance: "https://app.example.com" }, io);
-    expect(await readPinnedAppId()).toBe("app_A");
+    expect(await readPinnedSpaceId()).toBe("spc_A");
 
     // Second login — different user, network flakes. Preservation must not kick in.
     installDefaultResponders({
@@ -988,10 +988,10 @@ describe("login app-pin cascade", () => {
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
       listOrgs: () => new Response("boom", { status: 500 }),
-      listApplications: () => new Response("boom", { status: 500 }),
+      listSpaces: () => new Response("boom", { status: 500 }),
     });
     await loginCommand({ profile: "default", instance: "https://app.example.com" }, io);
 
-    expect(await readPinnedAppId()).toBeUndefined();
+    expect(await readPinnedSpaceId()).toBeUndefined();
   });
 });

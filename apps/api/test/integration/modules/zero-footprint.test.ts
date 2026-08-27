@@ -9,7 +9,7 @@
  * empty module list to prove that:
  *
  *   1. Module routes return 404 (not mounted)
- *   2. Module app-scoped prefixes don't trigger requireAppContext
+ *   2. Module space-scoped prefixes don't trigger requireSpaceContext
  *   3. OpenAPI spec has no module paths / components / tags
  *   4. The default buildAppConfig() has no module feature flags set
  *

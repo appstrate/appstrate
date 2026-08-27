@@ -63,7 +63,7 @@ async function seedAll(ctx: TestContext, opts: SeedOpts, credBag: Record<string,
       tools_policy: { call: {} },
     }),
   });
-  await seedInstalledPackage(ctx.defaultAppId, INTEG);
+  await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
   const serverManifest = mcpServerManifest({
     name: SERVER,
     version: "0.1.0",
@@ -83,7 +83,7 @@ async function seedAll(ctx: TestContext, opts: SeedOpts, credBag: Record<string,
     integrationId: INTEG,
     authKey: "primary",
     accountId: "default",
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     endUserId: null,
     credentialsEncrypted: encryptCredentialEnvelope({ outputs: credBag }),
@@ -130,7 +130,7 @@ describe("resolveIntegrationSpawns — delivery.env.user_config_key (CC-4)", () 
 
     const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
     });
@@ -157,7 +157,7 @@ describe("resolveIntegrationSpawns — delivery.env.user_config_key (CC-4)", () 
 
     const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
     });
@@ -182,7 +182,7 @@ describe("resolveIntegrationSpawns — delivery.env.user_config_key (CC-4)", () 
 
     const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
     });
@@ -206,7 +206,7 @@ describe("resolveIntegrationSpawns — delivery.env.user_config_key (CC-4)", () 
 
     const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
     });
@@ -231,7 +231,7 @@ describe("resolveIntegrationSpawns — delivery.env.user_config_key (CC-4)", () 
 
     const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
     });

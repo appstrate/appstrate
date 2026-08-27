@@ -5,9 +5,9 @@
  *
  * File: `$XDG_CONFIG_HOME/appstrate/config.toml` (or `~/.config/appstrate/`
  * when `XDG_CONFIG_HOME` is unset). One `[profile.<name>]` section per
- * profile holds the non-secret state (`instance`, `user_id`, `email`,
- * `org_id`). Access tokens live in the OS keyring, not here — see
- * `./keyring.ts`.
+ * profile holds the non-secret state, keyed exactly as the `Profile`
+ * fields below (`instance`, `userId`, `email`, `orgId`, `spaceId`).
+ * Access tokens live in the OS keyring, not here — see `./keyring.ts`.
  *
  * Profile resolution order (same convention as AWS / gcloud / doctl):
  *   1. `--profile <name>` CLI flag  (caller passes explicitly)
@@ -31,12 +31,29 @@ export interface Profile {
   userId: string;
   email: string;
   orgId?: string;
-  applicationId?: string;
+  spaceId?: string;
 }
 
 export interface Config {
   defaultProfile: string;
   profiles: Record<string, Profile>;
+}
+
+/**
+ * Raised by `readConfig` when a profile on disk still pins a key this CLI
+ * retired. Typed — and nothing else about it is special — so that
+ * `resolveActiveProfileOrNull` below can tell "this profile is unusable"
+ * apart from "there is no usable profile" without re-deriving the rule.
+ *
+ * Module-local on purpose. Those two functions are the whole surface; an
+ * exported class would invite a second `catch (e) { if (e instanceof …) }`
+ * elsewhere, which is exactly the parallel mechanism this shape avoids.
+ */
+class RetiredProfileKeyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RetiredProfileKeyError";
+  }
 }
 
 /** Fresh empty config. Always return a NEW object here — callers mutate
@@ -105,12 +122,43 @@ export async function readConfig(): Promise<Config> {
     ) {
       continue;
     }
+    // Retired-name refusal (`docs/NO_TRANSITIONAL_CODE.md` §1) — NOT a
+    // compatibility shim and NOT an alias: `applicationId` was renamed to
+    // `spaceId`, and this parse is an allow-list that drops unknown keys, so
+    // staying silent would let the next `writeConfig` erase the user's pin
+    // from disk with no warning. The retired key is read only to raise this
+    // error; its value never reaches any behaviour.
+    //
+    // This sits in `readConfig` because every command path goes through it,
+    // and it is the ONLY place the refusal is expressed. Commands that
+    // tolerate a missing profile must not swallow it: they call
+    // `resolveActiveProfileOrNull`, which re-throws `RetiredProfileKeyError`
+    // and returns `null` for everything else. That is why the fix this error
+    // names starts with a file edit — while the retired key is on disk, no
+    // command can run, `appstrate space switch` and `appstrate run` included.
+    // Deleting the line is the whole repair, not a workaround: the stored
+    // value is an `app_…` id, and spaces are `spc_…`, so it could not have
+    // been carried over even if this were a rename.
+    //
+    // EXPIRES 2027-03-01 — delete this check (and `RetiredProfileKeyError`,
+    // `resolveActiveProfileOrNull`'s re-throw and their tests) on or after
+    // that date, unconditionally. A date, not "once no profile still carries
+    // the key": nobody can observe what is on users' disks, so that condition
+    // never comes true and the check would live forever
+    // (`docs/NO_TRANSITIONAL_CODE.md` §1).
+    if ("applicationId" in row) {
+      throw new RetiredProfileKeyError(
+        `Profile "${name}" in ${getConfigPath()} was written by an older Appstrate CLI: ` +
+          `it pins the retired key "applicationId", replaced by "spaceId". ` +
+          `Delete that line from the file, then re-pin with: appstrate space switch`,
+      );
+    }
     profiles[name] = {
       instance: row.instance,
       userId: row.userId,
       email: row.email,
       orgId: typeof row.orgId === "string" ? row.orgId : undefined,
-      applicationId: typeof row.applicationId === "string" ? row.applicationId : undefined,
+      spaceId: typeof row.spaceId === "string" ? row.spaceId : undefined,
     };
   }
   return { defaultProfile, profiles };
@@ -147,8 +195,8 @@ export async function getProfile(name: string): Promise<Profile | null> {
 
 /**
  * Merge a partial update into an existing profile. Used by the login
- * org→app cascade and the `org switch` / `app switch` commands to rewrite
- * a single field (`orgId`, `applicationId`) without re-reading the whole profile
+ * org→space cascade and the `org switch` / `space switch` commands to rewrite
+ * a single field (`orgId`, `spaceId`) without re-reading the whole profile
  * at each call site.
  *
  * `undefined` in the patch means "clear the key" — strip it before write
@@ -184,9 +232,34 @@ export async function resolveActiveProfile(
 }
 
 /**
+ * `resolveActiveProfile` for callers that can proceed without a profile at
+ * all — `appstrate run` with an `ask_…` API key is the whole reason this
+ * exists. An unreadable or unparseable `config.toml` degrades to `null` so a
+ * corrupt file cannot block a run that never needed the file.
+ *
+ * `RetiredProfileKeyError` is deliberately NOT degraded. It is the one error
+ * here that says "the file is fine, but this CLI refuses it" — swallowing it
+ * turned a precise, fixable diagnosis into "requires a logged-in profile or
+ * an API key — run `appstrate login`", which is both wrong (the user IS
+ * logged in) and unactionable (`login` then hits the same refusal). The
+ * refusal itself still lives only in `readConfig`; this function just
+ * declines to hide it.
+ */
+export async function resolveActiveProfileOrNull(
+  explicit: string | undefined,
+): Promise<{ profileName: string; profile: Profile | undefined } | null> {
+  try {
+    return await resolveActiveProfile(explicit);
+  } catch (err) {
+    if (err instanceof RetiredProfileKeyError) throw err;
+    return null;
+  }
+}
+
+/**
  * Narrow `profile` from `Profile | undefined` to `Profile`, hard-exiting
  * with an actionable hint when the resolved profile has no config entry.
- * Used by every `appstrate org …` / `appstrate app …` subcommand —
+ * Used by every `appstrate org …` / `appstrate space …` subcommand —
  * centralized so the phrasing stays in sync across the two command
  * families.
  *

@@ -155,18 +155,18 @@ test.describe("MCP over an API key (full stack)", () => {
       jsonrpc: "2.0",
       id: 3,
       method: "tools/call",
-      params: { name: "search_operations", arguments: { query: "application", limit: 5 } },
+      params: { name: "search_operations", arguments: { query: "space", limit: 5 } },
     });
     const searchPayload = toolPayload(search.envelope);
     expect(searchPayload.isError).toBe(false);
     expect((searchPayload.data.count as number) ?? 0).toBeGreaterThan(0);
 
-    // invoke a stable, side-effect-free GET (lists the org's applications).
+    // invoke a stable, side-effect-free GET (lists the org's spaces).
     const invoke = await mcpRpc(request, url, headers, {
       jsonrpc: "2.0",
       id: 4,
       method: "tools/call",
-      params: { name: "invoke_operation", arguments: { operation_id: "listApplications" } },
+      params: { name: "invoke_operation", arguments: { operation_id: "listSpaces" } },
     });
     const payload = toolPayload(invoke.envelope);
     expect(payload.isError).toBe(false);
@@ -397,12 +397,12 @@ test.describe("MCP over a self-service OAuth client (DCR + PKCE)", () => {
       expect(init.status).toBe(200);
       expect(init.envelope.result?.serverInfo).toBeTruthy();
 
-      // ...and an invoke dispatches in-process as the user (owner → applications:read).
+      // ...and an invoke dispatches in-process as the user (owner → spaces:read).
       const invoke = await mcpRpc(anon, mcpUrl, headers, {
         jsonrpc: "2.0",
         id: 5,
         method: "tools/call",
-        params: { name: "invoke_operation", arguments: { operation_id: "listApplications" } },
+        params: { name: "invoke_operation", arguments: { operation_id: "listSpaces" } },
       });
       const payload = toolPayload(invoke.envelope);
       expect(payload.isError).toBe(false);
@@ -410,8 +410,8 @@ test.describe("MCP over a self-service OAuth client (DCR + PKCE)", () => {
 
       // Outbound confinement: the SAME token on a non-resource route is rejected.
       // The token cannot be lifted from the MCP surface to the rest of the API.
-      const lifted = await anon.get(`${BASE}/api/applications`, {
-        headers: { ...headers, "X-Application-Id": orgContext.org.defaultAppId },
+      const lifted = await anon.get(`${BASE}/api/spaces`, {
+        headers: { ...headers, "X-Space-Id": orgContext.org.defaultSpaceId },
       });
       expect(lifted.status()).toBe(401);
     } finally {
@@ -452,8 +452,8 @@ test.describe("MCP over a self-service OAuth client (DCR + PKCE)", () => {
       expect(init.envelope.result?.serverInfo).toBeTruthy();
 
       // ...and is still confined off the MCP surface.
-      const lifted = await anon.get(`${BASE}/api/applications`, {
-        headers: { ...headers, "X-Application-Id": orgContext.org.defaultAppId },
+      const lifted = await anon.get(`${BASE}/api/spaces`, {
+        headers: { ...headers, "X-Space-Id": orgContext.org.defaultSpaceId },
       });
       expect(lifted.status()).toBe(401);
     } finally {

@@ -16,7 +16,7 @@ import { sql } from "drizzle-orm";
 import { filePurposeEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { organizations } from "./organizations.ts";
-import { applications, endUsers } from "./applications.ts";
+import { spaces, endUsers } from "./spaces.ts";
 import { runs } from "./runs.ts";
 import { chatSessions } from "./chat.ts";
 
@@ -35,7 +35,7 @@ import { chatSessions } from "./chat.ts";
  *
  * Access is NEVER a per-file grant — it is inherited from the container at
  * check time (`getFileForActor`): a run-container file reuses the run's
- * read ACL (org+app scope + end-user guard); a chat-session-container file is
+ * read ACL (org+space scope + end-user guard); a chat-session-container file is
  * visible only to the session owner. `downloadable` is derived, not stored:
  * `purpose === 'agent_output' || creator === caller`.
  *
@@ -44,7 +44,7 @@ import { chatSessions } from "./chat.ts";
  * file as input (tracked via `file_links`): rather than cascade-delete
  * a file a rerun still needs, the delete service-path NULLs the container and
  * the row survives. A detached file has no container to inherit an ACL from, so
- * the precedence chain falls back to org+app scope (`agent_output` stays
+ * the precedence chain falls back to org+space scope (`agent_output` stays
  * org-visible as it was via its run; a detached `user_upload` stays
  * creator-only via `userId`). The `chk_files_single_container` CHECK allows
  * at most one container — both NULL is legal, both set is not.
@@ -62,9 +62,9 @@ export const files = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    applicationId: text("application_id")
+    spaceId: text("space_id")
       .notNull()
-      .references(() => applications.id, { onDelete: "cascade" }),
+      .references(() => spaces.id, { onDelete: "cascade" }),
     purpose: filePurposeEnum("purpose").notNull(),
     /** Run container — inherits the run's read ACL. Null for chat-only files. */
     runId: text("run_id").references(() => runs.id, { onDelete: "cascade" }),
@@ -82,7 +82,7 @@ export const files = pgTable(
     /** Creator attribution (end-user), copied from the run/caller. */
     endUserId: text("end_user_id").references(() => endUsers.id, { onDelete: "cascade" }),
     /**
-     * `files/{applicationId}/{fileId}/{safeName}` — the leading segment is the
+     * `files/{spaceId}/{fileId}/{safeName}` — the leading segment is the
      * bucket (`FILES_BUCKET`), which `parseStorageKey` splits back off at read
      * time. Bucket literal and stored key must agree; both were spelled
      * `documents` until migration `0044_finish_file_rename` moved them together.
@@ -99,9 +99,9 @@ export const files = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    // Gallery list: WHERE org+app ORDER BY created_at DESC — a backward scan
-    // over this composite serves the sort (same pattern as idx_runs_app_started).
-    index("idx_files_org_app_created").on(table.orgId, table.applicationId, table.createdAt),
+    // Gallery list: WHERE org+space ORDER BY created_at DESC — a backward scan
+    // over this composite serves the sort (same pattern as idx_runs_space_started).
+    index("idx_files_org_space_created").on(table.orgId, table.spaceId, table.createdAt),
     // Run-container lookup + FK cascade scan on run delete.
     index("idx_files_run").on(table.runId),
     // Chat-container lookup + FK cascade scan on session delete.
@@ -130,13 +130,13 @@ export const files = pgTable(
       .on(table.endUserId)
       .where(sql`${table.endUserId} IS NOT NULL`),
     // No index on `user_id`: it is only ever read ANDed under `org_id` +
-    // `application_id` (`listFilesForActor`), which
-    // `idx_files_org_app_created` already serves, and there is no
+    // `space_id` (`listFilesForActor`), which
+    // `idx_files_org_space_created` already serves, and there is no
     // user-deletion path in the platform for its SET NULL action to scan.
-    // Same reasoning for the `applications` cascade. NOT covered by
-    // `idx_files_org_app_created`: `application_id` is not that index's
-    // LEADING column, so it cannot serve an application-only lookup.
-    index("idx_files_application").on(table.applicationId),
+    // Same reasoning for the `spaces` cascade. NOT covered by
+    // `idx_files_org_space_created`: `space_id` is not that index's
+    // LEADING column, so it cannot serve a space-only lookup.
+    index("idx_files_space").on(table.spaceId),
     // Referenced target of `file_links`' composite tenant-integrity FK.
     // Trivially valid — `id` alone is the PK, so `(id, org_id)` can never
     // collide; it only costs an index build.

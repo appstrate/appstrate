@@ -75,16 +75,16 @@ async function openCsrfForm(url: string): Promise<{ cookie: string; csrf: string
   return { cookie, csrf };
 }
 
-async function setupApplicationClient(): Promise<{ clientId: string }> {
+async function setupSpaceClient(): Promise<{ clientId: string }> {
   const ctx = await createTestContext();
   const client = await createClient({
-    level: "application",
+    level: "space",
     name: "Public Origin Test Client",
     redirectUris: [REDIRECT_URI],
-    referencedApplicationId: ctx.defaultAppId,
+    referencedSpaceId: ctx.defaultSpaceId,
     allowSignup: true,
   });
-  await upsertSmtpConfig(ctx.defaultAppId, {
+  await upsertSmtpConfig(ctx.defaultSpaceId, {
     host: "__test_json__",
     port: 587,
     username: "test",
@@ -163,7 +163,7 @@ describe("OIDC public URLs behind a TLS-terminating proxy", () => {
   });
 
   it("keeps emailed magic-link callbacks on the canonical HTTPS origin", async () => {
-    const { clientId } = await setupApplicationClient();
+    const { clientId } = await setupSpaceClient();
     await requestMagicLink(clientId, `magic-${crypto.randomUUID()}@example.test`);
 
     expect(mails).toHaveLength(1);
@@ -183,7 +183,7 @@ describe("OIDC public URLs behind a TLS-terminating proxy", () => {
   });
 
   it("redirects magic-link confirmation to the canonical HTTPS verify endpoint", async () => {
-    const { clientId } = await setupApplicationClient();
+    const { clientId } = await setupSpaceClient();
     await requestMagicLink(clientId, `confirm-${crypto.randomUUID()}@example.test`);
     const emailedUrl = extractFirstEmailUrl(mails[0]!.html);
     const internalConfirmUrl = `${INTERNAL_ORIGIN}${emailedUrl.pathname}${emailedUrl.search}`;
@@ -214,7 +214,7 @@ describe("OIDC public URLs behind a TLS-terminating proxy", () => {
   });
 
   it("sends password-reset links on the canonical HTTPS origin", async () => {
-    const { clientId } = await setupApplicationClient();
+    const { clientId } = await setupSpaceClient();
     const user = await createTestUser({ emailVerified: true });
     const query = new URLSearchParams({
       client_id: clientId,

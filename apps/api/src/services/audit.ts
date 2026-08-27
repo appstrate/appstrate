@@ -24,7 +24,7 @@ type AuditActorType = "user" | "end_user" | "api_key" | "system" | (string & {})
 
 interface RecordAuditInput {
   orgId: string;
-  applicationId?: string | null;
+  spaceId?: string | null;
   actorType: AuditActorType;
   actorId?: string | null;
   /** Verb scoped by resource — `connection.created`, `api_key.revoked`, … */
@@ -42,7 +42,7 @@ export async function recordAudit(input: RecordAuditInput): Promise<void> {
   try {
     await db.insert(auditEvents).values({
       orgId: input.orgId,
-      applicationId: input.applicationId ?? null,
+      spaceId: input.spaceId ?? null,
       actorType: input.actorType,
       actorId: input.actorId ?? null,
       action: input.action,
@@ -66,20 +66,20 @@ export async function recordAudit(input: RecordAuditInput): Promise<void> {
 
 /**
  * Convenience wrapper: derive `actorType`, `actorId`, `ip`, `userAgent`,
- * `requestId`, and `applicationId` from the Hono context. Routes still
+ * `requestId`, and `spaceId` from the Hono context. Routes still
  * pass the audit-specific fields (`action`, `resourceType`, …).
  *
  * Org routes run without org-context middleware (the orgId comes from URL
  * params or is freshly created), so they pass `orgIdOverride` to supply the
  * orgId explicitly instead of reading it from context. The end_user /
- * applicationId derivation is a safe superset for org routes (both are unset
+ * spaceId derivation is a safe superset for org routes (both are unset
  * there).
  */
 export async function recordAuditFromContext(
   c: Context<AppEnv>,
   input: Omit<
     RecordAuditInput,
-    "orgId" | "applicationId" | "actorType" | "actorId" | "ip" | "userAgent" | "requestId"
+    "orgId" | "spaceId" | "actorType" | "actorId" | "ip" | "userAgent" | "requestId"
   > & { orgIdOverride?: string },
 ): Promise<void> {
   const { orgIdOverride, ...auditInput } = input;
@@ -106,7 +106,7 @@ export async function recordAuditFromContext(
   await recordAudit({
     ...auditInput,
     orgId,
-    applicationId: c.get("applicationId") ?? null,
+    spaceId: c.get("spaceId") ?? null,
     actorType,
     actorId,
     ip: getClientIpFromRequest(c.req.raw),

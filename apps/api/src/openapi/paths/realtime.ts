@@ -40,7 +40,7 @@ export const realtimePaths = {
         SSE_CHANNELS_DESCRIPTION,
       parameters: [
         { $ref: "#/components/parameters/SseOrgId" },
-        { $ref: "#/components/parameters/SseAppId" },
+        { $ref: "#/components/parameters/SseSpaceId" },
         { $ref: "#/components/parameters/SseToken" },
         { $ref: "#/components/parameters/Verbose" },
         { $ref: "#/components/parameters/SseChannels" },
@@ -67,7 +67,7 @@ export const realtimePaths = {
       parameters: [
         { name: "id", in: "path", required: true, schema: { type: "string" } },
         { $ref: "#/components/parameters/SseOrgId" },
-        { $ref: "#/components/parameters/SseAppId" },
+        { $ref: "#/components/parameters/SseSpaceId" },
         { $ref: "#/components/parameters/SseToken" },
         { $ref: "#/components/parameters/Verbose" },
         { $ref: "#/components/parameters/SseChannels" },
@@ -100,7 +100,7 @@ export const realtimePaths = {
           description: "Agent package ID",
         },
         { $ref: "#/components/parameters/SseOrgId" },
-        { $ref: "#/components/parameters/SseAppId" },
+        { $ref: "#/components/parameters/SseSpaceId" },
         { $ref: "#/components/parameters/SseToken" },
         { $ref: "#/components/parameters/Verbose" },
         { $ref: "#/components/parameters/SseChannels" },

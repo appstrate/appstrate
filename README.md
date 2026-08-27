@@ -189,7 +189,7 @@ appstrate/
 │       ├── pages/            # Route pages (React Router v7)
 │       ├── hooks/            # React Query + SSE realtime hooks
 │       ├── components/       # UI components (modals, forms, editors)
-│       └── stores/           # Zustand stores (auth, org, app, sidebar, theme)
+│       └── stores/           # Zustand stores (auth, org, space, sidebar, theme)
 │
 ├── packages/
 │   ├── core/                 # @appstrate/core — shared validation, storage, utilities (published on npm)
@@ -233,7 +233,7 @@ The API is organized into 30+ route domains. The live endpoint count is whatever
 | **Proxies**             | Org-level and agent-level HTTP proxy config                                                                                     |
 | **API Keys**            | Programmatic access tokens (`ask_*`)                                                                                            |
 | **Packages**            | Org packages CRUD, import (incl. `.afps-bundle` multi-package), publish, dist-tags, version pinning                             |
-| **Library**             | Consolidated package list with per-app install state                                                                            |
+| **Library**             | Consolidated package list with per-space install state                                                                          |
 | **Notifications**       | Run notification management                                                                                                     |
 | **Organizations**       | Org CRUD, members, invitations                                                                                                  |
 | **Profile**             | User profile management                                                                                                         |
@@ -243,8 +243,8 @@ The API is organized into 30+ route domains. The live endpoint count is whatever
 | **Meta**                | OpenAPI spec + Swagger UI                                                                                                       |
 | **Models**              | Org-level LLM model configuration and testing                                                                                   |
 | **Health**              | Health check                                                                                                                    |
-| **Applications**        | Primary workspace boundary — scopes agents, runs, schedules, webhooks, connections, packages, end-users                         |
-| **App Profiles**        | Application-scoped connection profile management                                                                                |
+| **Spaces**              | Primary scoping boundary — scopes agents, runs, schedules, webhooks, connections, packages, end-users                           |
+| **Space Profiles**      | Space-scoped connection profile management                                                                                      |
 | **End-Users**           | External end-user management for headless API (cursor pagination via `startingAfter`/`endingBefore`)                            |
 | **Webhooks**            | Run event webhooks with HMAC signing (Standard Webhooks)                                                                        |
 | **Credential Proxy**    | Server-side credential injection for external runners (5 verbs: GET/POST/PUT/PATCH/DELETE)                                      |

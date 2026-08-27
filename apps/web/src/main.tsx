@@ -60,7 +60,7 @@ const queryClient = new QueryClient({
 //
 // Kicking them here, before `i18nReady` resolves and before React mounts,
 // collapses those three round-trips into one and takes them off the locale
-// fetch's tail. `GET /api/applications` is the only first-screen read with a
+// fetch's tail. `GET /api/spaces` is the only first-screen read with a
 // real data dependency (it needs the selected org id), so what is left is two
 // network levels, not four.
 startAuthBootstrap();

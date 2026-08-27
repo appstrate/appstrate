@@ -45,7 +45,7 @@ interface AgentIntegrationsBlockProps {
  * server's `run_blocking` flag on the same bulk query, not a client predicate.
  */
 export function AgentIntegrationsBlock({ entries, agentPackageId }: AgentIntegrationsBlockProps) {
-  // The list carries `active` (installed + enabled in this app). An agent can
+  // The list carries `active` (installed + enabled in this space). An agent can
   // declare an integration that was never activated here (or got disabled);
   // those cards render a read-only "not active" state instead of a connect
   // affordance, mirroring the run-time `integration_not_active` gate.
@@ -78,7 +78,7 @@ interface IntegrationConnectionCardProps {
   packageId: string;
   agentTools: string[] | "*" | undefined;
   agentScopes: string[] | undefined;
-  /** Whether the integration is active (installed + enabled) in this app. */
+  /** Whether the integration is active (installed + enabled) in this space. */
   appActive: boolean;
   agentPackageId?: string;
 }
@@ -105,7 +105,7 @@ function IntegrationConnectionCard({
     );
   }
 
-  // Not active in this application → no connection is possible. Show a
+  // Not active in this space → no connection is possible. Show a
   // disabled, explanatory control rather than a picker the run-time gate would
   // reject with `integration_not_active`.
   if (!appActive) {
@@ -186,7 +186,7 @@ function ManagedIntegrationCard({
   const { data: consumingAgents } = useAgentsConsumingIntegration(packageId);
 
   // R5 — reuse hint: the resolved connection is shared across every agent in
-  // the app that consumes this integration, killing the "do I need one
+  // the space that consumes this integration, killing the "do I need one
   // connection per agent?" confusion. Only when resolved AND not blocking — a
   // blocking state is the picker's warning foreground, not a reassuring line.
   const resolvedConnection =

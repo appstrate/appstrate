@@ -135,19 +135,19 @@ function ConnectionRow({
     });
   }
 
-  // Org + application
+  // Org + space
   rows.push({
     label: t("connections.orgLabel"),
     value: (
       <>
         <span>{conn.org.name}</span>
-        <span className="text-muted-foreground"> &middot; {conn.application.name}</span>
+        <span className="text-muted-foreground"> &middot; {conn.space.name}</span>
       </>
     ),
   });
 
   // Reuse hint — tells the user this connection is
-  // shared across N agents in the application, killing the "do I need
+  // shared across N agents in the space, killing the "do I need
   // one connection per agent?" confusion.
   if (typeof conn.reused_by_agents === "number") {
     rows.push({
@@ -308,7 +308,7 @@ export function PreferencesConnectionsPage() {
     identity: string | null;
     connectionId: string;
     /**
-     * Number of agents that consume this integration in the application —
+     * Number of agents that consume this integration in the space —
      * surfaced in the confirm dialog so the user understands the blast
      * radius before deleting the connection globally.
      */
@@ -390,7 +390,7 @@ export function PreferencesConnectionsPage() {
                         packageId: group.source_id,
                         connectionId: conn.connection_id,
                         orgId: conn.org.id,
-                        applicationId: conn.application.id,
+                        spaceId: conn.space.id,
                         label,
                       })
                     }
@@ -399,7 +399,7 @@ export function PreferencesConnectionsPage() {
                         packageId: group.source_id,
                         connectionId: conn.connection_id,
                         orgId: conn.org.id,
-                        applicationId: conn.application.id,
+                        spaceId: conn.space.id,
                         sharedWithOrg: next,
                       })
                     }

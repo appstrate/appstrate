@@ -105,12 +105,12 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
       version: "0.1.0",
       manifest: serverManifest,
     });
-    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
   });
 
   function connectCtx(): ConnectContext {
     return {
-      scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       actor: { type: "user", id: ctx.user.id },
       integrationId: INTEG,
       authKey: "session",
@@ -125,7 +125,7 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
 
     const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
     });
@@ -174,7 +174,7 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
       integrationId: INTEG,
       authKey: "session",
       accountId: "default",
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,
       // Empty inputs plane → decryptCredentialInputsToStringMap → {}
@@ -189,7 +189,7 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
 
     const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
     });
@@ -248,7 +248,7 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
       version: "0.1.0",
       manifest: serverManifest,
     });
-    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
     await new LoginSecretStrategy().complete(connectCtx(), {
       kind: "fields",
       credentials: { identifiant: "user1", mot_de_passe: "s3cr3t" },
@@ -256,7 +256,7 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
 
     const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
     });
@@ -324,7 +324,7 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
       version: "0.1.0",
       manifest: serverManifest,
     });
-    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
 
     await new LoginSecretStrategy().complete(connectCtx(), {
       kind: "fields",
@@ -343,7 +343,7 @@ describe("resolveIntegrationSpawns — connect.tool run-start", () => {
 
     const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: wildcardAgent,
     });

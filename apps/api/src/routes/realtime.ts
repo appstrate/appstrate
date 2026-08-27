@@ -12,7 +12,8 @@ import type { RealtimeEvent, RealtimeChannel } from "../services/realtime.ts";
 import { forbidden, unauthorized } from "../lib/errors.ts";
 import { validateApiKey } from "../services/api-keys.ts";
 import { resolveApiKeyPermissions } from "../lib/permissions.ts";
-import { validateApplicationInOrg } from "../middleware/app-context.ts";
+import { validateSpaceInOrg } from "../middleware/space-context.ts";
+import { assertSpaceId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
 import type { OrgRole } from "../types/index.ts";
 
@@ -81,7 +82,7 @@ interface SSEAuthResult {
    * (services/realtime.ts).
    */
   isAdmin: boolean;
-  applicationId: string;
+  spaceId: string;
 }
 
 const isAdminRole = (role: OrgRole): boolean => role === "admin" || role === "owner";
@@ -117,12 +118,18 @@ async function validateSSEAuth(c: {
       throw forbidden("API key does not have the 'runs:read' scope");
     }
 
+    // The key's `spaceId` comes straight off the `api_keys` row and never
+    // reaches `validateSpaceInOrg` (the key already proves org+space binding),
+    // so this is the shape check for that path — an un-migrated `api_keys`
+    // table would otherwise open a stream on an `app_` id in silence.
+    assertSpaceId(keyInfo.spaceId);
+
     return {
       userId: keyInfo.userId,
       orgId: keyInfo.orgId,
       role: keyInfo.creatorRole,
       isAdmin: isAdminRole(keyInfo.creatorRole),
-      applicationId: keyInfo.applicationId,
+      spaceId: keyInfo.spaceId,
     };
   }
 
@@ -147,19 +154,19 @@ async function validateSSEAuth(c: {
 
   if (!rows[0]) return null;
 
-  const applicationId = c.req.query("applicationId");
-  if (!applicationId) return null;
+  const spaceId = c.req.query("spaceId");
+  if (!spaceId) return null;
 
-  // Validate application belongs to org
-  const app = await validateApplicationInOrg(applicationId, orgId);
-  if (!app) return null;
+  // Validate space belongs to org
+  const space = await validateSpaceInOrg(spaceId, orgId);
+  if (!space) return null;
 
   return {
     userId: session.user.id,
     orgId,
     role: rows[0].role,
     isAdmin: isAdminRole(rows[0].role),
-    applicationId,
+    spaceId,
   };
 }
 
@@ -171,7 +178,7 @@ function openRealtimeStream(
     runId?: string;
     packageId?: string;
     orgId: string;
-    applicationId: string;
+    spaceId: string;
     isAdmin: boolean;
     /**
      * Actor identity carried into the subscriber so the
@@ -380,7 +387,7 @@ function openRealtimeStream(
 
 async function sendInitialRunSnapshot(
   runId: string,
-  scope: { orgId: string; applicationId: string },
+  scope: { orgId: string; spaceId: string },
   send: (evt: RealtimeEvent) => void,
 ): Promise<void> {
   const [row] = await db
@@ -391,7 +398,7 @@ async function sendInitialRunSnapshot(
       userId: runs.userId,
       endUserId: runs.endUserId,
       orgId: runs.orgId,
-      applicationId: runs.applicationId,
+      spaceId: runs.spaceId,
       scheduleId: runs.scheduleId,
       error: runs.error,
       startedAt: runs.startedAt,
@@ -399,13 +406,7 @@ async function sendInitialRunSnapshot(
       duration: runs.duration,
     })
     .from(runs)
-    .where(
-      and(
-        eq(runs.id, runId),
-        eq(runs.orgId, scope.orgId),
-        eq(runs.applicationId, scope.applicationId),
-      ),
-    )
+    .where(and(eq(runs.id, runId), eq(runs.orgId, scope.orgId), eq(runs.spaceId, scope.spaceId)))
     .limit(1);
 
   if (!row) return;
@@ -419,7 +420,7 @@ async function sendInitialRunSnapshot(
       userId: row.userId,
       endUserId: row.endUserId,
       orgId: row.orgId,
-      applicationId: row.applicationId,
+      spaceId: row.spaceId,
       scheduleId: row.scheduleId,
       error: row.error,
       startedAt: row.startedAt?.toISOString() ?? null,
@@ -447,18 +448,14 @@ export function createRealtimeRouter() {
       {
         runId,
         orgId: validated.orgId,
-        applicationId: validated.applicationId,
+        spaceId: validated.spaceId,
         isAdmin: validated.isAdmin,
         userId: validated.userId,
         channels: parseChannels(c.req.query("channels")),
       },
       verbose,
       (send) =>
-        sendInitialRunSnapshot(
-          runId,
-          { orgId: validated.orgId, applicationId: validated.applicationId },
-          send,
-        ),
+        sendInitialRunSnapshot(runId, { orgId: validated.orgId, spaceId: validated.spaceId }, send),
     );
   });
 
@@ -477,7 +474,7 @@ export function createRealtimeRouter() {
       {
         packageId,
         orgId: validated.orgId,
-        applicationId: validated.applicationId,
+        spaceId: validated.spaceId,
         isAdmin: validated.isAdmin,
         userId: validated.userId,
         channels: parseChannels(c.req.query("channels")),
@@ -499,7 +496,7 @@ export function createRealtimeRouter() {
       subId,
       {
         orgId: validated.orgId,
-        applicationId: validated.applicationId,
+        spaceId: validated.spaceId,
         isAdmin: validated.isAdmin,
         userId: validated.userId,
         channels: parseChannels(c.req.query("channels")),

@@ -78,7 +78,7 @@ describe("publish_file across every launch path", () => {
 
   it("drops an unknown id from a stored published manifest, and does not guess", async () => {
     await seedPackage({ orgId: ctx.orgId, id: "@compatorg/published", type: "agent" });
-    await seedInstalledPackage(ctx.defaultAppId, "@compatorg/published");
+    await seedInstalledPackage(ctx.defaultSpaceId, "@compatorg/published");
     // A PUBLISHED version is immutable by construction — it cannot be repaired
     // in place, so this is the strictest case for the read direction: a hard
     // enum rejection here would make the agent permanently unrunnable.
@@ -99,7 +99,7 @@ describe("publish_file across every launch path", () => {
     const resolved = await resolveRegistryAgent({
       packageId: "@compatorg/published",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       stage: "published",
       spec: "1.0.0",
     });
@@ -121,7 +121,7 @@ describe("publish_file across every launch path", () => {
       runId: `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
       agent,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       input: {},
       ...(versionLabel ? { overrideVersionLabel: versionLabel } : {}),
@@ -159,7 +159,7 @@ describe("publish_file across every launch path", () => {
       },
       draftContent: "Do the thing.",
     });
-    await seedInstalledPackage(ctx.defaultAppId, "@compatorg/draft-agent");
+    await seedInstalledPackage(ctx.defaultSpaceId, "@compatorg/draft-agent");
 
     // Exactly what `routes/runs.ts` puts on the context via `c.get("package")`.
     const agent = await getPackage("@compatorg/draft-agent", ctx.orgId);
@@ -190,7 +190,7 @@ describe("publish_file across every launch path", () => {
       },
       draftContent: "Do the thing.",
     });
-    await seedInstalledPackage(ctx.defaultAppId, "@compatorg/scheduled");
+    await seedInstalledPackage(ctx.defaultSpaceId, "@compatorg/scheduled");
     await seedPackageVersion({
       packageId: "@compatorg/scheduled",
       version: "1.0.0",

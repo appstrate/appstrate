@@ -8,7 +8,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { $api, client, type components, type paths } from "@/api/client";
 import { useCurrentOrgId } from "@/hooks/use-org";
-import { useCurrentApplicationId } from "@/hooks/use-current-application";
+import { useCurrentSpaceId } from "@/hooks/use-current-space";
 import { useOrgOnlyScope } from "@/hooks/use-org-scope";
 
 /** Wire shapes from the OpenAPI spec. */
@@ -18,25 +18,23 @@ export type SignupRole = OAuthClient["signupRole"];
 type CreateOAuthClientBody =
   paths["/api/oauth/clients"]["post"]["requestBody"]["content"]["application/json"];
 
-export function useOAuthClients(level?: "org" | "application") {
+export function useOAuthClients(level?: "org" | "space") {
   const scope = useOrgOnlyScope();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   const isOrg = level === "org";
   return $api.useQuery(
     "get",
     "/api/oauth/clients",
     { params: { header: scope.header } },
     {
-      enabled: isOrg ? scope.enabled : scope.enabled && !!applicationId,
+      enabled: isOrg ? scope.enabled : scope.enabled && !!spaceId,
       select: (e) => {
         if (!level) return e.data;
         const byLevel = e.data.filter((c) => c.level === level);
-        // Application-level clients are org-wide on the wire — scope them to
-        // the currently-selected application so the tab never shows clients
-        // that belong to a sibling app in the same org.
-        return level === "application"
-          ? byLevel.filter((c) => c.referencedApplicationId === applicationId)
-          : byLevel;
+        // Space-level clients are org-wide on the wire — scope them to
+        // the currently-selected space so the tab never shows clients
+        // that belong to a sibling space in the same org.
+        return level === "space" ? byLevel.filter((c) => c.referencedSpaceId === spaceId) : byLevel;
       },
     },
   );
@@ -49,13 +47,13 @@ export function useOAuthClients(level?: "org" | "application") {
  */
 export function useOAuthScopes() {
   const scope = useOrgOnlyScope();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   return $api.useQuery(
     "get",
     "/api/oauth/scopes",
     { params: { header: scope.header } },
     {
-      enabled: scope.enabled && !!applicationId,
+      enabled: scope.enabled && !!spaceId,
       staleTime: Infinity, // scope list is static within a deploy
       select: (e) => e.data,
     },
@@ -69,9 +67,9 @@ function useInvalidateOAuthClients() {
   };
 }
 
-export function useCreateOAuthClient(level?: "org" | "application") {
+export function useCreateOAuthClient(level?: "org" | "space") {
   const invalidate = useInvalidateOAuthClients();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   const orgId = useCurrentOrgId();
   const isOrg = level === "org";
   return useMutation({
@@ -81,16 +79,16 @@ export function useCreateOAuthClient(level?: "org" | "application") {
       postLogoutRedirectUris?: string[];
       scopes?: string[];
       isFirstParty?: boolean;
-      /** Unified signup opt-in (instance/org/application). */
+      /** Unified signup opt-in (instance/org/space). */
       allowSignup?: boolean;
       /** Org-level only — role assigned on auto-join. `owner` forbidden. */
       signupRole?: SignupRole;
     }) => {
       // The level discriminator and pinned reference come from the current
-      // org/app context — call sites only provide the client fields.
+      // org/space context — call sites only provide the client fields.
       const body: CreateOAuthClientBody = isOrg
         ? { level: "org", referencedOrgId: orgId!, ...data }
-        : { level: "application", referencedApplicationId: applicationId!, ...data };
+        : { level: "space", referencedSpaceId: spaceId!, ...data };
       const { data: created } = await client.POST("/api/oauth/clients", { body });
       if (!created) throw new Error("empty response");
       return created;

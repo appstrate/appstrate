@@ -66,7 +66,7 @@ async function seedConnection(ctx: TestContext) {
     integrationId: INTEG,
     authKey: "primary",
     accountId: "default",
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     endUserId: null,
     credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k-1" } }),
@@ -90,12 +90,12 @@ async function seedAndResolve(
     source: "local",
     draftManifest: integManifest({ defaultTools: opts.defaultTools }),
   });
-  await seedInstalledPackage(ctx.defaultAppId, INTEG);
+  await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
   await seedConnection(ctx);
   return (
     await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(opts.integrationsConfiguration),
     })

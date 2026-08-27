@@ -5,7 +5,7 @@
  *
  * An AFPS agent declares ONE parameter schema (`input`). Whether a field is
  * asked at every launch or decided once by the editor is a platform fact, not
- * a manifest fact: it is carried by the per-application `values` (layer 2) and
+ * a manifest fact: it is carried by the per-space `values` (layer 2) and
  * `locked_fields` alongside the schema. The server resolves
  *
  *   author default (`schema.default`) → stored value → schedule value → caller input
@@ -24,9 +24,9 @@ import {
 } from "@appstrate/core/form";
 import { withoutLockedFields } from "@appstrate/core/input-resolution";
 
-/** The per-application layer that rides next to the schema on `AgentDetail.input`. */
+/** The per-space layer that rides next to the schema on `AgentDetail.input`. */
 export interface AgentInputSettings {
-  /** Values the editor stored once for this application. */
+  /** Values the editor stored once for this space. */
   values: Record<string, unknown>;
   /** Fields no caller may set at launch. */
   locked_fields: string[];
@@ -157,7 +157,7 @@ export function initialInputValues(
  * the state has been created.
  *
  * The two layers behind a field have different lifetimes: the editor's stored
- * `values` live on the application row and are version-independent, while an
+ * `values` live on the space row and are version-independent, while an
  * author `default` belongs to the schema of the version being launched. Seeding
  * a default would therefore freeze the version selected at open time onto every
  * later pick; the version-pinned wrapper supplies its own defaults through the

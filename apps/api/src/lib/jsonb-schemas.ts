@@ -45,7 +45,7 @@ export const scheduleInputSchema = z
   .superRefine(withByteCap(16 * KB));
 
 /**
- * `application_packages.input_settings` — the agent's editor-set input
+ * `space_packages.input_settings` — the agent's editor-set input
  * defaults (`values`) plus the input fields the editor froze (`locked`), as one
  * document. The wire pairs these as `values` / `locked_fields`; inside the
  * column the name `input_settings` already supplies the noun, so `locked` is

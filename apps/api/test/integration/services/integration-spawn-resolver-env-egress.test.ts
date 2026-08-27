@@ -74,7 +74,7 @@ async function seedAll(ctx: TestContext, manifest: Record<string, unknown>) {
     source: "local",
     draftManifest: manifest,
   });
-  await seedInstalledPackage(ctx.defaultAppId, INTEG);
+  await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
   const serverManifest = mcpServerManifest({
     name: SERVER,
     version: "0.1.0",
@@ -93,7 +93,7 @@ async function seedAll(ctx: TestContext, manifest: Record<string, unknown>) {
     integrationId: INTEG,
     authKey: "session",
     accountId: "default",
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     endUserId: null,
     credentialsEncrypted: encryptCredentialEnvelope({
@@ -121,7 +121,7 @@ describe("resolveIntegrationSpawns — env-delivery egress signal (#543)", () =>
 
     const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
     });
@@ -146,7 +146,7 @@ describe("resolveIntegrationSpawns — env-delivery egress signal (#543)", () =>
 
     const { specs } = await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: agentManifest(),
     });

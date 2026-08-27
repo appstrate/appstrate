@@ -5,7 +5,7 @@
  *
  * Covers:
  *
- *   - Per-application OAuth2 client registration (admin) backing the
+ *   - Per-space OAuth2 client registration (admin) backing the
  *     "Configure OAuth" admin form. Stored in `integration_oauth_clients`
  *     with the client_secret v1-envelope encrypted (empty string for
  *     public clients).
@@ -23,7 +23,7 @@
 import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
-  applicationPackages,
+  spacePackages,
   integrationConnections,
   integrationOauthClients,
   packages,
@@ -50,7 +50,7 @@ import {
 import { mergeSystemAndDb, setExactlyOneDefault, isUuid } from "../lib/db-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import { notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts";
-import type { ActorScope, AppScope } from "../lib/scope.ts";
+import type { ActorScope, SpaceScope } from "../lib/scope.ts";
 import { actorInsert, actorFilter, actorOrSharedFilter } from "../lib/actor.ts";
 import { getPackageDisplayName } from "../lib/package-helpers.ts";
 import { integrationCallbackUrl } from "../lib/integration-callback-url.ts";
@@ -72,7 +72,7 @@ import { resolveConnectionOwnerNames } from "./integration-connection-owner-name
 import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
 import type { IntegrationAuthStatus } from "@appstrate/shared-types";
 import { getIntegration } from "./integration-service.ts";
-import { assertApplicationInScope } from "./applications.ts";
+import { assertSpaceInScope } from "./spaces.ts";
 
 // ─────────────────────────────────────────────
 // Types
@@ -117,7 +117,7 @@ function lookupAuth(
 }
 
 async function loadManifestOrThrow(
-  scope: AppScope,
+  scope: SpaceScope,
   packageId: string,
 ): Promise<IntegrationManifest> {
   const summary = await getIntegration(scope.orgId, packageId);
@@ -164,12 +164,12 @@ export interface ResolvedConnectionRow extends ActorConnectionRow {
 
 /**
  * Lookup the actor's `integration_connections` row for `(packageId, authKey)`
- * scoped to `applicationId`. Returns `null` when no accessible connection
+ * scoped to `spaceId`. Returns `null` when no accessible connection
  * exists — callers decide whether that is a 404, a silent skip, or a 412
  * envelope.
  *
  * "Accessible" = own connection first, then any `shared_with_org=true`
- * connection in the same application + integration + authKey. The fallback
+ * connection in the same space + integration + authKey. The fallback
  * unlocks the admin-shared workflow: when `block_user_connections` is on
  * and the admin has marked their connection `shared_with_org`, members
  * who run agents on this integration land on the admin's row instead of
@@ -195,7 +195,7 @@ export interface ResolvedConnectionRow extends ActorConnectionRow {
 async function loadActorConnection(
   packageId: string,
   authKey: string,
-  context: { applicationId: string; actor: Actor; connectionId?: string },
+  context: { spaceId: string; actor: Actor; connectionId?: string },
 ): Promise<ActorConnectionRow | null> {
   const accessible = actorOrSharedFilter(context.actor, integrationConnections);
   const rows = await db
@@ -213,7 +213,7 @@ async function loadActorConnection(
       and(
         eq(integrationConnections.integrationId, packageId),
         eq(integrationConnections.authKey, authKey),
-        eq(integrationConnections.applicationId, context.applicationId),
+        eq(integrationConnections.spaceId, context.spaceId),
         accessible,
         ...(context.connectionId ? [eq(integrationConnections.id, context.connectionId)] : []),
       ),
@@ -254,7 +254,7 @@ async function loadActorConnection(
 }
 
 /**
- * Load a specific connection row by its id, scoped to the application
+ * Load a specific connection row by its id, scoped to the space
  * and protected by the actor's access predicate (own OR shared). Used
  * by the spawn resolver to decrypt the connection chosen by the cascade
  * (admin pin / overrides / member pin / auto fallback) and return its
@@ -274,7 +274,7 @@ async function loadAccessibleConnectionById(
   connectionId: string,
   integrationId: string,
   expectedAuthKey: string | null,
-  context: { applicationId: string; actor: Actor },
+  context: { spaceId: string; actor: Actor },
 ): Promise<ResolvedConnectionRow | null> {
   const accessible = actorOrSharedFilter(context.actor, integrationConnections);
   const [row] = await db
@@ -293,7 +293,7 @@ async function loadAccessibleConnectionById(
         eq(integrationConnections.id, connectionId),
         eq(integrationConnections.integrationId, integrationId),
         ...(expectedAuthKey !== null ? [eq(integrationConnections.authKey, expectedAuthKey)] : []),
-        eq(integrationConnections.applicationId, context.applicationId),
+        eq(integrationConnections.spaceId, context.spaceId),
         accessible,
       ),
     )
@@ -334,7 +334,7 @@ async function loadAccessibleConnectionById(
 async function pickAnyAccessibleConnection(
   packageId: string,
   declaredAuthKeys: string[],
-  context: { applicationId: string; actor: Actor; requiredAuthKey?: string },
+  context: { spaceId: string; actor: Actor; requiredAuthKey?: string },
 ): Promise<ResolvedConnectionRow | null> {
   const keys = context.requiredAuthKey
     ? declaredAuthKeys.filter((k) => k === context.requiredAuthKey)
@@ -363,7 +363,7 @@ export async function selectAccessibleConnection(
   packageId: string,
   declaredAuthKeys: string[],
   snapshotConnectionId: string | null,
-  context: { applicationId: string; actor: Actor; requiredAuthKey?: string },
+  context: { spaceId: string; actor: Actor; requiredAuthKey?: string },
 ): Promise<ResolvedConnectionRow | null> {
   return snapshotConnectionId
     ? loadAccessibleConnectionById(
@@ -376,9 +376,9 @@ export async function selectAccessibleConnection(
 }
 
 /**
- * Per-app activation state for an integration: the `active` flag plus the admin
+ * Per-space activation state for an integration: the `active` flag plus the admin
  * `block_user_connections` gate. `blockUserConnections` defaults to `false` when
- * no per-app row exists.
+ * no per-space row exists.
  */
 interface IntegrationActivation {
   active: boolean;
@@ -390,10 +390,10 @@ interface IntegrationActivation {
  * resolver, agent readiness, sidecar guards, settings list, agent-editor detail)
  * consults, directly or via the {@link isIntegrationActive} /
  * {@link listActiveIntegrationIds} wrappers below. One SELECT over
- * `application_packages` for the whole set; the precedence rule lives here and
+ * `space_packages` for the whole set; the precedence rule lives here and
  * nowhere else:
  *
- *   1. An `application_packages` row EXISTS → its `enabled` flag wins. This is
+ *   1. An `space_packages` row EXISTS → its `enabled` flag wins. This is
  *      the explicit, sticky operator decision: an installed-and-enabled row is
  *      active; a disabled row (`enabled = false`) is inactive and STAYS inactive
  *      across runs (never silently re-enabled).
@@ -412,21 +412,21 @@ interface IntegrationActivation {
  */
 export async function resolveIntegrationActivations(
   packageIds: readonly string[],
-  applicationId: string,
+  spaceId: string,
 ): Promise<Map<string, IntegrationActivation>> {
   const result = new Map<string, IntegrationActivation>();
   if (packageIds.length === 0) return result;
   const rows = await db
     .select({
-      packageId: applicationPackages.packageId,
-      enabled: applicationPackages.enabled,
-      blockUserConnections: applicationPackages.blockUserConnections,
+      packageId: spacePackages.packageId,
+      enabled: spacePackages.enabled,
+      blockUserConnections: spacePackages.blockUserConnections,
     })
-    .from(applicationPackages)
+    .from(spacePackages)
     .where(
       and(
-        eq(applicationPackages.applicationId, applicationId),
-        inArray(applicationPackages.packageId, packageIds as string[]),
+        eq(spacePackages.spaceId, spaceId),
+        inArray(spacePackages.packageId, packageIds as string[]),
       ),
     );
   const byId = new Map(rows.map((r) => [r.packageId, r]));
@@ -442,15 +442,12 @@ export async function resolveIntegrationActivations(
 }
 
 /**
- * `true` when the integration is active in the app — thin wrapper over
+ * `true` when the integration is active in the space — thin wrapper over
  * {@link resolveIntegrationActivations}. Use {@link assertIntegrationActive}
  * when the caller needs a structured 404 instead of a boolean.
  */
-export async function isIntegrationActive(
-  packageId: string,
-  applicationId: string,
-): Promise<boolean> {
-  const map = await resolveIntegrationActivations([packageId], applicationId);
+export async function isIntegrationActive(packageId: string, spaceId: string): Promise<boolean> {
+  const map = await resolveIntegrationActivations([packageId], spaceId);
   return map.get(packageId)!.active;
 }
 
@@ -461,9 +458,9 @@ export async function isIntegrationActive(
  */
 export async function listActiveIntegrationIds(
   packageIds: readonly string[],
-  applicationId: string,
+  spaceId: string,
 ): Promise<Set<string>> {
-  const map = await resolveIntegrationActivations(packageIds, applicationId);
+  const map = await resolveIntegrationActivations(packageIds, spaceId);
   const active = new Set<string>();
   for (const [id, activation] of map) {
     if (activation.active) active.add(id);
@@ -471,13 +468,10 @@ export async function listActiveIntegrationIds(
   return active;
 }
 
-/** Throw `notFound` unless the integration is active in the application. */
-export async function assertIntegrationActive(
-  packageId: string,
-  applicationId: string,
-): Promise<void> {
-  if (!(await isIntegrationActive(packageId, applicationId))) {
-    throw notFound(`Integration '${packageId}' is not installed in this application`);
+/** Throw `notFound` unless the integration is active in the space. */
+export async function assertIntegrationActive(packageId: string, spaceId: string): Promise<void> {
+  if (!(await isIntegrationActive(packageId, spaceId))) {
+    throw notFound(`Integration '${packageId}' is not installed in this space`);
   }
 }
 
@@ -534,7 +528,7 @@ function projectClientWithSecret(row: IntegrationOAuthClientRow): IntegrationOAu
   }
   return {
     id: row.id,
-    applicationId: row.applicationId,
+    spaceId: row.spaceId,
     integration_package_id: row.integrationId,
     auth_key: row.authKey,
     client_id: row.clientId,
@@ -580,7 +574,7 @@ export function toPublicClient(client: IntegrationOAuthClientWithSecret): Integr
  * descriptor list is built from this. Ordered oldest-first for a stable list.
  */
 async function listIntegrationOAuthClientsWithSecret(
-  scope: AppScope,
+  scope: SpaceScope,
   packageId: string,
   authKey: string,
 ): Promise<IntegrationOAuthClientWithSecret[]> {
@@ -589,7 +583,7 @@ async function listIntegrationOAuthClientsWithSecret(
     .from(integrationOauthClients)
     .where(
       and(
-        eq(integrationOauthClients.applicationId, scope.applicationId),
+        eq(integrationOauthClients.spaceId, scope.spaceId),
         eq(integrationOauthClients.integrationId, packageId),
         eq(integrationOauthClients.authKey, authKey),
       ),
@@ -604,7 +598,7 @@ async function listIntegrationOAuthClientsWithSecret(
  * the find half of the DCR find-or-create.
  */
 async function getAutoProvisionedClient(
-  scope: AppScope,
+  scope: SpaceScope,
   packageId: string,
   authKey: string,
 ): Promise<IntegrationOAuthClientWithSecret | null> {
@@ -613,7 +607,7 @@ async function getAutoProvisionedClient(
     .from(integrationOauthClients)
     .where(
       and(
-        eq(integrationOauthClients.applicationId, scope.applicationId),
+        eq(integrationOauthClients.spaceId, scope.spaceId),
         eq(integrationOauthClients.integrationId, packageId),
         eq(integrationOauthClients.authKey, authKey),
         eq(integrationOauthClients.autoProvisioned, true),
@@ -625,7 +619,7 @@ async function getAutoProvisionedClient(
 
 /** Whether any custom client for this auth is currently flagged default. */
 async function hasDefaultCustomClient(
-  scope: AppScope,
+  scope: SpaceScope,
   packageId: string,
   authKey: string,
 ): Promise<boolean> {
@@ -634,7 +628,7 @@ async function hasDefaultCustomClient(
     .from(integrationOauthClients)
     .where(
       and(
-        eq(integrationOauthClients.applicationId, scope.applicationId),
+        eq(integrationOauthClients.spaceId, scope.spaceId),
         eq(integrationOauthClients.integrationId, packageId),
         eq(integrationOauthClients.authKey, authKey),
         eq(integrationOauthClients.isDefault, true),
@@ -724,7 +718,7 @@ export function encodeClientAuthForStorage(input: {
 }
 
 /**
- * Register a NEW per-application OAuth2 client for an integration auth — one of
+ * Register a NEW per-space OAuth2 client for an integration auth — one of
  * the N custom (BYO-app) clients (model-provider pattern). Always an INSERT (no
  * upsert): a fresh client id is minted each time so multiple clients coexist.
  *
@@ -744,7 +738,7 @@ export function encodeClientAuthForStorage(input: {
  * `idx_ioc_one_auto`).
  */
 export async function createIntegrationOAuthClient(
-  scope: AppScope,
+  scope: SpaceScope,
   packageId: string,
   authKey: string,
   input: {
@@ -756,7 +750,7 @@ export async function createIntegrationOAuthClient(
   },
   opts: { autoProvisioned?: boolean } = {},
 ): Promise<IntegrationOAuthClientWithSecret> {
-  await assertApplicationInScope(scope);
+  await assertSpaceInScope(scope);
   const manifest = await loadManifestOrThrow(scope, packageId);
   const auth = lookupAuth(manifest, authKey);
   if (auth.type !== "oauth2") {
@@ -779,7 +773,7 @@ export async function createIntegrationOAuthClient(
   const [row] = await db
     .insert(integrationOauthClients)
     .values({
-      applicationId: scope.applicationId,
+      spaceId: scope.spaceId,
       integrationId: packageId,
       authKey,
       clientId: input.clientId,
@@ -801,7 +795,7 @@ export async function createIntegrationOAuthClient(
 
 /**
  * Rotate an existing custom client's credentials in place, by its id. Scoped to
- * the caller's application (escalation guard) — a client id from another app
+ * the caller's space (escalation guard) — a client id from another space
  * cannot be rotated. `is_default` / `auto_provisioned` are not touched here
  * (default selection is `setDefaultIntegrationClient`'s job).
  *
@@ -811,7 +805,7 @@ export async function createIntegrationOAuthClient(
  * refused when there is none. See the `methodOnly` block.
  */
 export async function updateIntegrationOAuthClient(
-  scope: AppScope,
+  scope: SpaceScope,
   clientId: string,
   input: {
     clientId: string;
@@ -822,7 +816,7 @@ export async function updateIntegrationOAuthClient(
     tokenEndpointAuthMethod?: string;
   },
 ): Promise<IntegrationOAuthClientWithSecret> {
-  await assertApplicationInScope(scope);
+  await assertSpaceInScope(scope);
   const [existing] = await db
     .select({
       autoProvisioned: integrationOauthClients.autoProvisioned,
@@ -834,7 +828,7 @@ export async function updateIntegrationOAuthClient(
     .where(
       and(
         eq(integrationOauthClients.id, clientId),
-        eq(integrationOauthClients.applicationId, scope.applicationId),
+        eq(integrationOauthClients.spaceId, scope.spaceId),
       ),
     )
     .limit(1);
@@ -900,7 +894,7 @@ export async function updateIntegrationOAuthClient(
     .where(
       and(
         eq(integrationOauthClients.id, clientId),
-        eq(integrationOauthClients.applicationId, scope.applicationId),
+        eq(integrationOauthClients.spaceId, scope.spaceId),
       ),
     )
     .returning();
@@ -912,7 +906,7 @@ export async function updateIntegrationOAuthClient(
 
 /**
  * A connect-time client resolved from a credential source — either an
- * env-provided system client or the org's per-application custom client. The
+ * env-provided system client or the org's per-space custom client. The
  * `clientRef` is what gets pinned on the connection so refresh resolves the
  * same credentials.
  */
@@ -989,7 +983,7 @@ function assertConnectClientUsable(client: IntegrationOAuthClientWithSecret): vo
   }
 }
 
-/** Project the org's per-application custom client into the resolved shape. */
+/** Project the org's per-space custom client into the resolved shape. */
 function customConnectClient(client: IntegrationOAuthClientWithSecret): ResolvedConnectClient {
   // Before the authorize redirect, never after the user has consented.
   assertConnectClientUsable(client);
@@ -1008,7 +1002,7 @@ function customConnectClient(client: IntegrationOAuthClientWithSecret): Resolved
  * Resolve WHICH OAuth client a connect flow uses, and its credentials — the
  * single home for the client-selection precedence (previously inlined in
  * `OAuth2Strategy.begin`). An integration auth may be served by the org's own
- * per-application custom clients (BYO-app, the N loaded into
+ * per-space custom clients (BYO-app, the N loaded into
  * `resolved.customClients`) AND/OR an env-provided system client. New
  * connections always use the **default** — there is no per-connect picker:
  *   - The default custom client when one is flagged (deliberate BYO-app), else
@@ -1036,7 +1030,7 @@ export function resolveConnectClient(
   // (no custom default), in which case the default system client wins. With no
   // default custom and no system client, the first custom is the connectable
   // fallback. Analogous to the org default-pointer resolution cascade in
-  // org-models.ts / org-proxies.ts, scoped per `(app, integration, auth)` here.
+  // org-models.ts / org-proxies.ts, scoped per `(space, integration, auth)` here.
   const defaultCustom = customClients.find((c) => c.isDefault);
   if (defaultCustom) return customConnectClient(defaultCustom);
   if (!autoProvisioned) {
@@ -1070,10 +1064,10 @@ export function resolveConnectClient(
  * credentials that mint/refresh a connection's tokens. The token-refresh
  * counterpart of `resolveConnectClient` — and the direct analogue of the
  * model-provider `loadInferenceCredentials`: try the system registry by id
- * first, then the per-application `integration_oauth_clients` table by id.
+ * first, then the per-space `integration_oauth_clients` table by id.
  *
- * SECURITY: the custom lookup is scoped to `(applicationId, integrationId,
- * authKey)` so a custom id belonging to another app/integration/auth never
+ * SECURITY: the custom lookup is scoped to `(spaceId, integrationId,
+ * authKey)` so a custom id belonging to another space/integration/auth never
  * resolves — the same re-validation the system branch applies. Returns `null`
  * when the id resolves to neither (since-removed client, remapped system entry,
  * cross-scope id) → the caller skips refresh (surfaces needs_reconnection).
@@ -1099,7 +1093,7 @@ export function resolveConnectClient(
  */
 export async function resolveIntegrationClientById(
   clientRef: string,
-  applicationId: string,
+  spaceId: string,
   integrationId: string,
   authKey: string,
   manifestAuthMethod: string | undefined,
@@ -1129,7 +1123,7 @@ export async function resolveIntegrationClientById(
   // typed lookup (and avoid a `uuid` cast error on a non-UUID literal).
   if (!isUuid(clientRef)) return null;
 
-  // 2) Custom per-application client, by id AND fully scoped (escalation guard).
+  // 2) Custom per-space client, by id AND fully scoped (escalation guard).
   const [row] = await db
     .select({
       clientId: integrationOauthClients.clientId,
@@ -1140,7 +1134,7 @@ export async function resolveIntegrationClientById(
     .where(
       and(
         eq(integrationOauthClients.id, clientRef),
-        eq(integrationOauthClients.applicationId, applicationId),
+        eq(integrationOauthClients.spaceId, spaceId),
         eq(integrationOauthClients.integrationId, integrationId),
         eq(integrationOauthClients.authKey, authKey),
       ),
@@ -1189,7 +1183,7 @@ export async function resolveIntegrationClientById(
 interface IntegrationClientDescriptor {
   /** `client_ref` to pass back at connect time. */
   client_ref: string;
-  /** `"built-in"` (env system client) or `"custom"` (org per-app client). */
+  /** `"built-in"` (env system client) or `"custom"` (org per-space client). */
   source: "built-in" | "custom";
   /**
    * For `"custom"` clients, the org's own OAuth `client_id` (they registered it).
@@ -1233,17 +1227,17 @@ function fingerprintSystemClientId(clientId: string): string {
 
 /**
  * List the OAuth clients available for `(packageId, authKey)`: the org's custom
- * per-application client (when registered) plus any env-provided system
+ * per-space client (when registered) plus any env-provided system
  * clients. The default mirrors the connect resolution precedence — the org's
  * custom client wins when present (it was registered on purpose), else the
  * first system client.
  */
 export async function listIntegrationClients(
-  scope: AppScope,
+  scope: SpaceScope,
   packageId: string,
   authKey: string,
 ): Promise<IntegrationClientDescriptor[]> {
-  await assertApplicationInScope(scope);
+  await assertSpaceInScope(scope);
   const customRows = await listIntegrationOAuthClientsWithSecret(scope, packageId, authKey);
   // Same generic system+DB merge the model-provider / proxy lists use: system
   // entries first, a DB row whose id collides with a system id is skipped
@@ -1299,7 +1293,7 @@ export async function listIntegrationClients(
 
 /**
  * Choose which OAuth client is the default for new connections on
- * `(application, integration, auth)` — the model-provider `setDefaultModel`
+ * `(space, integration, auth)` — the model-provider `setDefaultModel`
  * analogue. Among the N custom (BYO-app) clients at most one is flagged default
  * (DB-enforced by `idx_ioc_one_default`):
  *   - `clientRef` names one of the org's custom clients → flag it default
@@ -1312,18 +1306,18 @@ export async function listIntegrationClients(
  * partial unique never sees two defaults mid-flight.
  */
 export async function setDefaultIntegrationClient(
-  scope: AppScope,
+  scope: SpaceScope,
   integrationId: string,
   authKey: string,
   clientRef: string,
 ): Promise<void> {
-  await assertApplicationInScope(scope);
+  await assertSpaceInScope(scope);
   const customRows = await db
     .select({ id: integrationOauthClients.id })
     .from(integrationOauthClients)
     .where(
       and(
-        eq(integrationOauthClients.applicationId, scope.applicationId),
+        eq(integrationOauthClients.spaceId, scope.spaceId),
         eq(integrationOauthClients.integrationId, integrationId),
         eq(integrationOauthClients.authKey, authKey),
       ),
@@ -1341,7 +1335,7 @@ export async function setDefaultIntegrationClient(
   if (customRows.length === 0) return; // system default with no custom rows — nothing to persist.
 
   const authScope = and(
-    eq(integrationOauthClients.applicationId, scope.applicationId),
+    eq(integrationOauthClients.spaceId, scope.spaceId),
     eq(integrationOauthClients.integrationId, integrationId),
     eq(integrationOauthClients.authKey, authKey),
   );
@@ -1482,7 +1476,7 @@ function safeUrl(url: string | undefined): string | undefined {
  * are unaffected: they early-return with the existing lookup.
  */
 export async function ensureIntegrationOAuthClient(
-  scope: AppScope,
+  scope: SpaceScope,
   packageId: string,
   authKey: string,
   manifest: IntegrationManifest,
@@ -1599,7 +1593,7 @@ export async function ensureIntegrationOAuthClient(
   }
 
   // Narrow the concurrency window: re-check in case a parallel Connect just
-  // registered a client for the same (app, package, authKey).
+  // registered a client for the same (space, package, authKey).
   const racedClient = await getAutoProvisionedClient(scope, packageId, authKey);
   if (racedClient) return { ...resolved, customClients: [racedClient] };
 
@@ -1707,7 +1701,7 @@ export async function ensureIntegrationOAuthClient(
         { autoProvisioned: true },
       );
     } catch (insertErr) {
-      // Concurrent auto-DCR: a parallel Connect for the same (app, package,
+      // Concurrent auto-DCR: a parallel Connect for the same (space, package,
       // authKey) registered its client between our `racedClient` re-check above
       // and this insert. The partial unique `idx_ioc_one_auto` rejects the
       // second auto-provisioned row (Postgres 23505) — catch it and re-select
@@ -1790,23 +1784,23 @@ export async function ensureIntegrationOAuthClient(
 }
 
 /**
- * Delete one custom client by its id, scoped to the caller's application
+ * Delete one custom client by its id, scoped to the caller's space
  * (escalation guard). If it was the default, no auto-promotion — the resolution
  * cascade simply falls to the system client (or the admin re-picks a default);
  * this matches the model-provider behaviour and keeps the operation predictable.
  */
 export async function deleteIntegrationOAuthClient(
-  scope: AppScope,
+  scope: SpaceScope,
   clientId: string,
 ): Promise<{ deletedConnections: number }> {
-  await assertApplicationInScope(scope);
+  await assertSpaceInScope(scope);
   return db.transaction(async (tx) => {
     const deleted = await tx
       .delete(integrationOauthClients)
       .where(
         and(
           eq(integrationOauthClients.id, clientId),
-          eq(integrationOauthClients.applicationId, scope.applicationId),
+          eq(integrationOauthClients.spaceId, scope.spaceId),
         ),
       )
       .returning({ id: integrationOauthClients.id });
@@ -1820,7 +1814,7 @@ export async function deleteIntegrationOAuthClient(
     // (GitHub/Google) revokes all tokens it issued. We delete the orphaned
     // connections in the SAME transaction rather than leave un-refreshable
     // zombies. `client_ref` holds this client's UUID PK — globally unique and
-    // never collides with a non-UUID system id — so the applicationId-scoped
+    // never collides with a non-UUID system id — so the spaceId-scoped
     // match is exact. The pg_notify DELETE trigger fires `connection_update`
     // so live UI badges clear without a manual publish.
     const deletedConns = await tx
@@ -1828,7 +1822,7 @@ export async function deleteIntegrationOAuthClient(
       .where(
         and(
           eq(integrationConnections.clientRef, clientId),
-          eq(integrationConnections.applicationId, scope.applicationId),
+          eq(integrationConnections.spaceId, scope.spaceId),
         ),
       )
       .returning({ id: integrationConnections.id });
@@ -2013,7 +2007,7 @@ interface StoreConnectionInput {
  *
  *   - `insert`       — first acquisition (OAuth2 callback / fields submit).
  *   - `update-owned` — user-initiated reconnect / scope upgrade. Owner-scoped
- *                      WHERE (id + applicationId + actor identity + the
+ *                      WHERE (id + spaceId + actor identity + the
  *                      (packageId, authKey) the credentials belong to); throws
  *                      `notFound` when the row isn't the caller's OR belongs to
  *                      a different integration/auth (a caller-supplied id can
@@ -2024,10 +2018,10 @@ interface StoreConnectionInput {
  *                      (matches the pre-convergence refresh behaviour).
  */
 export type PersistTarget =
-  | { kind: "insert"; scope: AppScope; actor: Actor }
+  | { kind: "insert"; scope: SpaceScope; actor: Actor }
   | {
       kind: "update-owned";
-      scope: AppScope;
+      scope: SpaceScope;
       actor: Actor;
       connectionId: string;
       /** The (packageId, authKey) the credentials belong to — re-stamped into
@@ -2092,7 +2086,7 @@ interface PersistCredentialInput {
  * write-back consumes its own result shape and ignores this).
  *
  * Why no upsert-by-accountId: the previous model collapsed every connection on
- * the same `(packageId, authKey, accountId, app, owner)` tuple and silently
+ * the same `(packageId, authKey, accountId, space, owner)` tuple and silently
  * overwrote rows when `accountId` defaulted to "default". The current model
  * trusts the caller's intent — explicit connectionId = update; no id = insert.
  *
@@ -2117,7 +2111,7 @@ export async function persistCredentialBundle(
   const now = new Date();
 
   if (target.kind === "insert") {
-    await assertApplicationInScope(target.scope);
+    await assertSpaceInScope(target.scope);
     const { userId, endUserId } = actorInsert(target.actor);
     if (!input.packageId || !input.authKey || input.accountId === undefined) {
       throw new Error("persistCredentialBundle(insert): packageId, authKey, accountId required");
@@ -2137,7 +2131,7 @@ export async function persistCredentialBundle(
     // update paths never touch `label`). The extracted identity (`accountId`,
     // which `extractTokenIdentity` maps to the upstream email/login) when one
     // was produced, else "Connexion N" — N is the actor's existing connection
-    // count for this (app, integration) + 1, computed as a subquery in the
+    // count for this (space, integration) + 1, computed as a subquery in the
     // INSERT so it's one statement. This is the single source of truth for the
     // UI: no render-time fallback, the label is always set. User-editable after.
     const identityLabel =
@@ -2146,9 +2140,9 @@ export async function persistCredentialBundle(
     const labelValue: string | SQL =
       identityLabel ??
       input.labelHint ??
-      sql<string>`'Connexion ' || ((SELECT COUNT(*) FROM integration_connections WHERE application_id = ${target.scope.applicationId} AND integration_package_id = ${insertPackageId} AND ${ownerFilter}) + 1)`;
+      sql<string>`'Connexion ' || ((SELECT COUNT(*) FROM integration_connections WHERE space_id = ${target.scope.spaceId} AND integration_package_id = ${insertPackageId} AND ${ownerFilter}) + 1)`;
     // Serialize the COUNT(*)-derived "Connexion N" numbering per
-    // (app, integration, owner) with a transaction-scoped advisory lock: two
+    // (space, integration, owner) with a transaction-scoped advisory lock: two
     // concurrent first-time connects for the same actor would otherwise both
     // read the same COUNT (READ COMMITTED — neither sees the other's
     // uncommitted row) and mint duplicate "Connexion 2" labels. Under the lock
@@ -2156,7 +2150,7 @@ export async function persistCredentialBundle(
     // the freshly-inserted row and numbers monotonically. Identity/labelHint
     // labels don't need it but the lock is cheap and keeps one code path.
     const ownerKey = userId ?? endUserId ?? "";
-    const labelLockKey = `ic_label:${target.scope.applicationId}:${insertPackageId}:${ownerKey}`;
+    const labelLockKey = `ic_label:${target.scope.spaceId}:${insertPackageId}:${ownerKey}`;
     const row = await db.transaction(async (tx) => {
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${labelLockKey})::bigint)`);
       const inserted = await tx
@@ -2165,7 +2159,7 @@ export async function persistCredentialBundle(
           integrationId: insertPackageId,
           authKey: insertAuthKey,
           accountId: insertAccountId,
-          applicationId: target.scope.applicationId,
+          spaceId: target.scope.spaceId,
           userId,
           endUserId,
           credentialsEncrypted: ciphertext,
@@ -2208,9 +2202,9 @@ export async function persistCredentialBundle(
   if (input.clientRef !== undefined) set.clientRef = input.clientRef;
 
   if (target.kind === "update-owned") {
-    await assertApplicationInScope(target.scope);
+    await assertSpaceInScope(target.scope);
     const ownerPredicate = actorFilter(target.actor, integrationConnections);
-    // Owner-scoped reconnect: id + application + actor identity, PLUS the
+    // Owner-scoped reconnect: id + space + actor identity, PLUS the
     // (packageId, authKey) the new credentials belong to. Without the latter
     // two, a caller-supplied `connectionId` could overwrite ANY connection they
     // own — including one for a different integration — with this integration's
@@ -2218,7 +2212,7 @@ export async function persistCredentialBundle(
     // zero rows → the caller gets `notFound`, never a cross-integration clobber.
     const ownerScope = and(
       eq(integrationConnections.id, target.connectionId),
-      eq(integrationConnections.applicationId, target.scope.applicationId),
+      eq(integrationConnections.spaceId, target.scope.spaceId),
       eq(integrationConnections.integrationId, target.packageId),
       eq(integrationConnections.authKey, target.authKey),
       ownerPredicate,
@@ -2364,7 +2358,7 @@ export async function recordIntegrationRefreshFailure(
  * unlike the refresh write-back which leaves them untouched.
  */
 export async function saveIntegrationConnection(
-  scope: AppScope,
+  scope: SpaceScope,
   input: StoreConnectionInput,
 ): Promise<IntegrationConnectionSummary> {
   const persistInput: PersistCredentialInput = {
@@ -2399,7 +2393,7 @@ export async function saveIntegrationConnection(
 
 /**
  * List the connections the actor can *use* for an integration in this
- * application: their own rows, plus every row opted into org-wide sharing
+ * space: their own rows, plus every row opted into org-wide sharing
  * (`sharedWithOrg`) whoever owns it.
  *
  * The union — not the actor's own rows — is the correct set here because
@@ -2420,18 +2414,18 @@ export async function saveIntegrationConnection(
  * connection you can pick has to be identifiable.
  */
 export async function listIntegrationConnections(
-  scope: AppScope,
+  scope: SpaceScope,
   packageId: string,
   actor: Actor,
 ): Promise<IntegrationConnectionSummary[]> {
-  await assertApplicationInScope(scope);
+  await assertSpaceInScope(scope);
   const rows = await db
     .select()
     .from(integrationConnections)
     .where(
       and(
         eq(integrationConnections.integrationId, packageId),
-        eq(integrationConnections.applicationId, scope.applicationId),
+        eq(integrationConnections.spaceId, scope.spaceId),
         actorOrSharedFilter(actor, integrationConnections),
       ),
     );
@@ -2471,7 +2465,7 @@ interface UsableIntegration {
 
 /**
  * Integrations the actor could use when building an agent manually in the
- * current application: any integration for which a connection exists that is
+ * current space: any integration for which a connection exists that is
  * either the actor's own (`actorFilter`) OR opted into org-wide sharing
  * (`sharedWithOrg`). Mirrors the resolver predicate in `loadActorConnection`.
  *
@@ -2481,10 +2475,10 @@ interface UsableIntegration {
  * shared one, or both.
  */
 export async function listUsableIntegrationsForActor(
-  scope: AppScope,
+  scope: SpaceScope,
   actor: Actor,
 ): Promise<UsableIntegration[]> {
-  await assertApplicationInScope(scope);
+  await assertSpaceInScope(scope);
   const rows = await db
     .select({
       integrationId: integrationConnections.integrationId,
@@ -2495,7 +2489,7 @@ export async function listUsableIntegrationsForActor(
     .from(integrationConnections)
     .where(
       and(
-        eq(integrationConnections.applicationId, scope.applicationId),
+        eq(integrationConnections.spaceId, scope.spaceId),
         actorOrSharedFilter(actor, integrationConnections),
       ),
     );
@@ -2559,29 +2553,29 @@ export async function listUsableIntegrationsForActor(
  * (or per account, when multi-account).
  */
 export async function deleteIntegrationConnection(
-  scope: AppScope | ActorScope,
+  scope: SpaceScope | ActorScope,
   connectionId: string,
   actor: Actor,
 ): Promise<void> {
-  // Confirm the target application belongs to the caller's org before touching
+  // Confirm the target space belongs to the caller's org before touching
   // any connection — same escalation guard the other connection mutations run.
-  // Without it a caller could pass an application id from another org and the
-  // WHERE (id + applicationId + owner) would silently match zero rows and 404,
+  // Without it a caller could pass a space id from another org and the
+  // WHERE (id + spaceId + owner) would silently match zero rows and 404,
   // masking the cross-org attempt instead of rejecting it up front.
   //
   // The `/me/connections` path passes an `ActorScope` (no `orgId`): it is
   // actor-scoped, so the actor-ownership predicate below is the authoritative
-  // boundary and the app∈org check does not apply. The escalation guard runs
-  // only for `AppScope` callers (those that resolved an org). See docs: /me
+  // boundary and the space∈org check does not apply. The escalation guard runs
+  // only for `SpaceScope` callers (those that resolved an org). See docs: /me
   // routes skip org context.
-  if ("orgId" in scope) await assertApplicationInScope(scope);
+  if ("orgId" in scope) await assertSpaceInScope(scope);
   const ownerPredicate = actorFilter(actor, integrationConnections);
   const deleted = await db
     .delete(integrationConnections)
     .where(
       and(
         eq(integrationConnections.id, connectionId),
-        eq(integrationConnections.applicationId, scope.applicationId),
+        eq(integrationConnections.spaceId, scope.spaceId),
         ownerPredicate,
       ),
     )
@@ -2644,7 +2638,7 @@ export function serializeIntegrationConnection(
  * panel.
  */
 export async function getIntegrationAuthStatuses(
-  scope: AppScope,
+  scope: SpaceScope,
   packageId: string,
   actor: Actor,
 ): Promise<{
@@ -2674,14 +2668,14 @@ export async function getIntegrationAuthStatuses(
    */
   allow_undeclared_tools: boolean;
   /**
-   * Whether the integration is activated in the current application — an
-   * enabled `application_packages` row exists. Part of the resource state
+   * Whether the integration is activated in the current space — an
+   * enabled `space_packages` row exists. Part of the resource state
    * (mirrors the list endpoint's `active` flag), not an operation scrap.
    */
   active: boolean;
   /**
    * Admin gate: when `true`, only org admins may create personal
-   * connections in this application. Defaults to `false` when the
+   * connections in this space. Defaults to `false` when the
    * integration is not activated. Same source as the list endpoint.
    */
   block_user_connections: boolean;
@@ -2700,7 +2694,7 @@ export async function getIntegrationAuthStatuses(
    */
   platform_redirect_uri: string;
 }> {
-  await assertApplicationInScope(scope);
+  await assertSpaceInScope(scope);
   const manifest = await loadManifestOrThrow(scope, packageId);
   const authsMap = manifest.auths ?? {};
 
@@ -2734,7 +2728,7 @@ export async function getIntegrationAuthStatuses(
   const allConnections = await listIntegrationConnections(scope, packageId, actor);
   // Same precedence rule as the settings list endpoint, via the shared
   // resolver — env-backed SYSTEM integrations stay `active` here too.
-  const activation = (await resolveIntegrationActivations([packageId], scope.applicationId)).get(
+  const activation = (await resolveIntegrationActivations([packageId], scope.spaceId)).get(
     packageId,
   )!;
   const oauthClients = await db
@@ -2742,7 +2736,7 @@ export async function getIntegrationAuthStatuses(
     .from(integrationOauthClients)
     .where(
       and(
-        eq(integrationOauthClients.applicationId, scope.applicationId),
+        eq(integrationOauthClients.spaceId, scope.spaceId),
         eq(integrationOauthClients.integrationId, packageId),
       ),
     );
@@ -2811,7 +2805,7 @@ export async function getIntegrationAuthStatuses(
  * need the wider catalog don't re-fetch.
  */
 export async function readIntegrationAuth(
-  scope: AppScope,
+  scope: SpaceScope,
   packageId: string,
   authKey: string,
 ): Promise<{
@@ -2828,11 +2822,11 @@ export async function readIntegrationAuth(
 
 /**
  * Verify the package exists and is actually an integration before
- * delegating to the generic application_packages install path. The
+ * delegating to the generic space_packages install path. The
  * marketplace UI never calls `/api/packages/.../install`; it always
  * routes through this so the "wrong type" error surface is uniform.
  */
-export async function assertIsIntegration(scope: AppScope, packageId: string): Promise<void> {
+export async function assertIsIntegration(scope: SpaceScope, packageId: string): Promise<void> {
   const [row] = await db
     .select({ type: packages.type })
     .from(packages)

@@ -1,17 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Resolver smoke tests — per-application SMTP config.
+ * Resolver smoke tests — per-space SMTP config.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
+import { prefixedId } from "../../../../../lib/ids.ts";
 import { db } from "@appstrate/db/client";
-import {
-  user as userTable,
-  organizations,
-  applications,
-  applicationSmtpConfigs,
-} from "@appstrate/db/schema";
+import { user as userTable, organizations, spaces, spaceSmtpConfigs } from "@appstrate/db/schema";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import {
   resolveSmtpForClient,
@@ -21,7 +17,15 @@ import {
   deleteSmtpConfig,
 } from "../../../services/smtp.ts";
 
-async function seedApp(): Promise<string> {
+/**
+ * Seed a throwaway owner + org + space and return the SPACE ID (not the row).
+ *
+ * Deliberately NOT named `seedSpace`: the shared factory
+ * (`test/helpers/seed.ts`) already owns that name with a different signature
+ * and return type, and a local shadow of it reads like the shared one at the
+ * call site.
+ */
+async function seedOrgWithSpace(): Promise<string> {
   const ownerId = `user-${crypto.randomUUID()}`;
   await db.insert(userTable).values({
     id: ownerId,
@@ -37,15 +41,15 @@ async function seedApp(): Promise<string> {
       createdBy: ownerId,
     })
     .returning();
-  const applicationId = `app_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
-  await db.insert(applications).values({
-    id: applicationId,
+  const spaceId = prefixedId("spc");
+  await db.insert(spaces).values({
+    id: spaceId,
     orgId: org!.id,
     name: "Default",
     isDefault: true,
     createdBy: ownerId,
   });
-  return applicationId;
+  return spaceId;
 }
 
 describe("resolveSmtpForClient", () => {
@@ -54,18 +58,18 @@ describe("resolveSmtpForClient", () => {
     _clearSmtpCacheForTesting();
   });
 
-  it("returns null for level=application when no config exists", async () => {
-    const applicationId = await seedApp();
+  it("returns null for level=space when no config exists", async () => {
+    const spaceId = await seedOrgWithSpace();
     const resolved = await resolveSmtpForClient({
-      level: "application",
-      referencedApplicationId: applicationId,
+      level: "space",
+      referencedSpaceId: spaceId,
     });
     expect(resolved).toBeNull();
   });
 
-  it("returns a transport + from metadata when per-app config exists", async () => {
-    const applicationId = await seedApp();
-    await upsertSmtpConfig(applicationId, {
+  it("returns a transport + from metadata when per-space config exists", async () => {
+    const spaceId = await seedOrgWithSpace();
+    await upsertSmtpConfig(spaceId, {
       host: "__test_json__",
       port: 587,
       username: "u",
@@ -74,23 +78,21 @@ describe("resolveSmtpForClient", () => {
       fromName: "Tenant",
     });
     const resolved = await resolveSmtpForClient({
-      level: "application",
-      referencedApplicationId: applicationId,
+      level: "space",
+      referencedSpaceId: spaceId,
     });
     expect(resolved).not.toBeNull();
-    expect(resolved!.source).toBe("per-app");
+    expect(resolved!.source).toBe("per-space");
     expect(resolved!.fromAddress).toBe("noreply@tenant.example");
     expect(resolved!.fromName).toBe("Tenant");
   });
 
   it("is cached across calls and invalidated on upsert/delete", async () => {
-    const applicationId = await seedApp();
+    const spaceId = await seedOrgWithSpace();
     // First call: null, cached.
-    expect(
-      await resolveSmtpForClient({ level: "application", referencedApplicationId: applicationId }),
-    ).toBeNull();
+    expect(await resolveSmtpForClient({ level: "space", referencedSpaceId: spaceId })).toBeNull();
     // Upsert invalidates the cache → next call picks up the row.
-    await upsertSmtpConfig(applicationId, {
+    await upsertSmtpConfig(spaceId, {
       host: "__test_json__",
       port: 587,
       username: "u",
@@ -98,25 +100,25 @@ describe("resolveSmtpForClient", () => {
       fromAddress: "noreply@tenant.example",
     });
     const afterUpsert = await resolveSmtpForClient({
-      level: "application",
-      referencedApplicationId: applicationId,
+      level: "space",
+      referencedSpaceId: spaceId,
     });
     expect(afterUpsert).not.toBeNull();
     // Delete invalidates again.
-    await deleteSmtpConfig(applicationId);
+    await deleteSmtpConfig(spaceId);
     const afterDelete = await resolveSmtpForClient({
-      level: "application",
-      referencedApplicationId: applicationId,
+      level: "space",
+      referencedSpaceId: spaceId,
     });
     expect(afterDelete).toBeNull();
   });
 
   it("treats a row whose ciphertext cannot be decrypted as unconfigured", async () => {
-    const applicationId = await seedApp();
+    const spaceId = await seedOrgWithSpace();
     // Envelope with a kid absent from the keyring — decryption must fail and
     // the resolver must surface "not configured" instead of throwing.
-    await db.insert(applicationSmtpConfigs).values({
-      applicationId,
+    await db.insert(spaceSmtpConfigs).values({
+      spaceId,
       host: "smtp.tenant.example",
       port: 587,
       username: "u",
@@ -124,8 +126,8 @@ describe("resolveSmtpForClient", () => {
       fromAddress: "noreply@tenant.example",
     });
     const resolved = await resolveSmtpForClient({
-      level: "application",
-      referencedApplicationId: applicationId,
+      level: "space",
+      referencedSpaceId: spaceId,
     });
     expect(resolved).toBeNull();
   });
@@ -134,14 +136,14 @@ describe("resolveSmtpForClient", () => {
     // Test env wipes SMTP vars by default → env SMTP should be null.
     const resolved = await resolveSmtpForClient({
       level: "org",
-      referencedApplicationId: null,
+      referencedSpaceId: null,
     });
     expect(resolved).toBeNull();
   });
 
   it("invalidateSmtpCache forces a DB re-read", async () => {
-    const applicationId = await seedApp();
-    await upsertSmtpConfig(applicationId, {
+    const spaceId = await seedOrgWithSpace();
+    await upsertSmtpConfig(spaceId, {
       host: "__test_json__",
       port: 587,
       username: "u",
@@ -149,24 +151,24 @@ describe("resolveSmtpForClient", () => {
       fromAddress: "first@tenant.example",
     });
     const first = await resolveSmtpForClient({
-      level: "application",
-      referencedApplicationId: applicationId,
+      level: "space",
+      referencedSpaceId: spaceId,
     });
     expect(first!.fromAddress).toBe("first@tenant.example");
 
     // Direct DB update bypassing the service → cache would still have the
     // old row. Manually invalidate to force re-read.
-    await upsertSmtpConfig(applicationId, {
+    await upsertSmtpConfig(spaceId, {
       host: "__test_json__",
       port: 587,
       username: "u",
       pass: "p",
       fromAddress: "second@tenant.example",
     });
-    invalidateSmtpCache(applicationId);
+    invalidateSmtpCache(spaceId);
     const second = await resolveSmtpForClient({
-      level: "application",
-      referencedApplicationId: applicationId,
+      level: "space",
+      referencedSpaceId: spaceId,
     });
     expect(second!.fromAddress).toBe("second@tenant.example");
   });
