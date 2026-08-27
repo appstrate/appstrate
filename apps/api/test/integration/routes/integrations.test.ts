@@ -57,7 +57,7 @@ function gmailManifest(name = "@official/gmail"): IntegrationManifest {
           http: {
             in: "header",
             name: "Authorization",
-            prefix: "Bearer",
+            prefix: "Bearer ",
             value: "{$credential.api_key}",
           },
         },
@@ -72,7 +72,7 @@ function gmailManifest(name = "@official/gmail"): IntegrationManifest {
           http: {
             in: "header",
             name: "Authorization",
-            prefix: "Bearer",
+            prefix: "Bearer ",
             value: "{$credential.access_token}",
           },
         },
@@ -349,6 +349,29 @@ describe("GET /api/integrations/:packageId", () => {
     const res = await app.request("/api/integrations/@myorg/missing", {
       headers: authHeaders(ctx),
     });
+    expect(res.status).toBe(404);
+  });
+
+  it("refuses a stored manifest whose Authorization prefix is a bare auth scheme", async () => {
+    // Deliberately invalid: the shape every manifest stored BEFORE the §7.6
+    // prefix gate carries. `seedIntegration` is a raw insert, so this is
+    // byte-for-byte what such a row looks like in `packages.draft_manifest`.
+    // Every read path re-parses through `integrationManifestSchema`, so the
+    // row fails LOUDLY here instead of quietly rendering `BearerTOKEN`
+    // upstream. `scripts/migration/0005-afps-bare-auth-scheme-prefix.sql`
+    // moves those rows; this pins what happens until it is run.
+    const stale = gmailManifest("@myorg/stale-prefix") as unknown as Record<string, unknown>;
+    const auths = stale.auths as Record<string, { delivery: { http: { prefix: string } } }>;
+    auths.api!.delivery.http.prefix = "Bearer";
+    await seedIntegration(ctx.orgId, stale as unknown as IntegrationManifest);
+
+    const res = await app.request("/api/integrations/@myorg/stale-prefix", {
+      headers: authHeaders(ctx),
+    });
+    // 404, not 200: the route maps `invalid_manifest` onto "not found", so a
+    // stale row presents as a missing integration rather than a bad prefix.
+    // Loud, but not self-explaining — which is exactly why 0005 is worth
+    // running rather than waiting for the failure to be diagnosed.
     expect(res.status).toBe(404);
   });
 

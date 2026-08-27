@@ -123,7 +123,7 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
       ],
       {
         apikey: { headerName: "X-Api-Key", headerPrefix: "", value: "K" },
-        oauth: { headerName: "Authorization", headerPrefix: "Bearer", value: "TOKEN" },
+        oauth: { headerName: "Authorization", headerPrefix: "Bearer ", value: "TOKEN" },
       },
     );
     const { deps, source, getFetch } = makeDeps(initial, async () => true);
@@ -150,7 +150,7 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
     const initial = wire([{ authKey: "oauth", authType: "oauth2" }], {
       oauth: {
         headerName: "Authorization",
-        headerPrefix: "Bearer",
+        headerPrefix: "Bearer ",
         value: "PLATFORM",
         allowServerOverride: true,
       },

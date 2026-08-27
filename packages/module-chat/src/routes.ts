@@ -9,9 +9,9 @@
  * it stores the user turn before inference and the assistant turn when the
  * stream finalizes (`persistence.ts`, `finalize-stream.ts`). The routes below
  * therefore never accept a message — `GET /api/chat/sessions/:id` returns the
- * stored tree nodes for the client's read-only history adapter, in the
- * `{ id, parent_id, format, content }` shape assistant-ui's `ai-sdk/v6` format
- * adapter decodes.
+ * stored messages for the client's read-only history adapter, in `seq` order,
+ * as `{ id, content }` nodes assistant-ui's `ai-sdk/v6` format adapter
+ * decodes.
  *
  * Rate limiting: `services.http.rateLimit` (platform capability), captured into
  * the router's `ChatPlatformDeps` at module init (see index.ts).
@@ -69,8 +69,6 @@ function toSessionDto(row: SessionRow) {
 function toMessageDto(row: MessageRow) {
   return {
     id: row.messageId,
-    parent_id: row.parentId,
-    format: row.format,
     content: row.content,
   };
 }
@@ -153,7 +151,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     },
   );
 
-  // GET /api/chat/sessions/:id — the conversation's tree nodes (history load)
+  // GET /api/chat/sessions/:id — the conversation's messages, in seq order (history load)
   router.get("/api/chat/sessions/:id", requireModulePermission("chat", "read"), async (c) => {
     const session = await getOwnedSession(c.req.param("id"), c.get("orgId"), c.get("user").id);
     const messages = await loadMessages(session.id);

@@ -96,3 +96,35 @@ export function projectHttpDeliveryConfig(
   }
   return cfg;
 }
+
+/**
+ * Header names whose value is an RFC 9110 `credentials` production — an auth
+ * scheme token, one SP, then the credentials. Only in these positions is a
+ * bare token prefix a defect; anywhere else (`Cookie: session=`) it is an
+ * ordinary literal.
+ */
+const AUTH_SCHEME_HEADERS = new Set(["authorization", "proxy-authorization"]);
+
+/** RFC 9110 `token` grammar — matches a prefix that is nothing but a scheme. */
+const BARE_AUTH_SCHEME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
+/**
+ * True when `prefix` is nothing but an auth-scheme token AND `headerName` is a
+ * position whose value is an RFC 9110 `credentials` production.
+ *
+ * `prefix` is a LITERAL prepended to the rendered credential (AFPS §7.6), so a
+ * bare `"Bearer"` renders `Authorization: BearerTOKEN` — a malformed credential
+ * every upstream answers with a 401 that names nothing. The injector
+ * (`@appstrate/afps-runtime`'s `planHttpDeliveryInjection`) concatenates
+ * verbatim and repairs nothing, so every path that accepts an author-written
+ * prefix must refuse the bare form up front instead. This is the one grammar
+ * those gates share: the integration manifest validator
+ * (`@appstrate/core/integration`, install time) and the portable runtime's
+ * local creds file (`resolvers/integration-api-call.ts`, load time).
+ *
+ * Callers pass the EFFECTIVE header name — the one that will actually be sent,
+ * after their own defaulting has been applied.
+ */
+export function isBareAuthSchemePrefix(headerName: string, prefix: string): boolean {
+  return AUTH_SCHEME_HEADERS.has(headerName.toLowerCase()) && BARE_AUTH_SCHEME.test(prefix);
+}

@@ -16,7 +16,9 @@
  *
  * 404 from the run-config endpoint is "no inheritance, fall back to
  * flags + defaults" — typical for a system agent that hasn't been
- * installed in the space. Anything else bubbles as a hard error.
+ * installed in the space. Anything else bubbles as a hard error, and so
+ * does a 200 whose body is not the current wire shape (see
+ * `fetchRunConfigPayload`).
  */
 
 import { CLI_USER_AGENT } from "../../lib/version.ts";
@@ -58,7 +60,10 @@ interface FetchRunConfigInput {
 }
 
 export class RunConfigFetchError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    public readonly hint?: string,
+  ) {
     super(message);
     this.name = "RunConfigFetchError";
   }
@@ -67,7 +72,8 @@ export class RunConfigFetchError extends Error {
 /**
  * Call `GET /api/spaces/{spaceId}/packages/{scope}/{name}/run-config`
  * and return the parsed payload. Returns `null` on 404 (no inheritance);
- * any other non-2xx surfaces as `RunConfigFetchError`.
+ * any other non-2xx surfaces as `RunConfigFetchError`, as does a 200 whose
+ * body the reader cannot use.
  */
 export async function fetchRunConfigPayload(
   input: FetchRunConfigInput,
@@ -94,7 +100,35 @@ export async function fetchRunConfigPayload(
       `Failed to fetch run-config: HTTP ${res.status} ${res.statusText}`,
     );
   }
-  return (await res.json()) as ResolvedRunConfig;
+  // This is the only boundary between untrusted JSON and `ResolvedRunConfig`,
+  // and the instance on the other end is NOT this build: `appstrate run
+  // @scope/agent` talks to whatever version the user pinned, and the CLI has
+  // no version handshake to negotiate one. So a shape gap has to be named
+  // here or nowhere — `mergeRunConfig` dereferences `input` unguarded, and an
+  // absent member would otherwise surface as `undefined is not an object`,
+  // which names neither the field nor the server that omitted it.
+  //
+  // Only `input` is checked, deliberately: it is the one member the reader
+  // requires to be PRESENT. Every other member is declared `T | null`, so the
+  // `?? null` beside each collapses an absent one into a value the type
+  // already permits and that states the truth ("nothing set"). Same narrowness
+  // as `apiList` in `lib/api.ts`, which validates the single member it
+  // unwraps and lets the rest of the envelope be.
+  const payload: unknown = await res.json();
+  const inputLayer = (payload as { input?: { values?: unknown; locked_fields?: unknown } } | null)
+    ?.input;
+  if (
+    !inputLayer ||
+    typeof inputLayer.values !== "object" ||
+    inputLayer.values === null ||
+    !Array.isArray(inputLayer.locked_fields)
+  ) {
+    throw new RunConfigFetchError(
+      `Run-config from ${instance} has no usable \`input\` member ({ values, locked_fields }).`,
+      "That instance predates the per-space stored input layer this CLI reads — upgrade it, or re-run with --no-inherit.",
+    );
+  }
+  return payload as ResolvedRunConfig;
 }
 
 interface MergeRunConfigInputs {
@@ -140,8 +174,8 @@ export function mergeRunConfig(inputs: MergeRunConfigInputs): InheritedRunConfig
     generation: inherited?.generation ?? null,
     proxyId,
     versionPin,
-    inputValues: inherited?.input?.values ?? {},
-    lockedInputFields: inherited?.input?.locked_fields ?? [],
+    inputValues: inherited?.input.values ?? {},
+    lockedInputFields: inherited?.input.locked_fields ?? [],
     inherited: inherited !== null,
   };
 }

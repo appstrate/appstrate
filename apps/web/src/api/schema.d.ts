@@ -4839,9 +4839,6 @@ export interface components {
         ChatMessage: {
             /** @description Server-generated message id */
             id: string;
-            parent_id: string | null;
-            /** @description Storage format adapter id (e.g. ai-sdk/v6) */
-            format: string;
             /** @description Opaque encoded message */
             content: unknown;
         };

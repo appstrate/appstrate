@@ -32,7 +32,7 @@ interface RunConfigurationTabProps {
 export function RunConfigurationTab({ run, agentName }: RunConfigurationTabProps) {
   const { t } = useTranslation(["agents", "settings"]);
   const connectionsUsed = run.connections_used ?? null;
-  const isInline = run.package_ephemeral === true;
+  const isInline = run.package_ephemeral;
   // Source agent deleted (FK SET NULL after migration 0017): the run row
   // survives but the agent page it would link to is gone.
   const isOrphaned = run.packageId == null && !isInline;

@@ -208,13 +208,20 @@ export const forkSchema = z.object({
  * (e.g. `content: 1`) are rejected as a 400 instead of blowing up downstream
  * as a 500.
  *
- * Both objects are non-strict, so an unknown key (a client still sending the
- * retired `source_code`, say) is silently stripped rather than rejected.
+ * All three bodies below are `.strict()`. They were open, and the retired
+ * `source_code` key was the reason: dropped when its last reader died with the
+ * `tool` package type, it kept being accepted here — stripped in silence, so a
+ * client still sending it got a 201 and a package without it, with nothing
+ * anywhere saying the field had gone. A retired name must fail loudly
+ * (`docs/NO_TRANSITIONAL_CODE.md` §1), which is the rule that closed the four
+ * launch surfaces in #1187; the barrier is generic and names no field.
  */
-export const packageJsonCreateSchema = z.object({
-  manifest: z.record(z.string(), z.unknown()),
-  content: z.string().optional(),
-});
+export const packageJsonCreateSchema = z
+  .object({
+    manifest: z.record(z.string(), z.unknown()),
+    content: z.string().optional(),
+  })
+  .strict();
 
 /**
  * The create body of a type whose content file is MANDATORY — `agent` and
@@ -229,23 +236,27 @@ export const packageJsonCreateSchema = z.object({
  * it is a `refine` rather than `.min(1)` because "not blank" has no JSON
  * Schema spelling, so the published body says `required` and nothing more.
  */
-export const packageJsonCreateWithContentSchema = z.object({
-  manifest: z.record(z.string(), z.unknown()),
-  content: z.string().refine((v) => v.trim().length > 0, "Content cannot be empty"),
-});
+export const packageJsonCreateWithContentSchema = z
+  .object({
+    manifest: z.record(z.string(), z.unknown()),
+    content: z.string().refine((v) => v.trim().length > 0, "Content cannot be empty"),
+  })
+  .strict();
 
-export const packageJsonUpdateSchema = z.object({
-  manifest: z.record(z.string(), z.unknown()).optional(),
-  content: z.string().optional(),
-  /**
-   * Optimistic-lock token. Mandatory and integral — the value is a row version,
-   * never a fraction. This used to be `z.number().optional()` with a hand-rolled
-   * `null / typeof !== "number"` check in the handler restating both rules; the
-   * schema now carries them, so the spec's `required: ["lock_version"]` and
-   * `type: "integer"` have exactly one runtime counterpart.
-   */
-  lock_version: z.number().int(),
-});
+export const packageJsonUpdateSchema = z
+  .object({
+    manifest: z.record(z.string(), z.unknown()).optional(),
+    content: z.string().optional(),
+    /**
+     * Optimistic-lock token. Mandatory and integral — the value is a row version,
+     * never a fraction. This used to be `z.number().optional()` with a hand-rolled
+     * `null / typeof !== "number"` check in the handler restating both rules; the
+     * schema now carries them, so the spec's `required: ["lock_version"]` and
+     * `type: "integer"` have exactly one runtime counterpart.
+     */
+    lock_version: z.number().int(),
+  })
+  .strict();
 
 /**
  * Body of `POST /api/packages/{type}/{scope}/{name}/versions`. The body itself
@@ -628,7 +639,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     const orgSlug = c.get("orgSlug");
     const user = c.get("user");
 
-    // JSON body create path: { manifest, content?, source? }
+    // JSON body create path: { manifest, content? } — and nothing else.
     if (rcfg.jsonBodyCreate) {
       // The two create bodies differ only in whether `content` is mandatory,
       // which is what `requireContent` means. Selecting the schema here — as

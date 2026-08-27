@@ -113,6 +113,17 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
     sharedTypeName: "InstalledPackage",
     description: "SpacePackage ↔ InstalledPackage",
   },
+  // Inline run-config response — the CLI's only source for the per-space model /
+  // generation / proxy / version pin / stored input layer. Unregistered, the
+  // shared-type was free to mark `generation` and `input` optional while the
+  // spec required them, which is exactly the drift this step exists to catch.
+  {
+    path: "/api/spaces/{spaceId}/packages/{scope}/{name}/run-config",
+    method: "get",
+    status: "200",
+    sharedTypeName: "ResolvedRunConfig",
+    description: "GET .../run-config 200 ↔ ResolvedRunConfig",
+  },
   {
     specSchemaName: "IntegrationPin",
     sharedTypeName: "IntegrationPin",
@@ -240,6 +251,14 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
  * or inline `path`. Each listed field is a deliberate, reviewed exception:
  * the shared-type marks it required but the spec intentionally leaves it
  * optional. Keep every entry justified with a comment.
+ *
+ * This register and {@link KNOWN_REVERSE_DRIFT} are both checked for LIVENESS
+ * on every run: a key that resolves to no `responseTypeRegistry` entry, and a
+ * field that suppressed no finding, each fail verify-openapi. An entry whose
+ * drift is gone stops recording a divergence and starts pre-approving whatever
+ * lands at that name next — the same argument `GRANDFATHERED` makes in
+ * `scripts/verify-no-migration-dml.ts`, applied one notch tighter because these
+ * two describe files that are still edited.
  */
 export const KNOWN_DRIFT: Record<string, string[]> = {
   // OrganizationMember requires `orgId`, but the OrgMember response schema does
@@ -247,3 +266,30 @@ export const KNOWN_DRIFT: Record<string, string[]> = {
   // resource / the route's :orgId path param.
   OrgMember: ["orgId"],
 };
+
+/**
+ * The mirror register: fields the spec marks **required** while the shared-type
+ * marks them **optional**, keyed the same way as {@link KNOWN_DRIFT}.
+ *
+ * This direction is harmless on the wire — the server sends the field either
+ * way — which is why it went unnoticed for so long. It is not harmless in the
+ * type, because an optional member is a standing invitation to write a
+ * `?? fallback` branch for a case the server cannot produce. `ResolvedRunConfig`
+ * carried exactly that: `generation?` and `input?` annotated "Optional for
+ * compatibility with older servers", against a spec that required both and a
+ * CLI that has no version negotiation to make the tolerance mean anything.
+ *
+ * An entry here is one of exactly two things, and it must say which:
+ *   1. a legitimate asymmetry — a consumer is RIGHT to treat a guaranteed field
+ *      as absent-able, for a stated structural reason; or
+ *   2. a real finding this PR did not fix, with the fix named and the reason it
+ *      was deferred.
+ * Recording (2) as if it were (1) would make this register the same kind of
+ * inaccurate claim the check exists to catch, so the distinction is the point.
+ *
+ * A field the type does not declare at all is not drift and needs no entry: the
+ * check fires only on a member the type says may be absent — `x?: T` or
+ * `x: T | undefined`, which it reads as the same fact. A `| null` member is not
+ * one of those: it guarantees the key and only permits an empty value.
+ */
+export const KNOWN_REVERSE_DRIFT: Record<string, string[]> = {};

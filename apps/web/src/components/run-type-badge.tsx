@@ -26,7 +26,7 @@ export function RunTypeBadge({
   className?: string;
 }) {
   const { t } = useTranslation(["agents"]);
-  const isInline = run.package_ephemeral === true;
+  const isInline = run.package_ephemeral;
   const Icon = isInline ? MessageSquare : Bot;
 
   return (

@@ -82,9 +82,12 @@ export interface ProxyCredentialsPayload {
   credentialHeaderName?: string;
   /**
    * Literal prefix prepended to the credential value — typically `Bearer `
-   * for OAuth, empty for most API-key providers. For compatibility, a bare
-   * RFC auth-scheme token such as `Bearer` gets one separator only when the
-   * target is Authorization or Proxy-Authorization.
+   * for OAuth, empty for most API-key providers. `planInjectedCredentialHeader`
+   * concatenates it verbatim, so it MUST carry its own separator: a bare scheme
+   * (`Bearer`) sends `Authorization: BearerTOKEN`. Nothing repairs that here —
+   * the value comes from the auth-type default table or from a manifest
+   * `delivery.http.prefix`, and the bare form is refused at install time by
+   * `integrationManifestSchema` (`@appstrate/core/integration`).
    */
   credentialHeaderPrefix?: string;
   /**

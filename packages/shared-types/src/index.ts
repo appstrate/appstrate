@@ -186,7 +186,7 @@ export type EnrichedRun = RunWireDto & {
    */
   file_counts: { input: number; output: number };
   /** True if the run's source package is an inline/ephemeral shadow (POST /api/runs/inline). */
-  package_ephemeral?: boolean;
+  package_ephemeral: boolean;
   /** For inline runs only — snapshot of the manifest submitted at run time. Null after compaction. */
   inline_manifest?: Record<string, unknown> | null;
   /** For inline runs only — snapshot of the prompt submitted at run time. Null after compaction. */
@@ -962,8 +962,7 @@ export interface InstalledPackage {
  * `space_packages` stores is published here.
  */
 export interface ResolvedRunConfig {
-  /** Optional for compatibility with older servers; current API always emits it. */
-  generation?: ModelGenerationSettings | null;
+  generation: ModelGenerationSettings | null;
   modelId: string | null;
   proxyId: string | null;
   /** Pinned semver label (`1.2.3`), or null when the space uses the floating dist-tag. */
@@ -973,10 +972,8 @@ export interface ResolvedRunConfig {
    * (`apps/api/src/services/input-resolution.ts`), on the wire under the same
    * `{ values, locked_fields }` pair `PUT /api/agents/{scope}/{name}/input-settings`
    * reads and writes.
-   *
-   * Optional for compatibility with older servers; current API always emits it.
    */
-  input?: {
+  input: {
     /** Editor-set values, partial by design. */
     values: Record<string, unknown>;
     /** Fields the editor froze — a launch may not set them. */

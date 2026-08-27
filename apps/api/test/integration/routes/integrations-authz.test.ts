@@ -56,7 +56,11 @@ function gmailManifest(name = "@myorg/gmail"): IntegrationManifest {
       api: {
         type: "api_key",
         authorizedUris: ["https://gmail.googleapis.com/**"],
-        delivery: httpHeaderDelivery({ name: "Authorization", prefix: "Bearer", field: "api_key" }),
+        delivery: httpHeaderDelivery({
+          name: "Authorization",
+          prefix: "Bearer ",
+          field: "api_key",
+        }),
       },
       google: {
         type: "oauth2",
@@ -66,7 +70,7 @@ function gmailManifest(name = "@myorg/gmail"): IntegrationManifest {
         authorizedUris: ["https://www.googleapis.com/**"],
         delivery: httpHeaderDelivery({
           name: "Authorization",
-          prefix: "Bearer",
+          prefix: "Bearer ",
           field: "access_token",
         }),
       },
