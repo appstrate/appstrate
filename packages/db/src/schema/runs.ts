@@ -510,7 +510,7 @@ export const packagePersistence = pgTable(
       .on(table.runId)
       .where(sql`${table.runId} IS NOT NULL`),
     // FK cascade scan: space delete CASCADEs package_persistence.space_id
-    // (migration 0054). Same gap `pkp_run_id` already closes for `run_id`, and
+    // (migration 0055). Same gap `pkp_run_id` already closes for `run_id`, and
     // the same reason it cannot be served by anything above: `pkp_key_unique`
     // and `pkp_lookup` are package-LEADING, `pkp_org` is org-leading, and the
     // cascade's only qual is `space_id`. Postgres indexes the referenced side

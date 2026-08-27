@@ -212,8 +212,13 @@ export const forkSchema = z
  * (e.g. `content: 1`) are rejected as a 400 instead of blowing up downstream
  * as a 500.
  *
- * Both objects are non-strict, so an unknown key (a client still sending the
- * retired `source_code`, say) is silently stripped rather than rejected.
+ * All three bodies below are `.strict()`. They were open, and the retired
+ * `source_code` key was the reason: dropped when its last reader died with the
+ * `tool` package type, it kept being accepted here — stripped in silence, so a
+ * client still sending it got a 201 and a package without it, with nothing
+ * anywhere saying the field had gone. A retired name must fail loudly
+ * (`docs/NO_TRANSITIONAL_CODE.md` §1), which is the rule that closed the four
+ * launch surfaces in #1187; the barrier is generic and names no field.
  */
 export const packageJsonCreateSchema = z
   .object({
@@ -638,7 +643,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     const orgSlug = c.get("orgSlug");
     const user = c.get("user");
 
-    // JSON body create path: { manifest, content?, source? }
+    // JSON body create path: { manifest, content? } — and nothing else.
     if (rcfg.jsonBodyCreate) {
       // The two create bodies differ only in whether `content` is mandatory,
       // which is what `requireContent` means. Selecting the schema here — as

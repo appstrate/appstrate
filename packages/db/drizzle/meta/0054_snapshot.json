@@ -1,5 +1,5 @@
 {
-  "id": "3f2a91c6-7d84-4e05-b1a9-0c6e5d38b7f1",
+  "id": "c39a75c3-e0e7-4a2a-b7ee-4628448593e1",
   "prevId": "f1c9d0a4-5b3e-4a72-9d1f-6c8e2b7a4530",
   "version": "7",
   "dialect": "postgresql",
@@ -833,8 +833,8 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "model_provider_pairings_credential_id_fk": {
-          "name": "model_provider_pairings_credential_id_fk",
+        "model_provider_pairings_credential_id_model_provider_credentials_id_fk": {
+          "name": "model_provider_pairings_credential_id_model_provider_credentials_id_fk",
           "tableFrom": "model_provider_pairings",
           "tableTo": "model_provider_credentials",
           "columnsFrom": ["credential_id"],
@@ -904,11 +904,23 @@
           "primaryKey": false,
           "notNull": false
         },
+        "accepted_by": {
+          "name": "accepted_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "expires_at": {
           "name": "expires_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true
+        },
+        "accepted_at": {
+          "name": "accepted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -963,6 +975,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "idx_org_invitations_accepted_by": {
+          "name": "idx_org_invitations_accepted_by",
+          "columns": [
+            {
+              "expression": "accepted_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -980,6 +1007,15 @@
           "tableFrom": "org_invitations",
           "tableTo": "user",
           "columnsFrom": ["invited_by"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "org_invitations_accepted_by_user_id_fk": {
+          "name": "org_invitations_accepted_by_user_id_fk",
+          "tableFrom": "org_invitations",
+          "tableTo": "user",
+          "columnsFrom": ["accepted_by"],
           "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
@@ -1498,122 +1534,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.spaces": {
-      "name": "spaces",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "org_id": {
-          "name": "org_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "is_default": {
-          "name": "is_default",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "settings": {
-          "name": "settings",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
-        },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "idx_spaces_org_id": {
-          "name": "idx_spaces_org_id",
-          "columns": [
-            {
-              "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_spaces_one_default": {
-          "name": "idx_spaces_one_default",
-          "columns": [
-            {
-              "expression": "org_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "where": "\"spaces\".\"is_default\" = true",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "spaces_org_id_organizations_id_fk": {
-          "name": "spaces_org_id_organizations_id_fk",
-          "tableFrom": "spaces",
-          "tableTo": "organizations",
-          "columnsFrom": ["org_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "spaces_created_by_user_id_fk": {
-          "name": "spaces_created_by_user_id_fk",
-          "tableFrom": "spaces",
-          "tableTo": "user",
-          "columnsFrom": ["created_by"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.end_users": {
       "name": "end_users",
       "schema": "",
@@ -1777,6 +1697,122 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.spaces": {
+      "name": "spaces",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "org_id": {
+          "name": "org_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_default": {
+          "name": "is_default",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "settings": {
+          "name": "settings",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_spaces_org_id": {
+          "name": "idx_spaces_org_id",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_spaces_one_default": {
+          "name": "idx_spaces_one_default",
+          "columns": [
+            {
+              "expression": "org_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"spaces\".\"is_default\" = true",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "spaces_org_id_organizations_id_fk": {
+          "name": "spaces_org_id_organizations_id_fk",
+          "tableFrom": "spaces",
+          "tableTo": "organizations",
+          "columnsFrom": ["org_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "spaces_created_by_user_id_fk": {
+          "name": "spaces_created_by_user_id_fk",
+          "tableFrom": "spaces",
+          "tableTo": "user",
+          "columnsFrom": ["created_by"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.profiles": {
       "name": "profiles",
       "schema": "",
@@ -1835,139 +1871,6 @@
           "value": "\"profiles\".\"language\" IN ('fr', 'en')"
         }
       },
-      "isRLSEnabled": false
-    },
-    "public.space_packages": {
-      "name": "space_packages",
-      "schema": "",
-      "columns": {
-        "space_id": {
-          "name": "space_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "package_id": {
-          "name": "package_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "version_id": {
-          "name": "version_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "input_settings": {
-          "name": "input_settings",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{\"values\":{},\"locked\":[]}'::jsonb"
-        },
-        "model_id": {
-          "name": "model_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "generation_config": {
-          "name": "generation_config",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "proxy_id": {
-          "name": "proxy_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "block_user_connections": {
-          "name": "block_user_connections",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "enabled": {
-          "name": "enabled",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": true
-        },
-        "installed_at": {
-          "name": "installed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "idx_space_packages_package_id": {
-          "name": "idx_space_packages_package_id",
-          "columns": [
-            {
-              "expression": "package_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "space_packages_space_id_spaces_id_fk": {
-          "name": "space_packages_space_id_spaces_id_fk",
-          "tableFrom": "space_packages",
-          "tableTo": "spaces",
-          "columnsFrom": ["space_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "space_packages_package_id_packages_id_fk": {
-          "name": "space_packages_package_id_packages_id_fk",
-          "tableFrom": "space_packages",
-          "tableTo": "packages",
-          "columnsFrom": ["package_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "space_packages_version_id_package_versions_id_fk": {
-          "name": "space_packages_version_id_package_versions_id_fk",
-          "tableFrom": "space_packages",
-          "tableTo": "package_versions",
-          "columnsFrom": ["version_id"],
-          "columnsTo": ["id"],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "space_packages_space_id_package_id_pk": {
-          "name": "space_packages_space_id_package_id_pk",
-          "columns": ["space_id", "package_id"]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.package_dist_tags": {
@@ -2455,6 +2358,139 @@
           "value": "\"draft_manifest\" IS NULL OR (\"draft_manifest\" ->> 'schema_version') IS NULL OR (\"draft_manifest\" ->> 'schema_version') LIKE '0.%'"
         }
       },
+      "isRLSEnabled": false
+    },
+    "public.space_packages": {
+      "name": "space_packages",
+      "schema": "",
+      "columns": {
+        "space_id": {
+          "name": "space_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "package_id": {
+          "name": "package_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version_id": {
+          "name": "version_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "input_settings": {
+          "name": "input_settings",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{\"values\":{},\"locked\":[]}'::jsonb"
+        },
+        "model_id": {
+          "name": "model_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "generation_config": {
+          "name": "generation_config",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "proxy_id": {
+          "name": "proxy_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "block_user_connections": {
+          "name": "block_user_connections",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "enabled": {
+          "name": "enabled",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "installed_at": {
+          "name": "installed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "idx_space_packages_package_id": {
+          "name": "idx_space_packages_package_id",
+          "columns": [
+            {
+              "expression": "package_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "space_packages_space_id_spaces_id_fk": {
+          "name": "space_packages_space_id_spaces_id_fk",
+          "tableFrom": "space_packages",
+          "tableTo": "spaces",
+          "columnsFrom": ["space_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "space_packages_package_id_packages_id_fk": {
+          "name": "space_packages_package_id_packages_id_fk",
+          "tableFrom": "space_packages",
+          "tableTo": "packages",
+          "columnsFrom": ["package_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "space_packages_version_id_package_versions_id_fk": {
+          "name": "space_packages_version_id_package_versions_id_fk",
+          "tableFrom": "space_packages",
+          "tableTo": "package_versions",
+          "columnsFrom": ["version_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "space_packages_space_id_package_id_pk": {
+          "name": "space_packages_space_id_package_id_pk",
+          "columns": ["space_id", "package_id"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.llm_usage": {
@@ -2988,21 +3024,6 @@
           ],
           "isUnique": false,
           "where": "\"package_persistence\".\"run_id\" IS NOT NULL",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "pkp_space": {
-          "name": "pkp_space",
-          "columns": [
-            {
-              "expression": "space_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -4322,21 +4343,6 @@
           "method": "btree",
           "with": {}
         },
-        "idx_notifications_space": {
-          "name": "idx_notifications_space",
-          "columns": [
-            {
-              "expression": "space_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "uq_notifications_run_recipient_type": {
           "name": "uq_notifications_run_recipient_type",
           "columns": [
@@ -5210,6 +5216,15 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
+        "integration_org_defaults_connection_id_integration_connections_id_fk": {
+          "name": "integration_org_defaults_connection_id_integration_connections_id_fk",
+          "tableFrom": "integration_org_defaults",
+          "tableTo": "integration_connections",
+          "columnsFrom": ["connection_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
         "integration_org_defaults_created_by_user_id_fk": {
           "name": "integration_org_defaults_created_by_user_id_fk",
           "tableFrom": "integration_org_defaults",
@@ -5217,15 +5232,6 @@
           "columnsFrom": ["created_by"],
           "columnsTo": ["id"],
           "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "integration_org_defaults_connection_id_fk": {
-          "name": "integration_org_defaults_connection_id_fk",
-          "tableFrom": "integration_org_defaults",
-          "tableTo": "integration_connections",
-          "columnsFrom": ["connection_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },
@@ -6146,7 +6152,17 @@
           "with": {}
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "audit_events_space_id_spaces_id_fk": {
+          "name": "audit_events_space_id_spaces_id_fk",
+          "tableFrom": "audit_events",
+          "tableTo": "spaces",
+          "columnsFrom": ["space_id"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -6436,174 +6452,6 @@
         "webhooks_payload_mode_valid": {
           "name": "webhooks_payload_mode_valid",
           "value": "payload_mode IN ('full', 'summary')"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.space_smtp_configs": {
-      "name": "space_smtp_configs",
-      "schema": "",
-      "columns": {
-        "space_id": {
-          "name": "space_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "host": {
-          "name": "host",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "port": {
-          "name": "port",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "username": {
-          "name": "username",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "pass_encrypted": {
-          "name": "pass_encrypted",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "from_address": {
-          "name": "from_address",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "from_name": {
-          "name": "from_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "secure_mode": {
-          "name": "secure_mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'auto'"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "space_smtp_configs_space_id_spaces_id_fk": {
-          "name": "space_smtp_configs_space_id_spaces_id_fk",
-          "tableFrom": "space_smtp_configs",
-          "tableTo": "spaces",
-          "columnsFrom": ["space_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "space_smtp_configs_secure_mode_check": {
-          "name": "space_smtp_configs_secure_mode_check",
-          "value": "secure_mode IN ('auto', 'tls', 'starttls', 'none')"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.space_social_providers": {
-      "name": "space_social_providers",
-      "schema": "",
-      "columns": {
-        "space_id": {
-          "name": "space_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "provider": {
-          "name": "provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "client_id": {
-          "name": "client_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "client_secret_encrypted": {
-          "name": "client_secret_encrypted",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "scopes": {
-          "name": "scopes",
-          "type": "text[]",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "space_social_providers_space_id_spaces_id_fk": {
-          "name": "space_social_providers_space_id_spaces_id_fk",
-          "tableFrom": "space_social_providers",
-          "tableTo": "spaces",
-          "columnsFrom": ["space_id"],
-          "columnsTo": ["id"],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {
-        "space_social_providers_space_id_provider_pk": {
-          "name": "space_social_providers_space_id_provider_pk",
-          "columns": ["space_id", "provider"]
-        }
-      },
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {
-        "space_social_providers_provider_check": {
-          "name": "space_social_providers_provider_check",
-          "value": "provider IN ('google', 'github')"
         }
       },
       "isRLSEnabled": false
@@ -7662,6 +7510,174 @@
         "oidc_end_user_profiles_status_valid": {
           "name": "oidc_end_user_profiles_status_valid",
           "value": "status IN ('active', 'suspended')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.space_smtp_configs": {
+      "name": "space_smtp_configs",
+      "schema": "",
+      "columns": {
+        "space_id": {
+          "name": "space_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "host": {
+          "name": "host",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "port": {
+          "name": "port",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "username": {
+          "name": "username",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pass_encrypted": {
+          "name": "pass_encrypted",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "from_address": {
+          "name": "from_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "from_name": {
+          "name": "from_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "secure_mode": {
+          "name": "secure_mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'auto'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "space_smtp_configs_space_id_spaces_id_fk": {
+          "name": "space_smtp_configs_space_id_spaces_id_fk",
+          "tableFrom": "space_smtp_configs",
+          "tableTo": "spaces",
+          "columnsFrom": ["space_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "space_smtp_configs_secure_mode_check": {
+          "name": "space_smtp_configs_secure_mode_check",
+          "value": "secure_mode IN ('auto', 'tls', 'starttls', 'none')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.space_social_providers": {
+      "name": "space_social_providers",
+      "schema": "",
+      "columns": {
+        "space_id": {
+          "name": "space_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "client_id": {
+          "name": "client_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "client_secret_encrypted": {
+          "name": "client_secret_encrypted",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scopes": {
+          "name": "scopes",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "space_social_providers_space_id_spaces_id_fk": {
+          "name": "space_social_providers_space_id_spaces_id_fk",
+          "tableFrom": "space_social_providers",
+          "tableTo": "spaces",
+          "columnsFrom": ["space_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "space_social_providers_space_id_provider_pk": {
+          "name": "space_social_providers_space_id_provider_pk",
+          "columns": ["space_id", "provider"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "space_social_providers_provider_check": {
+          "name": "space_social_providers_provider_check",
+          "value": "provider IN ('google', 'github')"
         }
       },
       "isRLSEnabled": false

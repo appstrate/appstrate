@@ -32,7 +32,7 @@ const integrationCreds = (token = "tok-abc"): CredentialsResponse => ({
   authorizedUris: ["https://api.example.com/**"],
   allowAllUris: false,
   credentialHeaderName: "Authorization",
-  credentialHeaderPrefix: "Bearer",
+  credentialHeaderPrefix: "Bearer ",
   credentialFieldName: "access_token",
 });
 

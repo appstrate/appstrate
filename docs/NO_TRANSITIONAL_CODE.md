@@ -138,11 +138,11 @@ described is out of its reach, and §1 and §3 have no automated gate at all.
 Every migration that predates the gate is grandfathered in
 `scripts/verify-no-migration-dml.ts` by name.
 
-Its write vocabulary is `UPDATE`, `INSERT`, `DELETE` and `TRUNCATE`, in every
-position a statement can open — including a CTE, since
+Its write vocabulary is `UPDATE`, `INSERT`, `DELETE`, `TRUNCATE` and `MERGE`,
+in every position a statement can open — including a CTE, since
 `WITH moved AS (DELETE … RETURNING *) INSERT INTO other …` is the idiomatic way
 to move rows between tables and is squarely a `scripts/migration/` job. Of those
-four only an `UPDATE` can ever be licenced, per the rule above. Licensing is
+five only an `UPDATE` can ever be licenced, per the rule above. Licensing is
 closed by default and opened for the one verb the carve-out describes, rather
 than open by default and closed for `TRUNCATE` — otherwise `DELETE FROM t;`
 beside a `SET NOT NULL` on `t` passes a gate whose whole purpose is to stop a
@@ -150,12 +150,80 @@ migration from destroying rows on every database it is replayed against, and a
 fifth verb added to the vocabulary later would inherit an exemption nobody
 argued for.
 
+`MERGE` is that fifth verb, and it inherited nothing. PostgreSQL 16 writes rows
+in all three directions with it, and one statement can insert, update and delete
+at once — so a `MERGE` beside a `SET NOT NULL` would be `DELETE FROM t;` beside
+a `SET NOT NULL` with a longer spelling, which is the case the previous
+paragraph closed. It is therefore in the vocabulary and outside the carve-out. A
+backfill that genuinely preconditions a constraint is expressible as an
+`UPDATE`; writing it as a `MERGE` is a choice, and the remedy is to write the
+`UPDATE`. Before it was named the gate caught it only by ACCIDENT — through the
+`UPDATE` behind its `WHEN MATCHED THEN` — and reported the table as `set`.
+
+**A command string is code.** `EXECUTE format('UPDATE t SET x = 1')` writes rows
+at apply time exactly as the bare statement would, and it is written inside a
+string literal — which the gate blanks, because a migration header discussing
+`UPDATE` in prose is the common case here. So the gate also reads the argument of
+every `EXECUTE` and `format(…)` as the SQL it becomes. This is not a hypothetical
+bypass: `EXECUTE format(…)` is already how this directory writes catalog-guarded
+DDL (23 occurrences across `0043`, `0047`, `0048` and `0053`, every one a
+`RENAME`, a `DROP CONSTRAINT` or a probe), so it is the form the next author
+reaches for. A write found there is reported unconditionally, with no carve-out:
+the target is typically a `%I` filled from a catalog query, so there is no table
+name a licence could land on.
+
+**A `CREATE FUNCTION` body is not.** `CREATE FUNCTION audit_fn() … $$ BEGIN
+INSERT INTO audit …; RETURN NEW; END; $$` writes no row when the migration is
+applied — it writes a `pg_proc` entry, which is schema. The `INSERT` runs later,
+per row, when something touches the table the trigger is on: the application's
+behaviour, not a one-off repair. So a `CREATE [OR REPLACE] FUNCTION` /
+`PROCEDURE` body is read as neither a write nor a licence — as neither, because
+exempting it from the write scan alone would turn a function definition into a
+way to manufacture a licence for a write elsewhere in the file. Every way of
+writing a body is exempt, because "a function body" is what is exempt and no
+spelling is the exception: a dollar quote, the `BEGIN ATOMIC … END` that
+PostgreSQL 14 added for `LANGUAGE sql`, and a plain string — the last needing
+nothing special, since an ordinary literal is blanked in both directions
+anyway.
+
+**A `DO` block is the counter-case** and is **not** exempt, _however its code is
+quoted_: it executes at apply time against the rows that exist, which is
+precisely what this section forbids (`0021`, `0023`, `0040` and `0051` are that
+shape). The distinction is the `CREATE … FUNCTION` in front of the body — never
+the quoting, which is a lexical choice with no meaning here. `DO [LANGUAGE lang]
+code` takes a **string constant**, and `$$ … $$` is only one way to write one:
+`DO 'BEGIN UPDATE t SET x = 99; END';` is the same statement as its dollar-quoted
+twin and rewrites the same rows on every replay. The gate reads a `DO` body as
+code either way, in the same pass, so the same-table carve-out reaches both.
+
 Two writing forms are outside that vocabulary on purpose. `SELECT … INTO` is
-PL/pgSQL variable assignment inside the `DO $$` blocks this directory is full
-of, and creates a new relation rather than rewriting rows; `COPY … FROM` needs
-a file on the database host or `FROM STDIN`, and the boot migrator supplies
+PL/pgSQL variable assignment inside the `DO` blocks this directory is full of,
+and creates a new relation rather than rewriting rows; `COPY … FROM` needs a
+file on the database host or `FROM STDIN`, and the boot migrator supplies
 neither. Both are named here so the omission stays a decision rather than a
 gap.
+
+Two limits remain in the way literals are read, named for the same reason. The
+walker assumes `standard_conforming_strings` is on — the PostgreSQL default,
+and what the boot migrator runs under — which is what makes `E'…'` the one form
+where a backslash escapes the next character; a session that turned the setting
+off would make every literal escape-processing, and that is not modelled. And
+inside a `DO '…'` body a nested literal is written with doubled quotes
+(`''…''`), of which only the quote pairs are blanked, so a DML keyword parked
+in a nested VALUE there can read as a statement. That direction is the safe
+one, and the remedy is to reword or to use the dollar quote.
+
+Three limits remain in that dynamic-SQL reading, named for the same reason. A
+command _concatenated_ rather than formatted (`stmt := 'UPDATE ' || t; EXECUTE
+stmt;` — it passes through neither an `EXECUTE` nor a `format(` while it is being
+built), and a verb interpolated rather than written (`format('%s t SET …',
+verb)`), both need to follow a value through PL/pgSQL and are not seen; what is
+closed is the case that reads as ordinary SQL. `stmt := format('UPDATE …');
+EXECUTE stmt;` — the same bypass in two statements — _is_ seen, because a
+`format(…)` is read wherever it appears. And in the other direction, a
+`format(…)` building a MESSAGE rather than a command (`RAISE EXCEPTION '%',
+format('DELETE failed on %I', t)`) reads as a write and is reported; that
+direction is the safe one, and the remedy is to reword the message.
 
 ### 3. No dead transition scaffolding
 

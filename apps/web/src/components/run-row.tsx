@@ -116,7 +116,7 @@ export function RunRow({
   const isRunning = (ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(run.status);
   const isUnread = run.unread;
   const date = run.started_at ? formatDateField(run.started_at) : "";
-  const isInline = run.package_ephemeral === true;
+  const isInline = run.package_ephemeral;
   const isRemote = run.runOrigin === "remote";
   const isDetail = variant === "detail";
   // Source agent deleted (FK SET NULL after migration 0017): the run row

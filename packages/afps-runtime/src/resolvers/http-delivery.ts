@@ -53,12 +53,6 @@ export type HttpDeliveryInjectionDecision =
   | { kind: "caller_override"; headerName: string }
   | { kind: "inject"; header: { name: string; value: string } };
 
-// RFC 9110 `token` grammar. A bare token in Authorization position is an auth
-// scheme and therefore needs one SP before its credentials. Composite prefixes
-// (`Token token=`) and non-Authorization headers (`Cookie: session=`) remain
-// literal AFPS prefixes.
-const HTTP_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
-
 /**
  * Plan the observable credential-header mutation for one outgoing request.
  *
@@ -67,10 +61,15 @@ const HTTP_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
  * normalises `plan.value`: a valid secret whose bytes happen to start with an
  * auth-scheme word must reach the upstream unchanged (#988).
  *
- * AFPS defines `prefix` as literal. Appstrate additionally accepts the legacy
- * shorthand of a bare auth scheme in `Authorization` / `Proxy-Authorization`
- * position and inserts the required separator. This compatibility rule is
- * deliberately based on the separately-declared prefix, never on the secret.
+ * AFPS §7.6 defines `prefix` as a literal prepended to the rendered value, so
+ * it is concatenated verbatim — an `Authorization` scheme carries its own
+ * separator (`"Bearer "`, `"Basic "`), exactly like a composite prefix
+ * (`"Token token="`) or a cookie one (`"session="`). A bare scheme is a defect
+ * in whatever authored it, and each of the two authoring surfaces refuses it
+ * up front through the one shared predicate
+ * (`@appstrate/afps-shared/delivery-http:isBareAuthSchemePrefix`): a manifest
+ * at install time (`@appstrate/core/integration`), a local creds file when it
+ * is read ({@link ./integration-api-call.ts}). Nothing repairs it here.
  */
 export function planHttpDeliveryInjection(
   plan: Pick<HttpDeliveryPlan, "headerName" | "headerPrefix" | "value" | "allowServerOverride">,
@@ -86,19 +85,11 @@ export function planHttpDeliveryInjection(
   }
   if (plan.value.length === 0) return { kind: "none" };
 
-  const lowerHeaderName = plan.headerName.toLowerCase();
-  const isAuthorization =
-    lowerHeaderName === "authorization" || lowerHeaderName === "proxy-authorization";
-  const separator =
-    isAuthorization && plan.headerPrefix.length > 0 && HTTP_TOKEN.test(plan.headerPrefix)
-      ? " "
-      : "";
-
   return {
     kind: "inject",
     header: {
       name: plan.headerName,
-      value: `${plan.headerPrefix}${separator}${plan.value}`,
+      value: `${plan.headerPrefix}${plan.value}`,
     },
   };
 }

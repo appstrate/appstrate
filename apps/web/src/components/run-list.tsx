@@ -81,7 +81,7 @@ export function RunRows({
     // Inline runs: use the manifest displayName snapshot (run.agent_name) — the
     // raw shadow packageId (`@inline/r-…`) is never meaningful to users, and
     // the ephemeral row isn't in `agents` so the map lookup would miss anyway.
-    if (run.package_ephemeral === true) {
+    if (run.package_ephemeral) {
       return inlineRunDisplayName(run.agent_name, t("runs.inlineBadge"));
     }
     // Source agent deleted (FK SET NULL): fall back to the denormalized

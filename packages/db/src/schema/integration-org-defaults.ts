@@ -96,7 +96,7 @@ export const integrationOrgDefaults = pgTable(
     // Resolver hot path: load all defaults for a space in one query.
     // Reverse lookup for the unshare / destructive-delete impact guard.
     index("idx_integration_org_defaults_connection").on(table.connectionId),
-    // EXPLICITLY NAMED (migration 0054), and it has to be.
+    // EXPLICITLY NAMED (migration 0055), and it has to be.
     //
     // Drizzle derives an unnamed FK's name as
     // `<table>_<cols>_<refTable>_<refCols>_fk`, which here is 68 bytes.
@@ -115,7 +115,7 @@ export const integrationOrgDefaults = pgTable(
     // in beta.24.
     //
     // The explicit name below is 41 bytes and is what the catalog now holds,
-    // renamed in place by 0054. Keep any future name here under 63 bytes; the
+    // renamed in place by 0055. Keep any future name here under 63 bytes; the
     // schema-vs-migrations parity test asserts it for every constraint.
     foreignKey({
       columns: [table.connectionId],

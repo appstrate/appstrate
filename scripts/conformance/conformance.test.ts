@@ -298,19 +298,23 @@ describe("remote manifest accessors", () => {
 describe("applyAuth", () => {
   const headerManifest = {
     auths: {
-      primary: { delivery: { http: { in: "header", name: "Authorization", prefix: "Bearer" } } },
+      primary: { delivery: { http: { in: "header", name: "Authorization", prefix: "Bearer " } } },
     },
   };
 
-  it("sets a Bearer header with a single space, regardless of prefix spacing", () => {
+  it("concatenates the declared prefix verbatim — scheme and composite alike", () => {
+    // The probe must send the byte-for-byte header a real run sends, so it
+    // applies AFPS §7.6's literal rule rather than normalising spacing. A
+    // composite prefix is the case that proves it: trimming + re-spacing used
+    // to turn "Token token=" into "Token token= tok", which no run emits.
     const { headers } = applyAuth("https://api/x", headerManifest, "tok", "primary");
     expect(headers.Authorization).toBe("Bearer tok");
 
-    const spaced = {
-      auths: { primary: { delivery: { http: { name: "Authorization", prefix: "Bearer " } } } },
+    const composite = {
+      auths: { primary: { delivery: { http: { name: "Authorization", prefix: "Token token=" } } } },
     };
-    expect(applyAuth("https://api/x", spaced, "tok", "primary").headers.Authorization).toBe(
-      "Bearer tok",
+    expect(applyAuth("https://api/x", composite, "tok", "primary").headers.Authorization).toBe(
+      "Token token=tok",
     );
   });
 
@@ -336,7 +340,7 @@ describe("checkAuthLiveness", () => {
   const ghEntry = entry({
     packageId: "@appstrate/github",
     manifest: {
-      auths: { primary: { delivery: { http: { name: "Authorization", prefix: "Bearer" } } } },
+      auths: { primary: { delivery: { http: { name: "Authorization", prefix: "Bearer " } } } },
     },
   });
 

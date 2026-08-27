@@ -66,6 +66,7 @@ import {
   type HttpDeliveryPlan,
 } from "./http-delivery.ts";
 import {
+  isBareAuthSchemePrefix,
   projectHttpDeliveryConfig,
   type AfpsHttpDelivery,
 } from "@appstrate/afps-shared/delivery-http";
@@ -328,6 +329,39 @@ interface LocalIntegrationCredentialsFile {
   >;
 }
 
+/**
+ * Creds-file load gate — the local-path twin of the integration manifest
+ * validator's rule (1d) (`@appstrate/core/integration`).
+ *
+ * `injection.headerPrefix` is hand-authored in the creds file and reaches the
+ * injector without ever passing through a manifest, so the install-time gate
+ * cannot see it and this is the only place the defect can be caught. Refusing
+ * the whole file when it is read — before a single tool is built, let alone
+ * called — puts the error where the operator can still edit the file, rather
+ * than in an upstream 401 mid-run that names nothing.
+ *
+ * Returns `creds` so both materialisation points (parsed object in the
+ * constructor, JSON file in {@link LocalIntegrationResolver.loadCreds}) gate in
+ * one expression.
+ */
+function assertUsableCredsFile(
+  creds: LocalIntegrationCredentialsFile,
+): LocalIntegrationCredentialsFile {
+  for (const [name, entry] of Object.entries(creds.integrations)) {
+    const prefix = entry.injection?.headerPrefix;
+    // The default mirrors `resolveLocalDeliveryPlan`'s: an override that names
+    // no header lands in Authorization position, where a bare scheme is a
+    // defect.
+    const headerName = entry.injection?.headerName ?? "Authorization";
+    if (typeof prefix === "string" && isBareAuthSchemePrefix(headerName, prefix)) {
+      throw new Error(
+        `LocalIntegrationResolver: integrations["${name}"].injection.headerPrefix "${prefix}" is a bare auth scheme — the prefix is a literal (AFPS §7.6) and is concatenated verbatim, so it must include its own separator. Write "${prefix} ".`,
+      );
+    }
+  }
+  return creds;
+}
+
 interface LocalIntegrationResolverOptions {
   /** Path to a creds JSON file or an already-parsed object. */
   creds: string | LocalIntegrationCredentialsFile;
@@ -359,7 +393,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
       this.creds = null;
       this.credsPath = opts.creds;
     } else {
-      this.creds = opts.creds;
+      this.creds = assertUsableCredsFile(opts.creds);
       this.credsPath = null;
     }
   }
@@ -403,7 +437,7 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
     }
     const fs = await import("node:fs/promises");
     const raw = await fs.readFile(this.credsPath, "utf8");
-    this.creds = JSON.parse(raw) as LocalIntegrationCredentialsFile;
+    this.creds = assertUsableCredsFile(JSON.parse(raw) as LocalIntegrationCredentialsFile);
     return this.creds;
   }
 
@@ -566,6 +600,10 @@ export class LocalIntegrationResolver implements IntegrationApiCallResolver {
  *
  * When neither yields a header (e.g. `custom` auth with no `delivery.http`),
  * returns `null` and the caller injects nothing.
+ *
+ * Both prefixes are concatenated verbatim downstream and neither is inspected
+ * here: the override's was gated by {@link assertUsableCredsFile} when the file
+ * was read, the manifest's by the install-time validator.
  */
 function resolveLocalDeliveryPlan(
   meta: ApiCallIntegrationMeta,

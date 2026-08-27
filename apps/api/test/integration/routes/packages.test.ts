@@ -18,6 +18,7 @@ import {
 } from "../../../src/services/integration-client-registry.ts";
 import { installPackage } from "../../../src/services/space-packages.ts";
 import { assertDbMissing, assertDbHas } from "../../helpers/assertions.ts";
+import { expectRejectedField } from "../../helpers/body-validation.ts";
 import {
   mcpServerManifest,
   remoteIntegrationManifest,
@@ -754,14 +755,17 @@ describe("Packages API", () => {
       expect(body.lock_version).toBeGreaterThan(created.lock_version);
     });
 
-    // `source_code` was dropped from both JSON-body schemas once the last
-    // reader died with the `tool` package type. It used to be silently STRIPPED,
-    // because neither schema was `.strict()` — a retired key answered 201 and
-    // did nothing, which `docs/NO_TRANSITIONAL_CODE.md` §1 forbids ("a retired
-    // name must FAIL loudly, never fall back"). Both bodies are `.strict()` now,
-    // so it fails loudly and names itself.
-    it("refuses a body carrying the retired source_code key", async () => {
-      const createRes = await app.request("/api/packages/integrations", {
+    // `source_code` was dropped from the JSON-body schemas once the last reader
+    // died with the `tool` package type, and the schemas are `.strict()` since
+    // the retirement was finished: the key now fails loudly instead of being
+    // stripped in silence, which is what a retired name owes its callers
+    // (`docs/NO_TRANSITIONAL_CODE.md` §1) and what #1187 gave the launch
+    // surfaces. Each refusal is asserted through `expectRejectedField` rather
+    // than a bare status — a 400 on these routes is reachable for reasons that
+    // have nothing to do with the schema rule — and each is paired with the
+    // same body MINUS the key, so a 400 can only mean the key was refused.
+    it("rejects a body carrying the retired source_code key", async () => {
+      const rejectedCreate = await app.request("/api/packages/integrations", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
@@ -770,25 +774,18 @@ describe("Packages API", () => {
         }),
       });
 
-      expect(createRes.status).toBe(400);
-      const refused = (await createRes.json()) as {
-        code?: string;
-        errors?: Array<{ code?: string; field?: string }>;
-      };
-      expect(refused.code).toBe("validation_failed");
-      expect(refused.errors?.some((e) => e.code === "unknown_field")).toBe(true);
+      await expectRejectedField(rejectedCreate, "body");
 
-      // Control: the same body WITHOUT the retired key is still a 201, so the
-      // refusal above is about `source_code` and not about the request shape.
-      const okRes = await app.request("/api/packages/integrations", {
+      const createRes = await app.request("/api/packages/integrations", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
         body: JSON.stringify({
           manifest: remoteIntegrationManifest("@pkgorg/legacy-source-code"),
         }),
       });
-      expect(okRes.status).toBe(201);
-      const created = (await okRes.json()) as any;
+
+      expect(createRes.status).toBe(201);
+      const created = (await createRes.json()) as any;
 
       const updateRes = await app.request("/api/packages/integrations/@pkgorg/legacy-source-code", {
         method: "PUT",
@@ -803,7 +800,31 @@ describe("Packages API", () => {
         }),
       });
 
-      expect(updateRes.status).toBe(400);
+      await expectRejectedField(updateRes, "body");
+
+      // The control for that refusal, and the only place this file pins that
+      // `.strict()` left the ordinary update path alone: the same body MINUS
+      // the retired key is a 200. The refused PUT wrote nothing, so it still
+      // carries the `lock_version` the create returned.
+      const acceptedUpdate = await app.request(
+        "/api/packages/integrations/@pkgorg/legacy-source-code",
+        {
+          method: "PUT",
+          headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+          body: JSON.stringify({
+            manifest: {
+              ...remoteIntegrationManifest("@pkgorg/legacy-source-code"),
+              display_name: "Renamed Integration",
+            },
+            lock_version: created.lock_version,
+          }),
+        },
+      );
+
+      expect(acceptedUpdate.status).toBe(200);
+      expect(((await acceptedUpdate.json()) as any).lock_version).toBeGreaterThan(
+        created.lock_version,
+      );
     });
   });
 

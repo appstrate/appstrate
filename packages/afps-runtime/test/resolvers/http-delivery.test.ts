@@ -111,7 +111,11 @@ describe("planHttpDeliveryInjection", () => {
     ...overrides,
   });
 
-  it("repairs a bare Authorization auth scheme without touching the secret", () => {
+  it("concatenates a bare auth scheme verbatim — no separator is inserted", () => {
+    // The bare form is refused at install time by the integration manifest
+    // validator (`@appstrate/core/integration`, §7.6 gate), so this seam has
+    // exactly one contract: the prefix is a literal. Pinned so it cannot
+    // quietly regrow a separator-guessing branch.
     expect(
       planHttpDeliveryInjection(
         plan({ headerPrefix: "Bearer", value: "bearerXYZ-tokenlive_sk_123" }),
@@ -119,7 +123,7 @@ describe("planHttpDeliveryInjection", () => {
       ),
     ).toEqual({
       kind: "inject",
-      header: { name: "Authorization", value: "Bearer bearerXYZ-tokenlive_sk_123" },
+      header: { name: "Authorization", value: "BearerbearerXYZ-tokenlive_sk_123" },
     });
   });
 
@@ -143,11 +147,11 @@ describe("planHttpDeliveryInjection", () => {
     });
   });
 
-  it("supports arbitrary bare Authorization schemes", () => {
-    for (const headerPrefix of ["Basic", "Zoho-oauthtoken", "AWS4-HMAC-SHA256"]) {
-      expect(planHttpDeliveryInjection(plan({ headerPrefix }), [])).toEqual({
+  it("supports arbitrary auth schemes, each carrying its own separator", () => {
+    for (const scheme of ["Basic", "Zoho-oauthtoken", "AWS4-HMAC-SHA256"]) {
+      expect(planHttpDeliveryInjection(plan({ headerPrefix: `${scheme} ` }), [])).toEqual({
         kind: "inject",
-        header: { name: "Authorization", value: `${headerPrefix} secret` },
+        header: { name: "Authorization", value: `${scheme} secret` },
       });
     }
   });

@@ -106,7 +106,7 @@ export const organizationMembers = pgTable(
  *
  * The `status` enum already records THAT an invitation was accepted; who
  * accepted it and when is in the audit log, which outlives the row (the org
- * delete drops every invitation with it). Dropped by `0054`. If acceptance
+ * delete drops every invitation with it). Dropped by `0055`. If acceptance
  * attribution is ever wanted on this table, it needs a reader designed with
  * it — not these columns revived.
  */
@@ -393,7 +393,7 @@ export const modelProviderPairings = pgTable(
     // If the cleanup scan ever becomes hot, add a NON-partial index on
     // `expires_at` — the partial shape cannot serve that query.
     //
-    // EXPLICITLY NAMED (migration 0054). Drizzle's generated name,
+    // EXPLICITLY NAMED (migration 0055). Drizzle's generated name,
     // `model_provider_pairings_credential_id_model_provider_credentials_id_fk`,
     // is 70 bytes; Postgres truncates identifiers past 63 at creation, without
     // a warning, so the catalog has only ever held

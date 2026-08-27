@@ -80,7 +80,7 @@ describe("MITM listener — subprocess end-to-end", () => {
       const dp: Record<string, HttpDeliveryPlan> = {
         vendor: {
           headerName: "Authorization",
-          headerPrefix: "Bearer",
+          headerPrefix: "Bearer ",
           value: "fresh-token",
           allowServerOverride: false,
         },

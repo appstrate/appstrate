@@ -491,7 +491,7 @@ describe("POST /mcp — api_call", () => {
     authorizedUris: ["https://gmail.googleapis.com/**"],
     allowAllUris: false,
     credentialHeaderName: "Authorization",
-    credentialHeaderPrefix: "Bearer",
+    credentialHeaderPrefix: "Bearer ",
     credentialFieldName: PROXY_INJECTED_FIELD,
   });
 

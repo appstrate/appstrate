@@ -345,8 +345,12 @@ export function useCreatePackage(type: Exclude<PackageType, "mcp-server">) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   return useMutation({
+    // Exactly the keys the editor sends: the skill/integration branches forward
+    // this object whole and the create schemas are `.strict()`, so a key
+    // declared here that the server does not model is a 400 rather than a
+    // silent drop. `id` sat beside the retired `source_code` until #1128 took
+    // that one; no caller ever passed either.
     mutationFn: async (body: {
-      id?: string;
       manifest: Record<string, unknown>;
       content: string;
     }): Promise<{ id: string }> => {

@@ -18,7 +18,7 @@ import { pgTable, text, timestamp, bigserial, jsonb, uuid, index } from "drizzle
  * constraint — so the `org.deleted` tombstone keeps the deleted org's id as
  * a plain value with no referential dependency.
  *
- * `space_id` is the same, and for the same reason — since `0054`. It used to
+ * `space_id` is the same, and for the same reason — since `0055`. It used to
  * carry a real FK to `spaces` with `ON DELETE SET NULL`, which is the failure
  * that argument exists to prevent, applied to the other tenancy column:
  * `DELETE /api/spaces/:id` is a live route (`services/spaces.ts`), and every
@@ -31,7 +31,7 @@ import { pgTable, text, timestamp, bigserial, jsonb, uuid, index } from "drizzle
  * Dropping the FK also removes the referencing-side seq-scan that space
  * deletion paid to find the rows to blank, inside the transaction already
  * holding the organizations row lock (the class `0050` fixed for the
- * recipient deletes and `0054` finishes for the space delete).
+ * recipient deletes and `0055` finishes for the space delete).
  *
  * The cost, stated rather than discovered: nothing stops a `space_id` naming
  * a space that no longer exists. That is the intended posture — the same one

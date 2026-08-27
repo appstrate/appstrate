@@ -13,11 +13,10 @@
  * orphaned-run reconciliation (`run-reconcile.ts`), driven by the
  * `onRunStatusChange` event. The two never overlap: `persistNotice` takes the
  * session row's lock and refuses while `active_stream_id` is set, so a turn
- * owns its conversation from start to finalize. The routes below write no
- * message at all — `GET /api/chat/sessions/:id` returns the stored messages for
- * the client's read-only history load (`ui/sessions.ts` → `loadHistory`), as
- * `{ id, content }`: the ai-sdk/v6 UIMessage minus its id, plus the id, which
- * is exactly what `useChat({ messages })` is seeded with.
+ * owns its conversation from start to finalize. The routes below therefore
+ * never accept a message — `GET /api/chat/sessions/:id` returns the stored
+ * messages for the client's read-only history adapter, in `seq` order, as
+ * `{ id, content }` nodes assistant-ui's `ai-sdk/v6` format adapter decodes.
  *
  * There is no `parent_id` and no `format` on the wire. Both were columns
  * nothing ever read back, dropped by `0054` — see the `chatMessages` table doc.
@@ -160,7 +159,7 @@ export function createChatRouter(deps: ChatPlatformDeps) {
     },
   );
 
-  // GET /api/chat/sessions/:id — the conversation's tree nodes (history load)
+  // GET /api/chat/sessions/:id — the conversation's messages, in seq order (history load)
   router.get("/api/chat/sessions/:id", requireModulePermission("chat", "read"), async (c) => {
     const session = await getOwnedSession(c.req.param("id"), c.get("orgId"), c.get("user").id);
     const messages = await loadMessages(session.id);

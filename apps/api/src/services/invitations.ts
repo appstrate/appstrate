@@ -108,7 +108,7 @@ export async function getOrgInvitations(orgId: string) {
  *
  * `status` is the whole write. The row used to also record `accepted_by` /
  * `accepted_at`, which nothing ever read back — see the `orgInvitations` table
- * doc; both columns were dropped in `0054`. Who accepted and when is in the
+ * doc; both columns were dropped in `0055`. Who accepted and when is in the
  * audit log, which outlives the invitation row.
  */
 export async function markInvitationAccepted(

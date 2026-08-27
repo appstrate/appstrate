@@ -352,7 +352,7 @@ describe("migration replay schema parity", () => {
     // The leading column is the whole question for a cascade or a delete-by-X:
     // an index whose first column is not the one the query filters cannot serve
     // a seek, and the statement falls back to a sequential scan inside whatever
-    // transaction is holding a lock at the time (migrations 0050 and 0054).
+    // transaction is holding a lock at the time (migrations 0050 and 0055).
     const { rows } = await pg.query<{ tablename: string; indexname: string; indexdef: string }>(
       "SELECT tablename, indexname, indexdef FROM pg_indexes WHERE schemaname = 'public'",
     );

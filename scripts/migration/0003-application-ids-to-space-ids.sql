@@ -57,7 +57,7 @@
 -- the past. Every space-scoped audit read filters on it, so leaving it behind
 -- does not preserve history — it makes the history unfindable.
 --
--- It is no longer a FOREIGN KEY. `0054_schema_integrity_repairs` dropped that
+-- It is no longer a FOREIGN KEY. `0055_schema_integrity_repairs` dropped that
 -- constraint (an `ON DELETE SET NULL` that blanked the attribution of every
 -- deleted space, in a table whose own doc argues it must outlive what it
 -- describes), so nothing enforces the pointer any more and nothing would
@@ -180,7 +180,7 @@
 -- an input to the SQL. ALL SEVENTEEN ARE `ON DELETE CASCADE`.
 --
 -- `audit_events.space_id` used to be the eighteenth, and the one exception at
--- `ON DELETE SET NULL`. `0054_schema_integrity_repairs` dropped it: the SET
+-- `ON DELETE SET NULL`. `0055_schema_integrity_repairs` dropped it: the SET
 -- NULL was erasing the space attribution of every historical audit row the
 -- moment a space was deleted, in a table whose own doc argues it must outlive
 -- what it describes. The column survives as a denormalised value, and step 4
@@ -306,7 +306,7 @@
 -- ── C. the FKs came back, all seventeen, with their behaviour ────────────────
 --   Identical output before and after. `confdeltype` is `a`=no action,
 --   `c`=cascade, `n`=set null: all seventeen are `c`. `audit_events` used to be
---   the one `n` and is no longer here at all — `0054` dropped that FK.
+--   the one `n` and is no longer here at all — `0055` dropped that FK.
 --
 --   SELECT count(*) FROM pg_constraint
 --    WHERE confrelid = 'public.spaces'::regclass AND contype = 'f';     -- 17
@@ -520,7 +520,7 @@ END $$;
 -- unescaped, `_` is LIKE's single-character wildcard.
 --
 -- THE COLUMN SET IS THE FK CAPTURE **PLUS** `audit_events.space_id`, and the
--- union is load-bearing rather than defensive. `0054_schema_integrity_repairs`
+-- union is load-bearing rather than defensive. `0055_schema_integrity_repairs`
 -- dropped that table's foreign key into `spaces` — an audit log must outlive
 -- the entities it describes, and `ON DELETE SET NULL` was erasing the
 -- attribution of every deleted space — so the column is no longer in
@@ -530,7 +530,7 @@ END $$;
 -- DOES NOT REWRITE), and every space-scoped audit read filters on it.
 --
 -- `UNION` rather than `UNION ALL`: on a database where this script runs BEFORE
--- 0054 the column is still in the capture, and the extra term dedupes to
+-- 0055 the column is still in the capture, and the extra term dedupes to
 -- nothing. Both deploy orders therefore rewrite it exactly once.
 -- ─────────────────────────────────────────────────────────────────────────────
 UPDATE "spaces" SET "id" = 'spc_' || substring("id" FROM 5) WHERE "id" LIKE 'app\_%';

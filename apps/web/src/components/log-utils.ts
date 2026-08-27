@@ -222,11 +222,14 @@ function rawEntryId(log: RawLog, index: number, suffix = ""): string {
   return `log:${log.id ?? index}${suffix}`;
 }
 
+/**
+ * `assistant_message` is the only marker of model-authored prose. An untagged
+ * `appstrate.progress` row is a runner LIFECYCLE breadcrumb by definition
+ * (`AppstrateProgressEvent`, `@appstrate/afps-runtime`), so it belongs to the
+ * `runtime` kind — attributing it to the model would put words in its mouth.
+ */
 function isAgentText(log: RawLog): boolean {
-  if (log.type !== "progress") return false;
-  if (log.data?.["event"] === ASSISTANT_MESSAGE_EVENT) return true;
-  // Compatibility with runs emitted before `assistant_message` was stamped.
-  return !log.data && log.level === "debug";
+  return log.type === "progress" && log.data?.["event"] === ASSISTANT_MESSAGE_EVENT;
 }
 
 interface BuildLogEntriesOptions {
@@ -257,11 +260,6 @@ export function buildLogEntries(
     if (log.event === "output" && log.data) {
       if (!output) output = {};
       Object.assign(output, log.data);
-    } else if (log.event === "report" && log.type === "result") {
-      // Dead channel: the `report` runtime tool was replaced by durable
-      // `outputs/` files. Rows written before the removal stay in the DB
-      // but are skipped here — falling through to the generic branch would
-      // render them as a truncated, contextless log line.
     } else if (log.event === "run_completed") {
       continue;
     } else if (isTurnRow(log)) {
@@ -269,7 +267,6 @@ export function buildLogEntries(
       // run emits ~108 of them and they would drown the agent's own log lines.
       // They are rendered as a table in the run Exécution pane
       // (`buildTurnRows` → `TurnsTable` in `run-execution-tab.tsx`).
-      // Same precedent as the dead `report` channel above.
     } else {
       const logData = log.data ?? {};
       const message = (logData.message as string) || log.message || "";

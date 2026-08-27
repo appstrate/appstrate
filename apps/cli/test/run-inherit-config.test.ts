@@ -12,6 +12,7 @@ import {
   mergeRunConfig,
   RunConfigFetchError,
 } from "../src/commands/run/inherit-config.ts";
+import type { ResolvedRunConfig } from "@appstrate/shared-types";
 
 function stubFetch(opts: {
   status?: number;
@@ -34,9 +35,11 @@ describe("fetchRunConfigPayload", () => {
   it("returns the parsed payload on 200", async () => {
     const fetchImpl = stubFetch({
       body: {
+        ...stubPayload(),
         modelId: "claude-sonnet",
-        proxyId: null,
         version_pin: "1.0.0",
+        generation: { temperature: 0.2 },
+        input: { values: { dry_run: true }, locked_fields: ["dry_run"] },
       },
     });
     const payload = await fetchRunConfigPayload({
@@ -50,6 +53,10 @@ describe("fetchRunConfigPayload", () => {
     });
     expect(payload?.modelId).toBe("claude-sonnet");
     expect(payload?.version_pin).toBe("1.0.0");
+    // `generation` and `input` are required members of the wire shape — the
+    // endpoint always emits them, and `mergeRunConfig` reads them unguarded.
+    expect(payload?.generation).toEqual({ temperature: 0.2 });
+    expect(payload?.input).toEqual({ values: { dry_run: true }, locked_fields: ["dry_run"] });
   });
 
   it("returns null on 404 (no inheritance)", async () => {
@@ -67,6 +74,66 @@ describe("fetchRunConfigPayload", () => {
 
   it("throws on non-2xx, non-404", async () => {
     const fetchImpl = stubFetch({ status: 500, body: { detail: "boom" } });
+    await expect(
+      fetchRunConfigPayload({
+        instance: "https://app.example.com",
+        bearerToken: "ask_test",
+        spaceId: "spc_1",
+        scope: "@scope",
+        name: "agent",
+        fetchImpl,
+      }),
+    ).rejects.toBeInstanceOf(RunConfigFetchError);
+  });
+
+  it("accepts a current payload whose stored input layer is empty", async () => {
+    // `{ values: {}, locked_fields: [] }` is what a space with nothing
+    // configured emits — the boundary case the refusal below must NOT catch.
+    const fetchImpl = stubFetch({ body: stubPayload() });
+    const payload = await fetchRunConfigPayload({
+      instance: "https://app.example.com",
+      bearerToken: "ask_test",
+      spaceId: "spc_1",
+      scope: "@scope",
+      name: "agent",
+      fetchImpl,
+    });
+    expect(payload?.input).toEqual({ values: {}, locked_fields: [] });
+  });
+
+  it("refuses a payload with no `input` member, naming the field and the instance", async () => {
+    // `input` first appeared in this payload on 2026-08-21; an instance older
+    // than that answers 200 with every other member. The CLI is a published
+    // binary pointed at an arbitrary self-hosted platform and has no version
+    // handshake, so the cast boundary is the only place that gap can be named
+    // — and it must be named, not tolerated (docs/NO_TRANSITIONAL_CODE.md §1).
+    const { input: _absentOnOlderServers, ...olderServerPayload } = stubPayload();
+    const fetchImpl = stubFetch({ body: olderServerPayload });
+    let err: unknown;
+    try {
+      await fetchRunConfigPayload({
+        instance: "https://app.example.com",
+        bearerToken: "ask_test",
+        spaceId: "spc_1",
+        scope: "@scope",
+        name: "agent",
+        fetchImpl,
+      });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(RunConfigFetchError);
+    expect((err as RunConfigFetchError).message).toContain("`input`");
+    expect((err as RunConfigFetchError).message).toContain("https://app.example.com");
+    // `formatError` renders `<message> — <hint>`, so the action item the user
+    // can take reaches the terminal next to the diagnosis.
+    expect((err as RunConfigFetchError).hint).toContain("--no-inherit");
+  });
+
+  it("refuses a payload whose `input` members are the wrong shape", async () => {
+    const fetchImpl = stubFetch({
+      body: { ...stubPayload(), input: { values: {}, locked_fields: "dry_run" } },
+    });
     await expect(
       fetchRunConfigPayload({
         instance: "https://app.example.com",
@@ -103,11 +170,7 @@ describe("fetchRunConfigPayload", () => {
 
 describe("mergeRunConfig — priority order", () => {
   it("flag model wins over env model wins over inherited model", () => {
-    const inherited = {
-      modelId: "inherited-model",
-      proxyId: null,
-      version_pin: null,
-    };
+    const inherited = { ...stubPayload(), modelId: "inherited-model" };
     expect(mergeRunConfig({ inherited, hasExplicitSpec: false }).modelId).toBe("inherited-model");
     expect(
       mergeRunConfig({ inherited, hasExplicitSpec: false, envModel: "env-model" }).modelId,
@@ -123,13 +186,23 @@ describe("mergeRunConfig — priority order", () => {
   });
 
   it("explicit spec disables versionPin inheritance", () => {
-    const inherited = {
-      modelId: null,
-      proxyId: null,
-      version_pin: "1.2.3",
-    };
+    const inherited = { ...stubPayload(), version_pin: "1.2.3" };
     expect(mergeRunConfig({ inherited, hasExplicitSpec: false }).versionPin).toBe("1.2.3");
     expect(mergeRunConfig({ inherited, hasExplicitSpec: true }).versionPin).toBeNull();
+  });
+
+  it("passes the generation settings and the stored input layer through", () => {
+    const merged = mergeRunConfig({
+      inherited: {
+        ...stubPayload(),
+        generation: { temperature: 0.2 },
+        input: { values: { dry_run: true }, locked_fields: ["dry_run"] },
+      },
+      hasExplicitSpec: false,
+    });
+    expect(merged.generation).toEqual({ temperature: 0.2 });
+    expect(merged.inputValues).toEqual({ dry_run: true });
+    expect(merged.lockedInputFields).toEqual(["dry_run"]);
   });
 
   it("inherited=null produces a no-op merge", () => {
@@ -138,13 +211,19 @@ describe("mergeRunConfig — priority order", () => {
     expect(merged.modelId).toBeNull();
     expect(merged.proxyId).toBeNull();
     expect(merged.versionPin).toBeNull();
+    expect(merged.generation).toBeNull();
+    expect(merged.inputValues).toEqual({});
+    expect(merged.lockedInputFields).toEqual([]);
   });
 });
 
-function stubPayload() {
+/** A fully-populated wire payload — every member the endpoint always emits. */
+function stubPayload(): ResolvedRunConfig {
   return {
+    generation: null,
     modelId: null,
     proxyId: null,
-    versionPin: null,
+    version_pin: null,
+    input: { values: {}, locked_fields: [] },
   };
 }

@@ -35,6 +35,7 @@ import {
   apiUploadToolNameFor as deriveApiUploadToolName,
   assertUniqueApiToolAuthTokens,
 } from "@appstrate/afps-shared/api-tool-naming";
+import { isBareAuthSchemePrefix } from "@appstrate/afps-shared/delivery-http";
 import { normaliseMcpToolBody } from "@appstrate/afps-shared/mcp-naming";
 import { isToolsWildcard, TOOLS_WILDCARD, type ManifestIntegrationEntry } from "./dependencies.ts";
 
@@ -159,7 +160,9 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
     // dispatch exists in `packages/connect/src/afps-delivery.ts`). Rejecting
     // at install time gives manifest authors a loud error instead of a
     // silent runtime no-op.
-    const httpDelivery = (auth as { delivery?: { http?: { in?: string } } }).delivery?.http;
+    const httpDelivery = (
+      auth as { delivery?: { http?: { in?: string; name?: string; prefix?: string } } }
+    ).delivery?.http;
     if (httpDelivery?.in !== undefined && httpDelivery.in !== "header") {
       ctx.addIssue({
         code: "custom",
@@ -168,7 +171,28 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
       });
     }
 
-    // (1d) §7.2 + §7.6 install gate — `mtls` + `delivery.http` cannot be
+    // (1d) §7.6 install gate — `prefix` is a LITERAL prepended to the rendered
+    // value, so an auth-scheme prefix must carry its own separator ("Bearer ",
+    // not "Bearer"). A bare scheme renders `Authorization: BearerTOKEN`, which
+    // every upstream rejects as a malformed credential. The injector
+    // (`planHttpDeliveryInjection`) concatenates verbatim and repairs nothing,
+    // so the defect is caught here — where the manifest author can act on it —
+    // instead of at request time inside a run. The grammar itself lives in
+    // `@appstrate/afps-shared`: the portable runtime gates a hand-authored
+    // creds file the same way, and one rule may not have two spellings.
+    const httpPrefix = httpDelivery?.prefix;
+    if (
+      typeof httpPrefix === "string" &&
+      isBareAuthSchemePrefix(httpDelivery?.name ?? "", httpPrefix)
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: `delivery.http.prefix "${httpPrefix}" is a bare auth scheme — prefix is a literal (AFPS §7.6) and is concatenated verbatim, so it must include its own separator. Write "${httpPrefix} ".`,
+        path: ["auths", authKey, "delivery", "http", "prefix"],
+      });
+    }
+
+    // (1e) §7.2 + §7.6 install gate — `mtls` + `delivery.http` cannot be
     // honoured: the MITM proxy terminates upstream TLS and re-fetches, so
     // there is no first-class way to drive a client-cert handshake on the
     // upstream leg. Reject at install time; the integration author should

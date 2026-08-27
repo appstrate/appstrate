@@ -132,7 +132,7 @@ export const notifications = pgTable(
       table.recipientId,
       table.spaceId,
     ),
-    // Space-LEADING, single column (migration 0054). `space_id` is the FK
+    // Space-LEADING, single column (migration 0055). `space_id` is the FK
     // target of `ON DELETE CASCADE`, and Postgres indexes only the REFERENCED
     // side of a foreign key — so `DELETE FROM spaces WHERE id = ?`
     // (`services/spaces.ts`) had to seq-scan this whole table to find the rows

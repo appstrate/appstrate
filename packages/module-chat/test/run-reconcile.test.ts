@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { and, asc, eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { chatMessages, chatSessions, files, runs } from "@appstrate/db/schema";
 import { truncateAll } from "../../../apps/api/test/helpers/db.ts";
@@ -104,6 +104,18 @@ describe("orphaned chat run reconciliation", () => {
       .orderBy(asc(chatMessages.seq));
   }
 
+  async function sessionRow(sessionId: string) {
+    const [row] = await db
+      .select({
+        updatedAt: chatSessions.updatedAt,
+        lastAssistantSeq: chatSessions.lastAssistantSeq,
+      })
+      .from(chatSessions)
+      .where(eq(chatSessions.id, sessionId))
+      .limit(1);
+    return row!;
+  }
+
   it("records the launching session without clobbering run metadata", async () => {
     const sessionId = await createSession();
     const runId = await createRun(null, { degraded_integrations: ["@acme/gmail"] });
@@ -167,31 +179,22 @@ describe("orphaned chat run reconciliation", () => {
     await publishFile(runId, "report.html");
 
     await expect(reconcileChatRun({ runId, orgId: ctx.orgId })).resolves.toBe(true);
+    const before = await sessionRow(sessionId);
     await expect(reconcileChatRun({ runId, orgId: ctx.orgId })).resolves.toBe(false);
     await expect(reconcileChatRun({ runId, orgId: ctx.orgId })).resolves.toBe(false);
 
     const rows = await messages(sessionId);
     expect(rows).toHaveLength(1);
-    // …and the replay must not have touched the row it found either: the
-    // unread watermark still points AT the single notice. An upsert that ran
-    // again would have re-advanced it, marking a conversation unread that its
-    // owner may already have read.
-    const [row] = await db
-      .select({ seq: chatMessages.seq })
-      .from(chatMessages)
-      .where(
-        and(
-          eq(chatMessages.sessionId, sessionId),
-          eq(chatMessages.messageId, runNoticeMessageId(runId)),
-        ),
-      )
-      .limit(1);
-    const [session] = await db
-      .select({ lastAssistantSeq: chatSessions.lastAssistantSeq })
-      .from(chatSessions)
-      .where(eq(chatSessions.id, sessionId))
-      .limit(1);
-    expect(session!.lastAssistantSeq).toBe(row!.seq);
+    // …and the replay must not have TOUCHED the row it found either. The
+    // watermark would have survived an upsert anyway — the conflict path
+    // returns the EXISTING row's `seq` and `touchSession` advances
+    // `lastAssistantSeq` by `GREATEST`, so it cannot move — which is why the
+    // discriminating assertion is `updatedAt`. That IS re-stamped by a rewrite,
+    // and `chat_sessions` is listed `desc(updatedAt)`: a replayed
+    // reconciliation would jump the conversation to the top of its owner's
+    // sidebar with nothing new in it.
+    const after = await sessionRow(sessionId);
+    expect(after.updatedAt).toEqual(before.updatedAt);
   });
 
   it("stays silent while a turn is live on the session", async () => {

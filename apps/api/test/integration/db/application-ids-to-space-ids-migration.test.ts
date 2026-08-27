@@ -436,7 +436,7 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
     // without editing this test.
     //
     // `audit_events.space_id` is UNIONed in for the same reason the script's
-    // step 4 names it explicitly — `0054_schema_integrity_repairs` dropped its
+    // step 4 names it explicitly — `0055_schema_integrity_repairs` dropped its
     // foreign key (an `ON DELETE SET NULL` that blanked the attribution of
     // every deleted space), so the catalog sweep can no longer reach it. It is
     // still a pointer at a space and still has to be re-minted; without this
@@ -479,12 +479,12 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
     `);
     // Byte-for-byte the same set, same names, same delete actions — all
     // seventeen `c` (cascade). `audit_events` used to be an eighteenth entry at
-    // `n` (set null); `0054_schema_integrity_repairs` dropped that FK, because
+    // `n` (set null); `0055_schema_integrity_repairs` dropped that FK, because
     // the SET NULL was doing exactly what the old comment here warned a wrong
     // action would do — erasing the space attribution of every historical audit
     // row — and doing it on purpose, on every space delete.
     //
-    // So the assertion inverts: a resurrected `n` now means either 0054 was
+    // So the assertion inverts: a resurrected `n` now means either 0055 was
     // reverted or the capture/restore invented an action of its own.
     expect(after).toEqual(before);
     expect(after.filter((r) => r.d !== "c")).toEqual([]);
