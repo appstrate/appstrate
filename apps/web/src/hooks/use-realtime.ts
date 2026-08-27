@@ -2,10 +2,8 @@
 
 import { useEffect, useRef } from "react";
 import {
-  runUpdateEventSchema,
   runLogEventSchema,
   runMetricEventSchema,
-  type RunUpdateEvent,
   type RunLogEvent,
   type RunMetricEvent,
 } from "@appstrate/shared-types";
@@ -17,7 +15,6 @@ import { getCurrentSpaceId } from "./use-current-space";
 export type { RunLogEvent, RunMetricEvent } from "@appstrate/shared-types";
 
 interface RunRealtimeHandlers {
-  onStatusChange?: (payload: RunUpdateEvent) => void;
   onNewLog?: (log: RunLogEvent) => void;
   onMetric?: (metric: RunMetricEvent) => void;
 }
@@ -32,10 +29,12 @@ function safeJsonParse(text: string): unknown {
 }
 
 /**
- * Subscribe to run status changes, log inserts, and/or live metric updates
- * for a single run via a single SSE connection. Pass any subset of handlers
- * — the connection dispatches by event type and skips channels with no
- * listener attached.
+ * Subscribe to log inserts and/or live metric updates for a single run via a
+ * single SSE connection. Pass any subset of handlers — the connection
+ * dispatches by event type and skips channels with no listener attached.
+ *
+ * Status patches are NOT served here: they arrive on the global stream
+ * (`useGlobalRunSync`), which writes the same run cache key.
  */
 export function useRunRealtime(runId: string | null | undefined, handlers: RunRealtimeHandlers) {
   const handlersRef = useRef(handlers);
@@ -49,20 +48,16 @@ export function useRunRealtime(runId: string | null | undefined, handlers: RunRe
     const spaceId = getCurrentSpaceId();
     if (!orgId || !spaceId) return;
 
-    // Only the three run channels are dispatched below, so declare them: the
-    // per-run stream would otherwise also carry `connection_update` (every
-    // connection row the caller owns) and `chat_session_update` for a page
-    // that listens to neither. `verbose=true` is still required — it is what
-    // keeps `run_log.data` in the payload.
+    // Only the two run channels dispatched below are declared: the per-run
+    // stream would otherwise also carry `run_update` (status, already served
+    // by the global stream), `connection_update` (every connection row the
+    // caller owns) and `chat_session_update` for a page that listens to none
+    // of them. `verbose=true` is still required — it is what keeps
+    // `run_log.data` in the payload.
     const es = new EventSource(
-      `/api/realtime/runs/${runId}?orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}&verbose=true&channels=run_update,run_log,run_metric`,
+      `/api/realtime/runs/${runId}?orgId=${encodeURIComponent(orgId)}&spaceId=${encodeURIComponent(spaceId)}&verbose=true&channels=run_log,run_metric`,
       { withCredentials: true },
     );
-
-    es.addEventListener("run_update", (e) => {
-      const parsed = runUpdateEventSchema.safeParse(safeJsonParse(e.data));
-      if (parsed.success) handlersRef.current.onStatusChange?.(parsed.data);
-    });
 
     es.addEventListener("run_log", (e) => {
       const parsed = runLogEventSchema.safeParse(safeJsonParse(e.data));

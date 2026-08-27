@@ -14,10 +14,13 @@
  * `onRunStatusChange` event. The two never overlap: `persistNotice` takes the
  * session row's lock and refuses while `active_stream_id` is set, so a turn
  * owns its conversation from start to finalize. The routes below write no
- * message at all — `GET /api/chat/sessions/:id` returns the
- * stored tree nodes for the client's read-only history adapter, in the
- * `{ id, parent_id, format, content }` shape assistant-ui's `ai-sdk/v6` format
- * adapter decodes.
+ * message at all — `GET /api/chat/sessions/:id` returns the stored messages for
+ * the client's read-only history load (`ui/sessions.ts` → `loadHistory`), as
+ * `{ id, content }`: the ai-sdk/v6 UIMessage minus its id, plus the id, which
+ * is exactly what `useChat({ messages })` is seeded with.
+ *
+ * There is no `parent_id` and no `format` on the wire. Both were columns
+ * nothing ever read back, dropped by `0054` — see the `chatMessages` table doc.
  *
  * Rate limiting: `services.http.rateLimit` (platform capability), captured into
  * the router's `ChatPlatformDeps` at module init (see index.ts).
@@ -75,8 +78,6 @@ function toSessionDto(row: SessionRow) {
 function toMessageDto(row: MessageRow) {
   return {
     id: row.messageId,
-    parent_id: row.parentId,
-    format: row.format,
     content: row.content,
   };
 }

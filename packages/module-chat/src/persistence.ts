@@ -14,7 +14,10 @@
  * Storage stays byte-compatible with assistant-ui's `ai-sdk/v6`
  * MessageFormatAdapter so the existing client history-adapter LOAD path keeps
  * working unchanged: `content` = the UIMessage WITHOUT its `id` (the id lives in
- * `message_id`), `format` = `"ai-sdk/v6"`, `parent_id` chains messages linearly.
+ * `message_id`). The `format` and `parent_id` columns were dropped by `0054` —
+ * a constant and a re-encoding of `seq` order, neither of which any reader ever
+ * looked at; see the `chatMessages` table doc. The parent message id is still
+ * COMPUTED here, because `deterministicMessageId` hashes it.
  */
 
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
@@ -32,9 +35,6 @@ import type { UIMessage } from "ai";
  * ({@link persistNotice}).
  */
 type ChatDbClient = Pick<typeof db, "select" | "insert" | "update">;
-
-/** assistant-ui ai-sdk MessageFormatAdapter id — keep in sync with the client. */
-const CHAT_MESSAGE_FORMAT = "ai-sdk/v6";
 
 /** Storage content = UIMessage minus its id (the id rides in `message_id`). */
 function toContent(message: UIMessage): Record<string, unknown> {
@@ -119,6 +119,12 @@ async function upsertMessage(
   message: UIMessage,
   parentId: string | null,
 ): Promise<{ messageId: string; seq: number }> {
+  // `parentId` is HASH MATERIAL, not a stored column — the `parent_id` column
+  // was dropped by `0054`. It still has to be threaded here: every `gen_…` id
+  // already in the table was derived from it, so removing it from the material
+  // would mint a different id for the same message and break the upsert's
+  // dedupe on a retried finalize.
+  //
   // The row is keyed by (sessionId, messageId). The assistant UIMessage parsed
   // from the stream can arrive WITHOUT an id (the engine's start chunk may omit
   // `messageId`); an empty id would collide across turns and silently overwrite
@@ -135,13 +141,11 @@ async function upsertMessage(
     .values({
       sessionId,
       messageId,
-      parentId,
-      format: CHAT_MESSAGE_FORMAT,
       content,
     })
     .onConflictDoUpdate({
       target: [chatMessages.sessionId, chatMessages.messageId],
-      set: { parentId, content, format: CHAT_MESSAGE_FORMAT },
+      set: { content },
     })
     .returning({ seq: chatMessages.seq });
   return { messageId, seq: row!.seq };
@@ -178,19 +182,20 @@ export async function persistAssistantMessage(
  * deliverables).
  *
  * Goes through the same single writer as every other message (`upsertMessage` →
- * `touchSession`), so ordering, the `parent_id` chain, the title derivation and
- * the unread watermark behave identically. Persisted with the ASSISTANT role
+ * `touchSession`), so ordering, the title derivation and the unread watermark
+ * behave identically. Persisted with the ASSISTANT role
  * (not `system`): the engine's history projection (`buildStructuredPiTurn`)
  * keeps only `user` and `assistant` — a mid-transcript system message would be
  * dropped on the next turn, and refused outright by `chatStreamSchema` on the
  * way back in — and the notice reads naturally as something the assistant says.
  *
  * `messageId` is CALLER-CHOSEN and must be derived from the event, not random:
- * an already-present id makes this a no-op (returns false) so a replayed
- * reconciliation cannot append a second copy. The early return — rather than
- * relying on the `(session_id, message_id)` upsert — is what keeps the
- * `parent_id` chain intact: on a replay the notice is itself the last message,
- * so an upsert would re-parent it onto itself.
+ * an already-present id makes this a no-op (returns FALSE) so a replayed
+ * reconciliation cannot append a second copy. The early return rather than a
+ * bare reliance on the `(session_id, message_id)` upsert is what makes the
+ * return value honest: the upsert alone would touch the row again and report
+ * the replay as a fresh write, and `touchSession` would re-advance the unread
+ * watermark on a conversation whose owner has already read it.
  *
  * THE SINGLE-WRITER GUARD IS HERE, not in the caller. A notice may only be
  * written while no turn is generating (`active_stream_id IS NULL`) — a turn

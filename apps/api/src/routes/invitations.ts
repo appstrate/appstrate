@@ -125,7 +125,7 @@ router.post("/:token/accept", async (c) => {
   // is reported as already-accepted. `addMember` is idempotent (it swallows the
   // unique violation), so an existing membership keeps the claim valid.
   const claimed = await db.transaction(async (tx) => {
-    const won = await markInvitationAccepted(invitation.id, session.user.id, tx);
+    const won = await markInvitationAccepted(invitation.id, tx);
     if (!won) return false;
     await addMember(invitation.orgId, session.user.id, invitation.role as AssignableOrgRole, tx);
     return true;

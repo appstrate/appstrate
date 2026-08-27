@@ -13,6 +13,7 @@ import {
   uniqueIndex,
   primaryKey,
   check,
+  foreignKey,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { orgRoleEnum, invitationStatusEnum } from "./enums.ts";
@@ -91,6 +92,24 @@ export const organizationMembers = pgTable(
   ],
 );
 
+/**
+ * Pending invitations to join an org.
+ *
+ * NOTE — there are deliberately no `accepted_by` / `accepted_at` columns, and
+ * no `idx_org_invitations_accepted_by`. There were, written by
+ * `markInvitationAccepted` (`services/invitations.ts`) beside the
+ * `status = 'accepted'` flip, and read by nothing: `getOrgInvitations` — the
+ * only list — filters `status = 'pending'`, so an accepted row never reaches
+ * the route at all, and neither column appears in any DTO, OpenAPI schema or
+ * SPA read. The two assertions in `invitations.test.ts` were the entire
+ * readership, i.e. a test that only proved the write happened.
+ *
+ * The `status` enum already records THAT an invitation was accepted; who
+ * accepted it and when is in the audit log, which outlives the row (the org
+ * delete drops every invitation with it). Dropped by `0054`. If acceptance
+ * attribution is ever wanted on this table, it needs a reader designed with
+ * it — not these columns revived.
+ */
 export const orgInvitations = pgTable(
   "org_invitations",
   {
@@ -105,9 +124,7 @@ export const orgInvitations = pgTable(
     role: orgRoleEnum("role").notNull(),
     status: invitationStatusEnum("status").notNull().default("pending"),
     invitedBy: text("invited_by").references(() => user.id, { onDelete: "set null" }),
-    acceptedBy: text("accepted_by").references(() => user.id, { onDelete: "set null" }),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
@@ -117,7 +134,6 @@ export const orgInvitations = pgTable(
     // Postgres indexes only the REFERENCED side of a foreign key; without
     // this, deleting one user seq-scans this table under the deletion's lock.
     index("idx_org_invitations_invited_by").on(table.invitedBy),
-    index("idx_org_invitations_accepted_by").on(table.acceptedBy),
   ],
 );
 
@@ -352,10 +368,13 @@ export const modelProviderPairings = pgTable(
      * Final `model_provider_credentials.id` created or reconnected by the
      * helper. NULL while pending; surfaced via `GET /pairing/:id` after redeem
      * so the UI can act on the result without polling the credential list.
+     *
+     * The FK is declared in the table-config block below with an EXPLICIT
+     * name: drizzle's generated one,
+     * `model_provider_pairings_credential_id_model_provider_credentials_id_fk`,
+     * is 70 bytes and Postgres truncates silently at 63. See the block.
      */
-    credentialId: uuid("credential_id").references(() => modelProviderCredentials.id, {
-      onDelete: "set null",
-    }),
+    credentialId: uuid("credential_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
@@ -373,6 +392,23 @@ export const modelProviderPairings = pgTable(
     // reader, `consumePairing`, is anchored on the unique `token_hash`.
     // If the cleanup scan ever becomes hot, add a NON-partial index on
     // `expires_at` — the partial shape cannot serve that query.
+    //
+    // EXPLICITLY NAMED (migration 0054). Drizzle's generated name,
+    // `model_provider_pairings_credential_id_model_provider_credentials_id_fk`,
+    // is 70 bytes; Postgres truncates identifiers past 63 at creation, without
+    // a warning, so the catalog has only ever held
+    // `model_provider_pairings_credential_id_model_provider_credential`. The
+    // schema, the snapshot and `0000_init.sql` all carried the 70-byte form,
+    // and the first statement to address it by name — the
+    // `DROP CONSTRAINT "<declared name>"` drizzle-kit emits when an FK's
+    // `onDelete` or target changes — would have errored 42704 and aborted the
+    // whole pending batch. Same reasoning in full on
+    // `integration_org_defaults.connectionId`, the other one of the two.
+    foreignKey({
+      columns: [table.credentialId],
+      foreignColumns: [modelProviderCredentials.id],
+      name: "model_provider_pairings_credential_id_fk",
+    }).onDelete("set null"),
   ],
 );
 

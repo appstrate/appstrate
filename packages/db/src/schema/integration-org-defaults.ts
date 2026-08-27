@@ -39,7 +39,16 @@
  * the resolver falls through to the next layer.
  */
 
-import { pgTable, text, uuid, boolean, timestamp, index, uniqueIndex } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  uuid,
+  boolean,
+  timestamp,
+  index,
+  uniqueIndex,
+  foreignKey,
+} from "drizzle-orm/pg-core";
 import { user } from "./auth.ts";
 import { spaces } from "./spaces.ts";
 import { packages } from "./packages.ts";
@@ -56,10 +65,17 @@ export const integrationOrgDefaults = pgTable(
     integrationId: text("integration_package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
-    /** The connection every agent will use by default. Must be sharedWithOrg=true. */
-    connectionId: uuid("connection_id")
-      .notNull()
-      .references(() => integrationConnections.id, { onDelete: "cascade" }),
+    /**
+     * The connection every agent will use by default. Must be sharedWithOrg=true.
+     *
+     * The FK is declared in the table-config block below with an EXPLICIT name.
+     * Drizzle's generated name for it —
+     * `integration_org_defaults_connection_id_integration_connections_id_fk` —
+     * is 68 bytes, past Postgres' 63-byte identifier limit, so the catalog has
+     * only ever held the silently truncated form. See the block for why that
+     * matters.
+     */
+    connectionId: uuid("connection_id").notNull(),
     /** true = org-wide force (locks members); false = soft default (members can deviate). */
     enforce: boolean("enforce").notNull().default(false),
     /**
@@ -80,5 +96,31 @@ export const integrationOrgDefaults = pgTable(
     // Resolver hot path: load all defaults for a space in one query.
     // Reverse lookup for the unshare / destructive-delete impact guard.
     index("idx_integration_org_defaults_connection").on(table.connectionId),
+    // EXPLICITLY NAMED (migration 0054), and it has to be.
+    //
+    // Drizzle derives an unnamed FK's name as
+    // `<table>_<cols>_<refTable>_<refCols>_fk`, which here is 68 bytes.
+    // Postgres truncates any identifier past NAMEDATALEN-1 = 63 bytes AT
+    // CREATION, silently — so `0000_init.sql` asked for the 68-byte name and
+    // every database, fresh or ancient, ended up holding
+    // `integration_org_defaults_connection_id_integration_connections_`.
+    //
+    // Nothing notices until something addresses the constraint BY NAME, and
+    // the thing that eventually does is drizzle-kit itself: change this FK's
+    // `onDelete` or its target and `generate` emits
+    // `DROP CONSTRAINT "<the 68-byte name>"`, which matches nothing, errors
+    // 42704, and aborts the whole pending batch — every migration in the
+    // release, on every database. That is a failed deploy discovered at boot,
+    // which is exactly how the `audit_events_org_id_fkey` name drift was found
+    // in beta.24.
+    //
+    // The explicit name below is 41 bytes and is what the catalog now holds,
+    // renamed in place by 0054. Keep any future name here under 63 bytes; the
+    // schema-vs-migrations parity test asserts it for every constraint.
+    foreignKey({
+      columns: [table.connectionId],
+      foreignColumns: [integrationConnections.id],
+      name: "integration_org_defaults_connection_id_fk",
+    }).onDelete("cascade"),
   ],
 );

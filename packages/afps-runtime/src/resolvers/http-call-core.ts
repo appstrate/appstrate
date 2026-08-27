@@ -43,7 +43,7 @@ import { AuthorizedUrisError, ResolverError } from "../errors.ts";
  * in `runtime-pi/sidecar/helpers.ts` (256 KB) so the two layers stay
  * in sync — both truncate at the same boundary.
  */
-export const defaultInlineLimit = 256 * 1024;
+const defaultInlineLimit = 256 * 1024;
 
 /**
  * Hard upper bound on `responseMode.maxInlineBytes` — the agent-supplied
@@ -1029,8 +1029,6 @@ async function buildMultipartBytes(
   parts: NonNullable<Extract<ApiCallRequest["body"], { multipart: unknown }>["multipart"]>,
   workspace: string,
 ): Promise<{ bytes: Uint8Array<ArrayBuffer>; contentType: string }> {
-  const path = await import("node:path");
-  const fs = await import("node:fs/promises");
   const fd = new FormData();
   let totalSize = 0;
 
@@ -1069,11 +1067,11 @@ async function buildMultipartBytes(
           { max: MAX_REQUEST_BODY_SIZE },
         );
       }
-      const fileBytes = await fs.readFile(absPath);
+      const fileBytes = await fsPromises.readFile(absPath);
       const blob = new Blob([fileBytes], {
         type: part.contentType ?? "application/octet-stream",
       });
-      fd.append(part.name, blob, part.filename ?? path.basename(part.fromFile));
+      fd.append(part.name, blob, part.filename ?? nodePath.basename(part.fromFile));
     } else {
       // Inline base64 bytes — validate and decode via shared helper.
       // Note: the per-part size check uses MAX_REQUEST_BODY_SIZE as the
@@ -1224,7 +1222,6 @@ export async function resolveBodyForFetch(
       { fromFile: body.fromFile },
     );
   }
-  const fs = await import("node:fs/promises");
   const { absPath: safePath, stat: lst } = await resolveSafeFile(opts.workspace, body.fromFile);
   // Streaming path: file size > threshold AND caller opted in. Hard
   // cap at MAX_STREAMED_BODY_SIZE — beyond that the upload is refused
@@ -1248,7 +1245,7 @@ export async function resolveBodyForFetch(
       { fromFile: body.fromFile, size: lst.size, max: MAX_REQUEST_BODY_SIZE },
     );
   }
-  return { kind: "bytes", bytes: toArrayBufferUint8(await fs.readFile(safePath)) };
+  return { kind: "bytes", bytes: toArrayBufferUint8(await fsPromises.readFile(safePath)) };
 }
 
 /**
@@ -1355,15 +1352,13 @@ async function writeStreamToFile(
   absPath: string,
   options: { signal?: AbortSignal; maxBytes?: number } = {},
 ): Promise<{ size: number; sha256: string }> {
-  const path = await import("node:path");
-  const fs = await import("node:fs/promises");
   const crypto = await import("node:crypto");
-  await fs.mkdir(path.dirname(absPath), { recursive: true });
+  await fsPromises.mkdir(nodePath.dirname(absPath), { recursive: true });
 
   const { signal } = options;
 
   const hasher = crypto.createHash("sha256");
-  const handle = await fs.open(absPath, "w");
+  const handle = await fsPromises.open(absPath, "w");
   let size = 0;
   const reader = source.getReader();
 
@@ -1376,7 +1371,7 @@ async function writeStreamToFile(
       /* ignore */
     }
     try {
-      await fs.unlink(absPath);
+      await fsPromises.unlink(absPath);
     } catch {
       /* ignore */
     }
@@ -1402,13 +1397,13 @@ async function writeStreamToFile(
       })
     : null;
 
-  // TOCTOU re-check: the signal may have fired between fs.open and the
+  // TOCTOU re-check: the signal may have fired between fsPromises.open and the
   // addEventListener call above. addEventListener does NOT fire retroactively
   // for already-aborted signals, so we must re-check here explicitly.
   if (signal?.aborted) {
     reader.cancel(signal.reason).catch(() => {});
     await handle.close().catch(() => {});
-    await fs.unlink(absPath).catch(() => {});
+    await fsPromises.unlink(absPath).catch(() => {});
     throw signal.reason instanceof Error ? signal.reason : new Error("aborted");
   }
 
@@ -1449,7 +1444,7 @@ async function writeStreamToFile(
       /* ignore */
     }
     try {
-      await fs.unlink(absPath);
+      await fsPromises.unlink(absPath);
     } catch {
       /* ignore */
     }
@@ -1636,10 +1631,8 @@ export async function serializeFetchResponse(
   // 1. Caller asked for a file: write there, regardless of size or mime.
   if (typeof requestedToFile === "string" && requestedToFile.length > 0) {
     const safePath = await resolveSafeOutputPath(ctx.workspace, requestedToFile);
-    const path = await import("node:path");
-    const fs = await import("node:fs/promises");
-    await fs.mkdir(path.dirname(safePath), { recursive: true });
-    await fs.writeFile(safePath, bytes);
+    await fsPromises.mkdir(nodePath.dirname(safePath), { recursive: true });
+    await fsPromises.writeFile(safePath, bytes);
     const sha256 = await sha256Hex(bytes);
     const { mime: finalMime, sniffed } = await maybeSniffMimeType(mimeType, bytes);
     return {
@@ -1660,10 +1653,8 @@ export async function serializeFetchResponse(
   if (size > effectiveInlineLimit) {
     const relative = `responses/${ctx.toolCallId}.bin`;
     const safePath = await resolveSafePath(ctx.workspace, relative);
-    const path = await import("node:path");
-    const fs = await import("node:fs/promises");
-    await fs.mkdir(path.dirname(safePath), { recursive: true });
-    await fs.writeFile(safePath, bytes);
+    await fsPromises.mkdir(nodePath.dirname(safePath), { recursive: true });
+    await fsPromises.writeFile(safePath, bytes);
     const sha256 = await sha256Hex(bytes);
     const { mime: finalMime, sniffed } = await maybeSniffMimeType(mimeType, bytes);
     return {

@@ -251,64 +251,6 @@ function hasHeader(headers: Record<string, string>, name: string): boolean {
 }
 
 /**
- * MCP `_meta` key under which the sidecar surfaces token-budget
- * accounting to the agent runtime.
- *
- * NOTHING reads it today — no agent-side resolver, no runner, no test
- * outside `sidecar/test/token-budget-integration.test.ts`. It is
- * observable in the sidecar's own tests and logs and nowhere else: the
- * runner's `callToolResultToPi` (`runner-pi/src/runtime-tools/
- * mcp-forward.ts`) maps only `content` + `structuredContent` and DROPS
- * `_meta`, so reaching an agent-side consumer would require forwarding
- * `_meta` there first. Treat it as informational: the spill decisions it
- * reports are already enforced sidecar-side and logged, so a client that
- * drops `_meta` loses telemetry, not behaviour. Do not make it
- * load-bearing without giving it a real reader.
- *
- * Distinct from {@link UPSTREAM_META_KEY} (which carries upstream
- * `{ status, headers }`) so a CallToolResult can carry both without
- * collision.
- *
- * AFPS (Phase F1 follow-up): reverse-DNS namespace — `_meta` keys
- * must be either a single bare token or a reverse-DNS prefix (RFC §10.1
- * / Appendix B). The canonical form is `"dev.appstrate/token-budget"`.
- */
-const TOKEN_BUDGET_META_KEY = "dev.appstrate/token-budget";
-
-/**
- * Discriminated reason surfaced in the agent-facing `_meta` payload.
- * Wider than {@link BudgetDecision.reason} because it adds the
- * caller-driven fallback states (no blob store wired, blob store full)
- * the budget tracker itself cannot produce.
- */
-type TokenBudgetMetaReason =
-  | "under_inline_cap"
-  | "exceeds_inline_cap"
-  | "exceeds_run_budget"
-  | "exceeds_context_window"
-  | "blob_store_full"
-  | "no_blob_store_configured";
-
-/**
- * Shape of the {@link TOKEN_BUDGET_META_KEY} payload. Stable wire
- * contract — extensions append, never rename.
- */
-interface TokenBudgetMeta {
-  /** Tokens estimated for *this* tool output. */
-  estimatedTokens: number;
-  /** Cumulative tool-output tokens consumed in the run so far. */
-  consumedTokens: number;
-  /** Configured run-level ceiling. */
-  runBudgetTokens: number;
-  /** Configured per-call inline cap. */
-  inlineCapTokens: number;
-  /** What the budget tracker decided (after caller overrides). */
-  decision: "inline" | "spill";
-  /** Why it decided that way (machine-readable). */
-  reason: TokenBudgetMetaReason;
-}
-
-/**
  * Per-part metadata caps. Each is caller-supplied and ends up in MIME
  * part headers (`Content-Disposition: name="…"; filename="…"` /
  * `Content-Type: …`); none are counted by `MAX_REQUEST_BODY_SIZE`
@@ -1372,41 +1314,35 @@ interface ResponseToToolResultOptions {
 }
 
 /**
- * Pure helper: decide whether a text body should spill, and produce
- * the agent-facing `_meta` payload describing the decision.
+ * Pure helper: decide whether a text body should spill.
  *
  * Folded out of {@link responseToToolResult} so the budget logic is
  * unit-testable in isolation and the surrounding async flow stays
  * linear. Calls {@link TokenBudget.tryReserve} so the inline-record is
  * atomic with the decision (no decide/record interleave under
  * concurrent calls).
+ *
+ * `estimatedTokens` rides along because the two caller-driven
+ * forced-inline paths (blob store full, no blob store configured) must
+ * `record()` the tokens `tryReserve` deliberately did not.
  */
 function evaluateBudget(args: { text: string; tokenBudget: TokenBudget }): {
   shouldSpill: boolean;
-  meta: TokenBudgetMeta;
+  estimatedTokens: number;
 } {
   const estimated = args.tokenBudget.estimate(args.text);
   const decision = args.tokenBudget.tryReserve(estimated);
-  // Per-call trace at debug only. Spill events are already surfaced by
-  // the downstream "spilled to blob store" / "blob store full" / "no
-  // blob store configured" logs in spillToBlobStore.
+  // Per-call trace at debug only, and the only place the tracker's
+  // `reason` is surfaced. Spill outcomes are separately surfaced by the
+  // downstream "spilled to blob store" / "blob store full" / "no blob
+  // store configured" logs below.
   logger.debug("token-budget decision", {
     decision: decision.decision,
     reason: decision.reason,
     estimatedTokens: estimated,
     consumedTokens: decision.consumedTokens,
   });
-  return {
-    shouldSpill: decision.decision === "spill",
-    meta: {
-      estimatedTokens: estimated,
-      consumedTokens: decision.consumedTokens,
-      runBudgetTokens: decision.runBudgetTokens,
-      inlineCapTokens: decision.inlineCapTokens,
-      decision: decision.decision,
-      reason: decision.reason,
-    },
-  };
+  return { shouldSpill: decision.decision === "spill", estimatedTokens: estimated };
 }
 
 /**
@@ -1433,9 +1369,6 @@ function evaluateBudget(args: { text: string; tokenBudget: TokenBudget }): {
  *   reason. Production always supplies a BlobStore + TokenBudget via
  *   `mountMcp`.
  *
- * Every text-path result carries a `dev.appstrate/token-budget` `_meta`
- * payload so the agent runtime can surface accounting and react to
- * structured truncation events.
  */
 async function responseToToolResult(
   res: Response,
@@ -1462,11 +1395,6 @@ async function responseToToolResult(
     ? buildUpstreamMeta(res)
     : undefined;
 
-  // Budget meta accumulates per-response: estimated cost + the tracker's
-  // decision are folded in by the text path below. Stays undefined for
-  // binary spills where no text estimate is meaningful.
-  let budgetMeta: TokenBudgetMeta | undefined;
-
   type Result = {
     content: Array<
       | { type: "text"; text: string }
@@ -1476,10 +1404,7 @@ async function responseToToolResult(
     structuredContent?: Record<string, unknown>;
     _meta?: Record<string, unknown>;
   };
-  // Helper: attach `_meta` to every return path. We merge upstream-
-  // exchange meta and token-budget meta into a single payload — both
-  // are independent of agent-side mapping, both can be present
-  // simultaneously.
+  // Helper: attach `_meta` to every return path.
   //
   // No `structuredContent` is attached here. The response body owns
   // `content`, and a `structuredContent` that does not mirror it makes
@@ -1487,11 +1412,8 @@ async function responseToToolResult(
   // travel on `_meta[UPSTREAM_META_KEY]`, which the agent-side shaper
   // reads back into a model-visible `[api_call status=…]` line.
   const withMeta = (r: Result): Result => {
-    if (!upstreamMeta && !budgetMeta) return r;
-    const meta: Record<string, unknown> = {};
-    if (upstreamMeta) meta[UPSTREAM_META_KEY] = upstreamMeta;
-    if (budgetMeta) meta[TOKEN_BUDGET_META_KEY] = budgetMeta;
-    return { ...r, _meta: meta };
+    if (!upstreamMeta) return r;
+    return { ...r, _meta: { [UPSTREAM_META_KEY]: upstreamMeta } };
   };
 
   const ct = res.headers.get("content-type") ?? "";
@@ -1584,12 +1506,10 @@ async function responseToToolResult(
   // tryReserve() so cumulative state doesn't drift under concurrent
   // calls (two awaits between decide() and record() would otherwise
   // let two callers both observe a stale `consumed`).
-  const evaluation = evaluateBudget({
+  const { shouldSpill: shouldSpillForBudget, estimatedTokens } = evaluateBudget({
     text,
     tokenBudget: options.tokenBudget,
   });
-  budgetMeta = evaluation.meta;
-  const shouldSpillForBudget = evaluation.shouldSpill;
 
   // If the text body should spill AND we have a blob store, spill it.
   // The agent gets a pointer instead of poisoning its context with a
@@ -1603,14 +1523,13 @@ async function responseToToolResult(
         ...(options.source !== undefined ? { source: options.source } : {}),
       });
     } catch (err) {
-      // Blob store full — surface a distinct reason and record the
-      // forced-inline tokens against the budget. tryReserve() did NOT
-      // record on the spill path, so we record explicitly here.
-      budgetMeta = { ...budgetMeta, decision: "inline", reason: "blob_store_full" };
-      options.tokenBudget.record(budgetMeta.estimatedTokens);
+      // Blob store full — force the body inline and record the tokens
+      // against the budget. tryReserve() did NOT record on the spill
+      // path, so we record explicitly here.
+      options.tokenBudget.record(estimatedTokens);
       logger.warn("token-budget: blob store full, forced inline", {
         source: options.source,
-        estimatedTokens: budgetMeta.estimatedTokens,
+        estimatedTokens,
         consumedTokens: options.tokenBudget.consumedTokens(),
         error: getErrorMessage(err),
       });
@@ -1621,9 +1540,8 @@ async function responseToToolResult(
     }
     logger.info("token-budget: spilled to blob store", {
       source: options.source,
-      reason: budgetMeta?.reason,
-      estimatedTokens: budgetMeta?.estimatedTokens,
-      consumedTokens: budgetMeta?.consumedTokens,
+      estimatedTokens,
+      consumedTokens: options.tokenBudget.consumedTokens(),
       uri: record.uri,
     });
     const link = {
@@ -1636,15 +1554,13 @@ async function responseToToolResult(
   }
 
   // Inline path — when the budget said spill but no blob store is
-  // configured, surface the distinct reason and record the
-  // forced-inline tokens. tryReserve() did NOT record on the spill
-  // path, so we record explicitly here.
+  // configured, record the forced-inline tokens. tryReserve() did NOT
+  // record on the spill path, so we record explicitly here.
   if (shouldSpillForBudget && !options.blobStore) {
-    budgetMeta = { ...budgetMeta, decision: "inline", reason: "no_blob_store_configured" };
-    options.tokenBudget.record(budgetMeta.estimatedTokens);
+    options.tokenBudget.record(estimatedTokens);
     logger.warn("token-budget: no blob store configured, forced inline", {
       source: options.source,
-      estimatedTokens: budgetMeta.estimatedTokens,
+      estimatedTokens,
       consumedTokens: options.tokenBudget.consumedTokens(),
     });
   }
@@ -1876,8 +1792,8 @@ interface MountMcpOptions {
    * Run-scoped token budget. Every tool output is run through the
    * budget tracker before being delivered to the agent; dense JSON that
    * fits under a byte cap but would exhaust the context window spills
-   * to the blob store, and a structured `dev.appstrate/token-budget`
-   * `_meta` payload records the accounting.
+   * to the blob store. The decision is enforced sidecar-side and
+   * recorded in the sidecar's own logs.
    */
   tokenBudget: TokenBudget;
   /**

@@ -765,7 +765,6 @@ export function App() {
                 </LazyRoute>
               }
             />
-            <Route path="/spaces" element={<Navigate to="/org-settings/spaces" replace />} />
             <Route
               path="/preferences"
               element={
@@ -829,10 +828,6 @@ export function App() {
                   <EndUsersPage />
                 </LazyRoute>
               }
-            />
-            <Route
-              path="/space-settings"
-              element={<Navigate to="/org-settings/space/general" replace />}
             />
             <Route
               path="/org-settings"

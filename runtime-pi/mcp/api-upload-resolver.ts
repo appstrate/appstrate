@@ -255,9 +255,9 @@ export class McpApiUploadResolver {
     try {
       const stream = openFileStream(absPath);
       // `getReader()` resolves to the `node:stream/web` reader declaration,
-      // while `chunkBytes` declares the global one — structurally identical
-      // (same `ReadableStreamDefaultReader<Uint8Array>`), so bridge the two
-      // lib variants with a cast, matching this file's `openFileStream` cast.
+      // while `chunkBytes` declares the global (Bun) one — the two differ
+      // only by Bun's extra `readMany`, unused here, so bridge the lib
+      // variants with a cast.
       const reader = stream.getReader() as ReadableStreamDefaultReader<Uint8Array>;
       try {
         const iter = chunkBytes(reader, partSizeBytes, totalBytes);
@@ -412,28 +412,12 @@ export class McpApiUploadResolver {
 
 /**
  * Open a workspace file as a chunked `ReadableStream<Uint8Array>`.
- * Uses Bun's native `Bun.file(path).stream()` when available, with
- * a Node fallback so the resolver works in both runtimes (Bun in
- * production; Node only in mixed-runtime tests, none today).
+ *
+ * Bun-only, like the rest of `runtime-pi`: the image ENTRYPOINT is
+ * `bun run` and the package's test script is `bun test`.
  */
 function openFileStream(absPath: string): ReadableStream<Uint8Array> {
-  const bunGlobal = (
-    globalThis as { Bun?: { file: (p: string) => { stream: () => ReadableStream<Uint8Array> } } }
-  ).Bun;
-  if (bunGlobal && typeof bunGlobal.file === "function") {
-    return bunGlobal.file(absPath).stream();
-  }
-  // Lazy load to avoid pulling node:fs into pure-Bun runtimes. `require` and
-  // not `await import`: this function is synchronous and its callers depend
-  // on that, so the async form is a signature change, not a style change.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const mod = require("node:fs") as typeof import("node:fs");
-  const stream = mod.createReadStream(absPath);
-  // node:stream Readable.toWeb gives a ReadableStream<Buffer | string>;
-  // we know the source is binary so the cast is safe.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { Readable } = require("node:stream") as typeof import("node:stream");
-  return Readable.toWeb(stream) as unknown as ReadableStream<Uint8Array>;
+  return Bun.file(absPath).stream();
 }
 
 /**

@@ -30,7 +30,6 @@ export {
   finalizeThrownFailure,
   type FinalizeThrownFailureOptions,
 } from "./finalize-thrown-failure.ts";
-export { RunTimeoutError } from "../errors.ts";
 // Re-exported for ergonomics: runners produce RunResult, so consumers
 // typically import it alongside the runner surface.
 export type {

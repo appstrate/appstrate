@@ -172,9 +172,12 @@ describe("orphaned chat run reconciliation", () => {
 
     const rows = await messages(sessionId);
     expect(rows).toHaveLength(1);
-    // The replay must not have re-parented the notice onto itself either.
+    // …and the replay must not have touched the row it found either: the
+    // unread watermark still points AT the single notice. An upsert that ran
+    // again would have re-advanced it, marking a conversation unread that its
+    // owner may already have read.
     const [row] = await db
-      .select({ parentId: chatMessages.parentId })
+      .select({ seq: chatMessages.seq })
       .from(chatMessages)
       .where(
         and(
@@ -183,7 +186,12 @@ describe("orphaned chat run reconciliation", () => {
         ),
       )
       .limit(1);
-    expect(row!.parentId).toBeNull();
+    const [session] = await db
+      .select({ lastAssistantSeq: chatSessions.lastAssistantSeq })
+      .from(chatSessions)
+      .where(eq(chatSessions.id, sessionId))
+      .limit(1);
+    expect(session!.lastAssistantSeq).toBe(row!.seq);
   });
 
   it("stays silent while a turn is live on the session", async () => {

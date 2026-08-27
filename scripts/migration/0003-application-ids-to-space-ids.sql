@@ -25,7 +25,8 @@
 --
 -- ═══ WHAT THIS REWRITES, AND WHAT EACH REWRITE IS ANCHORED ON ═══
 --
---   1. `spaces.id` and the eighteen columns that reference it
+--   1. `spaces.id` and the eighteen columns that carry it (seventeen with a
+--      foreign key into it, plus `audit_events.space_id`, which has none)
 --      `'spc_' || substring(… FROM 5)`, anchored `LIKE 'app\_%'`.
 --      The underscore is ESCAPED — a bare `LIKE 'app_%'` treats `_` as the
 --      single-character wildcard and matches `appXanything`.
@@ -52,9 +53,17 @@
 -- per era. THAT SPLIT IS THE CORRECT OUTCOME. Do not "finish the job" here.
 --
 -- `audit_events.space_id` IS rewritten, and the asymmetry is deliberate rather
--- than an oversight: it is a live FOREIGN KEY into `spaces`, not a record of
--- the past. Leaving it behind does not preserve history, it breaks the
--- reference — and the FK re-add in step 4 would refuse to validate.
+-- than an oversight: it is a live POINTER at a row in `spaces`, not a record of
+-- the past. Every space-scoped audit read filters on it, so leaving it behind
+-- does not preserve history — it makes the history unfindable.
+--
+-- It is no longer a FOREIGN KEY. `0054_schema_integrity_repairs` dropped that
+-- constraint (an `ON DELETE SET NULL` that blanked the attribution of every
+-- deleted space, in a table whose own doc argues it must outlive what it
+-- describes), so nothing enforces the pointer any more and nothing would
+-- REPORT a missed rewrite either — the FK re-add in step 5 used to fail loudly
+-- on one. That is why step 4's column set names this column explicitly instead
+-- of deriving it from the FK capture; see the comment there.
 --
 -- `files.storage_key`, `uploads.storage_key` and
 -- `storage_deletion_jobs.storage_key` keep their `app_` path segment. This is
@@ -99,7 +108,7 @@
 --
 -- `0001` matched `doc_` + a canonical UUID so that chat rows merely DISCUSSING
 -- the id format were not rewritten. The opposite rule applies here. This id is
--- the target of eighteen foreign keys: parent and child must be transformed by
+-- the target of seventeen foreign keys: parent and child must be transformed by
 -- the SAME function or the reference breaks. A strict-UUID filter would skip a
 -- non-canonical `app_` id (a fixture, a hand-inserted row) on BOTH sides —
 -- consistently, so the FK survives — but would leave a space that
@@ -151,7 +160,7 @@
 -- All four ENABLE statements are inside the single transaction, so a failure
 -- anywhere rolls back to a database with its triggers intact.
 --
--- ═══ THE EIGHTEEN FOREIGN KEYS ═══
+-- ═══ THE SEVENTEEN FOREIGN KEYS ═══
 --
 -- None carries `ON UPDATE CASCADE` and none is DEFERRABLE, so the parent id
 -- cannot move under them: they must be dropped, the values rewritten, and the
@@ -159,22 +168,25 @@
 --
 -- The drop/restore is CATALOG-DRIVEN. It captures `pg_get_constraintdef()` for
 -- every FK whose `confrelid` is `spaces` into a temp table and replays those
--- definitions verbatim. That is not laziness about writing eighteen lines: it
--- is the only form that CANNOT get an `ON DELETE` wrong, cannot miss a
--- nineteenth key added after this file was written, and cannot invent a name
+-- definitions verbatim. That is not laziness about writing seventeen lines: it
+-- is the only form that CANNOT get an `ON DELETE` wrong, cannot miss an
+-- eighteenth key added after this file was written, and cannot invent a name
 -- for a constraint whose name drifted (`_fkey` vs `_fk` — see `0053` TRAP 1,
 -- and `cli_refresh_tokens_parent_id_fkey`, the surviving example in this
--- schema). Step 4's closing assertion re-counts them and RAISES if one did not
--- come back.
+-- schema). Step 5's closing assertion re-counts them against the capture and
+-- RAISES if one did not come back, so the count is never an input either.
 --
 -- What the catalog held when this was written — the list is documentation, not
--- an input to the SQL. SEVENTEEN ARE `ON DELETE CASCADE`; `audit_events` IS THE
--- ONE EXCEPTION AND IS `ON DELETE SET NULL`. Getting that one wrong would
--- silently convert "keep the audit row, forget the space" into "delete the
--- audit trail with the space", and nothing would ever report it.
+-- an input to the SQL. ALL SEVENTEEN ARE `ON DELETE CASCADE`.
+--
+-- `audit_events.space_id` used to be the eighteenth, and the one exception at
+-- `ON DELETE SET NULL`. `0054_schema_integrity_repairs` dropped it: the SET
+-- NULL was erasing the space attribution of every historical audit row the
+-- moment a space was deleted, in a table whose own doc argues it must outlive
+-- what it describes. The column survives as a denormalised value, and step 4
+-- names it explicitly BECAUSE it is no longer in this capture.
 --
 --   api_keys.space_id                      → spaces.id   ON DELETE CASCADE
---   audit_events.space_id                  → spaces.id   ON DELETE SET NULL  ←
 --   end_users.space_id                     → spaces.id   ON DELETE CASCADE
 --   files.space_id                         → spaces.id   ON DELETE CASCADE
 --   integration_connections.space_id       → spaces.id   ON DELETE CASCADE
@@ -217,8 +229,8 @@
 --
 -- Every `WHERE` is exactly the condition its `UPDATE` removes, so a second run
 -- matches zero rows and a partially applied environment converges. The
--- FK drop/restore cycle is a no-op on a replay (capture 18, drop 18, update
--- nothing, restore 18). The trigger disable/enable pairs are symmetric. The
+-- FK drop/restore cycle is a no-op on a replay (capture 17, drop 17, update
+-- nothing, restore 17). The trigger disable/enable pairs are symmetric. The
 -- three `VALIDATE CONSTRAINT` statements are no-ops on an already-valid
 -- constraint and are guarded on existence.
 --
@@ -232,7 +244,7 @@
 -- without a full re-scan.
 --
 --   -- ids: 'app_' || substring(… FROM 5) WHERE … LIKE 'spc\_%'  (same
---   --      drop/restore of the eighteen FKs)
+--   --      drop/restore of the seventeen FKs)
 --   -- scopes: 'applications:' || substring(s FROM 8) WHERE s LIKE 'spaces:%'
 --   --      — and note this direction is the DANGEROUS one: it is exactly the
 --   --      `spaces:`-anchored pass warned against above. Restrict it to the
@@ -291,12 +303,13 @@
 --   SELECT count(*) FROM spaces WHERE id !~ '^(app|spc)_';
 --   SELECT count(*) FROM spaces WHERE id LIKE 'spc\_app\_%' OR id LIKE 'app\_spc\_%';
 --
--- ── C. the FKs came back, all eighteen, with their behaviour ─────────────────
+-- ── C. the FKs came back, all seventeen, with their behaviour ────────────────
 --   Identical output before and after. `confdeltype` is `a`=no action,
---   `c`=cascade, `n`=set null: seventeen `c` and ONE `n` (audit_events).
+--   `c`=cascade, `n`=set null: all seventeen are `c`. `audit_events` used to be
+--   the one `n` and is no longer here at all — `0054` dropped that FK.
 --
 --   SELECT count(*) FROM pg_constraint
---    WHERE confrelid = 'public.spaces'::regclass AND contype = 'f';     -- 18
+--    WHERE confrelid = 'public.spaces'::regclass AND contype = 'f';     -- 17
 --   SELECT conrelid::regclass::text AS child, conname, confdeltype, confupdtype
 --     FROM pg_constraint
 --    WHERE confrelid = 'public.spaces'::regclass AND contype = 'f'
@@ -495,7 +508,7 @@ BEGIN
     RAISE EXCEPTION
       'A COMPOSITE foreign key into `spaces` exists; this script rewrites single-column keys only. Extend it deliberately rather than letting the loop below rewrite one column of a pair.';
   END IF;
-  RAISE NOTICE 'Dropping % foreign key(s) into spaces (expected 18 at the time this script was written).', n;
+  RAISE NOTICE 'Dropping % foreign key(s) into spaces (expected 17 at the time this script was written).', n;
   FOR r IN SELECT conname, tbl FROM "_spaces_fk_backup" ORDER BY tbl, conname LOOP
     EXECUTE format('ALTER TABLE %s DROP CONSTRAINT %I', r.tbl, r.conname);
   END LOOP;
@@ -505,6 +518,20 @@ END $$;
 -- Step 4 — re-mint the id. Parent first, then every child column, with the SAME
 -- transform, so the reference survives. `LIKE 'app\_%'` escapes the underscore;
 -- unescaped, `_` is LIKE's single-character wildcard.
+--
+-- THE COLUMN SET IS THE FK CAPTURE **PLUS** `audit_events.space_id`, and the
+-- union is load-bearing rather than defensive. `0054_schema_integrity_repairs`
+-- dropped that table's foreign key into `spaces` — an audit log must outlive
+-- the entities it describes, and `ON DELETE SET NULL` was erasing the
+-- attribution of every deleted space — so the column is no longer in
+-- `_spaces_fk_backup` and a loop driven by the capture alone would silently
+-- leave every historical audit row pointing at an `app_…` id that no longer
+-- exists. It is a POINTER, not a record of the past (see WHAT THIS DELIBERATELY
+-- DOES NOT REWRITE), and every space-scoped audit read filters on it.
+--
+-- `UNION` rather than `UNION ALL`: on a database where this script runs BEFORE
+-- 0054 the column is still in the capture, and the extra term dedupes to
+-- nothing. Both deploy orders therefore rewrite it exactly once.
 -- ─────────────────────────────────────────────────────────────────────────────
 UPDATE "spaces" SET "id" = 'spc_' || substring("id" FROM 5) WHERE "id" LIKE 'app\_%';
 
@@ -512,7 +539,12 @@ DO $$
 DECLARE
   r record;
 BEGIN
-  FOR r IN SELECT DISTINCT tbl, colname FROM "_spaces_fk_backup" ORDER BY tbl, colname LOOP
+  FOR r IN
+    SELECT DISTINCT tbl, colname FROM "_spaces_fk_backup"
+    UNION
+    SELECT 'public.audit_events', 'space_id'
+    ORDER BY tbl, colname
+  LOOP
     EXECUTE format(
       'UPDATE %s SET %I = %L || substring(%I FROM 5) WHERE %I LIKE %L',
       r.tbl, r.colname, 'spc_', r.colname, r.colname, 'app\_%'

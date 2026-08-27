@@ -54,14 +54,12 @@ function formatBytes(bytes: number): string {
   return `${bytes} bytes`;
 }
 
-/** Read a workspace file's bytes via Bun, with a Node fallback for tests. */
+/**
+ * Read a workspace file's bytes. Bun-only, like the rest of `runtime-pi`:
+ * the image ENTRYPOINT is `bun run` and the test script is `bun test`.
+ */
 async function readBytes(absPath: string): Promise<Uint8Array> {
-  const bun = (
-    globalThis as { Bun?: { file: (p: string) => { bytes: () => Promise<Uint8Array> } } }
-  ).Bun;
-  if (bun && typeof bun.file === "function") return await bun.file(absPath).bytes();
-  const fs = await import("node:fs/promises");
-  return new Uint8Array(await fs.readFile(absPath));
+  return await Bun.file(absPath).bytes();
 }
 
 /**

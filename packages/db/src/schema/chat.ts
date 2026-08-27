@@ -78,42 +78,41 @@ export const chatSessions = pgTable(
  * `packages/module-chat/src/persistence.ts` is the ONLY writer: it persists the
  * user turn before inference starts and the assistant turn when the stream
  * finalizes, upserting on `(session_id, message_id)`. The server decides `seq`
- * (a `serial`), the server decides `format`, and the server decides `parent_id`.
+ * (a `serial`).
  *
  * Ordering is `seq`, always — never `created_at`. Two messages in one turn can
  * share a clock tick; a `serial` cannot collide. The same reasoning already
  * governs `chat_sessions.lastAssistantSeq` / `lastReadSeq`, which are message
  * POINTERS into this column rather than timestamps.
  *
- * ── TWO COLUMNS THAT NO LONGER CARRY INFORMATION ────────────────────────────
+ * ── TWO COLUMNS THAT USED TO BE HERE, DROPPED BY `0054` ─────────────────────
  *
- * Recorded here rather than acted on: both are still echoed to the client, so
- * removing either is a coordinated change with `packages/module-chat`, which
- * this pass does not own.
+ * `format` was a server constant. `persistence.ts` wrote `"ai-sdk/v6"` at both
+ * the insert and the conflict-update and nothing else wrote the column, so it
+ * had exactly one possible value in every row that ever existed. It was a
+ * discriminator back when the CLIENT chose its format adapter; with a single
+ * server writer it discriminated nothing. If a second format ever ships, the
+ * column comes back with a CHECK — it was not worth keeping on the chance that
+ * it might.
  *
- * `format` — a server constant. `persistence.ts` writes `CHAT_MESSAGE_FORMAT`
- * at both the insert and the conflict-update, and nothing else writes the
- * column, so it has exactly one possible value in every row that exists. It was
- * a discriminator back when the CLIENT chose its format adapter; with a single
- * server writer it discriminates nothing. Removing it takes: dropping it from
- * the persisted DTO in `module-chat/src/routes.ts`, confirming no client reads
- * it back, then a migration. If a second format ever ships, the column comes
- * back with a CHECK — it should not be kept on the chance that it might.
+ * `parent_id` was a redundant re-encoding of `seq` order. It looked like
+ * branching (regeneration / edit), but the only writer was linear:
+ * `persistUserMessage` chained onto `lastMessageId(sessionId)` (the highest
+ * `seq`) and `persistAssistantMessage` chained onto the user turn that prompted
+ * it, so the stored value was always "the previous message" — exactly what
+ * `ORDER BY seq` already gives. Nothing reconstructed a tree from it, and it
+ * was unconstrained (no FK, no uniqueness), so nothing stopped a cycle or a
+ * dangling parent either. If real branching ships, what it needs is a
+ * per-branch pointer WITH a self-FK, not this column revived.
  *
- * `parent_id` — a redundant re-encoding of `seq` order. It exists to carry
- * branching (regeneration / edit), but the only writer is linear:
- * `persistUserMessage` chains onto `lastMessageId(sessionId)` (the highest
- * `seq`) and `persistAssistantMessage` chains onto the user turn that prompted
- * it. Under a linear writer, `parent_id` is always "the previous message", i.e.
- * exactly what `ORDER BY seq` already gives, and no reader reconstructs a tree
- * from it. It is also unconstrained — no FK, no uniqueness — so nothing stops a
- * cycle or a dangling parent. Removing it takes: dropping it from the DTO and
- * from `upsertMessage`'s insert/update, plus the `parentId` argument threaded
- * through `persistAssistantMessage`, then a migration. If real branching ships,
- * what it needs is a per-branch pointer WITH a self-FK — not this column
- * revived.
+ * The PARENT MESSAGE ID ITSELF is still computed, and still load-bearing — it
+ * is one third of the material `deterministicMessageId` hashes for a UIMessage
+ * that arrives without an id (`persistence.ts`). Dropping the column changed
+ * nothing about that hash: the value is read from `lastMessageId` and passed
+ * down exactly as before, it is simply no longer stored. Do not "simplify" that
+ * argument away — every `gen_…` id already persisted was derived with it.
  *
- * Neither is a correctness bug today. They are both dead weight that reads as
+ * Neither column was a correctness bug. Both were dead weight that read as
  * capability, which is the thing that makes the next reader model a tree that
  * is not there.
  */
@@ -126,8 +125,6 @@ export const chatMessages = pgTable(
       .references(() => chatSessions.id, { onDelete: "cascade" }),
     /** Client-generated message id (the format adapter's identity). */
     messageId: text("message_id").notNull(),
-    parentId: text("parent_id"),
-    format: text("format").notNull(),
     content: jsonb("content").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

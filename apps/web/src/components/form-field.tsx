@@ -10,7 +10,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@appstrate/ui/components/select";
-import { cn } from "@appstrate/ui/cn";
 
 type FormFieldType =
   | "text"
@@ -35,14 +34,8 @@ interface FormFieldProps {
   placeholder?: string;
   description?: string;
   enumValues?: string[];
-  error?: string;
   disabled?: boolean;
   min?: number;
-  max?: number;
-  minLength?: number;
-  maxLength?: number;
-  pattern?: string;
-  step?: number | "any";
 }
 
 export function FormField({
@@ -56,29 +49,16 @@ export function FormField({
   placeholder,
   description,
   enumValues,
-  error,
   disabled,
   min,
-  max,
-  minLength,
-  maxLength,
-  pattern,
-  step,
 }: FormFieldProps) {
-  const hintId = description ? `hint-${id}` : undefined;
-  const errorId = error ? `error-${id}` : undefined;
-  const describedBy = [hintId, errorId].filter(Boolean).join(" ") || undefined;
+  const describedBy = description ? `hint-${id}` : undefined;
 
   const renderInput = () => {
     if (enumValues) {
       return (
         <Select value={value} onValueChange={onChange}>
-          <SelectTrigger
-            id={id}
-            aria-describedby={describedBy}
-            aria-invalid={error ? true : undefined}
-            className={cn(error && "border-destructive")}
-          >
+          <SelectTrigger id={id} aria-describedby={describedBy}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -102,12 +82,8 @@ export function FormField({
           placeholder={placeholder}
           disabled={disabled}
           required={required}
-          minLength={minLength}
-          maxLength={maxLength}
           rows={4}
           aria-describedby={describedBy}
-          aria-invalid={error ? true : undefined}
-          className={cn(error && "border-destructive")}
         />
       );
     }
@@ -123,8 +99,7 @@ export function FormField({
           disabled={disabled}
           required={required}
           aria-describedby={describedBy}
-          aria-invalid={error ? true : undefined}
-          className={cn("h-10 w-20 cursor-pointer p-1", error && "border-destructive")}
+          className="h-10 w-20 cursor-pointer p-1"
         />
       );
     }
@@ -140,14 +115,7 @@ export function FormField({
         disabled={disabled}
         required={required}
         min={min}
-        max={max}
-        minLength={minLength}
-        maxLength={maxLength}
-        pattern={pattern}
-        step={step}
         aria-describedby={describedBy}
-        aria-invalid={error ? true : undefined}
-        className={cn(error && "border-destructive")}
       />
     );
   };
@@ -160,13 +128,8 @@ export function FormField({
       </Label>
       {renderInput()}
       {description && (
-        <p id={hintId} className="text-muted-foreground text-sm">
+        <p id={describedBy} className="text-muted-foreground text-sm">
           {description}
-        </p>
-      )}
-      {error && (
-        <p id={errorId} className="text-destructive text-sm">
-          {error}
         </p>
       )}
     </div>

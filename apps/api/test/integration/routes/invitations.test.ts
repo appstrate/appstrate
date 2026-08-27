@@ -108,8 +108,6 @@ describe("Invitations API", () => {
       );
       const row = await getDbRow(orgInvitations, eq(orgInvitations.id, inv.id));
       expect(row?.status).toBe("accepted");
-      expect(row?.acceptedBy).toBe(member.id);
-      expect(row?.acceptedAt).not.toBeNull();
     });
 
     it("marks the invitation accepted (and rejects a second accept with 410)", async () => {

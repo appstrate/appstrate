@@ -8,22 +8,16 @@ interface SidebarState {
   open: boolean;
   setOpen: (open: boolean) => void;
   setOpenTransient: (open: boolean) => void;
-  toggle: () => void;
 }
 
 const stored = localStorage.getItem(STORAGE_KEY);
 const initialOpen = stored === null ? true : stored === "true";
 
-export const useSidebarStore = create<SidebarState>()((set, get) => ({
+export const useSidebarStore = create<SidebarState>()((set) => ({
   open: initialOpen,
   setOpen: (open) => {
     localStorage.setItem(STORAGE_KEY, String(open));
     set({ open });
   },
   setOpenTransient: (open) => set({ open }),
-  toggle: () => {
-    const next = !get().open;
-    localStorage.setItem(STORAGE_KEY, String(next));
-    set({ open: next });
-  },
 }));
