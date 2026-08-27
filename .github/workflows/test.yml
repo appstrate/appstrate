@@ -153,7 +153,14 @@ jobs:
     # both jobs aligned on post-merge validation.
     if: contains(github.event.pull_request.labels.*.name, 'integration') || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 20, matching the two other heavy jobs. It was 10, and the four runs before
+    # this one took 425-464s — under two minutes of headroom, which the ~5.2k
+    # test lines this branch adds consumed exactly. A timeout is not a budget to
+    # sit against: this job is the ONLY pre-merge exercise of 271 integration
+    # files, so a cancellation reads as a red gate for a suite that never ran.
+    # If it approaches 20 too, split the suite rather than raising this again —
+    # the number stops meaning anything once it is routinely re-raised.
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
