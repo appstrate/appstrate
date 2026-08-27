@@ -1,36 +1,97 @@
 -- Drop `chat_messages.parent_id` and `chat_messages.format`: two columns that
--- carry no information. The table's own doc comment has said so since 0052,
+-- no longer have a reader. The table's own doc comment has said so since 0052,
 -- which left them alone because a column still echoed to the client cannot be
 -- dropped from one side. `packages/module-chat` stops echoing them in this
 -- same change, so they go now.
 --
--- ═══ WHY THEY CARRY NOTHING ═══
+-- ═══ WHY THEY GO, AND WHAT GOES WITH THEM ═══
 --
--- `format` — one writer, one constant. `upsertMessage`
--- (`packages/module-chat/src/persistence.ts`) is the ONLY statement that has
--- ever inserted into or updated this table, and it wrote the module-private
--- constant `"ai-sdk/v6"` at both the insert and the conflict-update. Every row
--- that exists therefore holds that one value. It discriminated something back
--- when the CLIENT chose its own format adapter and POSTed the node it wanted
--- stored; that path was deleted. If a second storage format ever ships, the
--- column comes back with a CHECK.
+-- The justification is that NOTHING READS THEM — not that their values are
+-- recoverable from what stays. Those are different arguments, and only the
+-- first one holds for every row (see the history below). What this file
+-- destroys is destroyed: two `DROP COLUMN`s, one way, no path back (§1 — a
+-- retired shape must fail, not fall back).
 --
--- `parent_id` — a re-encoding of `seq`. It was written as
+-- `parent_id` — no reader anywhere. All three reads of this table sort by
+-- `seq` (the full thread ASC, the previous message DESC LIMIT 1, the title scan
+-- ASC); no WHERE, ORDER BY, JOIN or recursive CTE mentions the column; it
+-- carries no FK and no uniqueness. The history DTO merely echoed the value
+-- back, and the SPA's decoder (`packages/module-chat/src/ui/sessions.ts`)
+-- destructures `{ id, content }` and nothing else — the rendered transcript is
+-- a flat list, and was one even when the column could hold a tree. If branching
+-- ever ships, what it needs is a per-branch pointer WITH a self-FK, not this
+-- column revived.
+--
+-- `format` — no reader either. Nothing here or in the SPA branches on it. It
+-- discriminated something back when the CLIENT chose its own format adapter and
+-- POSTed the node it wanted stored; that path was deleted. If a second storage
+-- format ever ships, the column comes back with a CHECK.
+--
+-- ═══ WHO WROTE THEM ═══
+--
+-- Two writers have existed. Only one of them ever shipped, and which one wrote
+-- a given row decides how much that row's discarded values could have meant.
+--
+-- `upsertMessage` (`packages/module-chat/src/persistence.ts`) is the writer in
+-- every RELEASED build. It wrote the module-private constant `"ai-sdk/v6"` at
+-- both the insert and the conflict-update, and it wrote `parent_id` as
 -- `lastMessageId(sessionId)` — itself an `ORDER BY seq DESC LIMIT 1` — for a
 -- user turn or a server notice, and as the prompting user turn for an assistant
--- turn. No FK, no uniqueness, and no reader anywhere: all three reads of this
--- table sort by `seq` (the full thread ASC, the previous message DESC LIMIT 1,
--- the title scan ASC), the history DTO merely echoed the value back, and the
--- SPA's decoder (`packages/module-chat/src/ui/sessions.ts`) destructures
--- `{ id, content }` and nothing else. If branching ever ships, what it needs is
--- a per-branch pointer WITH a self-FK, not this column revived.
+-- turn. For a row it wrote, `format` holds that one value and `parent_id`
+-- restates `seq` order.
+--
+-- The second writer never shipped. `POST /api/chat/sessions/:id/messages` —
+-- assistant-ui's native history-adapter append — was added in `29d0dd586`
+-- (2026-06-15) and took both columns straight out of the request body
+-- (`parent_id: z.string().max(200).nullable()`, `format: z.string().min(1)
+-- .max(100)`), upserting them verbatim. The client sent assistant-ui's own
+-- `MessageRepository` pointer, which FORKS on edit and regenerate — so under
+-- that writer `parent_id` is a genuine tree pointer rather than a restatement
+-- of `seq`, and `format` is whatever string the client chose.
+--
+-- That endpoint is contained in no tag (`git tag --contains 29d0dd586` is
+-- empty). It survives only on the abandoned `integration/all-modules` and
+-- `simplify/767-codex-trims` branches, last touched 2026-06-25. The packaged
+-- chat module reached the mainline in `98125cbe6` (2026-06-29, #688) with the
+-- endpoint already gone and the routes header already reading "The server is
+-- the single writer of messages … there is no client message-write endpoint",
+-- and `chat_messages` itself first shipped in `v1.0.0-beta.34` (2026-07-03) —
+-- the release before it, `v1.0.0-beta.33`, carries no chat code at all.
+--
+-- So on a database created by any released build, `upsertMessage` is the only
+-- statement that has ever written this table. On a database built from one of
+-- those branches it is not, and those values are not derivable from anything
+-- that survives. Both columns go either way, because neither has a reader — but
+-- an operator who wants to know which case they are in has to look BEFORE
+-- applying this file.
+--
+-- ═══ PRE-FLIGHT (optional; measure before applying) ═══
+--
+-- Nothing here gates the migration. UNMEASURED, per the precedent of
+-- `scripts/migration/0004`: no production dump is reachable from here, so these
+-- are the queries to run, not values anyone has observed.
+--
+-- Every distinct `format` ever stored. A single row reading `ai-sdk/v6` is the
+-- evidence that only the server writer ever ran against this database:
+--   SELECT format, count(*) FROM chat_messages GROUP BY 1 ORDER BY 2 DESC;
+--
+-- Rows whose `parent_id` is not the `message_id` of the immediately preceding
+-- `seq` in the same session — the rows `seq` order cannot account for. A
+-- session's first message has both sides NULL and does not count. 0 means the
+-- column restated `seq` on every row, and this drop then loses nothing at all:
+--   SELECT count(*) FROM (
+--     SELECT parent_id,
+--            lag(message_id) OVER (PARTITION BY session_id ORDER BY seq) AS prev
+--     FROM chat_messages
+--   ) t
+--   WHERE parent_id IS DISTINCT FROM prev;
 --
 -- ═══ NO DATA SCRIPT ═══
 --
--- Nothing to move (`docs/NO_TRANSITIONAL_CODE.md` §2). A constant and a value
--- derived from `seq` are exactly what the single server-chosen format and
--- `ORDER BY seq` already say, so there is no row content to rewrite anywhere
--- else first. This file is DDL only.
+-- Nothing to move (`docs/NO_TRANSITIONAL_CODE.md` §2). A `scripts/migration/`
+-- script moves row contents the new code still needs in a different shape; no
+-- code reads either column in ANY shape, so there is nowhere to move them to.
+-- This file is DDL only.
 --
 -- ═══ LOCK AND COST ═══
 --
@@ -38,8 +99,13 @@
 -- dropped, the heap is not rewritten — so the ACCESS EXCLUSIVE lock it takes on
 -- `chat_messages` covers a catalog update, not a scan. It is held to COMMIT
 -- like every lock in drizzle's batched transaction, so the bound that matters
--- is the rest of the batch, not these two statements. Both are one-way: the
--- values are gone, and there is deliberately no path back (§1 — a retired shape
--- must fail, not fall back).
-ALTER TABLE "chat_messages" DROP COLUMN "parent_id";--> statement-breakpoint
-ALTER TABLE "chat_messages" DROP COLUMN "format";
+-- is the rest of the batch, not these two statements.
+--
+-- `IF EXISTS` matches every DROP COLUMN since 0040 (`0040`, `0042`, `0044`,
+-- `0045`). `packages/db` ships a `db:push` script, so a dev database pushed
+-- straight to the new schema and then booted replays this file against a table
+-- that already lacks both columns; a bare DROP fails the whole boot batch
+-- there instead of no-opping. It changes nothing on a database that migrated in
+-- order.
+ALTER TABLE "chat_messages" DROP COLUMN IF EXISTS "parent_id";--> statement-breakpoint
+ALTER TABLE "chat_messages" DROP COLUMN IF EXISTS "format";

@@ -186,8 +186,21 @@ export async function persistAssistantMessage(
  * an already-present id makes this a no-op (returns false) so a replayed
  * reconciliation cannot append a second copy. The early return — rather than
  * relying on the `(session_id, message_id)` upsert — is what makes the replay
- * cost nothing: the upsert would rewrite the row and re-run `touchSession`,
- * re-flagging a session its owner has already read.
+ * cost nothing.
+ *
+ * What the early return saves is a write, not a wrong read-state. Read-state
+ * would survive the upsert untouched: the conflict path returns the EXISTING
+ * row's `seq`, and `touchSession` advances `lastAssistantSeq` by
+ * `GREATEST(coalesce(lastAssistantSeq, 0), seq)` — already ≥ that `seq` since
+ * the first write set it — while `lastReadSeq` is not in the assistant branch
+ * at all, so `unread` cannot flip. What the upsert WOULD do is rewrite the row
+ * (a fresh heap tuple carrying identical content) and re-run `touchSession` on
+ * it: a title scan for as long as `title` is null, an UPDATE of `chat_sessions`
+ * bumping `updatedAt` — which re-sorts the conversation list, ordered
+ * `desc(updatedAt)` in routes.ts — and an SSE `notifySessionUpdate` telling
+ * every connected client of that owner to refetch. A replayed reconciliation
+ * would jump the session to the top of its owner's sidebar with nothing new in
+ * it.
  */
 export async function persistNotice(
   sessionId: string,

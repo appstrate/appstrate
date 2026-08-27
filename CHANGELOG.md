@@ -8,6 +8,96 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **BREAKING: the package JSON bodies are `.strict()` — an unknown key is a
+  `400` instead of a silent strip.** `source_code` was dropped from the package
+  contract when its last reader died with the `tool` package type, and the
+  schemas were left open, so a client still sending it got a `201` and a package
+  without it with nothing anywhere saying the field had gone. A retired name
+  must fail loudly (`docs/NO_TRANSITIONAL_CODE.md` §1) — the rule that closed
+  the four launch surfaces in #1187, and this surface was left out of it. The
+  barrier is generic and names no field: it refuses any key the body does not
+  model. Seven request bodies carry `additionalProperties: false` in the spec to
+  match — `POST /api/packages/{skills,agents,integrations}` and
+  `PUT /api/packages/{skills,agents,integrations,mcp-servers}/{scope}/{name}`.
+  Refusals answer `400` `validation_failed` blaming the field `body`.
+
+  **Why this is BREAKING and not a fix: `.strict()` makes read-modify-write a
+  `400`.** `packageJsonUpdateSchema` accepts three keys — `manifest`, `content`
+  and `lock_version` — and every other property of the object the matching `GET`
+  hands back is now refused BY NAME.
+
+  For agents, `GET /api/packages/agents/{scope}/{name}` answers with the
+  `AgentDetail` component's 19 properties, of which the update body accepts
+  exactly two (`content` is not among them — an agent's content comes back as
+  `prompt`). The other 17 are refused: `id`, `display_name`, `description`,
+  `source`, `scope`, `version`, `prompt`, `updatedAt`, `input`, `output`,
+  `dependencies`, `last_run`, `running_runs`, `version_count`, `forked_from`,
+  `has_unarchived_changes`, `effective_timeout_seconds`.
+
+  For skills, integrations and mcp-servers the `GET` answers with
+  `OrgPackageItemDetail`, 18 properties, of which the update body accepts three.
+  The other 15 are refused: `id`, `orgId`, `name`, `description`, `source`,
+  `created_by`, `auto_installed`, `version`, `manifest_name`, `version_count`,
+  `has_unarchived_changes`, `forked_from`, `agents`, `createdAt`, `updatedAt`.
+
+  A third-party client that does the obvious thing — `GET` the package, edit
+  `manifest`, `PUT` the object back — previously had those keys stripped and got
+  a `200`; it now gets a `400` on `id`. **Send only `manifest`, `content` and
+  `lock_version`.** In-repo callers are unaffected: the three `toWireBody`
+  implementations already send exactly that, and `useCreatePackage`'s body type
+  declared an `id?: string` no caller ever passed, removed here — a key declared
+  against a now-strict body is a `400` waiting for its first caller.
+
+  `detect:breaking` reports this as non-breaking, and that is correct about the
+  OpenAPI _document_: it does not model a request body tightening
+  `additionalProperties`, which is invisible to both it and the generated SPA
+  types. This entry is the only signal a consumer gets. Same reasoning as the
+  schedule-body entry further down, which enumerates its 15 refused fields for
+  the same reason.
+
+- **BREAKING: an AFPS integration declaring a bare auth-scheme `prefix` is
+  refused at install time.** AFPS §7.6 defines `delivery.http.prefix` as a
+  literal prepended to the rendered value — every spec example writes the
+  trailing space. Appstrate additionally accepted the bare scheme (`"Bearer"`)
+  in `Authorization` position and spliced the separator in at request time; its
+  own comment called it "this compatibility rule". The injector now concatenates
+  verbatim and inspects nothing, and validator rule (1d) rejects the bare form
+  where the manifest author can act on it, naming the replacement
+  (`Write "Bearer ".`).
+
+  **51 in-repo system integrations wrote the bare form** — 44 `Bearer`,
+  6 `Basic`, 1 `Zoho-oauthtoken` — and every one is fixed here with a patch
+  bump and a rebuilt archive, per the immutable-published-version precedent of
+  #928.
+  Without the bump the fix stays inert in production. No exact-version pin
+  references any of them.
+
+  **Operators: an org-imported or org-published integration stored before this
+  change stops resolving.** System packages are unexposed (`resolvePublishedManifest`
+  short-circuits on the in-memory registry the rebuilt archives replaced), but
+  `packages.draft_manifest` and `package_versions.manifest` hold the author's
+  bytes verbatim and are never revalidated on read, so a stored bare prefix now
+  fails `invalid_manifest` at the first read — which the route maps onto `404`,
+  presenting as a missing integration rather than a bad prefix. Apply
+  `scripts/migration/0005-afps-bare-auth-scheme-prefix.sql`; its `WHERE` is
+  exactly the condition it removes (RFC 9110 token grammar, under
+  `Authorization` or `Proxy-Authorization`, case-insensitive) and it is
+  idempotent. It deliberately does not rewrite the uploaded archive bytes, so
+  `package_versions.integrity` is untouched and the boot sync's refuse-overwrite
+  guard still holds — the archive keeps the author's original spelling, and
+  re-importing it now fails loudly at the install gate.
+
+- **Run logs: an untagged `appstrate.progress` row renders as runtime output,
+  not as model prose.** `assistant_message` is the only marker of
+  model-authored text; the run-detail log view additionally treated a data-less
+  `debug`-level progress row as agent text, "compatibility with runs emitted
+  before `assistant_message` was stamped". No in-tree emitter produces that
+  shape as agent text, and the one shape still producible from outside the tree
+  is a runner lifecycle breadcrumb by definition — so the fallback was
+  attributing a container-lifecycle line to the model. Bounded and cosmetic: for
+  runs predating the stamp, such rows now carry the runtime dot instead of the
+  speech-bubble icon. Text, ordering, level colour and grouping are unchanged.
+
 - **BREAKING: run and schedule `GET` routes now enforce a read permission.**
   Eight reads were gated on org membership alone and enforced nothing about
   what the caller may do, so any credential that could reach the org could
@@ -595,6 +685,29 @@ latest, sidecar latest}` is byte-for-byte the same input as the supported
 
 ### Removed
 
+- **BREAKING (chat): `parent_id` and `format` are gone from the chat history
+  response, and from the table behind it.** `GET /api/chat/sessions/{id}`
+  returned each message as `{ id, parent_id, format, content }`, with all four
+  `required` on the `ChatMessage` component; it now returns `{ id, content }`,
+  in `seq` order. Both columns are dropped by migration `0054` in the same
+  change — a column still echoed to the client cannot be dropped from one side.
+
+  Neither had a reader. Every read of the table sorts by `seq`; nothing branched
+  on `format`, nothing walked `parent_id` (no FK, no uniqueness), and the SPA's
+  decoder already destructured `{ id, content }`. The transcript is a flat list.
+  `parent_id` is a `DROP COLUMN`, so its values are discarded permanently — the
+  migration header records what a row could have held and ships the pre-flight
+  queries to measure it before applying.
+
+  `detect:breaking` reports `0 breaking` here and always will:
+  `scripts/detect-breaking-changes.ts` strips module-owned paths and schemas
+  from both sides before comparing, so `ChatMessage` is absent from
+  `apps/api/src/openapi/baseline.json` entirely. The gate is structurally blind
+  to every chat wire change; this entry is the only signal. The first-party
+  reader is safe by construction — the SPA is baked into the platform image, so
+  a served build cannot be older than the platform serving it — but the route is
+  a public one, and **a third-party client reading either field must stop.**
+
 - **BREAKING (operators): the boot-time self-heal for the RFC 8707 oauth
   `resources` columns is gone — a database whose `__drizzle_migrations`
   watermark is ahead of its real schema now REFUSES TO BOOT.** Until now
@@ -1168,11 +1281,17 @@ latest, sidecar latest}` is byte-for-byte the same input as the supported
 - **`source_code` from the package create/update contract** — the
   `sourceFileName` plumbing behind it has been unreachable since the `tool`
   package type was dropped: no route config declared it, so `source_code` was
-  never on the wire and sending one in a request body was already a no-op (such
-  a body is still accepted, now stripped by non-strict Zod instead of parsed
-  and ignored). No runtime behaviour changes — the published OpenAPI spec
-  simply stops advertising a field that never existed at runtime, which
-  `detect:breaking` reports as 27 response-field removals.
+  never on the wire and sending one in a request body did nothing. The
+  published OpenAPI spec stops advertising a field that never existed at
+  runtime, which `detect:breaking` reports as 27 response-field removals.
+
+  **Sending one is now a `400`, not a silent strip.** This entry originally
+  said the body was still accepted and the key stripped by non-strict Zod, and
+  that no runtime behaviour changed; both stopped being true in the same
+  unreleased cycle, when the three package JSON body schemas were made
+  `.strict()`. A retired name must fail loudly
+  (`docs/NO_TRANSITIONAL_CODE.md` §1). See **BREAKING: the package JSON bodies
+  are `.strict()`** under _Changed_ for the refusal and what else it refuses.
 
 ### Fixed
 

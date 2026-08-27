@@ -179,18 +179,39 @@ per row, when something touches the table the trigger is on: the application's
 behaviour, not a one-off repair. So a `CREATE [OR REPLACE] FUNCTION` /
 `PROCEDURE` body is read as neither a write nor a licence — as neither, because
 exempting it from the write scan alone would turn a function definition into a
-way to manufacture a licence for a write elsewhere in the file. A `DO $$ … $$`
-block is the counter-case and is **not** exempt: it executes at apply time
-against the rows that exist, which is precisely what this section forbids
-(`0021`, `0023`, `0040` and `0051` are that shape). The whole distinction is the
-`CREATE … FUNCTION` in front of the dollar quote.
+way to manufacture a licence for a write elsewhere in the file. Every way of
+writing a body is exempt, because "a function body" is what is exempt and no
+spelling is the exception: a dollar quote, the `BEGIN ATOMIC … END` that
+PostgreSQL 14 added for `LANGUAGE sql`, and a plain string — the last needing
+nothing special, since an ordinary literal is blanked in both directions
+anyway.
+
+**A `DO` block is the counter-case** and is **not** exempt, _however its code is
+quoted_: it executes at apply time against the rows that exist, which is
+precisely what this section forbids (`0021`, `0023`, `0040` and `0051` are that
+shape). The distinction is the `CREATE … FUNCTION` in front of the body — never
+the quoting, which is a lexical choice with no meaning here. `DO [LANGUAGE lang]
+code` takes a **string constant**, and `$$ … $$` is only one way to write one:
+`DO 'BEGIN UPDATE t SET x = 99; END';` is the same statement as its dollar-quoted
+twin and rewrites the same rows on every replay. The gate reads a `DO` body as
+code either way, in the same pass, so the same-table carve-out reaches both.
 
 Two writing forms are outside that vocabulary on purpose. `SELECT … INTO` is
-PL/pgSQL variable assignment inside the `DO $$` blocks this directory is full
-of, and creates a new relation rather than rewriting rows; `COPY … FROM` needs
-a file on the database host or `FROM STDIN`, and the boot migrator supplies
+PL/pgSQL variable assignment inside the `DO` blocks this directory is full of,
+and creates a new relation rather than rewriting rows; `COPY … FROM` needs a
+file on the database host or `FROM STDIN`, and the boot migrator supplies
 neither. Both are named here so the omission stays a decision rather than a
 gap.
+
+Two limits remain in the way literals are read, named for the same reason. The
+walker assumes `standard_conforming_strings` is on — the PostgreSQL default,
+and what the boot migrator runs under — which is what makes `E'…'` the one form
+where a backslash escapes the next character; a session that turned the setting
+off would make every literal escape-processing, and that is not modelled. And
+inside a `DO '…'` body a nested literal is written with doubled quotes
+(`''…''`), of which only the quote pairs are blanked, so a DML keyword parked
+in a nested VALUE there can read as a statement. That direction is the safe
+one, and the remedy is to reword or to use the dollar quote.
 
 Three limits remain in that dynamic-SQL reading, named for the same reason. A
 command _concatenated_ rather than formatted (`stmt := 'UPDATE ' || t; EXECUTE

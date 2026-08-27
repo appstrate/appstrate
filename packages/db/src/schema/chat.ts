@@ -81,15 +81,19 @@ export const chatSessions = pgTable(
  * governs `chat_sessions.lastAssistantSeq` / `lastReadSeq`, which are message
  * POINTERS into this column rather than timestamps.
  *
- * `format` and `parent_id` were dropped in migration 0054. Both dated from the
- * client-authoritative model this table used to serve, where assistant-ui's
- * native history adapter POSTed tree nodes shaped
+ * `format` and `parent_id` were dropped in migration 0054, on the grounds that
+ * nothing READ them — not that their values were recoverable from what stays.
+ * Both dated from the client-authoritative model this table used to serve,
+ * where assistant-ui's native history adapter POSTed tree nodes shaped
  * `{ id, parent_id, format, content }` and the server stored what it was
- * handed. Under the single linear server writer that replaced it, `format` held
- * one constant in every row that ever existed, and `parent_id` re-encoded `seq`
- * order — with no FK, no uniqueness, and no reader that walked it. If a second
- * storage format ever ships it comes back with a CHECK; if branching ever ships
- * it needs a per-branch pointer WITH a self-FK, not that column revived.
+ * handed; that endpoint never shipped, and 0054's header dates it and says what
+ * a row it wrote would hold. Under the single linear server writer that
+ * replaced it — the only writer any released build has had — `format` held one
+ * constant and `parent_id` re-encoded `seq` order. Neither ever had a reader
+ * that walked it, and neither carried an FK or a uniqueness constraint that
+ * could have made one. If a second storage format ever ships it comes back with
+ * a CHECK; if branching ever ships it needs a per-branch pointer WITH a
+ * self-FK, not that column revived.
  */
 export const chatMessages = pgTable(
   "chat_messages",
