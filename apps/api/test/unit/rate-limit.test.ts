@@ -9,6 +9,7 @@ import {
   rateLimit,
   rateLimitByIp,
   rateLimitByBearer,
+  rateLimitMcp,
   resetRateLimiters,
 } from "../../src/middleware/rate-limit.ts";
 import { requestId } from "../../src/middleware/request-id.ts";
@@ -325,5 +326,110 @@ describe("rateLimitByBearer", () => {
       headers: { Authorization: "bearer run_333.hmac" },
     });
     expect(second.status).toBe(429);
+  });
+});
+
+describe("rateLimitMcp", () => {
+  beforeEach(async () => {
+    resetRateLimiters();
+    await flushRedis();
+  });
+
+  it("emits IETF RateLimit headers carrying the configured limit", async () => {
+    const app = createApp();
+    app.use("/api/mcp/o/org-1", async (c, next) => {
+      c.set("apiKeyId", "key-1");
+      return rateLimitMcp(7)(c, next);
+    });
+    app.post("/api/mcp/o/org-1", (c) => c.json({ ok: true }));
+
+    const res = await app.request("/api/mcp/o/org-1", { method: "POST" });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("RateLimit")).toContain("limit=7");
+  });
+
+  it("returns 429 with Retry-After once the limit is spent", async () => {
+    const app = createApp();
+    app.use("/api/mcp/o/org-1", async (c, next) => {
+      c.set("apiKeyId", "key-burst");
+      return rateLimitMcp(2)(c, next);
+    });
+    app.post("/api/mcp/o/org-1", (c) => c.json({ ok: true }));
+
+    await app.request("/api/mcp/o/org-1", { method: "POST" });
+    await app.request("/api/mcp/o/org-1", { method: "POST" });
+    const res = await app.request("/api/mcp/o/org-1", { method: "POST" });
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).not.toBeNull();
+  });
+
+  // The key is `mcp:<identity>` with NO method/path component — unlike
+  // `rateLimit`, whose key embeds `${method}:${path}`. One envelope is one
+  // point wherever it is posted, so a caller cannot buy extra budget by
+  // switching org path. Swapping this middleware for `rateLimit` makes the
+  // second request 200 and fails here.
+  it("keys one bucket across MCP paths, not one per path", async () => {
+    const app = createApp();
+    app.use("/api/mcp/*", async (c, next) => {
+      c.set("apiKeyId", "key-shared");
+      return rateLimitMcp(1)(c, next);
+    });
+    app.post("/api/mcp/o/org-a", (c) => c.json({ ok: true }));
+    app.post("/api/mcp/o/org-b", (c) => c.json({ ok: true }));
+
+    const first = await app.request("/api/mcp/o/org-a", { method: "POST" });
+    expect(first.status).toBe(200);
+    const second = await app.request("/api/mcp/o/org-b", { method: "POST" });
+    expect(second.status).toBe(429);
+  });
+
+  // MCP access is grantable to API keys, dashboard sessions AND OIDC
+  // end-users, so the resolver walks apiKey → endUser → user → IP. Each rung
+  // must produce a DISTINCT bucket: a rung that collapsed into the one below
+  // would let one caller spend another's budget, and a rung that resolved to
+  // `undefined` would put every such caller in one shared bucket.
+  it("gives each identity rung its own bucket", async () => {
+    const app = createApp();
+    app.post("/api/mcp/o/org-1", (c) => c.json({ ok: true }));
+
+    const call = async (seed: (c: Context<AppEnv>) => void) => {
+      const scoped = createApp();
+      scoped.use("/api/mcp/o/org-1", async (c, next) => {
+        seed(c);
+        return rateLimitMcp(1)(c, next);
+      });
+      scoped.post("/api/mcp/o/org-1", (c) => c.json({ ok: true }));
+      return scoped.request("/api/mcp/o/org-1", { method: "POST" });
+    };
+
+    // Same literal id at three different rungs — namespaced, so three buckets.
+    expect((await call((c) => c.set("apiKeyId", "same-id"))).status).toBe(200);
+    expect(
+      (await call((c) => c.set("endUser", { id: "same-id", spaceId: "space-1" }))).status,
+    ).toBe(200);
+    expect(
+      (await call((c) => c.set("user", { id: "same-id", email: "u@t.io", name: "U" }))).status,
+    ).toBe(200);
+
+    // Fourth call re-uses the FIRST rung's identity: its single point is gone.
+    expect((await call((c) => c.set("apiKeyId", "same-id"))).status).toBe(429);
+  });
+
+  it("falls back to the client IP when no identity is resolved", async () => {
+    const app = createApp();
+    app.use("/api/mcp/o/org-1", rateLimitMcp(1));
+    app.post("/api/mcp/o/org-1", (c) => c.json({ ok: true }));
+
+    const from = (ip: string) =>
+      app.request("/api/mcp/o/org-1", {
+        method: "POST",
+        headers: { "X-Forwarded-For": ip },
+      });
+
+    expect((await from("203.0.113.1")).status).toBe(200);
+    // A different IP must NOT inherit the first one's spent budget — that is
+    // what a resolver keying on `undefined` would do.
+    expect((await from("203.0.113.2")).status).toBe(200);
+    expect((await from("203.0.113.1")).status).toBe(429);
   });
 });
