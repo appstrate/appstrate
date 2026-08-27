@@ -43,58 +43,40 @@ describe("buildLogEntries — output extraction", () => {
   });
 });
 
-describe("buildLogEntries — historical report rows", () => {
-  // The `report` runtime tool is gone; rows written before the removal stay in
-  // `run_logs` forever. They must be skipped outright — without the explicit
-  // exclusion they fall through to the generic branch and surface as
-  // contextless lines in the viewer of every old run.
-  it("excludes dead report rows from the viewer entirely", () => {
-    const logs: RawLog[] = [
-      {
-        type: "result",
-        level: "info",
-        event: "report",
-        data: { content: "# Hello\n\nWorld" },
-      },
-      {
-        type: "result",
-        level: "info",
-        event: "report",
-        data: { content: "Second chunk", message: "Tool: report" },
-      },
-    ];
-    const { entries, output } = buildLogEntries(logs);
-    expect(entries).toEqual([]);
-    expect(output).toBeNull();
-  });
-
-  it("keeps surrounding progress rows intact around an excluded report row", () => {
-    const logs: RawLog[] = [
-      { type: "progress", level: "debug", message: "before" },
-      { type: "result", level: "info", event: "report", data: { content: "# md" } },
-      { type: "progress", level: "debug", message: "after" },
-    ];
-    const { entries } = buildLogEntries(logs);
-    expect(entries.map(entryLabel)).toEqual(["before", "after"]);
-  });
-});
-
 describe("buildLogEntries — progress entry projection", () => {
   it("keeps consecutive agent logs as separate viewer rows", () => {
-    const logs: RawLog[] = [
-      { type: "progress", level: "debug", message: "line one" },
-      { type: "progress", level: "debug", message: "line two" },
-      { type: "progress", level: "debug", message: "line three" },
-    ];
-    const { entries } = buildLogEntries(logs);
+    const agentText = (message: string): RawLog => ({
+      type: "progress",
+      level: "debug",
+      message,
+      data: { event: "assistant_message" },
+    });
+    const { entries } = buildLogEntries([
+      agentText("line one"),
+      agentText("line two"),
+      agentText("line three"),
+    ]);
     expect(entries).toHaveLength(3);
     expect(entries.every((entry) => entry.kind === "agent")).toBe(true);
     expect(entries.map(entryLabel)).toEqual(["line one", "line two", "line three"]);
   });
 
+  it("projects an untagged progress row as a runtime breadcrumb, not agent prose", () => {
+    // `appstrate.progress` is the canonical runner LIFECYCLE breadcrumb; only
+    // `data.event = "assistant_message"` marks model-authored text. A runner
+    // that stamps neither `data` nor a level lands here (the sink defaults the
+    // level to `debug`), and claiming those words for the model would be a
+    // misattribution.
+    const { entries } = buildLogEntries([{ type: "progress", level: "debug", message: "running" }]);
+    expect(entries).toEqual([
+      expect.objectContaining({ kind: "runtime", sourceType: "progress", message: "running" }),
+    ]);
+  });
+
   it("keeps data-bearing progress events as distinct entries (boot breadcrumbs)", () => {
     // The runtime-pi boot breadcrumbs carry `data` (at least `{ boot: true }`)
-    // precisely so the projection can distinguish them from agent narration.
+    // and their own level; each is a discrete phase marker, so each keeps its
+    // own row rather than being folded into the one before it.
     const logs: RawLog[] = [
       { type: "progress", level: "info", message: "connecting to sidecar", data: { boot: true } },
       { type: "progress", level: "info", message: "MCP connected", data: { boot: true } },
@@ -345,7 +327,7 @@ describe("buildLogEntries — semantic kinds", () => {
     ]);
   });
 
-  it("keeps an explicit debug log distinct from legacy data-less agent text", () => {
+  it("keeps a debug-level explicit log out of the generic runtime bucket", () => {
     const { entries } = buildLogEntries([
       {
         type: "progress",
