@@ -47,6 +47,7 @@ export const profilePaths = {
                 displayName: { type: "string", minLength: 1, maxLength: 100 },
                 language: { type: "string", enum: ["fr", "en"] },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -100,6 +101,7 @@ export const profilePaths = {
                   maxLength: MAX_PASSWORD_LENGTH,
                 },
               },
+              additionalProperties: false,
             },
           },
         },
@@ -161,6 +163,7 @@ export const profilePaths = {
               properties: {
                 ids: { type: "array", items: { type: "string" }, maxItems: 100 },
               },
+              additionalProperties: false,
             },
           },
         },

@@ -143,6 +143,7 @@ export const apiKeysPaths = {
                     "Permission scopes for the key (e.g. `agents:read`, `agents:run`). Omit or pass an empty array for full role access. A scope no API key can carry — unknown, or session-only such as `org:delete` — is rejected with a 400 naming it; a scope the creator's own role does not hold is dropped, since a key cannot be granted more than its creator has. `GET /api/api-keys/available-scopes` lists what the caller can grant.",
                 },
               },
+              additionalProperties: false,
             },
           },
         },

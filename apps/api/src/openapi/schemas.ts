@@ -24,6 +24,61 @@ const ORG_ROLES = [...orgRoleEnum.enumValues];
 const RUNTIME_TOOL_IDS = [...ACCEPTED_RUNTIME_TOOL_IDS];
 
 /**
+ * The org-settings members, shared by the READ component (`OrgSettings`, below)
+ * and the CLOSED write body of `PUT /api/orgs/{orgId}/settings`
+ * (`openapi/paths/organizations.ts`).
+ *
+ * The two cannot be one schema: `orgSettingsPatchSchema`
+ * (`services/organizations.ts`) is `.strict()`, so an unknown key on the write
+ * is a 400 — while `getOrgSettings` CASTS the JSONB column and returns it
+ * verbatim, so the READ genuinely can carry keys this document does not name.
+ * Closing the shared component would publish that read as a promise the server
+ * does not keep. Sharing the PROPERTIES instead is what keeps the two halves
+ * from drifting on the descriptions.
+ */
+export const ORG_SETTINGS_PROPERTIES = {
+  api_version: {
+    type: "string",
+    description:
+      "Pinned API version for this organization (format: YYYY-MM-DD). Automatically set to the current version at org creation. New API versions do not affect existing orgs until explicitly updated. On write, a version the server cannot serve is rejected with `400 unsupported_api_version` — an unserveable pin would make every org-scoped route fail for this organization.",
+  },
+  dashboard_sso_enabled: {
+    type: "boolean",
+    description:
+      "When true, org-level (dashboard) OAuth clients can be created and the SSO tab is exposed in the org settings UI. Defaults to false — most orgs only need space-level SSO for their end-users.",
+  },
+};
+
+/**
+ * The two members of the per-space input layer, shared by the
+ * `AgentInputSettings` component (below), by `AgentDetail.input`, and by the
+ * CLOSED write body of `PUT /api/agents/{scope}/{name}/input-settings`
+ * (`openapi/paths/agents.ts`).
+ *
+ * The write body cannot simply `$ref` the component and add
+ * `additionalProperties: false`: that keyword does not compose through
+ * `allOf`/`$ref` — it only sees the `properties` declared in the SAME schema
+ * object. And the component itself cannot be closed, because `AgentDetail.input`
+ * composes it with `schema` / `file_constraints` / `ui_hints`; closing the base
+ * would make that conjunction unsatisfiable. Sharing the properties is the one
+ * form that keeps `locked_fields` documented once.
+ */
+export const AGENT_INPUT_SETTINGS_PROPERTIES = {
+  values: {
+    type: "object",
+    description:
+      "Values stored for this space. Validated against the manifest `input.schema` with `required` dropped: leaving a required field empty here means it is asked at launch.",
+    additionalProperties: true,
+  },
+  locked_fields: {
+    type: "array",
+    items: { type: "string", minLength: 1 },
+    description:
+      "Input fields no caller may set at launch. A run or schedule that sets one is refused with 400 `locked_input_field`. A required field may not be locked unless it has a value (author `default` or an entry in `values`) — otherwise the write is refused with 400 `locked_required_field_empty`.",
+  },
+};
+
+/**
  * All OpenAPI schema definitions (components/schemas).
  */
 export const schemas = {
@@ -245,21 +300,12 @@ export const schemas = {
       },
     },
   },
+  // READ shape — deliberately open, see ORG_SETTINGS_PROPERTIES above. The
+  // write body of PUT /api/orgs/{orgId}/settings is the closed twin.
   OrgSettings: {
     type: "object",
     description: "Organization settings (extensible)",
-    properties: {
-      api_version: {
-        type: "string",
-        description:
-          "Pinned API version for this organization (format: YYYY-MM-DD). Automatically set to the current version at org creation. New API versions do not affect existing orgs until explicitly updated. On write, a version the server cannot serve is rejected with `400 unsupported_api_version` — an unserveable pin would make every org-scoped route fail for this organization.",
-      },
-      dashboard_sso_enabled: {
-        type: "boolean",
-        description:
-          "When true, org-level (dashboard) OAuth clients can be created and the SSO tab is exposed in the org settings UI. Defaults to false — most orgs only need space-level SSO for their end-users.",
-      },
-    },
+    properties: ORG_SETTINGS_PROPERTIES,
   },
   ProfileBatchItem: {
     type: "object",
@@ -413,25 +459,16 @@ export const schemas = {
       },
     },
   },
+  // Composition base (AgentDetail.input, the run-config response) AND the
+  // response body of PUT /agents/{scope}/{name}/input-settings. Left OPEN on
+  // purpose — see AGENT_INPUT_SETTINGS_PROPERTIES above; that route's REQUEST
+  // body is the closed twin, spelled in openapi/paths/agents.ts.
   AgentInputSettings: {
     type: "object",
     required: ["values", "locked_fields"],
     description:
       "The agent's stored input settings for one space: the values the editor set once (layer 2 of the input resolution) and the fields it froze. Both are full replacements — an omitted key means cleared, never unchanged.",
-    properties: {
-      values: {
-        type: "object",
-        description:
-          "Values stored for this space. Validated against the manifest `input.schema` with `required` dropped: leaving a required field empty here means it is asked at launch.",
-        additionalProperties: true,
-      },
-      locked_fields: {
-        type: "array",
-        items: { type: "string", minLength: 1 },
-        description:
-          "Input fields no caller may set at launch. A run or schedule that sets one is refused with 400 `locked_input_field`. A required field may not be locked unless it has a value (author `default` or an entry in `values`) — otherwise the write is refused with 400 `locked_required_field_empty`.",
-      },
-    },
+    properties: AGENT_INPUT_SETTINGS_PROPERTIES,
   },
   AgentDetail: {
     type: "object",

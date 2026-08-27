@@ -264,6 +264,7 @@ export const mePaths = {
                 integration_package_id: { type: "string", minLength: 1 },
                 connection_id: { type: "string", format: "uuid" },
               },
+              additionalProperties: false,
             },
           },
         },

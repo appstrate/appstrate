@@ -100,6 +100,7 @@ export const chatPaths = {
             schema: {
               type: "object",
               properties: { title: { type: "string", minLength: 1, maxLength: 200 } },
+              additionalProperties: false,
             },
           },
         },
@@ -171,6 +172,7 @@ export const chatPaths = {
               type: "object",
               required: ["title"],
               properties: { title: { type: "string", minLength: 1, maxLength: 200 } },
+              additionalProperties: false,
             },
           },
         },

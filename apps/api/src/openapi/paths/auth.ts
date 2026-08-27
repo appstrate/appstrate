@@ -172,6 +172,7 @@ export const authPaths = {
                 },
                 name: { type: "string", minLength: 1, maxLength: 120 },
               },
+              additionalProperties: false,
             },
           },
         },

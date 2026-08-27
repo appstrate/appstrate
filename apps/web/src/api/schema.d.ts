@@ -6484,7 +6484,14 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AgentInputSettings"];
+                "application/json": {
+                    /** @description Values stored for this space. Validated against the manifest `input.schema` with `required` dropped: leaving a required field empty here means it is asked at launch. */
+                    values: {
+                        [key: string]: unknown;
+                    };
+                    /** @description Input fields no caller may set at launch. A run or schedule that sets one is refused with 400 `locked_input_field`. A required field may not be locked unless it has a value (author `default` or an entry in `values`) — otherwise the write is refused with 400 `locked_required_field_empty`. */
+                    locked_fields: string[];
+                };
             };
         };
         responses: {
@@ -14370,7 +14377,12 @@ export interface operations {
         };
         requestBody?: {
             content: {
-                "application/json": components["schemas"]["OrgSettings"];
+                "application/json": {
+                    /** @description Pinned API version for this organization (format: YYYY-MM-DD). Automatically set to the current version at org creation. New API versions do not affect existing orgs until explicitly updated. On write, a version the server cannot serve is rejected with `400 unsupported_api_version` — an unserveable pin would make every org-scoped route fail for this organization. */
+                    api_version?: string;
+                    /** @description When true, org-level (dashboard) OAuth clients can be created and the SSO tab is exposed in the org settings UI. Defaults to false — most orgs only need space-level SSO for their end-users. */
+                    dashboard_sso_enabled?: boolean;
+                };
             };
         };
         responses: {

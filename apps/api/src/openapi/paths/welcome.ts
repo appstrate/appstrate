@@ -18,6 +18,7 @@ export const welcomePaths = {
               properties: {
                 displayName: { type: "string", maxLength: 100 },
               },
+              additionalProperties: false,
             },
           },
         },

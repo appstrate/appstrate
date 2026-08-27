@@ -1770,6 +1770,7 @@ const canonicalRunsPaths = {
               properties: {
                 ttl_seconds: { type: "integer", minimum: 1, maximum: 86400 },
               },
+              additionalProperties: false,
             },
           },
         },
