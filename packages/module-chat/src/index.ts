@@ -8,8 +8,12 @@
  *     schema per the "modules own no tables" rule — this module only reads
  *     and writes them).
  *   - REST surface under `/api/chat/*`: session CRUD, history READ, resume and
- *     stop. No route writes a message: persistence is server-authoritative and
- *     its two writers both live in `persistence.ts` (see routes.ts).
+ *     stop — none of which writes a message. Persistence is server-authoritative
+ *     and its two writers both live in `persistence.ts`; exactly ONE route
+ *     reaches them, `POST /api/chat` (the conversational loop below), which
+ *     stores the user turn before inference and the assistant turn when the
+ *     stream finalizes. The second writer, `persistNotice`, has no route at all
+ *     — it is driven by the `onRunStatusChange` event. See routes.ts.
  *     Auto-exposed over MCP through the `mcp` module's `invoke_operation`
  *     once documented in the OpenAPI spec — no dedicated MCP tool needed.
  *   - Full-page React UI exported from `@appstrate/module-chat/ui`

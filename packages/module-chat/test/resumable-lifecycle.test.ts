@@ -40,8 +40,11 @@ const CLOSE_DEADLINE_MS = 2_000;
 
 // The context is a process-wide singleton shared with every other suite in this
 // run: leave it on the tier the harness expects (tier 0 → in-memory).
+// `closeResumableStore()` alone is the whole reset — it disarms the url and the
+// factory as well as dropping the singleton, so the paired
+// `configureResumableStore(null)` this file used to repeat after every
+// configure call is gone.
 afterAll(async () => {
-  configureResumableStore(null);
   await closeResumableStore();
 });
 
@@ -50,8 +53,8 @@ describe("resumable store lifecycle", () => {
     const previous = process.env.REDIS_URL;
     process.env.REDIS_URL = DEAD_REDIS;
     try {
-      configureResumableStore(null);
       await closeResumableStore(); // drop any context an earlier suite built
+      configureResumableStore(null);
       // In-memory: an unknown id resolves to null at once. Were the env still
       // read, this would be a command against an unreachable Redis.
       expect(await getResumableContext().resume(crypto.randomUUID())).toBeNull();
@@ -106,17 +109,68 @@ describe("resumable store lifecycle", () => {
       expect(outcome).toBe("ended");
 
       // …and the singleton is gone, so the next boot builds a fresh store.
-      configureResumableStore(null);
       expect(getResumableContext()).not.toBe(before);
     } finally {
-      configureResumableStore(null);
+      await closeResumableStore();
+      for (const redis of opened) redis.disconnect();
+    }
+  });
+
+  it("reconfiguring replaces a store that was already built", async () => {
+    // `getResumableContext()` is lazy AND memoizing, so whoever reads it first
+    // fixes the tier. If that read happens before `chatModule.init` — a resume
+    // GET served during boot, a module initialised out of order — the platform's
+    // own Redis decision arrives after the answer and used to be ignored for the
+    // life of the process. Configuring must therefore invalidate, not just
+    // record.
+    await closeResumableStore();
+    const inMemory = getResumableContext();
+
+    const opened: Redis[] = [];
+    configureResumableStore(DEAD_REDIS, (url) => {
+      const redis = createResumableRedis(url);
+      opened.push(redis);
+      return redis;
+    });
+    try {
+      const reconfigured = getResumableContext();
+      expect(reconfigured).not.toBe(inMemory);
+      // …and it is genuinely the Redis tier, not merely a second in-memory one.
+      expect(opened).toHaveLength(1);
+    } finally {
+      await closeResumableStore();
+      for (const redis of opened) redis.disconnect();
+    }
+  });
+
+  it("closing disarms the url and the injected factory", async () => {
+    // Shutdown is the module going DOWN. A read after it must not open a client
+    // that nothing will ever close (this function is the only closer, and it has
+    // already run), and must not reach a factory a test injected — module state
+    // is process-wide and outlives the file that set it.
+    const opened: Redis[] = [];
+    configureResumableStore(DEAD_REDIS, (url) => {
+      const redis = createResumableRedis(url);
+      opened.push(redis);
+      return redis;
+    });
+    try {
+      getResumableContext();
+      expect(opened).toHaveLength(1);
+
+      await closeResumableStore();
+
+      // Back on the inert in-memory tier: no second client, and the resolve is
+      // immediate rather than a command against an unreachable Redis.
+      expect(await getResumableContext().resume(crypto.randomUUID())).toBeNull();
+      expect(opened).toHaveLength(1);
+    } finally {
       await closeResumableStore();
       for (const redis of opened) redis.disconnect();
     }
   });
 
   it("shutdown() closes the store — the next boot builds a fresh one", async () => {
-    configureResumableStore(null);
     await closeResumableStore();
     const before = getResumableContext();
     // Control: the context is a singleton for as long as the module is up.

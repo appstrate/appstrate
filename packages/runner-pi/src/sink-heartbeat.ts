@@ -121,17 +121,20 @@ export function startSinkHeartbeat(opts: StartSinkHeartbeatOptions): SinkHeartbe
    * prevent, so every attempt must be bounded.
    *
    * Half an interval, and not more. The invariant to preserve is that a hung
-   * attempt must still leave a ping inside the watchdog's window: the bound
-   * caps the worst-case gap between two ATTEMPTS at 1.5 intervals (a hang
-   * burns half an interval, then the next tick waits a full one), which is
-   * 22.5 s at this helper's 15 s default (the CLI) and 45 s at the container's
-   * `HEARTBEAT_INTERVAL_MS` of 30 s — both under the 60 s
-   * `RUN_STALL_THRESHOLD_SECONDS` the platform reaps on. A deadline at or
-   * above the interval pushes that gap to ≥2 intervals, which at 30 s exceeds
-   * the threshold outright: the pile-up again, only slower. In the other
-   * direction, even the smaller 7.5 s is orders of magnitude above an honest
-   * heartbeat RTT (a bodyless POST to the platform), so it cannot fire on a
-   * merely slow-but-live network.
+   * attempt must still leave a ping inside the watchdog's window. Worst case is
+   * a hang (half an interval) followed by the LONGEST jittered wait, not by a
+   * plain interval: `scheduleNext` multiplies the interval by
+   * `1 + jitter` at the top of its range, so the next tick is 1.15 intervals
+   * away at the 0.15 default. The gap between two ATTEMPTS is therefore capped
+   * at 1.65 intervals — 24.75 s at this helper's 15 s default (the CLI) and
+   * 49.5 s at the container's `HEARTBEAT_INTERVAL_MS` of 30 s. Both are under
+   * the 60 s `RUN_STALL_THRESHOLD_SECONDS` the platform reaps on, the tighter
+   * of the two by 10.5 s. A deadline at or above the interval pushes that gap
+   * to ≥2.15 intervals, which at 30 s is 64.5 s and exceeds the threshold
+   * outright: the pile-up again, only slower. In the other direction, even the
+   * smaller 7.5 s is orders of magnitude above an honest heartbeat RTT (a
+   * bodyless POST to the platform), so it cannot fire on a merely
+   * slow-but-live network.
    */
   const attemptTimeoutMs = Math.max(1, Math.round(intervalMs / 2));
 

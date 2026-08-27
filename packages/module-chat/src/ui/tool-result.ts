@@ -8,6 +8,32 @@
  * `{ content: [{ type:"text", text }] }`, a bare content array, or a JSON
  * string. `unwrapResult` peels those layers down to the actual payload so the
  * rest of the UI never has to know which shape arrived.
+ *
+ * It does NOT peel the AI-SDK `ToolResultOutput` envelopes
+ * `{ type:"json", value }` / `{ type:"content", value }`, and that is a checked
+ * decision rather than an oversight — an unpeeled envelope would be harmful
+ * (`isErrorPayload` reads `status`/`error` at the top level, misses them inside
+ * `value`, and a FAILED call renders as a success), so "arbitrary MCP servers
+ * emit whatever they like" is not on its own a reason to keep the peeling. What
+ * decides it is that no such value can reach `part.result`:
+ *
+ *   - every tool the chat exposes is registered by `pi-chat/mcp-tools.ts`, and
+ *     BOTH constructors there (`toPiToolResult`, `mcpResultToPi`) return Pi's
+ *     `{ content: [{type:"text",…}], details? }` shape. An arbitrary server's
+ *     `CallToolResult` is normalized by `mcpResultToPi` — every block becomes a
+ *     text block — before it is ever handed to the UI-stream mapper;
+ *   - that platform MCP client is the ONLY tool source: the engine builds the
+ *     session with `noTools: "builtin"` and a resource loader that disables
+ *     extension, skill and prompt discovery, so nothing else can register a
+ *     tool whose result would bypass those two constructors;
+ *   - and nothing ever persisted one either — the retired ai-sdk path stored
+ *     each tool's `execute` result (already `{ content: […] }`), while these
+ *     envelopes were the model-facing `toModelOutput` channel, which never
+ *     reached a UIMessage. A repo-wide search finds no producer.
+ *
+ * The one residue is a server that puts that literal JSON *inside* a text
+ * block. Peeling it would be guessing at a foreign server's semantics, not
+ * removing an Appstrate envelope, so it stays unpeeled.
  */
 
 /** Lifecycle phase of a tool call, derived from status + result. */

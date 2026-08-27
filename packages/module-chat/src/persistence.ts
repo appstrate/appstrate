@@ -169,7 +169,8 @@ export async function persistUserMessage(sessionId: string, message: UIMessage):
     message,
     await lastMessageId(db, sessionId),
   );
-  await touchSession(db, sessionId, "user", seq);
+  const owner = await touchSession(db, sessionId, "user", seq);
+  if (owner) notifySessionUpdate(sessionId, owner.orgId, owner.userId);
   return messageId;
 }
 
@@ -184,7 +185,8 @@ export async function persistAssistantMessage(
   precedingMessageId: string | null,
 ): Promise<void> {
   const { seq } = await upsertMessage(db, sessionId, message, precedingMessageId);
-  await touchSession(db, sessionId, "assistant", seq);
+  const owner = await touchSession(db, sessionId, "assistant", seq);
+  if (owner) notifySessionUpdate(sessionId, owner.orgId, owner.userId);
 }
 
 /**
@@ -243,7 +245,14 @@ export async function persistNotice(input: {
   text: string;
 }): Promise<boolean> {
   const { sessionId, orgId, messageId, text } = input;
-  return db.transaction(async (tx) => {
+  // The owner is carried OUT of the transaction so the change signal can be
+  // emitted after it commits. `notifySessionUpdate` issues its `pg_notify` on
+  // the pooled `db`, never on `tx` — a different connection, which autocommits
+  // at once. Emitted from inside this transaction the signal reached the SSE
+  // fan-out BEFORE the notice row committed: every connected client of that
+  // owner refetched the conversation and got a transcript without the notice
+  // in it, then sat on it until the next unrelated signal.
+  const { posted, owner } = await db.transaction(async (tx): Promise<NoticeOutcome> => {
     const [idle] = await tx
       .select({ id: chatSessions.id })
       .from(chatSessions)
@@ -258,22 +267,43 @@ export async function persistNotice(input: {
       .for("update");
     // No row = the session is gone, is another tenant's, or a turn owns it.
     // Either way: not ours to write into.
-    if (!idle) return false;
+    if (!idle) return { posted: false, owner: null };
     const [existing] = await tx
       .select({ seq: chatMessages.seq })
       .from(chatMessages)
       .where(and(eq(chatMessages.sessionId, sessionId), eq(chatMessages.messageId, messageId)))
       .limit(1);
-    if (existing) return false;
+    if (existing) return { posted: false, owner: null };
     const message = {
       id: messageId,
       role: "assistant",
       parts: [{ type: "text", text }],
     } as UIMessage;
-    const { seq } = await upsertMessage(tx, sessionId, message, await lastMessageId(tx, sessionId));
-    await touchSession(tx, sessionId, "assistant", seq);
-    return true;
+    // `null`, not `await lastMessageId(tx, …)`. `precedingMessageId` is hash
+    // material for `deterministicMessageId`, which `upsertMessage` reaches only
+    // when `message.id` is falsy — and a notice's id is always the caller's own
+    // (`run_notice_<runId>`, the single call site), so that branch is
+    // unreachable here. The read it replaced was pure cost in the worst place
+    // for one: a `chat_messages` scan held while this transaction has the
+    // session row locked `FOR UPDATE`, which is the serialization point a
+    // starting turn contends on.
+    const { seq } = await upsertMessage(tx, sessionId, message, null);
+    return { posted: true, owner: await touchSession(tx, sessionId, "assistant", seq) };
   });
+  if (owner) notifySessionUpdate(sessionId, owner.orgId, owner.userId);
+  return posted;
+}
+
+/** Tenant + owner of a session — the fan-out key `notifySessionUpdate` needs. */
+interface SessionOwner {
+  orgId: string;
+  userId: string;
+}
+
+/** What {@link persistNotice}'s transaction hands back to its caller. */
+interface NoticeOutcome {
+  posted: boolean;
+  owner: SessionOwner | null;
 }
 
 /**
@@ -283,21 +313,29 @@ export async function persistNotice(input: {
  * its owner looks at it), a user turn advances `lastReadSeq` (sending a message
  * implies having seen the thread — keeps headless/API senders from accruing
  * phantom unread). Watermarks are message pointers, monotonic via GREATEST —
- * a replayed/late write can never regress them. Ends by signalling the change
- * over SSE so connected clients refetch instead of polling.
+ * a replayed/late write can never regress them.
+ *
+ * Returns the session's owner (null when the row is gone) INSTEAD of signalling
+ * the change itself. `notifySessionUpdate` always publishes on the pooled `db`,
+ * so a signal raised here while `client` is a transaction handle leaves on a
+ * different connection and autocommits before the write it announces — the SSE
+ * fan-out fires, the client refetches, and the row is not visible yet. Each
+ * caller signals once its own write is committed; for the autocommit callers
+ * that is the very next statement, for `persistNotice` it is after
+ * `db.transaction` returns.
  */
 async function touchSession(
   client: ChatDbClient,
   sessionId: string,
   kind: "user" | "assistant",
   seq: number,
-): Promise<void> {
+): Promise<SessionOwner | null> {
   const [session] = await client
     .select({ title: chatSessions.title, orgId: chatSessions.orgId, userId: chatSessions.userId })
     .from(chatSessions)
     .where(eq(chatSessions.id, sessionId))
     .limit(1);
-  if (!session) return;
+  if (!session) return null;
   const title = session.title ?? (await deriveTitle(client, sessionId));
   await client
     .update(chatSessions)
@@ -309,11 +347,7 @@ async function touchSession(
       ...(title !== session.title ? { title } : {}),
     })
     .where(eq(chatSessions.id, sessionId));
-  // Detached inside `notifySessionUpdate` itself now, so this call site — on the
-  // pre-inference path of every turn — pays nothing, and neither do the six that
-  // used to await it for no reason. The `.catch(() => {})` that stood here was
-  // dead code either way: the function could not reject.
-  notifySessionUpdate(sessionId, session.orgId, session.userId);
+  return { orgId: session.orgId, userId: session.userId };
 }
 
 /**

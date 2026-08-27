@@ -109,6 +109,20 @@ export function configureResumableStore(
   url: string | null,
   factory: ResumableRedisFactory = createResumableRedis,
 ): void {
+  // Reconfiguring INVALIDATES what is already built. `getResumableContext()` is
+  // lazy, so anything that reads it before `chatModule.init` runs — a resume GET
+  // served during boot, a test, an out-of-order module — builds the store from
+  // whatever `redisUrl` said at that moment (nothing: the in-memory tier) and
+  // memoizes it. Writing only the two settings left that context in place, so
+  // the platform's own Redis decision arrived too late to matter and the
+  // process stayed on the wrong tier for its whole life, silently.
+  //
+  // The teardown is not awaited because this function is called from `init` and
+  // has nothing to wait for: `closeResumableStore` drops the singleton and the
+  // client handle SYNCHRONOUSLY (before its first await), so by the time the
+  // two assignments below run there is nothing stale left to read. Only the
+  // socket's `quit()` finishes later, and no caller needs to observe it.
+  void closeResumableStore().catch(() => {});
   redisUrl = url;
   createClient = factory;
 }
@@ -135,11 +149,23 @@ export function getResumableContext(): ResumableStreamContext {
  * Release the store's Redis connection on shutdown and drop the singleton, so
  * a restarted module builds a fresh one. Without this the client (and its
  * reconnect loop) outlived the module that opened it.
+ *
+ * It also DISARMS the configuration, returning the module to the state it boots
+ * in: no url, the real factory. Both halves were leaks. Leaving `redisUrl` set
+ * meant a `getResumableContext()` after shutdown opened a brand-new Redis
+ * client that nothing would ever close — this function is the only closer and
+ * it has already run. Leaving an injected `createClient` in place meant a
+ * test's factory survived into whatever ran next in the same `bun test`
+ * process, since module state is shared across files. After a close the store
+ * is the inert in-memory one until someone configures it again, which is the
+ * correct reading of "the module is down".
  */
 export async function closeResumableStore(): Promise<void> {
   const open = client;
   context = null;
   client = null;
+  redisUrl = null;
+  createClient = createResumableRedis;
   if (!open) return;
   // `quit()` drains in-flight commands, and it does NOT need a deadline of its
   // own: ioredis only sends the QUIT command on a client whose connection is
