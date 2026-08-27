@@ -578,13 +578,26 @@ All external inputs are validated using Zod schemas before processing:
 
 ### Rate limiting
 
-Token bucket rate limiting prevents abuse:
+Token bucket rate limiting prevents abuse. The authenticated limiter (`rateLimit`, `apps/api/src/middleware/rate-limit.ts`) keys on `method:path:identity`, where the identity is the API key id when one authenticated the request and the user id otherwise — so a budget is per route AND per credential, and rotating between an API key and a session does not merge the two. Public routes use `rateLimitByIp` instead.
 
-| Endpoint                              | Limit     | Scope    |
-| ------------------------------------- | --------- | -------- |
-| `POST /api/agents/{scope}/{name}/run` | 20/minute | Per user |
-| `POST /api/agents/import`             | 10/minute | Per user |
-| `POST /api/agents`                    | 10/minute | Per user |
+Representative limits, all read from the route registrations:
+
+| Endpoint                                                                                    | Limit                                                   | Scope               |
+| ------------------------------------------------------------------------------------------- | ------------------------------------------------------- | ------------------- |
+| `POST /api/agents/{scope}/{name}/run`                                                       | 20/minute                                               | Per user or API key |
+| `POST /api/packages/import` · `/import-bundle` · `/import-github`                           | 10/minute each                                          | Per user or API key |
+| `POST /api/agents/{scope}/{name}/schedules`                                                 | 10/minute                                               | Per user or API key |
+| `POST /api/runs/inline` · `/api/runs/inline/validate`                                       | `INLINE_RUN_LIMITS.rate_per_min` (60)                   | Per user or API key |
+| `POST /api/runs/remote`                                                                     | `PLATFORM_RUN_LIMITS.per_org_global_rate_per_min` (200) | Per user or API key |
+| `POST /api/uploads`                                                                         | 20/minute                                               | Per user or API key |
+| `PUT /api/uploads` (signed upload sink)                                                     | 60/minute                                               | Per IP              |
+| `POST /api/auth/bootstrap/redeem`                                                           | 5/minute                                                | Per IP              |
+| `POST /api/models/test` · `/api/model-provider-credentials/test` · `/api/proxies/{id}/test` | 5/minute                                                | Per user or API key |
+| `GET /api/runs/{id}/logs` · `GET /api/files/{id}/content`                                   | 120/minute                                              | Per user or API key |
+
+The two limits in parentheses are the schema defaults; both are operator-tunable through the `INLINE_RUN_LIMITS` / `PLATFORM_RUN_LIMITS` JSON env vars (`apps/api/src/services/run-limits.ts`).
+
+Package **creation** — `POST /api/packages/{agents|skills|integrations}`, the JSON-body editor path — carries no `rateLimit`. It is gated by `requirePermission(<type>, "write")` only. The rate-limited write paths are the three import routes above, which accept an arbitrary caller-supplied archive.
 
 ### Run timeout
 

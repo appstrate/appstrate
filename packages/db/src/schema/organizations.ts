@@ -106,9 +106,19 @@ export const organizationMembers = pgTable(
  *
  * The `status` enum already records THAT an invitation was accepted; who
  * accepted it and when is in the audit log, which outlives the row (the org
- * delete drops every invitation with it). Dropped by `0055`. If acceptance
- * attribution is ever wanted on this table, it needs a reader designed with
- * it — not these columns revived.
+ * delete drops every invitation with it). Dropped by `0055`.
+ *
+ * That audit substitute is NOT something the drop inherited — it did not exist
+ * when the columns went. `POST /invite/:token/accept` wrote no audit record at
+ * all, so for the length of one review the attribution was simply gone, backed
+ * by a claim nobody had implemented. The route now writes
+ * `org.invitation_accepted` (`routes/invitations.ts`) AFTER the claim is won,
+ * so the loser of a concurrent accept logs nothing, and
+ * `invitations.test.ts` asserts the actor, the timestamp and the payload.
+ * Delete that write and this paragraph becomes false again.
+ *
+ * If acceptance attribution is ever wanted on this TABLE, it needs a reader
+ * designed with it — not these columns revived.
  */
 export const orgInvitations = pgTable(
   "org_invitations",

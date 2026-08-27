@@ -54,8 +54,17 @@
 --
 -- `audit_events.space_id` IS rewritten, and the asymmetry is deliberate rather
 -- than an oversight: it is a live POINTER at a row in `spaces`, not a record of
--- the past. Every space-scoped audit read filters on it, so leaving it behind
--- does not preserve history — it makes the history unfindable.
+-- the past.
+--
+-- NOT because a reader filters on it — none does. `audit_events` has exactly
+-- one non-test user in the repo, the `db.insert` in `recordAudit`
+-- (`apps/api/src/services/audit.ts`); there is no route, DTO or SPA surface
+-- that reads the table back. The reason is what the VALUE would mean if left
+-- alone: after step 1 no row in `spaces` is named `app_…` any more, so an
+-- unrewritten `audit_events.space_id` points at an id that exists nowhere in
+-- the database. The first reader — an operator at a psql prompt, or a surface
+-- built later — would find the trail unjoinable rather than merely unindexed,
+-- and nothing would flag the miss, for the reason the next paragraph gives.
 --
 -- It is no longer a FOREIGN KEY. `0055_schema_integrity_repairs` dropped that
 -- constraint (an `ON DELETE SET NULL` that blanked the attribution of every

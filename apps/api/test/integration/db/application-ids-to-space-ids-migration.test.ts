@@ -741,7 +741,7 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
       //
       // `NOT tgisinternal` excludes the RI constraint triggers, whose generated
       // names embed OIDs and would churn purely because the script drops and
-      // restores the eighteen foreign keys.
+      // restores the seventeen foreign keys.
       const before = await triggerCatalog();
 
       // Non-vacuity: all three triggers the script actually disables are here,

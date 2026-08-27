@@ -31,6 +31,11 @@
  * A literal `DROP CONSTRAINT "<declared name>"` in 0055 passes every assertion
  * a fresh replay can make and fails this one — which is the only place the
  * beta.24 shape is reachable without a production dump.
+ *
+ * Section C's two renames are seeded the same way and for the same reason, in
+ * their case with a spelling 0055 does not name anywhere: see `FKEY_SPELLING`.
+ * A case seeded with a name the migration's own comment spells out proves
+ * nothing about how the migration finds it.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "bun:test";
@@ -57,6 +62,30 @@ const TRUNCATED = {
 const DECLARED_BEFORE = {
   integrationOrgDefaults: "integration_org_defaults_connection_id_integration_connections_id_fk",
   modelProviderPairings: "model_provider_pairings_credential_id_model_provider_credentials_id_fk",
+} as const;
+
+/**
+ * A THIRD spelling, matching neither the declared name nor the truncated one:
+ * Postgres' own `_fkey` suffix, the drift `audit_events` actually carries on
+ * production.
+ *
+ * Section C's case seeds THESE rather than the truncated forms, and the reason
+ * is the point of the case. The truncated forms are the two strings 0055's own
+ * section-C comment spells out, so a rename written as a literal
+ * `ALTER TABLE … RENAME CONSTRAINT "<truncated>" TO "<short>"` — the exact
+ * implementation the case exists to reject — satisfies a test seeded with
+ * them. Seeded with a name nothing in 0055 mentions, only a lookup that asks
+ * the catalog by (table, column, referenced table) can find them.
+ *
+ * The truncated population is not left uncovered. A fresh replay creates both
+ * FKs from `0000_init.sql`'s overlong names, Postgres truncates them at
+ * creation, and 0055 renames them — which is precisely what
+ * `migration-schema-parity.test.ts`'s "UNDER ITS DECLARED NAME" case asserts,
+ * on the same journal, on every run.
+ */
+const FKEY_SPELLING = {
+  integrationOrgDefaults: "integration_org_defaults_connection_id_fkey",
+  modelProviderPairings: "model_provider_pairings_credential_id_fkey",
 } as const;
 
 const pg = new PGlite();
@@ -127,6 +156,7 @@ describe("0055 — schema integrity repairs", () => {
     );
     expect(rows[0]?.conname).toBe(TRUNCATED.integrationOrgDefaults);
     expect(Buffer.byteLength(TRUNCATED.integrationOrgDefaults)).toBe(63);
+    expect(Buffer.byteLength(TRUNCATED.modelProviderPairings)).toBe(63);
     expect(Buffer.byteLength(DECLARED_BEFORE.integrationOrgDefaults)).toBe(68);
     expect(Buffer.byteLength(DECLARED_BEFORE.modelProviderPairings)).toBe(70);
     await pg.exec("DROP TABLE _trunc_source; DROP TABLE _trunc_target;");
@@ -171,28 +201,33 @@ describe("0055 — schema integrity repairs", () => {
     expect(await indexDefinition("pkp_space")).not.toContain("WHERE");
   });
 
-  it("renames both truncated constraints, found by column rather than by name", async () => {
+  it("renames both constraints, found by column rather than by name", async () => {
+    // Seeded with the `_fkey` spelling, NOT the truncated one — see
+    // `FKEY_SPELLING`. 0055 names the truncated forms in its own comment, so a
+    // literal `RENAME CONSTRAINT "<truncated>" TO "<short>"` would pass a test
+    // seeded with them, which is the implementation this case exists to
+    // reject. Nothing in 0055 mentions `_fkey`.
     await pg.exec(
       `ALTER TABLE "integration_org_defaults"
        RENAME CONSTRAINT "integration_org_defaults_connection_id_fk"
-       TO "${TRUNCATED.integrationOrgDefaults}"`,
+       TO "${FKEY_SPELLING.integrationOrgDefaults}"`,
     );
     await pg.exec(
       `ALTER TABLE "model_provider_pairings"
        RENAME CONSTRAINT "model_provider_pairings_credential_id_fk"
-       TO "${TRUNCATED.modelProviderPairings}"`,
+       TO "${FKEY_SPELLING.modelProviderPairings}"`,
     );
 
     await applyMigration();
 
     const orgDefaults = await foreignKeys("integration_org_defaults");
-    expect(orgDefaults.has(TRUNCATED.integrationOrgDefaults)).toBe(false);
+    expect(orgDefaults.has(FKEY_SPELLING.integrationOrgDefaults)).toBe(false);
     // The action must survive the rename — `RENAME CONSTRAINT` is catalog-only,
     // and a drop-and-recreate here would have been a window with no FK at all.
     expect(orgDefaults.get("integration_org_defaults_connection_id_fk")).toBe("cascade");
 
     const pairings = await foreignKeys("model_provider_pairings");
-    expect(pairings.has(TRUNCATED.modelProviderPairings)).toBe(false);
+    expect(pairings.has(FKEY_SPELLING.modelProviderPairings)).toBe(false);
     expect(pairings.get("model_provider_pairings_credential_id_fk")).toBe("set null");
   });
 

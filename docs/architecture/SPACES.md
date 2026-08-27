@@ -115,30 +115,30 @@ Mutations record audit events with `resourceType: "space"` and actions `space.cr
 
 **Package artifacts are deliberately not enumerated** (`:160`): `packages` is org-scoped and carries no `space_id`, so this cascade drops only the `space_packages` join rows — the package objects stay owned by the org and are purged by `deleteOrganization`.
 
-Everything else follows the FK. What each dependent does on a space delete:
+Everything else follows the FK — except the last row, which since `0055` no longer has one. What each dependent does on a space delete:
 
-| Table                                   | `space_id`    | On delete                                    |
-| --------------------------------------- | ------------- | -------------------------------------------- |
-| `space_packages`                        | NOT NULL      | cascade                                      |
-| `runs`                                  | NOT NULL      | cascade                                      |
-| `package_schedules`                     | NOT NULL      | cascade                                      |
-| `package_persistence`                   | NOT NULL      | cascade                                      |
-| `end_users`                             | NOT NULL      | cascade                                      |
-| `api_keys`                              | NOT NULL      | cascade                                      |
-| `files`                                 | NOT NULL      | cascade (+ storage job)                      |
-| `uploads`                               | NOT NULL      | cascade (+ storage job)                      |
-| `notifications`                         | NOT NULL      | cascade                                      |
-| `integration_connections`               | NOT NULL      | cascade                                      |
-| `integration_oauth_clients`             | NOT NULL      | cascade                                      |
-| `integration_pins`                      | NOT NULL      | cascade                                      |
-| `integration_org_defaults`              | NOT NULL      | cascade                                      |
-| `space_smtp_configs`                    | NOT NULL (PK) | cascade                                      |
-| `space_social_providers`                | NOT NULL      | cascade                                      |
-| `webhooks`                              | nullable      | cascade                                      |
-| `oauth_clients` (`referenced_space_id`) | nullable      | cascade                                      |
-| `audit_events`                          | nullable      | **set null** — the record outlives the space |
+| Table                                   | `space_id`    | On delete                                |
+| --------------------------------------- | ------------- | ---------------------------------------- |
+| `space_packages`                        | NOT NULL      | cascade                                  |
+| `runs`                                  | NOT NULL      | cascade                                  |
+| `package_schedules`                     | NOT NULL      | cascade                                  |
+| `package_persistence`                   | NOT NULL      | cascade                                  |
+| `end_users`                             | NOT NULL      | cascade                                  |
+| `api_keys`                              | NOT NULL      | cascade                                  |
+| `files`                                 | NOT NULL      | cascade (+ storage job)                  |
+| `uploads`                               | NOT NULL      | cascade (+ storage job)                  |
+| `notifications`                         | NOT NULL      | cascade                                  |
+| `integration_connections`               | NOT NULL      | cascade                                  |
+| `integration_oauth_clients`             | NOT NULL      | cascade                                  |
+| `integration_pins`                      | NOT NULL      | cascade                                  |
+| `integration_org_defaults`              | NOT NULL      | cascade                                  |
+| `space_smtp_configs`                    | NOT NULL (PK) | cascade                                  |
+| `space_social_providers`                | NOT NULL      | cascade                                  |
+| `webhooks`                              | nullable      | cascade                                  |
+| `oauth_clients` (`referenced_space_id`) | nullable      | cascade                                  |
+| `audit_events`                          | nullable      | **no FK** — the value outlives the space |
 
-Two of those columns are nullable because the row can be scoped at either level, and a CHECK ties the discriminator to the id: `webhooks` requires `(level = 'org' AND space_id IS NULL) OR (level = 'space' AND space_id IS NOT NULL)` (`packages/db/src/schema/webhooks.ts:66`), and `oauth_clients` carries the three-way `org` / `space` / `instance` version of the same rule (`packages/db/src/schema/oidc.ts:132`). `audit_events.space_id` is `ON DELETE SET NULL` on purpose (`packages/db/src/schema/audit.ts:27`) — deleting a space must not delete the record that it was deleted.
+Two of those columns are nullable because the row can be scoped at either level, and a CHECK ties the discriminator to the id: `webhooks` requires `(level = 'org' AND space_id IS NULL) OR (level = 'space' AND space_id IS NOT NULL)` (`packages/db/src/schema/webhooks.ts:66`), and `oauth_clients` carries the three-way `org` / `space` / `instance` version of the same rule (`packages/db/src/schema/oidc.ts:132`). `audit_events.space_id` is nullable for a different reason: it is not a foreign key at all (`packages/db/src/schema/audit.ts`), the same denormalised posture `org_id` has always had. It used to be one, with `ON DELETE SET NULL`, and that blanked the attribution of every historical row for a space the instant the space was deleted — the failure the table's own doc argues against, applied to the other tenancy column. `0055` dropped the constraint; the value now survives the delete, naming a space that no longer exists. Deleting a space must not erase the record that it was deleted.
 
 ## Deploying the rename
 
@@ -147,4 +147,4 @@ The rename ships as **two files that are one deploy**, and neither is a deploy o
 - `packages/db/drizzle/0053_applications_to_spaces.sql` — the **catalog** half. Table, column, constraint, index and `notify.ts` function renames. It rewrites no row value.
 - `scripts/migration/0003-application-ids-to-space-ids.sql` — the **row-value** half, run by an operator in the same window (`docs/NO_TRANSITIONAL_CODE.md` §2 keeps one-off content rewrites out of drizzle). It re-mints `spaces.id` and every column that references it, plus the values that encode a space id or the retired word.
 
-**Their headers are the authority on how, in what order, and what is deliberately left alone** — the eighteen foreign keys and why the drop/restore is catalog-driven, why the `level` rewrite must precede the id rewrite, which triggers are disabled and why, what is verified before and after, and the promotion of the three CHECK constraints `0053` was forced to add `NOT VALID` (which `0003` performs itself, guarded, inside its own transaction — there is no manual post-deploy step). Read them there, not here: this page describes the space model, which outlives the rename, while those two files describe a migration that stops being true the moment it is applied. Restating any of it here would make a third source that can disagree with the other two, and has.
+**Their headers are the authority on how, in what order, and what is deliberately left alone** — the seventeen foreign keys and why the drop/restore is catalog-driven, why the `level` rewrite must precede the id rewrite, which triggers are disabled and why, what is verified before and after, and the promotion of the three CHECK constraints `0053` was forced to add `NOT VALID` (which `0003` performs itself, guarded, inside its own transaction — there is no manual post-deploy step). Read them there, not here: this page describes the space model, which outlives the rename, while those two files describe a migration that stops being true the moment it is applied. Restating any of it here would make a third source that can disagree with the other two, and has.

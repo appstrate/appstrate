@@ -35,6 +35,43 @@
 -- the database with history drifted. Asking the catalog what the constraint is
 -- called removes the question.
 --
+-- ═══ FORWARD-ONLY. THE RELEASE THAT CARRIES THIS FILE CANNOT BE ROLLED BACK ══
+--
+-- Sections A, B and C are all rollback-safe: a dropped foreign key, two added
+-- indexes and two renamed constraints change nothing any application version
+-- reads or writes. SECTION D IS NOT, and it pins this release.
+--
+-- It drops `org_invitations.accepted_by` / `accepted_at`, and THE PREVIOUS
+-- APPLICATION VERSION WRITES BOTH: `markInvitationAccepted`
+-- (`apps/api/src/services/invitations.ts`) sets `acceptedBy` / `acceptedAt`
+-- beside the `status = 'accepted'` flip. This release is the one that stops.
+--
+-- Migrations are applied AT BOOT, before the health gate (`apps/api/src/lib/
+-- boot.ts`), so the columns are gone from the shared database the moment a
+-- container of this release starts — before anything has decided the deploy is
+-- good. Redeploying the previous image, which is the documented recovery path,
+-- then brings back a binary whose accept-invitation UPDATE names a column that
+-- no longer exists: Postgres 42703, and every invitation acceptance 500s until
+-- the image is rolled forward. Nothing restores the columns on the way back —
+-- drizzle's runner has no down step and this file has no inverse.
+--
+-- WHAT AN OPERATOR DOES INSTEAD: roll FORWARD. Redeploy this release, or a
+-- later one, rather than the previous image. If this release genuinely has to
+-- be abandoned, the previous image needs the two columns back before it can
+-- accept an invitation again —
+--
+--   ALTER TABLE org_invitations ADD COLUMN IF NOT EXISTS accepted_by text;
+--   ALTER TABLE org_invitations
+--     ADD COLUMN IF NOT EXISTS accepted_at timestamp with time zone;
+--
+-- — by hand. Plain columns are enough: the old code only WROTE them, so the
+-- dropped index and the `user` foreign key need not come back. This migration
+-- is already recorded in `__drizzle_migrations` and will not re-run, so those
+-- two columns must be dropped again by hand once the rollback is over, or the
+-- database keeps two columns the schema does not declare and
+-- `migration-schema-parity.test.ts` reports them as drift. The VALUES are not
+-- recoverable, and that costs nothing — nothing ever read them (section D).
+--
 -- ═══ THE TWO FENCES, SET ONCE FOR THE WHOLE FILE ═══════════════════════════
 --
 -- Every statement below takes a lock: ACCESS EXCLUSIVE for the constraint drop,
@@ -72,8 +109,17 @@ SET LOCAL statement_timeout = '60s';--> statement-breakpoint
 -- `services/spaces.ts`). Every historical audit row for that space lost its
 -- attribution the moment it ran, and nothing reconstructs it: `action` is a
 -- verb, `resource_id` names the resource rather than its container. The rows
--- survived as a trail nobody can scope — and deleting a space is exactly when
+-- survived as a trail nobody CAN scope — and deleting a space is exactly when
 -- its trail matters most.
+--
+-- NOBODY SCOPES ONE TODAY, and the argument deliberately does not rest on
+-- anybody doing so. `audit_events` has exactly one non-test user in the whole
+-- repo — the `db.insert` in `recordAudit` (`apps/api/src/services/audit.ts`).
+-- There is no read path at all: no route, no DTO, no OpenAPI schema, no SPA
+-- surface. The table is written for an operator at a psql prompt and for a
+-- reader nobody has built yet, which is exactly why the column has to outlive
+-- the space: an audit trail is kept against questions not yet asked, and
+-- `SET NULL` answered every one of them, in advance, with "unknown".
 --
 -- After this the column is a denormalised `text`, same posture as `org_id`.
 -- The cost is stated rather than discovered: nothing stops a `space_id` naming
@@ -246,6 +292,13 @@ BEGIN
 END $$;--> statement-breakpoint
 
 -- ═══ D. TWO COLUMNS NOTHING READS ════════════════════════════════════════════
+--
+-- THIS IS THE SECTION THAT MAKES THE RELEASE FORWARD-ONLY. The two drops below
+-- are the only statements in this file the previous application version cannot
+-- survive: it still WRITES both columns, so redeploying the previous image
+-- after this has run gives 42703 on every invitation acceptance. Roll forward,
+-- never back — the header's FORWARD-ONLY section has the operator's escape
+-- hatch if the release must be abandoned anyway.
 --
 -- `org_invitations.accepted_by` / `accepted_at` — written once, by
 -- `markInvitationAccepted` beside the `status = 'accepted'` flip, and read by

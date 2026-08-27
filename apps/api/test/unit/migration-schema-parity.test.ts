@@ -309,9 +309,28 @@ describe("migration replay schema parity", () => {
   });
 
   it("gives every declared foreign key the declared ON DELETE action", async () => {
-    // The half a name comparison cannot see. `audit_events.space_id` carried
-    // `ON DELETE SET NULL` under a perfectly ordinary name, and blanked the
-    // audit trail of every deleted space.
+    // The half a name comparison cannot see: a constraint whose NAME is right
+    // and whose referential ACTION is not. A migration that re-creates a FK
+    // under the same name with a different `ON DELETE`, or an `onDelete` edit
+    // in the schema that no migration follows, leaves the set diff above
+    // perfectly green and lands here instead.
+    //
+    // WHAT IT DOES NOT CATCH — stated because the obvious reading of this case
+    // is wrong. Not `audit_events.space_id`'s pre-0055 `ON DELETE SET NULL`,
+    // the defect `0055` section A removed. The schema DECLARED `set null` and
+    // the catalog held `confdeltype = 'n'`; the two agreed, so `mismatched`
+    // was empty and this case was green on it throughout. It could not have
+    // been otherwise: a parity check asks whether the database matches the
+    // code, and there the code was wrong too — revert the schema edit AND
+    // delete section A and every case in this file stays green, which is the
+    // split `migration-0055-schema-repairs.test.ts`'s header describes.
+    //
+    // Whether an action is the RIGHT one is a design question no mechanical
+    // comparison in this repo decides: `set null` is correct on the
+    // `created_by` / `invited_by` columns that use it, and was wrong on an
+    // append-only audit log. That one was found by reading the table's own doc
+    // against its columns. This case guards the AGREEMENT from here on;
+    // `migration-0055-schema-repairs.test.ts` guards the FIX.
     const { rows } = await pg.query<{ relname: string; conname: string; confdeltype: string }>(
       `SELECT t.relname, c.conname, c.confdeltype
        FROM pg_constraint c
