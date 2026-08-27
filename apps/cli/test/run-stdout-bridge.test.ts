@@ -135,7 +135,7 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 /**
- * Simulate a system tool emission (the legacy stdout-JSONL protocol).
+ * Simulate a system tool emission over the stdout-JSONL protocol.
  * Same shape `@appstrate/output` and `@appstrate/log` write at
  * runtime: object stamped with `timestamp` + `runId`, terminated by `\n`.
  */

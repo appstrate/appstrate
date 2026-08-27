@@ -1,16 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
+// Same rule as every block below, and it holds for TYPES as much as values: a
+// line here is only what something OUTSIDE the package imports FROM THE BARREL.
+// `installSessionBridge` (#1202) and `preserveRequestedThinkingLevel` (#1209)
+// lost their last such reader and came off this list.
+//
+// So did fifteen `Options`/payload types across the blocks below — an options
+// type is re-exported next to its function by reflex, but no consumer here ever
+// names one (they pass an object literal). Every symbol dropped for either
+// reason stays exported from its own module for in-package use; only the
+// re-export line goes. knip is what sees this now: `includeEntryExports` is on
+// for this workspace (`knip.config.ts`), so a barrel line with no reader fails
+// the gate instead of being invisible.
 export {
   PiRunner,
-  installSessionBridge,
   derivePiCompactionSettings,
-  preserveRequestedThinkingLevel,
   prepareRequestedThinkingLevel,
   setPiRuntimeCredential,
   type PiRunnerOptions,
   type PiModelConfig,
-  type BridgeableSession,
-  type InternalSink,
 } from "./pi-runner.ts";
 
 // Same rule as the `pi-sdk.ts` block below: only what something OUTSIDE the
@@ -57,57 +65,35 @@ export { Type, loadPiCodingAgentSdk, type PiCodingAgentSdk } from "./pi-sdk.ts";
 export type { Api, Model, Message, ExtensionAPI, ExtensionFactory } from "./pi-sdk.ts";
 export type { PiSdkAgentSessionEvent, PiSdkAssistantMessageEvent, PiSdkUsage } from "./pi-sdk.ts";
 
-export { prepareBundleForPi, type PrepareBundleOptions } from "./bundle-extensions.ts";
+export { prepareBundleForPi } from "./bundle-extensions.ts";
 
-export {
-  buildApiCallExtensionFactory,
-  type BuildApiCallExtensionFactoryOptions,
-} from "./api-call-bridge.ts";
+export { buildApiCallExtensionFactory } from "./api-call-bridge.ts";
 
-export {
-  buildRuntimePiEnv,
-  pickOperatorSidecarEnv,
-  SIDECAR_OPERATOR_ENV_KEYS,
-  type RuntimePiEnvOptions,
-  type RuntimePiModelConfig,
-  type SidecarOperatorEnvKey,
-} from "./container-env.ts";
+export { buildRuntimePiEnv, pickOperatorSidecarEnv } from "./container-env.ts";
+// `SIDECAR_OPERATOR_ENV_KEYS` is NOT here: #1178 removed its last external
+// reader. The platform forwards operator env through `pickOperatorSidecarEnv`;
+// the key list itself is read only inside this package (`container-env.ts` and
+// its tests).
 
-export {
-  emitRuntimeReady,
-  emitBootProgress,
-  type RuntimeReadyPayload,
-  type BootProgressOptions,
-} from "./runtime-ready.ts";
+export { emitRuntimeReady, emitBootProgress } from "./runtime-ready.ts";
 
-export {
-  startSinkHeartbeat,
-  type StartSinkHeartbeatOptions,
-  type SinkHeartbeatHandle,
-} from "./sink-heartbeat.ts";
+export { startSinkHeartbeat, type SinkHeartbeatHandle } from "./sink-heartbeat.ts";
 
-export {
-  RUN_HISTORY_INJECTED_TOOL,
-  RECALL_MEMORY_INJECTED_TOOL,
-  RUNTIME_INJECTED_TOOLS,
-  type RuntimeInjectedTool,
-} from "./runtime-tools/index.ts";
+// `RUN_HISTORY_INJECTED_TOOL` / `RECALL_MEMORY_INJECTED_TOOL` are NOT here:
+// their one outside consumer (`runtime-pi/sidecar/mcp.ts`) imports them from
+// the `./runtime-tools` subpath, the same barrel-vs-subpath split as
+// `PI_SDK_VERSION` above.
+export { RUNTIME_INJECTED_TOOLS } from "./runtime-tools/index.ts";
 
 export {
   buildRuntimeToolFactories,
   callToolResultToPi,
-  type BuildRuntimeToolFactoriesOptions,
   type RuntimeEventEmitter,
 } from "./runtime-tools/mcp-forward.ts";
 
 export {
   buildRuntimeToolExtensions,
-  type BuildRuntimeToolExtensionsOptions,
   buildPublishFileExtension,
-  type BuildPublishFileExtensionOptions,
 } from "./runtime-tools/runtime-tool-extensions.ts";
 
-export {
-  spillResourcesToWorkspace,
-  type ResourceSpillOptions,
-} from "./runtime-tools/resource-spill.ts";
+export { spillResourcesToWorkspace } from "./runtime-tools/resource-spill.ts";

@@ -119,7 +119,7 @@ export type IntegrationDropReason =
   | "not_integration"
   | "invalid_manifest"
   | "not_installed"
-  | "remote_url_missing"
+  | "remote_source_invalid"
   | "local_server_ref_missing"
   | "mcp_server_unresolved"
   | "mcp_server_not_runnable"
@@ -378,8 +378,16 @@ async function resolveOne(
   if (isRemoteHttp) {
     const remote = getRemoteSource(manifest);
     if (!remote) {
-      logger.warn("remote-source integration missing remote.url; skipping", { integrationId });
-      return drop("remote_url_missing");
+      // One reason covers both halves because `getRemoteSource` validates both
+      // and reports neither: `source.remote` is unusable when `url` is not a
+      // string OR `transport` is outside AFPS §7.1's enum. Naming only the url
+      // — as this did while the helper accepted any string transport — sends an
+      // author to inspect a url that is fine.
+      logger.warn("remote-source integration has an unusable source.remote; skipping", {
+        integrationId,
+        detail: 'requires a string `url` and `transport` of "streamable-http" | "sse"',
+      });
+      return drop("remote_source_invalid");
     }
     // P0-2 — SSRF floor on the manifest-supplied remote MCP URL. The sidecar
     // opens a credential-bearing Streamable HTTP / SSE client against this URL,
@@ -409,20 +417,18 @@ async function resolveOne(
         `remote-source integration '${integrationId}' source.remote.url host '${egress.hostname}' is blocked by the SSRF guard (${egress.detail})`,
       );
     }
-    // AFPS §7.1 — `transport` is `"streamable-http" | "sse"`. The
-    // manifest schema enforces the enum + `required`; we forward the
-    // declared value verbatim so the sidecar can pick the right MCP
-    // client transport. `getRemoteSource` already returned null (→ skip,
-    // above) for a non-string `transport`, so this is TYPE NARROWING from
-    // the helper's `string` to the union, not a fallback:
-    // `"streamable-http"` is the normal taken branch.
+    // AFPS §7.1 — `transport` is `"streamable-http" | "sse"`, forwarded
+    // verbatim so the sidecar can pick the right MCP client transport.
+    // There is nothing to narrow and nothing to default: `getRemoteSource`
+    // returns the union or null, and null already skipped this integration
+    // above. Anything else here would be a rewrite of what the manifest
+    // said, which is how a malformed transport used to reach the sidecar
+    // wearing a valid one's name.
     //
     // `server.type` is intentionally omitted — the sidecar dispatches on
     // `spec.sourceKind === "remote"`. Carrying `"http"` here would collide
     // with the AFPS `mcpServerTypeEnum` (`node|python|binary|uv`).
-    const transport: "streamable-http" | "sse" =
-      remote.transport === "sse" ? "sse" : "streamable-http";
-    serverSpec = { url: remote.url, transport };
+    serverSpec = { url: remote.url, transport: remote.transport };
   } else if (sourceKind === "local") {
     const ref = getLocalServerRef(manifest);
     if (!ref) {
@@ -599,8 +605,8 @@ async function resolveOne(
               // a Streamable HTTP client against it. Mutually exclusive with
               // `entry_point` (enforced by `integrationManifestSchema`).
               ...(serverSpec.url ? { url: serverSpec.url } : {}),
-              // AFPS §7.1 — `streamable-http` (default) | `sse`. Only
-              // emitted on remote sources.
+              // AFPS §7.1 — `streamable-http` | `sse`, required by the
+              // manifest schema. Only emitted on remote sources.
               ...(serverSpec.transport ? { transport: serverSpec.transport } : {}),
             },
           }

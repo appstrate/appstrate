@@ -29,10 +29,12 @@ dimension, and consolidates into one report written to
    never fall back.
 2. **Data repair belongs in `scripts/migration/`, never in a drizzle migration**
    — `packages/db/drizzle/*.sql` describes schema and is replayed forever. DML
-   that rewrites row contents is an operational task. The one legitimate overlap
-   is a backfill that is the precondition of a `SET NOT NULL` promotion, a
-   `CHECK`, or a `VALIDATE CONSTRAINT` landing on the **same table**, never a
-   `TRUNCATE`; §2 of the doc states it in full, with its limits, and is the
+   that rewrites row contents is an operational task. Two overlaps are
+   legitimate, both an `UPDATE` landing on the **same table** as the clause
+   licensing it: a backfill preconditioning a `SET NOT NULL` promotion, a
+   `CHECK`, or a `VALIDATE CONSTRAINT`; and a fold whose source column the same
+   file `DROP`s. A `CHECK` added `NOT VALID` enforces nothing and licences
+   nothing. §2 of the doc states all of it in full, with its limits, and is the
    authority — do not audit from this summary.
 3. **No dead transition scaffolding** — decided feature flags, shims, adapters
    wrapping a shape nothing emits, `@deprecated` exports with no caller,
@@ -75,11 +77,14 @@ retired form still WRITTEN anywhere? If not, it is a 🔴.
 
 **Agent B — Drizzle migrations.** Read every `packages/db/drizzle/*.sql`.
 Classify each statement as schema (DDL) or data (DML). Report every `UPDATE` /
-`INSERT` / `DELETE` / `TRUNCATE` that rewrites row contents, EXCEPT a backfill
-that is the precondition of a `SET NOT NULL` promotion, a `CHECK`, or a
-`VALIDATE CONSTRAINT` landing on the **same table** — read
+`INSERT` / `DELETE` / `TRUNCATE` that rewrites row contents, EXCEPT the two
+shapes §2 licences on the **same table**, in the same file: a backfill that is
+the precondition of a `SET NOT NULL` promotion, a `CHECK` or a
+`VALIDATE CONSTRAINT` (the `VALIDATE`, not the `ADD` — the constraint is
+routinely added `NOT VALID` a release earlier), and a fold whose source column
+that file `DROP`s. A fold whose source column survives is NOT exempt. Read
 `docs/NO_TRANSITIONAL_CODE.md` §2 for the exact carve-out and the column-level
-limit it does not reach, and note that a `TRUNCATE` is never licenced by it.
+limit it does not reach, and note that only an `UPDATE` is ever licenced — an `INSERT`, a `DELETE` or a `TRUNCATE` never is.
 Also flag migrations
 whose header argues its own necessity from a read-time alias that no longer
 exists — that pairing is what produced `0046`. Note: existing files are

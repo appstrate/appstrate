@@ -95,14 +95,10 @@ export async function bootCritical(): Promise<void> {
     await applyCoreMigrations();
   }
 
-  // Self-heal RFC 8707 oauth `resources` columns (migration 0006) when the
-  // migration watermark is ahead of the real schema. Idempotent — a no-op on
-  // any healthy DB, runs the missing DDL only on a watermark-drifted prod DB.
-  await reconcileOAuthResourceColumns().catch((err) => {
-    logger.warn("Could not reconcile oauth resource columns", {
-      error: getErrorMessage(err),
-    });
-  });
+  // Refuse to boot when the RFC 8707 oauth `resources` columns (migration 0006)
+  // are absent although the migrator reported nothing pending. Detection only —
+  // the repair is an operator task, see the function's doc comment.
+  await assertOAuthResourceColumnsPresent();
 
   // Bootstrap-token reconciliation (#344). If the env still carries an
   // AUTH_BOOTSTRAP_TOKEN but at least one org exists, the token is dead —
@@ -457,25 +453,76 @@ export async function bootBackground(): Promise<{ agentsHealthy: boolean }> {
 }
 
 /**
- * Self-heal the RFC 8707 oauth `resources` columns when the migration
- * watermark is ahead of the actual schema.
+ * Refuse to boot when the RFC 8707 oauth `resources` columns (migration 0006)
+ * are absent although the migrator reported nothing pending.
  *
- * Migration 0006 adds `resources text[]` to oauth_access_tokens /
- * oauth_consents / oauth_refresh_tokens (audience binding) and re-defaults
- * oauth_clients.level. drizzle-orm's postgres-js migrator applies migrations
- * by timestamp watermark (`max(created_at)` in `__drizzle_migrations`), NOT by
- * hash-set membership: a production DB whose watermark was corrupted to a
- * future date (known prod incident) silently SKIPS 0006. The pinned
- * better-auth 1.7 oauth-provider then expects columns that were never created,
- * which breaks token mint on resource/MCP flows.
+ * drizzle-orm's postgres-js migrator applies migrations by timestamp watermark
+ * (`max(created_at)` in `__drizzle_migrations`), NOT by hash-set membership. A
+ * production DB whose watermark was corrupted to a future date (known prod
+ * incident) reports nothing pending while every migration below that date was
+ * never applied — 0006 among them, which adds `resources text[]` to
+ * oauth_access_tokens / oauth_consents / oauth_refresh_tokens and re-defaults
+ * oauth_clients.level. The pinned better-auth 1.7 oauth-provider then queries
+ * columns that do not exist, and token mint fails on resource/MCP flows.
+ * Tier 0 cannot reach this state: `applyCorePGliteMigrations` keys on the
+ * journal tag, not on a watermark.
  *
- * This runs the same additive DDL as 0006 — idempotently (`IF NOT EXISTS`) —
- * AFTER the migrator. On a healthy DB the columns already exist and it is a
- * no-op. On a watermark-drifted DB it creates the missing columns and logs
- * loudly so the operator realigns `__drizzle_migrations` before the *next*
- * schema release (this guard only covers 0006).
+ * This used to re-run 0006's DDL here, idempotently, on every boot of every
+ * deployment, forever — a broken database made to work silently, with nothing
+ * recording when the repair could stop shipping. That is what
+ * `docs/NO_TRANSITIONAL_CODE.md` §3 and §5 forbid. The DDL moved to
+ * `scripts/migration/0004-oauth-resources-watermark-drift.sql`, run once by an
+ * operator; what stays here detects and refuses, the shape
+ * `RETIRED_ENV_RENAMES` (`packages/env/src/index.ts`) already uses for a form
+ * that must never silently work.
+ *
+ * Refusing rather than warning, deliberately: the drift is not scoped to 0006.
+ * It skipped every migration below the corrupted watermark, so a process that
+ * kept running would be serving from a schema nobody can enumerate, failing
+ * later at arbitrary unrelated queries. One actionable message at boot beats
+ * that. The cost is real and accepted — a deployment this used to repair in
+ * place now stays down until the script is run.
+ *
+ * The probe is a signature, not a proof, and the gap is wider than it looks.
+ * It sees one migration, so a watermark corrupted *after* 0006 applied leaves
+ * these columns present and this check passes with other migrations still
+ * missing. Worse for the upgrade path: the self-heal shipped in every release
+ * up to this one and ran on every boot, so a database that drifted BEFORE this
+ * release already had the columns restored — it will pass here while its
+ * watermark is still corrupt. In practice this fires for a drift that first
+ * appears from here on, and for restores of a backup taken before the heal.
+ *
+ * Restoring the columns therefore clears the boot refusal, not the drift.
+ * `scripts/migration/0004-…` ships the ledger diagnostic for the real extent,
+ * and its header says the same thing.
+ *
+ * The general check — compare `max(created_at)` in `__drizzle_migrations`
+ * against the largest `when` in `meta/_journal.json` — was considered and
+ * rejected. It is exact for this incident but refuses boot after any deliberate
+ * ROLLBACK, where a database legitimately carries a watermark from a newer
+ * release than the code, and turning routine rollbacks into outages costs more
+ * than the corruption it would catch. The diagnostic stays a query an operator
+ * runs, not a predicate that stops the process.
+ *
+ * `columnExists` is injected for tests — production reads the live database.
  */
-async function reconcileOAuthResourceColumns(): Promise<void> {
+export async function assertOAuthResourceColumnsPresent(
+  columnExists: () => Promise<boolean> = oauthResourcesColumnExists,
+): Promise<void> {
+  if (await columnExists()) return;
+
+  throw new Error(
+    "Schema drift: the oauth `resources` columns (migration 0006) are absent even though " +
+      "the migrator reported nothing pending. __drizzle_migrations is ahead of the real " +
+      "schema, so 0006 — and every other migration below the corrupted watermark — was " +
+      "silently skipped. Refusing to boot: token mint would fail at runtime on resource/MCP " +
+      "flows, and the rest of the skipped set is unknown. Apply " +
+      "scripts/migration/0004-oauth-resources-watermark-drift.sql to this database (it ships " +
+      "the diagnostic query for the full extent of the drift), then restart.",
+  );
+}
+
+async function oauthResourcesColumnExists(): Promise<boolean> {
   const { sql: rawSql } = await import("drizzle-orm");
   const present = toRows(
     await db.execute(rawSql`
@@ -486,25 +533,7 @@ async function reconcileOAuthResourceColumns(): Promise<void> {
       LIMIT 1
     `),
   );
-  if (present.length > 0) return;
-
-  logger.error(
-    "Schema drift: oauth `resources` columns (migration 0006) are absent even though " +
-      "the migration watermark is satisfied. The __drizzle_migrations watermark is ahead " +
-      "of the real schema, so 0006 was silently skipped. Self-healing the columns now — " +
-      "realign __drizzle_migrations so future migrations are not skipped too.",
-  );
-  await db.execute(
-    rawSql`ALTER TABLE "oauth_access_tokens" ADD COLUMN IF NOT EXISTS "resources" text[]`,
-  );
-  await db.execute(
-    rawSql`ALTER TABLE "oauth_consents" ADD COLUMN IF NOT EXISTS "resources" text[]`,
-  );
-  await db.execute(
-    rawSql`ALTER TABLE "oauth_refresh_tokens" ADD COLUMN IF NOT EXISTS "resources" text[]`,
-  );
-  await db.execute(rawSql`ALTER TABLE "oauth_clients" ALTER COLUMN "level" SET DEFAULT 'instance'`);
-  logger.warn("Self-healed oauth `resources` columns (migration 0006 watermark drift)");
+  return present.length > 0;
 }
 
 /**

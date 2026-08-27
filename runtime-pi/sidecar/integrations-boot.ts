@@ -247,9 +247,10 @@ async function fetchBundleBytes(
   serverVersion: string | undefined,
   opts: BundleFetchOptions,
 ): Promise<Uint8Array> {
-  // #588 — when the platform pinned a concrete version at run kickoff, forward
-  // it so the bytes match the manifest the spawn-resolver read. Absent → the
-  // route serves the latest non-yanked version (back-compat).
+  // #588 — the platform pins a concrete version at run kickoff; forward it so
+  // the bytes match the manifest the spawn-resolver read. Only a system
+  // mcp-server has none (boot registry, single version, served by id alone) —
+  // for anything else the route rejects an absent `?version=`.
   const url = serverVersion
     ? `${opts.platformApiUrl}/internal/mcp-server-bundle/${mcpServerId}?version=${encodeURIComponent(serverVersion)}`
     : `${opts.platformApiUrl}/internal/mcp-server-bundle/${mcpServerId}`;
@@ -425,22 +426,14 @@ export async function connectRemoteHttpIntegration(
       `integration ${spec.integrationId} declares sourceKind="remote" but no server.url`,
     );
   }
-  // AFPS §7.1 — pick the MCP client transport from the manifest.
-  // Default to `streamable-http` when the field is absent (back-compat
-  // for manifests that predated the enum). Anything else is a
-  // hard-fail at boot — the platform validates the enum at install time,
-  // so reaching this branch means the manifest carries a value the
-  // sidecar doesn't (yet) know how to dispatch to.
-  const declaredTransport = spec.manifest.server?.transport;
-  const transport: "streamable-http" | "sse" =
-    declaredTransport === "sse" ? "sse" : "streamable-http";
-  if (
-    declaredTransport !== undefined &&
-    declaredTransport !== "streamable-http" &&
-    declaredTransport !== "sse"
-  ) {
+  // AFPS §7.1 — pick the MCP client transport from the manifest. The enum is
+  // required, and re-validated on every read of a stored manifest rather than
+  // only at install, so anything else — absent included — means the spec did
+  // not come from a conforming manifest and is a hard-fail at boot.
+  const transport = spec.manifest.server?.transport;
+  if (transport !== "streamable-http" && transport !== "sse") {
     throw new Error(
-      `integration ${spec.integrationId} declares unsupported source.remote.transport="${declaredTransport}" (allowed: "streamable-http" | "sse")`,
+      `integration ${spec.integrationId} declares unsupported source.remote.transport="${transport}" (allowed: "streamable-http" | "sse")`,
     );
   }
 
@@ -1523,7 +1516,7 @@ export async function bootIntegrations(
           serverUrl: server.url,
           // AFPS §7.1 — surface the actual transport the sidecar
           // dispatched to so operators can audit which path executed.
-          transport: server.transport ?? "streamable-http",
+          transport: server.transport,
           authKey,
           toolCount: added + apiCallAdded,
         });

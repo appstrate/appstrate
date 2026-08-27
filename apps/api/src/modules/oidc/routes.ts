@@ -223,8 +223,8 @@ interface PageContext {
    * `renderSocialButtons` on every OIDC page. For `level=space`
    * clients, reflects `space_social_providers` rows — buttons appear
    * only when the tenant has configured creds for that provider. For
-   * `level=org` / `level=instance`, falls back to env presence (legacy
-   * shared-OAuth-App behavior for non-space clients).
+   * `level=org` / `level=instance`, reflects env presence — those flows
+   * authenticate against the platform's own shared OAuth App.
    */
   socialProviders: { google: boolean; github: boolean };
 }
@@ -288,18 +288,20 @@ async function loadPageContext(
       );
     }
   }
-  // Resolve SMTP per-client: `level=space` reads `space_smtp_configs`,
-  // `level=org`/`level=instance` falls back to env SMTP. Null → email features
-  // disabled for this flow (no instance fallback for space-level clients).
+  // Resolve SMTP per-client, split by level the same way social providers are
+  // just below: `level=space` reads `space_smtp_configs`, `level=org` /
+  // `level=instance` read the instance config from env. Null → email features
+  // disabled for this flow; a space-level client does NOT fall through to the
+  // instance transport.
   const smtp = await resolveSmtpForClient(record);
   if (opts.requireSmtp && !smtp) {
     return c.html(renderErrorPage(opts.requireSmtp).value, 404);
   }
-  // Per-client social provider availability. Space-level clients read
-  // from `space_social_providers` (tenant-owned OAuth App). Org and
-  // instance clients keep the legacy env-based fallback — the platform's
-  // shared Google/GitHub OAuth App is the appropriate identity issuer for
-  // dashboard / satellite flows.
+  // Per-client social provider availability, split by client level.
+  // Space-level clients read from `space_social_providers` (tenant-owned OAuth
+  // App). Org and instance clients read env presence — the platform's shared
+  // Google/GitHub OAuth App is the appropriate identity issuer for dashboard /
+  // satellite flows.
   let socialGoogle: boolean;
   let socialGithub: boolean;
   if (record.level === "space") {

@@ -71,10 +71,7 @@ function getBuiltinModules(): Map<string, string> {
  * otherwise the specifier is treated as an npm package name and loaded via
  * dynamic import. The built-in directory is scanned only once per process.
  */
-async function resolveSpecifier(specifier: string): Promise<{
-  default?: AppstrateModule;
-  appstrateModule?: AppstrateModule;
-}> {
+async function resolveSpecifier(specifier: string): Promise<{ default?: AppstrateModule }> {
   const builtinPath = getBuiltinModules().get(specifier);
   if (builtinPath) {
     return import(/* webpackIgnore: true */ builtinPath);
@@ -84,15 +81,25 @@ async function resolveSpecifier(specifier: string): Promise<{
 
 /**
  * Import one module specifier and return its exported module object. Any
- * failure (unresolvable specifier, missing `manifest.id`) is fatal — all
- * declared modules are required.
+ * failure (unresolvable specifier, wrong export shape, missing `manifest.id`)
+ * is fatal — all declared modules are required.
+ *
+ * The default export is the ONE shape a module is loaded from, so the two
+ * failures get one error each: nothing was exported in that shape, or the
+ * exported thing is malformed. Collapsing them sends an author with a
+ * wrong-shaped export to inspect a manifest that is fine.
  */
 async function importModule(specifier: string): Promise<AppstrateModule> {
   try {
     const raw = await resolveSpecifier(specifier);
-    // Support both default export and named `appstrateModule` export
-    const mod = (raw.default ?? raw.appstrateModule) as AppstrateModule | undefined;
-    if (!mod?.manifest?.id) {
+    const mod = raw.default;
+    if (!mod) {
+      throw new Error(
+        `Module "${specifier}" has no default export. A module is loaded from its default ` +
+          `export only — end the entry file with \`export default myModule;\`.`,
+      );
+    }
+    if (!mod.manifest?.id) {
       throw new Error(`Module "${specifier}" is missing manifest.id`);
     }
     return mod;

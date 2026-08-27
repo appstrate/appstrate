@@ -277,9 +277,8 @@ export interface IntegrationSpawnSpec {
        * runnable BYTES come from the SAME version as the manifest the
        * spawn-resolver read — eliminating the manifest/bytes version skew and
        * the "publish ≠ deploy" footgun (issue #588). Omitted for system
-       * mcp-servers (single version served from the boot registry) and for
-       * remote/serverless integrations. When absent, the byte route falls back
-       * to the latest non-yanked published version (back-compat).
+       * mcp-servers — the byte route serves those from the in-memory boot
+       * registry by id alone — and for remote/serverless integrations.
        */
       version?: string;
       /**
@@ -302,11 +301,13 @@ export interface IntegrationSpawnSpec {
        */
       url?: string;
       /**
-       * AFPS §7.1 — remote MCP transport selector. Mirrors the
-       * manifest's `source.remote.transport` enum (`"streamable-http" |
-       * "sse"`). Defaults to `"streamable-http"` on the sidecar side when
-       * absent (back-compat for manifests that predate the enum). Only meaningful when
-       * {@link IntegrationSpawnSpec.sourceKind} is `"remote"`.
+       * AFPS §7.1 — remote MCP transport selector, mirroring the manifest's
+       * `source.remote.transport` enum. REQUIRED for remote sources: the
+       * sidecar dispatches on it and hard-fails on anything that is not one
+       * of the two values, an absent one included. Optional in TypeScript
+       * only because this `server` bag is the collapsed union of the local /
+       * remote / serverless shapes (same reason as `url` above) — it is
+       * omitted for local and serverless sources, where it means nothing.
        */
       transport?: "streamable-http" | "sse";
     };

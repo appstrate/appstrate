@@ -266,11 +266,11 @@ router.delete("/integration-pins", requireSpaceContext(), async (c) => {
  * schedule overrides. The intent is *destructive* — "I never want to use
  * this credential anywhere again".
  *
- * The previous user-facing entrypoint on the agent surface
- * (`DELETE /api/integrations/:packageId/connections/:connectionId`) was
- * removed in favour of this single owner-scoped endpoint. Surfaced
- * only from `/connections` (the user-owned management page) so members
- * can't accidentally trigger a global delete from an agent context.
+ * This is the ONLY entrypoint for that delete, and it is owner-scoped by
+ * construction. Surfaced only from `/connections` (the user-owned management
+ * page), so a member can't trigger a global delete from an agent context —
+ * there they switch the agent's pick with `PUT /api/me/integration-pins`,
+ * which stops one agent using a connection without destroying it.
  *
  * Space context is implicit — the connection row carries `space_id`,
  * we re-derive scope from it instead of asking the SPA to send a header

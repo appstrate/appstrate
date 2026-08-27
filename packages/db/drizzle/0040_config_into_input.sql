@@ -21,8 +21,8 @@
 --     `Number(lastDbMigration.created_at) < migration.folderMillis` — a
 --     TIMESTAMP WATERMARK read from `drizzle.__drizzle_migrations`. The content
 --     hash is written to that table and never compared. `boot.ts`'s
---     `reconcileOAuthResourceColumns` docblock states the same rule from the
---     other direction: a watermark ahead of reality SKIPS a migration.
+--     `assertOAuthResourceColumnsPresent` docblock states the same rule from
+--     the other direction: a watermark ahead of reality SKIPS a migration.
 --   * `applyCorePGliteMigrations` (`apps/api/src/lib/pglite-migrate.ts`, tier 0)
 --     keys on the journal TAG. `0040_config_into_input` has not changed.
 --

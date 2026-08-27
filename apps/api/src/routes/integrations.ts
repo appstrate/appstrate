@@ -30,9 +30,10 @@
  *     hold the credential (`connect/fields` = "import a connection") or want to
  *     drive the OAuth redirect themselves (`connect/oauth2`). Server-to-server.
  *
- * Destructive connection delete moved to `DELETE /api/me/connections/:id` — the
- * single owner-scoped entry point. The agent-surface "unlink" button is gone:
- * members switch agent picks via member pins, not by deleting the shared row.
+ * Destructive connection delete is not on this surface: it is owner-scoped, on
+ * `DELETE /api/me/connections/:connectionId`, as the single entry point. From
+ * here members switch an agent's pick via member pins, which is a different
+ * operation from deleting the shared row.
  *
  * The OAuth2 callback renders a popup-close HTML page so the dashboard's
  * connect-window handler can detect completion and refresh.
@@ -992,15 +993,6 @@ export function createIntegrationsRouter() {
       throw internalError();
     }
   });
-
-  // DELETE /:packageId/connections/:connectionId was removed — destructive
-  // delete is now owner-scoped via `DELETE /api/me/connections/:connectionId`
-  // (single entry point on /connections, surfaces a confirm dialog with the
-  // impact list). The agent surface used to call this endpoint as part of
-  // an "unlink" button that conflated "stop this agent from using this
-  // connection" with "delete the connection globally" — the bug that drove
-  // the integration refactor. Members now switch the agent's pick via the
-  // member-pin endpoint (`PUT /api/me/integration-pins`).
 
   router.get(
     "/:packageId{@[^/]+/[^/]+}/connections",

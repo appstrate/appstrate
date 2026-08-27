@@ -322,25 +322,52 @@ jobs:
           echo "::endgroup::"
           echo "✓ --yes path OK"
 
-          # ── Scenario 1d: APPSTRATE_AUTO_INSTALL=1 (legacy escape hatch) ─
-          # Existing scripted provisioning (Ansible, cloud-init) that
-          # depends on the previous all-in-one default opts in via this
-          # env var. Same effect as --yes but env-driven.
-          echo "::group::APPSTRATE_AUTO_INSTALL=1"
+          # ── Scenario 1d: APPSTRATE_AUTO_INSTALL is retired ──────────────
+          # The var used to select unattended mode. Silently ignoring it
+          # would flip an Ansible / cloud-init run that still sets it into
+          # the two-step path — binary dropped, nothing installed, exit 0.
+          # It must fail, name the --yes replacement, and leave nothing
+          # installed. An empty value carries no intent and stays a no-op.
+          echo "::group::APPSTRATE_AUTO_INSTALL is retired"
           set +e
           AUTO_OUT=$(APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-auto" \
             APPSTRATE_AUTO_INSTALL=1 \
-            APPSTRATE_FORCE_DUAL=1 \
             bash /tmp/bootstrap.sh 2>&1)
           rc=$?
           set -e
           echo "$AUTO_OUT"
-          test "$rc" -eq 0 \
-            || { echo "::error::bootstrap exited $rc under APPSTRATE_AUTO_INSTALL=1"; exit 1; }
-          echo "$AUTO_OUT" | grep -q "FAKE_CLI_RAN subcommand=install" \
-            || { echo "::error::APPSTRATE_AUTO_INSTALL=1 did not exec the CLI"; exit 1; }
+          test "$rc" -ne 0 \
+            || { echo "::error::APPSTRATE_AUTO_INSTALL=1 did not fail the bootstrap"; exit 1; }
+          echo "$AUTO_OUT" | grep -q "APPSTRATE_AUTO_INSTALL is retired" \
+            || { echo "::error::retired-var failure did not name APPSTRATE_AUTO_INSTALL"; exit 1; }
+          echo "$AUTO_OUT" | grep -q -- "--yes" \
+            || { echo "::error::retired-var failure did not name the --yes replacement"; exit 1; }
+          echo "$AUTO_OUT" | grep -q "FAKE_CLI_RAN" \
+            && { echo "::error::bootstrap exec'd the CLI despite the retired var"; exit 1; }
+          test ! -e "$GITHUB_WORKSPACE/bin-auto/appstrate" \
+            || { echo "::error::bootstrap installed the binary despite the retired var"; exit 1; }
           echo "::endgroup::"
-          echo "✓ APPSTRATE_AUTO_INSTALL=1 path OK"
+          echo "✓ APPSTRATE_AUTO_INSTALL retired-var guard OK"
+
+          # An explicitly blanked value carries no intent — `${VAR:-}`
+          # forwarding and a commented-out dotenv line both produce it — so
+          # the guard must NOT trip on it. Same rule as RETIRED_ENV_RENAMES
+          # in `@appstrate/env`.
+          echo "::group::APPSTRATE_AUTO_INSTALL= (empty) is a no-op"
+          set +e
+          EMPTY_OUT=$(APPSTRATE_BIN_DIR="$GITHUB_WORKSPACE/bin-auto-empty" \
+            APPSTRATE_AUTO_INSTALL='' \
+            APPSTRATE_FORCE_DUAL=1 \
+            bash /tmp/bootstrap.sh --yes 2>&1)
+          rc=$?
+          set -e
+          echo "$EMPTY_OUT"
+          test "$rc" -eq 0 \
+            || { echo "::error::bootstrap exited $rc under APPSTRATE_AUTO_INSTALL= (empty)"; exit 1; }
+          echo "$EMPTY_OUT" | grep -q "FAKE_CLI_RAN subcommand=install" \
+            || { echo "::error::APPSTRATE_AUTO_INSTALL= (empty) blocked the install"; exit 1; }
+          echo "::endgroup::"
+          echo "✓ APPSTRATE_AUTO_INSTALL= (empty) no-op OK"
 
           # ── Scenario 1b: APPSTRATE_NO_LAUNCH=1 (binary drop, no install) ─
           # Users who want the interactive `appstrate install` flow (once

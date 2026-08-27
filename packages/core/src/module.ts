@@ -409,10 +409,7 @@ export type ModulePermissionContribution = {
 // ---------------------------------------------------------------------------
 
 /**
- * Context passed alongside the `beforeSignup` hook's `email` argument. The
- * second argument is optional for backward compatibility: existing modules
- * that declare `async (email) => {...}` continue to work unchanged
- * (JavaScript silently drops extra arguments).
+ * Context passed alongside the `beforeSignup` hook's `email` argument.
  *
  * Modules that need to read request-scoped state (e.g. a signed cookie
  * pinning an OAuth client for the in-flight signup) should read from
@@ -1472,7 +1469,8 @@ export interface PlatformServices {
    * to delete the `chat_sessions` row, so the file teardown and the row
    * delete commit atomically: a file materializing in the gap can no longer
    * be cascade-deleted without a storage-deletion outbox job. Omitted → the
-   * platform opens its own transaction (the legacy, non-atomic single call).
+   * platform opens its own transaction, which is correct whenever the caller
+   * has no wider unit of work to join.
    */
   cleanupSessionFiles(chatSessionId: string, tx?: unknown): Promise<void>;
   /**

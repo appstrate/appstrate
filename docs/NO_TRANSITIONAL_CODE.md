@@ -53,30 +53,87 @@ own verification queries.
 | Reviewed as | permanent contract         | an operational task                    |
 | Example     | `ALTER TABLE … ADD COLUMN` | rewrite 521 ids from `doc_` to `file_` |
 
-A backfill that is the **precondition** of a constraint is the one legitimate
-overlap — it cannot be separated from the constraint it enables. Three clauses
-qualify: `SET NOT NULL` (`0051`), `CHECK` (`0038`) and `VALIDATE CONSTRAINT`
-(`0021`). The constraint must land on the **same table** the backfill repairs;
-file-level, a constraint on table A would licence a rewrite of table B. Keep it
-minimal, and keep it in the same file as the constraint.
+A write that **cannot be separated** from the schema change beside it is the one
+legitimate overlap. Two shapes qualify, and nothing else.
+
+**The precondition of a constraint.** Three clauses: `SET NOT NULL` (`0051`),
+`ADD CONSTRAINT … CHECK` (`0038`), `VALIDATE CONSTRAINT` (`0021`). The test is
+not where the constraint is born but **whether that clause scans the rows that
+already exist** — only then can a repair beside it be the precondition of
+anything. Three consequences, and the gate implements all three:
+
+- `ADD CONSTRAINT … CHECK (…)` licences, because Postgres validates the whole
+  table as it adds it. Creation and enforcement are the same moment.
+- `ADD CONSTRAINT … CHECK (…) NOT VALID` licences **nothing**. Postgres
+  deliberately skips the existing rows, so the rows a repair would fix are
+  exactly the rows the `NOT VALID` just excused. Repair them beside the
+  `VALIDATE`, in the file that turns the constraint on. Without this the
+  recommended two-step pattern would licence arbitrary repair in the first
+  file, the one where nothing is enforced.
+- A `CHECK` in a **column definition** (`ADD COLUMN c int CHECK (…)`, or one
+  inside a `CREATE TABLE`) licences nothing either — the same reason a
+  `NOT NULL` in a column definition does not, below. The column is new, so
+  every existing row satisfies it vacuously.
+
+That `NOT VALID` split is the safe pattern on a large table: add the constraint
+in one release, then repair and `VALIDATE` in a later one, with the repair
+beside the `VALIDATE`. So the constraint is added in a different file from the
+backfill that preconditions it. `0020`/`0021` are that pair, and `0018`'s own
+header tells future migrations to use it. It is the `VALIDATE` that must share
+the file with the repair — never the `ADD`.
+
+**A fold whose source column is dropped in the same file.** `DROP COLUMN`
+destroys the values, so an operator script run afterwards would have nothing left
+to read: the fold is as inseparable from the `DROP` as a backfill is from a
+`SET NOT NULL`. `0018` folds `version_dirty` into `runs.version_ref` and drops it
+on the next line; `0040` does it twice more. The `DROP` is the whole bound — a
+fold whose source **survives** is ordinary data repair and is not exempt.
+`0040`'s `application_packages` wrap keeps the column it reads, and `0033`'s
+second `UPDATE` strips a key out of a `runs.metadata` it keeps: both are
+violations, not folds.
+
+Either way the licensing clause must land on the **same table** the write
+touches; file-level, a `CHECK` on table A would licence a rewrite of table B.
+Keep the write minimal, and keep it in the file that carries the clause.
+
+And either way the licenced write is an **`UPDATE`** — no clause licences an
+`INSERT`, a `DELETE` or a `TRUNCATE`. `DELETE FROM t;` empties a table exactly as
+`TRUNCATE t;` does, and "drop all the rows, then promote the column" satisfies
+any constraint vacuously: the destruction this rule exists to stop, wearing a
+precondition's clothes. Licensing is closed by default and opened for the one
+verb both shapes are actually written in.
+
+This is a deliberate trade, not a claim that nothing else could ever qualify.
+Two shapes genuinely are inseparable and are still refused: deleting orphan rows
+before a `VALIDATE CONSTRAINT` on a non-nullable FK (`0021` escaped it only
+because its column is nullable, so `SET … = NULL` was available), and folding a
+column into a CHILD table (`INSERT INTO child SELECT … FROM parent;`) before the
+parent `DROP`s it. Both are rare, both are destructive enough to deserve a human
+reading them, and admitting either would re-open `DELETE FROM t;` beside a
+`SET NOT NULL`. Write them as `scripts/migration/` scripts and split the
+constraint into the next release.
 
 `SET NOT NULL` is a _promotion_, and only a promotion counts. A `NOT NULL` in a
 column definition never had a backfill as its precondition: Postgres refuses
 `ADD COLUMN … NOT NULL` on a populated table without a `DEFAULT`, and that
 default already satisfies the constraint. `0018` is the live example — it adds
 `runs.version_ref` with a default and then rewrites `runs`, so reading this
-carve-out as "any `NOT NULL`" would licence plain data repair on the very table
-the migration rewrites.
+carve-out as "any `NOT NULL`" would licence that rewrite on the strength of a
+constraint nothing preconditions. The rewrite _is_ licenced — by the `DROP
+COLUMN` on the next line, which bounds it to the values that column is about to
+take with it.
 
-What it does not separate: a constraint and an _unrelated_ repair on the same
-table. `0023` adds a `CHECK` to `llm_usage` and, in the same file, backfills a
-different `llm_usage` column — structurally indistinguishable from `0038`, where
-the `CHECK` covers the column the `UPDATE` fills. Telling the two apart needs
+What it does not separate: a licensing clause and an _unrelated_ repair on the
+same table. `0023` adds a `CHECK` to `llm_usage` and, in the same file, backfills
+a different `llm_usage` column — structurally indistinguishable from `0038`,
+where the `CHECK` covers the column the `UPDATE` fills. A `DROP COLUMN` has the
+same reach: it licences the fold of the column it drops, and cannot tell that
+apart from a rewrite of a column it leaves alone. Telling the two apart needs
 column-level analysis and is out of scope. The gap is a limit, not permission.
 
 `bun run verify:no-migration-dml` enforces the table-level half of this section
 and nothing else: a write in a new migration must be licenced by one of those
-three clauses landing on the table it writes. The column-level gap just
+four clauses landing on the table it writes. The column-level gap just
 described is out of its reach, and §1 and §3 have no automated gate at all.
 Every migration that predates the gate is grandfathered in
 `scripts/verify-no-migration-dml.ts` by name.
@@ -84,10 +141,14 @@ Every migration that predates the gate is grandfathered in
 Its write vocabulary is `UPDATE`, `INSERT`, `DELETE` and `TRUNCATE`, in every
 position a statement can open — including a CTE, since
 `WITH moved AS (DELETE … RETURNING *) INSERT INTO other …` is the idiomatic way
-to move rows between tables and is squarely a `scripts/migration/` job. A
-`TRUNCATE` is never licenced by the carve-out: emptying a table satisfies every
-constraint vacuously, so "drop all rows, then promote the column" is not a
-precondition, it is the destruction this rule exists to stop.
+to move rows between tables and is squarely a `scripts/migration/` job. Of those
+four only an `UPDATE` can ever be licenced, per the rule above. Licensing is
+closed by default and opened for the one verb the carve-out describes, rather
+than open by default and closed for `TRUNCATE` — otherwise `DELETE FROM t;`
+beside a `SET NOT NULL` on `t` passes a gate whose whole purpose is to stop a
+migration from destroying rows on every database it is replayed against, and a
+fifth verb added to the vocabulary later would inherit an exemption nobody
+argued for.
 
 Two writing forms are outside that vocabulary on purpose. `SELECT … INTO` is
 PL/pgSQL variable assignment inside the `DO $$` blocks this directory is full

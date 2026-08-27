@@ -6,7 +6,7 @@
  *
  * The registry is AGNOSTIC — it only knows package specifiers, never
  * module internals. Each module is a dynamic import that must export
- * a default AppstrateModule (or an `appstrateModule` named export).
+ * a default AppstrateModule.
  */
 
 import { db } from "@appstrate/db/client";

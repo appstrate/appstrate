@@ -205,7 +205,7 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
     // rotating refresh instead of a 7-day BA session.
     cliTokenPlugin(),
     deviceAuthorization({
-      // `schema: {}` is a workaround for better-auth 1.6.9's
+      // `schema: {}` is a workaround for better-auth 1.7.0-beta.4's
       // `deviceAuthorizationOptionsSchema` defining `schema: z.custom(() => true)`
       // (device-authorization/index.mjs:28). Under zod 4.4.3 (pinned via the
       // root `overrides.zod` since #512), `z.custom()` rejects missing keys

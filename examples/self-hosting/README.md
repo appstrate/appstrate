@@ -105,10 +105,6 @@ The installer opens `/register` in your browser and the bootstrap owner
 signs up there (form pre-fills + locks the email field) — see
 [AUTH_MODES.md](./AUTH_MODES.md) for the full matrix of closed-mode options.
 
-Legacy `APPSTRATE_AUTO_INSTALL=1` is preserved as an escape hatch for
-existing scripted provisioning that depended on the previous "always
-auto-install" default.
-
 Overrides: `APPSTRATE_VERSION=v1.2.3` (env var pins a specific release
 binary). Per-field flags: `bash -s -- --tier 3 --dir ~/appstrate`.
 

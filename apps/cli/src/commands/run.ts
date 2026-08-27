@@ -360,8 +360,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   // runs in-process), register the shared MCP tool definitions
   // (`@appstrate/core/runtime-tool-defs`) as Pi extensions. The default
   // emitter writes the canonical events as stdout-JSONL, harvested by the
-  // `attachStdoutBridge` wired below into the run sink — same wire contract
-  // the former built-in tools used.
+  // `attachStdoutBridge` wired below into the run sink.
   const rootRuntimeTools = (
     bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined
   )?.runtime_tools;

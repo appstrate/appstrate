@@ -17,9 +17,10 @@
  * Event delivery mirrors the MCP path: the tool handler returns its
  * canonical events under the `_meta` key; this wrapper re-emits them into
  * the run's event sink via {@link reEmitRuntimeToolEvents}. The default
- * emitter writes the legacy stdout-JSONL line so the existing
- * `attachStdoutBridge` harvesting keeps working unchanged; callers that own
- * a sink can pass an explicit `emit` to route events directly.
+ * emitter writes the stdout-JSONL line that `attachStdoutBridge` harvests --
+ * the current wire contract, and the default precisely because it needs no
+ * sink; callers that own one can pass an explicit `emit` to route events
+ * directly.
  */
 
 import { Type, type ExtensionAPI, type ExtensionFactory } from "../pi-sdk.ts";
@@ -39,9 +40,8 @@ export interface BuildRuntimeToolExtensionsOptions {
   outputSchema?: Record<string, unknown> | null;
   /**
    * Sink for the canonical events each tool call produces. Defaults to the
-   * legacy stdout-JSONL emitter (`{...event, timestamp, runId}\n`) harvested
-   * by `attachStdoutBridge` — same wire contract the former built-in tools
-   * used, so no-sidecar callers need no extra wiring.
+   * stdout-JSONL emitter (`{...event, timestamp, runId}\n`) harvested by
+   * `attachStdoutBridge`, so no-sidecar callers need no extra wiring.
    */
   emit?: (event: RuntimeToolEvent) => void;
 }

@@ -82,9 +82,9 @@ Everything else (`hooks`, `events`, `openApiComponentSchemas`, `openApiSchemas`,
 (e.g. OIDC's `oauth_clients`/`jwks`, webhooks' `webhooks`) — live in the **core
 schema** (`packages/db/src/schema/`) and are created by the system migration
 pipeline at boot. A module is pure behavior: routes, hooks, events, RBAC, Better
-Auth plugins, model providers, OpenAPI. There is no module `schema.ts`, no
-per-module migration tree, no `__drizzle_migrations_<id>`, and no `drizzleSchemas()`
-or `ctx.applyMigrations` — those were removed in core 2.23.0.
+Auth plugins, model providers, OpenAPI. The module contract carries no schema
+or migration surface at all: no module `schema.ts`, no per-module migration
+tree, no `__drizzle_migrations_<id>` table.
 
 1. A module's tables are defined in `packages/db/src/schema/<domain>.ts` and
    exported from the core barrel. The module imports them from `@appstrate/db/schema`.

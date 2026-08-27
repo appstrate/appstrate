@@ -63,14 +63,15 @@ describe("readConfig", () => {
     expect(read).toEqual(input);
   });
 
-  it("round-trips a profile without spaceId unchanged (forward-compat)", async () => {
-    // Profiles predating #217 have `orgId` but no `spaceId`. They
-    // must parse cleanly and write back without materializing a phantom
-    // `spaceId = ""` entry in the TOML file.
+  it("round-trips a profile without spaceId unchanged", async () => {
+    // A profile that has never pinned a space has `orgId` but no `spaceId` —
+    // `login` writes the field only when it carries one over, and `space
+    // current` handles the unpinned case. It must parse cleanly and write back
+    // without materializing a phantom `spaceId = ""` entry in the TOML file.
     const input: Config = {
-      defaultProfile: "legacy",
+      defaultProfile: "unpinned",
       profiles: {
-        legacy: {
+        unpinned: {
           instance: "https://app.example.com",
           userId: "u1",
           email: "a@b.c",
@@ -81,7 +82,7 @@ describe("readConfig", () => {
     await writeConfig(input);
     const read = await readConfig();
     expect(read).toEqual(input);
-    expect(read.profiles.legacy!.spaceId).toBeUndefined();
+    expect(read.profiles.unpinned!.spaceId).toBeUndefined();
     const { readFile } = await import("node:fs/promises");
     const raw = await readFile(join(configHome.dir(), "appstrate", "config.toml"), "utf-8");
     expect(raw).not.toContain("spaceId");

@@ -24,7 +24,6 @@ function PlanCard({
   const { t } = useTranslation(["settings"]);
   const Icon = PLAN_ICONS[plan.id] ?? Sparkles;
   const descKey = PLAN_DESCRIPTION_KEYS[plan.id];
-  const storageBytes = plan.file_storage_bytes;
 
   return (
     <button
@@ -66,14 +65,10 @@ function PlanCard({
             count: plan.credit_quota.toLocaleString(),
           })}
         </span>
-        {/* Storage entitlement — the plan's other metered resource. Omitted
-            entirely when the billing module does not report it, rather than
-            rendering a misleading "0 B". */}
-        {storageBytes !== undefined && (
-          <span className="text-muted-foreground text-xs">
-            {t("onboarding.planStorage", { size: formatBytes(storageBytes) })}
-          </span>
-        )}
+        {/* Storage entitlement — the plan's other metered resource. */}
+        <span className="text-muted-foreground text-xs">
+          {t("onboarding.planStorage", { size: formatBytes(plan.file_storage_bytes) })}
+        </span>
       </div>
     </button>
   );

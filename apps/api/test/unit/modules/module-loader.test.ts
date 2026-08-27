@@ -143,6 +143,63 @@ describe("module-loader", () => {
   });
 
   /**
+   * The export shape a module is loaded from — the DEFAULT export, and only
+   * that one.
+   *
+   * A named `appstrateModule` export was accepted beside it and had never had a
+   * producer; it is gone. Asserted rather than deleted in silence, because a
+   * reintroduced `?? raw.appstrateModule` is invisible: it would typecheck and
+   * pass every other test here while quietly restoring two names for one
+   * contract. The retired shape must FAIL, and the failure must tell the author
+   * which shape to write instead of blaming a manifest that is fine.
+   */
+  describe("module export shape", () => {
+    let root: string;
+
+    beforeEach(async () => {
+      root = await mkdtemp(join(tmpdir(), "appstrate-module-shape-"));
+    });
+    afterEach(async () => {
+      await rm(root, { recursive: true, force: true });
+    });
+
+    /** A loadable package whose entry file is `body`, verbatim. */
+    async function entryFixture(name: string, body: string): Promise<string> {
+      return writeFixturePackage(
+        root,
+        name,
+        { name, type: "module", main: "index.js" },
+        { "index.js": body },
+      );
+    }
+
+    const CONTRACT = `{ manifest: { id: "shaped", name: "shaped", version: "1.0.0" }, init: async () => {} }`;
+
+    it("rejects a module exposing only a named `appstrateModule` export", async () => {
+      const specifier = await entryFixture(
+        "named-only",
+        `export const appstrateModule = ${CONTRACT};`,
+      );
+      await expect(loadModules([specifier], mockCtx())).rejects.toThrow("no default export");
+      expect(getModules().size).toBe(0);
+    });
+
+    it("names the required shape in the refusal", async () => {
+      const specifier = await entryFixture(
+        "named-only-2",
+        `export const appstrateModule = ${CONTRACT};`,
+      );
+      await expect(loadModules([specifier], mockCtx())).rejects.toThrow("export default");
+    });
+
+    it("loads the same contract when it is the default export", async () => {
+      const specifier = await entryFixture("default-export", `export default ${CONTRACT};`);
+      await loadModules([specifier], mockCtx());
+      expect(getModules().has("shaped")).toBe(true);
+    });
+  });
+
+  /**
    * The module→platform half of the contract (#973): an out-of-tree module
    * built against an older core is invisible to `tsc`, and a stale caller of a
    * platform service fails SILENTLY (core 6.0.0 made

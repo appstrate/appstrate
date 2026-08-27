@@ -314,16 +314,35 @@ export function getLocalServerRef(
   return typeof vendored === "boolean" ? { name, version, vendored } : { name, version };
 }
 
-/** `source.remote` for a `remote`-source integration (`{ url, transport }`). */
+/**
+ * `source.remote` for a `remote`-source integration (`{ url, transport }`).
+ *
+ * `transport` is validated against AFPS §7.1's enum, not merely against
+ * `string`. Returning the union is what makes every caller's narrowing real:
+ * accept `string` here and the spawn resolver has to turn it into the union
+ * somehow, and the only cheap way to do that is to map everything that is not
+ * `"sse"` onto `"streamable-http"` — which silently rewrites a manifest
+ * declaring `"websocket"` into one declaring HTTP, and hands the sidecar a
+ * spec that can never trip its own guard.
+ *
+ * This is defence in depth, NOT the gate. Every path that produces an
+ * `IntegrationManifest` re-parses it against `integrationManifestSchema`
+ * first (`integration-service.ts` — the uncached fetch and all three cache
+ * seeds), and an out-of-enum transport fails that parse whole, so a caller
+ * here has already been handed a conforming manifest. The null branch is
+ * therefore unreachable in practice; it exists so the TYPE is honest and so a
+ * future caller that skips the parse cannot silently get a coercion.
+ */
 export function getRemoteSource(
   manifest: IntegrationManifest,
-): { url: string; transport: string } | null {
+): { url: string; transport: "streamable-http" | "sse" } | null {
   const source = (
     manifest as { source?: { kind?: string; remote?: { url?: unknown; transport?: unknown } } }
   ).source;
   if (source?.kind !== "remote" || !source.remote) return null;
   const { url, transport } = source.remote;
-  if (typeof url !== "string" || typeof transport !== "string") return null;
+  if (typeof url !== "string") return null;
+  if (transport !== "streamable-http" && transport !== "sse") return null;
   return { url, transport };
 }
 

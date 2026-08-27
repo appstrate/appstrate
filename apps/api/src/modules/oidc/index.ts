@@ -26,7 +26,7 @@
  *  - `init()` installs the realm resolver and syncs instance clients. The
  *    Better Auth oauth-provider tables and the `oidc_end_user_profiles`
  *    shadow table live in the core schema and are created by the system
- *    migration pipeline — the module no longer owns migrations.
+ *    migration pipeline; modules own no tables and run no migrations.
  */
 
 import { z } from "zod";
@@ -179,8 +179,8 @@ const oidcModule: AppstrateModule = {
     return oidcBetterAuthPlugins({ cachedTrustedClientIds });
   },
 
-  // No `drizzleSchemas()`: the OIDC tables (jwks, oauth_clients, …) live in the
-  // core schema barrel, which the Better Auth adapter resolves directly.
+  // The OIDC tables (jwks, oauth_clients, …) live in the core schema barrel —
+  // modules own no tables; the Better Auth adapter resolves them from there.
 
   openApiPaths() {
     return oidcPaths;

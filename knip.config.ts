@@ -136,7 +136,7 @@ function manifestEntries(workspace: string, omitExports: readonly string[] = [])
  */
 
 /**
- * `includeEntryExports` — why seven workspaces below set it and the rest do
+ * `includeEntryExports` — why eight workspaces below set it and the rest do
  * not.
  *
  * knip does not report the exports of an entry file: reaching a file as an
@@ -172,16 +172,27 @@ function manifestEntries(workspace: string, omitExports: readonly string[] = [])
  * genuinely published and genuinely read out of tree, and for the workspaces
  * whose only entries are Docker CMDs or Playwright specs, which export nothing.
  *
- * It ALSO stays off, for now, for `packages/afps-runtime`, `packages/runner-pi`,
- * `apps/cli` and the four `packages/module-*` packages — and that is a DEFERRAL,
- * not the exemption above: per the header, none of them is on npm, so each has
- * the same unearned exemption `packages/ui` and its six siblings gave up. The
- * flag was measured on `packages/afps-runtime` (176 findings, 122 distinct
- * names, 159 of them barrel re-export lines) and the result is not a hygiene
- * list — it is the single question of whether an unpublished package keeps a
- * portable public API, which belongs to its own pass. See that workspace's
- * block below for the numbers. Do not grant these the published-package
- * exemption on re-reading this file; they are owed a triage, not a pass.
+ * `packages/runner-pi` is the eighth, and it got there by the triage below
+ * rather than by the `exports`-map rule: it is not on npm, so "no in-repo
+ * reader" is evidence of death for it too. Turning the flag on reported 15
+ * FURTHER findings — on top of five value re-exports removed by hand first,
+ * twenty lines in all — every one of the fifteen a type re-exported beside its own
+ * function and named by nobody outside the package — options and payload
+ * shapes consumers build as object literals. All 15 lines were deleted (the
+ * types stay exported from their own modules), and the run is clean, so this
+ * workspace carries no `ignore*` from the change. Small enough to settle in
+ * place, unlike the deferral below.
+ *
+ * It ALSO stays off, for now, for `packages/afps-runtime`, `apps/cli` and the
+ * four `packages/module-*` packages — and that is a DEFERRAL, not the exemption
+ * above: per the header, none of them is on npm, so each has the same unearned
+ * exemption `packages/ui` and its six siblings gave up. The flag was measured
+ * on `packages/afps-runtime` (176 findings, 122 distinct names, 159 of them
+ * barrel re-export lines) and the result is not a hygiene list — it is the
+ * single question of whether an unpublished package keeps a portable public
+ * API, which belongs to its own pass. See that workspace's block below for the
+ * numbers. Do not grant these the published-package exemption on re-reading
+ * this file; they are owed a triage, not a pass.
  */
 
 const config: KnipConfig = {
@@ -511,6 +522,7 @@ const config: KnipConfig = {
       entry: [...manifestEntries("packages/env")],
     },
     "packages/runner-pi": {
+      includeEntryExports: true,
       entry: [...manifestEntries("packages/runner-pi")],
     },
     "packages/shared-types": {

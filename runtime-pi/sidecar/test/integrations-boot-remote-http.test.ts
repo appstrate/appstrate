@@ -36,7 +36,7 @@ function spec(url: string = SERVER_URL): IntegrationSpawnSpec {
     integrationId: "@vendor/remote",
     namespace: "remote",
     sourceKind: "remote",
-    manifest: { name: "remote", version: "1.0.0", server: { url } },
+    manifest: { name: "remote", version: "1.0.0", server: { url, transport: "streamable-http" } },
     toolAllowlist: [],
   } as unknown as IntegrationSpawnSpec;
 }
@@ -335,6 +335,35 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
     const { deps, source } = makeDeps(initial, async () => true);
     await expect(connectRemoteHttpIntegration(noUrl, source, deps)).rejects.toThrow(
       /no server\.url/,
+    );
+  });
+
+  /**
+   * AFPS §7.1 makes `source.remote.transport` a required enum, so an absent
+   * value is not a legacy manifest to tolerate — it is a spec the platform
+   * cannot have produced. It must fail as loudly as any unknown value.
+   */
+  it.each([
+    ["absent", undefined],
+    ["unsupported", "websocket"],
+  ])("throws when server.transport is %s", async (_label, transport) => {
+    const bad = {
+      integrationId: "@vendor/remote",
+      namespace: "remote",
+      sourceKind: "remote",
+      manifest: {
+        name: "remote",
+        version: "1.0.0",
+        server: { url: SERVER_URL, ...(transport === undefined ? {} : { transport }) },
+      },
+      toolAllowlist: [],
+    } as unknown as IntegrationSpawnSpec;
+    const initial = wire([{ authKey: "oauth", authType: "oauth2" }], {
+      oauth: { headerName: "Authorization", headerPrefix: "Bearer ", value: "T" },
+    });
+    const { deps, source } = makeDeps(initial, async () => true);
+    await expect(connectRemoteHttpIntegration(bad, source, deps)).rejects.toThrow(
+      /unsupported source\.remote\.transport.*allowed: "streamable-http" \| "sse"/,
     );
   });
 });

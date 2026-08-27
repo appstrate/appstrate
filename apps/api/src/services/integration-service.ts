@@ -196,10 +196,13 @@ async function resolvePublishedManifest(
   orgId: string,
   pin?: string | null,
 ): Promise<PublishedManifestResolution> {
-  // System packages are loaded once at boot and served from the in-memory
-  // registry by id — there is no `package_versions` row to pin against, and the
-  // byte route resolves them the same way (issue #588 only concerns
-  // separately-versioned local packages).
+  // System packages are loaded once at boot and answered from the in-memory
+  // registry by id, which holds ONE version per id — so there is no version to
+  // pin, and this returns `version: null`. (They do get `package_versions`
+  // rows, written by `syncSystemPackagesToDb`; this path simply never consults
+  // them.) The byte route short-circuits on the same registry, so issue #588 —
+  // manifest and bytes drawn from different versions — cannot arise here; it
+  // only concerns separately-versioned local packages.
   const sys = getSystemPackages().get(packageId);
   if (sys) {
     return { ok: true, rawManifest: sys.manifest, version: null, source: "system" };

@@ -118,15 +118,12 @@ describe("getLocalServerRef", () => {
 });
 
 describe("getRemoteSource", () => {
-  it("returns the remote url + transport", () => {
+  it.each(["streamable-http", "sse"] as const)("returns the remote url + %s transport", (t) => {
     expect(
       getRemoteSource(
-        manifest({
-          kind: "remote",
-          remote: { url: "https://mcp.example.com/v1", transport: "http" },
-        }),
+        manifest({ kind: "remote", remote: { url: "https://mcp.example.com/v1", transport: t } }),
       ),
-    ).toEqual({ url: "https://mcp.example.com/v1", transport: "http" });
+    ).toEqual({ url: "https://mcp.example.com/v1", transport: t });
   });
 
   it("returns null when source is not remote", () => {
@@ -135,10 +132,35 @@ describe("getRemoteSource", () => {
 
   it("returns null when remote block is malformed", () => {
     expect(
-      getRemoteSource(manifest({ kind: "remote", remote: { url: 1, transport: "http" } })),
+      getRemoteSource(
+        manifest({ kind: "remote", remote: { url: 1, transport: "streamable-http" } }),
+      ),
     ).toBeNull();
     expect(getRemoteSource(manifest({ kind: "remote" }))).toBeNull();
   });
+
+  /**
+   * A transport outside AFPS §7.1's enum is malformed, not "close enough".
+   *
+   * This case used to assert the opposite — `transport: "http"` round-tripped
+   * verbatim, because the helper checked only `typeof transport === "string"`.
+   * That made every caller's narrowing a lie: the spawn resolver turned the
+   * `string` into the union by mapping everything that was not `"sse"` onto
+   * `"streamable-http"`, so a manifest declaring `"http"` or `"websocket"` was
+   * silently rewritten into one declaring HTTP and handed to the sidecar
+   * wearing a valid transport's name. Rejecting here is what lets the resolver
+   * forward the value verbatim and the sidecar's own guard mean something.
+   */
+  it.each(["http", "websocket", "STREAMABLE-HTTP", ""])(
+    "returns null for a transport outside the enum: %p",
+    (transport) => {
+      expect(
+        getRemoteSource(
+          manifest({ kind: "remote", remote: { url: "https://mcp.example.com/v1", transport } }),
+        ),
+      ).toBeNull();
+    },
+  );
 });
 
 describe("getAppstrateConnectMeta", () => {
