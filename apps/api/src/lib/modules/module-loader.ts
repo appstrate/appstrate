@@ -84,15 +84,10 @@ async function resolveSpecifier(specifier: string): Promise<{ default?: Appstrat
  * failure (unresolvable specifier, wrong export shape, missing `manifest.id`)
  * is fatal — all declared modules are required.
  *
- * The default export is the ONE shape a module is loaded from. A named
- * `appstrateModule` export was accepted beside it until an audit found it had
- * never had a single producer — every built-in, workspace and out-of-tree
- * module exports default, and the authoring guide documents only that. Its one
- * effect was to turn a wrong-export-shape mistake into the "missing
- * manifest.id" message below, which sends the author to inspect a manifest that
- * is fine. Hence the two errors: each names the mistake it actually is, and the
- * first names the shape a module must have — no branch has to know the retired
- * name to say so.
+ * The default export is the ONE shape a module is loaded from, so the two
+ * failures get one error each: nothing was exported in that shape, or the
+ * exported thing is malformed. Collapsing them sends an author with a
+ * wrong-shaped export to inspect a manifest that is fine.
  */
 async function importModule(specifier: string): Promise<AppstrateModule> {
   try {

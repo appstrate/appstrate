@@ -117,17 +117,58 @@ UPDATE llm_usage SET run_id = NULL WHERE chat_session_id IS NOT NULL;`;
     expect(flags(check)).toBe(true);
   });
 
-  it("reads `NOT VALID` only from the CHECK's own statement", () => {
+  it("reads `NOT VALID` from the CHECK's own ACTION, not from the rest of its statement", () => {
     // The other direction, so the rule above cannot over-reach: a `NOT VALID`
-    // on a LATER, unrelated constraint must not retroactively disarm a CHECK
-    // that really is enforced. Were the search not bounded to the CHECK's own
-    // statement, following §2's advice anywhere in a file would strip the
-    // licence from every CHECK in it.
-    const sql = `ALTER TABLE "webhooks" ADD CONSTRAINT "k" CHECK (payload_mode IN ('full'));--> statement-breakpoint
-ALTER TABLE "runs" ADD CONSTRAINT "runs_org_id_fk" FOREIGN KEY ("org_id")
-  REFERENCES "public"."orgs"("id") NOT VALID;--> statement-breakpoint
-UPDATE "webhooks" SET "payload_mode" = 'full' WHERE "payload_mode" IS NULL;`;
+    // on an unrelated constraint must not retroactively disarm a CHECK that
+    // really is enforced. Were the search not bounded, following §2's advice
+    // anywhere in a file would strip the licence from every CHECK in it.
+    //
+    // `ALTER TABLE` takes a COMMA-SEPARATED action list, so both constraints
+    // below live inside ONE `;` — which is what makes this fixture bite. The
+    // `;`-separated variant (the two constraints split by an intervening
+    // `--> statement-breakpoint`) is the strictly weaker case: there the
+    // statement boundary already separates them, so it passes under a
+    // statement-wide scan too and proves nothing about the bound.
+    const sql = `ALTER TABLE "llm_usage"
+  ADD CONSTRAINT "llm_usage_one_owner" CHECK (run_id IS NULL OR chat_session_id IS NULL),
+  ADD CONSTRAINT "llm_usage_run_id_org_id_fk" FOREIGN KEY ("run_id","org_id")
+    REFERENCES "public"."runs"("id","org_id") NOT VALID;--> statement-breakpoint
+UPDATE llm_usage SET run_id = NULL WHERE chat_session_id IS NOT NULL;`;
     expect(flags(sql)).toBe(false);
+  });
+
+  it("licences the same repair when the action list carries no `NOT VALID` at all", () => {
+    // The control for the case above: the identical file minus the deferred FK.
+    // Without it the pass above could be a detector that licences everything.
+    const sql = `ALTER TABLE "llm_usage"
+  ADD CONSTRAINT "llm_usage_one_owner" CHECK (run_id IS NULL OR chat_session_id IS NULL);--> statement-breakpoint
+UPDATE llm_usage SET run_id = NULL WHERE chat_session_id IS NOT NULL;`;
+    expect(flags(sql)).toBe(false);
+  });
+
+  it("still reads a `NOT VALID` that sits on the CHECK's own action in an action list", () => {
+    // The half that keeps the bound honest: narrowing the search to one action
+    // must not narrow it past the trailing `NOT VALID` belonging to THAT
+    // action. Same file as the pair above, with the `NOT VALID` moved onto the
+    // CHECK — nothing is enforced, so nothing is licenced.
+    const sql = `ALTER TABLE "llm_usage"
+  ADD CONSTRAINT "llm_usage_one_owner" CHECK (run_id IS NULL OR chat_session_id IS NULL) NOT VALID,
+  ADD CONSTRAINT "llm_usage_run_id_org_id_fk" FOREIGN KEY ("run_id","org_id")
+    REFERENCES "public"."runs"("id","org_id");--> statement-breakpoint
+UPDATE llm_usage SET run_id = NULL WHERE chat_session_id IS NOT NULL;`;
+    expect(flags(sql)).toBe(true);
+  });
+
+  it("finds a `NOT VALID` past a CHECK expression that itself contains a comma", () => {
+    // The action's span is found by matching the CHECK's parentheses and then
+    // reading to the next `,` at depth 0 — never by splitting on `,`. A comma
+    // INSIDE the expression ends the span early under a naive split, and the
+    // trailing `NOT VALID` goes unseen. (The literals here are blanked by
+    // `sanitize`, but the comma between them is not: it is real syntax.)
+    const sql = `ALTER TABLE "webhooks"
+  ADD CONSTRAINT "webhooks_payload_mode_valid" CHECK (payload_mode IN ('full', 'summary')) NOT VALID;--> statement-breakpoint
+UPDATE "webhooks" SET "payload_mode" = 'full' WHERE "payload_mode" IS NULL;`;
+    expect(flags(sql)).toBe(true);
   });
 
   it("allows a fold beside a DROP COLUMN on the same table", () => {
@@ -180,6 +221,30 @@ DELETE FROM "runs" WHERE "status" = 'pending';`;
     // precondition. §2 licences the PROMOTION (`SET NOT NULL`), not this.
     const sql = `ALTER TABLE "runs" ADD COLUMN "version_ref" text DEFAULT 'draft' NOT NULL;--> statement-breakpoint
 UPDATE "runs" SET "version_ref" = 'other';`;
+    expect(flags(sql)).toBe(true);
+  });
+
+  it("does NOT treat a column-definition CHECK as a constraint promotion", () => {
+    // The `NOT NULL` argument above, verbatim, for the other clause that can
+    // appear in a column DEFINITION: `ADD COLUMN … CHECK (…)` gives a
+    // BRAND-NEW column its constraint, so every existing row satisfies it
+    // vacuously and no backfill was ever its precondition. Only
+    // `ADD CONSTRAINT <name> CHECK (…)` licences — and that is not decoration:
+    // a bare `CHECK (` made the `NOT VALID` rule above bypassable, by moving
+    // the constraint inline where no `NOT VALID` can be written.
+    const sql = `ALTER TABLE "runs" ADD COLUMN "attempts" integer CHECK ("attempts" >= 0);--> statement-breakpoint
+UPDATE "runs" SET "attempts" = 0;`;
+    expect(flags(sql)).toBe(true);
+  });
+
+  it("does NOT treat a CHECK inside a CREATE TABLE as a constraint promotion", () => {
+    // The same class of non-event, at its most obvious: the table is being
+    // created, so it holds no row the CHECK could require a repair for.
+    const sql = `CREATE TABLE "quotas" (
+  "id" text PRIMARY KEY NOT NULL,
+  "seats" integer CHECK ("seats" > 0)
+);--> statement-breakpoint
+UPDATE "quotas" SET "seats" = 1;`;
     expect(flags(sql)).toBe(true);
   });
 

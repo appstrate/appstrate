@@ -994,15 +994,6 @@ export function createIntegrationsRouter() {
     }
   });
 
-  // This surface has no destructive delete, deliberately. Deleting a
-  // connection is owner-scoped and lives on `DELETE
-  // /api/me/connections/:connectionId` — one entry point, which is what lets
-  // the dashboard show a confirm dialog carrying the full impact list. From
-  // here a member changes which connection an agent uses via the member-pin
-  // endpoint (`PUT /api/me/integration-pins`); that is a different operation
-  // from deleting the connection globally, and keeping them apart is the
-  // point.
-
   router.get(
     "/:packageId{@[^/]+/[^/]+}/connections",
     requirePermission("integrations", "read"),

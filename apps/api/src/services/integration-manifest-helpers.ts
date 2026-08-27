@@ -323,9 +323,15 @@ export function getLocalServerRef(
  * somehow, and the only cheap way to do that is to map everything that is not
  * `"sse"` onto `"streamable-http"` — which silently rewrites a manifest
  * declaring `"websocket"` into one declaring HTTP, and hands the sidecar a
- * spec that can never trip its own guard. A manifest outside the enum is
- * malformed; it is dropped with the same loud warning as any other malformed
- * remote source, never coerced into a shape that happens to run.
+ * spec that can never trip its own guard.
+ *
+ * This is defence in depth, NOT the gate. Every path that produces an
+ * `IntegrationManifest` re-parses it against `integrationManifestSchema`
+ * first (`integration-service.ts` — the uncached fetch and all three cache
+ * seeds), and an out-of-enum transport fails that parse whole, so a caller
+ * here has already been handed a conforming manifest. The null branch is
+ * therefore unreachable in practice; it exists so the TYPE is honest and so a
+ * future caller that skips the parse cannot silently get a coercion.
  */
 export function getRemoteSource(
   manifest: IntegrationManifest,

@@ -84,7 +84,7 @@ the precondition of a `SET NOT NULL` promotion, a `CHECK` or a
 routinely added `NOT VALID` a release earlier), and a fold whose source column
 that file `DROP`s. A fold whose source column survives is NOT exempt. Read
 `docs/NO_TRANSITIONAL_CODE.md` §2 for the exact carve-out and the column-level
-limit it does not reach, and note that a `TRUNCATE` is never licenced by it.
+limit it does not reach, and note that only an `UPDATE` is ever licenced — an `INSERT`, a `DELETE` or a `TRUNCATE` never is.
 Also flag migrations
 whose header argues its own necessity from a read-time alias that no longer
 exists — that pairing is what produced `0046`. Note: existing files are

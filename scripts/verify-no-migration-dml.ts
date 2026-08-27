@@ -250,7 +250,22 @@ const TABLE_STATEMENT = `\\b(?:ALTER|CREATE)\\s+TABLE\\s+(?:IF\\s+(?:NOT\\s+)?EX
  * `IS NOT NULL` problem for free: a `WHERE` predicate cannot match this shape
  * at all.
  */
-const LICENCE = /\bSET\s+NOT\s+NULL\b|\bCHECK\s*\(|\bVALIDATE\s+CONSTRAINT\b|\bDROP\s+COLUMN\b/gi;
+const LICENCE = new RegExp(
+  [
+    String.raw`\bSET\s+NOT\s+NULL\b`,
+    // `ADD CONSTRAINT <name> CHECK (`, never a bare `CHECK (`. A `CHECK` in a
+    // COLUMN DEFINITION (`ADD COLUMN c int CHECK (…)`, or one inside a
+    // `CREATE TABLE`) is the same non-event as a `NOT NULL` in a column
+    // definition, and is excluded for the same reason stated above: the column
+    // is new, so every existing row satisfies it vacuously and no backfill was
+    // ever its precondition. Leaving it wide made the `isDeferredCheck` rule
+    // below bypassable by moving the constraint inline.
+    String.raw`\bADD\s+CONSTRAINT\s+(?:"[^"]*"|[A-Za-z_][A-Za-z0-9_$]*)\s+CHECK\s*\(`,
+    String.raw`\bVALIDATE\s+CONSTRAINT\b`,
+    String.raw`\bDROP\s+COLUMN\b`,
+  ].join("|"),
+  "gi",
+);
 
 /**
  * Every table this file carries a `LICENCE` clause for.
@@ -324,10 +339,40 @@ export function licencedTables(sanitized: string): Set<string> {
  * one where nothing is being enforced.
  */
 function isDeferredCheck(sanitized: string, licence: RegExpExecArray): boolean {
-  if (!/^CHECK/i.test(licence[0])) return false;
-  const end = sanitized.indexOf(";", licence.index);
-  const statement = sanitized.slice(licence.index, end === -1 ? undefined : end);
-  return /\bNOT\s+VALID\b/i.test(statement);
+  if (!/CHECK\s*\($/i.test(licence[0])) return false;
+
+  // The CHECK's own ACTION, not its whole statement. `ALTER TABLE` takes a
+  // comma-separated action list, so `ADD CONSTRAINT a CHECK (…), ADD CONSTRAINT
+  // b FOREIGN KEY (…) NOT VALID` puts an enforced CHECK and an unrelated
+  // deferred FK inside one `;`. Scanning to the `;` let the FK's `NOT VALID`
+  // disarm the CHECK — a false positive against a legitimate shape.
+  //
+  // So: skip the CHECK's parenthesised expression by matching its parens, then
+  // read only up to the next `,` or `;` at depth 0. That span is where this
+  // constraint's own trailing `NOT VALID` would sit.
+  const open = sanitized.lastIndexOf("(", licence.index + licence[0].length);
+  let depth = 0;
+  let i = open;
+  for (; i < sanitized.length; i += 1) {
+    const ch = sanitized[i];
+    if (ch === "(") depth += 1;
+    else if (ch === ")") {
+      depth -= 1;
+      if (depth === 0) {
+        i += 1;
+        break;
+      }
+    }
+  }
+  let end = i;
+  let nested = 0;
+  for (; end < sanitized.length; end += 1) {
+    const ch = sanitized[end];
+    if (ch === "(") nested += 1;
+    else if (ch === ")") nested -= 1;
+    else if (nested === 0 && (ch === "," || ch === ";")) break;
+  }
+  return /\bNOT\s+VALID\b/i.test(sanitized.slice(i, end));
 }
 
 /**

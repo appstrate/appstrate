@@ -42,7 +42,13 @@ export function SourceSection({ manifest, onChange }: SourceSectionProps) {
             id="int-source-transport"
             label={t("integrationEditor.source.transport")}
             value={source.remoteTransport}
-            onChange={(v) => update({ remoteTransport: v })}
+            // `FormField` hands back the raw `string` its widget holds. The
+            // widget is a select over these two values, so anything else is
+            // unreachable — narrow rather than coerce, so an impossible value
+            // leaves the state untouched instead of silently becoming HTTP.
+            onChange={(v) => {
+              if (v === "streamable-http" || v === "sse") update({ remoteTransport: v });
+            }}
             enumValues={["streamable-http", "sse"]}
           />
         </>

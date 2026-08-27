@@ -16,7 +16,7 @@ here fixes data once, on the deployments that need it, and is reviewed as an
 operational task. The two legitimate overlaps — a backfill that is the
 **precondition** of a `SET NOT NULL` promotion, a `CHECK`, or a
 `VALIDATE CONSTRAINT`, and a fold whose source column the same file `DROP`s —
-each landing on the **same table**, never a `TRUNCATE`, are stated in full,
+each an `UPDATE` landing on the **same table** (an `INSERT`, a `DELETE` or a `TRUNCATE` is never licenced), are stated in full,
 with their limits, in `docs/NO_TRANSITIONAL_CODE.md` §2, which is the
 authority; `bun run verify:no-migration-dml` enforces it.
 

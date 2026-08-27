@@ -427,9 +427,9 @@ export async function connectRemoteHttpIntegration(
     );
   }
   // AFPS §7.1 — pick the MCP client transport from the manifest. The enum is
-  // required and validated at install time, so anything else — absent
-  // included — means the manifest carries a value the sidecar can't dispatch
-  // to, and is a hard-fail at boot.
+  // required, and re-validated on every read of a stored manifest rather than
+  // only at install, so anything else — absent included — means the spec did
+  // not come from a conforming manifest and is a hard-fail at boot.
   const transport = spec.manifest.server?.transport;
   if (transport !== "streamable-http" && transport !== "sse") {
     throw new Error(

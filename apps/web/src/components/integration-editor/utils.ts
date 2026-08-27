@@ -27,10 +27,27 @@ function asStringArray(v: unknown): string[] {
 
 export type SourceKind = "remote" | "local" | "none";
 
+/**
+ * AFPS §7.1's transport enum, as the editor's form state.
+ *
+ * Typed as the union rather than `string` so the select and the manifest
+ * writer cannot drift apart: `setSource` writes this value straight into
+ * `source.remote.transport`, which the manifest schema requires to be one of
+ * these two. Reading it used to accept any string and pass it through, so a
+ * value the schema rejects could round-trip the editor unchanged.
+ *
+ * An absent or unrecognised value resolves to `"streamable-http"` — the
+ * initial selection for an integration being authored, not a tolerance for a
+ * stored one. A stored manifest cannot carry anything else: every read path
+ * re-parses it against `integrationManifestSchema` and a bad transport fails
+ * the whole parse, so the editor never receives one.
+ */
+type RemoteTransport = "streamable-http" | "sse";
+
 interface SourceState {
   kind: SourceKind;
   remoteUrl: string;
-  remoteTransport: string;
+  remoteTransport: RemoteTransport;
   serverName: string;
   serverVersion: string;
 }
@@ -43,7 +60,7 @@ export function getSource(manifest: Rec): SourceState {
   return {
     kind: kind === "local" || kind === "none" ? kind : "remote",
     remoteUrl: typeof remote.url === "string" ? remote.url : "",
-    remoteTransport: typeof remote.transport === "string" ? remote.transport : "streamable-http",
+    remoteTransport: remote.transport === "sse" ? "sse" : "streamable-http",
     serverName: typeof server.name === "string" ? server.name : "",
     serverVersion: typeof server.version === "string" ? server.version : "",
   };

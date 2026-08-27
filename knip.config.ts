@@ -175,7 +175,8 @@ function manifestEntries(workspace: string, omitExports: readonly string[] = [])
  * `packages/runner-pi` is the eighth, and it got there by the triage below
  * rather than by the `exports`-map rule: it is not on npm, so "no in-repo
  * reader" is evidence of death for it too. Turning the flag on reported 15
- * findings, every one a type re-exported from `src/index.ts` beside its own
+ * FURTHER findings — on top of five value re-exports removed by hand first,
+ * twenty lines in all — every one of the fifteen a type re-exported beside its own
  * function and named by nobody outside the package — options and payload
  * shapes consumers build as object literals. All 15 lines were deleted (the
  * types stay exported from their own modules), and the run is clean, so this

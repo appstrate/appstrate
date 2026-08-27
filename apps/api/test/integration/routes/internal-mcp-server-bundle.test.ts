@@ -248,11 +248,12 @@ describe("GET /internal/mcp-server-bundle/:scope/:name", () => {
   });
 
   it("serves a SYSTEM mcp-server from the boot registry without ?version=", async () => {
-    // Positive control for the short-circuit that survives the rule above: a
-    // system mcp-server has no `package_versions` row to pin, so the sidecar
-    // legitimately omits `?version=` for it and the route answers from the
-    // in-memory boot registry. `getTestApp()` skips `boot()`, so the registry
-    // is empty unless a test installs one.
+    // Positive control for the short-circuit that survives the rule above: the
+    // boot registry holds one version per id, so the spawn resolver pins no
+    // version for a system mcp-server and the sidecar legitimately omits
+    // `?version=`. The route answers from that registry before it ever reads
+    // the query. `getTestApp()` skips `boot()`, so the registry is empty
+    // unless a test installs one.
     await seedLocalIntegration(true, SYSTEM_SERVER);
     const restore = _setSystemPackagesForTesting(
       new Map([[SYSTEM_SERVER, systemEntry(SYSTEM_SERVER, SYSTEM_BUNDLE_BYTES)]]),

@@ -57,21 +57,30 @@ A write that **cannot be separated** from the schema change beside it is the one
 legitimate overlap. Two shapes qualify, and nothing else.
 
 **The precondition of a constraint.** Three clauses: `SET NOT NULL` (`0051`),
-`CHECK` (`0038`), `VALIDATE CONSTRAINT` (`0021`). What must be in the file is the
-clause that **enforces** the constraint, not the one that creates it. On a large
-table the safe pattern is `ADD CONSTRAINT … NOT VALID` in one release and
-`VALIDATE CONSTRAINT` in a later one, with the repair the validation needs
-sitting beside the `VALIDATE` — so the constraint is added in a different file
-from the backfill that preconditions it. `0020`/`0021` are that pair, and
-`0018`'s own header tells future migrations to use it.
+`ADD CONSTRAINT … CHECK` (`0038`), `VALIDATE CONSTRAINT` (`0021`). The test is
+not where the constraint is born but **whether that clause scans the rows that
+already exist** — only then can a repair beside it be the precondition of
+anything. Three consequences, and the gate implements all three:
 
-The corollary bites in the other direction too: `ADD CONSTRAINT … CHECK (…) NOT
-VALID` licences **nothing**. Postgres deliberately skips the existing rows, so
-nothing is being enforced yet and no repair beside it can be a precondition —
-the rows it would fix are exactly the rows the `NOT VALID` just excused. Repair
-them beside the `VALIDATE`, in the file that turns the constraint on. Without
-that carve-out the recommended two-step pattern would licence arbitrary repair
-in the first file, the one where nothing is enforced.
+- `ADD CONSTRAINT … CHECK (…)` licences, because Postgres validates the whole
+  table as it adds it. Creation and enforcement are the same moment.
+- `ADD CONSTRAINT … CHECK (…) NOT VALID` licences **nothing**. Postgres
+  deliberately skips the existing rows, so the rows a repair would fix are
+  exactly the rows the `NOT VALID` just excused. Repair them beside the
+  `VALIDATE`, in the file that turns the constraint on. Without this the
+  recommended two-step pattern would licence arbitrary repair in the first
+  file, the one where nothing is enforced.
+- A `CHECK` in a **column definition** (`ADD COLUMN c int CHECK (…)`, or one
+  inside a `CREATE TABLE`) licences nothing either — the same reason a
+  `NOT NULL` in a column definition does not, below. The column is new, so
+  every existing row satisfies it vacuously.
+
+That `NOT VALID` split is the safe pattern on a large table: add the constraint
+in one release, then repair and `VALIDATE` in a later one, with the repair
+beside the `VALIDATE`. So the constraint is added in a different file from the
+backfill that preconditions it. `0020`/`0021` are that pair, and `0018`'s own
+header tells future migrations to use it. It is the `VALIDATE` that must share
+the file with the repair — never the `ADD`.
 
 **A fold whose source column is dropped in the same file.** `DROP COLUMN`
 destroys the values, so an operator script run afterwards would have nothing left
@@ -87,12 +96,22 @@ Either way the licensing clause must land on the **same table** the write
 touches; file-level, a `CHECK` on table A would licence a rewrite of table B.
 Keep the write minimal, and keep it in the file that carries the clause.
 
-And either way the write is an **`UPDATE`**. Both shapes fill or move column
-values, and neither is expressible any other way, so no clause licences an
-`INSERT`, a `DELETE` or a `TRUNCATE`. That is not a technicality: `DELETE FROM t;`
-empties a table exactly as `TRUNCATE t;` does, and "drop all the rows, then
-promote the column" satisfies any constraint vacuously — the destruction this
-rule exists to stop, wearing a precondition's clothes.
+And either way the licenced write is an **`UPDATE`** — no clause licences an
+`INSERT`, a `DELETE` or a `TRUNCATE`. `DELETE FROM t;` empties a table exactly as
+`TRUNCATE t;` does, and "drop all the rows, then promote the column" satisfies
+any constraint vacuously: the destruction this rule exists to stop, wearing a
+precondition's clothes. Licensing is closed by default and opened for the one
+verb both shapes are actually written in.
+
+This is a deliberate trade, not a claim that nothing else could ever qualify.
+Two shapes genuinely are inseparable and are still refused: deleting orphan rows
+before a `VALIDATE CONSTRAINT` on a non-nullable FK (`0021` escaped it only
+because its column is nullable, so `SET … = NULL` was available), and folding a
+column into a CHILD table (`INSERT INTO child SELECT … FROM parent;`) before the
+parent `DROP`s it. Both are rare, both are destructive enough to deserve a human
+reading them, and admitting either would re-open `DELETE FROM t;` beside a
+`SET NOT NULL`. Write them as `scripts/migration/` scripts and split the
+constraint into the next release.
 
 `SET NOT NULL` is a _promotion_, and only a promotion counts. A `NOT NULL` in a
 column definition never had a backfill as its precondition: Postgres refuses

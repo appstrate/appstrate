@@ -119,7 +119,7 @@ export type IntegrationDropReason =
   | "not_integration"
   | "invalid_manifest"
   | "not_installed"
-  | "remote_url_missing"
+  | "remote_source_invalid"
   | "local_server_ref_missing"
   | "mcp_server_unresolved"
   | "mcp_server_not_runnable"
@@ -378,8 +378,16 @@ async function resolveOne(
   if (isRemoteHttp) {
     const remote = getRemoteSource(manifest);
     if (!remote) {
-      logger.warn("remote-source integration missing remote.url; skipping", { integrationId });
-      return drop("remote_url_missing");
+      // One reason covers both halves because `getRemoteSource` validates both
+      // and reports neither: `source.remote` is unusable when `url` is not a
+      // string OR `transport` is outside AFPS §7.1's enum. Naming only the url
+      // — as this did while the helper accepted any string transport — sends an
+      // author to inspect a url that is fine.
+      logger.warn("remote-source integration has an unusable source.remote; skipping", {
+        integrationId,
+        detail: 'requires a string `url` and `transport` of "streamable-http" | "sse"',
+      });
+      return drop("remote_source_invalid");
     }
     // P0-2 — SSRF floor on the manifest-supplied remote MCP URL. The sidecar
     // opens a credential-bearing Streamable HTTP / SSE client against this URL,

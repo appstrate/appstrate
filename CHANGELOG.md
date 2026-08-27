@@ -631,13 +631,26 @@ latest, sidecar latest}` is byte-for-byte the same input as the supported
 - **BREAKING (internal API): `GET /internal/mcp-server-bundle/{scope}/{name}`
   now returns `400` when `?version=` is absent on a non-system mcp-server**,
   where it used to serve the latest non-yanked version. That fallback existed
-  for pre-#588 sidecars, which no supported deployment has — the platform,
-  `PI_IMAGE` and `SIDECAR_IMAGE` are a version contract and `@appstrate/env`
-  fails boot on a disagreeing trio — and it silently reintroduced the exact
-  manifest/bytes skew #588 closed. This is a container-to-host route; no
-  external client calls it, and the sidecar in the matching image always sends
-  the parameter. System mcp-servers still omit it and are served from the
-  in-memory boot registry by id alone.
+  for pre-#588 sidecars: the platform, `PI_IMAGE` and `SIDECAR_IMAGE` are a
+  version contract, and `@appstrate/env` fails boot on a disagreeing trio, so a
+  sidecar that old cannot be paired with this platform by tag. It silently
+  reintroduced the exact manifest/bytes skew #588 closed.
+
+  This is a container-to-host route; no external client calls it, and the
+  sidecar in the matching image sends the parameter for every package that has
+  a version to send. System mcp-servers have none — they are served from the
+  in-memory boot registry by id alone — and still omit it, which is why the
+  parameter stays optional in the spec rather than becoming `required`.
+
+  The guard is not airtight, and this entry does not lean on it. Digest pinning
+  is supported, and `findRuntimeImageTagMismatch` skips a digest-pinned ref
+  outright; the guard also says nothing about containers already running when
+  the platform restarts, which is why the release notes carry a drain step. So
+  a pre-#588 sidecar CAN reach this platform, and it now 400s on every
+  local-source integration instead of silently running skewed bytes. The load-
+  bearing argument is the other one: nothing in a matching image omits the
+  parameter, because the resolver only leaves it unset for system mcp-servers,
+  which the route answers before it reads the query at all.
 
 - **BREAKING (installer): `APPSTRATE_AUTO_INSTALL` is retired — `scripts/bootstrap.sh`
   now refuses to run while it is set.** The variable was a fourth trigger for a
