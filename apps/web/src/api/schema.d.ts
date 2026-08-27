@@ -7300,7 +7300,10 @@ export interface operations {
                      *       "createdAt": "2026-01-15T10:30:00Z",
                      *       "updatedAt": "2026-01-15T10:30:00Z",
                      *       "actor_name": "Pierre",
-                     *       "actor_type": "user"
+                     *       "actor_type": "user",
+                     *       "running_runs": 0,
+                     *       "unread_count": 0,
+                     *       "last_run_number": 0
                      *     }
                      */
                     "application/json": components["schemas"]["Schedule"];
@@ -17756,8 +17759,7 @@ export interface operations {
                      *         "output": {
                      *           "processed": 42,
                      *           "labeled": 38
-                     *         },
-                     *         "text": "## Inbox triage\nProcessed 42 emails, labeled 38."
+                     *         }
                      *       },
                      *       "artifacts": {
                      *         "status": "complete",
@@ -18605,7 +18607,10 @@ export interface operations {
                      *       "createdAt": "2026-01-14T14:00:00Z",
                      *       "updatedAt": "2026-01-15T09:00:05Z",
                      *       "actor_name": "Pierre",
-                     *       "actor_type": "user"
+                     *       "actor_type": "user",
+                     *       "running_runs": 0,
+                     *       "unread_count": 2,
+                     *       "last_run_number": 12
                      *     }
                      */
                     "application/json": components["schemas"]["Schedule"];

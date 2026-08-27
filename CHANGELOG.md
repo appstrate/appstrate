@@ -719,6 +719,37 @@ latest, sidecar latest}` is byte-for-byte the same input as the supported
 
 ### Fixed
 
+- **The weekly system-package conformance monitor can fail again.** The job
+  captured the harness's exit code into a step output, used it only to decide
+  whether to file a tracking issue, and never re-raised it — so
+  `.github/workflows/conformance-monitor.yml` reported success while the
+  harness reported `4 fail`, and issue #1206 sat open and uncommented for
+  three days behind a green run. The code is now re-raised by a final step
+  that runs _after_ the issue is filed, keeping the ordering that made the
+  capture necessary in the first place: a job that dies on the harness never
+  reaches the reporting step, so a red run would otherwise destroy its own
+  diagnostics.
+
+- **`@appstrate/clickup-mcp` 1.2.1 → 1.2.2 and `@appstrate/gmail-mcp`
+  2.3.1 → 2.3.2 declare the tools their servers actually expose.** ClickUp
+  advertises `clickup_create_task_comment`, `clickup_merge_document` and
+  `clickup_merge_document_page` (all three named as deferred follow-up in
+  #1172 and confirmed by the monitor since); Gmail has added
+  `update_message_labels` (`gmail.modify`, like the other label mutations)
+  and `get_draft` (`gmail.readonly`, like `list_drafts`) upstream. Both
+  packages are version-bumped and their archives rebuilt — a published
+  version is immutable, so an unbumped manifest fix never reaches production
+  (#928).
+
+- **The `refresh-strategy` waiver list is a ratchet instead of a wall.**
+  `UNVERIFIED_CEILING` was an upper bound, so it caught a growing backlog but
+  waved through a shrinking one — verify a provider, remove its entry, and the
+  ceiling silently kept the free seat for the next waiver. It is now an
+  equality: the backlog cannot grow, and it cannot shrink without the ceiling
+  being lowered in the same commit. The burn-down procedure — what "verifying
+  one entry" actually means, and which four things to edit — is documented on
+  the list itself.
+
 - **`appstrate run` validates the resolved input against the agent's schema
   again.** The `config` → `input` collapse (#1179) deleted the CLI's validation
   and replaced it with nothing: at `v1.0.0-beta.51` the site read

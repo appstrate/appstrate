@@ -21,6 +21,16 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # `verify:release-version` compares the compose files' hardcoded
+          # `${APPSTRATE_VERSION:-…}` fallback against the newest `v*` tag —
+          # the only in-repo statement of which release is current (the CLI's
+          # package.json reads `0.0.0` until release.yml stamps it). The default
+          # `fetch-depth: 1` checkout fetches NO tags, and that gate throws
+          # rather than degrading to a vacuous pass, so without this it fails
+          # every run. Tags only, not `fetch-depth: 0` — full history costs
+          # minutes on this repo and nothing here reads a commit range.
+          fetch-tags: true
 
       - name: Setup Bun
         uses: ./.github/actions/bun-setup

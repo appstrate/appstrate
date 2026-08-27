@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/gmail-mcp",
-  "version": "2.3.1",
+  "version": "2.3.2",
   "type": "integration",
   "schema_version": "0.1",
   "display_name": "Gmail",
@@ -105,6 +105,11 @@
         "primary": ["https://www.googleapis.com/auth/gmail.readonly"]
       }
     },
+    "get_draft": {
+      "required_scopes": {
+        "primary": ["https://www.googleapis.com/auth/gmail.readonly"]
+      }
+    },
     "list_drafts": {
       "required_scopes": {
         "primary": ["https://www.googleapis.com/auth/gmail.readonly"]
@@ -141,6 +146,11 @@
       }
     },
     "unlabel_message": {
+      "required_scopes": {
+        "primary": ["https://www.googleapis.com/auth/gmail.modify"]
+      }
+    },
+    "update_message_labels": {
       "required_scopes": {
         "primary": ["https://www.googleapis.com/auth/gmail.modify"]
       }

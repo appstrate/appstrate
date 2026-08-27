@@ -877,10 +877,7 @@ const canonicalRunsPaths = {
                 scheduleId: "sched_cm1abc456def789",
                 status: "success",
                 input: { folder: "inbox", maxEmails: 50 },
-                result: {
-                  output: { processed: 42, labeled: 38 },
-                  text: "## Inbox triage\nProcessed 42 emails, labeled 38.",
-                },
+                result: { output: { processed: 42, labeled: 38 } },
                 artifacts: { status: "complete", published: 2, failed: [] },
                 checkpoint: { lastProcessedId: "msg_99f2a" },
                 error: null,

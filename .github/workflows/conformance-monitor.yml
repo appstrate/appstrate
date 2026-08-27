@@ -42,6 +42,10 @@ jobs:
           # servers report a "skipped" WARN instead of being tested.
           CONFORMANCE_TOKENS: ${{ secrets.CONFORMANCE_TOKENS }}
         run: |
+          # `set +e` keeps a failing harness from killing the step, so the
+          # report below still gets written and the issue still gets filed.
+          # The exit code is re-raised by the final step of this job — that
+          # step, not this one, is what makes drift red.
           set +e
           {
             echo "## System-package conformance — \`--tier all\`"
@@ -73,6 +77,8 @@ jobs:
         # Only `fail` findings (real parity drift / SSRF) flip the exit code.
         # "couldn't test" WARNs (no credential, upstream down) do not, so a
         # credential-less monitor stays quiet until a genuine mismatch lands.
+        # The same condition gates the failure step below — issue and red run
+        # are two readings of one signal, never one without the other.
         if: steps.run.outputs.code != '0'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -87,3 +93,25 @@ jobs:
           else
             gh issue create --title "$title" --label conformance --body-file conformance-report.md
           fi
+
+      - name: Fail on conformance drift
+        # The harness's exit code, re-raised. It is captured rather than left
+        # to fail the step above BECAUSE the issue must be filed first: a job
+        # that dies on the harness never reaches the reporting step, so a red
+        # run would destroy its own diagnostics. Ordering, not leniency —
+        # without this step the job is green no matter what the harness found,
+        # and drift lives only in an issue nobody is paged for (#1206 sat open
+        # and uncommented for three days behind a green monitor).
+        #
+        # `always()` is deliberately NOT used: if an earlier step failed, that
+        # failure already reddens the job and re-raising a possibly-unset code
+        # on top of it only obscures which step broke.
+        if: steps.run.outputs.code != '0'
+        env:
+          # Through the environment rather than `${{ }}` interpolated into the
+          # script: a step output is untrusted input to the shell by policy,
+          # even when — as here — it can only ever be `${PIPESTATUS[0]}`.
+          CONFORMANCE_EXIT_CODE: ${{ steps.run.outputs.code }}
+        run: |
+          echo "Conformance harness exited ${CONFORMANCE_EXIT_CODE} — see the tracking issue." >&2
+          exit "${CONFORMANCE_EXIT_CODE}"

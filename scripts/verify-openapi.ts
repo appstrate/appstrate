@@ -146,6 +146,31 @@ try {
       // Public endpoints (health, OAuth callback, OpenAPI spec, docs) intentionally
       // have no 4xx responses — they are unauthenticated and always succeed or 5xx
       "operation-4xx-response": "off",
+      // Everything else `recommended` ships is promoted from `warn` to `error`.
+      // This section fails on `error` only, so a `warn` rule here is not a
+      // lenient rule — it is an OFF rule that prints a line, and the
+      // LINT_ALLOWLIST below (whose whole premise is "keep rules globally ON so
+      // any NEW violation still surfaces") was decorative for exactly as long as
+      // that held. Two of these were being violated at the time of the promotion
+      // and the gate reported ALL CHECKS PASSED. Every rule listed here was
+      // verified clean before being promoted; a genuine deviation earns a
+      // narrow, justified pointer entry in LINT_ALLOWLIST, never a downgrade
+      // back to `warn`. The two rules turned `off` above are the only blanket
+      // exemptions, and both state their reason.
+      "info-license": "error",
+      "info-license-strict": "error",
+      "no-duplicated-tag-names": "error",
+      "no-invalid-media-type-examples": "error",
+      "no-invalid-parameter-examples": "error",
+      "no-invalid-schema-examples": "error",
+      "no-mixed-number-range-constraints": "error",
+      "no-required-schema-properties-undefined": "error",
+      "no-server-example.com": "error",
+      "no-unused-components": "error",
+      "operation-2xx-response": "error",
+      "operation-operationId": "error",
+      "security-scopes-defined": "error",
+      "tag-description": "error",
     },
   });
 
@@ -187,6 +212,13 @@ try {
     // would be a lie. Documenting the 405 behaviour is still useful for
     // clients. Scoped to GET /api/mcp/o/{org} only.
     "operation-2xx-response@#/paths/~1api~1mcp~1o~1{org}/get/responses",
+    // GET /api/integrations/connect/start is the public entry the hosted
+    // connect URL points at. It is a dispatcher, not a resource: a valid token
+    // 302s to the provider OAuth screen or the hosted form, and every failure
+    // renders an HTML error page under its own 4xx/5xx. It never returns
+    // content, so a 2xx would be a lie — the same shape as POST /activate
+    // above. Scoped to GET /api/integrations/connect/start only.
+    "operation-2xx-response@#/paths/~1api~1integrations~1connect~1start/get/responses",
   ]);
   const problems = rawProblems.filter((p) => {
     const pointer = p.location?.[0]?.pointer ?? "";

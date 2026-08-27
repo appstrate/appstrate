@@ -287,6 +287,60 @@
     "//#verify:compose-defaults": {
       "cache": false
     },
+    // `cache: false`, like every sibling `verify:*` except type-coverage, and
+    // that is the deliberate choice rather than an omission. This gate's
+    // verdict depends on something turbo cannot hash: the git TAG namespace
+    // (and `GITHUB_REF_NAME` on a tag push). A cached replay keyed on file
+    // contents alone would report the previous verdict after a new release tag
+    // appeared with no file having changed — the gate would go stale in exactly
+    // the way the version it guards did. There is no `inputs` list that closes
+    // that, so the task never caches and always re-reads the tags. It reads two
+    // small file sets and spawns one `git tag`, so the cost is noise.
+    "//#verify:release-version": {
+      "cache": false
+    },
+    // The one new `verify:*` task that CAN cache correctly, so it does — its
+    // verdict is a pure function of three file sets and nothing else (no git
+    // refs, no clock, no network), which is exactly the condition
+    // `//#verify:type-coverage` satisfies and every `cache: false` sibling does
+    // not.
+    //
+    // The inputs ARE the gate's coverage, and a wrong list here is a false
+    // GREEN, not a slow build — the incident class this file already documents
+    // three times (`typecheck` replaying over uncompiled `test/**`, `//#lint`
+    // replaying over an edited `apps/web/tsconfig.json`, `//#typecheck:scripts`
+    // replaying over `knip.config.ts`). The three populations the script reads:
+    //
+    //   - `docs/ENV.md`               the rows
+    //   - `packages/env/src/index.ts` the schema key set — the file, not the
+    //                                 package: the script imports the module,
+    //                                 and adding a key there with no row here
+    //                                 must invalidate this verdict
+    //   - `*.env.example`             both shipped example files. The glob is
+    //                                 `**/.env.example` because the second one
+    //                                 lives under `examples/self-hosting/`, and
+    //                                 a root-anchored `.env.example` would miss
+    //                                 it — the file list is discovered from the
+    //                                 git index at runtime, so this glob must be
+    //                                 a SUPERSET of what discovery can return.
+    //
+    // `scripts/verify-env-docs.ts` and `scripts/lib/tracked-files.ts` are the
+    // gate's own code; an edit to either changes the verdict without touching
+    // any of the three populations above.
+    //
+    // Probe when changing it: `turbo run '//#verify:env-docs' --dry=json`, EDIT
+    // one of these files (turbo hashes content — `touch` moves nothing and
+    // reads as a false negative), run again — the hash must move.
+    "//#verify:env-docs": {
+      "inputs": [
+        "docs/ENV.md",
+        "packages/env/src/index.ts",
+        "**/.env.example",
+        "scripts/verify-env-docs.ts",
+        "scripts/lib/tracked-files.ts",
+        "package.json"
+      ]
+    },
     "//#detect:breaking": {
       "cache": false
     },

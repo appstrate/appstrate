@@ -88,8 +88,9 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
      |   │    {ns}__{tool} (spawned integrations — one runner │
      |   │    container per integration)                      │
      |   ├─ Agent Container (Pi Coding Agent, Bun) ───────────┤
-     |   │  AGENT_PROMPT, LLM_*; SIDECAR_URL deleted after    │
-     |   │  bootstrap; NO RUN_TOKEN; cannot reach host        │
+     |   │  AGENT_PROMPT, LLM_*; SIDECAR_AUTH_TOKEN (sidecar- │
+     |   │  only bearer, NOT the run token); it + SIDECAR_URL │
+     |   │  deleted after bootstrap; NO RUN_TOKEN             │
      |   └────────────────────────────────────────────────────┘
 ```
 
@@ -149,13 +150,13 @@ Tier 0 (zero-install) requires only Bun.
 - **New API route**: route file in `routes/` + OpenAPI path file in `openapi/paths/` + wire in `index.ts`. Run `bun run verify:openapi`, then `bun run generate:api` to refresh the SPA's generated types (`verify:api-types` in `check` fails otherwise). Every 2xx JSON response must declare a schema (verify-openapi step 6).
 - **DB migration (core)**: edit `packages/db/src/schema.ts` → `bun run db:generate` (needs `DATABASE_URL` for drizzle-kit). Applied automatically at boot (PGlite + PostgreSQL) — no manual `db:migrate`.
 - **Module tables**: there are none separately — a module's tables live in the core schema (`packages/db/src/schema/<domain>.ts`) and migrate with core. No per-module migration step.
-- **Quality gate**: `bun run check` — 16 task names, not 2: `turbo typecheck lint format:check` plus
+- **Quality gate**: `bun run check` — 18 task names, not 2: `turbo typecheck lint format:check` plus
   `verify:openapi`, `verify:api-types`, `verify:type-coverage`, `verify:compose-defaults`,
-  `detect:breaking`, `build:system-packages:check`, `lint:manifest-casing`, `conformance:check`,
-  `verify:module-isolation`, `typecheck:scripts`, `verify:module-contract`, `verify:dead-code`,
-  `verify:no-migration-dml`.
-  turbo fans those out to **36** actual tasks (`typecheck` alone runs in 21 workspaces) — count them
-  with `bunx turbo <the 16 names> --dry=json`, never by reading this line.
+  `verify:release-version`, `verify:env-docs`, `detect:breaking`, `build:system-packages:check`,
+  `lint:manifest-casing`, `conformance:check`, `verify:module-isolation`, `typecheck:scripts`,
+  `verify:module-contract`, `verify:dead-code`, `verify:no-migration-dml`.
+  turbo fans those out to **38** actual tasks (`typecheck` alone runs in 21 workspaces) — count them
+  with `bunx turbo run <the 18 names> --dry=json`, never by reading this line.
   There is no `turbo check` task — the root script drives turbo directly.
 - **Dead code**: `verify:dead-code` runs knip over every workspace and fails on an exported symbol
   with no reader, a file nothing reaches, or a declared dependency nothing imports. `eslint`'s
@@ -226,7 +227,7 @@ Required vars (boot fails without them):
 | `RUN_TOKEN_SECRET`          | HMAC secret for run bearer tokens (≥16 chars), rotates independently            |
 | `CONNECT_SESSION_SECRET`    | HMAC secret for hosted-connect-portal tokens (≥16 chars), rotates independently |
 
-Most-touched optional vars: `MODULES` (default `oidc,webhooks,mcp,core-providers,@appstrate/module-chat` — subscription modules `@appstrate/module-codex` + `@appstrate/module-claude-code` are opt-in), `DATABASE_URL`, `REDIS_URL`, `S3_BUCKET`, `RUN_ADAPTER` (default `process`; `docker` for containers), `APP_URL`, `TRUSTED_ORIGINS`, `TRUST_PROXY`. See `docs/ENV.md` for all 115 documented vars with defaults and full notes (97 of them live in the `@appstrate/env` Zod schema; the rest are read directly by modules, the sidecar or the runtime image).
+Most-touched optional vars: `MODULES` (default `oidc,webhooks,mcp,core-providers,@appstrate/module-chat` — subscription modules `@appstrate/module-codex` + `@appstrate/module-claude-code` are opt-in), `DATABASE_URL`, `REDIS_URL`, `S3_BUCKET`, `RUN_ADAPTER` (default `process`; `docker` for containers), `APP_URL`, `TRUSTED_ORIGINS`, `TRUST_PROXY`. See `docs/ENV.md` for all 120 documented vars with defaults and full notes — 99 of them the `@appstrate/env` Zod schema's complete key set, the other 21 read straight from `process.env` by modules, the sidecar or the agent container. A separate 4-row table below them lists RETIRED names that boot now refuses; those are not documented vars and are not in the 120. `bun run verify:env-docs` (in `bun run check`) holds the table complete against both the schema and `.env.example`, so these counts move with the code rather than with someone remembering to edit this line — read the gate's success line, not this sentence, for today's figures.
 
 ## Agent & Extension Gotchas
 
