@@ -19,16 +19,22 @@
  * answer with its field-precise 400 either. The run just starts with no file
  * and every layer reports success.
  *
- * Both spellings are covered. `context_documents` is the pre-#1177 ARGUMENT
- * name of the `run_and_wait` tool, and a model reaches for it from its own
- * transcript (an earlier turn of the same conversation) or from a tool listing
- * taken before the upgrade — the MCP server advertises `tools.listChanged:
- * false`, so calling the old shape afterwards is correct client behaviour. It
- * survives ONLY as a tool argument: `run-and-wait-client` canonicalizes it to
- * `context_files` while building the launch body, and the HTTP route no longer
- * knows the old name at all (its body schema is `.strict()`, so a raw
- * `context_documents` on the wire is a 400). That canonicalization is exactly
- * what this case pins.
+ * The retired spelling gets its own case. `context_documents` is the pre-#1177
+ * ARGUMENT name of the `run_and_wait` tool, and a model reaches for it from its
+ * own transcript (an earlier turn of the same conversation) or from a tool
+ * listing taken before the upgrade — the MCP server advertises
+ * `tools.listChanged: false`, so calling the old shape afterwards is correct
+ * client behaviour. It survives nowhere: the client refuses every argument it
+ * does not declare, and `RUN_AND_WAIT_RETIRED_ARGUMENTS` only names the
+ * replacement in the refusal message — "a message-quality table, not an alias
+ * table: nothing here is accepted, canonicalized or relayed". The HTTP route
+ * never knew the old name either (its body schema is `.strict()`). What that
+ * case pins is the refusal rather than the drop: a name nobody reads is
+ * invisible, which is the failure mode above wearing a retired spelling.
+ *
+ * The third case is the floor — no file argument at all still launches, with
+ * `runs.input` left null — so the allowlist cannot be read as gating the plain
+ * prompt path.
  */
 
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "bun:test";
