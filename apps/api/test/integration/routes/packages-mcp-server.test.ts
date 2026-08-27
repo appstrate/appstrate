@@ -31,7 +31,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import { uploadPackageFiles } from "../../../src/services/package-items/storage.ts";
 import { mcpServerManifest } from "../../helpers/integration-manifests.ts";
 import { packages, packageVersions } from "@appstrate/db/schema";
@@ -238,7 +238,7 @@ describe("mcp-server package routes", () => {
       });
 
       await expect(
-        installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, SERVER_ID),
+        installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, SERVER_ID),
       ).rejects.toMatchObject({ status: 422, code: "bundle_invalid" });
     });
 

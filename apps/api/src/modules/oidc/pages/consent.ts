@@ -16,7 +16,7 @@
 
 import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
-import type { ResolvedAppBranding } from "../services/branding.ts";
+import type { ResolvedSpaceBranding } from "../services/branding.ts";
 
 /**
  * Consent-screen descriptions, French (the hosted OAuth pages are FR-only).
@@ -66,8 +66,8 @@ interface ConsentPageProps {
   action: string;
   /** CSRF token injected into the form + paired cookie. */
   csrfToken: string;
-  /** Resolved branding for the owning application. */
-  branding: ResolvedAppBranding;
+  /** Resolved branding for the owning space. */
+  branding: ResolvedSpaceBranding;
   /** Optional error message displayed above the form. */
   error?: string;
 }
@@ -83,7 +83,7 @@ export function renderConsentPage(props: ConsentPageProps): RawHtml {
       <span class="client">${props.clientName}</span> souhaite accéder à votre compte
       ${props.branding.name}.
     </p>
-    <p>Cette application aura accès à :</p>
+    <p>Cette space aura accès à :</p>
     <ul class="scopes">
       ${scopeItems}
     </ul>

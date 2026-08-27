@@ -10,7 +10,7 @@
  *
  * This test manufactures that cycle deterministically instead of hoping for
  * load: a background transaction locks an `organizations` row (step 1), and
- * once truncateAll() is blocked on it, touches an `applications` row the
+ * once truncateAll() is blocked on it, touches an `spaces` row the
  * truncate has already deleted uncommitted (step 2). Both sides then wait on
  * each other — the only exit is Postgres aborting one of them with a
  * deadlock. Whichever side is the victim, truncateAll() must come out clean:
@@ -25,7 +25,8 @@ import { sql } from "drizzle-orm";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { isTransientLockError } from "../../helpers/deadlock-retry.ts";
 import { describeRequiresPostgres } from "../../helpers/tier.ts";
-import { organizations, applications } from "@appstrate/db/schema";
+import { organizations, spaces } from "@appstrate/db/schema";
+import { prefixedId } from "../../../src/lib/ids.ts";
 
 describeRequiresPostgres("truncateAll deadlock resilience (issue #883)", () => {
   it(
@@ -38,8 +39,8 @@ describeRequiresPostgres("truncateAll deadlock resilience (issue #883)", () => {
         .values({ name: "deadlock-test", slug: `deadlock-${crypto.randomUUID()}` })
         .returning();
       if (!org) throw new Error("failed to seed organization");
-      const appId = `app_deadlock_${crypto.randomUUID().slice(0, 8)}`;
-      await db.insert(applications).values({ id: appId, orgId: org.id, name: "deadlock-app" });
+      const spaceId = prefixedId("spc");
+      await db.insert(spaces).values({ id: spaceId, orgId: org.id, name: "deadlock-space" });
 
       const warnSpy = spyOn(console, "warn");
       try {
@@ -50,13 +51,13 @@ describeRequiresPostgres("truncateAll deadlock resilience (issue #883)", () => {
             // Step 1 — lock the org row. truncateAll()'s DELETE FROM
             // organizations will block on this.
             await tx.execute(sql`SELECT id FROM ${organizations} WHERE id = ${org.id} FOR UPDATE`);
-            // Give truncateAll() time to delete `applications` (uncommitted)
+            // Give truncateAll() time to delete `spaces` (uncommitted)
             // and block on our org-row lock.
             await Bun.sleep(400);
-            // Step 2 — touch the applications row the truncate already
+            // Step 2 — touch the spaces row the truncate already
             // deleted uncommitted. Now each side waits on the other: a lock
             // cycle only the deadlock detector can break.
-            await tx.execute(sql`UPDATE ${applications} SET name = 'poke' WHERE id = ${appId}`);
+            await tx.execute(sql`UPDATE ${spaces} SET name = 'poke' WHERE id = ${spaceId}`);
           })
           .then(
             () => "committed" as const,
@@ -87,7 +88,7 @@ describeRequiresPostgres("truncateAll deadlock resilience (issue #883)", () => {
 
         // Whatever the outcome, the database ends up clean.
         expect(await db.select({ id: organizations.id }).from(organizations)).toHaveLength(0);
-        expect(await db.select({ id: applications.id }).from(applications)).toHaveLength(0);
+        expect(await db.select({ id: spaces.id }).from(spaces)).toHaveLength(0);
       } finally {
         warnSpy.mockRestore();
       }

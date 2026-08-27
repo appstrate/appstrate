@@ -45,7 +45,7 @@ export interface RemoteResolverInputs {
    * Bearer …` header and lets the platform decide.
    */
   bearerToken: string;
-  applicationId: string;
+  spaceId: string;
   /**
    * Org id pinned on the profile (interactive) or passed via
    * `APPSTRATE_ORG_ID` (headless). Required for JWT auth on routes that
@@ -85,7 +85,7 @@ export const ERR_LOCAL_REQUIRES_CREDS = {
 } as const;
 export const ERR_REMOTE_REQUIRES_AUTH = {
   message: "--integrations=remote requires a logged-in profile or an API key",
-  hint: "Run `appstrate login`, or set APPSTRATE_API_KEY + APPSTRATE_INSTANCE + APPSTRATE_APP_ID (headless)",
+  hint: "Run `appstrate login`, or set APPSTRATE_API_KEY + APPSTRATE_INSTANCE + APPSTRATE_SPACE_ID (headless)",
 } as const;
 
 /**
@@ -123,16 +123,16 @@ export function buildIntegrationResolver(
           ERR_REMOTE_REQUIRES_AUTH.hint,
         );
       }
-      if (!remote.instance || !remote.bearerToken || !remote.applicationId) {
+      if (!remote.instance || !remote.bearerToken || !remote.spaceId) {
         throw new ResolverConfigError(
-          "--integrations=remote requires instance + bearerToken + applicationId",
-          "Ensure your profile has an applicationId set (run `appstrate app switch`) and a usable session (run `appstrate login`)",
+          "--integrations=remote requires instance + bearerToken + spaceId",
+          "Ensure your profile has a spaceId set (run `appstrate space switch`) and a usable session (run `appstrate login`)",
         );
       }
       return new RemoteAppstrateIntegrationResolver({
         instance: remote.instance,
         apiKey: remote.bearerToken,
-        applicationId: remote.applicationId,
+        spaceId: remote.spaceId,
         ...(remote.orgId ? { orgId: remote.orgId } : {}),
         endUserId: remote.endUserId,
         extraHeaders: remote.extraHeaders,

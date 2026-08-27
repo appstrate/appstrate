@@ -50,7 +50,7 @@ import { fileTypeStream } from "file-type";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { getEnv } from "@appstrate/env";
 import type { Actor } from "@appstrate/connect";
-import type { AppScope } from "../lib/scope.ts";
+import type { SpaceScope } from "../lib/scope.ts";
 import { actorInsert, actorFromIds, actorScopeFilter } from "../lib/actor.ts";
 import { prefixedId } from "../lib/ids.ts";
 import { logger } from "../lib/logger.ts";
@@ -165,12 +165,12 @@ export function storageKeyToDeletionJob(
 
 /**
  * Storage path (inside {@link FILES_BUCKET}) a file's bytes live at:
- * `{applicationId}/{fileId}/{safeName}`. One builder so the layout is
+ * `{spaceId}/{fileId}/{safeName}`. One builder so the layout is
  * defined once.
  */
-function fileStoragePath(scope: AppScope, fileId: string, name: string): string {
+function fileStoragePath(scope: SpaceScope, fileId: string, name: string): string {
   const safeName = toStorageName(name);
-  return `${scope.applicationId}/${fileId}/${safeName}`;
+  return `${scope.spaceId}/${fileId}/${safeName}`;
 }
 
 /** The 413 message for a file exceeding the per-file cap. */
@@ -190,7 +190,7 @@ type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
  * Fold `bytes` back off an org's `files_bytes_used` counter, clamped at 0
  * (`GREATEST`) so a drift or double-decrement can never drive it negative. The
  * single decrement primitive for every file-teardown path (single-doc
- * delete, expiry sweep, run/session detach, application/end-user cascade). Runs
+ * delete, expiry sweep, run/session detach, space/end-user cascade). Runs
  * inside the caller's transaction — each call site has already locked the org
  * row or is deleting the very rows whose bytes it folds back, so no lock is
  * taken here.
@@ -225,7 +225,7 @@ export interface PendingUploadMaterialization {
 export interface FileRow {
   id: string;
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   purpose: FilePurpose;
   runId: string | null;
   chatSessionId: string | null;
@@ -491,7 +491,7 @@ export function createHashingCounter(caps?: HashingCounterCaps): {
 /**
  * Wire shape for a file. Field casing follows CASING_CONVENTIONS.md
  * carve-out 4b (universal DB-convention fields stay camelCase EVERYWHERE):
- * `applicationId`, `packageId`, `createdAt`, `expiresAt` are on that exact list.
+ * `spaceId`, `packageId`, `createdAt`, `expiresAt` are on that exact list.
  * `run_id` / `chat_session_id` are NOT on it (the list carves out `scheduleId`,
  * `apiKeyId`, `endUserId` but deliberately not `runId`), so they stay snake_case
  * as domain fields — matching the `notification` DTO's `run_id` and the `Run`
@@ -502,7 +502,7 @@ interface FileDto {
   id: string;
   uri: string;
   purpose: FilePurpose;
-  applicationId: string;
+  spaceId: string;
   run_id: string | null;
   chat_session_id: string | null;
   packageId: string | null;
@@ -618,7 +618,7 @@ export function toFileDto(
     id: row.id,
     uri: fileUri(row.id),
     purpose: row.purpose,
-    applicationId: row.applicationId,
+    spaceId: row.spaceId,
     run_id: row.runId,
     chat_session_id: row.chatSessionId,
     packageId: row.packageId,
@@ -660,7 +660,7 @@ export function toFileDto(
  * byte count inside the transaction with the org row locked `FOR UPDATE`.
  */
 export async function createFileFromUpload(
-  scope: AppScope,
+  scope: SpaceScope,
   actor: Actor,
   uploadId: string,
   container: FileContainer,
@@ -739,7 +739,7 @@ interface CommittedFileRow {
  * transaction + audit live in exactly one place.
  */
 async function commitFileRow(params: {
-  scope: AppScope;
+  scope: SpaceScope;
   fileId: string;
   /** Path inside {@link FILES_BUCKET} the bytes were streamed to. */
   storagePath: string;
@@ -834,7 +834,7 @@ async function commitFileRow(params: {
         .values({
           id: fileId,
           orgId: scope.orgId,
-          applicationId: scope.applicationId,
+          spaceId: scope.spaceId,
           purpose: params.purpose,
           runId: params.runId,
           chatSessionId: params.chatSessionId,
@@ -866,7 +866,7 @@ async function commitFileRow(params: {
     const auditActor = actorFromIds(attribution.userId, attribution.endUserId);
     await recordAudit({
       orgId: scope.orgId,
-      applicationId: scope.applicationId,
+      spaceId: scope.spaceId,
       actorType: auditActor ? auditActor.type : "system",
       actorId: auditActor?.id ?? null,
       action: "file.created",
@@ -893,7 +893,7 @@ async function commitFileRow(params: {
  */
 async function runOutputBytesUsed(
   executor: DbOrTx,
-  scope: AppScope,
+  scope: SpaceScope,
   runId: string,
 ): Promise<number> {
   const [row] = await executor
@@ -912,7 +912,7 @@ async function runOutputBytesUsed(
  */
 async function runOutputCountUsed(
   executor: DbOrTx,
-  scope: AppScope,
+  scope: SpaceScope,
   runId: string,
 ): Promise<number> {
   const [row] = await executor
@@ -954,7 +954,7 @@ function isUniqueViolation(err: unknown): boolean {
  */
 async function findDedupFile(
   executor: DbOrTx,
-  scope: AppScope,
+  scope: SpaceScope,
   runId: string,
   sha256: string,
   name: string,
@@ -966,7 +966,7 @@ async function findDedupFile(
       and(
         eq(files.runId, runId),
         eq(files.orgId, scope.orgId),
-        eq(files.applicationId, scope.applicationId),
+        eq(files.spaceId, scope.spaceId),
         eq(files.purpose, "agent_output"),
         eq(files.sha256, sha256),
         eq(files.name, name),
@@ -998,7 +998,7 @@ async function findDedupFile(
  * whose violation the commit path catches and resolves to the same dedup (200).
  */
 export async function createFileFromStream(
-  scope: AppScope,
+  scope: SpaceScope,
   runId: string,
   attribution: { userId: string | null; endUserId: string | null },
   packageId: string | null,
@@ -1135,7 +1135,7 @@ export async function assertWithinFileLimits(orgId: string, sizes: number[]): Pr
  * reason, and rethrow so the route surfaces the real error to the caller.
  */
 export async function materializeRunUploads(
-  scope: AppScope,
+  scope: SpaceScope,
   actor: Actor,
   runId: string,
   packageId: string | null,
@@ -1186,7 +1186,7 @@ export async function materializeRunUploads(
 const fileSelect = {
   id: files.id,
   orgId: files.orgId,
-  applicationId: files.applicationId,
+  spaceId: files.spaceId,
   purpose: files.purpose,
   runId: files.runId,
   chatSessionId: files.chatSessionId,
@@ -1205,14 +1205,14 @@ const fileSelect = {
 /**
  * Resolve a file for `actor`, enforcing the container's read-ACL (D2).
  * Returns `null` (→ 404 at the route) when the file does not exist in the
- * caller's org+app, or when the container's ACL rejects the actor — a
- * cross-org, cross-app, or cross-actor id is indistinguishable from a missing
+ * caller's org+space, or when the container's ACL rejects the actor — a
+ * cross-org, cross-space, or cross-actor id is indistinguishable from a missing
  * one. The full {@link FileCapabilities} are derived once here (the single
  * source) — `permissions` supplies the `files:delete` grant that decides the
  * `keep` / `delete` capabilities (default: none).
  */
 export async function getFileForActor(
-  scope: AppScope,
+  scope: SpaceScope,
   actor: Actor,
   fileId: string,
   permissions: ReadonlySet<string> = new Set(),
@@ -1222,17 +1222,13 @@ export async function getFileForActor(
     .select(fileSelect)
     .from(files)
     .where(
-      and(
-        eq(files.id, fileId),
-        eq(files.orgId, scope.orgId),
-        eq(files.applicationId, scope.applicationId),
-      ),
+      and(eq(files.id, fileId), eq(files.orgId, scope.orgId), eq(files.spaceId, scope.spaceId)),
     )
     .limit(1);
   if (!row) return null;
 
   if (row.runId) {
-    // Run container: reuse the run's read semantics (org+app scope already
+    // Run container: reuse the run's read semantics (org+space scope already
     // matched above) plus the end-user guard (routes/runs.ts pattern).
     const run = await getRun(scope, row.runId);
     if (!run) return null;
@@ -1249,7 +1245,7 @@ export async function getFileForActor(
   } else {
     // Detached (both containers NULL — the legal state under
     // `chk_files_single_container`): no container to inherit an ACL from.
-    // Org+app already matched above; apply the same end-user guard the run
+    // Org+space already matched above; apply the same end-user guard the run
     // container would (an end_user reads only its own rows).
     if (actor.type === "end_user" && row.endUserId !== actor.id) return null;
     // Conservative invariant: a detached `user_upload` is creator-only, fully
@@ -1307,7 +1303,7 @@ export async function loadFileForPreview(orgId: string, fileId: string): Promise
 export async function resolveChatAttachment(
   request: ChatAttachmentRequest,
 ): Promise<ResolvedChatAttachment> {
-  const scope: AppScope = { orgId: request.orgId, applicationId: request.applicationId };
+  const scope: SpaceScope = { orgId: request.orgId, spaceId: request.spaceId };
   const actor: Actor = { type: "user", id: request.userId };
 
   if (isFileUri(request.uri)) {
@@ -1351,14 +1347,14 @@ export interface ListFilesFilters {
  * or another run). So the filter is the union: rows anchored to the run, OR rows
  * whose id is referenced by the run's input JSONB.
  *
- * The run lookup is `getRun(scope, runId)` — the SAME org+app scoping every other
- * run read uses — so a run id from another org/app resolves to null and its input
+ * The run lookup is `getRun(scope, runId)` — the SAME org+space scoping every other
+ * run read uses — so a run id from another org/space resolves to null and its input
  * refs never widen the result (no cross-tenant leak; the referenced-id `inArray`
- * is AND-ed with the caller's org/app/actor scope on `files` regardless).
+ * is AND-ed with the caller's org/space/actor scope on `files` regardless).
  * When the run has no input or no file refs, this collapses to the original
  * plain `run_id =` equality — behavior unchanged.
  */
-async function runContainerFilter(scope: AppScope, runId: string): Promise<SQL> {
+async function runContainerFilter(scope: SpaceScope, runId: string): Promise<SQL> {
   const run = await getRun(scope, runId);
   const inputDocIds = run ? extractFileIds(run.input) : [];
   if (inputDocIds.length === 0) return eq(files.runId, runId);
@@ -1372,7 +1368,7 @@ async function runContainerFilter(scope: AppScope, runId: string): Promise<SQL> 
  * even though dashboard members may read the org-wide run list.
  */
 async function chatContextFileFilter(
-  scope: AppScope,
+  scope: SpaceScope,
   actor: Actor,
   chatSessionId: string,
 ): Promise<SQL> {
@@ -1401,7 +1397,7 @@ async function chatContextFileFilter(
           and(
             eq(files.runId, runs.id),
             eq(runs.orgId, scope.orgId),
-            eq(runs.applicationId, scope.applicationId),
+            eq(runs.spaceId, scope.spaceId),
             eq(runs.chatSessionId, chatSessionId),
           ),
         ),
@@ -1416,7 +1412,7 @@ async function chatContextFileFilter(
             eq(fileLinks.fileId, files.id),
             eq(fileLinks.orgId, scope.orgId),
             eq(runs.orgId, scope.orgId),
-            eq(runs.applicationId, scope.applicationId),
+            eq(runs.spaceId, scope.spaceId),
             eq(runs.chatSessionId, chatSessionId),
           ),
         ),
@@ -1425,10 +1421,10 @@ async function chatContextFileFilter(
 }
 
 /**
- * Org+app-scoped file gallery, with container-inherited visibility (D7 —
+ * Org+space-scoped file gallery, with container-inherited visibility (D7 —
  * consistent with `getFileForActor`):
  *
- *  - A dashboard `user` (member) sees every run-contained file in the app
+ *  - A dashboard `user` (member) sees every run-contained file in the space
  *    (mirroring the org-wide runs list — no per-user filter), plus chat-contained
  *    files only from their OWN sessions (chat sessions are private).
  *  - An `end_user` sees only their own rows (`actorScopeFilter`).
@@ -1437,7 +1433,7 @@ async function chatContextFileFilter(
  * the end-users list.
  */
 export async function listFilesForActor(
-  scope: AppScope,
+  scope: SpaceScope,
   actor: Actor,
   filters: ListFilesFilters = {},
   permissions: ReadonlySet<string> = new Set(),
@@ -1447,7 +1443,7 @@ export async function listFilesForActor(
 
   const conditions: SQL[] = [
     eq(files.orgId, scope.orgId),
-    eq(files.applicationId, scope.applicationId),
+    eq(files.spaceId, scope.spaceId),
     actor.type === "end_user"
       ? actorScopeFilter(actor, { userId: files.userId, endUserId: files.endUserId })
       : // Members — three visibility arms so a detached (both containers NULL)
@@ -1480,7 +1476,7 @@ export async function listFilesForActor(
         and(
           eq(files.id, filters.startingAfter),
           eq(files.orgId, scope.orgId),
-          eq(files.applicationId, scope.applicationId),
+          eq(files.spaceId, scope.spaceId),
         ),
       )
       .limit(1);
@@ -1544,7 +1540,7 @@ export async function listFilesForActor(
  *
  * LOCK ORDER — org row FIRST, then the files. Every file WRITE
  * (`createFileFromStream`) locks the org row before inserting, and every
- * parent cascade (organization / application / end-user delete) locks the org
+ * parent cascade (organization / space / end-user delete) locks the org
  * before enumerating. A teardown that locked files first and only touched
  * `organizations` later through the counter update would form the other half of
  * an ABBA cycle with those cascades. Taking the org lock here also serializes
@@ -1553,7 +1549,7 @@ export async function listFilesForActor(
  * against the by-then-deleted parent and drops its own object.
  *
  * The run and end-user variants carry their `orgId` explicitly: both callers
- * already resolved it (it is the app scope they are authorized against) and
+ * already resolved it (it is the space scope they are authorized against) and
  * already hold that very org lock, so re-deriving it from the container rows
  * would only be a second read of a value the caller had all along. The chat
  * variant crosses the module boundary with the session id alone, so its org is
@@ -1679,10 +1675,10 @@ export async function detachOrDeleteContainedFiles(
  * Org-first lock order (see {@link detachOrDeleteContainedFiles}): this
  * transaction ends up writing `organizations` through the counter decrement, so
  * it must take that row's lock BEFORE the file's — otherwise it holds a
- * `files` lock while waiting on an org lock that an org/application cascade
+ * `files` lock while waiting on an org lock that an org/space cascade
  * (which locks org → files) already holds, and Postgres kills one of the two.
  */
-export async function deleteFile(scope: AppScope, fileId: string): Promise<void> {
+export async function deleteFile(scope: SpaceScope, fileId: string): Promise<void> {
   await db.transaction(async (tx) => {
     await tx
       .select({ id: organizations.id })
@@ -1695,11 +1691,7 @@ export async function deleteFile(scope: AppScope, fileId: string): Promise<void>
       .select({ storageKey: files.storageKey })
       .from(files)
       .where(
-        and(
-          eq(files.id, fileId),
-          eq(files.orgId, scope.orgId),
-          eq(files.applicationId, scope.applicationId),
-        ),
+        and(eq(files.id, fileId), eq(files.orgId, scope.orgId), eq(files.spaceId, scope.spaceId)),
       )
       .limit(1)
       .for("update");
@@ -1720,11 +1712,7 @@ export async function deleteFile(scope: AppScope, fileId: string): Promise<void>
     const deleted = await tx
       .delete(files)
       .where(
-        and(
-          eq(files.id, fileId),
-          eq(files.orgId, scope.orgId),
-          eq(files.applicationId, scope.applicationId),
-        ),
+        and(eq(files.id, fileId), eq(files.orgId, scope.orgId), eq(files.spaceId, scope.spaceId)),
       )
       .returning({ size: files.size });
     if (deleted.length === 0) throw notFound(`File '${fileId}' not found`);
@@ -1743,19 +1731,15 @@ export async function deleteFile(scope: AppScope, fileId: string): Promise<void>
  * action (GitLab model): a file a caller explicitly keeps is exempted from
  * the expiry GC and never swept. Idempotent: pinning an already-permanent
  * file (NULL `expires_at`) is a no-op that returns the row unchanged.
- * Org+app scoped; authorization (creator OR `files:delete`) is enforced by
+ * Org+space scoped; authorization (creator OR `files:delete`) is enforced by
  * the caller (same rule as delete). Returns the updated row.
  */
-export async function clearFileExpiry(scope: AppScope, fileId: string): Promise<FileRow> {
+export async function clearFileExpiry(scope: SpaceScope, fileId: string): Promise<FileRow> {
   const [row] = await db
     .update(files)
     .set({ expiresAt: null })
     .where(
-      and(
-        eq(files.id, fileId),
-        eq(files.orgId, scope.orgId),
-        eq(files.applicationId, scope.applicationId),
-      ),
+      and(eq(files.id, fileId), eq(files.orgId, scope.orgId), eq(files.spaceId, scope.spaceId)),
     )
     .returning(fileSelect);
   if (!row) throw notFound(`File '${fileId}' not found`);
@@ -1777,7 +1761,7 @@ export async function clearFileExpiry(scope: AppScope, fileId: string): Promise<
  * (see {@link detachOrDeleteContainedFiles}). A global batch could not: it
  * would lock files across orgs first and only reach `organizations` through
  * the counter decrement, which is exactly the ABBA cycle that made this
- * every-15-minutes sweep abort an organization or application deletion.
+ * every-15-minutes sweep abort an organization or space deletion.
  */
 export async function cleanupExpiredFiles(): Promise<number> {
   // Orgs holding at least one expired file. Read outside any transaction —
@@ -1862,13 +1846,13 @@ export async function cleanupExpiredFiles(): Promise<number> {
  * `SUM(files.size)` and correct any drift. The counter is maintained
  * transactionally by file writes and the service-mediated parent deletion
  * paths. Legacy data, manual SQL, or an unmediated FK cascade can still bypass
- * that application-level accounting, so this pass remains a safety net. It
+ * that space-level accounting, so this pass remains a safety net. It
  * writes only orgs whose value differs. Each organization row is locked before
  * its SUM is read; file writes use the same lock, so reconciliation cannot
  * clobber a concurrent increment or decrement. Returns the number of orgs fixed.
  *
  * Note: this pass only corrects the byte COUNTER. The corresponding storage
- * objects are NOT orphaned by cascade deletes — the org / application / end-user
+ * objects are NOT orphaned by cascade deletes — the org / space / end-user
  * delete paths enumerate their files' storage keys and enqueue them into the
  * transactional deletion outbox (`storage_deletion_jobs`) before the cascade
  * drops the rows, so the objects are purged by the background worker. This

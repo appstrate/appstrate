@@ -462,7 +462,7 @@ const DOC_STREAM_CONCURRENCY = 4;
  * Resolve `rerun_from` to the prior run's persisted `input` snapshot.
  *
  * Access control mirrors `GET /api/runs/:id`: the lookup is scoped to the
- * caller's org + application (cross-tenant ids surface as the same not-found
+ * caller's org + space (cross-tenant ids surface as the same not-found
  * as a missing run), end-users can only replay their own runs, and the prior
  * run must belong to the agent being triggered (its input schema is the one
  * the replayed input was validated against). The returned input flows through
@@ -477,10 +477,7 @@ async function resolveRerunInput(
   if (rerunFrom.length === 0) {
     throw invalidRequest("`rerun_from` must be a run id", "rerun_from");
   }
-  const prior = await getRun(
-    { orgId: c.get("orgId"), applicationId: c.get("applicationId") },
-    rerunFrom,
-  );
+  const prior = await getRun({ orgId: c.get("orgId"), spaceId: c.get("spaceId") }, rerunFrom);
   if (!prior) {
     throw notFound(`Run '${rerunFrom}' not found`);
   }
@@ -543,14 +540,14 @@ export async function parseRequestInput(
      */
     injectedInput?: Record<string, unknown>;
     /**
-     * Values the editor stored once on `application_packages.input_settings`
+     * Values the editor stored once on `space_packages.input_settings`
      * (`values`) — layer 2 of the input resolution (see
-     * `input-resolution.ts`). Omitted by origins that have no per-application
+     * `input-resolution.ts`). Omitted by origins that have no per-space
      * row (inline runs on a shadow package).
      */
     editorDefaults?: Record<string, unknown>;
     /**
-     * `application_packages.input_settings` (`locked`) — input fields the
+     * `space_packages.input_settings` (`locked`) — input fields the
      * caller may not set. A request naming one is refused with 400
      * `locked_input_field`.
      */
@@ -599,7 +596,7 @@ export async function parseRequestInput(
   if (inputSchema) {
     const refs = collectFileRefs(inputSchema, input);
     const orgId = c.get("orgId");
-    const applicationId = c.get("applicationId");
+    const spaceId = c.get("spaceId");
 
     // Resolve every upload URI to an upload id up front so a malformed URI
     // fails before we touch storage.
@@ -679,12 +676,12 @@ export async function parseRequestInput(
 
         // Resolve every `appfile://` reference through the container ACL (D2):
         // the run-triggering actor must be able to read the file, else it is
-        // indistinguishable from missing (404 — covers cross-org and cross-app).
+        // indistinguishable from missing (404 — covers cross-org and cross-space).
         const resolvedDocs =
           fileRefs.length > 0
             ? await Promise.all(
                 fileRefs.map(async ({ ref, id }) => {
-                  const doc = await getFileForActor({ orgId, applicationId }, actor, id);
+                  const doc = await getFileForActor({ orgId, spaceId }, actor, id);
                   // Cross-actor ACL (S2): resolving a run is org-wide-visible to
                   // members, but a `user_upload` is creator-only content — a
                   // member must not deliver another member's private upload into
@@ -711,7 +708,7 @@ export async function parseRequestInput(
           resolved.length > 0
             ? await peekUploads(
                 resolved.map((r) => r.id),
-                { orgId, applicationId, actor },
+                { orgId, spaceId, actor },
               )
             : new Map();
         assertDocsWithinCap(
@@ -804,48 +801,44 @@ export async function parseRequestInput(
             // `.fileType` once the head has been read — available after the pipe
             // drains. The counting passthrough yields the size the size-check
             // (and manifest) needs.
-            const meta = await consumeUploadStream(
-              id,
-              { orgId, applicationId, actor },
-              async (src) => {
-                const detection = await fileTypeStream(src);
-                let bytes = 0;
-                // Hash the streamed bytes too, so consume can compare against a
-                // client-declared upload sha256 and reject a mismatch at this
-                // FIRST consume (fails fast, before the run is created).
-                const hasher = new Bun.CryptoHasher("sha256");
-                const counter = new TransformStream<Uint8Array, Uint8Array>({
-                  transform(chunk, controller) {
-                    bytes += chunk.byteLength;
-                    // Abort the moment the stream overshoots the declared size,
-                    // rather than copying a declared-small / uploaded-huge object
-                    // into the run workspace in full just to delete it after the
-                    // post-drain size check. Errors the stream → the S3 multipart
-                    // upload aborts (or the FS write stops) → consume releases the
-                    // claim and the run workspace is rolled back. The post-drain
-                    // `bytes === size` check in consume still catches the
-                    // under-size case (and is the correctness backstop for any
-                    // sink that does not abort early).
-                    if (bytes > declaredSize) {
-                      controller.error(
-                        invalidRequest(
-                          `Upload '${id}' size mismatch: declared ${declaredSize} bytes, exceeded mid-stream`,
-                        ),
-                      );
-                      return;
-                    }
-                    hasher.update(chunk);
-                    controller.enqueue(chunk);
-                  },
-                });
-                await streamRunFile(runId, docName, detection.pipeThrough(counter));
-                return {
-                  bytes,
-                  sniffedMime: detection.fileType?.mime,
-                  sha256: hasher.digest("hex"),
-                };
-              },
-            );
+            const meta = await consumeUploadStream(id, { orgId, spaceId, actor }, async (src) => {
+              const detection = await fileTypeStream(src);
+              let bytes = 0;
+              // Hash the streamed bytes too, so consume can compare against a
+              // client-declared upload sha256 and reject a mismatch at this
+              // FIRST consume (fails fast, before the run is created).
+              const hasher = new Bun.CryptoHasher("sha256");
+              const counter = new TransformStream<Uint8Array, Uint8Array>({
+                transform(chunk, controller) {
+                  bytes += chunk.byteLength;
+                  // Abort the moment the stream overshoots the declared size,
+                  // rather than copying a declared-small / uploaded-huge object
+                  // into the run workspace in full just to delete it after the
+                  // post-drain size check. Errors the stream → the S3 multipart
+                  // upload aborts (or the FS write stops) → consume releases the
+                  // claim and the run workspace is rolled back. The post-drain
+                  // `bytes === size` check in consume still catches the
+                  // under-size case (and is the correctness backstop for any
+                  // sink that does not abort early).
+                  if (bytes > declaredSize) {
+                    controller.error(
+                      invalidRequest(
+                        `Upload '${id}' size mismatch: declared ${declaredSize} bytes, exceeded mid-stream`,
+                      ),
+                    );
+                    return;
+                  }
+                  hasher.update(chunk);
+                  controller.enqueue(chunk);
+                },
+              });
+              await streamRunFile(runId, docName, detection.pipeThrough(counter));
+              return {
+                bytes,
+                sniffedMime: detection.fileType?.mime,
+                sha256: hasher.digest("hex"),
+              };
+            });
             return {
               fieldName: ref.fieldName,
               name: meta.name,

@@ -56,7 +56,7 @@ function resetFsStorage(): void {
  */
 const CORE_TABLES = [
   // Leaf tables (no dependents). `files` references runs / organizations /
-  // applications / chat_sessions (all ON DELETE CASCADE), so it must be deleted
+  // spaces / chat_sessions (all ON DELETE CASCADE), so it must be deleted
   // BEFORE any of them — placed first to guarantee that ordering.
   "files",
   // Standalone outbox table (no FKs) — deletion jobs must not leak between tests.
@@ -73,7 +73,7 @@ const CORE_TABLES = [
   "package_persistence",
   "package_version_dependencies",
   "package_dist_tags",
-  "application_packages",
+  "space_packages",
   "integration_connections",
   "integration_oauth_clients",
   "package_schedules",
@@ -88,7 +88,7 @@ const CORE_TABLES = [
   "end_users",
   // Core tables
   "packages",
-  "applications",
+  "spaces",
   "org_members",
   "organizations",
   "profiles",

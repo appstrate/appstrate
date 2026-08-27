@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Better Auth plugin — inject per-app social OAuth credentials into the
- * Google/GitHub provider configs on `level=application` flows.
+ * Better Auth plugin — inject per-space social OAuth credentials into the
+ * Google/GitHub provider configs on `level=space` flows.
  *
  * The `socialProviders` block in `packages/db/src/auth.ts` exposes `clientId`
  * and `clientSecret` as getters that first consult an AsyncLocalStorage
  * override (`getSocialOverride()`). This plugin is where that override gets
  * set: a `before` hook matching BA's social sign-in + callback endpoints
- * reads the pending-client cookie, resolves per-app creds, and calls
+ * reads the pending-client cookie, resolves per-space creds, and calls
  * `enterSocialOverride()`. Every downstream BA method that touches
  * `options.clientId` / `options.clientSecret` (verified lazy-read across
  * `@better-auth/core/social-providers/{google,github}.mjs`, `oauth2/*.mjs`
@@ -29,8 +29,8 @@
  * wrapper is required.
  *
  * No-op when the pending-client cookie is missing, the referenced client is
- * not `level=application`, or no per-app creds are configured. In that last
- * case the getters fall through to env — which, for an app-level client
+ * not `level=space`, or no per-space creds are configured. In that last
+ * case the getters fall through to env — which, for a space-level client
  * that hasn't configured the provider, will be empty. The provider factory's
  * own `CLIENT_ID_AND_SECRET_REQUIRED` guard then rejects the request — but
  * that path should never execute because the login page's feature-flag
@@ -51,7 +51,7 @@ async function applyOverride(ctx: { request?: Request }): Promise<void> {
   if (!pendingClientId) return;
 
   const client = await getClientCached(pendingClientId);
-  if (!client || client.level !== "application" || !client.referencedApplicationId) return;
+  if (!client || client.level !== "space" || !client.referencedSpaceId) return;
 
   try {
     const [google, github] = await Promise.all([
@@ -73,10 +73,10 @@ async function applyOverride(ctx: { request?: Request }): Promise<void> {
     // rotation, …) must not leak the platform's env creds to a tenant's flow.
     // Downstream BA surfaces `CLIENT_ID_AND_SECRET_REQUIRED` if this was not
     // a transient blip.
-    logger.warn("oidc: failed to resolve per-app social credentials", {
+    logger.warn("oidc: failed to resolve per-space social credentials", {
       module: "oidc",
       clientId: pendingClientId,
-      applicationId: client.referencedApplicationId,
+      spaceId: client.referencedSpaceId,
       error: getErrorMessage(err),
     });
   }

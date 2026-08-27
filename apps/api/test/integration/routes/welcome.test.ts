@@ -151,7 +151,7 @@ describe("Welcome API", () => {
       const ctx = await createTestContext();
       const apiKey = await seedApiKey({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         createdBy: ctx.user.id,
       });
       const originalName = ctx.user.name;

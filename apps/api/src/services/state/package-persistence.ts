@@ -16,7 +16,7 @@
  * Vocabulary: `actor_type='user'` matches both the `@afps-spec/schema`
  * wire format and the in-process `Actor` type (`@appstrate/connect`).
  * The `PersistenceScope` here narrows `Actor` by adding a `'shared'`
- * variant for app-wide rows; non-shared scopes pass through unchanged.
+ * variant for space-wide rows; non-shared scopes pass through unchanged.
  */
 
 import { and, asc, count, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
@@ -57,10 +57,10 @@ const MAX_PINNED_KEY_LENGTH = 64;
 
 /**
  * Persistence scope. Narrower than `Actor` by one case: a storage scope may
- * be explicitly `"shared"` (app-wide), which an incoming run may or may not
+ * be explicitly `"shared"` (space-wide), which an incoming run may or may not
  * map to — scheduled/system runs land on `shared` automatically, while a
  * dashboard-user run with `scope: "shared"` explicitly is the runtime
- * opting into app-wide behaviour.
+ * opting into space-wide behaviour.
  */
 export type PersistenceScope =
   { type: "user"; id: string } | { type: "end_user"; id: string } | { type: "shared" };
@@ -140,7 +140,7 @@ export function scopeFromActor(actor: Actor | null): PersistenceScope {
  */
 export async function getCheckpoint(
   packageId: string,
-  applicationId: string,
+  spaceId: string,
   scope: PersistenceScope,
 ): Promise<unknown | null> {
   const { actorType, actorId } = storageActor(scope);
@@ -152,7 +152,7 @@ export async function getCheckpoint(
       .where(
         and(
           eq(packagePersistence.packageId, packageId),
-          eq(packagePersistence.applicationId, applicationId),
+          eq(packagePersistence.spaceId, spaceId),
           eq(packagePersistence.key, CHECKPOINT_KEY),
           eq(packagePersistence.actorType, actorType),
           eq(packagePersistence.actorId, actorId!),
@@ -168,7 +168,7 @@ export async function getCheckpoint(
     .where(
       and(
         eq(packagePersistence.packageId, packageId),
-        eq(packagePersistence.applicationId, applicationId),
+        eq(packagePersistence.spaceId, spaceId),
         eq(packagePersistence.key, CHECKPOINT_KEY),
         eq(packagePersistence.actorType, "shared"),
         isNull(packagePersistence.actorId),
@@ -192,7 +192,7 @@ export async function getCheckpoint(
  */
 export async function upsertPinned(
   packageId: string,
-  applicationId: string,
+  spaceId: string,
   orgId: string,
   scope: PersistenceScope,
   key: string,
@@ -217,10 +217,10 @@ export async function upsertPinned(
 
   await db.execute(sql`
     INSERT INTO ${packagePersistence}
-      (package_id, application_id, org_id, key, pinned, actor_type, actor_id, content, run_id, created_at, updated_at)
+      (package_id, space_id, org_id, key, pinned, actor_type, actor_id, content, run_id, created_at, updated_at)
     VALUES
-      (${packageId}, ${applicationId}, ${orgId}, ${key}, true, ${actorType}, ${actorId}, ${contentJson}, ${runId}, NOW(), NOW())
-    ON CONFLICT (package_id, application_id, actor_type, (COALESCE(actor_id, '__shared__')), key) WHERE key IS NOT NULL
+      (${packageId}, ${spaceId}, ${orgId}, ${key}, true, ${actorType}, ${actorId}, ${contentJson}, ${runId}, NOW(), NOW())
+    ON CONFLICT (package_id, space_id, actor_type, (COALESCE(actor_id, '__shared__')), key) WHERE key IS NOT NULL
     DO UPDATE SET
       content    = EXCLUDED.content,
       run_id     = EXCLUDED.run_id,
@@ -228,11 +228,11 @@ export async function upsertPinned(
   `);
 }
 
-/** Delete a single pinned slot row by id, scoped to (package, app). Covers any non-null key. */
+/** Delete a single pinned slot row by id, scoped to (package, space). Covers any non-null key. */
 export async function deletePinnedSlotById(
   id: number,
   packageId: string,
-  applicationId: string,
+  spaceId: string,
 ): Promise<boolean> {
   const deleted = await db
     .delete(packagePersistence)
@@ -240,7 +240,7 @@ export async function deletePinnedSlotById(
       and(
         eq(packagePersistence.id, id),
         eq(packagePersistence.packageId, packageId),
-        eq(packagePersistence.applicationId, applicationId),
+        eq(packagePersistence.spaceId, spaceId),
         sql`${packagePersistence.key} IS NOT NULL`,
       ),
     )
@@ -251,7 +251,7 @@ export async function deletePinnedSlotById(
 /** Delete the checkpoint row for a specific scope. */
 export async function deleteCheckpoint(
   packageId: string,
-  applicationId: string,
+  spaceId: string,
   scope: PersistenceScope,
 ): Promise<boolean> {
   const deleted = await db
@@ -259,7 +259,7 @@ export async function deleteCheckpoint(
     .where(
       and(
         eq(packagePersistence.packageId, packageId),
-        eq(packagePersistence.applicationId, applicationId),
+        eq(packagePersistence.spaceId, spaceId),
         eq(packagePersistence.key, CHECKPOINT_KEY),
         buildScopeFilter(scope),
       ),
@@ -278,7 +278,7 @@ export async function deleteCheckpoint(
  */
 export async function listPinnedSlots(
   packageId: string,
-  applicationId: string,
+  spaceId: string,
   scope?: PersistenceScope,
   runId?: string,
 ): Promise<PinnedSlotRow[]> {
@@ -297,7 +297,7 @@ export async function listPinnedSlots(
     .where(
       and(
         eq(packagePersistence.packageId, packageId),
-        eq(packagePersistence.applicationId, applicationId),
+        eq(packagePersistence.spaceId, spaceId),
         sql`${packagePersistence.key} IS NOT NULL`,
         ...(scope ? [buildVisibilityFilter(scope)!] : []),
         ...(runId ? [eq(packagePersistence.runId, runId)] : []),
@@ -317,7 +317,7 @@ export async function listPinnedSlots(
  */
 export async function listMemories(
   packageId: string,
-  applicationId: string,
+  spaceId: string,
   scope: PersistenceScope,
   runId?: string,
 ): Promise<Memory[]> {
@@ -335,7 +335,7 @@ export async function listMemories(
     .where(
       and(
         eq(packagePersistence.packageId, packageId),
-        eq(packagePersistence.applicationId, applicationId),
+        eq(packagePersistence.spaceId, spaceId),
         isNull(packagePersistence.key),
         buildVisibilityFilter(scope)!,
         ...(runId ? [eq(packagePersistence.runId, runId)] : []),
@@ -365,7 +365,7 @@ export const RECALL_LIMIT_MAX = 50;
 
 export async function recallMemories(
   packageId: string,
-  applicationId: string,
+  spaceId: string,
   scope: PersistenceScope,
   opts: { query?: string; limit?: number } = {},
 ): Promise<Memory[]> {
@@ -373,7 +373,7 @@ export async function recallMemories(
 
   const conditions = [
     eq(packagePersistence.packageId, packageId),
-    eq(packagePersistence.applicationId, applicationId),
+    eq(packagePersistence.spaceId, spaceId),
     isNull(packagePersistence.key),
     eq(packagePersistence.pinned, false),
     buildVisibilityFilter(scope)!,
@@ -407,12 +407,12 @@ export async function recallMemories(
  * Append memories for a scope. Always `pinned=false` (archive tier); the
  * AFPS `note` tool has no pinning parameter so every agent-written memory
  * lands in the archive. Bounded at {@link MAX_MEMORIES_PER_SCOPE} per
- * `(package, app, scope)` and trimmed to {@link MAX_MEMORY_CONTENT}
+ * `(package, space, scope)` and trimmed to {@link MAX_MEMORY_CONTENT}
  * characters per entry.
  */
 export async function addMemories(
   packageId: string,
-  applicationId: string,
+  spaceId: string,
   orgId: string,
   scope: PersistenceScope,
   contents: unknown[],
@@ -428,7 +428,7 @@ export async function addMemories(
     .where(
       and(
         eq(packagePersistence.packageId, packageId),
-        eq(packagePersistence.applicationId, applicationId),
+        eq(packagePersistence.spaceId, spaceId),
         isNull(packagePersistence.key),
         buildScopeFilter(scope),
       ),
@@ -445,7 +445,7 @@ export async function addMemories(
     assertValidContent(trimmed, "memory");
     return {
       packageId,
-      applicationId,
+      spaceId,
       orgId,
       key: null,
       pinned: false,
@@ -465,11 +465,11 @@ export async function addMemories(
   return inserted.length;
 }
 
-/** Delete a single memory by id, scoped to (package, app). */
+/** Delete a single memory by id, scoped to (package, space). */
 export async function deleteMemory(
   id: number,
   packageId: string,
-  applicationId: string,
+  spaceId: string,
 ): Promise<boolean> {
   const deleted = await db
     .delete(packagePersistence)
@@ -477,7 +477,7 @@ export async function deleteMemory(
       and(
         eq(packagePersistence.id, id),
         eq(packagePersistence.packageId, packageId),
-        eq(packagePersistence.applicationId, applicationId),
+        eq(packagePersistence.spaceId, spaceId),
         isNull(packagePersistence.key),
       ),
     )
@@ -486,18 +486,18 @@ export async function deleteMemory(
 }
 
 /**
- * Delete every memory row for (package, app), optionally narrowed to a
+ * Delete every memory row for (package, space), optionally narrowed to a
  * specific scope. Passing `undefined` for `scope` wipes memories across
  * every actor — used by the admin "clear all memories" route.
  */
 export async function deleteAllMemories(
   packageId: string,
-  applicationId: string,
+  spaceId: string,
   scope?: PersistenceScope,
 ): Promise<number> {
   const baseWhere = and(
     eq(packagePersistence.packageId, packageId),
-    eq(packagePersistence.applicationId, applicationId),
+    eq(packagePersistence.spaceId, spaceId),
     isNull(packagePersistence.key),
     ...(scope ? [buildScopeFilter(scope)] : []),
   );

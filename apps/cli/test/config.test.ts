@@ -18,6 +18,7 @@ import {
   deleteProfile,
   listProfiles,
   resolveProfileName,
+  resolveActiveProfileOrNull,
   type Config,
 } from "../src/lib/config.ts";
 import { useTempConfigHome } from "./helpers/auth-fixture.ts";
@@ -52,7 +53,7 @@ describe("readConfig", () => {
           userId: "u1",
           email: "a@b.c",
           orgId: "o1",
-          applicationId: "a1",
+          spaceId: "spc_1",
         },
         dev: { instance: "http://localhost:3000", userId: "u2", email: "x@y.z" },
       },
@@ -62,12 +63,11 @@ describe("readConfig", () => {
     expect(read).toEqual(input);
   });
 
-  it("round-trips a profile without applicationId unchanged", async () => {
-    // A profile that has never pinned an application has `orgId` but no
-    // `applicationId` — `login` writes the field only when it carries one over,
-    // and `app current` handles the unpinned case. It must parse cleanly and
-    // write back without materializing a phantom `applicationId = ""` entry in
-    // the TOML file.
+  it("round-trips a profile without spaceId unchanged", async () => {
+    // A profile that has never pinned a space has `orgId` but no `spaceId` —
+    // `login` writes the field only when it carries one over, and `space
+    // current` handles the unpinned case. It must parse cleanly and write back
+    // without materializing a phantom `spaceId = ""` entry in the TOML file.
     const input: Config = {
       defaultProfile: "unpinned",
       profiles: {
@@ -82,10 +82,10 @@ describe("readConfig", () => {
     await writeConfig(input);
     const read = await readConfig();
     expect(read).toEqual(input);
-    expect(read.profiles.unpinned!.applicationId).toBeUndefined();
+    expect(read.profiles.unpinned!.spaceId).toBeUndefined();
     const { readFile } = await import("node:fs/promises");
     const raw = await readFile(join(configHome.dir(), "appstrate", "config.toml"), "utf-8");
-    expect(raw).not.toContain("applicationId");
+    expect(raw).not.toContain("spaceId");
   });
 
   it("skips malformed profile rows without throwing", async () => {
@@ -106,6 +106,108 @@ describe("readConfig", () => {
     await fs.writeFile(join(configHome.dir(), "appstrate", "config.toml"), bad);
     const config = await readConfig();
     expect(Object.keys(config.profiles)).toEqual(["ok"]);
+  });
+
+  it("refuses to parse a profile that still pins the retired `applicationId`", async () => {
+    // Fail-loud on the retired key (`docs/NO_TRANSITIONAL_CODE.md` §1): the
+    // parse is an allow-list that drops unknown keys, so accepting the file
+    // would let the next `writeConfig` erase the user's pin without a word.
+    const stale = [
+      'defaultProfile = "prod"',
+      "[profile.prod]",
+      'instance = "https://a.example"',
+      'userId = "u"',
+      'email = "x@y.z"',
+      'orgId = "org_1"',
+      'applicationId = "app_1"',
+    ].join("\n");
+    const fs = await import("node:fs/promises");
+    await fs.mkdir(join(configHome.dir(), "appstrate"), { recursive: true });
+    await fs.writeFile(join(configHome.dir(), "appstrate", "config.toml"), stale);
+
+    // `undefined` when `readConfig` resolved — every assertion below then fails
+    // on a non-string receiver rather than passing vacuously.
+    const message = await readConfig().then(
+      () => undefined,
+      (err: unknown) => (err as Error).message,
+    );
+    // Names the offending profile, the retired key, its replacement, and the fix.
+    expect(message).toContain('Profile "prod"');
+    expect(message).toContain(join(configHome.dir(), "appstrate", "config.toml"));
+    expect(message).toContain('"applicationId"');
+    expect(message).toContain('"spaceId"');
+    expect(message).toContain("appstrate space switch");
+  });
+
+  it("refuses even when the stale profile is not the active one", async () => {
+    // Deliberate: `writeConfig` rewrites the WHOLE file, so a check narrowed to
+    // the active profile would let the inactive one's pin be dropped silently
+    // the next time any command saved the config.
+    const mixed = [
+      'defaultProfile = "current"',
+      "[profile.current]",
+      'instance = "https://a.example"',
+      'userId = "u"',
+      'email = "x@y.z"',
+      'spaceId = "spc_1"',
+      "[profile.stale]",
+      'instance = "https://b.example"',
+      'userId = "u2"',
+      'email = "s@y.z"',
+      'applicationId = "app_9"',
+    ].join("\n");
+    const fs = await import("node:fs/promises");
+    await fs.mkdir(join(configHome.dir(), "appstrate"), { recursive: true });
+    await fs.writeFile(join(configHome.dir(), "appstrate", "config.toml"), mixed);
+
+    await expect(readConfig()).rejects.toThrow(/Profile "stale"/);
+  });
+
+  it("parses a profile that carries only `spaceId`", async () => {
+    const good = [
+      'defaultProfile = "prod"',
+      "[profile.prod]",
+      'instance = "https://a.example"',
+      'userId = "u"',
+      'email = "x@y.z"',
+      'orgId = "org_1"',
+      'spaceId = "spc_1"',
+    ].join("\n");
+    const fs = await import("node:fs/promises");
+    await fs.mkdir(join(configHome.dir(), "appstrate"), { recursive: true });
+    await fs.writeFile(join(configHome.dir(), "appstrate", "config.toml"), good);
+
+    const config = await readConfig();
+    expect(config.profiles.prod).toEqual({
+      instance: "https://a.example",
+      userId: "u",
+      email: "x@y.z",
+      orgId: "org_1",
+      spaceId: "spc_1",
+    });
+  });
+
+  it("never carries the retired key into a parsed profile", async () => {
+    // The repaired file the refusal message asks for: the `app_…` value is gone,
+    // replaced by a `spc_…` one. A parse that aliased the retired key onto
+    // `spaceId`, or spread the raw TOML row wholesale, would still surface
+    // `applicationId` on the returned object here.
+    const repaired = [
+      'defaultProfile = "prod"',
+      "[profile.prod]",
+      'instance = "https://a.example"',
+      'userId = "u"',
+      'email = "x@y.z"',
+      'spaceId = "spc_1"',
+    ].join("\n");
+    const fs = await import("node:fs/promises");
+    await fs.mkdir(join(configHome.dir(), "appstrate"), { recursive: true });
+    await fs.writeFile(join(configHome.dir(), "appstrate", "config.toml"), repaired);
+
+    const prod = (await readConfig()).profiles.prod!;
+    expect(prod.spaceId).toBe("spc_1");
+    expect(Object.keys(prod)).not.toContain("applicationId");
+    expect((prod as unknown as Record<string, unknown>).applicationId).toBeUndefined();
   });
 });
 
@@ -198,14 +300,14 @@ describe("updateProfile", () => {
       email: "e",
       orgId: "org_1",
     });
-    await updateProfile("dev", { applicationId: "app_1" });
+    await updateProfile("dev", { spaceId: "spc_1" });
     const after = await getProfile("dev");
     expect(after).toEqual({
       instance: "http://localhost:3000",
       userId: "u",
       email: "e",
       orgId: "org_1",
-      applicationId: "app_1",
+      spaceId: "spc_1",
     });
   });
 
@@ -215,31 +317,31 @@ describe("updateProfile", () => {
       userId: "u",
       email: "e",
       orgId: "org_1",
-      applicationId: "app_1",
+      spaceId: "spc_1",
     });
-    // Clearing applicationId should drop the key entirely — not leave an explicit
-    // `applicationId: undefined` that TOML would serialize as `applicationId = ""`.
-    await updateProfile("dev", { applicationId: undefined });
+    // Clearing spaceId should drop the key entirely — not leave an explicit
+    // `spaceId: undefined` that TOML would serialize as `spaceId = ""`.
+    await updateProfile("dev", { spaceId: undefined });
     const after = await getProfile("dev");
-    expect(after!.applicationId).toBeUndefined();
+    expect(after!.spaceId).toBeUndefined();
     const { readFile } = await import("node:fs/promises");
     const raw = await readFile(join(configHome.dir(), "appstrate", "config.toml"), "utf-8");
-    expect(raw).not.toContain("applicationId");
+    expect(raw).not.toContain("spaceId");
   });
 
-  it("rewrites multiple fields atomically — orgId + applicationId in one call", async () => {
+  it("rewrites multiple fields atomically — orgId + spaceId in one call", async () => {
     await setProfile("dev", {
       instance: "http://localhost:3000",
       userId: "u",
       email: "e",
       orgId: "org_old",
-      applicationId: "app_old",
+      spaceId: "spc_old",
     });
-    // Simulates `org switch` cascade: swap org and clear app pin in one write.
-    await updateProfile("dev", { orgId: "org_new", applicationId: undefined });
+    // Simulates `org switch` cascade: swap org and clear space pin in one write.
+    await updateProfile("dev", { orgId: "org_new", spaceId: undefined });
     const after = await getProfile("dev");
     expect(after!.orgId).toBe("org_new");
-    expect(after!.applicationId).toBeUndefined();
+    expect(after!.spaceId).toBeUndefined();
   });
 
   it("throws when the profile is missing (invariant: runLogin writes first)", async () => {
@@ -253,7 +355,7 @@ describe("updateProfile", () => {
       email: "e",
       orgId: "org_1",
     });
-    await updateProfile("dev", { applicationId: "app_1" });
+    await updateProfile("dev", { spaceId: "spc_1" });
     const after = await getProfile("dev");
     expect(after!.instance).toBe("http://localhost:3000");
     expect(after!.userId).toBe("u");
@@ -294,5 +396,50 @@ describe("TOML file format", () => {
     const raw = await readFile(join(configHome.dir(), "appstrate", "config.toml"), "utf-8");
     expect(raw).toContain("[profile.prod]");
     expect(raw).toContain('instance = "https://a"');
+  });
+});
+
+describe("resolveActiveProfileOrNull", () => {
+  async function writeConfigFile(body: string): Promise<void> {
+    const fs = await import("node:fs/promises");
+    const dir = join(configHome.dir(), "appstrate");
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(join(dir, "config.toml"), body);
+  }
+
+  it("returns the resolution (profile undefined) when there is no config file at all", async () => {
+    // The invariant `appstrate run --api-key` depends on: no profile is not an
+    // error, so the resolution still comes back and the caller reads
+    // `profile === undefined`.
+    const resolved = await resolveActiveProfileOrNull(undefined);
+    expect(resolved).toEqual({ profileName: "default", profile: undefined });
+  });
+
+  it("degrades an unparseable config file to null", async () => {
+    await writeConfigFile("this is not [ valid toml");
+    expect(await resolveActiveProfileOrNull(undefined)).toBeNull();
+  });
+
+  it("re-throws the retired-key refusal instead of degrading it to null", async () => {
+    // The one error this helper must NOT hide. `null` here would make the
+    // caller report "no profile" at a user who has one — see
+    // `test/run-resolver-inputs.test.ts`.
+    await writeConfigFile(
+      [
+        'defaultProfile = "prod"',
+        "[profile.prod]",
+        'instance = "https://a.example"',
+        'userId = "u"',
+        'email = "x@y.z"',
+        'applicationId = "app_1"',
+      ].join("\n"),
+    );
+
+    const message = await resolveActiveProfileOrNull(undefined).then(
+      () => undefined,
+      (err: unknown) => (err as Error).message,
+    );
+    expect(message).toContain('"applicationId"');
+    expect(message).toContain("appstrate space switch");
   });
 });

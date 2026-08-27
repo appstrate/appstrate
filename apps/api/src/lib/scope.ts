@@ -10,15 +10,15 @@ import type { AppEnv } from "../types/index.ts";
  *
  * Why: issue #172 and its 4 sibling bugs all shared the same root cause —
  * a service filtered by `orgId` only, while the resource actually lived
- * under an `applicationId`. A key in App A could therefore reach App B
- * rows in the same org. Making app-scoped services take `AppScope` (which
+ * under a `spaceId`. A key in Space A could therefore reach Space B
+ * rows in the same org. Making space-scoped services take `SpaceScope` (which
  * structurally requires both fields) turns the "forgot to pass
- * applicationId" bug class into a TypeScript error at the call site.
+ * spaceId" bug class into a TypeScript error at the call site.
  *
- * These types are intentionally not branded. The required `applicationId`
- * field on `AppScope` is the constraint — you cannot construct an
- * `AppScope` without it, which is enough to block the bug class. Branding
- * would add stronger guarantees (can't pass an ad-hoc `{ orgId, applicationId }`
+ * These types are intentionally not branded. The required `spaceId`
+ * field on `SpaceScope` is the constraint — you cannot construct an
+ * `SpaceScope` without it, which is enough to block the bug class. Branding
+ * would add stronger guarantees (can't pass an ad-hoc `{ orgId, spaceId }`
  * object from outside the helpers) but at significant ergonomics cost.
  */
 
@@ -26,25 +26,25 @@ export interface OrgScope {
   readonly orgId: string;
 }
 
-export interface AppScope extends OrgScope {
-  readonly applicationId: string;
+export interface SpaceScope extends OrgScope {
+  readonly spaceId: string;
 }
 
 /**
- * App-scoped access WITHOUT an org boundary — the actor-ownership case.
+ * Space-scoped access WITHOUT an org boundary — the actor-ownership case.
  *
  * `/me/*` connection management operates purely on `(userId | endUserId)`
  * ownership: a connection belongs to its owner regardless of which org the
  * caller is currently scoped to (or whether they have an org context at all,
- * as with a cookie session). It carries the `applicationId` re-derived from the
+ * as with a cookie session). It carries the `spaceId` re-derived from the
  * resource row but deliberately NO `orgId`, so a consuming service can tell it
- * apart from an {@link AppScope} at the type level (`"orgId" in scope`) and skip
- * the app∈org escalation guard that only makes sense with an org. This replaces
+ * apart from an {@link SpaceScope} at the type level (`"orgId" in scope`) and skip
+ * the space∈org escalation guard that only makes sense with an org. This replaces
  * the old `{ orgId: "" }` sentinel — the actor boundary is now expressed by the
  * absence of `orgId`, not a magic empty string.
  */
 export interface ActorScope {
-  readonly applicationId: string;
+  readonly spaceId: string;
 }
 
 /**
@@ -62,17 +62,17 @@ export function getOrgScope(c: Context<AppEnv>): OrgScope {
 }
 
 /**
- * Read `orgId` + `applicationId` from the Hono context. Routes that call
- * this MUST be mounted behind `requireAppContext()` (or the path must
- * satisfy `isAppScopedPath` / a module's app-scoped paths) so
- * `applicationId` is pinned before this runs. Throwing indicates a
+ * Read `orgId` + `spaceId` from the Hono context. Routes that call
+ * this MUST be mounted behind `requireSpaceContext()` (or the path must
+ * satisfy `isSpaceScopedPath` / a module's space-scoped paths) so
+ * `spaceId` is pinned before this runs. Throwing indicates a
  * misconfigured route — not something the caller should handle.
  */
-export function getAppScope(c: Context<AppEnv>): AppScope {
+export function getSpaceScope(c: Context<AppEnv>): SpaceScope {
   const orgId = c.get("orgId");
-  const applicationId = c.get("applicationId");
-  if (!orgId || !applicationId) {
+  const spaceId = c.get("spaceId");
+  if (!orgId || !spaceId) {
     throw internalError();
   }
-  return { orgId, applicationId };
+  return { orgId, spaceId };
 }

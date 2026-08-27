@@ -29,9 +29,9 @@ export interface IntegrationSummary {
   manifest: IntegrationManifestView;
   orgId: string | null;
   source: "local" | "system";
-  /** True when an application_packages row exists for this (app, integration). */
+  /** True when a space_packages row exists for this (space, integration). */
   active?: boolean;
-  /** Admin-only per-(app, integration) lock; defaults to false when inactive. */
+  /** Admin-only per-(space, integration) lock; defaults to false when inactive. */
   block_user_connections?: boolean;
 }
 
@@ -62,7 +62,7 @@ export interface IntegrationConnection {
    * user-editable. The UI renders it verbatim.
    */
   label?: string | null;
-  /** Opt-in: makes this connection selectable by other members of the same app. */
+  /** Opt-in: makes this connection selectable by other members of the same space. */
   shared_with_org?: boolean;
   /**
    * The registered OAuth client that minted this connection — a flat client id
@@ -135,7 +135,7 @@ export type { IntegrationToolCatalogEntry };
 export interface IntegrationOAuthClient {
   /** Row UUID — the `client_ref` handle for rotate / delete / default-client. */
   id: string;
-  applicationId: string;
+  spaceId: string;
   integration_package_id: string;
   auth_key: string;
   client_id: string;
@@ -159,7 +159,7 @@ export interface IntegrationOAuthClient {
 }
 
 /**
- * One connection an actor can pick from for a given (application,
+ * One connection an actor can pick from for a given (space,
  * integration): own + shared-with-org, with caller-facing display fields.
  * Base wire shape for the annotated candidate list surfaced by
  * `GET /api/agents/:scope/:name/connection-readiness`

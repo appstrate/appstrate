@@ -20,7 +20,7 @@ import { createTestContext, authHeaders, type TestContext } from "../../helpers/
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { assertDbMissing } from "../../helpers/assertions.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import {
   _setRunLimitsForTesting,
   getInlineRunLimits,
@@ -28,7 +28,7 @@ import {
 } from "../../../src/services/run-limits.ts";
 import { _resetCacheForTesting } from "@appstrate/env";
 import {
-  applicationPackages,
+  spacePackages,
   auditEvents,
   packageDistTags,
   packageVersions,
@@ -195,16 +195,11 @@ async function seedAndExportBundle(opts: {
     setLatest: true,
   });
 
-  await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, rootId);
+  await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, rootId);
   await db
-    .update(applicationPackages)
+    .update(spacePackages)
     .set({ versionId: rootVer.versionId })
-    .where(
-      and(
-        eq(applicationPackages.applicationId, ctx.defaultAppId),
-        eq(applicationPackages.packageId, rootId),
-      ),
-    );
+    .where(and(eq(spacePackages.spaceId, ctx.defaultSpaceId), eq(spacePackages.packageId, rootId)));
 
   const res = await app.request(`/api/agents/${rootId}/bundle`, { headers: authHeaders(ctx) });
   if (res.status !== 200) {
@@ -265,7 +260,7 @@ describe("POST /api/packages/import-bundle — import", () => {
     expect(body.root_installed).toBe(true);
 
     // Verify DB state — 3 packages registered + root installed in
-    // the importing app.
+    // the importing space.
     for (const id of ["@srcorg/agent-root", "@srcorg/skill-a", "@srcorg/skill-b"]) {
       const [pkg] = await db
         .select({ id: packages.id })
@@ -282,11 +277,11 @@ describe("POST /api/packages/import-bundle — import", () => {
     }
     const [installed] = await db
       .select()
-      .from(applicationPackages)
+      .from(spacePackages)
       .where(
         and(
-          eq(applicationPackages.applicationId, ctx.defaultAppId),
-          eq(applicationPackages.packageId, "@srcorg/agent-root"),
+          eq(spacePackages.spaceId, ctx.defaultSpaceId),
+          eq(spacePackages.packageId, "@srcorg/agent-root"),
         ),
       )
       .limit(1);

@@ -224,7 +224,7 @@ export const responses = {
   NoPublishedVersion: {
     description:
       "Resource not found. On `PUT /api/schedules/{id}`, most commonly the schedule id itself " +
-      "does not exist (or belongs to another application) — that check runs first. Both writes " +
+      "does not exist (or belongs to another space) — that check runs first. Both writes " +
       "also answer 404 when the target agent does not exist, or has no published version " +
       "(`no_published_version`): on `POST` always, on `PUT` when the patch carries `input` or " +
       "`version_override`. A schedule with no `version_override` fires the PUBLISHED manifest, " +

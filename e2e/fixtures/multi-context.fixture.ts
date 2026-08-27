@@ -4,7 +4,7 @@
  * Playwright fixture providing TWO independent org contexts
  * for cross-org isolation tests.
  *
- * Each context has its own user, org, and default app.
+ * Each context has its own user, org, and default space.
  */
 
 import { test as base, expect } from "@playwright/test";
@@ -19,9 +19,9 @@ interface OrgContext {
 interface MultiContextFixtures {
   ctxA: OrgContext;
   ctxB: OrgContext;
-  /** API client scoped to OrgA's default app */
+  /** API client scoped to OrgA's default space */
   clientA: ApiClient;
-  /** API client scoped to OrgB's default app */
+  /** API client scoped to OrgB's default space */
   clientB: ApiClient;
   /** Org-only client for OrgA */
   orgClientA: ReturnType<typeof createOrgOnlyClient>;
@@ -47,7 +47,7 @@ export const test = base.extend<MultiContextFixtures>({
       createApiClient(request, {
         cookie: ctxA.auth.cookie,
         orgId: ctxA.org.orgId,
-        applicationId: ctxA.org.defaultAppId,
+        spaceId: ctxA.org.defaultSpaceId,
       }),
     );
   },
@@ -57,7 +57,7 @@ export const test = base.extend<MultiContextFixtures>({
       createApiClient(request, {
         cookie: ctxB.auth.cookie,
         orgId: ctxB.org.orgId,
-        applicationId: ctxB.org.defaultAppId,
+        spaceId: ctxB.org.defaultSpaceId,
       }),
     );
   },

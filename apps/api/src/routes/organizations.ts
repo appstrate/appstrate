@@ -42,7 +42,7 @@ import { provisionDefaultAgentForOrg } from "../services/default-agent.ts";
 import { effectiveOrgStorageLimit } from "../services/files.ts";
 import { getEnv } from "@appstrate/env";
 import { isPlatformAdmin } from "@appstrate/db/auth-policy";
-import { createDefaultApplication } from "../services/applications.ts";
+import { createDefaultSpace } from "../services/spaces.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import { logger } from "../lib/logger.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
@@ -156,18 +156,18 @@ router.post("/", async (c) => {
   // Notify modules of org creation (non-fatal — errors isolated per module)
   await emitEvent("onOrgCreate", org.id, user.email);
 
-  // Create default application for the new org (non-fatal)
-  const defaultApp = await createDefaultApplication(org.id, user.id).catch((err) => {
-    logger.warn("Failed to create default application for new org", {
+  // Create default space for the new org (non-fatal)
+  const defaultSpace = await createDefaultSpace(org.id, user.id).catch((err) => {
+    logger.warn("Failed to create default space for new org", {
       orgId: org.id,
       error: getErrorMessage(err),
     });
     return null;
   });
 
-  // Provision default hello-world agent + install in default app (non-fatal)
-  if (defaultApp) {
-    await provisionDefaultAgentForOrg(org.id, org.slug, user.id, defaultApp.id).catch(() => {});
+  // Provision default hello-world agent + install in default space (non-fatal)
+  if (defaultSpace) {
+    await provisionDefaultAgentForOrg(org.id, org.slug, user.id, defaultSpace.id).catch(() => {});
   }
 
   await recordAuditFromContext(c, {
@@ -580,7 +580,7 @@ router.put("/:orgId/settings", async (c) => {
   //
   // The check lives here rather than as a `.refine()` on `orgSettingsSchema`:
   // that schema is exported from `@appstrate/core`, the published OSS package,
-  // which must not learn this app's version registry.
+  // which must not learn the platform's version registry.
   if (data.api_version !== undefined && !isVersionSupported(data.api_version)) {
     throw unsupportedApiVersion(
       `API version "${data.api_version}" is not supported. Current version: ${CURRENT_API_VERSION}.`,

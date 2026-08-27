@@ -279,7 +279,7 @@ function buildNoteDef(): RuntimeToolDef {
         "Archive memories are NOT injected into the system prompt; retrieve them on demand with `recall_memory`. " +
         'Scope defaults to "actor" — personal observations stay private to the calling actor (scheduled runs, ' +
         "manual triggers, and different members each see only their own notes). " +
-        'Pass scope="shared" for facts universal to the app — API quirks, org conventions, shared-resource structure — ' +
+        'Pass scope="shared" for facts universal to the space — API quirks, org conventions, shared-resource structure — ' +
         "so every actor can recall them. " +
         "Use for insights worth remembering (e.g. 'Gmail API paginates at 100 results', 'User prefers CSV format').",
       inputSchema: {
@@ -292,7 +292,7 @@ function buildNoteDef(): RuntimeToolDef {
             type: "string",
             enum: ["actor", "shared"],
             description:
-              'Persistence scope. "actor" (default) keeps the note private to the calling actor — well-suited for personal preferences. "shared" makes the note visible to every actor of the app; use for facts universal regardless of who triggered the run.',
+              'Persistence scope. "actor" (default) keeps the note private to the calling actor — well-suited for personal preferences. "shared" makes the note visible to every actor of the space; use for facts universal regardless of who triggered the run.',
           },
         },
       },
@@ -334,7 +334,7 @@ function buildPinDef(): RuntimeToolDef {
             type: "string",
             enum: ["actor", "shared"],
             description:
-              'Persistence scope. "actor" (default) gives every actor their own private copy of the slot — scheduled runs, manual triggers, and different members do not share state. "shared" makes the slot app-wide; use when the slot tracks a resource shared across actors.',
+              'Persistence scope. "actor" (default) gives every actor their own private copy of the slot — scheduled runs, manual triggers, and different members do not share state. "shared" makes the slot space-wide; use when the slot tracks a resource shared across actors.',
           },
         },
       },

@@ -2,7 +2,7 @@
 
 import { useQueryClient } from "@tanstack/react-query";
 import { $api } from "../api/client";
-import { useCurrentApplicationId } from "./use-current-application";
+import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgScope } from "./use-org-scope";
 import { paginatedRunsKeys, runsKeys, runKeys } from "../lib/query-keys";
 
@@ -26,15 +26,15 @@ const NOTIFICATION_POLL_INTERVAL_MS = 300_000;
 
 export function useUnreadCount() {
   const scope = useOrgScope();
-  // Badge counters only need an application context (legacy behavior).
-  const applicationId = useCurrentApplicationId();
+  // Badge counters only need a space context (legacy behavior).
+  const spaceId = useCurrentSpaceId();
   return $api.useQuery(
     "get",
     "/api/notifications/unread-count",
     { params: { header: scope.header } },
     {
       refetchInterval: NOTIFICATION_POLL_INTERVAL_MS,
-      enabled: !!applicationId,
+      enabled: !!spaceId,
       select: (d) => d.count,
     },
   );
@@ -43,7 +43,7 @@ export function useUnreadCount() {
 /** Recipient's notifications (newest first). `unread` filters to unread only. */
 export function useNotifications(opts: { unread?: boolean; limit?: number } = {}) {
   const scope = useOrgScope();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   const { unread = true, limit = 50 } = opts;
   return $api.useQuery(
     "get",
@@ -51,7 +51,7 @@ export function useNotifications(opts: { unread?: boolean; limit?: number } = {}
     { params: { header: scope.header, query: { unread, limit } } },
     {
       refetchInterval: NOTIFICATION_POLL_INTERVAL_MS,
-      enabled: !!applicationId,
+      enabled: !!spaceId,
       select: (d) => d.data,
     },
   );
@@ -59,15 +59,15 @@ export function useNotifications(opts: { unread?: boolean; limit?: number } = {}
 
 export function useUnreadCountsByAgent() {
   const scope = useOrgScope();
-  // Badge counters only need an application context (legacy behavior).
-  const applicationId = useCurrentApplicationId();
+  // Badge counters only need a space context (legacy behavior).
+  const spaceId = useCurrentSpaceId();
   return $api.useQuery(
     "get",
     "/api/notifications/unread-counts-by-agent",
     { params: { header: scope.header } },
     {
       refetchInterval: NOTIFICATION_POLL_INTERVAL_MS,
-      enabled: !!applicationId,
+      enabled: !!spaceId,
       select: (d) => d.counts,
     },
   );

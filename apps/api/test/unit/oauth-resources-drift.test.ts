@@ -23,7 +23,7 @@ describe("assertOAuthResourceColumnsPresent", () => {
 
   it("names the operator script rather than repairing", async () => {
     await expect(assertOAuthResourceColumnsPresent(async () => false)).rejects.toThrow(
-      /scripts\/migration\/0003-oauth-resources-watermark-drift\.sql/,
+      /scripts\/migration\/0004-oauth-resources-watermark-drift\.sql/,
     );
   });
 
@@ -40,7 +40,7 @@ describe("assertOAuthResourceColumnsPresent", () => {
     const sql = await Bun.file(
       resolve(
         import.meta.dir,
-        "../../../../scripts/migration/0003-oauth-resources-watermark-drift.sql",
+        "../../../../scripts/migration/0004-oauth-resources-watermark-drift.sql",
       ),
     ).text();
     for (const table of ["oauth_access_tokens", "oauth_consents", "oauth_refresh_tokens"]) {

@@ -5,7 +5,7 @@
  *
  * Polymorphic across two client types:
  *   - `dashboard`: org-scoped OAuth client for dashboard users (org operators)
- *   - `end_user`: application-scoped OAuth client for app end-users
+ *   - `end_user`: space-scoped OAuth client for space end-users
  *
  * The admin CRUD uses `z.discriminatedUnion("clientType", …)` for creation
  * so the request body is statically typed on the discriminant. The
@@ -30,7 +30,7 @@ import { getClientIp } from "../../lib/client-ip.ts";
 import { getPublicAppOrigin } from "../../lib/public-url.ts";
 import { db } from "@appstrate/db/client";
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
-import { user, applications } from "@appstrate/db/schema";
+import { user, spaces } from "@appstrate/db/schema";
 import { getOrgSettings, getOrgMember } from "../../services/organizations.ts";
 import { resolvePermissions } from "../../lib/permissions.ts";
 import type { OrgRole } from "../../types/index.ts";
@@ -88,9 +88,9 @@ import { getAppstrateScopes } from "./auth/scopes.ts";
 import { consumeLoginEmailAttempt, resetLoginEmailAttempts } from "./auth/guards.ts";
 import {
   UnverifiedEmailConflictError,
-  AppSignupClosedError,
+  SpaceSignupClosedError,
   resolveOrCreateEndUser,
-  loadAppById,
+  loadSpaceById,
 } from "./services/enduser-mapping.ts";
 import { getEnv } from "@appstrate/env";
 import { renderLoginPage } from "./pages/login.ts";
@@ -150,13 +150,13 @@ const createOrgClientSchema = z.object({
   signupRole: z.enum(SIGNUP_ROLE_ALLOWED).optional(),
 });
 
-const createApplicationClientSchema = z.object({
-  level: z.literal("application"),
+const createSpaceClientSchema = z.object({
+  level: z.literal("space"),
   name: z.string().min(1).max(200),
   redirectUris: z.array(redirectUriSchema).min(1),
   postLogoutRedirectUris: z.array(redirectUriSchema).optional(),
   scopes: z.array(z.string().min(1)).optional(),
-  referencedApplicationId: z.string().min(1),
+  referencedSpaceId: z.string().min(1),
   isFirstParty: z.boolean().optional(),
   // Unified signup opt-in. Secure-by-default → when omitted, the service
   // stores `false` and fresh end-user sign-ins are rejected until the
@@ -169,7 +169,7 @@ const createApplicationClientSchema = z.object({
 
 export const createOAuthClientSchema = z.discriminatedUnion("level", [
   createOrgClientSchema,
-  createApplicationClientSchema,
+  createSpaceClientSchema,
 ]);
 
 export const smtpConfigUpsertSchema = z.object({
@@ -220,8 +220,8 @@ interface PageContext {
   smtp: ResolvedSmtpConfig | null;
   /**
    * Per-client social-provider availability, passed verbatim to
-   * `renderSocialButtons` on every OIDC page. For `level=application`
-   * clients, reflects `application_social_providers` rows — buttons appear
+   * `renderSocialButtons` on every OIDC page. For `level=space`
+   * clients, reflects `space_social_providers` rows — buttons appear
    * only when the tenant has configured creds for that provider. For
    * `level=org` / `level=instance`, reflects env presence — those flows
    * authenticate against the platform's own shared OAuth App.
@@ -264,9 +264,9 @@ async function loadPageContext(
   if (!record || record.disabled) {
     return c.html(
       renderErrorPage({
-        title: "Application introuvable",
+        title: "Espace introuvable",
         message:
-          "L'application associée à ce lien n'existe plus ou a été désactivée. Contactez l'administrateur de l'application.",
+          "L'espace associé à ce lien n'existe plus ou a été désactivé. Contactez l'administrateur de l'espace.",
       }).value,
       404,
     );
@@ -288,21 +288,21 @@ async function loadPageContext(
       );
     }
   }
-  // Resolve SMTP per-client: `level=application` reads `application_smtp_configs`,
+  // Resolve SMTP per-client: `level=space` reads `space_smtp_configs`,
   // `level=org`/`level=instance` falls back to env SMTP. Null → email features
-  // disabled for this flow (no instance fallback for app-level clients).
+  // disabled for this flow (no instance fallback for space-level clients).
   const smtp = await resolveSmtpForClient(record);
   if (opts.requireSmtp && !smtp) {
     return c.html(renderErrorPage(opts.requireSmtp).value, 404);
   }
   // Per-client social provider availability, split by client level.
-  // Application-level clients read from `application_social_providers`
-  // (tenant-owned OAuth App). Org and instance clients read env presence —
-  // the platform's shared Google/GitHub OAuth App is the appropriate identity
-  // issuer for dashboard / satellite flows.
+  // Space-level clients read from `space_social_providers` (tenant-owned OAuth
+  // App). Org and instance clients read env presence — the platform's shared
+  // Google/GitHub OAuth App is the appropriate identity issuer for dashboard /
+  // satellite flows.
   let socialGoogle: boolean;
   let socialGithub: boolean;
-  if (record.level === "application") {
+  if (record.level === "space") {
     const [g, gh] = await Promise.all([
       resolveSocialProviderForClient(record, "google"),
       resolveSocialProviderForClient(record, "github"),
@@ -375,8 +375,8 @@ function isInstanceSmtpEnabled(): boolean {
 
 /**
  * Effective "is signup open" flag for a client's entry pages. Unified
- * across all levels (instance / org / application) per `a2aae3af` — aligns
- * with FusionAuth (per-application `registrationConfiguration.enabled`),
+ * across all levels (instance / org / space) per `a2aae3af` — aligns
+ * with FusionAuth (per-space `registrationConfiguration.enabled`),
  * Auth0 (per-connection `disable_signups`), and Okta (policy-bound SSR):
  * when signup is closed the hosted login UI hides the CTA rather than
  * showing it and rejecting at submit.
@@ -399,7 +399,7 @@ function allowSignupForClient(client: { allowSignup: boolean }): boolean {
 function mapLoginErrorCode(code: string): string {
   switch (code) {
     case "signup_disabled":
-      return "L'inscription n'est pas ouverte sur cette application. Contactez un administrateur pour être ajouté à l'organisation.";
+      return "L'inscription n'est pas ouverte sur cet espace. Contactez un administrateur pour être ajouté à l'organisation.";
     case "new_user_signup_disabled":
       return "Aucun compte n'existe pour cette adresse email. Créez un compte ou utilisez un autre fournisseur de connexion.";
     case "email_not_found":
@@ -471,14 +471,14 @@ export function createOidcRouter() {
           throw forbidden("Dashboard SSO is disabled for this organization");
         }
       } else {
-        // application-level: the application must belong to the caller's org.
-        const [app] = await db
-          .select({ orgId: applications.orgId })
-          .from(applications)
-          .where(eq(applications.id, data.referencedApplicationId))
+        // space-level: the space must belong to the caller's org.
+        const [space] = await db
+          .select({ orgId: spaces.orgId })
+          .from(spaces)
+          .where(eq(spaces.id, data.referencedSpaceId))
           .limit(1);
-        if (!app || app.orgId !== orgId) {
-          throw forbidden("referencedApplicationId must belong to the current organization");
+        if (!space || space.orgId !== orgId) {
+          throw forbidden("referencedSpaceId must belong to the current organization");
         }
       }
 
@@ -494,8 +494,8 @@ export function createOidcRouter() {
     },
   );
 
-  // Combined list: org-level clients for the org + application-level clients
-  // for every app the org owns. The admin UI renders both in one table.
+  // Combined list: org-level clients for the org + space-level clients
+  // for every space the org owns. The admin UI renders both in one table.
   router.get(
     "/api/oauth/clients",
     rateLimit(300),
@@ -503,9 +503,9 @@ export function createOidcRouter() {
     async (c) => {
       const orgId = c.get("orgId");
       const appRows = await db
-        .select({ id: applications.id })
-        .from(applications)
-        .where(eq(applications.orgId, orgId));
+        .select({ id: spaces.id })
+        .from(spaces)
+        .where(eq(spaces.orgId, orgId));
       const clients = await listClientsForOrgAndApps(
         orgId,
         appRows.map((a) => a.id),
@@ -611,43 +611,43 @@ export function createOidcRouter() {
     },
   );
 
-  // ── Admin: per-application SMTP configuration ─────────────────────────────
+  // ── Admin: per-space SMTP configuration ─────────────────────────────
   //
-  // Scoped to applications owned by the caller's org. Per-app SMTP replaces
-  // instance-level env SMTP for `level=application` OIDC flows — without a
+  // Scoped to spaces owned by the caller's org. Per-space SMTP replaces
+  // instance-level env SMTP for `level=space` OIDC flows — without a
   // row, verification emails, magic-link, and reset-password are disabled for
-  // that app's clients. See `services/smtp.ts` for the resolver.
+  // that space's clients. See `services/smtp.ts` for the resolver.
 
-  const assertAppBelongsToOrg = async (c: Context<AppEnv>, applicationId: string) => {
+  const assertSpaceBelongsToOrg = async (c: Context<AppEnv>, spaceId: string) => {
     const orgId = c.get("orgId");
-    const [app] = await db
-      .select({ orgId: applications.orgId })
-      .from(applications)
-      .where(eq(applications.id, applicationId))
+    const [space] = await db
+      .select({ orgId: spaces.orgId })
+      .from(spaces)
+      .where(eq(spaces.id, spaceId))
       .limit(1);
-    if (!app || app.orgId !== orgId) throw notFound("Application not found");
+    if (!space || space.orgId !== orgId) throw notFound("Space not found");
   };
 
   router.get(
-    "/api/applications/:id/smtp-config",
+    "/api/spaces/:id/smtp-config",
     rateLimit(300),
-    requireCorePermission("applications", "read"),
+    requireCorePermission("spaces", "read"),
     async (c) => {
-      const applicationId = c.req.param("id")!;
-      await assertAppBelongsToOrg(c, applicationId);
-      const config = await getSmtpConfig(applicationId);
+      const spaceId = c.req.param("id")!;
+      await assertSpaceBelongsToOrg(c, spaceId);
+      const config = await getSmtpConfig(spaceId);
       if (!config) throw notFound("SMTP configuration not found");
       return c.json(config);
     },
   );
 
   router.put(
-    "/api/applications/:id/smtp-config",
+    "/api/spaces/:id/smtp-config",
     rateLimit(20),
-    requireCorePermission("applications", "write"),
+    requireCorePermission("spaces", "write"),
     async (c) => {
-      const applicationId = c.req.param("id")!;
-      await assertAppBelongsToOrg(c, applicationId);
+      const spaceId = c.req.param("id")!;
+      await assertSpaceBelongsToOrg(c, spaceId);
       const data = await readJsonBody(c, smtpConfigUpsertSchema);
       // SSRF: block configurations that would make Appstrate bounce
       // email traffic off internal metadata endpoints / loopback relays.
@@ -666,34 +666,34 @@ export function createOidcRouter() {
       if (hostCheck.blocked && hostCheck.reason === "blocked-resolved") {
         throw invalidRequest("host resolves to a private/internal network", "host");
       }
-      const saved = await upsertSmtpConfig(applicationId, data);
+      const saved = await upsertSmtpConfig(spaceId, data);
       return c.json(saved);
     },
   );
 
   router.delete(
-    "/api/applications/:id/smtp-config",
+    "/api/spaces/:id/smtp-config",
     rateLimit(10),
-    requireCorePermission("applications", "write"),
+    requireCorePermission("spaces", "write"),
     async (c) => {
-      const applicationId = c.req.param("id")!;
-      await assertAppBelongsToOrg(c, applicationId);
-      const deleted = await deleteSmtpConfig(applicationId);
+      const spaceId = c.req.param("id")!;
+      await assertSpaceBelongsToOrg(c, spaceId);
+      const deleted = await deleteSmtpConfig(spaceId);
       if (!deleted) throw notFound("SMTP configuration not found");
       return c.body(null, 204);
     },
   );
 
   router.post(
-    "/api/applications/:id/smtp-config/test",
+    "/api/spaces/:id/smtp-config/test",
     rateLimit(5),
-    requireCorePermission("applications", "write"),
+    requireCorePermission("spaces", "write"),
     async (c) => {
-      const applicationId = c.req.param("id")!;
-      await assertAppBelongsToOrg(c, applicationId);
+      const spaceId = c.req.param("id")!;
+      await assertSpaceBelongsToOrg(c, spaceId);
       const data = await readJsonBody(c, smtpConfigTestSchema);
       try {
-        const result = await sendTestEmail(applicationId, data.to);
+        const result = await sendTestEmail(spaceId, data.to);
         return c.json({ ok: true, messageId: result.messageId });
       } catch (err) {
         const message = getErrorMessage(err);
@@ -708,11 +708,11 @@ export function createOidcRouter() {
     },
   );
 
-  // ── Admin: per-application social auth providers ──────────────────────────
+  // ── Admin: per-space social auth providers ──────────────────────────
   //
-  // Scoped to applications owned by the caller's org. Per-app social auth
+  // Scoped to spaces owned by the caller's org. Per-space social auth
   // replaces the instance env `GOOGLE_CLIENT_*` / `GITHUB_CLIENT_*` pair for
-  // `level=application` OIDC flows — without a row for a given provider, that
+  // `level=space` OIDC flows — without a row for a given provider, that
   // provider's button is hidden on the tenant's login/register pages (no
   // fallback to env creds, same rule as SMTP). See `services/social.ts`
   // for the resolver.
@@ -724,42 +724,42 @@ export function createOidcRouter() {
   };
 
   router.get(
-    "/api/applications/:id/social-providers/:provider",
+    "/api/spaces/:id/social-providers/:provider",
     rateLimit(300),
-    requireCorePermission("applications", "read"),
+    requireCorePermission("spaces", "read"),
     async (c) => {
-      const applicationId = c.req.param("id")!;
-      await assertAppBelongsToOrg(c, applicationId);
+      const spaceId = c.req.param("id")!;
+      await assertSpaceBelongsToOrg(c, spaceId);
       const provider = parseProvider(c.req.param("provider")!);
-      const config = await getSocialProvider(applicationId, provider);
+      const config = await getSocialProvider(spaceId, provider);
       if (!config) throw notFound("Social provider configuration not found");
       return c.json(config);
     },
   );
 
   router.put(
-    "/api/applications/:id/social-providers/:provider",
+    "/api/spaces/:id/social-providers/:provider",
     rateLimit(20),
-    requireCorePermission("applications", "write"),
+    requireCorePermission("spaces", "write"),
     async (c) => {
-      const applicationId = c.req.param("id")!;
-      await assertAppBelongsToOrg(c, applicationId);
+      const spaceId = c.req.param("id")!;
+      await assertSpaceBelongsToOrg(c, spaceId);
       const provider = parseProvider(c.req.param("provider")!);
       const data = await readJsonBody(c, socialProviderUpsertSchema);
-      const saved = await upsertSocialProvider(applicationId, provider, data);
+      const saved = await upsertSocialProvider(spaceId, provider, data);
       return c.json(saved);
     },
   );
 
   router.delete(
-    "/api/applications/:id/social-providers/:provider",
+    "/api/spaces/:id/social-providers/:provider",
     rateLimit(10),
-    requireCorePermission("applications", "write"),
+    requireCorePermission("spaces", "write"),
     async (c) => {
-      const applicationId = c.req.param("id")!;
-      await assertAppBelongsToOrg(c, applicationId);
+      const spaceId = c.req.param("id")!;
+      await assertSpaceBelongsToOrg(c, spaceId);
       const provider = parseProvider(c.req.param("provider")!);
-      const deleted = await deleteSocialProvider(applicationId, provider);
+      const deleted = await deleteSocialProvider(spaceId, provider);
       if (!deleted) throw notFound("Social provider configuration not found");
       return c.body(null, 204);
     },
@@ -804,7 +804,7 @@ export function createOidcRouter() {
       missingClientId: {
         title: "Lien de connexion invalide",
         message:
-          "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
+          "L'identifiant de l'espace est manquant. Veuillez relancer la connexion depuis l'espace.",
       },
     });
     if (page instanceof Response) return page;
@@ -843,7 +843,7 @@ export function createOidcRouter() {
           renderErrorPage({
             title: "Connexion impossible",
             message:
-              "La page de connexion n'a pas pu être rafraîchie. Veuillez relancer la connexion depuis l'application.",
+              "La page de connexion n'a pas pu être rafraîchie. Veuillez relancer la connexion depuis l'espace.",
             branding: ctx.branding,
           }).value,
           400,
@@ -916,7 +916,7 @@ export function createOidcRouter() {
       missingClientId: {
         title: "Lien de connexion invalide",
         message:
-          "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
+          "L'identifiant de l'espace est manquant. Veuillez relancer la connexion depuis l'espace.",
       },
     });
     if (page instanceof Response) return page;
@@ -1089,7 +1089,7 @@ export function createOidcRouter() {
         } catch (err) {
           if (err instanceof OrgSignupClosedError) {
             return renderError(
-              "Ce compte n'est pas membre de l'organisation et l'inscription n'est pas ouverte sur cette application. Contactez votre administrateur.",
+              "Ce compte n'est pas membre de l'organisation et l'inscription n'est pas ouverte sur cet espace. Contactez votre administrateur.",
               403,
               email,
             );
@@ -1099,7 +1099,7 @@ export function createOidcRouter() {
       }
     }
 
-    // For application-level clients: proactively resolve-or-create the
+    // For space-level clients: proactively resolve-or-create the
     // end-user row so `UnverifiedEmailConflictError` surfaces as a 409 here
     // rather than as an opaque 500 three redirects deep at token-mint time.
     // Org-level clients skip this — they don't create end_users rows.
@@ -1114,10 +1114,10 @@ export function createOidcRouter() {
     //
     // WARNING: if future changes add observable side effects to
     // `resolveOrCreateEndUser` (events, webhooks, audit logs), they will
-    // fire TWICE for application-level logins. Gate any such side effect
+    // fire TWICE for space-level logins. Gate any such side effect
     // on a "newly created" flag returned from the function, or move the
     // proactive check to a side-effect-free probe.
-    if (ctx.client.level === "application" && ctx.client.referencedApplicationId) {
+    if (ctx.client.level === "space" && ctx.client.referencedSpaceId) {
       const [authUserRow] = await db
         .select({
           id: user.id,
@@ -1129,8 +1129,8 @@ export function createOidcRouter() {
         .where(eq(user.email, email))
         .limit(1);
       if (authUserRow) {
-        const app = await loadAppById(ctx.client.referencedApplicationId);
-        if (app) {
+        const space = await loadSpaceById(ctx.client.referencedSpaceId);
+        if (space) {
           try {
             await resolveOrCreateEndUser(
               {
@@ -1139,7 +1139,7 @@ export function createOidcRouter() {
                 name: authUserRow.name ?? null,
                 emailVerified: authUserRow.emailVerified === true,
               },
-              app,
+              space,
               { allowSignup: ctx.client.allowSignup },
             );
           } catch (err) {
@@ -1150,9 +1150,9 @@ export function createOidcRouter() {
                 email,
               );
             }
-            if (err instanceof AppSignupClosedError) {
+            if (err instanceof SpaceSignupClosedError) {
               return renderError(
-                "L'inscription automatique est désactivée pour cette application. Contactez votre administrateur pour qu'il crée votre compte avant votre connexion.",
+                "L'inscription automatique est désactivée pour cet espace. Contactez votre administrateur pour qu'il crée votre compte avant votre connexion.",
                 403,
                 email,
               );
@@ -1181,7 +1181,7 @@ export function createOidcRouter() {
       missingClientId: {
         title: "Lien d'inscription invalide",
         message:
-          "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
+          "L'identifiant de l'espace est manquant. Veuillez relancer la connexion depuis l'espace.",
       },
     });
     if (page instanceof Response) return page;
@@ -1192,7 +1192,7 @@ export function createOidcRouter() {
         renderErrorPage({
           title: "Inscription fermée",
           message:
-            "L'inscription n'est pas ouverte sur cette application. Contactez votre administrateur pour obtenir un accès.",
+            "L'inscription n'est pas ouverte sur cet espace. Contactez votre administrateur pour obtenir un accès.",
           branding: ctx.branding,
         }).value,
         403,
@@ -1220,7 +1220,7 @@ export function createOidcRouter() {
       missingClientId: {
         title: "Lien d'inscription invalide",
         message:
-          "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
+          "L'identifiant de l'espace est manquant. Veuillez relancer la connexion depuis l'espace.",
       },
     });
     if (page instanceof Response) return page;
@@ -1235,7 +1235,7 @@ export function createOidcRouter() {
         renderErrorPage({
           title: "Inscription fermée",
           message:
-            "L'inscription n'est pas ouverte sur cette application. Contactez votre administrateur pour obtenir un accès.",
+            "L'inscription n'est pas ouverte sur cet espace. Contactez votre administrateur pour obtenir un accès.",
           branding: ctx.branding,
         }).value,
         403,
@@ -1317,9 +1317,9 @@ export function createOidcRouter() {
     let authResponse: Response;
     try {
       // Wrap the BA call in the per-client SMTP override so every OIDC flow
-      // — application, org, instance — routes its outbound mail through the
+      // — space, org, instance — routes its outbound mail through the
       // same resolver-provided transport. `ctx.smtp` is the resolver's
-      // answer (per-app row for app-level clients, env SMTP for org/instance,
+      // answer (per-space row for space-level clients, env SMTP for org/instance,
       // null when nothing is configured) and supersedes the boot-time
       // transport captured in `@appstrate/db/auth`.
       // CRIT-15: bind the realm resolution + signup guard to the OAuth
@@ -1327,7 +1327,7 @@ export function createOidcRouter() {
       // browser-supplied `oidc_pending_client` cookie. `signUpEmail` triggers
       // `databaseHooks.user.create.before`, where the realm resolver reads the
       // pending client from these headers; a caller who strips or overwrites
-      // their own cookie could otherwise force an application flow to mint a
+      // their own cookie could otherwise force a space flow to mint a
       // full `platform`-realm user. Re-deriving the cookie here makes that
       // impossible for the email-register create path.
       const baHeaders = headersWithAuthoritativePendingClient(
@@ -1384,7 +1384,7 @@ export function createOidcRouter() {
 
     const cookieCount = forwardOAuthSessionCookies(c, authResponse, ctx.client.isFirstParty);
 
-    // Application-level client with no per-app SMTP, but instance SMTP IS
+    // Space-level client with no per-space SMTP, but instance SMTP IS
     // configured → Better Auth wired `requireEmailVerification=true` +
     // `sendOnSignUp=true` at boot, so the `signUpEmail` call above already
     // dispatched a verification email via the instance transport and withheld
@@ -1396,11 +1396,11 @@ export function createOidcRouter() {
     // auto-link by verified email, `adoptEndUserByEmail` end-user takeover,
     // etc.). Only a real, delivered-and-confirmed verification may flip that
     // flag; leave it false. The verification email was genuinely sent, so
-    // surface the same branded "check your email" interstitial as the per-app
+    // surface the same branded "check your email" interstitial as the per-space
     // SMTP path below — the link resumes the OAuth flow via the pinned
     // `callbackURL`.
     if (
-      ctx.client.level === "application" &&
+      ctx.client.level === "space" &&
       !ctx.features.smtp &&
       cookieCount === 0 &&
       isInstanceSmtpEnabled()
@@ -1443,7 +1443,7 @@ export function createOidcRouter() {
               orgId: ctx.client.referencedOrgId,
             });
             return renderRegError(
-              "L'inscription n'est pas ouverte sur cette application. Contactez votre administrateur.",
+              "L'inscription n'est pas ouverte sur cet espace. Contactez votre administrateur.",
               403,
               email,
               name,
@@ -1492,7 +1492,7 @@ export function createOidcRouter() {
   const MAGIC_LINK_MISSING_CLIENT = {
     title: "Lien de connexion invalide",
     message:
-      "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
+      "L'identifiant de l'espace est manquant. Veuillez relancer la connexion depuis l'espace.",
   };
 
   router.get("/api/oauth/magic-link", rateLimitByIp(60), async (c) => {
@@ -1504,7 +1504,7 @@ export function createOidcRouter() {
     const { url, ctx } = page;
     // The pending cookie pins the client_id so the BA `beforeSignup` guard
     // (`oidcBeforeSignupGuard`) applies the org-level signup policy at
-    // verify time: creation is allowed for instance/app clients and for
+    // verify time: creation is allowed for instance/space clients and for
     // org-level clients with `allowSignup: true`, and blocked otherwise.
     issuePendingClientCookie(c, ctx.client.clientId);
     const body = renderMagicLinkPage({
@@ -1614,7 +1614,7 @@ export function createOidcRouter() {
   // param — we parse it defensively and fall back to platform defaults on
   // any error. The confirm page is a short transitional surface; a missing
   // brand is acceptable (the user is about to land on the authorize /
-  // application redirect anyway).
+  // space redirect anyway).
 
   async function resolveConfirmBranding(
     callbackURL: string | null,
@@ -1747,7 +1747,7 @@ export function createOidcRouter() {
   };
   const FORGOT_PASSWORD_MISSING_CLIENT = {
     title: "Lien invalide",
-    message: "L'identifiant de l'application est manquant.",
+    message: "L'identifiant de l'espace est manquant.",
   };
 
   router.get("/api/oauth/forgot-password", rateLimitByIp(60), async (c) => {
@@ -1845,7 +1845,7 @@ export function createOidcRouter() {
   };
   const RESET_PASSWORD_MISSING_CLIENT = {
     title: "Lien invalide",
-    message: "L'identifiant de l'application est manquant.",
+    message: "L'identifiant de l'espace est manquant.",
   };
 
   router.get("/api/oauth/reset-password", rateLimitByIp(60), async (c) => {
@@ -1996,7 +1996,7 @@ export function createOidcRouter() {
   const CONSENT_MISSING_CLIENT = {
     title: "Page d'autorisation invalide",
     message:
-      "L'identifiant de l'application est manquant. Veuillez relancer la connexion depuis l'application.",
+      "L'identifiant de l'espace est manquant. Veuillez relancer la connexion depuis l'espace.",
   };
 
   router.get("/api/oauth/consent", rateLimitByIp(60), async (c) => {
@@ -2133,7 +2133,7 @@ export function createOidcRouter() {
   //   5. `POST /activate/deny`         → symmetric deny.
   //
   // Branding is always the platform default — device flow is instance-
-  // level (the `appstrate-cli` client); application-level device flows are
+  // level (the `appstrate-cli` client); space-level device flows are
   // out of scope for v0.
 
   // Device-flow approve/deny: tightest limit in the OIDC surface because
@@ -2330,7 +2330,7 @@ export function createOidcRouter() {
           branding: PLATFORM_DEFAULT_BRANDING,
           outcome: "denied",
           error:
-            "L'autorisation a échoué. Le code a peut-être expiré, été déjà utilisé ou votre compte n'est pas autorisé pour cette application.",
+            "L'autorisation a échoué. Le code a peut-être expiré, été déjà utilisé ou votre compte n'est pas autorisé pour cet espace.",
         }).value,
         400,
       );

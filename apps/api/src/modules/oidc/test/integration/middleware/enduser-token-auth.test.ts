@@ -7,7 +7,7 @@
  * a test app with the real OIDC module loaded via `getTestApp({ modules })`.
  * The test mints ES256 JWTs by hand against the local JWKS, hits real
  * Appstrate routes, and asserts that:
- *   1. A valid JWT with matching `endUserId`/`applicationId` claims resolves
+ *   1. A valid JWT with matching `endUserId`/`spaceId` claims resolves
  *      through the strategy, populates `endUser` in request context, and
  *      reaches the route handler (200 response).
  *   2. An unknown `endUserId` claim → strategy returns null → falls through
@@ -27,7 +27,7 @@ import * as jose from "jose";
 import { eq } from "drizzle-orm";
 import { _resetCacheForTesting } from "@appstrate/env";
 import { db } from "@appstrate/db/client";
-import { endUsers, applications } from "@appstrate/db/schema";
+import { endUsers, spaces } from "@appstrate/db/schema";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../../../../../test/helpers/auth.ts";
 import { oidcEndUserProfiles } from "@appstrate/db/schema";
@@ -116,16 +116,16 @@ afterAll(() => {
 
 describe("OIDC auth strategy — end-to-end via getTestApp", () => {
   let orgId: string;
-  let applicationId: string;
+  let spaceId: string;
   let authUserId: string;
   let endUserId: string;
 
   beforeEach(async () => {
     await truncateAll();
     const { id: ownerId } = await createTestUser();
-    const { org, defaultAppId } = await createTestOrg(ownerId, { slug: "oidcstrat" });
+    const { org, defaultSpaceId } = await createTestOrg(ownerId, { slug: "oidcstrat" });
     orgId = org.id;
-    applicationId = defaultAppId;
+    spaceId = defaultSpaceId;
 
     // End-user auth identity (distinct from the owning member).
     const { id } = await createTestUser({
@@ -137,7 +137,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     endUserId = prefixedId("eu");
     await db.insert(endUsers).values({
       id: endUserId,
-      applicationId,
+      spaceId,
       orgId,
       email: "stage3@example.com",
       name: "Stage Three",
@@ -155,7 +155,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       sub: authUserId,
       actor_type: "end_user",
       end_user_id: endUserId,
-      application_id: applicationId,
+      space_id: spaceId,
       email: "stage3@example.com",
       name: "Stage Three",
       scope: "openid runs:read",
@@ -163,7 +163,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     const res = await app.request(`/api/runs`, {
       headers: {
         Authorization: `Bearer ${token}`,
-        "X-Application-Id": applicationId,
+        "X-Space-Id": spaceId,
       },
     });
     // Strategy claimed the request, endUser context set, route reached.
@@ -178,7 +178,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       sub: authUserId,
       actor_type: "end_user",
       end_user_id: endUserId,
-      application_id: applicationId,
+      space_id: spaceId,
       email: "stage3@example.com",
       name: "Stage Three",
       scope: "openid runs:read",
@@ -186,7 +186,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     const res = await app.request(`/api/runs`, {
       headers: {
         Authorization: `bearer ${token}`,
-        "X-Application-Id": applicationId,
+        "X-Space-Id": spaceId,
       },
     });
     expect(res.status).toBe(200);
@@ -197,7 +197,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       sub: authUserId,
       actor_type: "end_user",
       end_user_id: endUserId,
-      application_id: applicationId,
+      space_id: spaceId,
       email: "stage3@example.com",
       name: "Stage Three",
       scope: "openid runs:read",
@@ -205,7 +205,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     const res = await app.request(`/api/end-users/${endUserId}`, {
       headers: {
         Authorization: `Bearer ${token}`,
-        "X-Application-Id": applicationId,
+        "X-Space-Id": spaceId,
         "Appstrate-User": endUserId,
       },
     });
@@ -222,12 +222,12 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       sub: authUserId,
       actor_type: "end_user",
       end_user_id: "eu_does_not_exist",
-      application_id: applicationId,
+      space_id: spaceId,
     });
     const res = await app.request(`/api/end-users/${endUserId}`, {
       headers: {
         Authorization: `Bearer ${token}`,
-        "X-Application-Id": applicationId,
+        "X-Space-Id": spaceId,
       },
     });
     // Strategy returned null → fell through to core auth → no session → 401.
@@ -238,7 +238,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     const res = await app.request(`/api/end-users/${endUserId}`, {
       headers: {
         Authorization: "Bearer eyJhbGciOiJFUzI1NiJ9.bogus.signature",
-        "X-Application-Id": applicationId,
+        "X-Space-Id": spaceId,
       },
     });
     expect(res.status).toBe(401);
@@ -251,48 +251,48 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     const res = await app.request(`/api/end-users/${endUserId}`, {
       headers: {
         Authorization: "Bearer ask_invalid_key_000000000000000000000000",
-        "X-Application-Id": applicationId,
+        "X-Space-Id": spaceId,
       },
     });
     expect(res.status).toBe(401);
   });
 
-  it("rejects a spoofed X-Application-Id header when the JWT pinned a different application", async () => {
-    // A1 — cross-application escalation guard. Holder of a valid JWT for
-    // App A must not be able to reach App B (same org) by attaching a
-    // spoofed `X-Application-Id: App B` header. `requireAppContext()` pins
-    // applicationId from the auth strategy first and rejects any header
+  it("rejects a spoofed X-Space-Id header when the JWT pinned a different space", async () => {
+    // A1 — cross-space escalation guard. Holder of a valid JWT for
+    // Space A must not be able to reach Space B (same org) by attaching a
+    // spoofed `X-Space-Id: Space B` header. `requireSpaceContext()` pins
+    // spaceId from the auth strategy first and rejects any header
     // that contradicts the pinned value.
     const { id: otherOwnerId } = await createTestUser();
-    const { defaultAppId: otherAppId } = await createTestOrg(otherOwnerId, {
+    const { defaultSpaceId: otherSpaceId } = await createTestOrg(otherOwnerId, {
       slug: "escalateapp",
     });
-    expect(otherAppId).not.toBe(applicationId);
+    expect(otherSpaceId).not.toBe(spaceId);
 
     const token = await mintToken({
       sub: authUserId,
       actor_type: "end_user",
       end_user_id: endUserId,
-      application_id: applicationId, // JWT legitimately scoped to App A
+      space_id: spaceId, // JWT legitimately scoped to Space A
     });
     const res = await app.request(`/api/end-users/${endUserId}`, {
       headers: {
         Authorization: `Bearer ${token}`,
-        "X-Application-Id": otherAppId, // spoof attempt: App B
+        "X-Space-Id": otherSpaceId, // spoof attempt: Space B
       },
     });
     expect(res.status).toBe(403);
   });
 
-  it("accepts a matching X-Application-Id header when the JWT already pinned the application", async () => {
+  it("accepts a matching X-Space-Id header when the JWT already pinned the space", async () => {
     // Regression guard for A1: the common case (satellite sends both
-    // Authorization and X-Application-Id with matching values) must still reach
+    // Authorization and X-Space-Id with matching values) must still reach
     // the route handler.
     const token = await mintToken({
       sub: authUserId,
       actor_type: "end_user",
       end_user_id: endUserId,
-      application_id: applicationId,
+      space_id: spaceId,
       // `/api/runs` is used here as a convenient authenticated route — the
       // subject under test is app-context pinning. It enforces `runs:read`
       // like every other read route, so the token has to carry it.
@@ -301,46 +301,46 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     const res = await app.request(`/api/runs`, {
       headers: {
         Authorization: `Bearer ${token}`,
-        "X-Application-Id": applicationId,
+        "X-Space-Id": spaceId,
       },
     });
     expect(res.status).toBe(200);
   });
 
-  it("rejects a token whose claim applicationId mismatches the end-user row", async () => {
+  it("rejects a token whose claim spaceId mismatches the end-user row", async () => {
     // Create a second app in the same org.
     const { id: otherOwnerId } = await createTestUser();
-    const { defaultAppId: otherAppId } = await createTestOrg(otherOwnerId, {
+    const { defaultSpaceId: otherSpaceId } = await createTestOrg(otherOwnerId, {
       slug: "otherapp",
     });
-    expect(otherAppId).not.toBe(applicationId);
+    expect(otherSpaceId).not.toBe(spaceId);
 
     // Sanity: the end-user still belongs to the first app.
     const [row] = await db
-      .select({ applicationId: endUsers.applicationId })
+      .select({ spaceId: endUsers.spaceId })
       .from(endUsers)
       .where(eq(endUsers.id, endUserId));
-    expect(row!.applicationId).toBe(applicationId);
+    expect(row!.spaceId).toBe(spaceId);
 
-    // Token claims the end-user lives in otherApp — strategy should refuse.
+    // Token claims the end-user lives in otherSpace — strategy should refuse.
     const token = await mintToken({
       sub: authUserId,
       actor_type: "end_user",
       end_user_id: endUserId,
-      application_id: otherAppId,
+      space_id: otherSpaceId,
     });
     const res = await app.request(`/api/end-users/${endUserId}`, {
       headers: {
         Authorization: `Bearer ${token}`,
-        "X-Application-Id": otherAppId,
+        "X-Space-Id": otherSpaceId,
       },
     });
     // Strategy returned null (mismatch) → fell through → 401.
     expect(res.status).toBe(401);
 
-    // Silence unused-import warnings — applications import is retained for
+    // Silence unused-import warnings — spaces import is retained for
     // anyone extending the test to cross-check app metadata.
-    void applications;
+    void spaces;
   });
 
   it("rejects a token when the end-user is suspended", async () => {
@@ -354,13 +354,13 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       sub: authUserId,
       actor_type: "end_user",
       end_user_id: endUserId,
-      application_id: applicationId,
+      space_id: spaceId,
       email: "stage3@example.com",
     });
     const res = await app.request(`/api/end-users/${endUserId}`, {
       headers: {
         Authorization: `Bearer ${token}`,
-        "X-Application-Id": applicationId,
+        "X-Space-Id": spaceId,
       },
     });
     // Strategy returns null for non-active end-user → falls through → 401.
@@ -373,10 +373,10 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     const { createClient, updateClient } = await import("../../../services/oauth-admin.ts");
 
     const client = await createClient({
-      level: "application",
+      level: "space",
       name: "Disabled Test Client",
       redirectUris: ["https://example.com/cb"],
-      referencedApplicationId: applicationId,
+      referencedSpaceId: spaceId,
     });
 
     // Mint a token with the azp claim matching the client.
@@ -385,7 +385,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       azp: client.clientId,
       actor_type: "end_user",
       end_user_id: endUserId,
-      application_id: applicationId,
+      space_id: spaceId,
       // The subject under test is the azp/disabled-client check; `/api/runs`
       // is the probe route and enforces `runs:read`.
       scope: "openid runs:read",
@@ -395,7 +395,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     const goodRes = await app.request(`/api/runs`, {
       headers: {
         Authorization: `Bearer ${token}`,
-        "X-Application-Id": applicationId,
+        "X-Space-Id": spaceId,
       },
     });
     expect(goodRes.status).toBe(200);
@@ -407,7 +407,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     const badRes = await app.request(`/api/end-users/${endUserId}`, {
       headers: {
         Authorization: `Bearer ${token}`,
-        "X-Application-Id": applicationId,
+        "X-Space-Id": spaceId,
       },
     });
     expect(badRes.status).toBe(401);
@@ -437,7 +437,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       scope: "openid",
     });
 
-    // Hit an org-scoped route (not app-scoped). Profile route works for any
+    // Hit an org-scoped route (not space-scoped). Profile route works for any
     // authenticated user.
     const res = await app.request("/api/profile", {
       headers: {
@@ -453,7 +453,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     // Sending the token with `X-Org-Id: Y` must NOT grant access to Y —
     // the token's `org_id` claim wins, the header is silently ignored.
     // Invariant: orgId pinned by the auth strategy is authoritative.
-    const { organizationMembers, applications } = await import("@appstrate/db/schema");
+    const { organizationMembers, spaces } = await import("@appstrate/db/schema");
 
     // Make authUserId a member of the original org (X) as admin.
     await db.insert(organizationMembers).values({
@@ -464,7 +464,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
 
     // Create a second org (Y) where the same user is also a member.
     const { id: otherOwnerId } = await createTestUser();
-    const { org: otherOrg, defaultAppId: otherAppId } = await createTestOrg(otherOwnerId, {
+    const { org: otherOrg, defaultSpaceId: otherSpaceId } = await createTestOrg(otherOwnerId, {
       slug: "crossorg",
     });
     await db.insert(organizationMembers).values({
@@ -474,8 +474,8 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     });
     expect(otherOrg.id).not.toBe(orgId);
 
-    // Token scoped to org X. `applications:read` is requested so the token can
-    // reach the guarded `GET /api/applications` probe below (dashboard perms =
+    // Token scoped to org X. `spaces:read` is requested so the token can
+    // reach the guarded `GET /api/spaces` probe below (dashboard perms =
     // requested-scope ∩ role-ceiling; admin's ceiling allows it). The spoof
     // guard under test is orthogonal to the resource scope.
     const token = await mintToken({
@@ -484,12 +484,12 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       org_id: orgId,
       org_role: "admin",
       email: "stage3@example.com",
-      scope: "openid applications:read",
+      scope: "openid spaces:read",
     });
 
     // Send token + X-Org-Id: Y (spoof attempt). Hit an org-scoped route that
     // reads c.get("orgId") so we can observe which org actually resolved.
-    const res = await app.request("/api/applications", {
+    const res = await app.request("/api/spaces", {
       headers: {
         Authorization: `Bearer ${token}`,
         "X-Org-Id": otherOrg.id,
@@ -497,12 +497,12 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { data: Array<{ id: string }> };
-    // Must list applications of org X (token scope), NOT org Y (spoofed header).
+    // Must list spaces of org X (token scope), NOT org Y (spoofed header).
     const ids = body.data.map((a) => a.id);
-    expect(ids).toContain(applicationId);
-    expect(ids).not.toContain(otherAppId);
+    expect(ids).toContain(spaceId);
+    expect(ids).not.toContain(otherSpaceId);
 
-    void applications;
+    void spaces;
   });
 
   it("rejects a dashboard_user token when user is no longer an org member", async () => {
@@ -549,12 +549,12 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     await db.insert(runs).values({
       id: runId,
       orgId,
-      applicationId,
+      spaceId,
       status: "success",
       endUserId: opts.endUserId ?? null,
     });
     const { row } = await createFileFromStream(
-      { orgId, applicationId },
+      { orgId, spaceId },
       runId,
       { userId: null, endUserId: opts.endUserId ?? null },
       null,
@@ -586,7 +586,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     });
     const headers = {
       Authorization: `Bearer ${token}`,
-      "X-Application-Id": applicationId,
+      "X-Space-Id": spaceId,
     };
 
     const list = await app.request("/api/files", { headers });
@@ -620,7 +620,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
     });
     const headers = {
       Authorization: `Bearer ${token}`,
-      "X-Application-Id": applicationId,
+      "X-Space-Id": spaceId,
     };
 
     for (const path of ["/api/files", `/api/files/${docId}`, `/api/files/${docId}/content`]) {
@@ -636,14 +636,14 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
       sub: authUserId,
       actor_type: "end_user",
       end_user_id: endUserId,
-      application_id: applicationId,
+      space_id: spaceId,
       email: "stage3@example.com",
       scope: "openid runs:read files:read",
     });
     const res = await app.request(`/api/files/${docId}`, {
       headers: {
         Authorization: `Bearer ${token}`,
-        "X-Application-Id": applicationId,
+        "X-Space-Id": spaceId,
       },
     });
     expect(res.status).toBe(200);

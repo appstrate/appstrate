@@ -5,7 +5,7 @@ import { schemaHasFileFields } from "@appstrate/core/form";
 import { client, type paths } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
-import { useCurrentApplicationId } from "./use-current-application";
+import { useCurrentSpaceId } from "./use-current-space";
 import { usePackageDetail } from "./use-packages";
 import { useAgentModel } from "./use-models";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
@@ -24,26 +24,26 @@ import type { AgentDetail, ScheduleWireDto, EnrichedSchedule } from "@appstrate/
 
 export function useAllSchedules() {
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   return useQuery({
     // Key pinned to the legacy shape: use-global-run-sync invalidates by the
-    // ["schedules", orgId, applicationId] prefix on SSE events.
-    queryKey: scheduleKeys.list(orgId, applicationId),
+    // ["schedules", orgId, spaceId] prefix on SSE events.
+    queryKey: scheduleKeys.list(orgId, spaceId),
     queryFn: async (): Promise<EnrichedSchedule[]> => {
       const { data } = await client.GET("/api/schedules");
       return data?.data ?? [];
     },
-    enabled: !!orgId && !!applicationId,
+    enabled: !!orgId && !!spaceId,
   });
 }
 
 export function useScheduleById(id: string | undefined) {
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   return useQuery({
     // Key pinned to the legacy shape: use-global-run-sync invalidates
-    // ["schedule", orgId, applicationId, scheduleId] on SSE events.
-    queryKey: scheduleKeys.detail(orgId, applicationId, id),
+    // ["schedule", orgId, spaceId, scheduleId] on SSE events.
+    queryKey: scheduleKeys.detail(orgId, spaceId, id),
     queryFn: async (): Promise<EnrichedSchedule> => {
       const { data } = await client.GET("/api/schedules/{id}", {
         params: { path: { id: id! } },
@@ -51,17 +51,17 @@ export function useScheduleById(id: string | undefined) {
       // Non-2xx throws via the client middleware, so `data` is defined here.
       return data!;
     },
-    enabled: !!id && !!applicationId,
+    enabled: !!id && !!spaceId,
   });
 }
 
 export function useSchedules(packageId: string | undefined) {
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   return useQuery({
     // Key pinned to the legacy shape (under the ["schedules", orgId,
-    // applicationId] prefix invalidated by use-global-run-sync).
-    queryKey: scheduleKeys.listForAgent(orgId, applicationId, packageId),
+    // spaceId] prefix invalidated by use-global-run-sync).
+    queryKey: scheduleKeys.listForAgent(orgId, spaceId, packageId),
     queryFn: async (): Promise<EnrichedSchedule[]> => {
       const { scope, name } = splitPackageRef(packageId!);
       const { data } = await client.GET("/api/agents/{scope}/{name}/schedules", {
@@ -69,7 +69,7 @@ export function useSchedules(packageId: string | undefined) {
       });
       return data?.data ?? [];
     },
-    enabled: !!packageId && !!applicationId,
+    enabled: !!packageId && !!spaceId,
   });
 }
 
@@ -159,7 +159,7 @@ interface ScheduleFormDeps {
    * Full input wrapper (schema + ui_hints + file_constraints + property_order)
    * — the launch surfaces feed this to `<SchemaForm>` so version-pinned input
    * renders with full fidelity, not just the bare schema (#770). It also
-   * carries the per-application layers (`values` + `locked_fields`), so a
+   * carries the per-space layers (`values` + `locked_fields`), so a
    * consumer needing those reads them off this same object rather than a
    * second prop that could drift from it.
    */

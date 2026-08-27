@@ -16,15 +16,9 @@ import {
 } from "@appstrate/db/auth";
 import { getTestApp } from "../helpers/app.ts";
 import { db, truncateAll } from "../helpers/db.ts";
-import {
-  organizations,
-  organizationMembers,
-  user,
-  applications,
-  packages,
-} from "@appstrate/db/schema";
+import { organizations, organizationMembers, user, spaces, packages } from "@appstrate/db/schema";
 import { emitEvent } from "../../src/lib/modules/module-loader.ts";
-import { createDefaultApplication } from "../../src/services/applications.ts";
+import { createDefaultSpace } from "../../src/services/spaces.ts";
 import { provisionDefaultAgentForOrg } from "../../src/services/default-agent.ts";
 
 const app = getTestApp();
@@ -135,7 +129,7 @@ describe("Bootstrap org after-hook (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
     expect(org!.name).toBe("Default");
   });
 
-  it("provisions default application + hello-world agent + emits onOrgCreate", async () => {
+  it("provisions default space + hello-world agent + emits onOrgCreate", async () => {
     // Mirror what `boot.ts` registers in production. The preload already
     // wires this up but we re-register here with a local spy on
     // `onOrgCreate` to assert the event fired.
@@ -144,8 +138,8 @@ describe("Bootstrap org after-hook (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
     setPostBootstrapOrgHook(async ({ orgId, slug, userId, userEmail }) => {
       orgCreateCalls.push({ orgId, userEmail });
       await originalEmit("onOrgCreate", orgId, userEmail);
-      const defaultApp = await createDefaultApplication(orgId, userId);
-      await provisionDefaultAgentForOrg(orgId, slug, userId, defaultApp.id);
+      const defaultSpace = await createDefaultSpace(orgId, userId);
+      await provisionDefaultAgentForOrg(orgId, slug, userId, defaultSpace.id);
     });
 
     setEnv({
@@ -159,11 +153,11 @@ describe("Bootstrap org after-hook (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
     const [org] = await db.select().from(organizations).limit(1);
     expect(org).toBeDefined();
 
-    // Default application created (mirrors POST /api/orgs)
-    const apps = await db.select().from(applications).where(eq(applications.orgId, org!.id));
-    expect(apps).toHaveLength(1);
-    expect(apps[0]!.isDefault).toBe(true);
-    expect(apps[0]!.name).toBe("Default");
+    // Default space created (mirrors POST /api/orgs)
+    const spaceRows = await db.select().from(spaces).where(eq(spaces.orgId, org!.id));
+    expect(spaceRows).toHaveLength(1);
+    expect(spaceRows[0]!.isDefault).toBe(true);
+    expect(spaceRows[0]!.name).toBe("Default");
 
     // hello-world agent provisioned in the org's namespace
     const orgPackages = await db.select().from(packages).where(eq(packages.orgId, org!.id));
@@ -180,9 +174,9 @@ describe("Bootstrap org after-hook (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
 
   it("does NOT bootstrap for non-platform realm signups (OIDC end-user flow)", async () => {
     // Simulate an OIDC end-user signup by overriding the realm resolver
-    // to return the application-level realm string. The bootstrap email
+    // to return the space-level realm string. The bootstrap email
     // would otherwise match — the realm guard is what stops it.
-    setRealmResolver(async () => "end_user:app_test_application_id");
+    setRealmResolver(async () => "end_user:spc_test_space_id");
     try {
       setEnv({
         AUTH_BOOTSTRAP_OWNER_EMAIL: "owner@acme.com",
@@ -195,7 +189,7 @@ describe("Bootstrap org after-hook (AUTH_BOOTSTRAP_OWNER_EMAIL)", () => {
       // User exists with the end-user realm
       const [u] = await db.select().from(user).where(eq(user.email, "owner@acme.com")).limit(1);
       expect(u).toBeDefined();
-      expect(u!.realm).toBe("end_user:app_test_application_id");
+      expect(u!.realm).toBe("end_user:spc_test_space_id");
 
       // No platform org provisioned for them
       const orgCount = await db.select().from(organizations);

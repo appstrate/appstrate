@@ -151,19 +151,19 @@ describe("seedLoggedInProfile", () => {
     }
   });
 
-  it("leaves orgId / applicationId out of config.toml when not supplied", async () => {
+  it("leaves orgId / spaceId out of config.toml when not supplied", async () => {
     const home = useTempConfigHome("appstrate-cli-fixture-seed-");
     await home.setup();
     const keyring = installFakeKeyring();
     try {
       await seedLoggedInProfile("bare");
       // Assert on the file, not on `getProfile`: `readConfig` normalises every
-      // profile to carry `orgId`/`applicationId` keys (undefined when absent),
+      // profile to carry `orgId`/`spaceId` keys (undefined when absent),
       // so a read cannot distinguish "unpinned" from "pinned to nothing".
       const toml = await Bun.file(join(home.dir(), "appstrate", "config.toml")).text();
       expect(toml).toContain("[profile.bare]");
       expect(toml).not.toContain("orgId");
-      expect(toml).not.toContain("applicationId");
+      expect(toml).not.toContain("spaceId");
     } finally {
       keyring.restore();
       await home.teardown();

@@ -286,13 +286,13 @@ describe("runPreflightGates — beforeUsage execution facts", () => {
     await seedRun({
       packageId: "@gates/agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "running",
     });
     await seedRun({
       packageId: "@gates/agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "running",
     });
 

@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Browser E2E tests for agent visibility across apps.
+ * Browser E2E tests for agent visibility across spaces.
  * @tags @critical
  */
 
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 import { createAuthedContext } from "../../fixtures/browser.fixture.ts";
-import { createAgent, createApplication, installPackageInApp } from "../../helpers/seed.ts";
+import { createAgent, createSpace, installPackageInSpace } from "../../helpers/seed.ts";
 import { AgentsPage } from "../../pages/agents-page.ts";
 import { Sidebar } from "../../pages/sidebar.ts";
 import { WebhooksPage } from "../../pages/webhooks-page.ts";
 
 test.describe("Agent visibility in UI", () => {
-  test("Default app shows auto-installed agents on /agents page", async ({
+  test("Default space shows auto-installed agents on /agents page", async ({
     authedPage: page,
     apiClient,
     browserCtx,
@@ -27,7 +27,7 @@ test.describe("Agent visibility in UI", () => {
     await agents.expectAgentVisible(agentName);
   });
 
-  test("Custom app shows only installed agents", async ({
+  test("Custom space shows only installed agents", async ({
     browser,
     apiClient,
     browserCtx,
@@ -39,14 +39,14 @@ test.describe("Agent visibility in UI", () => {
     await createAgent(apiClient, scope, installedAgent);
     await createAgent(apiClient, scope, hiddenAgent);
 
-    const customApp = await createApplication(orgOnlyClient, `UI Custom ${Date.now()}`);
-    await installPackageInApp(orgOnlyClient, customApp.id, `${scope}/${installedAgent}`);
+    const customSpace = await createSpace(orgOnlyClient, `UI Custom ${Date.now()}`);
+    await installPackageInSpace(orgOnlyClient, customSpace.id, `${scope}/${installedAgent}`);
 
     const context = await createAuthedContext(
       browser,
       browserCtx.auth,
       browserCtx.org.orgId,
-      customApp.id,
+      customSpace.id,
     );
     const customPage = await context.newPage();
     const agents = new AgentsPage(customPage);
@@ -56,7 +56,7 @@ test.describe("Agent visibility in UI", () => {
     await context.close();
   });
 
-  test("Switching app via sidebar updates agent list @smoke", async ({
+  test("Switching space via sidebar updates agent list @smoke", async ({
     authedPage: page,
     apiClient,
     browserCtx,
@@ -66,26 +66,26 @@ test.describe("Agent visibility in UI", () => {
     const agentName = `ui-switch-${Date.now()}`;
     await createAgent(apiClient, scope, agentName);
 
-    const customApp = await createApplication(orgOnlyClient, `SwitchApp ${Date.now()}`);
+    const customSpace = await createSpace(orgOnlyClient, `SwitchApp ${Date.now()}`);
 
     const agents = new AgentsPage(page);
     await agents.goto();
     await agents.expectAgentVisible(agentName);
 
     const sidebar = new Sidebar(page);
-    await sidebar.switchApp(customApp.name);
+    await sidebar.switchSpace(customSpace.name);
 
     await agents.expectAgentNotVisible(agentName);
   });
 
-  test("Schedules page loads for current app context", async ({ authedPage: page }) => {
+  test("Schedules page loads for current space context", async ({ authedPage: page }) => {
     await page.goto("/schedules");
     await expect(page.getByRole("heading", { level: 2 }).first()).toBeVisible({
       timeout: 10_000,
     });
   });
 
-  test("Webhooks page shows current app webhooks", async ({ authedPage: page, apiClient }) => {
+  test("Webhooks page shows current space webhooks", async ({ authedPage: page, apiClient }) => {
     const webhookUrl = `https://ui-test-${Date.now()}.example.com/hook`;
     await apiClient.post("/webhooks", {
       level: "org",

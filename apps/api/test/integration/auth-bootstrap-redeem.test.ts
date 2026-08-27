@@ -74,7 +74,7 @@ describe("POST /api/auth/bootstrap/redeem", () => {
     resetRateLimiters();
     await flushRedis();
     // Wire the post-hook so the redeem route has a destination for its
-    // best-effort default-app provisioning. We don't assert on it here
+    // best-effort default-space provisioning. We don't assert on it here
     // (covered in auth-bootstrap-org.test.ts) — we just need it not to
     // be a no-op that hides a regression in the default path.
     setPostBootstrapOrgHook(async () => {});

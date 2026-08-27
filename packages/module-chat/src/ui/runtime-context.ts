@@ -14,7 +14,7 @@
  * THREE contexts, no more:
  *  - `getHeaders` — the OAuth connect card (`oauth-connect-card.tsx`) opens a
  *    card-local SSE stream to `/api/realtime`, and building that URL needs the
- *    caller's `X-Org-Id` / `X-Application-Id`, which only the host knows.
+ *    caller's `X-Org-Id` / `X-Space-Id`, which only the host knows.
  *  - `selectConversation` — navigation, see below.
  *  - `ChatHost` — ONE bag of host services, memoized by `ChatPage` from its
  *    props. Deliberately not one context per service: every member is

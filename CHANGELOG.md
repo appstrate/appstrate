@@ -603,7 +603,7 @@ latest, sidecar latest}` is byte-for-byte the same input as the supported
   recorded when that repair could stop shipping.
 
   **If the check fires, the API will not start.** Apply
-  `scripts/migration/0003-oauth-resources-watermark-drift.sql` to the database
+  `scripts/migration/0004-oauth-resources-watermark-drift.sql` to the database
   and restart; the boot error names the file. The repair is idempotent and a
   few seconds of additive DDL.
 

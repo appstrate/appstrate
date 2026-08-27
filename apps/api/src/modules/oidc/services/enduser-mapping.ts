@@ -3,17 +3,17 @@
 /**
  * End-user mapping service.
  *
- * When an end-user authenticates via the OIDC flow for a specific application,
- * this service maps the global Better Auth `user` identity to an application-
+ * When an end-user authenticates via the OIDC flow for a specific space,
+ * this service maps the global Better Auth `user` identity to a space-
  * scoped `end_users` row — creating both the `end_users` record and the
  * module-owned `oidc_end_user_profiles` shadow row on first sight.
  *
  * Resolution order (mirrors the Google Accounts → per-service profile model):
  *   1. Join `end_users ⋈ oidc_end_user_profiles` on `authUserId` within the
- *      target `applicationId`. If a profile already links this auth identity
- *      to an end-user in this app, return it.
+ *      target `spaceId`. If a profile already links this auth identity
+ *      to an end-user in this space, return it.
  *   2. If the auth identity's email is strictly verified, look for an API-
- *      created `end_users` row in this app with the same email AND no profile
+ *      created `end_users` row in this space with the same email AND no profile
  *      row yet (or a profile row with `authUserId IS NULL`). If found, link it.
  *   3. Otherwise create a fresh `end_users` row + companion profile row.
  *
@@ -29,45 +29,45 @@
 
 import { eq, and, isNull, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { endUsers, applications } from "@appstrate/db/schema";
+import { endUsers, spaces } from "@appstrate/db/schema";
 import { logger } from "../../../lib/logger.ts";
 import { prefixedId } from "../../../lib/ids.ts";
-import type { AppContextRow } from "../../../middleware/app-context.ts";
+import type { SpaceContextRow } from "../../../middleware/space-context.ts";
 import type { AuthIdentity } from "../auth/types.ts";
 import { oidcEndUserProfiles } from "@appstrate/db/schema";
 
 /**
- * Load an application row by id — shared helper for callers that need the
- * full `AppContextRow` shape outside the Hono middleware chain (e.g. the
+ * Load a space row by id — shared helper for callers that need the
+ * full `SpaceContextRow` shape outside the Hono middleware chain (e.g. the
  * `customAccessTokenClaims` closure in `auth/plugins.ts`, which only has
- * the `metadata.applicationId` string at token-mint time). Returns `null`
- * if the application has been deleted between client registration and
+ * the `metadata.spaceId` string at token-mint time). Returns `null`
+ * if the space has been deleted between client registration and
  * token mint.
  */
-export async function loadAppById(applicationId: string): Promise<AppContextRow | null> {
+export async function loadSpaceById(spaceId: string): Promise<SpaceContextRow | null> {
   const [row] = await db
     .select({
-      id: applications.id,
-      orgId: applications.orgId,
-      isDefault: applications.isDefault,
+      id: spaces.id,
+      orgId: spaces.orgId,
+      isDefault: spaces.isDefault,
     })
-    .from(applications)
-    .where(eq(applications.id, applicationId))
+    .from(spaces)
+    .where(eq(spaces.id, spaceId))
     .limit(1);
   return row ?? null;
 }
 
-async function requireAppById(applicationId: string): Promise<AppContextRow> {
-  const app = await loadAppById(applicationId);
-  if (!app) {
-    throw new Error(`OIDC: application '${applicationId}' not found`);
+async function requireSpaceById(spaceId: string): Promise<SpaceContextRow> {
+  const space = await loadSpaceById(spaceId);
+  if (!space) {
+    throw new Error(`OIDC: space '${spaceId}' not found`);
   }
-  return app;
+  return space;
 }
 
 interface ResolvedEndUser {
   endUserId: string;
-  applicationId: string;
+  spaceId: string;
   orgId: string;
   email: string | null;
   name: string | null;
@@ -75,52 +75,52 @@ interface ResolvedEndUser {
 
 /**
  * Thrown when the OIDC flow cannot safely create / adopt an end-user because
- * a row with the same email already exists in the application and the auth
+ * a row with the same email already exists in the space and the auth
  * identity has not strictly verified ownership of that email. Bubbling up an
  * explicit error (rather than silently adopting or raw-crashing on the unique
  * index) prevents account-takeover via unverified login.
  */
 export class UnverifiedEmailConflictError extends Error {
-  readonly applicationId: string;
+  readonly spaceId: string;
   readonly email: string;
-  constructor(applicationId: string, email: string) {
+  constructor(spaceId: string, email: string) {
     super(
-      `OIDC: an end-user with email '${email}' already exists in application '${applicationId}' ` +
+      `OIDC: an end-user with email '${email}' already exists in space '${spaceId}' ` +
         `and the authenticating identity has not verified the email address. Refusing to link.`,
     );
     this.name = "UnverifiedEmailConflictError";
-    this.applicationId = applicationId;
+    this.spaceId = spaceId;
     this.email = email;
   }
 }
 
 /** Thrown by `resolveOrCreateEndUser` step 3 when the client's `allowSignup` is `false`. */
-export class AppSignupClosedError extends Error {
-  readonly applicationId: string;
+export class SpaceSignupClosedError extends Error {
+  readonly spaceId: string;
   readonly authUserId: string;
-  constructor(applicationId: string, authUserId: string) {
-    super(`OIDC: signup is disabled for application '${applicationId}'`);
-    this.name = "AppSignupClosedError";
-    this.applicationId = applicationId;
+  constructor(spaceId: string, authUserId: string) {
+    super(`OIDC: signup is disabled for space '${spaceId}'`);
+    this.name = "SpaceSignupClosedError";
+    this.spaceId = spaceId;
     this.authUserId = authUserId;
   }
 }
 
 /**
- * Resolve (or create) the application-scoped end-user for an authenticated
+ * Resolve (or create) the space-scoped end-user for an authenticated
  * Better Auth identity.
  *
- * Accepts either a fully-loaded `AppContextRow` (preferred — callers on the
- * hot path like `customAccessTokenClaims` in `auth/plugins.ts` load the app
- * once per token mint and pass it through) or a bare `applicationId` string
+ * Accepts either a fully-loaded `SpaceContextRow` (preferred — callers on the
+ * hot path like `customAccessTokenClaims` in `auth/plugins.ts` load the space
+ * once per token mint and pass it through) or a bare `spaceId` string
  * (kept for the integration tests and any caller that hasn't threaded the
- * middleware-resolved `app` through yet — the function loads the row itself
- * and throws a clear error if the application is missing).
+ * middleware-resolved `space` through yet — the function loads the row itself
+ * and throws a clear error if the space is missing).
  *
  * ## Race-safety invariant
  *
  * Two concurrent token-mint closures for the same `authUser.id` +
- * `applicationId` are race-safe without a top-level transaction because
+ * `spaceId` are race-safe without a top-level transaction because
  * each step is individually atomic:
  *
  *  1. `findLinkedEndUser` — single SELECT. Idempotent.
@@ -139,13 +139,13 @@ export class AppSignupClosedError extends Error {
  */
 export async function resolveOrCreateEndUser(
   authUser: AuthIdentity,
-  appOrId: AppContextRow | string,
+  spaceOrId: SpaceContextRow | string,
   policy: { allowSignup: boolean },
 ): Promise<ResolvedEndUser> {
-  const app = typeof appOrId === "string" ? await requireAppById(appOrId) : appOrId;
-  const applicationId = app.id;
+  const space = typeof spaceOrId === "string" ? await requireSpaceById(spaceOrId) : spaceOrId;
+  const spaceId = space.id;
   // Step 1: already linked via oidc_end_user_profiles → return existing end-user.
-  const linked = await findLinkedEndUser(authUser.id, applicationId);
+  const linked = await findLinkedEndUser(authUser.id, spaceId);
   if (linked) return linked;
 
   // Step 2: API-created end-user with matching email, not yet linked to any auth identity.
@@ -153,55 +153,50 @@ export async function resolveOrCreateEndUser(
   // SMTP verification is disabled or the auth provider reports an unverified address.
   const email = authUser.email ? authUser.email.toLowerCase().trim() : null;
   if (email && authUser.emailVerified === true) {
-    const adopted = await adoptEndUserByEmail(authUser, applicationId);
+    const adopted = await adoptEndUserByEmail(authUser, spaceId);
     if (adopted) return adopted;
   } else if (email) {
     // Email is known but not strictly verified — if a row with this email already
-    // exists in the app, we MUST NOT silently create a duplicate or adopt.
+    // exists in the space, we MUST NOT silently create a duplicate or adopt.
     // Refuse and let the caller surface a "verify your email" prompt.
     const clash = await db
       .select({ id: endUsers.id })
       .from(endUsers)
-      .where(and(eq(endUsers.applicationId, applicationId), eq(endUsers.email, email)))
+      .where(and(eq(endUsers.spaceId, spaceId), eq(endUsers.email, email)))
       .limit(1);
     if (clash.length > 0) {
-      throw new UnverifiedEmailConflictError(applicationId, email);
+      throw new UnverifiedEmailConflictError(spaceId, email);
     }
   }
 
   // Step 3: signup gate. Closed clients reject fresh creation — the admin
   // must pre-create the end-user via the headless API.
-  if (!policy.allowSignup) throw new AppSignupClosedError(applicationId, authUser.id);
-  return createEndUser(authUser, app);
+  if (!policy.allowSignup) throw new SpaceSignupClosedError(spaceId, authUser.id);
+  return createEndUser(authUser, space);
 }
 
 async function findLinkedEndUser(
   authUserId: string,
-  applicationId: string,
+  spaceId: string,
 ): Promise<ResolvedEndUser | null> {
   const [row] = await db
     .select({
       endUserId: endUsers.id,
-      applicationId: endUsers.applicationId,
+      spaceId: endUsers.spaceId,
       orgId: endUsers.orgId,
       email: endUsers.email,
       name: endUsers.name,
     })
     .from(oidcEndUserProfiles)
     .innerJoin(endUsers, eq(endUsers.id, oidcEndUserProfiles.endUserId))
-    .where(
-      and(
-        eq(oidcEndUserProfiles.authUserId, authUserId),
-        eq(endUsers.applicationId, applicationId),
-      ),
-    )
+    .where(and(eq(oidcEndUserProfiles.authUserId, authUserId), eq(endUsers.spaceId, spaceId)))
     .limit(1);
   return row ?? null;
 }
 
 async function adoptEndUserByEmail(
   authUser: AuthIdentity,
-  applicationId: string,
+  spaceId: string,
 ): Promise<ResolvedEndUser | null> {
   const email = authUser.email.toLowerCase().trim();
 
@@ -209,7 +204,7 @@ async function adoptEndUserByEmail(
   const [candidate] = await db
     .select({
       endUserId: endUsers.id,
-      applicationId: endUsers.applicationId,
+      spaceId: endUsers.spaceId,
       orgId: endUsers.orgId,
       email: endUsers.email,
       name: endUsers.name,
@@ -219,7 +214,7 @@ async function adoptEndUserByEmail(
     .leftJoin(oidcEndUserProfiles, eq(oidcEndUserProfiles.endUserId, endUsers.id))
     .where(
       and(
-        eq(endUsers.applicationId, applicationId),
+        eq(endUsers.spaceId, spaceId),
         eq(endUsers.email, email),
         // Not already linked to a DIFFERENT auth identity.
         // (Either no profile row at all, or profile row with null authUserId.)
@@ -232,7 +227,7 @@ async function adoptEndUserByEmail(
 
   const result = {
     endUserId: candidate.endUserId,
-    applicationId: candidate.applicationId,
+    spaceId: candidate.spaceId,
     orgId: candidate.orgId,
     email: candidate.email,
     name: candidate.name,
@@ -244,13 +239,13 @@ async function adoptEndUserByEmail(
   // Otherwise upsert the profile row with this auth identity.
   const linked = await linkProfileAtomic(candidate.endUserId, authUser.id);
   // Lost the race — re-fetch via step 1.
-  if (!linked) return findLinkedEndUser(authUser.id, applicationId);
+  if (!linked) return findLinkedEndUser(authUser.id, spaceId);
 
   logger.info("Linked existing end-user to OIDC auth identity", {
     module: "oidc",
     endUserId: candidate.endUserId,
     authUserId: authUser.id,
-    applicationId,
+    spaceId,
   });
   return result;
 }
@@ -301,8 +296,11 @@ async function linkProfileAtomic(endUserId: string, authUserId: string): Promise
  * other transaction is now visible and the resolution completes without
  * a duplicate.
  */
-async function createEndUser(authUser: AuthIdentity, app: AppContextRow): Promise<ResolvedEndUser> {
-  const applicationId = app.id;
+async function createEndUser(
+  authUser: AuthIdentity,
+  space: SpaceContextRow,
+): Promise<ResolvedEndUser> {
+  const spaceId = space.id;
   const endUserId = prefixedId("eu");
   const email = authUser.email ? authUser.email.toLowerCase().trim() : null;
   const now = new Date();
@@ -313,8 +311,8 @@ async function createEndUser(authUser: AuthIdentity, app: AppContextRow): Promis
         .insert(endUsers)
         .values({
           id: endUserId,
-          applicationId,
-          orgId: app.orgId,
+          spaceId,
+          orgId: space.orgId,
           externalId: email, // OIDC-created end-users use email as externalId by default
           email,
           name: authUser.name ?? email,
@@ -323,7 +321,7 @@ async function createEndUser(authUser: AuthIdentity, app: AppContextRow): Promis
         })
         .returning({
           endUserId: endUsers.id,
-          applicationId: endUsers.applicationId,
+          spaceId: endUsers.spaceId,
           orgId: endUsers.orgId,
           email: endUsers.email,
           name: endUsers.name,
@@ -345,7 +343,7 @@ async function createEndUser(authUser: AuthIdentity, app: AppContextRow): Promis
       module: "oidc",
       endUserId,
       authUserId: authUser.id,
-      applicationId,
+      spaceId,
     });
     return row;
   } catch (err) {
@@ -354,10 +352,10 @@ async function createEndUser(authUser: AuthIdentity, app: AppContextRow): Promis
     // row both absent), so we retry against the committed state of the
     // winning transaction.
     if (isUniqueViolation(err)) {
-      const linked = await findLinkedEndUser(authUser.id, applicationId);
+      const linked = await findLinkedEndUser(authUser.id, spaceId);
       if (linked) return linked;
       if (authUser.email && authUser.emailVerified === true) {
-        const adopted = await adoptEndUserByEmail(authUser, applicationId);
+        const adopted = await adoptEndUserByEmail(authUser, spaceId);
         if (adopted) return adopted;
       }
     }
@@ -371,7 +369,7 @@ function isUniqueViolation(err: unknown): boolean {
 
 /**
  * Light-weight lookup used by the auth strategy when the incoming JWT already
- * carries `endUserId` + `applicationId` claims — skip the full resolve path and
+ * carries `endUserId` + `spaceId` claims — skip the full resolve path and
  * just pull the owning org.
  */
 export async function lookupEndUser(
@@ -380,7 +378,7 @@ export async function lookupEndUser(
   const [row] = await db
     .select({
       endUserId: endUsers.id,
-      applicationId: endUsers.applicationId,
+      spaceId: endUsers.spaceId,
       orgId: endUsers.orgId,
       email: endUsers.email,
       name: endUsers.name,

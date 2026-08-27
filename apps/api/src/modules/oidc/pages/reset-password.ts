@@ -17,7 +17,7 @@
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
 import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
-import type { ResolvedAppBranding } from "../services/branding.ts";
+import type { ResolvedSpaceBranding } from "../services/branding.ts";
 
 interface ResetPasswordPageProps {
   queryString: string;
@@ -25,14 +25,14 @@ interface ResetPasswordPageProps {
   token: string;
   error?: string;
   csrfToken: string;
-  branding: ResolvedAppBranding;
+  branding: ResolvedSpaceBranding;
   /** True after a successful POST — renders a "password updated" confirmation. */
   success?: boolean;
 }
 
 interface InvalidTokenPageProps {
   queryString: string;
-  branding: ResolvedAppBranding;
+  branding: ResolvedSpaceBranding;
 }
 
 /** Dedicated screen when the verification link is missing/expired. */

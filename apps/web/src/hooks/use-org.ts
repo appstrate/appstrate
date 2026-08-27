@@ -5,7 +5,7 @@ import { useStore } from "zustand";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { client } from "../api/client";
 import { orgStore } from "../stores/org-store";
-import { appStore } from "../stores/app-store";
+import { spaceStore } from "../stores/space-store";
 import { useAutoSelect } from "./use-auto-select";
 import { orgKeys } from "../lib/query-keys";
 
@@ -74,8 +74,8 @@ export function useOrg() {
     (orgId: string) => {
       if (orgId === orgStore.getState().id) return;
       orgStore.getState().setId(orgId);
-      // Reset application selection when org changes
-      appStore.getState().setId(null);
+      // Reset space selection when org changes
+      spaceStore.getState().setId(null);
       // Clear all cached data since it is org-scoped
       queryClient.removeQueries({ predicate: (q) => q.queryKey[0] !== "orgs" });
     },

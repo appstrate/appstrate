@@ -337,40 +337,40 @@ describe("apiFetchRaw — X-Org-Id header injection", () => {
   });
 });
 
-describe("apiFetchRaw — X-Application-Id header injection", () => {
-  it("forwards profile.applicationId as X-Application-Id when set", async () => {
+describe("apiFetchRaw — X-Space-Id header injection", () => {
+  it("forwards profile.spaceId as X-Space-Id when set", async () => {
     await seedLoggedInProfile("default", {
       orgId: "org_42",
-      applicationId: "app_7",
+      spaceId: "spc_7",
       tokens: { accessToken: "tok", expiresAt: Date.now() + 5 * 60 * 1000, refreshToken: "r" },
     });
-    let capturedApp: string | undefined;
+    let capturedSpace: string | undefined;
     let capturedOrg: string | undefined;
     installFetch(async (_url, init) => {
       const h = init?.headers as Record<string, string>;
-      capturedApp = h["X-Application-Id"];
+      capturedSpace = h["X-Space-Id"];
       capturedOrg = h["X-Org-Id"];
       return jsonResponse(200, {});
     });
     await apiFetchRaw("default", "/api/data");
     // Both headers sent when both are pinned — the common agent recipe path.
-    expect(capturedApp).toBe("app_7");
+    expect(capturedSpace).toBe("spc_7");
     expect(capturedOrg).toBe("org_42");
   });
 
-  it("does NOT send X-Application-Id when profile.applicationId is unset", async () => {
+  it("does NOT send X-Space-Id when profile.spaceId is unset", async () => {
     await seedLoggedInProfile("default", {
       orgId: "org_42",
       tokens: { accessToken: "tok", expiresAt: Date.now() + 5 * 60 * 1000, refreshToken: "r" },
     });
-    let sawAppHeader = true;
+    let sawSpaceHeader = true;
     installFetch(async (_url, init) => {
       const h = init?.headers as Record<string, string>;
-      sawAppHeader = "X-Application-Id" in h;
+      sawSpaceHeader = "X-Space-Id" in h;
       return jsonResponse(200, {});
     });
     await apiFetchRaw("default", "/api/data");
-    expect(sawAppHeader).toBe(false);
+    expect(sawSpaceHeader).toBe(false);
   });
 });
 

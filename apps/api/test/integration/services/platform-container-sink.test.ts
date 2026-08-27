@@ -241,7 +241,7 @@ async function seedRunWithSink(input: {
     id: runId,
     packageId: input.packageId,
     orgId: input.ctx.orgId,
-    applicationId: input.ctx.defaultAppId,
+    spaceId: input.ctx.defaultSpaceId,
     status: "pending",
     runOrigin: "platform",
     sinkSecretEncrypted: encrypt(input.secret),
@@ -432,7 +432,7 @@ describe("executeAgentInBackground — server-side finalize synthesis", () => {
     const execInput: ExecuteAgentInBackgroundInput = {
       runId,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       agent: buildAgent(pkg.id),
       context: buildContext(runId),
       plan,

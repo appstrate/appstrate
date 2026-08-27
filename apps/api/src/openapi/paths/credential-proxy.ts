@@ -32,10 +32,10 @@ const proxySharedDescription =
 
 const proxyParameters = [
   {
-    name: "X-Application-Id",
+    name: "X-Space-Id",
     in: "header",
     required: true,
-    description: "Application id (app_…) the API key is scoped to.",
+    description: "Space id (spc_…) the API key is scoped to.",
     schema: { type: "string" },
   },
   {
@@ -127,8 +127,8 @@ const proxyParameters = [
     description:
       "Optional explicit connection UUID. When set, the proxy narrows to that connection " +
       "after validating it belongs to the caller (own user / end-user connection, or a " +
-      "shared connection in the request's application). When absent the route falls back to the " +
-      "implicit default chain (end-user default → app default → user default). Mismatched " +
+      "shared connection in the request's space). When absent the route falls back to the " +
+      "implicit default chain (end-user default → space default → user default). Mismatched " +
       "or unknown ids surface as `404 — no credentials`, identical to the implicit-default path.",
     schema: { type: "string", format: "uuid" },
   },

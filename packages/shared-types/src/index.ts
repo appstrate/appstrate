@@ -74,7 +74,7 @@ export interface RunWireDto {
   endUserId: string | null;
   apiKeyId: string | null;
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   scheduleId: string | null;
   status: _RunStatus;
   input: unknown;
@@ -323,7 +323,7 @@ export interface ScheduleWireDto {
   userId: string | null;
   endUserId: string | null;
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   name: string | null;
   enabled: boolean;
   cron_expression: string;
@@ -449,15 +449,15 @@ export interface MeConnectionEntry {
   /** Admin/owner sharing toggle (per-org). */
   shared_with_org: boolean;
   /**
-   * Number of installed agents in this connection's application that
+   * Number of installed agents in this connection's space that
    * declare this integration in their dependencies. Used by the UI to
    * surface "reused by N agents" so members understand that the connection
    * is shared across the org's agents rather than per-agent.
    */
   reused_by_agents: number;
-  /** Where this connection lives (the connection is keyed per-app). */
+  /** Where this connection lives (the connection is keyed per-space). */
   org: { id: string; name: string };
-  application: { id: string; name: string };
+  space: { id: string; name: string };
 }
 
 export interface MeConnectionSourceGroup {
@@ -528,7 +528,7 @@ export interface AgentDetail {
     integrations: AgentIntegrationEntry[];
   };
   /**
-   * The agent's single parameter schema plus the per-application layers the
+   * The agent's single parameter schema plus the per-space layers the
    * launch form needs: `values` are the editor's stored defaults (layer 2 of
    * the input resolution) and `locked_fields` the fields it froze — not asked
    * at launch, and refused if a caller sets them.
@@ -910,14 +910,14 @@ export interface ApiKeyInfo {
   createdAt: string;
 }
 
-// --- Application Types ---
+// --- Space Types ---
 
 /** Mirrored by an OpenAPI response schema and reached only by name — see
  * `OrganizationMember` above and `knip.config.ts`.
  *
  * @openapiMirror
  */
-export interface ApplicationInfo {
+export interface SpaceInfo {
   id: string;
   name: string;
   isDefault: boolean;
@@ -947,29 +947,29 @@ export interface InstalledPackage {
 }
 
 /**
- * Per-application resolved run-config returned by
- * `GET /api/applications/{applicationId}/packages/{scope}/{name}/run-config`.
- * Single source of truth for both the dashboard's per-app agent run and
+ * Per-space resolved run-config returned by
+ * `GET /api/spaces/{spaceId}/packages/{scope}/{name}/run-config`.
+ * Single source of truth for both the dashboard's per-space agent run and
  * the CLI's `appstrate run @scope/agent` invocation — keeping them in
  * lockstep prevents UI ↔ CLI drift on model / proxy / version pin.
  *
- * `input` carries the per-application stored input layer, because
+ * `input` carries the per-space stored input layer, because
  * `appstrate run @scope/agent --local` fetches the bundle and executes it on
  * the caller's machine: there is no server-side resolution on that path, so
  * without these members the local run would apply author defaults only and
  * silently ignore both the editor's values and its locks. Layers 3-4
  * (schedule values, caller input) stay server-owned — only what
- * `application_packages` stores is published here.
+ * `space_packages` stores is published here.
  */
 export interface ResolvedRunConfig {
   /** Optional for compatibility with older servers; current API always emits it. */
   generation?: ModelGenerationSettings | null;
   modelId: string | null;
   proxyId: string | null;
-  /** Pinned semver label (`1.2.3`), or null when the app uses the floating dist-tag. */
+  /** Pinned semver label (`1.2.3`), or null when the space uses the floating dist-tag. */
   version_pin: string | null;
   /**
-   * `application_packages.input_settings` — layer 2 of the input resolution
+   * `space_packages.input_settings` — layer 2 of the input resolution
    * (`apps/api/src/services/input-resolution.ts`), on the wire under the same
    * `{ values, locked_fields }` pair `PUT /api/agents/{scope}/{name}/input-settings`
    * reads and writes.
@@ -989,7 +989,7 @@ export interface ResolvedRunConfig {
 export interface EndUserInfo {
   id: string;
   object: "end_user";
-  applicationId: string;
+  spaceId: string;
   name: string | null;
   email: string | null;
   externalId: string | null;
@@ -998,7 +998,7 @@ export interface EndUserInfo {
   updatedAt: string;
 }
 
-// --- OIDC Module — per-application auth config view types ---
+// --- OIDC Module — per-space auth config view types ---
 //
 // These OIDC-module-owned wire types live in ./oidc.ts (the frontend cannot
 // cross the module boundary to import from the API). Re-exported here so

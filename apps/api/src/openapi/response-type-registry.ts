@@ -104,14 +104,14 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
   },
   { specSchemaName: "ApiKeyInfo", sharedTypeName: "ApiKeyInfo", description: "ApiKeyInfo" },
   {
-    specSchemaName: "ApplicationObject",
-    sharedTypeName: "ApplicationInfo",
-    description: "ApplicationObject ↔ ApplicationInfo",
+    specSchemaName: "SpaceObject",
+    sharedTypeName: "SpaceInfo",
+    description: "SpaceObject ↔ SpaceInfo",
   },
   {
-    specSchemaName: "ApplicationPackage",
+    specSchemaName: "SpacePackage",
     sharedTypeName: "InstalledPackage",
-    description: "ApplicationPackage ↔ InstalledPackage",
+    description: "SpacePackage ↔ InstalledPackage",
   },
   {
     specSchemaName: "IntegrationPin",

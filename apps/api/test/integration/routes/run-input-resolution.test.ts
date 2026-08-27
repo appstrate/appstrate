@@ -18,7 +18,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedSchedule } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import { createApiKeyCredential } from "../../../src/services/model-providers/credentials.ts";
 import { createOrgModel, setDefaultModel } from "../../../src/services/org-models.ts";
 import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
@@ -33,7 +33,7 @@ const app = getTestApp();
 const AGENT_ID = "@inputorg/layered-agent";
 
 /**
- * `tone` carries an author default, `folder` is overridden per application,
+ * `tone` carries an author default, `folder` is overridden per space,
  * `subject` is required with no default — the three shapes the four layers
  * have to tell apart.
  */
@@ -77,7 +77,7 @@ describe("run input resolution — author / editor / schedule / caller layers", 
       },
       draftContent: "Write a {{tone}} message about {{subject}}.",
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT_ID);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT_ID);
 
     const credentialId = await createApiKeyCredential({
       orgId: ctx.orgId,
@@ -96,7 +96,7 @@ describe("run input resolution — author / editor / schedule / caller layers", 
     await setDefaultModel(ctx.orgId, modelDbId);
   }
 
-  /** Write the per-application input settings through the real route. */
+  /** Write the per-space input settings through the real route. */
   async function putInputSettings(body: {
     values?: Record<string, unknown>;
     locked_fields?: string[];
@@ -175,7 +175,7 @@ describe("run input resolution — author / editor / schedule / caller layers", 
     const schedule = await seedSchedule({
       packageId: AGENT_ID,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       input: { folder: "scheduled", subject: "weekly digest" },
     });
@@ -185,7 +185,7 @@ describe("run input resolution — author / editor / schedule / caller layers", 
       AGENT_ID,
       { type: "user", id: ctx.user.id },
       ctx.orgId,
-      ctx.defaultAppId,
+      ctx.defaultSpaceId,
       { folder: "scheduled", subject: "weekly digest" },
       { versionOverride: "draft" },
     );
@@ -207,7 +207,7 @@ describe("run input resolution — author / editor / schedule / caller layers", 
     const schedule = await seedSchedule({
       packageId: AGENT_ID,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       input: { folder: "scheduled", subject: "weekly digest" },
     });
@@ -217,7 +217,7 @@ describe("run input resolution — author / editor / schedule / caller layers", 
       AGENT_ID,
       { type: "user", id: ctx.user.id },
       ctx.orgId,
-      ctx.defaultAppId,
+      ctx.defaultSpaceId,
       { folder: "scheduled", subject: "weekly digest" },
       { versionOverride: "draft" },
     );

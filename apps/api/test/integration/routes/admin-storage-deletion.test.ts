@@ -4,7 +4,7 @@
  * Guard contract of the platform-operator storage-deletion outbox routes.
  *
  * The listing is instance-global — it returns the bucket + in-bucket key (which
- * encodes the owning application id and the stored filename) of objects
+ * encodes the owning space id and the stored filename) of objects
  * belonging to EVERY organization. So the only thing standing between an
  * arbitrary authenticated principal and a cross-org filename dump is
  * `requirePlatformAdmin`, and these tests pin its three independent
@@ -59,7 +59,7 @@ const oidcLikeStrategy: AuthStrategy = {
       orgSlug: currentCtx.org.slug,
       orgRole: "owner",
       authMethod: "oauth2-dashboard",
-      applicationId: currentCtx.defaultAppId,
+      spaceId: currentCtx.defaultSpaceId,
       // Deliberately generous: the point is that NO scope set substitutes for
       // an authentic platform session on this surface.
       permissions: ["org:read", "runs:read", "files:read", "files:delete"],
@@ -131,7 +131,7 @@ describe("GET/POST /api/admin/storage-deletion-jobs — platform operator guard"
     const ctx = currentCtx!;
     const key = await seedApiKey({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       createdBy: ctx.user.id,
       scopes: ["runs:read"],
     });
@@ -142,12 +142,12 @@ describe("GET/POST /api/admin/storage-deletion-jobs — platform operator guard"
   });
 
   it("refuses a session whose realm is not `platform`, allowlisted email or not", async () => {
-    // An end-user of a third-party application lives in the SAME Better Auth
+    // An end-user of a third-party space lives in the SAME Better Auth
     // user table and declares its own email at signup — so an allowlisted
     // address proves nothing without the realm. The realm the guard reads is
     // the one denormalized onto the SESSION row at creation time.
     const ctx = currentCtx!;
-    const foreignRealm = `app:${ctx.defaultAppId}`;
+    const foreignRealm = `space:${ctx.defaultSpaceId}`;
     const lookalike = await createTestUser({ email: "operator-lookalike@test.com" });
     await addOrgMember(ctx.orgId, lookalike.id, "owner");
     await db.update(userTable).set({ realm: foreignRealm }).where(eq(userTable.id, lookalike.id));

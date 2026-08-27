@@ -7,7 +7,7 @@
  *
  * Consumed by the `/api/credential-proxy/proxy` public endpoint, used
  * by external runners (CLI, GitHub Action, third-party agents) to
- * reach the application's integrations from outside Appstrate. The caller
+ * reach the space's integrations from outside Appstrate. The caller
  * authenticates via an API key scoped with `credential-proxy:call`.
  *
  * Credentials are resolved from `integration_connections` (the same
@@ -22,7 +22,7 @@
  * The module deliberately does NOT implement rate-limiting, authz, or
  * audit logging — those are the caller's responsibility. This function
  * assumes it has already been authorised to issue a call against
- * (applicationId, integrationId) and focuses purely on the mechanics.
+ * (spaceId, integrationId) and focuses purely on the mechanics.
  */
 
 import {
@@ -65,8 +65,8 @@ interface CookieJarAdapter {
 }
 
 interface ProxyCallInput {
-  /** Application that owns the credentials. */
-  applicationId: string;
+  /** Space that owns the credentials. */
+  spaceId: string;
   /**
    * Actor whose `integration_connections` row is decrypted. End-user
    * impersonation (`Appstrate-User`) yields an `end_user` actor; dashboard
@@ -239,7 +239,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   try {
     const result = await resolveIntegrationProxyCredentials({
       integrationId: input.integrationId,
-      applicationId: input.applicationId,
+      spaceId: input.spaceId,
       actor: input.actor,
       ...(input.connectionId ? { connectionId: input.connectionId } : {}),
     });
@@ -454,7 +454,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     try {
       const refreshedResult = await forceRefreshIntegrationProxyCredentials({
         integrationId: input.integrationId,
-        applicationId: input.applicationId,
+        spaceId: input.spaceId,
         actor: input.actor,
         ...(input.connectionId ? { connectionId: input.connectionId } : {}),
       });
@@ -504,7 +504,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     try {
       await forceRefreshIntegrationProxyCredentials({
         integrationId: input.integrationId,
-        applicationId: input.applicationId,
+        spaceId: input.spaceId,
         actor: input.actor,
         ...(input.connectionId ? { connectionId: input.connectionId } : {}),
       });

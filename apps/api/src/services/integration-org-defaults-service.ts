@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Org-wide default connection per (application, integration) — admin CRUD +
+ * Org-wide default connection per (space, integration) — admin CRUD +
  * the resolver-facing aggregator.
  *
  * The default is the cross-agent governance baseline: one row covers every
@@ -11,7 +11,7 @@
  * cascade in `integration-connection-resolver.ts`).
  *
  * Same target validation as admin pins (`validatePinTarget` with
- * `requireShared`): the connection must exist, belong to this application,
+ * `requireShared`): the connection must exist, belong to this space,
  * reference this integration, and be `sharedWithOrg = true` — an admin
  * can't coerce a member's personal connection.
  */
@@ -20,7 +20,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { integrationConnections, integrationOrgDefaults } from "@appstrate/db/schema";
 import type { IntegrationOrgDefault } from "@appstrate/shared-types";
-import type { AppScope } from "../lib/scope.ts";
+import type { SpaceScope } from "../lib/scope.ts";
 import { validatePinTarget } from "./integration-pins-service.ts";
 
 /** Identical wire shape to {@link IntegrationOrgDefault}; aliased for the canonical pattern (cf. `PinSummary`). */
@@ -32,9 +32,9 @@ interface UpsertOrgDefaultInput {
   createdBy: string | null;
 }
 
-/** The org default for (application, integration), or null when unset. */
+/** The org default for (space, integration), or null when unset. */
 export async function getOrgDefault(
-  scope: AppScope,
+  scope: SpaceScope,
   integrationId: string,
 ): Promise<OrgDefaultSummary | null> {
   const [row] = await db
@@ -52,7 +52,7 @@ export async function getOrgDefault(
     )
     .where(
       and(
-        eq(integrationOrgDefaults.applicationId, scope.applicationId),
+        eq(integrationOrgDefaults.spaceId, scope.spaceId),
         eq(integrationOrgDefaults.integrationId, integrationId),
       ),
     )
@@ -69,11 +69,11 @@ export async function getOrgDefault(
 }
 
 /**
- * Resolver-facing map for one application: integrationId → {connectionId,
+ * Resolver-facing map for one space: integrationId → {connectionId,
  * enforce}. Loaded alongside pins in `resolveConnectionsForRun`.
  */
 export async function listOrgDefaultsForResolver(
-  applicationId: string,
+  spaceId: string,
 ): Promise<Record<string, { connectionId: string; enforce: boolean }>> {
   const rows = await db
     .select({
@@ -82,15 +82,15 @@ export async function listOrgDefaultsForResolver(
       enforce: integrationOrgDefaults.enforce,
     })
     .from(integrationOrgDefaults)
-    .where(eq(integrationOrgDefaults.applicationId, applicationId));
+    .where(eq(integrationOrgDefaults.spaceId, spaceId));
   const out: Record<string, { connectionId: string; enforce: boolean }> = {};
   for (const r of rows) out[r.integrationId] = { connectionId: r.connectionId, enforce: r.enforce };
   return out;
 }
 
-/** Set or replace the org default for (application, integration). */
+/** Set or replace the org default for (space, integration). */
 export async function upsertOrgDefault(
-  scope: AppScope,
+  scope: SpaceScope,
   integrationId: string,
   input: UpsertOrgDefaultInput,
 ): Promise<OrgDefaultSummary> {
@@ -99,13 +99,13 @@ export async function upsertOrgDefault(
   });
 
   const now = new Date();
-  // Atomic upsert on the (application, integration) unique index — avoids the
+  // Atomic upsert on the (space, integration) unique index — avoids the
   // check-then-insert race where two concurrent first-writers both miss the
   // SELECT and the loser's INSERT throws a raw unique-violation (500).
   await db
     .insert(integrationOrgDefaults)
     .values({
-      applicationId: scope.applicationId,
+      spaceId: scope.spaceId,
       integrationId,
       connectionId: input.connectionId,
       enforce: input.enforce,
@@ -114,7 +114,7 @@ export async function upsertOrgDefault(
       updatedAt: now,
     })
     .onConflictDoUpdate({
-      target: [integrationOrgDefaults.applicationId, integrationOrgDefaults.integrationId],
+      target: [integrationOrgDefaults.spaceId, integrationOrgDefaults.integrationId],
       set: {
         connectionId: input.connectionId,
         enforce: input.enforce,
@@ -134,14 +134,14 @@ export async function upsertOrgDefault(
 }
 
 export async function deleteOrgDefault(
-  scope: AppScope,
+  scope: SpaceScope,
   integrationId: string,
 ): Promise<{ deleted: boolean }> {
   const result = await db
     .delete(integrationOrgDefaults)
     .where(
       and(
-        eq(integrationOrgDefaults.applicationId, scope.applicationId),
+        eq(integrationOrgDefaults.spaceId, scope.spaceId),
         eq(integrationOrgDefaults.integrationId, integrationId),
       ),
     )

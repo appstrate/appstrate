@@ -273,7 +273,7 @@ export function ResourceSection({
           })}
 
           {/* Declared but not usable here: an integration that is not active in
-              this application, or a skill that is not installed. Flagged rather
+              this space, or a skill that is not installed. Flagged rather
               than hidden, because the run gate rejects them.
 
               For an integration the row also carries the cure. The message says

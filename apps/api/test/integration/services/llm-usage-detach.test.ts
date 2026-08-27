@@ -46,7 +46,7 @@ describe("llm_usage detach-on-delete (migration 0028)", () => {
     const run = await seedRun({
       packageId: "@detachorg/agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "success",
       completedAt: new Date(),
     });
@@ -84,7 +84,7 @@ describe("llm_usage detach-on-delete (migration 0028)", () => {
     const { runId, runnerId, proxyId } = await seedRunWithLedger();
 
     const deleted = await deletePackageRuns(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       "@detachorg/agent",
     );
     expect(deleted).toBe(1);

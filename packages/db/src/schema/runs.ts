@@ -22,7 +22,7 @@ import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import type { PricingStatus } from "../pricing-status.ts";
 import { runStatusEnum, llmUsageSourceEnum, runOriginEnum, credentialSourceEnum } from "./enums.ts";
 import { user } from "./auth.ts";
-import { applications, endUsers } from "./applications.ts";
+import { spaces, endUsers } from "./spaces.ts";
 import { apiKeys, organizations, modelProviderCredentials } from "./organizations.ts";
 import { packages } from "./packages.ts";
 import { chatSessions } from "./chat.ts";
@@ -100,9 +100,9 @@ export const runs = pgTable(
     endUserId: text("end_user_id").references(() => endUsers.id, {
       onDelete: "set null",
     }),
-    applicationId: text("application_id")
+    spaceId: text("space_id")
       .notNull()
-      .references(() => applications.id, { onDelete: "cascade" }),
+      .references(() => spaces.id, { onDelete: "cascade" }),
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
@@ -324,15 +324,15 @@ export const runs = pgTable(
     index("idx_runs_schedule_id")
       .on(table.scheduleId)
       .where(sql`${table.scheduleId} IS NOT NULL`),
-    // Application-scoped lookups (incl. the FK cascade on app delete) are
-    // served by the leftmost prefix of idx_runs_app_status_started — no
-    // separate single-column applicationId index needed.
-    index("idx_runs_app_status_started").on(table.applicationId, table.status, table.startedAt),
-    // Global runs list with NO status filter: WHERE application_id = ?
+    // Space-scoped lookups (incl. the FK cascade on space delete) are
+    // served by the leftmost prefix of idx_runs_space_status_started — no
+    // separate single-column spaceId index needed.
+    index("idx_runs_space_status_started").on(table.spaceId, table.status, table.startedAt),
+    // Global runs list with NO status filter: WHERE space_id = ?
     // ORDER BY started_at DESC. The three-column index above needs a
     // status equality to serve the sort, so the unfiltered path keeps a
     // two-column twin.
-    index("idx_runs_app_started").on(table.applicationId, table.startedAt),
+    index("idx_runs_space_started").on(table.spaceId, table.startedAt),
     // MAX(run_number) per package (nextRunNumber) becomes a 1-row
     // backward index probe instead of an aggregate scan.
     index("idx_runs_package_run_number").on(table.packageId, table.runNumber),
@@ -441,7 +441,7 @@ export const runLogs = pgTable(
  * orthogonal dimensions instead of an enum:
  *
  * - `key` — nullable string. When set, the row is upsert-by-key (single
- *   slot per `(package, app, actor, key)`); when null, the row is append-
+ *   slot per `(package, space, actor, key)`); when null, the row is append-
  *   only. Today the only named slot is `'checkpoint'`; archive memories
  *   leave `key` null.
  * - `pinned` — when true, the row is rendered into the agent's system
@@ -463,9 +463,9 @@ export const packagePersistence = pgTable(
     packageId: text("package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
-    applicationId: text("application_id")
+    spaceId: text("space_id")
       .notNull()
-      .references(() => applications.id, { onDelete: "cascade" }),
+      .references(() => spaces.id, { onDelete: "cascade" }),
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
@@ -487,17 +487,17 @@ export const packagePersistence = pgTable(
     uniqueIndex("pkp_key_unique")
       .on(
         table.packageId,
-        table.applicationId,
+        table.spaceId,
         table.actorType,
         sql`(COALESCE(${table.actorId}, '__shared__'))`,
         table.key,
       )
       .where(sql`key IS NOT NULL`),
     // Primary read paths: getCheckpoint / listMemories / listPinned /
-    // recall_memory all narrow on (package, app, actor) first.
+    // recall_memory all narrow on (package, space, actor) first.
     index("pkp_lookup").on(
       table.packageId,
-      table.applicationId,
+      table.spaceId,
       table.actorType,
       table.actorId,
       table.key,
@@ -746,9 +746,9 @@ export const schedules = pgTable(
     orgId: uuid("org_id")
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
-    applicationId: text("application_id")
+    spaceId: text("space_id")
       .notNull()
-      .references(() => applications.id, { onDelete: "cascade" }),
+      .references(() => spaces.id, { onDelete: "cascade" }),
     name: text("name"),
     enabled: boolean("enabled").default(true).notNull(),
     cronExpression: text("cron_expression").notNull(),
@@ -786,7 +786,7 @@ export const schedules = pgTable(
     index("idx_schedules_user_id").on(table.userId),
     index("idx_schedules_end_user_id").on(table.endUserId),
     index("idx_package_schedules_org_id").on(table.orgId),
-    index("idx_package_schedules_app_id").on(table.applicationId),
+    index("idx_package_schedules_space_id").on(table.spaceId),
     check(
       "package_schedules_exactly_one_actor",
       sql`(user_id IS NOT NULL) <> (end_user_id IS NOT NULL)`,

@@ -1,42 +1,42 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tests for nextRunNumber isolation per application.
+ * Tests for nextRunNumber isolation per space.
  *
- * Verifies that run numbering is independent per (packageId, orgId, applicationId).
+ * Verifies that run numbering is independent per (packageId, orgId, spaceId).
  * Since nextRunNumber is private, we test through createRun and verify via DB.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedApplication } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { seedAgent, seedSpace } from "../../helpers/seed.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import { createRun } from "../../../src/services/state/runs.ts";
 import { runs } from "@appstrate/db/schema";
 import { eq, and } from "drizzle-orm";
 
-describe("nextRunNumber isolation per application", () => {
+describe("nextRunNumber isolation per space", () => {
   let ctx: TestContext;
-  let appBId: string;
+  let spaceBId: string;
   const agentId = "@testorg/run-num-agent";
 
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext();
-    const appB = await seedApplication({ orgId: ctx.orgId, name: "AppB" });
-    appBId = appB.id;
+    const spaceB = await seedSpace({ orgId: ctx.orgId, name: "SpaceB" });
+    spaceBId = spaceB.id;
 
     await seedAgent({ id: agentId, orgId: ctx.orgId, createdBy: ctx.user.id });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, agentId);
-    await installPackage({ orgId: ctx.orgId, applicationId: appBId }, agentId);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, agentId);
+    await installPackage({ orgId: ctx.orgId, spaceId: spaceBId }, agentId);
   });
 
-  it("assigns run number 1 to the first run in each application independently", async () => {
+  it("assigns run number 1 to the first run in each space independently", async () => {
     const actor = { type: "user" as const, id: ctx.user.id };
 
     await createRun(
-      { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       {
         id: "run_aaaabbbbcccc0001",
         packageId: agentId,
@@ -45,7 +45,7 @@ describe("nextRunNumber isolation per application", () => {
       },
     );
     await createRun(
-      { orgId: ctx.orgId, applicationId: appBId },
+      { orgId: ctx.orgId, spaceId: spaceBId },
       {
         id: "run_aaaabbbbcccc0002",
         packageId: agentId,
@@ -57,68 +57,68 @@ describe("nextRunNumber isolation per application", () => {
     const [runA] = await db
       .select({ runNumber: runs.runNumber })
       .from(runs)
-      .where(and(eq(runs.id, "run_aaaabbbbcccc0001"), eq(runs.applicationId, ctx.defaultAppId)));
+      .where(and(eq(runs.id, "run_aaaabbbbcccc0001"), eq(runs.spaceId, ctx.defaultSpaceId)));
 
     const [runB] = await db
       .select({ runNumber: runs.runNumber })
       .from(runs)
-      .where(and(eq(runs.id, "run_aaaabbbbcccc0002"), eq(runs.applicationId, appBId)));
+      .where(and(eq(runs.id, "run_aaaabbbbcccc0002"), eq(runs.spaceId, spaceBId)));
 
     expect(runA!.runNumber).toBe(1);
     expect(runB!.runNumber).toBe(1);
   });
 
-  it("increments run numbers independently per application", async () => {
+  it("increments run numbers independently per space", async () => {
     const actor = { type: "user" as const, id: ctx.user.id };
 
-    const appAScope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
-    const appBScope = { orgId: ctx.orgId, applicationId: appBId };
-    // 3 runs in AppA, 2 runs in AppB
-    await createRun(appAScope, {
+    const spaceAScope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+    const spaceBScope = { orgId: ctx.orgId, spaceId: spaceBId };
+    // 3 runs in SpaceA, 2 runs in SpaceB
+    await createRun(spaceAScope, {
       id: "run_aaaa000000000001",
       packageId: agentId,
       actor,
       input: null,
     });
-    await createRun(appAScope, {
+    await createRun(spaceAScope, {
       id: "run_aaaa000000000002",
       packageId: agentId,
       actor,
       input: null,
     });
-    await createRun(appBScope, {
+    await createRun(spaceBScope, {
       id: "run_bbbb000000000001",
       packageId: agentId,
       actor,
       input: null,
     });
-    await createRun(appAScope, {
+    await createRun(spaceAScope, {
       id: "run_aaaa000000000003",
       packageId: agentId,
       actor,
       input: null,
     });
-    await createRun(appBScope, {
+    await createRun(spaceBScope, {
       id: "run_bbbb000000000002",
       packageId: agentId,
       actor,
       input: null,
     });
 
-    const appARuns = await db
+    const spaceARuns = await db
       .select({ id: runs.id, runNumber: runs.runNumber })
       .from(runs)
-      .where(and(eq(runs.packageId, agentId), eq(runs.applicationId, ctx.defaultAppId)));
+      .where(and(eq(runs.packageId, agentId), eq(runs.spaceId, ctx.defaultSpaceId)));
 
-    const appBRuns = await db
+    const spaceBRuns = await db
       .select({ id: runs.id, runNumber: runs.runNumber })
       .from(runs)
-      .where(and(eq(runs.packageId, agentId), eq(runs.applicationId, appBId)));
+      .where(and(eq(runs.packageId, agentId), eq(runs.spaceId, spaceBId)));
 
-    expect(appARuns).toHaveLength(3);
-    expect(appARuns.map((r) => r.runNumber).sort()).toEqual([1, 2, 3]);
+    expect(spaceARuns).toHaveLength(3);
+    expect(spaceARuns.map((r) => r.runNumber).sort()).toEqual([1, 2, 3]);
 
-    expect(appBRuns).toHaveLength(2);
-    expect(appBRuns.map((r) => r.runNumber).sort()).toEqual([1, 2]);
+    expect(spaceBRuns).toHaveLength(2);
+    expect(spaceBRuns.map((r) => r.runNumber).sort()).toEqual([1, 2]);
   });
 });

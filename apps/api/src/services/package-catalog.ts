@@ -9,7 +9,7 @@ import type { AgentManifest, LoadedPackage } from "../types/index.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { extractSkillIdsFromManifest, parseDraftManifest } from "../lib/manifest-utils.ts";
-import { hasPackageAccess } from "./application-packages.ts";
+import { hasPackageAccess } from "./space-packages.ts";
 
 interface DbPackageRow {
   id: string;
@@ -143,19 +143,20 @@ export async function getPackage(
 }
 
 /**
- * Load an agent and verify application-level access in one operation.
- * Default app = access to all, custom app = must be explicitly installed.
+ * Load an agent and verify space-level access in one operation.
+ * System packages are reachable from every space; everything else needs an
+ * installed `space_packages` row (`hasPackageAccess`).
  * Returns null if agent not found OR access denied (404 semantics — no info leak).
  */
 export async function getPackageWithAccess(
   id: string,
   orgId: string,
-  applicationId: string,
+  spaceId: string,
 ): Promise<LoadedPackage | null> {
   const agent = await getPackage(id, orgId);
   if (!agent) return null;
 
-  if (!(await hasPackageAccess({ orgId, applicationId }, id))) return null;
+  if (!(await hasPackageAccess({ orgId, spaceId }, id))) return null;
 
   return agent;
 }

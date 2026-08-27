@@ -6,7 +6,7 @@
  * A POST /api/runs/inline request creates a transient `packages` row with
  * `ephemeral = true`, then feeds it through the existing run pipeline. The
  * shadow row is hidden from every user-facing catalog query
- * (notEphemeralFilter), never installed in applications, and eventually
+ * (notEphemeralFilter), never installed in spaces, and eventually
  * compacted (manifest/prompt NULLed) by the retention worker.
  *
  * Shadow IDs use the reserved `@inline/r-<hex>` format so they remain
@@ -357,7 +357,7 @@ export function normalizeContextFileUris(value: unknown): string[] {
  */
 export async function triggerInlineRun(params: {
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   actor: Actor | null;
   /** Pre-minted run id — input files already live in its workspace namespace. */
   runId: string;
@@ -369,7 +369,7 @@ export async function triggerInlineRun(params: {
   /** W3C `traceparent` of the spawning request — forwarded to the runtime. */
   traceparent?: string;
 }): Promise<{ runId: string; packageId: string }> {
-  const { orgId, applicationId, actor, runId, preflight, parsed, apiKeyId, traceparent } = params;
+  const { orgId, spaceId, actor, runId, preflight, parsed, apiKeyId, traceparent } = params;
   const { manifest, prompt, modelIdOverride, proxyIdOverride, connectionOverrides } = preflight;
 
   // `parseRequestInput` already collapses an effectively-empty input to
@@ -415,7 +415,7 @@ export async function triggerInlineRun(params: {
       modelId: modelIdOverride,
       generationConfigOverride: parsed.generationConfigOverride ?? null,
       proxyId: proxyIdOverride,
-      applicationId,
+      spaceId,
       apiKeyId,
       connectionOverrides,
       traceparent,

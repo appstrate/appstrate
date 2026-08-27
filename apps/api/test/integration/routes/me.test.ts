@@ -20,12 +20,7 @@ import {
   authHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import {
-  seedApiKey,
-  seedPackage,
-  seedApplication,
-  seedInstalledPackage,
-} from "../../helpers/seed.ts";
+import { seedApiKey, seedPackage, seedSpace, seedInstalledPackage } from "../../helpers/seed.ts";
 import { db } from "../../helpers/db.ts";
 import { assertDbHas } from "../../helpers/assertions.ts";
 import { integrationConnections } from "@appstrate/db/schema";
@@ -35,7 +30,7 @@ const app = getTestApp();
 
 async function seedConnectionFor(opts: {
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   integrationId: string;
   userId: string;
   label?: string;
@@ -53,7 +48,7 @@ async function seedConnectionFor(opts: {
       integrationId: opts.integrationId,
       authKey: "google",
       accountId: `acct-${crypto.randomUUID().slice(0, 8)}`,
-      applicationId: opts.applicationId,
+      spaceId: opts.spaceId,
       userId: opts.userId,
       credentialsEncrypted: "x",
       scopesGranted: ["openid", "email"],
@@ -127,7 +122,7 @@ describe("Me API (/api/me)", () => {
       const apiKey = await seedApiKey({
         createdBy: ctx.user.id,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         scopes: [],
       });
 
@@ -154,31 +149,31 @@ describe("Me API (/api/me)", () => {
       ctx = await createTestContext();
     });
 
-    it("returns identity, org role, and usable integrations (own + org-shared), app-scoped", async () => {
-      // Own connection in the current app → source "own".
+    it("returns identity, org role, and usable integrations (own + org-shared), space-scoped", async () => {
+      // Own connection in the current space → source "own".
       await seedConnectionFor({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         integrationId: "@ctx/gmail",
         userId: ctx.user.id,
       });
 
-      // Connection owned by ANOTHER user but shared with the org, same app → "shared".
+      // Connection owned by ANOTHER user but shared with the org, same space → "shared".
       const other = await createTestUser();
       await seedConnectionFor({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         integrationId: "@ctx/clickup",
         userId: other.id,
         sharedWithOrg: true,
       });
 
-      // Connection in a DIFFERENT app of the same org → must NOT appear.
-      const otherApp = await seedApplication({ orgId: ctx.orgId });
+      // Connection in a DIFFERENT space of the same org → must NOT appear.
+      const otherSpace = await seedSpace({ orgId: ctx.orgId });
       await seedConnectionFor({
         orgId: ctx.orgId,
-        applicationId: otherApp.id,
-        integrationId: "@ctx/other-app",
+        spaceId: otherSpace.id,
+        integrationId: "@ctx/other-space",
         userId: ctx.user.id,
       });
 
@@ -197,7 +192,7 @@ describe("Me API (/api/me)", () => {
       const byId = new Map(body.connections.map((c) => [c.integration_id, c]));
       expect(byId.get("@ctx/gmail")?.source).toBe("own");
       expect(byId.get("@ctx/clickup")?.source).toBe("shared");
-      expect(byId.has("@ctx/other-app")).toBe(false);
+      expect(byId.has("@ctx/other-space")).toBe(false);
     });
 
     it("lists runnable agents (enabled only) with invokable id and input flag", async () => {
@@ -214,13 +209,13 @@ describe("Me API (/api/me)", () => {
           input: { schema: { type: "object", properties: { folder: { type: "string" } } } },
         },
       });
-      await seedInstalledPackage(ctx.defaultAppId, "@ctx/triage");
+      await seedInstalledPackage(ctx.defaultSpaceId, "@ctx/triage");
 
-      // Installed but disabled in the app → must NOT appear.
+      // Installed but disabled in the space → must NOT appear.
       await seedPackage({ id: "@ctx/disabled", orgId: ctx.orgId });
-      await seedInstalledPackage(ctx.defaultAppId, "@ctx/disabled", { enabled: false });
+      await seedInstalledPackage(ctx.defaultSpaceId, "@ctx/disabled", { enabled: false });
 
-      // Owned by the org but NOT installed in this app → must NOT appear.
+      // Owned by the org but NOT installed in this space → must NOT appear.
       await seedPackage({ id: "@ctx/uninstalled", orgId: ctx.orgId });
 
       const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
@@ -262,13 +257,13 @@ describe("Me API (/api/me)", () => {
           description: "Searches the web.",
         },
       });
-      await seedInstalledPackage(ctx.defaultAppId, "@ctx/web-research");
+      await seedInstalledPackage(ctx.defaultSpaceId, "@ctx/web-research");
 
-      // Installed but disabled in the app → must NOT appear.
+      // Installed but disabled in the space → must NOT appear.
       await seedPackage({ id: "@ctx/skill-disabled", orgId: ctx.orgId, type: "skill" });
-      await seedInstalledPackage(ctx.defaultAppId, "@ctx/skill-disabled", { enabled: false });
+      await seedInstalledPackage(ctx.defaultSpaceId, "@ctx/skill-disabled", { enabled: false });
 
-      // Owned by the org but NOT installed in this app → must NOT appear.
+      // Owned by the org but NOT installed in this space → must NOT appear.
       await seedPackage({ id: "@ctx/skill-uninstalled", orgId: ctx.orgId, type: "skill" });
 
       const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
@@ -307,12 +302,12 @@ describe("Me API (/api/me)", () => {
       const ctx = await createTestContext({ orgSlug: "conn-org" });
       await seedConnectionFor({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         integrationId: "@conn/gmail",
         userId: ctx.user.id,
       });
 
-      // Crosses orgs/apps by design — must succeed WITHOUT X-Org-Id.
+      // Crosses orgs/spaces by design — must succeed WITHOUT X-Org-Id.
       const res = await app.request("/api/me/connections", {
         headers: { Cookie: ctx.cookie },
       });
@@ -329,17 +324,21 @@ describe("Me API (/api/me)", () => {
 
     it("aggregates connections across multiple orgs the caller belongs to", async () => {
       const user = await createTestUser();
-      const { org: orgA, defaultAppId: appA } = await createTestOrg(user.id, { slug: "org-aa" });
-      const { org: orgB, defaultAppId: appB } = await createTestOrg(user.id, { slug: "org-bb" });
+      const { org: orgA, defaultSpaceId: spaceA } = await createTestOrg(user.id, {
+        slug: "org-aa",
+      });
+      const { org: orgB, defaultSpaceId: spaceB } = await createTestOrg(user.id, {
+        slug: "org-bb",
+      });
       await seedConnectionFor({
         orgId: orgA.id,
-        applicationId: appA,
+        spaceId: spaceA,
         integrationId: "@conn/a",
         userId: user.id,
       });
       await seedConnectionFor({
         orgId: orgB.id,
-        applicationId: appB,
+        spaceId: spaceB,
         integrationId: "@conn/b",
         userId: user.id,
       });
@@ -360,7 +359,7 @@ describe("Me API (/api/me)", () => {
       const other = await createTestUser();
       await seedConnectionFor({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         integrationId: "@conn/secret",
         userId: ctx.user.id,
       });
@@ -386,7 +385,7 @@ describe("Me API (/api/me)", () => {
       // Seed one real connection so we can prove the no-op delete left it intact.
       const survivorId = await seedConnectionFor({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         integrationId: "@del/gmail",
         userId: ctx.user.id,
       });
@@ -408,16 +407,16 @@ describe("Me API (/api/me)", () => {
     });
 
     it("does not let actor B delete actor A's connection (ownership boundary)", async () => {
-      // Actor A owns the connection in their own org/app.
+      // Actor A owns the connection in their own org/space.
       const ctxA = await createTestContext({ orgSlug: "victim-org" });
       const connId = await seedConnectionFor({
         orgId: ctxA.orgId,
-        applicationId: ctxA.defaultAppId,
+        spaceId: ctxA.defaultSpaceId,
         integrationId: "@del/owned-by-a",
         userId: ctxA.user.id,
       });
 
-      // Actor B is a completely separate user. /me/* skips org/app context,
+      // Actor B is a completely separate user. /me/* skips org/space context,
       // so B can address the row by id — but the service's (userId | endUserId)
       // ownership filter must refuse to delete a row B doesn't own.
       const userB = await createTestUser();
@@ -441,7 +440,7 @@ describe("Me API (/api/me)", () => {
       const ctx = await createTestContext({ orgSlug: "self-del-org" });
       const connId = await seedConnectionFor({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         integrationId: "@del/mine",
         userId: ctx.user.id,
       });
@@ -467,12 +466,12 @@ describe("Me API (/api/me)", () => {
     });
   });
 
-  // ── CRIT-03 — /me/connections is (org, application)-scoped for an API key ──
+  // ── CRIT-03 — /me/connections is (org, space)-scoped for an API key ──
   //
   // An API key authenticates as its CREATOR, but the key itself is bound to
-  // one org + one application. `listMeConnections(actor, authority)` now takes
-  // a required authority: `api_key` → `app_scoped` with the key's own
-  // orgId/applicationId. Pre-fix, the key inherited the creator's cross-org
+  // one org + one space. `listMeConnections(actor, authority)` now takes
+  // a required authority: `api_key` → `space_scoped` with the key's own
+  // orgId/spaceId. Pre-fix, the key inherited the creator's cross-org
   // `user_global` view — a leaked key could enumerate (and destructively
   // delete) the creator's connections in EVERY org they belong to.
   describe("/api/me/connections API-key authority scoping (CRIT-03)", () => {
@@ -483,28 +482,28 @@ describe("Me API (/api/me)", () => {
 
     async function setupTwoOrgConnections() {
       const user = await createTestUser();
-      const { org: orgA, defaultAppId: appA } = await createTestOrg(user.id, {
+      const { org: orgA, defaultSpaceId: spaceA } = await createTestOrg(user.id, {
         slug: "crit03-org-a",
       });
-      const { org: orgB, defaultAppId: appB } = await createTestOrg(user.id, {
+      const { org: orgB, defaultSpaceId: spaceB } = await createTestOrg(user.id, {
         slug: "crit03-org-b",
       });
       const connA = await seedConnectionFor({
         orgId: orgA.id,
-        applicationId: appA,
+        spaceId: spaceA,
         integrationId: "@crit03/conn-a",
         userId: user.id,
       });
       const connB = await seedConnectionFor({
         orgId: orgB.id,
-        applicationId: appB,
+        spaceId: spaceB,
         integrationId: "@crit03/conn-b",
         userId: user.id,
       });
-      // Key bound to org A's default application, created by the same user.
+      // Key bound to org A's default space, created by the same user.
       const apiKey = await seedApiKey({
         orgId: orgA.id,
-        applicationId: appA,
+        spaceId: spaceA,
         createdBy: user.id,
         scopes: [],
       });
@@ -560,7 +559,7 @@ describe("Me API (/api/me)", () => {
       await assertDbHas(integrationConnections, eq(integrationConnections.id, connB));
     });
 
-    it("an org-A API key CAN delete a connection inside its own (org, application)", async () => {
+    it("an org-A API key CAN delete a connection inside its own (org, space)", async () => {
       const { connA, bearer } = await setupTwoOrgConnections();
 
       const res = await app.request(`/api/me/connections/${connA}`, {

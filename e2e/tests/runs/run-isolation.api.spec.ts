@@ -3,14 +3,14 @@
 /**
  * Run isolation E2E tests.
  *
- * Verifies that run listings are properly scoped by org and app.
+ * Verifies that run listings are properly scoped by org and space.
  * Note: actual run creation requires Docker, so these tests verify
  * listing/detail endpoints return correct scoping (empty lists, 404s).
  */
 
 import { test, expect } from "../../fixtures/multi-context.fixture.ts";
-import { test as appTest, expect as appExpect } from "../../fixtures/api.fixture.ts";
-import { createAgent, createApplication } from "../../helpers/seed.ts";
+import { test as spaceTest, expect as spaceExpect } from "../../fixtures/api.fixture.ts";
+import { createAgent, createSpace } from "../../helpers/seed.ts";
 import { createApiClient } from "../../helpers/api-client.ts";
 
 // ═══════════════════════════════════════════════
@@ -59,73 +59,73 @@ test.describe("Cross-org run isolation", () => {
 });
 
 // ═══════════════════════════════════════════════
-// Cross-app run isolation
+// Cross-space run isolation
 // ═══════════════════════════════════════════════
 
-appTest.describe("Cross-app run isolation", () => {
-  appTest(
-    "Run listing is app-scoped (custom app has no runs)",
+spaceTest.describe("Cross-space run isolation", () => {
+  spaceTest(
+    "Run listing is space-scoped (custom space has no runs)",
     async ({ request, orgContext, orgOnlyClient }) => {
-      const customApp = await createApplication(orgOnlyClient, `RunIso-${Date.now()}`);
+      const customSpace = await createSpace(orgOnlyClient, `RunIso-${Date.now()}`);
       const customClient = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        applicationId: customApp.id,
+        spaceId: customSpace.id,
       });
 
-      // Custom app should have 0 runs
+      // Custom space should have 0 runs
       const res = await customClient.get("/runs");
-      appExpect(res.status()).toBe(200);
+      spaceExpect(res.status()).toBe(200);
       const body = await res.json();
-      appExpect(body.data ?? []).toHaveLength(0);
+      spaceExpect(body.data ?? []).toHaveLength(0);
     },
   );
 
-  appTest(
-    "Custom app without agent installed cannot list agent runs",
+  spaceTest(
+    "Custom space without agent installed cannot list agent runs",
     async ({ request, apiClient, orgContext, orgOnlyClient }) => {
       const scope = `@${orgContext.org.orgSlug}`;
       const agentName = `run-noaccess-${Date.now()}`;
       await createAgent(apiClient, scope, agentName);
 
-      // Custom app without the agent installed
-      const customApp = await createApplication(orgOnlyClient, `RunNoAccess-${Date.now()}`);
+      // Custom space without the agent installed
+      const customSpace = await createSpace(orgOnlyClient, `RunNoAccess-${Date.now()}`);
       const customClient = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        applicationId: customApp.id,
+        spaceId: customSpace.id,
       });
 
       // Should 404 — requireAgent() blocks access
       const res = await customClient.get(`/agents/${scope}/${agentName}/runs`);
-      appExpect(res.status()).toBe(404);
+      spaceExpect(res.status()).toBe(404);
     },
   );
 
-  appTest(
-    "Agent runs listing is app-scoped",
+  spaceTest(
+    "Agent runs listing is space-scoped",
     async ({ request, apiClient, orgContext, orgOnlyClient }) => {
       const scope = `@${orgContext.org.orgSlug}`;
-      const agentName = `run-app-${Date.now()}`;
+      const agentName = `run-space-${Date.now()}`;
       await createAgent(apiClient, scope, agentName);
 
-      // Install agent in custom app
-      const customApp = await createApplication(orgOnlyClient, `RunApp-${Date.now()}`);
-      await orgOnlyClient.post(`/applications/${customApp.id}/packages`, {
+      // Install agent in custom space
+      const customSpace = await createSpace(orgOnlyClient, `RunSpace-${Date.now()}`);
+      await orgOnlyClient.post(`/spaces/${customSpace.id}/packages`, {
         packageId: `${scope}/${agentName}`,
       });
 
       const customClient = createApiClient(request, {
         cookie: orgContext.auth.cookie,
         orgId: orgContext.org.orgId,
-        applicationId: customApp.id,
+        spaceId: customSpace.id,
       });
 
-      // List runs for the agent from custom app — should be empty
+      // List runs for the agent from custom space — should be empty
       const res = await customClient.get(`/agents/${scope}/${agentName}/runs`);
-      appExpect(res.status()).toBe(200);
+      spaceExpect(res.status()).toBe(200);
       const body = await res.json();
-      appExpect(body.data ?? []).toHaveLength(0);
+      spaceExpect(body.data ?? []).toHaveLength(0);
     },
   );
 });

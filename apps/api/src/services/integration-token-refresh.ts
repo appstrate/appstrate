@@ -86,7 +86,7 @@ class UnrefreshableConnectionError extends Error {
 /**
  * Refresh the OAuth2 access token for an integration connection.
  * No-op (returns current creds) when the manifest auth isn't OAuth2 or no
- * per-app OAuth client is registered (`refreshContext` absent). When the auth
+ * per-space OAuth client is registered (`refreshContext` absent). When the auth
  * IS refreshable but the stored credentials carry no refresh_token, the token
  * is unrecoverable: flags needsReconnection AND throws
  * {@link UnrefreshableConnectionError} so the caller surfaces the same terminal
@@ -372,9 +372,9 @@ export function decryptIntegrationConnectionFields(
 
 /**
  * Build the OAuth2 {@link IntegrationRefreshContext} for an integration
- * auth from its per-application `integration_oauth_clients` row. Returns
+ * auth from its per-space `integration_oauth_clients` row. Returns
  * `null` (the auth is not refreshable) for: non-oauth2 auths, auths without a
- * `tokenUrl`, missing per-app OAuth client, and undecryptable client secret.
+ * `tokenUrl`, missing per-space OAuth client, and undecryptable client secret.
  *
  * Public clients (`token_endpoint_auth_method: "none"`, RFC 7591 §2) ARE
  * supported — the refresh helper sends `client_id` in the body with no
@@ -385,7 +385,7 @@ export async function buildIntegrationOAuthRefreshContext(
   packageId: string,
   authKey: string,
   authDef: AfpsManifestAuth,
-  applicationId: string,
+  spaceId: string,
   /**
    * The minting client pinned on the connection
    * (`integration_connections.client_ref`): a flat client id — the env id of a
@@ -444,11 +444,11 @@ export async function buildIntegrationOAuthRefreshContext(
   }
 
   // Resolve the SAME client that minted the connection by its pinned id (system
-  // env or per-application custom row), with the cross-scope escalation guard.
+  // env or per-space custom row), with the cross-scope escalation guard.
   // Null → since-removed / remapped / cross-scope id: skip (needs_reconnection).
   const client = await resolveIntegrationClientById(
     clientRef,
-    applicationId,
+    spaceId,
     packageId,
     authKey,
     manifestAuthMethod,

@@ -11,12 +11,12 @@
  *   3. runs.connection_overrides               → caller's run-time choice
  *   4. package_schedules.connection_overrides  → frozen at schedule create
  *   5. integration_pins (user_id = actor)      → member's persisted pick
- *      per (user, app, agent, integration). Empty in OSS until the user
+ *      per (user, space, agent, integration). Empty in OSS until the user
  *      explicitly picks via the agent-page picker; a server-side record
  *      the resolver sees on every run.
  *   6. integration_org_defaults (soft)         → org-wide default, all agents
  *   7. fallback: actor's accessible connections
- *      = own + (shared_with_org AND application match)
+ *      = own + (shared_with_org AND space match)
  *      → 1 match → auto, 0 → not_connected, N → must_choose
  *
  * The exported `resolveConnections()` is pure — no DB access — so it can
@@ -26,7 +26,7 @@
 
 import { and, eq, or, inArray, isNull } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { integrationConnections, integrationPins, applicationPackages } from "@appstrate/db/schema";
+import { integrationConnections, integrationPins, spacePackages } from "@appstrate/db/schema";
 import type {
   IntegrationConnectionRow as ConnectionRow,
   IntegrationPinRow as PinRow,
@@ -51,7 +51,7 @@ import {
 import type { ResolutionFieldError } from "../lib/errors.ts";
 import type { Actor } from "../lib/actor.ts";
 import { actorOrSharedFilter } from "../lib/actor.ts";
-import type { AppScope } from "../lib/scope.ts";
+import type { SpaceScope } from "../lib/scope.ts";
 import { fetchIntegrationManifest, type IntegrationManifestCache } from "./integration-service.ts";
 import { listOrgDefaultsForResolver } from "./integration-org-defaults-service.ts";
 
@@ -115,12 +115,12 @@ interface ResolveConnectionsInput {
   requirements: IntegrationRequirement[];
   /**
    * Connections visible to the actor for this run — own + (shared AND
-   * matching application). The caller is responsible for the
-   * (actor, application) filter; the resolver just enumerates.
+   * matching space). The caller is responsible for the
+   * (actor, space) filter; the resolver just enumerates.
    */
   accessibleConnections: ConnectionRow[];
   /**
-   * Pins for (application, agent). Mixed — both admin pins (`userId IS NULL`,
+   * Pins for (space, agent). Mixed — both admin pins (`userId IS NULL`,
    * applies to every actor) and member pins (`userId = actor`, the actor's
    * own preference). The pure resolver filters between them based on
    * `actorUserId`; the caller can either pass the admin-only subset (used
@@ -133,7 +133,7 @@ interface ResolveConnectionsInput {
   /** Schedule's frozen override map (package_schedules row). */
   scheduleOverrides?: ConnectionOverrides | null;
   /**
-   * Org-wide default connection per integration (application-scoped, all
+   * Org-wide default connection per integration (space-scoped, all
    * agents). `enforce: true` locks every actor (layer 2, just below the
    * per-agent admin pin); `enforce: false` is a soft default (layer 6,
    * just above the fallback — a member pin still wins). Absent in OSS
@@ -542,7 +542,7 @@ interface ResolveConnectionsForRunInput {
   agentManifest: Record<string, unknown>;
   packageId: string;
   actor: Actor;
-  scope: AppScope;
+  scope: SpaceScope;
   runOverrides?: ConnectionOverrides | null;
   scheduleOverrides?: ConnectionOverrides | null;
   /** Resolve inert integrations too — see {@link ResolveConnectionsInput.includeInert}. */
@@ -577,9 +577,9 @@ export async function resolveConnectionsForRun(
   // Load accessible connections + pins + org defaults in parallel.
   const integrationIds = validReqs.map((r) => r.integrationId);
   const [accessibleConnections, pins, orgDefaults] = await Promise.all([
-    loadAccessibleConnections(input.actor, input.scope.applicationId, integrationIds),
-    loadPins(input.scope.applicationId, input.packageId, integrationIds, actorUserId),
-    listOrgDefaultsForResolver(input.scope.applicationId),
+    loadAccessibleConnections(input.actor, input.scope.spaceId, integrationIds),
+    loadPins(input.scope.spaceId, input.packageId, integrationIds, actorUserId),
+    listOrgDefaultsForResolver(input.scope.spaceId),
   ]);
 
   return resolveConnections({
@@ -753,12 +753,12 @@ async function buildRequirement(
 
 async function loadAccessibleConnections(
   actor: Actor,
-  applicationId: string,
+  spaceId: string,
   integrationIds: string[],
 ): Promise<ConnectionRow[]> {
   if (integrationIds.length === 0) return [];
-  // Own OR shared-with-org, both scoped to THIS application (the
-  // applicationId predicate is applied outside the OR) and to the
+  // Own OR shared-with-org, both scoped to THIS space (the
+  // spaceId predicate is applied outside the OR) and to the
   // integrations the agent actually requires, to avoid loading the world.
   const rows = await db
     .select()
@@ -766,7 +766,7 @@ async function loadAccessibleConnections(
     .where(
       and(
         inArray(integrationConnections.integrationId, integrationIds),
-        eq(integrationConnections.applicationId, applicationId),
+        eq(integrationConnections.spaceId, spaceId),
         actorOrSharedFilter(actor, integrationConnections),
       ),
     );
@@ -774,7 +774,7 @@ async function loadAccessibleConnections(
 }
 
 async function loadPins(
-  applicationId: string,
+  spaceId: string,
   packageId: string,
   integrationIds: string[],
   actorUserId: string | null,
@@ -792,7 +792,7 @@ async function loadPins(
     .from(integrationPins)
     .where(
       and(
-        eq(integrationPins.applicationId, applicationId),
+        eq(integrationPins.spaceId, spaceId),
         eq(integrationPins.packageId, packageId),
         inArray(integrationPins.integrationId, integrationIds),
         scopeFilter,
@@ -805,24 +805,19 @@ async function loadPins(
 
 /**
  * Used at POST /api/integration-connections — refuses non-admin actors
- * when the (application, integration) row has block_user_connections=true.
+ * when the (space, integration) row has block_user_connections=true.
  * Surfaced as a permission check, not a resolution error, because it
  * fires *before* the connection exists (so the resolver path doesn't
  * see this case in practice).
  */
 export async function isUserConnectionCreationBlocked(
-  applicationId: string,
+  spaceId: string,
   integrationId: string,
 ): Promise<boolean> {
   const rows = await db
-    .select({ blocked: applicationPackages.blockUserConnections })
-    .from(applicationPackages)
-    .where(
-      and(
-        eq(applicationPackages.applicationId, applicationId),
-        eq(applicationPackages.packageId, integrationId),
-      ),
-    )
+    .select({ blocked: spacePackages.blockUserConnections })
+    .from(spacePackages)
+    .where(and(eq(spacePackages.spaceId, spaceId), eq(spacePackages.packageId, integrationId)))
     .limit(1);
   return rows[0]?.blocked === true;
 }

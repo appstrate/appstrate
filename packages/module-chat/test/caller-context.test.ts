@@ -321,26 +321,26 @@ describe("buildCallerContextBlock", () => {
     const out = await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
       origin: "http://127.0.0.1:3000",
       headers: { cookie: "session=abc", "x-org-id": "org_1" },
-      applicationId: "app_1",
+      spaceId: "spc_1",
       user,
       deps,
     });
     // Block is rendered from the dispatched payload, not from request context.
     expect(out).toContain("`@appstrate/gmail`");
     expect(out).toContain("## Existing agents you can run");
-    // The app-scoped read carries the resolved application id on the dispatch.
+    // The space-scoped read carries the resolved space id on the dispatch.
     const req = lastRequest()!;
     expect(new URL(req.url).pathname).toBe("/api/me/context");
-    expect(req.headers.get("x-application-id")).toBe("app_1");
+    expect(req.headers.get("x-space-id")).toBe("spc_1");
     expect(req.headers.get("cookie")).toBe("session=abc");
   });
 
-  it("falls back to an identity-only block when there is no application context", async () => {
-    // No applicationId → never dispatches; identity/role from request context.
+  it("falls back to an identity-only block when there is no space context", async () => {
+    // No spaceId → never dispatches; identity/role from request context.
     const { deps, lastRequest } = fakeDeps(() => new Response(null, { status: 500 }));
     const out = await buildCallerContextBlock(
       fakeContext({ orgRole: "owner", orgName: "Acme", orgSlug: "acme" }),
-      { origin: "http://127.0.0.1:3000", headers: {}, applicationId: undefined, user, deps },
+      { origin: "http://127.0.0.1:3000", headers: {}, spaceId: undefined, user, deps },
     );
     expect(out).toContain("Ada (ada@acme.com)");
     expect(out).toContain('whose role is "owner"');
@@ -352,7 +352,7 @@ describe("buildCallerContextBlock", () => {
     const out = await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
       origin: "http://127.0.0.1:3000",
       headers: {},
-      applicationId: "app_1",
+      spaceId: "spc_1",
       user,
       deps,
     });
@@ -364,7 +364,7 @@ describe("buildCallerContextBlock", () => {
     const out = await buildCallerContextBlock(fakeContext({ orgRole: "member" }), {
       origin: "http://127.0.0.1:3000",
       headers: {},
-      applicationId: "app_1",
+      spaceId: "spc_1",
       user,
       deps,
     });

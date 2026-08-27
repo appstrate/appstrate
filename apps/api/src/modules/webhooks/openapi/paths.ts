@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { SPACE_ID_RE } from "../../../lib/ids.ts";
+
 /** Shared webhook creation properties (DRY across oneOf variants). */
 const sharedCreateProps = {
   url: { type: "string", format: "uri" },
@@ -50,10 +52,14 @@ export const webhooksPaths = {
                 },
                 {
                   type: "object",
-                  required: ["level", "applicationId", "url", "events"],
+                  required: ["level", "spaceId", "url", "events"],
                   properties: {
-                    level: { type: "string", enum: ["application"] },
-                    applicationId: { type: "string", description: "Application ID (app_ prefix)" },
+                    level: { type: "string", enum: ["space"] },
+                    spaceId: {
+                      type: "string",
+                      pattern: SPACE_ID_RE.source,
+                      description: "Space ID (spc_ prefix)",
+                    },
                     ...sharedCreateProps,
                   },
                 },
@@ -62,7 +68,7 @@ export const webhooksPaths = {
             },
             examples: {
               orgLevel: {
-                summary: "Org-level webhook (fires for all apps)",
+                summary: "Org-level webhook (fires for all spaces)",
                 value: {
                   level: "org",
                   url: "https://api.example.com/webhooks/appstrate",
@@ -71,11 +77,11 @@ export const webhooksPaths = {
                   enabled: true,
                 },
               },
-              applicationLevel: {
-                summary: "Application-level webhook (pinned to one app)",
+              spaceLevel: {
+                summary: "Space-level webhook (pinned to one space)",
                 value: {
-                  level: "application",
-                  applicationId: "app_cm4jkl013",
+                  level: "space",
+                  spaceId: "spc_8a3b6d9f-1e42-4c07-b5d8-6f0a2c4e8b13",
                   url: "https://api.example.com/webhooks/appstrate",
                   events: ["run.success", "run.failed"],
                   packageId: null,
@@ -119,8 +125,8 @@ export const webhooksPaths = {
               example: {
                 id: "wh_cm1abc123",
                 object: "webhook",
-                level: "application",
-                applicationId: "app_cm4jkl013",
+                level: "space",
+                spaceId: "spc_8a3b6d9f-1e42-4c07-b5d8-6f0a2c4e8b13",
                 url: "https://example.com/webhooks/appstrate",
                 events: ["run.success", "run.failed"],
                 packageId: null,
@@ -146,15 +152,15 @@ export const webhooksPaths = {
       tags: ["Webhooks"],
       summary: "List webhooks",
       description:
-        "List webhooks visible to the current organization. When `applicationId` is passed, returns org-level + application-level webhooks pinned to that app. When `all=true`, returns every webhook in the org regardless of level.",
+        "List webhooks visible to the current organization. When `spaceId` is passed, returns org-level + space-level webhooks pinned to that space. When `all=true`, returns every webhook in the org regardless of level.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         {
-          name: "applicationId",
+          name: "spaceId",
           in: "query",
           required: false,
           schema: { type: "string" },
-          description: "Filter — include webhooks pinned to this application (plus org-level).",
+          description: "Filter — include webhooks pinned to this space (plus org-level).",
         },
         {
           name: "all",
@@ -162,7 +168,7 @@ export const webhooksPaths = {
           required: false,
           schema: { type: "string", enum: ["true"] },
           description:
-            "When `true`, return all webhooks in the org (org-level + every application-level). Overrides `applicationId`.",
+            "When `true`, return all webhooks in the org (org-level + every space-level). Overrides `spaceId`.",
         },
       ],
       responses: {
@@ -189,8 +195,8 @@ export const webhooksPaths = {
                   {
                     id: "wh_cm1abc123",
                     object: "webhook",
-                    level: "application",
-                    applicationId: "app_cm4jkl013",
+                    level: "space",
+                    spaceId: "spc_8a3b6d9f-1e42-4c07-b5d8-6f0a2c4e8b13",
                     url: "https://example.com/webhooks/appstrate",
                     events: ["run.success", "run.failed"],
                     packageId: null,
@@ -234,8 +240,8 @@ export const webhooksPaths = {
               example: {
                 id: "wh_cm1abc123",
                 object: "webhook",
-                level: "application",
-                applicationId: "app_cm4jkl013",
+                level: "space",
+                spaceId: "spc_8a3b6d9f-1e42-4c07-b5d8-6f0a2c4e8b13",
                 url: "https://example.com/webhooks/appstrate",
                 events: ["run.success", "run.failed"],
                 packageId: null,
@@ -305,8 +311,8 @@ export const webhooksPaths = {
               example: {
                 id: "wh_cm1abc123",
                 object: "webhook",
-                level: "application",
-                applicationId: "app_cm4jkl013",
+                level: "space",
+                spaceId: "spc_8a3b6d9f-1e42-4c07-b5d8-6f0a2c4e8b13",
                 url: "https://example.com/webhooks/appstrate",
                 events: ["run.success", "run.failed"],
                 packageId: null,

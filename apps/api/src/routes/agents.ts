@@ -23,7 +23,7 @@ import {
   updateInstalledPackage,
   getInstalledPackageSettings,
   hasPackageAccess,
-} from "../services/application-packages.ts";
+} from "../services/space-packages.ts";
 import { getPackage } from "../services/package-catalog.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import type { AgentManifest } from "../types/index.ts";
@@ -36,7 +36,7 @@ import { z } from "zod";
 import { ApiError, forbidden, invalidRequest, notFound, validationFailed } from "../lib/errors.ts";
 import { readJsonBody } from "../lib/request-body.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
-import { getAppScope } from "../lib/scope.ts";
+import { getSpaceScope } from "../lib/scope.ts";
 import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";
 import { assertExplicitModelExists, resolveModel } from "../services/org-models.ts";
 import {
@@ -63,7 +63,7 @@ export const modelIdSchema = z.object({
 
 /**
  * Body of `PUT /api/agents/{scope}/{name}/input-settings` — the agent's stored
- * input settings for this application.
+ * input settings for this space.
  *
  * `values` are layer 2 of the input resolution (editor defaults, partial by
  * design); `locked_fields` names the input fields no caller may set at
@@ -134,7 +134,7 @@ const BUNDLE_DEPENDENCY_READ_GUARDS = new Map<string, ReturnType<typeof requireP
  *
  * Visibility is deliberately NOT re-derived here. Dependency resolution is
  * org-scoped in every catalog, which is what lets a run reach a skill that is
- * not installed in the current application; re-checking `hasPackageAccess` over
+ * not installed in the current space; re-checking `hasPackageAccess` over
  * the dep set would make the export stricter than the run it mirrors and break
  * `appstrate run @scope/agent` where clicking Run in the dashboard succeeds.
  * Scope, not visibility, is what this route was missing.
@@ -166,9 +166,9 @@ async function requireBundleDependencyReadPermissions(
 export function createAgentsRouter() {
   const router = new Hono<AppEnv>();
 
-  // GET /api/agents — list agents accessible to the current application
+  // GET /api/agents — list agents accessible to the current space
   router.get("/", async (c) => {
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
 
     // Single query: system packages + installed packages via LEFT JOIN
     const [rows, runningCounts] = await Promise.all([
@@ -262,7 +262,7 @@ export function createAgentsRouter() {
       // AND unsatisfiable — every run would fail and nobody could see why.
       assertLockedFieldsSatisfiable(schema, body.locked_fields, values);
 
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       await updateInstalledPackage(scope, agent.id, {
         inputSettings: { values, locked: body.locked_fields },
       });
@@ -290,8 +290,8 @@ export function createAgentsRouter() {
   // GET /api/agents/:scope/:name/proxy — get agent proxy configuration
   router.get(`/${SCOPED_PACKAGE_ROUTE}/proxy`, requireAgent(), async (c) => {
     const agent = c.get("package");
-    const applicationId = c.get("applicationId");
-    const { proxyId } = await getInstalledPackageSettings(applicationId, agent.id);
+    const spaceId = c.get("spaceId");
+    const { proxyId } = await getInstalledPackageSettings(spaceId, agent.id);
 
     return c.json({ proxyId, resolved: proxyId !== "none" });
   });
@@ -308,7 +308,7 @@ export function createAgentsRouter() {
       const role = c.get("orgRole");
       return c.json(
         await resolveAgentConnectionReadiness({
-          scope: getAppScope(c),
+          scope: getSpaceScope(c),
           agentPackageId: agent.id,
           actor: getActor(c),
           isAdmin: role === "owner" || role === "admin",
@@ -325,7 +325,7 @@ export function createAgentsRouter() {
     requirePermission("agents", "configure"),
     async (c) => {
       const agent = c.get("package");
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       const data = await readJsonBody(c, proxyIdSchema);
 
       await updateInstalledPackage(scope, agent.id, { proxyId: data.proxyId });
@@ -339,7 +339,7 @@ export function createAgentsRouter() {
 
       // Return the bare proxy-setting resource — same shape and read path
       // (`getInstalledPackageSettings`) as GET /agents/:scope/:name/proxy (#657).
-      const { proxyId } = await getInstalledPackageSettings(scope.applicationId, agent.id);
+      const { proxyId } = await getInstalledPackageSettings(scope.spaceId, agent.id);
       return c.json({ proxyId, resolved: proxyId !== "none" });
     },
   );
@@ -347,11 +347,8 @@ export function createAgentsRouter() {
   // GET /api/agents/:scope/:name/model — get agent model configuration
   router.get(`/${SCOPED_PACKAGE_ROUTE}/model`, requireAgent(), async (c) => {
     const agent = c.get("package");
-    const applicationId = c.get("applicationId");
-    const { modelId, generationConfig } = await getInstalledPackageSettings(
-      applicationId,
-      agent.id,
-    );
+    const spaceId = c.get("spaceId");
+    const { modelId, generationConfig } = await getInstalledPackageSettings(spaceId, agent.id);
 
     return c.json({ modelId, generation: generationConfig });
   });
@@ -363,11 +360,11 @@ export function createAgentsRouter() {
     requirePermission("agents", "configure"),
     async (c) => {
       const agent = c.get("package");
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       const data = await readJsonBody(c, modelIdSchema);
 
       // Reject unknown/cross-org ids like run and schedule overrides do (#960); null clears.
-      const current = await getInstalledPackageSettings(scope.applicationId, agent.id);
+      const current = await getInstalledPackageSettings(scope.spaceId, agent.id);
       const explicitModel = await assertExplicitModelExists(scope.orgId, data.modelId);
       const selectedModel =
         explicitModel ?? (await resolveModel(scope.orgId, agent.id, data.modelId));
@@ -411,7 +408,7 @@ export function createAgentsRouter() {
       // Return the bare model-setting resource — same shape and read path
       // (`getInstalledPackageSettings`) as GET /agents/:scope/:name/model (#657).
       const { modelId, generationConfig } = await getInstalledPackageSettings(
-        scope.applicationId,
+        scope.spaceId,
         agent.id,
       );
       return c.json({ modelId, generation: generationConfig });
@@ -430,7 +427,7 @@ export function createAgentsRouter() {
     requirePermission("persistence", "read"),
     async (c) => {
       const agent = c.get("package");
-      const applicationId = c.get("applicationId");
+      const spaceId = c.get("spaceId");
       const kindParam = c.req.query("kind");
       const actorTypeParam = c.req.query("actor_type");
       const actorIdParam = c.req.query("actor_id");
@@ -462,11 +459,9 @@ export function createAgentsRouter() {
 
       const [pinned, memories] = await Promise.all([
         wantsPinned
-          ? listPinnedSlots(agent.id, applicationId, pinnedScope, runIdParam)
+          ? listPinnedSlots(agent.id, spaceId, pinnedScope, runIdParam)
           : Promise.resolve([]),
-        wantsMemory
-          ? listMemories(agent.id, applicationId, scope, runIdParam)
-          : Promise.resolve([]),
+        wantsMemory ? listMemories(agent.id, spaceId, scope, runIdParam) : Promise.resolve([]),
       ]);
 
       return c.json({
@@ -504,12 +499,12 @@ export function createAgentsRouter() {
     requirePermission("persistence", "delete"),
     async (c) => {
       const agent = c.get("package");
-      const applicationId = c.get("applicationId");
+      const spaceId = c.get("spaceId");
       const result = z.coerce.number().int().min(1).safeParse(c.req.param("id"));
       if (!result.success) {
         throw invalidRequest("Invalid memory id", "id");
       }
-      const deleted = await deleteMemory(result.data, agent.id, applicationId);
+      const deleted = await deleteMemory(result.data, agent.id, spaceId);
       if (!deleted) {
         throw notFound("Memory not found");
       }
@@ -530,12 +525,12 @@ export function createAgentsRouter() {
     requirePermission("persistence", "delete"),
     async (c) => {
       const agent = c.get("package");
-      const applicationId = c.get("applicationId");
+      const spaceId = c.get("spaceId");
       const result = z.coerce.number().int().min(1).safeParse(c.req.param("id"));
       if (!result.success) {
         throw invalidRequest("Invalid pinned slot id", "id");
       }
-      const deleted = await deletePinnedSlotById(result.data, agent.id, applicationId);
+      const deleted = await deletePinnedSlotById(result.data, agent.id, spaceId);
       if (!deleted) {
         throw notFound("Pinned slot not found");
       }
@@ -551,14 +546,14 @@ export function createAgentsRouter() {
 
   // DELETE /api/agents/:scope/:name/persistence?kind=&actor_type=&actor_id=
   // Bulk delete: by default wipes every memory + checkpoint for the agent
-  // in this app. Narrow with query params.
+  // in this space. Narrow with query params.
   router.delete(
     `/${SCOPED_PACKAGE_ROUTE}/persistence`,
     requireAgent(),
     requirePermission("persistence", "delete"),
     async (c) => {
       const agent = c.get("package");
-      const applicationId = c.get("applicationId");
+      const spaceId = c.get("spaceId");
       const kindParam = c.req.query("kind");
       const actorTypeParam = c.req.query("actor_type");
       const actorIdParam = c.req.query("actor_id");
@@ -577,13 +572,13 @@ export function createAgentsRouter() {
       let checkpointDeleted = false;
 
       if (!kindParam || kindParam === "memory") {
-        memoriesDeleted = await deleteAllMemories(agent.id, applicationId, scope);
+        memoriesDeleted = await deleteAllMemories(agent.id, spaceId, scope);
       }
       if ((!kindParam || kindParam === "pinned") && scope) {
         // Checkpoint slot is upserted per-scope; require an explicit scope here.
         // (Bulk-delete of every pinned slot key is intentionally not exposed —
         // each named slot must be deleted individually via DELETE /pinned/:id.)
-        checkpointDeleted = await deleteCheckpoint(agent.id, applicationId, scope);
+        checkpointDeleted = await deleteCheckpoint(agent.id, spaceId, scope);
       }
 
       await recordAuditFromContext(c, {
@@ -610,11 +605,11 @@ export function createAgentsRouter() {
   // (multi-package archive with pinned versions of every transitive dep).
   //
   // We deliberately don't use `requireAgent()` here: that middleware folds
-  // "doesn't exist in org" and "exists in org but not installed in app"
+  // "doesn't exist in org" and "exists in org but not installed in space"
   // into a single opaque 404. The CLI's run-by-id flow needs to tell the
   // two cases apart so it can prompt the user to install rather than
   // suggest the package is mistyped. Inline check below distinguishes
-  // them via `agent_not_installed_in_app`.
+  // them via `agent_not_installed_in_space`.
   router.get(
     `/${SCOPED_PACKAGE_ROUTE}/bundle`,
     rateLimit(30),
@@ -624,7 +619,7 @@ export function createAgentsRouter() {
       const nameParam = c.req.param("name")!;
       const packageId = `${scopeParam}/${nameParam}`;
       const orgId = c.get("orgId");
-      const applicationId = c.get("applicationId")!;
+      const spaceId = c.get("spaceId")!;
       const versionSpec = c.req.query("version") ?? null;
       const sourceQuery = c.req.query("source");
       // `source=draft` mirrors the dashboard "Run" button: bundle the
@@ -661,17 +656,17 @@ export function createAgentsRouter() {
           detail: `Agent '${packageId}' not found in this organization`,
         });
       }
-      if (!(await hasPackageAccess({ orgId, applicationId }, packageId))) {
+      if (!(await hasPackageAccess({ orgId, spaceId }, packageId))) {
         throw new ApiError({
           status: 404,
-          code: "agent_not_installed_in_app",
+          code: "agent_not_installed_in_space",
           title: "Agent Not Installed",
           detail:
-            `Agent '${packageId}' exists in this organization but is not installed in application '${applicationId}'. ` +
-            `Install it via POST /api/applications/${applicationId}/packages, or pick a different application.`,
+            `Agent '${packageId}' exists in this organization but is not installed in space '${spaceId}'. ` +
+            `Install it via POST /api/spaces/${spaceId}/packages, or pick a different space.`,
         });
       }
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
 
       // Omit time-varying metadata (createdAt) so two exports of the same
       // (package, version) produce byte-identical archives — this makes

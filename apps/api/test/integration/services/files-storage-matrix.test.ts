@@ -51,7 +51,7 @@ import { deleteFile } from "../../../src/services/files.ts";
 import { buildFileResourceProvider, type McpToolContext } from "../../../src/modules/mcp/tools.ts";
 import { runs } from "@appstrate/db/schema";
 
-type Scope = { orgId: string; applicationId: string };
+type Scope = { orgId: string; spaceId: string };
 const app = getTestApp();
 
 async function stageUpload(
@@ -63,7 +63,7 @@ async function stageUpload(
 ): Promise<string> {
   const up = await createUpload({
     orgId: scope.orgId,
-    applicationId: scope.applicationId,
+    spaceId: scope.spaceId,
     createdBy,
     name,
     size: bytes.byteLength,
@@ -83,7 +83,7 @@ async function seedRunRow(scope: Scope): Promise<string> {
   await db.insert(runs).values({
     id,
     orgId: scope.orgId,
-    applicationId: scope.applicationId,
+    spaceId: scope.spaceId,
     status: "running",
     runOrigin: "platform",
     sinkSecretEncrypted: "test-sink-secret",
@@ -110,7 +110,7 @@ describe("files storage parity — core flow (ambient backend)", () => {
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "storagematrix" });
-    scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     userActor = { type: "user", id: ctx.user.id };
   });
 
@@ -180,7 +180,7 @@ describeRequiresS3("files storage parity — S3 presigned posture", () => {
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "presigned" });
-    scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
   });
 
   it("GET /content 307-redirects to a presigned URL that serves the bytes from MinIO", async () => {

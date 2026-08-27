@@ -30,7 +30,7 @@ import {
   localIntegrationManifest,
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 
 describe("NOTIFY triggers (regression)", () => {
   let ctx: TestContext;
@@ -77,7 +77,7 @@ describe("NOTIFY triggers (regression)", () => {
     await seedRun({
       packageId: "@notifyorg/trigger-agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "pending",
     });
@@ -87,7 +87,7 @@ describe("NOTIFY triggers (regression)", () => {
     const run = await seedRun({
       packageId: "@notifyorg/trigger-agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "pending",
     });
@@ -107,7 +107,7 @@ describe("NOTIFY triggers (regression)", () => {
     const run = await seedRun({
       packageId: "@notifyorg/trigger-agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "pending",
     });
@@ -163,7 +163,7 @@ describe("NOTIFY triggers (regression)", () => {
     const run = await seedRun({
       packageId: "@notifyorg/trigger-agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "running",
     });
@@ -204,22 +204,22 @@ describe("NOTIFY triggers (regression)", () => {
         },
       }),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INTEG);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEG);
 
     // Local accumulator — the listener handler stays attached for the
     // process lifetime (the ListenClient abstraction in db/client.ts hides
     // postgres.js's unlisten by casting to Promise<void>). `afterAll` drops
     // the trigger so no more NOTIFYs fire on integration_connections, and
-    // the application_id filter inside the handler scopes to this test only.
+    // the space_id filter inside the handler scopes to this test only.
     const received: Array<{ operation: string; needs_reconnection: boolean | null }> = [];
     await listenClient.listen("connection_update", (raw) => {
       try {
         const payload = JSON.parse(raw) as {
           operation: string;
-          application_id: string;
+          space_id: string;
           needs_reconnection: boolean | null;
         };
-        if (payload.application_id !== ctx.defaultAppId) return;
+        if (payload.space_id !== ctx.defaultSpaceId) return;
         received.push({
           operation: payload.operation,
           needs_reconnection: payload.needs_reconnection,
@@ -235,7 +235,7 @@ describe("NOTIFY triggers (regression)", () => {
         integrationId: INTEG,
         authKey: "primary",
         accountId: `acct-${ctx.user.id.slice(0, 6)}`,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         endUserId: null,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "v1" } }),

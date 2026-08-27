@@ -34,7 +34,7 @@ import {
 } from "../../helpers/integration-manifests.ts";
 import * as storage from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import { _setSystemPackagesForTesting } from "../../../src/services/system-packages.ts";
 import type { SystemPackageEntry } from "@appstrate/core/system-packages";
 
@@ -100,7 +100,7 @@ describe("GET /internal/mcp-server-bundle/:scope/:name", () => {
       }),
     });
     if (installed) {
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INTEGRATION);
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
     }
   }
 
@@ -145,12 +145,12 @@ describe("GET /internal/mcp-server-bundle/:scope/:name", () => {
         integrations_configuration: { [INTEGRATION]: { tools: ["search"] } },
       },
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
 
     const run = await seedRun({
       packageId: AGENT,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "running",
     });
@@ -282,9 +282,9 @@ describe("GET /internal/mcp-server-bundle/:scope/:name", () => {
     expect(res.status).toBe(404);
   });
 
-  it("DENY: returns 404 when the referencing integration is declared but NOT installed in the app", async () => {
+  it("DENY: returns 404 when the referencing integration is declared but NOT installed in the space", async () => {
     // The integration that references MCP_SERVER exists and is declared by the
-    // agent, but is not in `application_packages` — the guard requires an
+    // agent, but is not in `space_packages` — the guard requires an
     // installed integration, so the reference does not count.
     await seedLocalIntegration(false);
     await seedMcpServerWithBundle(MCP_SERVER, SERVER_BUNDLE_BYTES);
@@ -332,7 +332,7 @@ describe("GET /internal/mcp-server-bundle/:scope/:name", () => {
     const pinnedRun = await seedRun({
       packageId: AGENT,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "running",
       versionRef: "2.0.0",

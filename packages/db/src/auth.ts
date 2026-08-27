@@ -52,11 +52,11 @@ async function hasPendingInvitationByEmail(email: string): Promise<boolean> {
  * has actually inserted the org row — never on the idempotent no-op path.
  * apps/api wires this at boot to (a) emit `onOrgCreate` so cloud free-tier
  * and other module listeners observe the bootstrap org, and (b) provision
- * the default application + hello-world agent so the post-signup onboarding
- * path lands on a usable workspace, mirroring `POST /api/orgs`.
+ * the default space + hello-world agent so the post-signup onboarding
+ * path lands on a usable space, mirroring `POST /api/orgs`.
  *
  * Lives as an injection slot rather than a direct call because the
- * platform service layer (applications, default-agent, module event bus)
+ * platform service layer (spaces, default-agent, module event bus)
  * lives in `apps/api`, which `packages/db` cannot import without inverting
  * the dependency graph.
  */
@@ -84,7 +84,7 @@ export function setPostBootstrapOrgHook(hook: (info: PostBootstrapOrgInfo) => Pr
  *
  * Realm-guarded: only fires for `platform` realm signups. Without this guard,
  * an OIDC end-user flow that happens to target `AUTH_BOOTSTRAP_OWNER_EMAIL`
- * (`realm = end_user:<applicationId>`) would provision a platform org for an
+ * (`realm = end_user:<spaceId>`) would provision a platform org for an
  * end-user, mixing audiences that the realm separation exists to keep apart.
  */
 async function maybeBootstrapOrgForOwner(
@@ -105,7 +105,7 @@ async function maybeBootstrapOrgForOwner(
       slug: result.slug,
     });
     if (_postBootstrapOrgHook) {
-      // Side effects (event emit, default app, default agent) run in
+      // Side effects (event emit, default space, default agent) run in
       // apps/api. Failures here are logged but never break signup — the
       // org itself is already committed.
       try {
@@ -167,13 +167,13 @@ export function setBeforeSignupHook(
 // row at creation time. The default ("platform") covers every signup flow
 // driven by the platform itself (dashboard signup, org invitation, direct
 // BA sign-up). The OIDC module overrides this via `setRealmResolver()`
-// during its `init()` to return `"end_user:<applicationId>"` whenever the
-// in-flight signup is bound to an application-level OAuth client — the
+// during its `init()` to return `"end_user:<spaceId>"` whenever the
+// in-flight signup is bound to a space-level OAuth client — the
 // single-user-pool isolation fix that prevents end-user sessions from
 // being replayed against platform routes.
 //
 // Async signature so the resolver can look up the OAuth client's policy
-// (which includes `applicationId`) in the short-TTL cache — same plumbing
+// (which includes `spaceId`) in the short-TTL cache — same plumbing
 // as `oidcBeforeSignupGuard`.
 //
 // The resolver receives the full request-scoped view Better Auth exposes to
@@ -245,7 +245,7 @@ export function setMagicLinkIssuedHook(hook: (info: MagicLinkIssuedInfo) => Prom
 
 // ─── SMTP override (per-request) ─────────────────────────────────────────────
 //
-// Flows driven by a `level=application` OIDC client must send verification
+// Flows driven by a `level=space` OIDC client must send verification
 // emails, magic-links, and password-reset mails through the TENANT's SMTP
 // transport, not the instance env transport. The Better Auth singleton is
 // built once at boot with callbacks that capture `smtpTransport` by closure
@@ -308,7 +308,7 @@ function formatFrom(override: SmtpOverride): string {
 
 // ─── Social provider override (per-request) ──────────────────────────────────
 //
-// Flows driven by a `level=application` OIDC client must redirect through the
+// Flows driven by a `level=space` OIDC client must redirect through the
 // TENANT's Google/GitHub OAuth App, not the platform's — so the consent
 // screen shows the tenant's branding, scopes are tenant-controlled, and
 // audit/revocation happen on the tenant's OAuth App. Like SMTP, we can't
@@ -316,7 +316,7 @@ function formatFrom(override: SmtpOverride): string {
 // below expose `clientId` / `clientSecret` as **getters** that look up an
 // AsyncLocalStorage override before falling back to env. The OIDC module's
 // BA `before` hook calls `enterSocialOverride()` after reading the pending-
-// client cookie and resolving per-app creds — all subsequent BA property
+// client cookie and resolving per-space creds — all subsequent BA property
 // accesses (in Google/GitHub provider factories, validate-authorization-code,
 // create-authorization-url) see the tenant's creds.
 //
@@ -350,7 +350,7 @@ const socialOverrideStore = new AsyncLocalStorage<SocialOverride>();
  *     long as we only call this from the OIDC module's social `before`
  *     hook (see `apps/api/src/modules/oidc/services/ba-social-override-plugin.ts`).
  *   - Tested by `apps/api/src/modules/oidc/test/unit/social-override-isolation.test.ts`
- *     which exercises two concurrent requests with distinct per-app creds
+ *     which exercises two concurrent requests with distinct per-space creds
  *     and asserts no cross-contamination.
  */
 export function enterSocialOverride(override: SocialOverride): void {
@@ -553,7 +553,7 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
     : null;
   const googleEnvEnabled = !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
   const githubEnvEnabled = !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET);
-  // Both providers are ALWAYS registered on BA so per-app credentials
+  // Both providers are ALWAYS registered on BA so per-space credentials
   // injected via `enterSocialOverride()` (OIDC module plugin, see
   // `apps/api/src/modules/oidc/services/ba-social-override-plugin.ts`) have a
   // live provider factory to flow through — even when the env vars are
@@ -563,8 +563,8 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
   // error surfaced to the UI when a tenant hasn't configured creds).
   //
   // `anySocialEnabled` still gates account-linking + trusted providers on
-  // env-configured providers only: per-app social applies exclusively to
-  // `level=application` OIDC clients, which have their own auth surface —
+  // env-configured providers only: per-space social applies exclusively to
+  // `level=space` OIDC clients, which have their own auth surface —
   // the instance-wide account linking flag is an env concern.
   const anySocialEnabled = googleEnvEnabled || githubEnvEnabled;
   const socialProviders: Record<
@@ -634,7 +634,7 @@ function buildAuth(extraPlugins: BetterAuthPluginList = []) {
     //
     // Suppress one construction-time false positive: the google/github social
     // providers below are registered with empty placeholder creds ON PURPOSE
-    // so the per-app OIDC social override (`enterSocialOverride`) has a live
+    // so the per-space OIDC social override (`enterSocialOverride`) has a live
     // provider factory to flow tenant creds through at request time. BA's
     // `!clientId` guard runs once at construction and can't see that
     // request-time override, so "Social provider … is missing clientId or

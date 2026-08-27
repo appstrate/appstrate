@@ -12,7 +12,7 @@ import { triggerBlobDownload } from "../lib/blob-download";
 import { splitPackageRef } from "../lib/package-paths";
 import { VERSION_DRAFT, isVersioned } from "../lib/version-selector";
 import { useCurrentOrgId } from "./use-org";
-import { useCurrentApplicationId } from "./use-current-application";
+import { useCurrentSpaceId } from "./use-current-space";
 import { packageKeys, agentsKeys, invalidatePackageFiles } from "../lib/query-keys";
 import type {
   OrgPackageItem,
@@ -28,8 +28,8 @@ import type {
 // (["packages", ...], ["agents", ...], ["version-*", ...]) instead of the
 // openapi-react-query [method, path, init] keys. The keys are cache-coupled
 // across files: use-editor-state / use-library / use-models / use-proxies
-// invalidate them after writes, and use-current-application resets them on
-// application switch. Only the fetch layer is migrated to the typed client.
+// invalidate them after writes, and use-current-space resets them on
+// space switch. Only the fetch layer is migrated to the typed client.
 
 // --- Packages — config-driven factory ---
 
@@ -130,11 +130,11 @@ async function fetchPackageDetail(
 
 function usePackageList(type: PackageType, opts?: { activeOnly?: boolean }) {
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   const cfg = PACKAGE_CONFIG[type];
   const activeOnly = opts?.activeOnly ?? false;
   return useQuery({
-    queryKey: packageKeys.list(cfg.path, orgId, applicationId, activeOnly ? "active" : "all"),
+    queryKey: packageKeys.list(cfg.path, orgId, spaceId, activeOnly ? "active" : "all"),
     queryFn: async (): Promise<OrgPackageItem[]> => {
       const { data } = await client.GET(`/api/packages/${cfg.path}`, {
         params: { query: activeOnly ? { active: "true" } : undefined },
@@ -155,7 +155,7 @@ function usePackageList(type: PackageType, opts?: { activeOnly?: boolean }) {
         auto_installed: item.auto_installed,
       }));
     },
-    enabled: !!orgId && !!applicationId,
+    enabled: !!orgId && !!spaceId,
   });
 }
 
@@ -165,7 +165,7 @@ function usePackageDetail<T extends PackageType>(
   opts?: { enabled?: boolean; version?: string },
 ) {
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   const cfg = PACKAGE_CONFIG[type];
   // `version` rides the query key so switching the run-options version dropdown
   // refetches the version-pinned detail instead of serving the cached draft
@@ -173,9 +173,9 @@ function usePackageDetail<T extends PackageType>(
   const version = opts?.version ?? VERSION_DRAFT;
 
   return useQuery({
-    queryKey: packageKeys.detail(cfg.path, orgId, applicationId, id!, version),
+    queryKey: packageKeys.detail(cfg.path, orgId, spaceId, id!, version),
     queryFn: () => fetchPackageDetail(type, id!, version),
-    enabled: !!orgId && !!applicationId && !!id && (opts?.enabled ?? true),
+    enabled: !!orgId && !!spaceId && !!id && (opts?.enabled ?? true),
   });
 }
 
@@ -237,9 +237,9 @@ export {
 
 export function useAgents() {
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   return useQuery({
-    queryKey: agentsKeys.list(orgId, applicationId),
+    queryKey: agentsKeys.list(orgId, spaceId),
     queryFn: async (): Promise<AgentListItem[]> => {
       const { data } = await client.GET("/api/agents");
       // The spec marks most item fields optional — normalize to the asserted
@@ -259,7 +259,7 @@ export function useAgents() {
         dependencies: a.dependencies ?? {},
       }));
     },
-    enabled: !!orgId && !!applicationId,
+    enabled: !!orgId && !!spaceId,
   });
 }
 
@@ -289,7 +289,7 @@ export function usePackageDownload(scope: string | undefined, name: string | und
  * dependency graph in one self-contained archive). Triggers a browser
  * download via the shared `triggerBlobDownload`. Optional `version` pins the
  * export to a specific release; defaults to the version installed in the
- * current application.
+ * current space.
  */
 export function useAgentBundleExport(scope: string | undefined, name: string | undefined) {
   const { t } = useTranslation("common");
@@ -318,9 +318,9 @@ export function useVersionDetail(
   version: string | undefined,
 ) {
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   return useQuery({
-    queryKey: ["version-detail", orgId, applicationId, type, packageId, version],
+    queryKey: ["version-detail", orgId, spaceId, type, packageId, version],
     queryFn: async (): Promise<VersionDetailResponse> => {
       const { data } = await client.GET(
         `/api/packages/${PACKAGE_CONFIG[type].path}/{scope}/{name}/versions/{version}`,
@@ -328,15 +328,15 @@ export function useVersionDetail(
       );
       return data!;
     },
-    enabled: !!orgId && !!applicationId && !!packageId && !!version,
+    enabled: !!orgId && !!spaceId && !!packageId && !!version,
   });
 }
 
 export function usePackageVersions(type: PackageType, packageId: string | undefined) {
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   return useQuery({
-    queryKey: ["package-versions", orgId, applicationId, type, packageId],
+    queryKey: ["package-versions", orgId, spaceId, type, packageId],
     queryFn: async (): Promise<VersionListItem[]> => {
       const { data } = await client.GET(
         `/api/packages/${PACKAGE_CONFIG[type].path}/{scope}/{name}/versions`,
@@ -344,7 +344,7 @@ export function usePackageVersions(type: PackageType, packageId: string | undefi
       );
       return data!.versions;
     },
-    enabled: !!orgId && !!applicationId && !!packageId,
+    enabled: !!orgId && !!spaceId && !!packageId,
   });
 }
 
@@ -428,9 +428,9 @@ export function useRestoreVersion(type: PackageType, packageId: string) {
 
 export function useVersionInfo(type: PackageType, packageId: string | undefined) {
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   return useQuery({
-    queryKey: ["version-info", orgId, applicationId, type, packageId],
+    queryKey: ["version-info", orgId, spaceId, type, packageId],
     queryFn: async (): Promise<{
       latest_published_version: string | null;
       active_version: string | null;
@@ -444,7 +444,7 @@ export function useVersionInfo(type: PackageType, packageId: string | undefined)
         active_version: data!.active_version ?? null,
       };
     },
-    enabled: !!orgId && !!applicationId && !!packageId,
+    enabled: !!orgId && !!spaceId && !!packageId,
   });
 }
 

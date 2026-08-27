@@ -70,7 +70,7 @@ async function verifyRunToken(c: Context): Promise<{
     userId: string | null;
     endUserId: string | null;
     orgId: string;
-    applicationId: string;
+    spaceId: string;
     status: string;
     modelCredentialId: string | null;
     runOrigin: "platform" | "remote";
@@ -123,7 +123,7 @@ async function verifyRunToken(c: Context): Promise<{
       userId: runs.userId,
       endUserId: runs.endUserId,
       orgId: runs.orgId,
-      applicationId: runs.applicationId,
+      spaceId: runs.spaceId,
       status: runs.status,
       modelCredentialId: runs.modelCredentialId,
       runOrigin: runs.runOrigin,
@@ -155,7 +155,7 @@ async function verifyRunToken(c: Context): Promise<{
       userId: run.userId,
       endUserId: run.endUserId,
       orgId: run.orgId,
-      applicationId: run.applicationId,
+      spaceId: run.spaceId,
       status: run.status,
       modelCredentialId: run.modelCredentialId ?? null,
       runOrigin: run.runOrigin,
@@ -208,7 +208,7 @@ export function createInternalRouter() {
       // shared / no-actor bucket.
       const actor: Actor | null = actorFromIds(run.userId, run.endUserId);
       const recentRuns = await getRecentRuns(
-        { orgId: run.orgId, applicationId: run.applicationId },
+        { orgId: run.orgId, spaceId: run.spaceId },
         run.packageId,
         actor,
         {
@@ -248,12 +248,10 @@ export function createInternalRouter() {
 
     try {
       const actor: Actor | null = actorFromIds(run.userId, run.endUserId);
-      const memories = await recallMemories(
-        run.packageId,
-        run.applicationId,
-        scopeFromActor(actor),
-        { ...(query !== undefined ? { query } : {}), limit },
-      );
+      const memories = await recallMemories(run.packageId, run.spaceId, scopeFromActor(actor), {
+        ...(query !== undefined ? { query } : {}),
+        limit,
+      });
 
       return c.json({
         memories: memories.map((m) => ({
@@ -307,7 +305,7 @@ export function createInternalRouter() {
   /**
    * Pin: the running agent must declare this integration in
    * `dependencies.integrations` AND it must be installed in the run's
-   * application. Same guard used by /mcp-server-bundle and the
+   * space. Same guard used by /mcp-server-bundle and the
    * /integration-credentials endpoints to keep a leaked run token from
    * enumerating integration secrets across the org.
    *
@@ -322,7 +320,7 @@ export function createInternalRouter() {
    */
   async function assertAgentDeclaresIntegration(
     packageId: string,
-    run: { packageId: string; orgId: string; applicationId: string; versionRef: string | null },
+    run: { packageId: string; orgId: string; spaceId: string; versionRef: string | null },
     runId: string,
   ): Promise<void> {
     const effective = await getRunEffectiveAgent(run);
@@ -340,8 +338,8 @@ export function createInternalRouter() {
     // Same activation rule as the spawn resolver / agent readiness (single
     // source of truth): an installed-and-enabled row OR a system integration
     // auto-active with no row. A disabled row stays inactive.
-    if (!(await isIntegrationActive(packageId, run.applicationId))) {
-      throw notFound(`Integration '${packageId}' is not installed in this application`);
+    if (!(await isIntegrationActive(packageId, run.spaceId))) {
+      throw notFound(`Integration '${packageId}' is not installed in this space`);
     }
   }
 
@@ -391,7 +389,7 @@ export function createInternalRouter() {
       result = await resolveLiveIntegrationCredentials(packageId, {
         runId,
         orgId: run.orgId,
-        applicationId: run.applicationId,
+        spaceId: run.spaceId,
         agentPackageId: run.packageId,
         actor,
         resolvedConnections: run.resolvedConnections,
@@ -432,7 +430,7 @@ export function createInternalRouter() {
         {
           runId,
           orgId: run.orgId,
-          applicationId: run.applicationId,
+          spaceId: run.spaceId,
           agentPackageId: run.packageId,
           actor,
           resolvedConnections: run.resolvedConnections,
@@ -525,7 +523,7 @@ export function createInternalRouter() {
   /**
    * Authorise an mcp-server bundle fetch: the running agent must declare at
    * least one integration (in `dependencies.integrations`) that (a) is
-   * installed in the run's application AND (b) references this mcp-server via
+   * installed in the run's space AND (b) references this mcp-server via
    * `source.server.name`. This keeps a leaked run token from enumerating
    * arbitrary server source across the org.
    */
@@ -534,7 +532,7 @@ export function createInternalRouter() {
     run: {
       packageId: string;
       orgId: string;
-      applicationId: string;
+      spaceId: string;
       versionRef: string | null;
       resolvedIntegrationVersions: Record<
         string,
@@ -553,7 +551,7 @@ export function createInternalRouter() {
     for (const integrationId of Object.keys(integrations)) {
       // Same activation rule as everywhere else (installed-and-enabled row, or
       // system integration auto-active with no row); skip inactive ones.
-      if (!(await isIntegrationActive(integrationId, run.applicationId))) continue;
+      if (!(await isIntegrationActive(integrationId, run.spaceId))) continue;
       // Read the integration manifest AT the version frozen for this run
       // (#686) so the authz check sees the same `source.server.name` the spawn
       // resolver did. No frozen entry (soft-resolved / legacy run) → draft.

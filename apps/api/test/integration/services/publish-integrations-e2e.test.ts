@@ -53,7 +53,7 @@ async function seedConnection(ctx: TestContext, integrationId: string) {
     integrationId,
     authKey: "primary",
     accountId: "default",
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     endUserId: null,
     credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
@@ -109,7 +109,7 @@ async function publishAndResolve(
   return (
     await resolveIntegrationSpawns({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       agentManifest: stored!.manifest as Record<string, unknown>,
     })
@@ -140,7 +140,7 @@ describe("publish → resolveIntegrationSpawns (prompt-only agent, e2e)", () => 
         tools_policy: { search: {} },
       }),
     });
-    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
     await seedPackage({
       id: SERVER,
       orgId: ctx.orgId,
@@ -182,7 +182,7 @@ describe("publish → resolveIntegrationSpawns (prompt-only agent, e2e)", () => 
         auths: API_KEY_AUTH,
       }),
     });
-    await seedInstalledPackage(ctx.defaultAppId, INTEG);
+    await seedInstalledPackage(ctx.defaultSpaceId, INTEG);
     await seedConnection(ctx, INTEG);
 
     const specs = await publishAndResolve(ctx, "@e2eorg/agent-api", INTEG, "api_call");

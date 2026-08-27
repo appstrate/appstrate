@@ -13,11 +13,11 @@
  *   - skip `requireOrgContext` so the caller doesn't need `X-Org-Id` upfront
  *     (`/api/me/orgs` is the prerequisite to setting it; org-scoped reads
  *     use the org already pinned by the strategy or `X-Org-Id`; the pin and
- *     context routes below opt back into app context via `requireAppContext`),
+ *     context routes below opt back into space context via `requireSpaceContext`),
  *   - accept every auth method that represents a single user (cookie session,
  *     API key, OAuth2 instance/dashboard/end-user JWTs),
  *   - return only the data the caller is entitled to (API key sees its
- *     bound org, OIDC end-user sees their application's owning org,
+ *     bound org, OIDC end-user sees their space's owning org,
  *     dashboard user sees every org they're a member of); write/delete
  *     routes additionally enforce per-row owner (`userId`/`endUserId`)
  *     scoping in the service layer, not org membership.
@@ -44,8 +44,8 @@ import { integrationConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { listMeConnections, type MeConnectionAuthority } from "../services/me-connections.ts";
 import { getActor } from "../lib/actor.ts";
-import { requireAppContext } from "../middleware/app-context.ts";
-import { getAppScope, type ActorScope, type AppScope } from "../lib/scope.ts";
+import { requireSpaceContext } from "../middleware/space-context.ts";
+import { getSpaceScope, type ActorScope, type SpaceScope } from "../lib/scope.ts";
 import {
   upsertMemberPin,
   deleteMemberPin,
@@ -55,7 +55,7 @@ import {
   deleteIntegrationConnection,
   listUsableIntegrationsForActor,
 } from "../services/integration-connections.ts";
-import { listRunnableAgents, listInstalledSkills } from "../services/application-packages.ts";
+import { listRunnableAgents, listInstalledSkills } from "../services/space-packages.ts";
 import { listRecentForActor } from "../services/state/runs.ts";
 import { getEndUser } from "../services/end-users.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
@@ -70,9 +70,9 @@ const router = new Hono<AppEnv>();
  * `/me/connections` surface (list + delete).
  *
  * An API key authenticates as its CREATOR (`c.get("user")` is the key's
- * creator), but the key itself is bound to one org + one application and its
+ * creator), but the key itself is bound to one org + one space and its
  * bearer is a long-lived secret that may be handed to a third-party
- * application. The cross-org/cross-app view is an interactive-dashboard
+ * space. The cross-org/cross-space view is an interactive-dashboard
  * feature — it must never be reachable with an API key, or a leaked key
  * could enumerate (and destructively delete) the creator's connections in
  * every org they belong to. The API-key auth branch always pins both ids
@@ -82,11 +82,11 @@ const router = new Hono<AppEnv>();
 function getMeConnectionAuthority(c: Context<AppEnv>): MeConnectionAuthority {
   if (c.get("authMethod") !== "api_key") return { kind: "user_global" };
   const orgId = c.get("orgId");
-  const applicationId = c.get("applicationId");
-  if (!orgId || !applicationId) {
-    throw unauthorized("API key is missing its org/application binding");
+  const spaceId = c.get("spaceId");
+  if (!orgId || !spaceId) {
+    throw unauthorized("API key is missing its org/space binding");
   }
-  return { kind: "app_scoped", orgId, applicationId };
+  return { kind: "space_scoped", orgId, spaceId };
 }
 
 /**
@@ -96,8 +96,8 @@ function getMeConnectionAuthority(c: Context<AppEnv>): MeConnectionAuthority {
  * - API key: the single org the key is bound to (DB-level filter — a
  *   compromised key cannot enumerate every org the creator belongs to)
  * - OIDC end-user JWT: the single org owning the impersonated end-user's
- *   application (end-users are not org members; the org is derived from
- *   `endUser.applicationId`)
+ *   space (end-users are not org members; the org is derived from
+ *   `endUser.spaceId`)
  *
  * Skips `requireOrgContext` (no `X-Org-Id` required — listing orgs is the
  * prerequisite to setting it). Authentication itself is enforced by the
@@ -107,7 +107,7 @@ router.get("/orgs", async (c) => {
   const endUser = c.get("endUser");
   if (endUser) {
     // End-users are not in `organization_members` — the OIDC strategy already
-    // pinned their application's owning org on `c.set("orgId", ...)`. Reuse
+    // pinned their space's owning org on `c.set("orgId", ...)`. Reuse
     // that single id and return a one-element list so the SPA org picker
     // has a stable shape across auth methods.
     const orgId = c.get("orgId");
@@ -155,13 +155,13 @@ router.get("/orgs", async (c) => {
  * GET /api/me/connections — unified user-scope connection list.
  *
  * For interactive user credentials (cookie session, OAuth dashboard/instance
- * JWT): every integration connection the caller owns across all orgs/apps
+ * JWT): every integration connection the caller owns across all orgs/spaces
  * they're a member of — the connection list belongs to the user, not to any
- * org/application, so org context is skipped entirely.
+ * org/space, so org context is skipped entirely.
  *
- * For an API key: hard-scoped to the key's bound (org, application) pair —
+ * For an API key: hard-scoped to the key's bound (org, space) pair —
  * the key authenticates as its creator, but its bearer must not be able to
- * enumerate the creator's connections in other orgs/apps
+ * enumerate the creator's connections in other orgs/spaces
  * (see {@link getMeConnectionAuthority}). Source-grouped (one group per
  * package) in both cases.
  */
@@ -182,8 +182,8 @@ router.get("/connections", async (c) => {
  *
  * Member-only (no end-user surface — end-users are addressed via API key
  * impersonation and the calling member controls the choice via run
- * overrides). All routes require `X-Application-Id`; the pin is scoped
- * to (member, application, agent, integration, authKey).
+ * overrides). All routes require `X-Space-Id`; the pin is scoped
+ * to (member, space, agent, integration, authKey).
  *
  * Admin pins live under `/api/integrations/:packageId/pins/...` and use
  * a different validation rule (the connection must be `sharedWithOrg`);
@@ -195,7 +195,7 @@ export const upsertMemberPinSchema = z.object({
   connection_id: z.uuid(),
 });
 
-router.get("/integration-pins", requireAppContext(), async (c) => {
+router.get("/integration-pins", requireSpaceContext(), async (c) => {
   const user = c.get("user");
   if (!user) throw unauthorized("Authentication required");
   if (c.get("endUser")) {
@@ -207,18 +207,18 @@ router.get("/integration-pins", requireAppContext(), async (c) => {
   if (!agentPackageId) {
     return c.json(listResponse([]));
   }
-  const scope = getAppScope(c);
+  const scope = getSpaceScope(c);
   const pins = await listMemberPinsForAgent(scope, agentPackageId, user.id);
   return c.json(listResponse(pins));
 });
 
-router.put("/integration-pins", requireAppContext(), async (c) => {
+router.put("/integration-pins", requireSpaceContext(), async (c) => {
   const user = c.get("user");
   if (!user) throw unauthorized("Authentication required");
   if (c.get("endUser")) {
     throw unauthorized("End-user cannot set a member-scope pin");
   }
-  const scope = getAppScope(c);
+  const scope = getSpaceScope(c);
   const input = await readJsonBody(c, upsertMemberPinSchema, { allowEmpty: true });
   const result = await upsertMemberPin(scope, {
     agentPackageId: input.agent_package_id,
@@ -235,13 +235,13 @@ router.put("/integration-pins", requireAppContext(), async (c) => {
   return c.json(result);
 });
 
-router.delete("/integration-pins", requireAppContext(), async (c) => {
+router.delete("/integration-pins", requireSpaceContext(), async (c) => {
   const user = c.get("user");
   if (!user) throw unauthorized("Authentication required");
   if (c.get("endUser")) {
     throw unauthorized("End-user cannot clear a member-scope pin");
   }
-  const scope = getAppScope(c);
+  const scope = getSpaceScope(c);
   const agentPackageId = c.req.query("agent_package_id");
   const integrationId = c.req.query("integration_package_id");
   if (!agentPackageId || !integrationId) {
@@ -272,12 +272,12 @@ router.delete("/integration-pins", requireAppContext(), async (c) => {
  * there they switch the agent's pick with `PUT /api/me/integration-pins`,
  * which stops one agent using a connection without destroying it.
  *
- * App context is implicit — the connection row carries `application_id`,
+ * Space context is implicit — the connection row carries `space_id`,
  * we re-derive scope from it instead of asking the SPA to send a header
  * for a per-row operation. EXCEPT for API-key callers: the key is bound to
- * one (org, application) and a delete outside that boundary is refused (a
+ * one (org, space) and a delete outside that boundary is refused (a
  * leaked key must not be able to destroy the creator's credentials in other
- * orgs/apps), so the key's own scope is used instead of the row-derived one.
+ * orgs/spaces), so the key's own scope is used instead of the row-derived one.
  */
 router.delete("/connections/:connectionId", async (c) => {
   const connectionId = c.req.param("connectionId")!;
@@ -292,12 +292,12 @@ router.delete("/connections/:connectionId", async (c) => {
     return c.body(null, 204);
   }
 
-  // /me/* skips org/app context middleware — derive applicationId from
+  // /me/* skips org/space context middleware — derive spaceId from
   // the connection row itself. Ownership is enforced by the service via
   // (userId | endUserId) filter, not by org membership: a connection
   // belongs to its owner regardless of which org context they're browsing.
   const [row] = await db
-    .select({ applicationId: integrationConnections.applicationId })
+    .select({ spaceId: integrationConnections.spaceId })
     .from(integrationConnections)
     .where(eq(integrationConnections.id, connectionId))
     .limit(1);
@@ -310,32 +310,32 @@ router.delete("/connections/:connectionId", async (c) => {
 
   // Scope selection depends on the credential's authority:
   //
-  //   - API key (`app_scoped`): the key is bound to one (org, application).
-  //     A connection outside that application short-circuits to 204 (same
+  //   - API key (`space_scoped`): the key is bound to one (org, space).
+  //     A connection outside that space short-circuits to 204 (same
   //     non-disclosure as the "row not found" branch — a probing key learns
-  //     nothing), and the delete itself runs under the KEY'S `AppScope`, so
-  //     the service's app∈org assertion and its `applicationId` WHERE filter
+  //     nothing), and the delete itself runs under the KEY'S `SpaceScope`, so
+  //     the service's space∈org assertion and its `spaceId` WHERE filter
   //     both enforce the boundary in SQL.
   //
   //   - Interactive user credential (`user_global`): pass an `ActorScope`
-  //     (applicationId only, no orgId) deliberately. `/me/connections` is an
-  //     actor-ownership boundary, not an app∈org one: a connection belongs to
+  //     (spaceId only, no orgId) deliberately. `/me/connections` is an
+  //     actor-ownership boundary, not a space∈org one: a connection belongs to
   //     its owner regardless of which org the caller is currently scoped to.
-  //     The absence of `orgId` tells the service to skip its app∈org
+  //     The absence of `orgId` tells the service to skip its space∈org
   //     assertion and rely solely on the (userId | endUserId) ownership
   //     predicate. Passing the caller's live `c.get("orgId")` here (populated
   //     for OIDC callers, empty for cookie sessions) would wrongly run that
-  //     assertion and 404 a self-owned connection whose application lives in
+  //     assertion and 404 a self-owned connection whose space lives in
   //     a different org. Ownership is still fully enforced downstream by the
   //     actor filter.
-  let scope: AppScope | ActorScope;
-  if (authority.kind === "app_scoped") {
-    if (row.applicationId !== authority.applicationId) {
+  let scope: SpaceScope | ActorScope;
+  if (authority.kind === "space_scoped") {
+    if (row.spaceId !== authority.spaceId) {
       return c.body(null, 204);
     }
-    scope = { orgId: authority.orgId, applicationId: authority.applicationId };
+    scope = { orgId: authority.orgId, spaceId: authority.spaceId };
   } else {
-    scope = { applicationId: row.applicationId } satisfies ActorScope;
+    scope = { spaceId: row.spaceId } satisfies ActorScope;
   }
   await deleteIntegrationConnection(scope, connectionId, actor);
   await recordAuditFromContext(c, {
@@ -353,16 +353,16 @@ router.delete("/connections/:connectionId", async (c) => {
  * prompt, the platform MCP server exposes it as the `get_me` tool, and
  * external REST/MCP clients call it directly. Returns the caller's identity,
  * their role in the pinned org, and the integrations they could attach when
- * building an agent in the current application (own or org-shared) — so the
+ * building an agent in the current space (own or org-shared) — so the
  * agent can prefer already-connected integrations and respect the caller's
  * role (operations beyond it will 403 at invoke time).
  *
- * App context resolves from `X-Application-Id`, the API key's application, or
- * (for the in-process MCP sub-dispatch) the org's default application.
+ * Space context resolves from `X-Space-Id`, the API key's space, or
+ * (for the in-process MCP sub-dispatch) the org's default space.
  */
-router.get("/context", requireAppContext(), async (c) => {
+router.get("/context", requireSpaceContext(), async (c) => {
   const actor = getActor(c);
-  const scope = getAppScope(c);
+  const scope = getSpaceScope(c);
 
   let identity: { id: string; name: string | null; email: string | null };
   if (actor.type === "end_user") {
@@ -378,7 +378,7 @@ router.get("/context", requireAppContext(), async (c) => {
 
   // Agents are a runnable-hint: only surface them when the caller actually holds
   // `agents:run` (otherwise the model would propose agents that 403 at invoke).
-  // The list is app-scoped (same for every actor in the app), capped for prompt
+  // The list is space-scoped (same for every actor in the space), capped for prompt
   // size, and authoritative execution still re-checks RBAC at the run route.
   // Skills, like agents, are only useful for building/configuring an agent run,
   // so they share the `agents:run` gate. They aren't run directly — the model

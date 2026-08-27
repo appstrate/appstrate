@@ -18,7 +18,7 @@ import { scopedWhere } from "../lib/db-helpers.ts";
  * dashboard token scoped to a specific org), the `X-Org-Id` header MUST match
  * the pinned value — otherwise a holder of a token scoped to org A who is also
  * a member of org B by session could spoof `X-Org-Id: B` and bypass the token's
- * consent scope. Symmetric with `requireAppContext`.
+ * consent scope. Symmetric with `requireSpaceContext`.
  *
  * A caller that neither pins an org nor sends the header gets a 400. A token
  * that pins an org reaches this middleware with `pinned` set, so it is only

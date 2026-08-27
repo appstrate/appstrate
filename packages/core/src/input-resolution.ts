@@ -8,12 +8,12 @@
  * An AFPS manifest declares ONE parameter schema (`input`). Whether a value is
  * asked at every launch or set once and reused is a platform concern, not a
  * manifest concern: it is expressed as stored values plus per-field locks on
- * `application_packages`.
+ * `space_packages`.
  *
  * The layers, last one wins:
  *
  *   author default   (manifest `input.schema` JSON Schema `default` keyword)
- *     -> editor default   (`application_packages.input_settings.values`)
+ *     -> editor default   (`space_packages.input_settings.values`)
  *       -> the overlay   (the one source of values this launch carries)
  *
  * The merge is a shallow per-property overlay: a layer either supplies a
@@ -74,11 +74,11 @@ export interface InputLayers {
   /** `manifest.input.schema` — its `default` keywords are the author layer. */
   schema?: JSONSchemaObject | undefined;
   /**
-   * `application_packages.input_settings.values` — values the editor stored
-   * once. Absent for a target with no application row behind it.
+   * `space_packages.input_settings.values` — values the editor stored
+   * once. Absent for a target with no space row behind it.
    */
   editorDefaults?: Record<string, unknown> | undefined;
-  /** `application_packages.input_settings.locked` — fields no overlay may set. */
+  /** `space_packages.input_settings.locked` — fields no overlay may set. */
   lockedFields?: readonly string[] | undefined;
   /** The source above the editor layer — see {@link InputOverlay}. */
   overlay: InputOverlay;

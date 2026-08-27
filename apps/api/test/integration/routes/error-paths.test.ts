@@ -27,8 +27,8 @@ describe("401 — unauthenticated requests", () => {
     { method: "GET", path: "/api/api-keys" },
     { method: "POST", path: "/api/api-keys" },
     { method: "GET", path: "/api/integrations" },
-    { method: "GET", path: "/api/applications" },
-    { method: "POST", path: "/api/applications" },
+    { method: "GET", path: "/api/spaces" },
+    { method: "POST", path: "/api/spaces" },
     { method: "GET", path: "/api/end-users" },
     { method: "GET", path: "/api/models" },
     { method: "GET", path: "/api/proxies" },
@@ -63,7 +63,7 @@ describe("400 — missing X-Org-Id header on org-scoped routes", () => {
     { method: "GET", path: "/api/agents" },
     { method: "GET", path: "/api/api-keys" },
     { method: "GET", path: "/api/integrations" },
-    { method: "GET", path: "/api/applications" },
+    { method: "GET", path: "/api/spaces" },
     { method: "GET", path: "/api/models" },
     { method: "GET", path: "/api/proxies" },
     { method: "GET", path: "/api/model-provider-credentials" },
@@ -109,8 +109,8 @@ describe("404 — non-existent resources", () => {
     expect(res.status).toBe(404);
   });
 
-  it("DELETE /api/applications/nonexistent returns 404", async () => {
-    const res = await app.request("/api/applications/nonexistent", {
+  it("DELETE /api/spaces/nonexistent returns 404", async () => {
+    const res = await app.request("/api/spaces/nonexistent", {
       method: "DELETE",
       headers: authHeaders(ctx),
     });
@@ -270,8 +270,8 @@ describe("400 — validation errors", () => {
     expect(res.status).toBe(400);
   });
 
-  it("POST /api/applications without name returns 400", async () => {
-    const res = await app.request("/api/applications", {
+  it("POST /api/spaces without name returns 400", async () => {
+    const res = await app.request("/api/spaces", {
       method: "POST",
       headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
       body: JSON.stringify({}),

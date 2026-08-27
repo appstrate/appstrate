@@ -23,7 +23,7 @@ import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { seedPackage, seedPackageVersion } from "./seed.ts";
 import { localIntegrationManifest, httpHeaderDelivery } from "./integration-manifests.ts";
 import type { TestContext } from "./auth.ts";
-import { installPackage } from "../../src/services/application-packages.ts";
+import { installPackage } from "../../src/services/space-packages.ts";
 import { createApiKeyCredential } from "../../src/services/model-providers/credentials.ts";
 import { createOrgModel, setDefaultModel } from "../../src/services/org-models.ts";
 import { waitForInFlight } from "../../src/services/run-tracker.ts";
@@ -137,7 +137,7 @@ function connectionTestIntegrationManifest(id: string) {
 
 /**
  * Seed the integration package + a PUBLISHED 1.0.0 version + install it in the
- * context's default application. The published version is what the run's
+ * context's default space. The published version is what the run's
  * dependency freeze resolves the agent's `^1.0.0` pin against — without it
  * kickoff aborts with 422 `dependency_unresolved` long before the connection
  * snapshot.
@@ -155,7 +155,7 @@ export async function seedConnectionTestIntegration(ctx: TestContext, id: string
     version: "1.0.0",
     manifest: connectionTestIntegrationManifest(id) as unknown as Record<string, unknown>,
   });
-  await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, id);
+  await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
 }
 
 /** Add one connection on the integration's `primary` auth, owned by the ctx user. */
@@ -169,7 +169,7 @@ export async function seedIntegrationConnection(
       integrationId,
       authKey: "primary",
       accountId: `acct-${crypto.randomUUID().slice(0, 8)}`,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,
       credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret-value" } }),

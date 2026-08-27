@@ -7,7 +7,7 @@
  * result.
  *
  * The platform resolves `manifest.input.schema` defaults and the
- * per-application stored values on every run, so a local run of the same
+ * per-space stored values on every run, so a local run of the same
  * agent must resolve them too or it executes with different parameters than
  * the dashboard would. Layers 3-4 (schedule values, caller input on a
  * platform run) deliberately have no equivalent: the server owns that chain.
@@ -94,10 +94,10 @@ describe("resolveLocalInput", () => {
 });
 
 /**
- * Layer 2 — `application_packages.input_settings`, delivered by the
+ * Layer 2 — `space_packages.input_settings`, delivered by the
  * `run-config` endpoint. Present only for `appstrate run @scope/agent`
- * (a REMOTE package installed in an application); a bundle read off disk
- * has no application row behind it and passes `undefined`.
+ * (a REMOTE package installed in a space); a bundle read off disk
+ * has no space row behind it and passes `undefined`.
  */
 describe("resolveLocalInput — stored input layer (remote package)", () => {
   const STORED = { values: { tone: "brisk" }, lockedFields: [] as string[] };
@@ -160,7 +160,7 @@ describe("resolveLocalInput — stored input layer (remote package)", () => {
   });
 
   it("leaves a local bundle path (no stored layer) on author defaults only", () => {
-    // `appstrate run ./dir` has no application row — nothing is inherited and
+    // `appstrate run ./dir` has no space row — nothing is inherited and
     // no lock can apply, so the pre-existing behaviour is unchanged.
     expect(resolveLocalInput(TONE_BUNDLE, { extra: 1 }, undefined)).toEqual({
       tone: "neutral",

@@ -24,13 +24,13 @@ export const OIDC_IDENTITY_SCOPE_SET: ReadonlySet<string> = new Set(OIDC_IDENTIT
 /**
  * Permissions that can be granted to end-user OIDC JWTs.
  *
- * End-users are NOT org members — they impersonate through an application
+ * End-users are NOT org members — they impersonate through a space
  * via a JWT minted by the OIDC module's oauth-provider. This allowlist is
  * the intersection of (a) safe-for-end-user permissions and (b) permissions
  * whose routes are compatible with the strict end-user run-filter.
  *
  * Destructive and admin-scoped permissions (`agents:write`, `agents:delete`,
- * `runs:delete`, `api-keys:*`, `webhooks:*`, `applications:*`, `end-users:*`,
+ * `runs:delete`, `api-keys:*`, `webhooks:*`, `spaces:*`, `end-users:*`,
  * `model-provider-credentials:*`, etc.) are excluded — they are admin work, not
  * end-user work, and granting them through a user-consented OAuth flow would
  * let an embedding app silently escalate.

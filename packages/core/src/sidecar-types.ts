@@ -132,7 +132,7 @@ export interface SidecarLaunchSpec {
 /**
  * Per-integration spec consumed by the sidecar. The platform launcher
  * resolves the chain `agent.dependencies.integrations[id] →
- * applicationPackages → integration_connections` and emits one entry
+ * spacePackages → integration_connections` and emits one entry
  * per installed-and-connected integration.
  *
  * Bundle bytes are NOT inlined — they would blow past the Linux env

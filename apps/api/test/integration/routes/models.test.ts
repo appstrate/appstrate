@@ -1431,7 +1431,7 @@ describe("Models API", () => {
       return {
         Cookie: member.cookie,
         "X-Org-Id": ctx.orgId,
-        "X-Application-Id": ctx.defaultAppId,
+        "X-Space-Id": ctx.defaultSpaceId,
         ...extra,
       };
     }

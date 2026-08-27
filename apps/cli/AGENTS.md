@@ -6,10 +6,10 @@ You are an AI coding agent (Claude Code, Cursor, Codex, Gemini CLI, …) and a h
 
 Appstrate is a platform for running autonomous AI agents in sandboxed containers. Its REST API is the single source of truth, fully documented in OpenAPI 3.1 (never quote an endpoint count — ask the instance: `appstrate openapi list --json | jq length`). The `appstrate` CLI is a thin, authenticated wrapper around that API:
 
-- **`appstrate api`** — `curl`-compatible HTTP passthrough. Replace `curl https://app/api/x` with `appstrate api /api/x`. The CLI injects `Authorization: Bearer <jwt>` + `X-Org-Id` + `X-Application-Id` from the OS keyring; you never see the bearer.
+- **`appstrate api`** — `curl`-compatible HTTP passthrough. Replace `curl https://app/api/x` with `appstrate api /api/x`. The CLI injects `Authorization: Bearer <jwt>` + `X-Org-Id` + `X-Space-Id` from the OS keyring; you never see the bearer.
 - **`appstrate openapi`** — schema explorer. `list` + `show` + `export` let you discover the available endpoints without dumping the whole spec into your context window.
 - **`appstrate org`** — pin which organization the profile targets (`X-Org-Id`).
-- **`appstrate app`** — pin which application the profile targets (`X-Application-Id`). Required for app-scoped routes (agents, runs, schedules, …).
+- **`appstrate space`** — pin which space the profile targets (`X-Space-Id`). Required for space-scoped routes (agents, runs, schedules, …).
 - **`appstrate login` / `logout` / `whoami` / `token`** — session management.
 
 Everything else the user asks for — creating an agent, triggering a run, uploading a package, managing webhooks — is expressed as `appstrate api <METHOD> <path>` plus a JSON body. The CLI never hides endpoints from you.
@@ -30,12 +30,14 @@ appstrate login --instance https://app.example.com
 # 3. Confirm which org is pinned (X-Org-Id sent on every call)
 appstrate org current
 
-# 3b. Confirm which application is pinned (X-Application-Id sent on every call).
-#     App-scoped routes (agents, runs, schedules, webhooks, api-keys,
-#     notifications, packages, integrations, end-users) require this.
-#     `login` cascades into the default app
+# 3b. Confirm which space is pinned (X-Space-Id sent on every call).
+#     Space-scoped routes (agents, runs, schedules, api-keys, notifications,
+#     packages, integrations, end-users, uploads, files) require this.
+#     Not webhooks: `/api/webhooks` carries its own `spaceId` field and is
+#     absent from SPACE_SCOPED_PREFIXES.
+#     `login` cascades into the default space
 #     automatically, so this usually already prints a value.
-appstrate app current
+appstrate space current
 
 # 4. Discover the "runs" domain. --json produces compact, greppable output.
 appstrate openapi list --tag runs --json
@@ -43,24 +45,29 @@ appstrate openapi list --tag runs --json
 # 5. Inspect the operation you want. --json returns the fully dereferenced
 #    schema (request body, responses, all $refs inlined) — ideal for
 #    building a request body without re-fetching the schema.
-appstrate openapi show createRun --json
+appstrate openapi show runAgent --json
 
-# 6. List existing agents, pick one
-appstrate api GET /api/agents | jq '.[] | {id, name, slug}'
+# 6. List existing agents, pick one. The response is a Stripe-style
+#    envelope — `{ object, data, hasMore }` — so iterate `.data[]`, not
+#    `.[]`. Each item carries `id` (already `@scope/name`), `display_name`
+#    and `scope`; there is no `name` or `slug` field.
+appstrate api GET /api/agents | jq '.data[] | {id, display_name, scope}'
 
-# 7. Trigger a run. -d @file / -d @- / -d '{"…"}' all work like curl.
+# 7. Trigger a run. The route is keyed by the scoped package name, NOT by
+#    an opaque id — `POST /api/agents/{scope}/{name}/run`, with the `@`
+#    part of the scope segment. -d @file / -d @- / -d '{"…"}' all work
+#    like curl.
 echo '{"input": {"query": "hello"}}' \
-  | appstrate api POST /api/agents/agt_123/run -d @-
+  | appstrate api POST '/api/agents/@acme/email-sorter/run' -d @-
 ```
 
-The server responds via Server-Sent Events. To consume the stream in an agent-friendly way:
+**That POST is fire-and-forget**: it returns `201` with the created run resource as JSON (`id`, `status`, `model_label`, …) and nothing streams from it. Progress is a separate GET on the realtime endpoint:
 
 ```sh
-# SSE stream — line-buffered, one JSON event per "data:" line
-appstrate api POST /api/agents/agt_123/run \
-  -d @input.json \
-  -H 'Accept: text/event-stream' \
-  -N                                 # disable output buffering
+# SSE stream — one JSON event per "data:" line, until the run finishes.
+# `appstrate api` writes response chunks through as they arrive; there is
+# no buffering flag to disable.
+appstrate api GET /api/realtime/runs/run_cm1abc123def456
 ```
 
 ## Rules of engagement
@@ -68,7 +75,7 @@ appstrate api POST /api/agents/agt_123/run \
 1. **Discover before you POST.** Always run `appstrate openapi show <operationId> --json` before constructing a request body. Schemas change; your training data lies.
 2. **Never hard-code tokens.** If you find yourself writing `Authorization: Bearer …`, you've failed the design. The CLI owns the bearer; you just call `appstrate api`.
 3. **Never print tokens.** `appstrate token` returns metadata only — never the plaintext. Do not try to extract tokens from the keyring.
-4. **Respect the org + app boundaries.** `X-Org-Id` and `X-Application-Id` are auto-injected from the pinned profile. To operate on a different org, run `appstrate org switch <slug-or-id>` (the app pin cascades automatically). To operate on a different app within the same org, run `appstrate app switch <id>`. Do not forge either header.
+4. **Respect the org + space boundaries.** `X-Org-Id` and `X-Space-Id` are auto-injected from the pinned profile. To operate on a different org, run `appstrate org switch <slug-or-id>` (the space pin cascades automatically). To operate on a different space within the same org, run `appstrate space switch <id>`. Do not forge either header.
 5. **Fail fast on auth drift.** If `whoami` exits non-zero mid-session, STOP and tell the human to re-run `appstrate login`. Do not retry blindly.
 6. **Use `--profile <name>` for multi-instance.** `--profile dev` / `--profile prod` pick a keyring entry + instance URL pair. Do not hack `~/.config/appstrate/config.toml` by hand.
 
@@ -113,7 +120,7 @@ appstrate openapi show POST /api/runs/inline --json    # required fields
 appstrate api POST /api/runs/inline -d @manifest.json
 ```
 
-**List runs for an application, filter by status:**
+**List runs for a space, filter by status:**
 
 ```sh
 appstrate api GET '/api/runs?status=success&limit=20' | jq '.data[]'
@@ -139,8 +146,9 @@ If you hit any of the following, stop and surface the issue to the human instead
 
 - `401 unauthorized` after `whoami` passed — the refresh token family was revoked; `appstrate login` needed.
 - `403 forbidden` — the pinned org doesn't have permission. Offer `appstrate org switch` or ask which org to use.
-- `400 Application context required` — the profile has no `applicationId` pinned. Run `appstrate app current` to check, then `appstrate app switch` (or surface the error — the cascade at login should have handled this).
-- `404 Application '<id>' not found in this organization` — stale app pin from a previous org. Run `appstrate app switch` under the current org.
+- `400 Space context required` — the profile has no `spaceId` pinned. Run `appstrate space current` to check, then `appstrate space switch` (or surface the error — the cascade at login should have handled this).
+- `404 Space '<id>' not found in this organization` — stale space pin from a previous org. Run `appstrate space switch` under the current org.
+- `Profile "<name>" … pins the retired key "applicationId"` — the profile on disk predates the space rename. Every command is blocked until the human deletes that line from `config.toml` and re-pins with `appstrate space switch`. Surface this to the human; do not edit their config yourself.
 - `404 not found` on an operationId that `openapi list` shows — the instance version is older than the CLI. Ask the human to upgrade.
 - `This CLI is not registered on the target instance` — version incompatibility; do not patch around it.
 

@@ -40,7 +40,7 @@ import { db } from "@appstrate/db/client";
 import { runs, TERMINAL_RUN_STATUSES, type RunStatus } from "@appstrate/db/schema";
 import { addSubscriber, removeSubscriber } from "./realtime.ts";
 import { invalidRequest } from "../lib/errors.ts";
-import type { AppScope } from "../lib/scope.ts";
+import type { SpaceScope } from "../lib/scope.ts";
 
 /**
  * Server-side wait ceiling, in seconds. Kept below typical proxy idle
@@ -116,7 +116,7 @@ export function activePollLoopCount(): number {
  */
 function addSharedPollWaiter(
   runId: string,
-  scope: AppScope,
+  scope: SpaceScope,
   pollIntervalMs: number,
   onTerminal: () => void,
 ): () => void {
@@ -194,17 +194,11 @@ export function parseWaitQuery(raw: string | undefined): number {
 }
 
 /** One narrow indexed read: is the run terminal right now? */
-async function isRunTerminal(scope: AppScope, runId: string): Promise<boolean> {
+async function isRunTerminal(scope: SpaceScope, runId: string): Promise<boolean> {
   const [row] = await db
     .select({ status: runs.status })
     .from(runs)
-    .where(
-      and(
-        eq(runs.id, runId),
-        eq(runs.orgId, scope.orgId),
-        eq(runs.applicationId, scope.applicationId),
-      ),
-    )
+    .where(and(eq(runs.id, runId), eq(runs.orgId, scope.orgId), eq(runs.spaceId, scope.spaceId)))
     .limit(1);
   // A run deleted mid-wait resolves the wait too — the caller re-reads and
   // surfaces its own 404 rather than holding the request for nothing.
@@ -223,7 +217,7 @@ async function isRunTerminal(scope: AppScope, runId: string): Promise<boolean> {
  */
 export async function waitForRunTerminal(opts: {
   runId: string;
-  scope: AppScope;
+  scope: SpaceScope;
   /** Wait budget in milliseconds (already capped by {@link parseWaitQuery}). */
   timeoutMs: number;
   /**
@@ -277,14 +271,14 @@ export async function waitForRunTerminal(opts: {
     signal?.addEventListener("abort", finish, { once: true });
 
     // Primary wakeup: the realtime fan-out of the `run_update` PG NOTIFY.
-    // The filter reuses the same org/application isolation gates as the SSE
+    // The filter reuses the same org/space isolation gates as the SSE
     // subscribers; `isAdmin` only affects the run_log channel (unused here).
     addSubscriber({
       id: subId,
       filter: {
         runId,
         orgId: scope.orgId,
-        applicationId: scope.applicationId,
+        spaceId: scope.spaceId,
         isAdmin: true,
         // This in-process subscriber only ever acts on `run_update` (see the
         // `send` handler below); declaring it keeps the run's log and metric

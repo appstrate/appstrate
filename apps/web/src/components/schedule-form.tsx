@@ -108,7 +108,7 @@ interface ScheduleFormProps {
   currentActor?: ActorValue;
   /**
    * The agent's input wrapper (schema + hints + order) plus the
-   * per-application layers behind it (`values` + `locked_fields`).
+   * per-space layers behind it (`values` + `locked_fields`).
    */
   inputWrapper?: AgentDetail["input"];
   /** Persisted defaults — passed straight through to RunOverridesPanel. */

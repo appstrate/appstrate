@@ -5,7 +5,7 @@
  * credential-proxy service.
  *
  * The public `/api/credential-proxy/proxy` endpoint (BYOI / CLI /
- * GitHub Action) reaches an application's integrations from outside
+ * GitHub Action) reaches a space's integrations from outside
  * Appstrate. `proxyCall()` resolves the integration connection for the
  * caller's actor, builds the `delivery.http` plan, and synthesises the
  * upstream auth header server-side — the caller cannot alter it (the
@@ -21,7 +21,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
-import { applicationPackages, integrationConnections } from "@appstrate/db/schema";
+import { spacePackages, integrationConnections } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
@@ -48,15 +48,15 @@ async function installAndConnect(
   authKey: string,
   fields: Record<string, string>,
 ): Promise<void> {
-  await db.insert(applicationPackages).values({
-    applicationId: ctx.defaultAppId,
+  await db.insert(spacePackages).values({
+    spaceId: ctx.defaultSpaceId,
     packageId,
   });
   await db.insert(integrationConnections).values({
     integrationId: packageId,
     authKey,
     accountId: "acct-1",
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     credentialsEncrypted: encryptCredentialEnvelope({ outputs: fields }),
     scopesGranted: [],
@@ -110,7 +110,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     }) as unknown as typeof fetch;
 
     const res = await proxyCall({
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
       method: "GET",
@@ -152,7 +152,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     }) as unknown as typeof fetch;
 
     const res = await proxyCall({
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
       method: "GET",
@@ -196,7 +196,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     }) as unknown as typeof fetch;
 
     await proxyCall({
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
       method: "GET",
@@ -237,7 +237,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     }) as unknown as typeof fetch;
 
     await proxyCall({
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
       method: "GET",
@@ -292,7 +292,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
     }) as unknown as typeof fetch;
 
     await proxyCall({
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
       method: "GET",
@@ -341,7 +341,7 @@ describe("proxyCall — server-side credential injection (integration-backed)", 
 
     await expect(
       proxyCall({
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         actor: { type: "user", id: ctx.user.id },
         integrationId: packageId,
         method: "GET",

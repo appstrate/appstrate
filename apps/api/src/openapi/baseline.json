@@ -3,7 +3,7 @@
   "info": {
     "title": "Appstrate API",
     "version": "1.0.0",
-    "description": "API for Appstrate — an open-source platform for running autonomous AI agents in sandboxed Docker containers. Manage agents, runs, schedules, providers, API keys, and more.\n\n## Common Response Headers\n\nAll API responses include a `Request-Id` header (`req_` prefix) for tracing. All authenticated responses additionally include an `Appstrate-Version` header with the resolved API version (format: `YYYY-MM-DD`). Rate-limited endpoints return `RateLimit` and `RateLimit-Policy` headers on every response (not just 429).\n\n## Idempotency\n\n`Idempotency-Key` is honoured **only** on the operations that declare it as a parameter. Sending it anywhere else is refused, not ignored: any other request with an unsafe method (`POST`, `PUT`, `PATCH`, `DELETE`, …) that carries the header is rejected before it reaches the handler with `400` `application/problem+json`, `code: \"idempotency_not_supported\"`. Safe methods (`GET`, `HEAD`, `OPTIONS`) ignore the header — replaying them is already free of effect (RFC 9110 §9.2.1), so there is no guarantee to correct.\n\nThis response is produced by a request-level middleware rather than by any operation, so it is documented here instead of on each of the ~130 operations that can emit it. A client that never sends `Idempotency-Key` outside the operations declaring it will never see it. Do not stamp the header onto every outbound request: on this API that turns a working call into a `400`.\n\nOn the operations that do honour it, the key is stored for 24h scoped to the organization and application: a repeat with the same key and the same body replays the original response with `Idempotent-Replayed: true`; the same key with a different body is `422` `idempotency_conflict`; a concurrent in-flight duplicate is `409` `idempotency_in_progress`.\n\n**Not covered:** `/api/auth/*` (Better Auth) terminates the request chain before this middleware runs. Those endpoints — sign-up/sign-in/sign-out, the device flow, `cli/token`, `cli/revoke`, `organization/*` — neither honour nor refuse the header; they ignore it.",
+    "description": "API for Appstrate — an open-source platform for running autonomous AI agents in sandboxed Docker containers. Manage agents, runs, schedules, providers, API keys, and more.\n\n## Common Response Headers\n\nAll API responses include a `Request-Id` header (`req_` prefix) for tracing. All authenticated responses additionally include an `Appstrate-Version` header with the resolved API version (format: `YYYY-MM-DD`). Rate-limited endpoints return `RateLimit` and `RateLimit-Policy` headers on every response (not just 429).\n\n## Idempotency\n\n`Idempotency-Key` is honoured **only** on the operations that declare it as a parameter. Sending it anywhere else is refused, not ignored: any other request with an unsafe method (`POST`, `PUT`, `PATCH`, `DELETE`, …) that carries the header is rejected before it reaches the handler with `400` `application/problem+json`, `code: \"idempotency_not_supported\"`. Safe methods (`GET`, `HEAD`, `OPTIONS`) ignore the header — replaying them is already free of effect (RFC 9110 §9.2.1), so there is no guarantee to correct.\n\nThis response is produced by a request-level middleware rather than by any operation, so it is documented here instead of on each of the ~130 operations that can emit it. A client that never sends `Idempotency-Key` outside the operations declaring it will never see it. Do not stamp the header onto every outbound request: on this API that turns a working call into a `400`.\n\nOn the operations that do honour it, the key is stored for 24h scoped to the organization and space: a repeat with the same key and the same body replays the original response with `Idempotent-Replayed: true`; the same key with a different body is `422` `idempotency_conflict`; a concurrent in-flight duplicate is `409` `idempotency_in_progress`.\n\n**Not covered:** `/api/auth/*` (Better Auth) terminates the request chain before this middleware runs. Those endpoints — sign-up/sign-in/sign-out, the device flow, `cli/token`, `cli/revoke`, `organization/*` — neither honour nor refuse the header; they ignore it.",
     "contact": {
       "name": "Appstrate",
       "url": "https://appstrate.dev",
@@ -55,7 +55,7 @@
     },
     {
       "name": "Library",
-      "description": "Consolidated package catalog across an organization's applications (UI-oriented)."
+      "description": "Consolidated package catalog across an organization's spaces (UI-oriented)."
     },
     {
       "name": "Notifications",
@@ -102,12 +102,12 @@
       "description": "API documentation and specification"
     },
     {
-      "name": "Applications",
-      "description": "Application management for headless API"
+      "name": "Spaces",
+      "description": "Space management for headless API"
     },
     {
-      "name": "Application Packages",
-      "description": "Manage packages installed in an application"
+      "name": "Space Packages",
+      "description": "Manage packages installed in a space"
     },
     {
       "name": "End Users",
@@ -277,7 +277,8 @@
                   },
                   "password": {
                     "type": "string",
-                    "minLength": 8
+                    "minLength": 8,
+                    "maxLength": 128
                   },
                   "name": {
                     "type": "string"
@@ -420,7 +421,7 @@
         "operationId": "redeemBootstrapToken",
         "tags": ["Auth"],
         "summary": "Claim ownership of an unattended install",
-        "description": "Redeem the one-shot AUTH_BOOTSTRAP_TOKEN written by `appstrate install --yes` to seize ownership of a closed-by-default instance (issue #344). Single-use — once any organization exists, the token is dead. Creates the user, the bootstrap organization, the default application, and the hello-world agent in one round-trip; sets the session cookie so the SPA is logged in immediately.",
+        "description": "Redeem the one-shot AUTH_BOOTSTRAP_TOKEN written by `appstrate install --yes` to seize ownership of a closed-by-default instance (issue #344). Single-use — once any organization exists, the token is dead. Creates the user, the bootstrap organization, the default space, and the hello-world agent in one round-trip; sets the session cookie so the SPA is logged in immediately.",
         "security": [],
         "requestBody": {
           "required": true,
@@ -443,7 +444,7 @@
                   "password": {
                     "type": "string",
                     "minLength": 8,
-                    "maxLength": 256
+                    "maxLength": 128
                   },
                   "name": {
                     "type": "string",
@@ -484,7 +485,7 @@
                           "items": {
                             "type": "string"
                           },
-                          "description": "Optional advisory codes — e.g. `default_app_provisioning_failed` when the post-bootstrap default-app/agent hook failed. The owner+org are still committed; the operator can self-heal via /api/applications."
+                          "description": "Optional advisory codes — e.g. `default_space_provisioning_failed` when the post-bootstrap default-space/agent hook failed. The owner+org are still committed; the operator can self-heal via /api/spaces."
                         }
                       }
                     }
@@ -566,7 +567,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           }
         ],
         "responses": {
@@ -663,13 +664,13 @@
         "operationId": "saveAgentInputSettings",
         "tags": ["Agents"],
         "summary": "Save agent input settings",
-        "description": "Save the agent's stored input values and field locks for this application. `values` are validated against the manifest `input.schema` with `required` dropped (a required field left empty is asked at launch). Locking a required field that has no value — no author `default` and no entry in `values` — is refused with 400 `locked_required_field_empty`.",
+        "description": "Save the agent's stored input values and field locks for this space. `values` are validated against the manifest `input.schema` with `required` dropped (a required field left empty is asked at launch). Locking a required field that has no value — no author `default` and no entry in `values` — is refused with 400 `locked_required_field_empty`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -733,7 +734,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -787,7 +788,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -867,7 +868,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -927,7 +928,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -1098,7 +1099,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -1180,13 +1181,13 @@
         "operationId": "deleteAgentPersistenceMemory",
         "tags": ["Agents"],
         "summary": "Delete a single memory by id",
-        "description": "Admin-only. The id must belong to the targeted agent in the current app.",
+        "description": "Admin-only. The id must belong to the targeted agent in the current space.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -1232,13 +1233,13 @@
         "operationId": "deleteAgentPersistencePinnedSlot",
         "tags": ["Agents"],
         "summary": "Delete a single pinned slot by id",
-        "description": "Admin-only. Deletes any named pinned slot (`checkpoint`, `persona`, `goals`, …). The id must belong to the targeted agent in the current app.",
+        "description": "Admin-only. Deletes any named pinned slot (`checkpoint`, `persona`, `goals`, …). The id must belong to the targeted agent in the current space.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -1290,7 +1291,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -1352,7 +1353,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -1449,7 +1450,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -1528,13 +1529,13 @@
         "operationId": "exportAgentBundle",
         "tags": ["Agents"],
         "summary": "Export an agent as an .afps-bundle",
-        "description": "Streams a canonical multi-package .afps-bundle archive containing the agent and all its transitive dependencies. The archive is deterministic (byte-identical across calls with the same inputs) and carries per-file RECORD hashes plus a bundle-level SRI digest (also echoed in the `X-Bundle-Integrity` response header). Two modes: `?source=published` (default) exports the version installed for this application (falls back to the `latest` dist-tag, or pass `?version=` to pin); `?source=draft` bundles the agent's current draft state — used by the CLI's run-by-id flow to mirror the dashboard Run button on never-published agents. `?source=draft` cannot be combined with `?version=`. Assembly reads the same stored artifacts a run does, so it reports the same coded bundle failures — see the 422 and 500 responses.",
+        "description": "Streams a canonical multi-package .afps-bundle archive containing the agent and all its transitive dependencies. The archive is deterministic (byte-identical across calls with the same inputs) and carries per-file RECORD hashes plus a bundle-level SRI digest (also echoed in the `X-Bundle-Integrity` response header). Two modes: `?source=published` (default) exports the version installed for this space (falls back to the `latest` dist-tag, or pass `?version=` to pin); `?source=draft` bundles the agent's current draft state — used by the CLI's run-by-id flow to mirror the dashboard Run button on never-published agents. `?source=draft` cannot be combined with `?version=`. Assembly reads the same stored artifacts a run does, so it reports the same coded bundle failures — see the 422 and 500 responses.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -1546,7 +1547,7 @@
             "in": "query",
             "name": "version",
             "required": false,
-            "description": "Version to export — exact semver, dist-tag, or semver range. Defaults to the version currently installed for this application (falls back to the `latest` dist-tag). Mutually exclusive with `?source=draft`.",
+            "description": "Version to export — exact semver, dist-tag, or semver range. Defaults to the version currently installed for this space (falls back to the `latest` dist-tag). Mutually exclusive with `?source=draft`.",
             "schema": {
               "type": "string"
             }
@@ -1654,7 +1655,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/AppstrateUser"
@@ -1693,7 +1694,7 @@
                   },
                   "rerun_from": {
                     "type": "string",
-                    "description": "Run id whose persisted `input` to replay on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + application scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). Staged `upload://` inputs are materialized on the original run and rewritten in its persisted input as durable `appfile://` references, so later reruns reuse the same files without depending on upload retention. Existing `appfile://` inputs remain unchanged. **Limitation:** inline `data:` inputs are NOT replayable — their bytes are materialized into the original run's workspace and stripped from the stored input (only a payload-less marker is persisted), so replaying a run whose input carried an inline file returns 409 `rerun_inline_input_unavailable`. Stage the file with `createUpload` when the input must be replayable."
+                    "description": "Run id whose persisted `input` to replay on this run. Mutually exclusive with `input` (400 if both are sent). The referenced run must be visible in the caller's org + space scope (404 otherwise; end-users can only replay their own runs) and must belong to the agent being triggered (409 `rerun_agent_mismatch`). Staged `upload://` inputs are materialized on the original run and rewritten in its persisted input as durable `appfile://` references, so later reruns reuse the same files without depending on upload retention. Existing `appfile://` inputs remain unchanged. **Limitation:** inline `data:` inputs are NOT replayable — their bytes are materialized into the original run's workspace and stripped from the stored input (only a payload-less marker is persisted), so replaying a run whose input carried an inline file returns 409 `rerun_inline_input_unavailable`. Stage the file with `createUpload` when the input must be replayable."
                   },
                   "modelId": {
                     "type": "string",
@@ -1768,7 +1769,7 @@
                   "endUserId": null,
                   "apiKeyId": null,
                   "orgId": "org_r3t5w8y1z6",
-                  "applicationId": "app_m4n5o6p7",
+                  "spaceId": "spc_1d4e7a90-3c21-4b6f-8e05-6a9c2f7b1d38",
                   "scheduleId": null,
                   "status": "pending",
                   "input": {
@@ -1944,7 +1945,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -2028,7 +2029,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -2104,7 +2105,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/AppstrateUser"
@@ -2215,7 +2216,7 @@
                   "endUserId": null,
                   "apiKeyId": null,
                   "orgId": "org_r3t5w8y1z6",
-                  "applicationId": "app_m4n5o6p7",
+                  "spaceId": "spc_1d4e7a90-3c21-4b6f-8e05-6a9c2f7b1d38",
                   "scheduleId": null,
                   "status": "pending",
                   "input": {
@@ -2370,7 +2371,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/AppstrateUser"
@@ -2493,14 +2494,14 @@
       "get": {
         "operationId": "listRuns",
         "tags": ["Runs"],
-        "summary": "List runs across the application (global view)",
-        "description": "Org + application scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, a date range, and the chat session that launched the run. Inline runs surface via `package_ephemeral: true` on each row. Note: global filters are ignored when `user=me` (self-view uses a simpler path).",
+        "summary": "List runs across the space (global view)",
+        "description": "Org + space scoped paginated list. Supports filtering by `user=me` (self-owned, also implicit for end-user impersonation), `kind` (all, package, inline), `status`, a date range, and the chat session that launched the run. Inline runs surface via `package_ephemeral: true` on each row. Note: global filters are ignored when `user=me` (self-view uses a simpler path).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/AppstrateUser"
@@ -2641,7 +2642,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "id",
@@ -2694,7 +2695,7 @@
                   "endUserId": null,
                   "apiKeyId": null,
                   "orgId": "org_r3t5w8y1z6",
-                  "applicationId": "app_m4n5o6p7",
+                  "spaceId": "spc_1d4e7a90-3c21-4b6f-8e05-6a9c2f7b1d38",
                   "scheduleId": "sched_cm1abc456def789",
                   "status": "success",
                   "input": {
@@ -2804,7 +2805,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "id",
@@ -2919,7 +2920,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "id",
@@ -2953,7 +2954,7 @@
                   "endUserId": null,
                   "apiKeyId": null,
                   "orgId": "org_r3t5w8y1z6",
-                  "applicationId": "app_m4n5o6p7",
+                  "spaceId": "spc_1d4e7a90-3c21-4b6f-8e05-6a9c2f7b1d38",
                   "scheduleId": null,
                   "status": "cancelled",
                   "input": {
@@ -3057,7 +3058,7 @@
               "schema": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["source", "applicationId"],
+                "required": ["source", "spaceId"],
                 "properties": {
                   "source": {
                     "description": "Two attribution shapes: `inline` ships the manifest+prompt in the body (ad-hoc agents — always lands on a shadow ephemeral package); `registry` declares the package by id and the server reads the manifest from its own catalog (deterministic attribution, no fingerprint reconciliation).",
@@ -3101,7 +3102,7 @@
                           },
                           "spec": {
                             "type": "string",
-                            "description": "Version, semver range, or dist-tag. Only valid with `stage: published`. Resolution falls back to the version installed in the application, then to the `latest` dist-tag."
+                            "description": "Version, semver range, or dist-tag. Only valid with `stage: published`. Resolution falls back to the version installed in the space, then to the `latest` dist-tag."
                           },
                           "integrity": {
                             "type": "string",
@@ -3111,7 +3112,7 @@
                       }
                     ]
                   },
-                  "applicationId": {
+                  "spaceId": {
                     "type": "string",
                     "minLength": 1
                   },
@@ -4132,7 +4133,7 @@
             "$ref": "#/components/parameters/SseOrgId"
           },
           {
-            "$ref": "#/components/parameters/SseAppId"
+            "$ref": "#/components/parameters/SseSpaceId"
           },
           {
             "$ref": "#/components/parameters/SseToken"
@@ -4183,7 +4184,7 @@
             "$ref": "#/components/parameters/SseOrgId"
           },
           {
-            "$ref": "#/components/parameters/SseAppId"
+            "$ref": "#/components/parameters/SseSpaceId"
           },
           {
             "$ref": "#/components/parameters/SseToken"
@@ -4235,7 +4236,7 @@
             "$ref": "#/components/parameters/SseOrgId"
           },
           {
-            "$ref": "#/components/parameters/SseAppId"
+            "$ref": "#/components/parameters/SseSpaceId"
           },
           {
             "$ref": "#/components/parameters/SseToken"
@@ -4278,7 +4279,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           }
         ],
         "responses": {
@@ -4336,7 +4337,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -4398,7 +4399,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -4463,7 +4464,7 @@
                   },
                   "actor": {
                     "type": "object",
-                    "description": "Execution identity for runs this schedule fires (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this application). Omit to default to the calling identity. Requires `schedules:write`.",
+                    "description": "Execution identity for runs this schedule fires (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this space). Omit to default to the calling identity. Requires `schedules:write`.",
                     "properties": {
                       "user_id": {
                         "type": "string"
@@ -4509,7 +4510,7 @@
                   "userId": "usr_r3t5w8y1z6",
                   "endUserId": null,
                   "orgId": "org_r3t5w8y1z6",
-                  "applicationId": "app_r3t5w8y1z6",
+                  "spaceId": "spc_9c1f4a2e-7b30-4d58-9a61-2e5c8f0b3d47",
                   "name": "Weekday morning sort",
                   "enabled": true,
                   "cron_expression": "0 9 * * 1-5",
@@ -4535,7 +4536,7 @@
             }
           },
           "400": {
-            "description": "Validation error. Possible causes: missing/invalid cron expression, invalid input, or agent has file inputs (cannot be scheduled).",
+            "description": "Validation error. Possible causes: missing/invalid cron expression, a timezone `cron-parser` cannot schedule against (`timezone`), invalid input, or agent has file inputs (cannot be scheduled).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4549,6 +4550,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NoPublishedVersion"
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
@@ -4567,7 +4571,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "id",
@@ -4600,7 +4604,7 @@
                   "userId": "usr_r3t5w8y1z6",
                   "endUserId": null,
                   "orgId": "org_r3t5w8y1z6",
-                  "applicationId": "app_r3t5w8y1z6",
+                  "spaceId": "spc_9c1f4a2e-7b30-4d58-9a61-2e5c8f0b3d47",
                   "name": "Weekday morning sort",
                   "enabled": true,
                   "cron_expression": "0 9 * * 1-5",
@@ -4646,7 +4650,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "id",
@@ -4717,7 +4721,7 @@
                   },
                   "actor": {
                     "type": "object",
-                    "description": "Re-point the schedule's execution identity (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this application). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`.",
+                    "description": "Re-point the schedule's execution identity (#738). Provide exactly one of `user_id` (an org member) or `end_user_id` (an end-user of this space). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`.",
                     "properties": {
                       "user_id": {
                         "type": "string"
@@ -4761,7 +4765,7 @@
             }
           },
           "400": {
-            "description": "Validation error. Possible causes: missing/invalid cron expression or invalid input.",
+            "description": "Validation error. Possible causes: missing/invalid cron expression, a timezone `cron-parser` cannot schedule against (`timezone`), or invalid input.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4777,7 +4781,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "404": {
-            "$ref": "#/components/responses/NotFound"
+            "$ref": "#/components/responses/NoPublishedVersion"
           }
         }
       },
@@ -4791,7 +4795,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "id",
@@ -4837,7 +4841,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "id",
@@ -4913,13 +4917,13 @@
         "operationId": "listIntegrations",
         "tags": ["Integrations"],
         "summary": "List available integrations",
-        "description": "List every AFPS integration accessible to the current org (own + system), enriched with `active` + `block_user_connections` flags for the current application. Supports offset pagination (`limit`/`offset`) and a `fields` projection selector — request `?fields=id,source` to drop the heavy per-row `manifest` and fetch only what you need.",
+        "description": "List every AFPS integration accessible to the current org (own + system), enriched with `active` + `block_user_connections` flags for the current space. Supports offset pagination (`limit`/`offset`) and a `fields` projection selector — request `?fields=id,source` to drop the heavy per-row `manifest` and fetch only what you need.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "limit",
@@ -5073,7 +5077,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "packageId",
@@ -5337,13 +5341,13 @@
       "post": {
         "operationId": "activateIntegration",
         "tags": ["Integrations"],
-        "summary": "Activate an integration in the current application",
+        "summary": "Activate an integration in the current space",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "packageId",
@@ -5618,13 +5622,13 @@
       "delete": {
         "operationId": "deactivateIntegration",
         "tags": ["Integrations"],
-        "summary": "Deactivate an integration in the current application (non-destructive)",
+        "summary": "Deactivate an integration in the current space (non-destructive)",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "packageId",
@@ -5679,7 +5683,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "packageId",
@@ -5750,7 +5754,7 @@
                   "type": "object",
                   "required": [
                     "id",
-                    "applicationId",
+                    "spaceId",
                     "integration_package_id",
                     "auth_key",
                     "client_id",
@@ -5766,7 +5770,7 @@
                       "format": "uuid",
                       "description": "Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes."
                     },
-                    "applicationId": {
+                    "spaceId": {
                       "type": "string"
                     },
                     "integration_package_id": {
@@ -5825,7 +5829,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "packageId",
@@ -5895,7 +5899,7 @@
                   "type": "object",
                   "required": [
                     "id",
-                    "applicationId",
+                    "spaceId",
                     "integration_package_id",
                     "auth_key",
                     "client_id",
@@ -5911,7 +5915,7 @@
                       "format": "uuid",
                       "description": "Row UUID — the `client_ref` handle passed to the rotate / delete / default-client routes."
                     },
-                    "applicationId": {
+                    "spaceId": {
                       "type": "string"
                     },
                     "integration_package_id": {
@@ -5968,7 +5972,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "packageId",
@@ -6023,7 +6027,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "packageId",
@@ -6141,7 +6145,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "packageId",
@@ -6279,7 +6283,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "packageId",
@@ -6478,7 +6482,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "packageId",
@@ -6578,7 +6582,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "packageId",
@@ -6949,13 +6953,13 @@
         "operationId": "listIntegrationConnections",
         "tags": ["Integrations"],
         "summary": "List the connections the caller can use for an integration",
-        "description": "Returns the caller's own connections **plus** every connection in the application opted into org-wide sharing (`shared_with_org: true`), whoever owns it — the same set the runtime resolver picks from. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`.",
+        "description": "Returns the caller's own connections **plus** every connection in the space opted into org-wide sharing (`shared_with_org: true`), whoever owns it — the same set the runtime resolver picks from. Rows the caller does not own carry `owner_name` and have `identity_claims` redacted to `null`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "packageId",
@@ -7095,7 +7099,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "packageId",
@@ -7266,13 +7270,13 @@
       "patch": {
         "operationId": "updateIntegrationSettings",
         "tags": ["Integrations"],
-        "summary": "Toggle the per-(app, integration) block_user_connections gate (admin)",
+        "summary": "Toggle the per-(space, integration) block_user_connections gate (admin)",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "packageId",
@@ -7545,13 +7549,13 @@
       "get": {
         "operationId": "listIntegrationPins",
         "tags": ["Integrations"],
-        "summary": "List admin pins for this integration in this application",
+        "summary": "List admin pins for this integration in this space",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "packageId",
@@ -7616,7 +7620,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "packageId",
@@ -7689,7 +7693,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "packageId",
@@ -7768,7 +7772,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "packageId",
@@ -7814,13 +7818,13 @@
         "operationId": "getIntegrationOrgDefault",
         "tags": ["Integrations"],
         "summary": "Get the org-wide default connection for this integration",
-        "description": "The cross-agent governance baseline: one default connection per (application, integration) used by every consuming agent. `enforce: true` locks every member; `enforce: false` is overridable by a member pin. Returns 204 when unset.",
+        "description": "The cross-agent governance baseline: one default connection per (space, integration) used by every consuming agent. `enforce: true` locks every member; `enforce: false` is overridable by a member pin. Returns 204 when unset.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "packageId",
@@ -7866,7 +7870,7 @@
                     },
                     "auth_key": {
                       "type": "string",
-                      "description": "Auth type of the chosen connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default per (application, integration) regardless of auth_key; this field just tells you which auth the current default connection uses."
+                      "description": "Auth type of the chosen connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default per (space, integration) regardless of auth_key; this field just tells you which auth the current default connection uses."
                     },
                     "enforce": {
                       "type": "boolean"
@@ -7904,13 +7908,13 @@
         "operationId": "upsertIntegrationOrgDefault",
         "tags": ["Integrations"],
         "summary": "Set the org-wide default connection for this integration (admin)",
-        "description": "Upsert the single (application, integration) default. Keyed per-integration, NOT per-auth: this overwrites the one existing default wholesale (atomic onConflictDoUpdate on [applicationId, integrationId]). Selecting a connection of a different auth type replaces the current default rather than adding a second one. The response `auth_key` reflects the chosen connection's auth (derived).",
+        "description": "Upsert the single (space, integration) default. Keyed per-integration, NOT per-auth: this overwrites the one existing default wholesale (atomic onConflictDoUpdate on [spaceId, integrationId]). Selecting a connection of a different auth type replaces the current default rather than adding a second one. The response `auth_key` reflects the chosen connection's auth (derived).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "packageId",
@@ -7977,7 +7981,7 @@
                     },
                     "auth_key": {
                       "type": "string",
-                      "description": "Auth type of the chosen connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default per (application, integration) regardless of auth_key; this field just tells you which auth the current default connection uses."
+                      "description": "Auth type of the chosen connection, derived (joined) from the connection row — NOT a key dimension. There is exactly one default per (space, integration) regardless of auth_key; this field just tells you which auth the current default connection uses."
                     },
                     "enforce": {
                       "type": "boolean"
@@ -8015,7 +8019,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "packageId",
@@ -8747,7 +8751,7 @@
         },
         "responses": {
           "200": {
-            "description": "Model updated — the bare updated model resource (same shape as `GET`/`list`).",
+            "description": "Model updated — the bare updated model resource (same shape as `GET`/`list`). For a managed (aliased) model the binding fields are nulled, exactly as on `list`.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -8819,7 +8823,7 @@
         "operationId": "testModel",
         "tags": ["Models"],
         "summary": "Test model connection",
-        "description": "Test that the model's API key and base URL are valid by making a lightweight request to the provider. Rate limited to 5 requests per minute.",
+        "description": "Test that the model's API key and base URL are valid by making a lightweight request to the provider. Rate limited to 5 requests per minute. Not available for a managed (aliased) model: the result would report the hidden backing's round-trip time and upstream status.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -8851,6 +8855,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -9563,7 +9570,7 @@
         "operationId": "createOAuthModelProviderPairing",
         "tags": ["Model Provider Credentials"],
         "summary": "Mint a one-shot pairing token for the connect helper",
-        "description": "Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper <token>` command. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/pair/redeem` using this token as Bearer credentials. Pass `credentialId` to reconnect that exact org credential in place; omit it to create a new connection. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. Org-scoped: only `X-Org-Id` is required (no `X-Application-Id` — the resulting credential lives in `model_provider_credentials`, which has no app affinity).",
+        "description": "Creates a single-use pairing token surfaced in the dashboard as a `npx @appstrate/connect-helper <token>` command. The user runs the command on their machine; the helper completes the loopback OAuth dance against the provider's authorization server, then POSTs the resulting credentials back to `/api/model-providers-oauth/pair/redeem` using this token as Bearer credentials. Pass `credentialId` to reconnect that exact org credential in place; omit it to create a new connection. The plaintext token is returned exactly once — only its SHA-256 hash is persisted. Org-scoped: only `X-Org-Id` is required (no `X-Space-Id` — the resulting credential lives in `model_provider_credentials`, which has no space affinity).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -10272,7 +10279,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           }
         ],
         "responses": {
@@ -10336,13 +10343,13 @@
         "operationId": "listApiKeys",
         "tags": ["API Keys"],
         "summary": "List API keys",
-        "description": "List active (non-revoked) API keys for the current application (scoped by X-Application-Id).",
+        "description": "List active (non-revoked) API keys for the current space (scoped by X-Space-Id).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           }
         ],
         "responses": {
@@ -10416,7 +10423,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           }
         ],
         "requestBody": {
@@ -10426,7 +10433,7 @@
               "schema": {
                 "type": "object",
                 "required": ["name"],
-                "description": "The API key is scoped to the application specified by the X-Application-Id header.",
+                "description": "The API key is scoped to the space specified by the X-Space-Id header.",
                 "properties": {
                   "name": {
                     "type": "string",
@@ -10522,7 +10529,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "id",
@@ -11603,7 +11610,7 @@
         "operationId": "listMyOrgs",
         "tags": ["Profile"],
         "summary": "List orgs the authenticated caller belongs to",
-        "description": "Returns every org the caller can access. Cookie sessions and OIDC dashboard JWTs see every org the user is a member of. API keys see only their bound org. OIDC end-user JWTs see the single org owning their application. **Does NOT require `X-Org-Id`** — this endpoint is the prerequisite to setting it.",
+        "description": "Returns every org the caller can access. Cookie sessions and OIDC dashboard JWTs see every org the user is a member of. API keys see only their bound org. OIDC end-user JWTs see the single org owning their space. **Does NOT require `X-Org-Id`** — this endpoint is the prerequisite to setting it.",
         "responses": {
           "200": {
             "description": "Orgs accessible to the caller",
@@ -11683,8 +11690,8 @@
       "get": {
         "operationId": "listMyConnections",
         "tags": ["Profile"],
-        "summary": "List the caller's connections across every org/app",
-        "description": "Unified user-scope view of the caller's integration connections under a single shape, grouped by source package. For interactive user credentials (cookie session, dashboard/instance JWT) it crosses orgs/applications by design — does NOT require `X-Org-Id`. For an API key the list is scoped to the key's bound organization and application only.",
+        "summary": "List the caller's connections across every org/space",
+        "description": "Unified user-scope view of the caller's integration connections under a single shape, grouped by source package. For interactive user credentials (cookie session, dashboard/instance JWT) it crosses orgs/spaces by design — does NOT require `X-Org-Id`. For an API key the list is scoped to the key's bound organization and space only.",
         "responses": {
           "200": {
             "description": "Connection groups",
@@ -11752,7 +11759,7 @@
                                 "shared_with_org",
                                 "reused_by_agents",
                                 "org",
-                                "application"
+                                "space"
                               ],
                               "properties": {
                                 "connection_id": {
@@ -11813,7 +11820,7 @@
                                     }
                                   }
                                 },
-                                "application": {
+                                "space": {
                                   "type": "object",
                                   "required": ["id", "name"],
                                   "properties": {
@@ -11850,13 +11857,13 @@
         "operationId": "listMyIntegrationPins",
         "tags": ["Profile"],
         "summary": "List the caller's member-scope integration pins for an agent",
-        "description": "Returns the caller's own (integration, authKey) → connectionId pins for the given agent. Used by the agent-page picker to render the collapsed default row. Member-only; end-user callers receive an empty list. Requires `X-Application-Id`.",
+        "description": "Returns the caller's own (integration, authKey) → connectionId pins for the given agent. Used by the agent-page picker to render the collapsed default row. Member-only; end-user callers receive an empty list. Requires `X-Space-Id`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "agent_package_id",
@@ -11929,7 +11936,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           }
         ],
         "requestBody": {
@@ -11992,7 +11999,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "agent_package_id",
@@ -12035,7 +12042,7 @@
         "operationId": "deleteMyConnection",
         "tags": ["Profile"],
         "summary": "Delete one of the caller's own connections (destructive)",
-        "description": "Removes the `integration_connections` row globally. ON DELETE CASCADE vacates every reference (admin pins, member pins, run snapshots, schedule overrides). Intent is destructive: 'I never want to use this credential anywhere again'. Surfaced only from the /connections management page — agent-surface unlinks now drop the member pin instead (see `DELETE /api/me/integration-pins`). With an API key, only connections inside the key's bound organization and application can be deleted (204 with no effect otherwise).",
+        "description": "Removes the `integration_connections` row globally. ON DELETE CASCADE vacates every reference (admin pins, member pins, run snapshots, schedule overrides). Intent is destructive: 'I never want to use this credential anywhere again'. Surfaced only from the /connections management page — agent-surface unlinks now drop the member pin instead (see `DELETE /api/me/integration-pins`). With an API key, only connections inside the key's bound organization and space can be deleted (204 with no effect otherwise).",
         "parameters": [
           {
             "name": "connectionId",
@@ -12062,13 +12069,13 @@
         "operationId": "getMyContext",
         "tags": ["Profile"],
         "summary": "The caller's working context for an AI agent",
-        "description": "Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current application (their own or org-shared). One payload powering the chat system prompt, the MCP `get_me` tool, and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). App context resolves from `X-Application-Id`, the API key's application, or the org default.",
+        "description": "Returns the caller's identity, their role in the pinned org, and the integrations they could attach when building an agent in the current space (their own or org-shared). One payload powering the chat system prompt, the MCP `get_me` tool, and direct API/MCP callers — so an agent can prefer already-connected integrations and respect the caller's role (operations beyond it 403 at invoke time). Space context resolves from `X-Space-Id`, the API key's space, or the org default.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           }
         ],
         "responses": {
@@ -12203,7 +12210,7 @@
                     },
                     "agents": {
                       "type": "array",
-                      "description": "Agents the caller can run in the current application (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. When `agents_truncated` is true, the full list is reachable via the `listAgents` operation.",
+                      "description": "Agents the caller can run in the current space (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. When `agents_truncated` is true, the full list is reachable via the `listAgents` operation.",
                       "items": {
                         "type": "object",
                         "required": [
@@ -12250,7 +12257,7 @@
                     },
                     "skills": {
                       "type": "array",
-                      "description": "Skills the caller could attach to an agent in the current application (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. When `skills_truncated` is true, the full list is reachable via the `listSkills` operation.",
+                      "description": "Skills the caller could attach to an agent in the current space (capped). Only present when the caller holds the `agents:run` permission; empty otherwise. Skills are not run directly — declare them under an agent manifest's `dependencies.skills`. When `skills_truncated` is true, the full list is reachable via the `listSkills` operation.",
                       "items": {
                         "type": "object",
                         "required": [
@@ -12890,7 +12897,7 @@
         "operationId": "getIntegrationCredentials",
         "tags": ["Internal"],
         "summary": "Fetch live credentials + HTTP delivery plans for an installed integration",
-        "description": "Sidecar-only. Auth via Bearer run token. Backs the MITM `MitmCredentialSource.current()` + `.deliveryPlans()` calls — returns per-auth resolved credentials + `HttpDeliveryPlan` derived from the integration's `manifest.auths.{key}.delivery.http` declaration. OAuth2 tokens are proactively refreshed when within `OAUTH_REFRESH_LEAD_MS` of expiry. Verifies that the run's agent declares this integration in `dependencies.integrations` AND that the integration is installed on the run's application. A `200` with an EMPTY `auths` array means one thing only: the integration declares no auth. Every state where a credential was expected but could not be produced fails instead — `404` when the actor has no connection (or the connection this run pinned at kickoff was deleted/unshared since), `409` when the pinned manifest version no longer declares the connection's auth, `410` when the credential is dead. The sidecar reads an empty payload as *no `delivery.http` auths, skip the MITM listener*, so answering `200` for a broken state boots the run with zero credentials and every upstream call leaves uncredentialed.",
+        "description": "Sidecar-only. Auth via Bearer run token. Backs the MITM `MitmCredentialSource.current()` + `.deliveryPlans()` calls — returns per-auth resolved credentials + `HttpDeliveryPlan` derived from the integration's `manifest.auths.{key}.delivery.http` declaration. OAuth2 tokens are proactively refreshed when within `OAUTH_REFRESH_LEAD_MS` of expiry. Verifies that the run's agent declares this integration in `dependencies.integrations` AND that the integration is installed on the run's space. A `200` with an EMPTY `auths` array means one thing only: the integration declares no auth. Every state where a credential was expected but could not be produced fails instead — `404` when the actor has no connection (or the connection this run pinned at kickoff was deleted/unshared since), `409` when the pinned manifest version no longer declares the connection's auth, `410` when the credential is dead. The sidecar reads an empty payload as *no `delivery.http` auths, skip the MITM listener*, so answering `200` for a broken state boots the run with zero credentials and every upstream call leaves uncredentialed.",
         "security": [
           {
             "bearerExecToken": []
@@ -13240,7 +13247,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "unread",
@@ -13377,7 +13384,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           }
         ],
         "responses": {
@@ -13435,7 +13442,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           }
         ],
         "responses": {
@@ -13499,7 +13506,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "id",
@@ -13550,7 +13557,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "runId",
@@ -13599,7 +13606,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           }
         ],
         "responses": {
@@ -13648,13 +13655,13 @@
         "operationId": "importBundle",
         "tags": ["Packages"],
         "summary": "Import a multi-package .afps-bundle",
-        "description": "Import a multi-package `.afps-bundle` archive (exported via `GET /api/agents/:scope/:name/bundle`). Also accepts a raw `.afps` archive, which is promoted to a bundle-of-one by resolving its transitive dependencies against the org registry. Every embedded package is registered in the org (or reused if a byte-identical version already exists), and the root is installed in the current application. Rate-limited to 10 requests/minute. Returns 409 with a `bundle_conflict` code if any embedded package conflicts with an existing one (same identity, different bytes, or owned by another org).",
+        "description": "Import a multi-package `.afps-bundle` archive (exported via `GET /api/agents/:scope/:name/bundle`). Also accepts a raw `.afps` archive, which is promoted to a bundle-of-one by resolving its transitive dependencies against the org registry. Every embedded package is registered in the org (or reused if a byte-identical version already exists), and the root is installed in the current space. Rate-limited to 10 requests/minute. Returns 409 with a `bundle_conflict` code if any embedded package conflicts with an existing one (same identity, different bytes, or owned by another org).",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           }
         ],
         "requestBody": {
@@ -13668,7 +13675,7 @@
                   "file": {
                     "type": "string",
                     "format": "binary",
-                    "description": "`.afps-bundle` (preferred), `.afps`, or `.zip` archive — detected automatically via the bundle.json marker. May also be supplied under the `bundle` form field as an alias."
+                    "description": "`.afps-bundle` (preferred), `.afps`, or `.zip` archive — detected automatically via the bundle.json marker."
                   }
                 }
               }
@@ -13726,7 +13733,7 @@
                     },
                     "root_installed": {
                       "type": "boolean",
-                      "description": "Whether the root was installed in the calling application (false if it was already installed)."
+                      "description": "Whether the root was installed in the calling space (false if it was already installed)."
                     },
                     "root_package_id": {
                       "type": "string"
@@ -13789,7 +13796,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "force",
@@ -13908,7 +13915,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           }
         ],
         "requestBody": {
@@ -14012,7 +14019,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -14056,13 +14063,13 @@
                 }
               },
               "Cache-Control": {
-                "description": "Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Always `private`: the response is tenant-scoped. Never a fresh window and never `immutable`: this index is RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the application. `no-cache` still permits the `304` round-trip, which a version pin answers from a single database read.",
+                "description": "Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Always `private`: the response is tenant-scoped. Never a fresh window and never `immutable`: this index is RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the space. `no-cache` still permits the `304` round-trip, which a version pin answers from a single database read.",
                 "schema": {
                   "type": "string"
                 }
               },
               "Vary": {
-                "description": "Always `X-Org-Id, X-Application-Id` — access depends on both, so a cache must not reuse this body across organizations or applications.",
+                "description": "Always `X-Org-Id, X-Space-Id` — access depends on both, so a cache must not reuse this body across organizations or spaces.",
                 "schema": {
                   "type": "string"
                 }
@@ -14098,7 +14105,7 @@
                 }
               },
               "Vary": {
-                "description": "Always `X-Org-Id, X-Application-Id`, as on the `200`.",
+                "description": "Always `X-Org-Id, X-Space-Id`, as on the `200`.",
                 "schema": {
                   "type": "string"
                 }
@@ -14153,7 +14160,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -14206,13 +14213,13 @@
                 }
               },
               "Cache-Control": {
-                "description": "Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Never a fresh window and never `immutable`: these bytes are RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the application.",
+                "description": "Always `private, no-cache`, for every selector — draft, exact version pin, dist-tag, semver range, yanked. Never a fresh window and never `immutable`: these bytes are RBAC-gated, and a copy the browser may serve without contacting the server would outlive a revoked `<type>:read`, an org removal, or the package being uninstalled from the space.",
                 "schema": {
                   "type": "string"
                 }
               },
               "Vary": {
-                "description": "Always `X-Org-Id, X-Application-Id` — access depends on both, so a cache must not reuse these bytes across organizations or applications.",
+                "description": "Always `X-Org-Id, X-Space-Id` — access depends on both, so a cache must not reuse these bytes across organizations or spaces.",
                 "schema": {
                   "type": "string"
                 }
@@ -14273,7 +14280,7 @@
                 }
               },
               "Vary": {
-                "description": "Always `X-Org-Id, X-Application-Id`, as on the `200`.",
+                "description": "Always `X-Org-Id, X-Space-Id`, as on the `200`.",
                 "schema": {
                   "type": "string"
                 }
@@ -14328,7 +14335,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -14408,13 +14415,13 @@
         "operationId": "listSkills",
         "tags": ["Packages"],
         "summary": "List skills",
-        "description": "List the skills available to the current application (`X-Application-Id`): system packages, plus organization packages installed in this application. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-application install state, use `GET /api/library`.",
+        "description": "List the skills available to the current space (`X-Space-Id`): system packages, plus organization packages installed in this space. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-space install state, use `GET /api/library`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageActiveFilter"
@@ -14492,7 +14499,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           }
         ],
         "requestBody": {
@@ -14560,7 +14567,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -14622,7 +14629,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -14680,7 +14687,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -14759,7 +14766,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -14830,7 +14837,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -14888,7 +14895,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -14937,7 +14944,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -14986,7 +14993,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -15064,7 +15071,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -15109,13 +15116,13 @@
         "operationId": "listAgentPackages",
         "tags": ["Packages"],
         "summary": "List agent packages",
-        "description": "List the agent packages available to the current application (`X-Application-Id`): system packages, plus organization packages installed in this application. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-application install state, use `GET /api/library`.",
+        "description": "List the agent packages available to the current space (`X-Space-Id`): system packages, plus organization packages installed in this space. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-space install state, use `GET /api/library`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageActiveFilter"
@@ -15174,7 +15181,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           }
         ],
         "requestBody": {
@@ -15240,7 +15247,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -15298,7 +15305,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -15384,7 +15391,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -15435,7 +15442,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -15494,7 +15501,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -15552,7 +15559,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -15631,7 +15638,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -15701,7 +15708,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -15758,7 +15765,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -15817,7 +15824,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -15912,13 +15919,13 @@
         "operationId": "listIntegrationPackages",
         "tags": ["Packages"],
         "summary": "List integration packages",
-        "description": "List the integration packages available to the current application (`X-Application-Id`): system packages, plus organization packages installed in this application. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-application install state, use `GET /api/library`.",
+        "description": "List the integration packages available to the current space (`X-Space-Id`): system packages, plus organization packages installed in this space. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-space install state, use `GET /api/library`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageActiveFilter"
@@ -15977,7 +15984,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           }
         ],
         "requestBody": {
@@ -16045,7 +16052,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -16107,7 +16114,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -16165,7 +16172,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -16244,7 +16251,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -16315,7 +16322,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -16373,7 +16380,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -16422,7 +16429,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -16471,7 +16478,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -16549,7 +16556,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -16594,13 +16601,13 @@
         "operationId": "listMcpServerPackages",
         "tags": ["Packages"],
         "summary": "List MCP-server packages",
-        "description": "List the MCP-server packages available to the current application (`X-Application-Id`): system packages, plus organization packages installed in this application. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-application install state, use `GET /api/library`.",
+        "description": "List the MCP-server packages available to the current space (`X-Space-Id`): system packages, plus organization packages installed in this space. Organization packages that exist but are not installed here are NOT returned — for the organization-wide catalogue with per-space install state, use `GET /api/library`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageActiveFilter"
@@ -16659,7 +16666,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           }
         ],
         "requestBody": {
@@ -16727,7 +16734,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -16789,7 +16796,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -16847,7 +16854,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -16926,7 +16933,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -16997,7 +17004,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -17055,7 +17062,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -17104,7 +17111,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -17153,7 +17160,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -17231,7 +17238,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/PackageScope"
@@ -17271,12 +17278,12 @@
         }
       }
     },
-    "/api/applications": {
+    "/api/spaces": {
       "post": {
-        "operationId": "createApplication",
-        "tags": ["Applications"],
-        "summary": "Create an application",
-        "description": "Create a new application for the organization. Applications scope end-users and their sessions.",
+        "operationId": "createSpace",
+        "tags": ["Spaces"],
+        "summary": "Create a space",
+        "description": "Create a new space for the organization. Spaces scope end-users and their sessions.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -17294,7 +17301,7 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 100,
-                    "description": "Human-readable application name"
+                    "description": "Human-readable space name"
                   },
                   "settings": {
                     "type": "object",
@@ -17308,7 +17315,7 @@
                         "description": "Allowed OAuth redirect domains (e.g. myapp.com, staging.myapp.com). Subdomains are matched automatically."
                       }
                     },
-                    "description": "Application settings"
+                    "description": "Space settings"
                   }
                 }
               }
@@ -17317,7 +17324,7 @@
         },
         "responses": {
           "201": {
-            "description": "Application created",
+            "description": "Space created",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -17329,11 +17336,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApplicationObject"
+                  "$ref": "#/components/schemas/SpaceObject"
                 },
                 "example": {
-                  "id": "app_cm1xyz789ghi012",
-                  "object": "application",
+                  "id": "spc_5b8c0e13-4f7a-4d92-b3c6-71e0a4d9f582",
+                  "object": "space",
                   "orgId": "550e8400-e29b-41d4-a716-446655440000",
                   "name": "My SaaS App",
                   "isDefault": false,
@@ -17359,10 +17366,10 @@
         }
       },
       "get": {
-        "operationId": "listApplications",
-        "tags": ["Applications"],
-        "summary": "List applications",
-        "description": "List all applications for the organization.",
+        "operationId": "listSpaces",
+        "tags": ["Spaces"],
+        "summary": "List spaces",
+        "description": "List all spaces for the organization.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -17370,7 +17377,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Application list",
+            "description": "Space list",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -17392,7 +17399,7 @@
                     "data": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/ApplicationObject"
+                        "$ref": "#/components/schemas/SpaceObject"
                       }
                     },
                     "hasMore": {
@@ -17405,8 +17412,8 @@
                   "object": "list",
                   "data": [
                     {
-                      "id": "app_default001",
-                      "object": "application",
+                      "id": "spc_0a2b4c6d-8e10-4f32-9a54-b6c8d0e2f416",
+                      "object": "space",
                       "orgId": "550e8400-e29b-41d4-a716-446655440000",
                       "name": "Default",
                       "isDefault": true,
@@ -17418,8 +17425,8 @@
                       "updatedAt": "2026-01-10T08:00:00Z"
                     },
                     {
-                      "id": "app_cm1xyz789ghi012",
-                      "object": "application",
+                      "id": "spc_5b8c0e13-4f7a-4d92-b3c6-71e0a4d9f582",
+                      "object": "space",
                       "orgId": "550e8400-e29b-41d4-a716-446655440000",
                       "name": "My SaaS App",
                       "isDefault": false,
@@ -17445,12 +17452,12 @@
         }
       }
     },
-    "/api/applications/{id}": {
+    "/api/spaces/{id}": {
       "get": {
-        "operationId": "getApplication",
-        "tags": ["Applications"],
-        "summary": "Get an application",
-        "description": "Get a single application by ID.",
+        "operationId": "getSpace",
+        "tags": ["Spaces"],
+        "summary": "Get a space",
+        "description": "Get a single space by ID.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -17466,7 +17473,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Application detail",
+            "description": "Space detail",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -17478,7 +17485,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApplicationObject"
+                  "$ref": "#/components/schemas/SpaceObject"
                 }
               }
             }
@@ -17495,10 +17502,10 @@
         }
       },
       "patch": {
-        "operationId": "updateApplication",
-        "tags": ["Applications"],
-        "summary": "Update an application",
-        "description": "Update application name or settings.",
+        "operationId": "updateSpace",
+        "tags": ["Spaces"],
+        "summary": "Update a space",
+        "description": "Update space name or settings.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -17522,7 +17529,7 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 100,
-                    "description": "Human-readable application name"
+                    "description": "Human-readable space name"
                   },
                   "settings": {
                     "type": "object",
@@ -17536,7 +17543,7 @@
                         "description": "Allowed OAuth redirect domains (e.g. myapp.com, staging.myapp.com). Subdomains are matched automatically."
                       }
                     },
-                    "description": "Application settings"
+                    "description": "Space settings"
                   }
                 }
               }
@@ -17545,7 +17552,7 @@
         },
         "responses": {
           "200": {
-            "description": "Application updated",
+            "description": "Space updated",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -17557,7 +17564,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApplicationObject"
+                  "$ref": "#/components/schemas/SpaceObject"
                 }
               }
             }
@@ -17577,10 +17584,10 @@
         }
       },
       "delete": {
-        "operationId": "deleteApplication",
-        "tags": ["Applications"],
-        "summary": "Delete an application",
-        "description": "Delete an application and all associated end-users. The default application cannot be deleted.",
+        "operationId": "deleteSpace",
+        "tags": ["Spaces"],
+        "summary": "Delete a space",
+        "description": "Delete a space and all associated end-users. The default space cannot be deleted.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -17596,7 +17603,7 @@
         ],
         "responses": {
           "204": {
-            "description": "Application deleted",
+            "description": "Space deleted",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -17618,18 +17625,18 @@
         }
       }
     },
-    "/api/applications/{applicationId}/packages": {
+    "/api/spaces/{spaceId}/packages": {
       "get": {
         "operationId": "listInstalledPackages",
-        "tags": ["Application Packages"],
+        "tags": ["Space Packages"],
         "summary": "List installed packages",
-        "description": "List all packages installed in this application, with their model/proxy/version overrides.",
+        "description": "List all packages installed in this space, with their model/proxy/version overrides.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "name": "applicationId",
+            "name": "spaceId",
             "in": "path",
             "required": true,
             "schema": {
@@ -17668,7 +17675,7 @@
                     "data": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/ApplicationPackage"
+                        "$ref": "#/components/schemas/SpacePackage"
                       }
                     },
                     "hasMore": {
@@ -17690,15 +17697,15 @@
       },
       "post": {
         "operationId": "installPackage",
-        "tags": ["Application Packages"],
+        "tags": ["Space Packages"],
         "summary": "Install a package",
-        "description": "Install a package from the organization catalog into this application.",
+        "description": "Install a package from the organization catalog into this space.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "name": "applicationId",
+            "name": "spaceId",
             "in": "path",
             "required": true,
             "schema": {
@@ -17735,7 +17742,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApplicationPackage"
+                  "$ref": "#/components/schemas/SpacePackage"
                 }
               }
             }
@@ -17753,7 +17760,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Package already installed in this application",
+            "description": "Package already installed in this space",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -17765,10 +17772,10 @@
         }
       }
     },
-    "/api/applications/{applicationId}/packages/{scope}/{name}": {
+    "/api/spaces/{spaceId}/packages/{scope}/{name}": {
       "get": {
         "operationId": "getInstalledPackage",
-        "tags": ["Application Packages"],
+        "tags": ["Space Packages"],
         "summary": "Get installed package",
         "description": "Get an installed package detail with its model/proxy/version overrides.",
         "parameters": [
@@ -17776,7 +17783,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "name": "applicationId",
+            "name": "spaceId",
             "in": "path",
             "required": true,
             "schema": {
@@ -17801,7 +17808,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApplicationPackage"
+                  "$ref": "#/components/schemas/SpacePackage"
                 }
               }
             }
@@ -17816,7 +17823,7 @@
       },
       "put": {
         "operationId": "updateInstalledPackage",
-        "tags": ["Application Packages"],
+        "tags": ["Space Packages"],
         "summary": "Update installed package overrides",
         "description": "Update the model/proxy overrides, generation settings, enabled flag, or version pinning for an installed package. The agent's stored input values are NOT settable here — use `PUT /api/agents/{scope}/{name}/input-settings`, which validates them against the manifest input schema.",
         "parameters": [
@@ -17824,7 +17831,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "name": "applicationId",
+            "name": "spaceId",
             "in": "path",
             "required": true,
             "schema": {
@@ -17882,7 +17889,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ApplicationPackage"
+                  "$ref": "#/components/schemas/SpacePackage"
                 }
               }
             }
@@ -17903,15 +17910,15 @@
       },
       "delete": {
         "operationId": "uninstallPackage",
-        "tags": ["Application Packages"],
+        "tags": ["Space Packages"],
         "summary": "Uninstall a package",
-        "description": "Remove a package from this application.",
+        "description": "Remove a package from this space.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "name": "applicationId",
+            "name": "spaceId",
             "in": "path",
             "required": true,
             "schema": {
@@ -17941,18 +17948,18 @@
         }
       }
     },
-    "/api/applications/{applicationId}/packages/{scope}/{name}/run-config": {
+    "/api/spaces/{spaceId}/packages/{scope}/{name}/run-config": {
       "get": {
-        "operationId": "getApplicationPackageRunConfig",
-        "tags": ["Application Packages"],
-        "summary": "Get the resolved per-app run configuration",
-        "description": "Returns the configuration applied when this application runs the given package: model override, generation settings, proxy override, pinned version label, and the stored input layer (editor values plus locked fields). Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-app flow.",
+        "operationId": "getSpacePackageRunConfig",
+        "tags": ["Space Packages"],
+        "summary": "Get the resolved per-space run configuration",
+        "description": "Returns the configuration applied when this space runs the given package: model override, generation settings, proxy override, pinned version label, and the stored input layer (editor values plus locked fields). Used by the CLI to reproduce a UI run without stitching together three separate calls; the UI uses the same source for its run-from-space flow.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "name": "applicationId",
+            "name": "spaceId",
             "in": "path",
             "required": true,
             "schema": {
@@ -18006,7 +18013,7 @@
                           "$ref": "#/components/schemas/AgentInputSettings"
                         }
                       ],
-                      "description": "Stored input layer for this application — the editor's values and the fields it locked. A locally executed run applies `values` under the caller's input and refuses a caller value naming a locked field."
+                      "description": "Stored input layer for this space — the editor's values and the fields it locked. A locally executed run applies `values` under the caller's input and refuses a caller value naming a locked field."
                     }
                   }
                 },
@@ -18045,13 +18052,13 @@
         "operationId": "createEndUser",
         "tags": ["End Users"],
         "summary": "Create an end-user",
-        "description": "Create a new end-user within an application. At least one of name, email, or externalId should be provided for identification.",
+        "description": "Create a new end-user within a space. At least one of name, email, or externalId should be provided for identification.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "$ref": "#/components/parameters/IdempotencyKey"
@@ -18129,7 +18136,7 @@
                 "example": {
                   "id": "eu_cm4jkl012",
                   "object": "end_user",
-                  "applicationId": "app_cm4jkl013",
+                  "spaceId": "spc_2c5d8f1a-4b70-4e63-9d18-3a7f5c9e0b24",
                   "name": "Alice Martin",
                   "email": "alice@example.com",
                   "externalId": "usr_12345",
@@ -18156,7 +18163,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Conflict — either a request with the same Idempotency-Key is already being processed (idempotency_in_progress), or the externalId is already in use by another end-user in the application (external_id_taken)",
+            "description": "Conflict — either a request with the same Idempotency-Key is already being processed (idempotency_in_progress), or the externalId is already in use by another end-user in the space (external_id_taken)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -18180,7 +18187,7 @@
                       "type": "https://docs.appstrate.dev/errors/external-id-taken",
                       "title": "Conflict",
                       "status": 409,
-                      "detail": "An end-user with this externalId already exists in the application.",
+                      "detail": "An end-user with this externalId already exists in the space.",
                       "code": "external_id_taken",
                       "requestId": "req_abc123"
                     }
@@ -18201,14 +18208,14 @@
         "operationId": "listEndUsers",
         "tags": ["End Users"],
         "summary": "List end-users",
-        "description": "List end-users with cursor-based pagination. Filter by applicationId, externalId, or email.\n\n**Pagination**: `startingAfter` and `endingBefore` are mutually exclusive — pass at most one. Encoded via the `x-mutually-exclusive` extension below for client generators that honour it; the server enforces the constraint at runtime regardless.",
+        "description": "List end-users with cursor-based pagination. Filter by spaceId, externalId, or email.\n\n**Pagination**: `startingAfter` and `endingBefore` are mutually exclusive — pass at most one. Encoded via the `x-mutually-exclusive` extension below for client generators that honour it; the server enforces the constraint at runtime regardless.",
         "x-mutually-exclusive": ["startingAfter", "endingBefore"],
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "externalId",
@@ -18311,7 +18318,7 @@
                     {
                       "id": "eu_cm4jkl012",
                       "object": "end_user",
-                      "applicationId": "app_cm4jkl013",
+                      "spaceId": "spc_2c5d8f1a-4b70-4e63-9d18-3a7f5c9e0b24",
                       "name": "Alice Martin",
                       "email": "alice@example.com",
                       "externalId": "usr_12345",
@@ -18354,7 +18361,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "id",
@@ -18384,7 +18391,7 @@
                 "example": {
                   "id": "eu_cm4jkl012",
                   "object": "end_user",
-                  "applicationId": "app_cm4jkl013",
+                  "spaceId": "spc_2c5d8f1a-4b70-4e63-9d18-3a7f5c9e0b24",
                   "name": "Alice Martin",
                   "email": "alice@example.com",
                   "externalId": "usr_12345",
@@ -18422,7 +18429,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "id",
@@ -18487,7 +18494,7 @@
                 "example": {
                   "id": "eu_cm4jkl012",
                   "object": "end_user",
-                  "applicationId": "app_cm4jkl013",
+                  "spaceId": "spc_2c5d8f1a-4b70-4e63-9d18-3a7f5c9e0b24",
                   "name": "Alice Martin Updated",
                   "email": "alice@example.com",
                   "externalId": "usr_12345",
@@ -18514,7 +18521,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "The externalId is already in use by another end-user in the application",
+            "description": "The externalId is already in use by another end-user in the space",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -18524,7 +18531,7 @@
                   "type": "https://docs.appstrate.dev/errors/external-id-taken",
                   "title": "Conflict",
                   "status": 409,
-                  "detail": "An end-user with this externalId already exists in the application.",
+                  "detail": "An end-user with this externalId already exists in the space.",
                   "code": "external_id_taken",
                   "requestId": "req_abc123"
                 }
@@ -18546,7 +18553,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "id",
@@ -18592,7 +18599,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           }
         ],
         "requestBody": {
@@ -18831,13 +18838,13 @@
         "operationId": "listFiles",
         "tags": ["Files"],
         "summary": "List files",
-        "description": "List the files visible to the caller in the current application. Requires the `files:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so members see their own files (and system-owned ones) and end-users see only their own. Filter by `purpose`, `run_id`, `packageId`, `chat_session_id`, or a chat session's complete context; paginate with `startingAfter` + `limit`.",
+        "description": "List the files visible to the caller in the current space. Requires the `files:read` permission (the family gate — mirrors `runs:read`); on top of it, each row is filtered by its own container ACL, so members see their own files (and system-owned ones) and end-users see only their own. Filter by `purpose`, `run_id`, `packageId`, `chat_session_id`, or a chat session's complete context; paginate with `startingAfter` + `limit`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "purpose",
@@ -18937,7 +18944,7 @@
                           "id",
                           "uri",
                           "purpose",
-                          "applicationId",
+                          "spaceId",
                           "run_id",
                           "chat_session_id",
                           "packageId",
@@ -18968,7 +18975,7 @@
                             "type": "string",
                             "enum": ["user_upload", "agent_output"]
                           },
-                          "applicationId": {
+                          "spaceId": {
                             "type": "string"
                           },
                           "run_id": {
@@ -19102,7 +19109,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "id",
@@ -19133,7 +19140,7 @@
                     "id",
                     "uri",
                     "purpose",
-                    "applicationId",
+                    "spaceId",
                     "run_id",
                     "chat_session_id",
                     "packageId",
@@ -19164,7 +19171,7 @@
                       "type": "string",
                       "enum": ["user_upload", "agent_output"]
                     },
-                    "applicationId": {
+                    "spaceId": {
                       "type": "string"
                     },
                     "run_id": {
@@ -19285,7 +19292,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "id",
@@ -19352,7 +19359,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "id",
@@ -19383,7 +19390,7 @@
                     "id",
                     "uri",
                     "purpose",
-                    "applicationId",
+                    "spaceId",
                     "run_id",
                     "chat_session_id",
                     "packageId",
@@ -19414,7 +19421,7 @@
                       "type": "string",
                       "enum": ["user_upload", "agent_output"]
                     },
-                    "applicationId": {
+                    "spaceId": {
                       "type": "string"
                     },
                     "run_id": {
@@ -19532,7 +19539,7 @@
             "$ref": "#/components/parameters/XOrgId"
           },
           {
-            "$ref": "#/components/parameters/XAppId"
+            "$ref": "#/components/parameters/XSpaceId"
           },
           {
             "name": "id",
@@ -19698,11 +19705,11 @@
                           "storage_key": {
                             "type": "string",
                             "description": "In-bucket object key (no bucket prefix).",
-                            "example": "app_abc/file_def/report.pdf"
+                            "example": "spc_abc/file_def/report.pdf"
                           },
                           "reason": {
                             "type": "string",
-                            "description": "Why the object is being purged (file_deleted | file_expired | org_deleted | application_deleted | end_user_deleted | run_workspace_deleted | version_deleted | upload_expired | materialization_failed). Free text, not a constrained enum."
+                            "description": "Why the object is being purged (file_deleted | file_expired | org_deleted | space_deleted | end_user_deleted | run_workspace_deleted | version_deleted | upload_expired | materialization_failed). Free text, not a constrained enum."
                           },
                           "attempts": {
                             "type": "integer",
@@ -19822,10 +19829,10 @@
         ],
         "parameters": [
           {
-            "name": "X-Application-Id",
+            "name": "X-Space-Id",
             "in": "header",
             "required": true,
-            "description": "Application id (app_…) the API key is scoped to.",
+            "description": "Space id (spc_…) the API key is scoped to.",
             "schema": {
               "type": "string"
             }
@@ -19920,7 +19927,7 @@
             "name": "X-Connection-Id",
             "in": "header",
             "required": false,
-            "description": "Optional explicit connection UUID. When set, the proxy narrows to that connection after validating it belongs to the caller (own user / end-user connection, or a shared connection in the request's application). When absent the route falls back to the implicit default chain (end-user default → app default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path.",
+            "description": "Optional explicit connection UUID. When set, the proxy narrows to that connection after validating it belongs to the caller (own user / end-user connection, or a shared connection in the request's space). When absent the route falls back to the implicit default chain (end-user default → space default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path.",
             "schema": {
               "type": "string",
               "format": "uuid"
@@ -20004,10 +20011,10 @@
         ],
         "parameters": [
           {
-            "name": "X-Application-Id",
+            "name": "X-Space-Id",
             "in": "header",
             "required": true,
-            "description": "Application id (app_…) the API key is scoped to.",
+            "description": "Space id (spc_…) the API key is scoped to.",
             "schema": {
               "type": "string"
             }
@@ -20102,7 +20109,7 @@
             "name": "X-Connection-Id",
             "in": "header",
             "required": false,
-            "description": "Optional explicit connection UUID. When set, the proxy narrows to that connection after validating it belongs to the caller (own user / end-user connection, or a shared connection in the request's application). When absent the route falls back to the implicit default chain (end-user default → app default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path.",
+            "description": "Optional explicit connection UUID. When set, the proxy narrows to that connection after validating it belongs to the caller (own user / end-user connection, or a shared connection in the request's space). When absent the route falls back to the implicit default chain (end-user default → space default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path.",
             "schema": {
               "type": "string",
               "format": "uuid"
@@ -20193,10 +20200,10 @@
         ],
         "parameters": [
           {
-            "name": "X-Application-Id",
+            "name": "X-Space-Id",
             "in": "header",
             "required": true,
-            "description": "Application id (app_…) the API key is scoped to.",
+            "description": "Space id (spc_…) the API key is scoped to.",
             "schema": {
               "type": "string"
             }
@@ -20291,7 +20298,7 @@
             "name": "X-Connection-Id",
             "in": "header",
             "required": false,
-            "description": "Optional explicit connection UUID. When set, the proxy narrows to that connection after validating it belongs to the caller (own user / end-user connection, or a shared connection in the request's application). When absent the route falls back to the implicit default chain (end-user default → app default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path.",
+            "description": "Optional explicit connection UUID. When set, the proxy narrows to that connection after validating it belongs to the caller (own user / end-user connection, or a shared connection in the request's space). When absent the route falls back to the implicit default chain (end-user default → space default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path.",
             "schema": {
               "type": "string",
               "format": "uuid"
@@ -20382,10 +20389,10 @@
         ],
         "parameters": [
           {
-            "name": "X-Application-Id",
+            "name": "X-Space-Id",
             "in": "header",
             "required": true,
-            "description": "Application id (app_…) the API key is scoped to.",
+            "description": "Space id (spc_…) the API key is scoped to.",
             "schema": {
               "type": "string"
             }
@@ -20480,7 +20487,7 @@
             "name": "X-Connection-Id",
             "in": "header",
             "required": false,
-            "description": "Optional explicit connection UUID. When set, the proxy narrows to that connection after validating it belongs to the caller (own user / end-user connection, or a shared connection in the request's application). When absent the route falls back to the implicit default chain (end-user default → app default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path.",
+            "description": "Optional explicit connection UUID. When set, the proxy narrows to that connection after validating it belongs to the caller (own user / end-user connection, or a shared connection in the request's space). When absent the route falls back to the implicit default chain (end-user default → space default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path.",
             "schema": {
               "type": "string",
               "format": "uuid"
@@ -20571,10 +20578,10 @@
         ],
         "parameters": [
           {
-            "name": "X-Application-Id",
+            "name": "X-Space-Id",
             "in": "header",
             "required": true,
-            "description": "Application id (app_…) the API key is scoped to.",
+            "description": "Space id (spc_…) the API key is scoped to.",
             "schema": {
               "type": "string"
             }
@@ -20669,7 +20676,7 @@
             "name": "X-Connection-Id",
             "in": "header",
             "required": false,
-            "description": "Optional explicit connection UUID. When set, the proxy narrows to that connection after validating it belongs to the caller (own user / end-user connection, or a shared connection in the request's application). When absent the route falls back to the implicit default chain (end-user default → app default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path.",
+            "description": "Optional explicit connection UUID. When set, the proxy narrows to that connection after validating it belongs to the caller (own user / end-user connection, or a shared connection in the request's space). When absent the route falls back to the implicit default chain (end-user default → space default → user default). Mismatched or unknown ids surface as `404 — no credentials`, identical to the implicit-default path.",
             "schema": {
               "type": "string",
               "format": "uuid"
@@ -21074,8 +21081,8 @@
       "get": {
         "operationId": "getLibrary",
         "tags": ["Library"],
-        "summary": "List all packages visible to the org with per-app install state",
-        "description": "Returns every package available to the caller's organization (org-owned + system) grouped by type (`agent`, `skill`, `mcp-server`, `integration`). Each package carries an `installed_in` array of application ids — the applications belonging to the caller's org where the package is currently installed. Ephemeral packages are excluded.\n\nThe response also includes the org's applications (id, name, isDefault) so the UI can render a single grid keyed by app without an additional `/api/applications` call.",
+        "summary": "List all packages visible to the org with per-space install state",
+        "description": "Returns every package available to the caller's organization (org-owned + system) grouped by type (`agent`, `skill`, `mcp-server`, `integration`). Each package carries an `installed_in` array of space ids — the spaces belonging to the caller's org where the package is currently installed. Ephemeral packages are excluded.\n\nThe response also includes the org's spaces (id, name, isDefault) so the UI can render a single grid keyed by space without an additional `/api/spaces` call.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -21096,22 +21103,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["object", "applications", "packages"],
+                  "required": ["object", "spaces", "packages"],
                   "properties": {
                     "object": {
                       "type": "string",
                       "enum": ["library"]
                     },
-                    "applications": {
+                    "spaces": {
                       "type": "array",
-                      "description": "Applications belonging to the caller's organization. The default application (if any) is listed first.",
+                      "description": "Spaces belonging to the caller's organization. The default space (if any) is listed first.",
                       "items": {
                         "type": "object",
                         "required": ["id", "name", "isDefault"],
                         "properties": {
                           "id": {
                             "type": "string",
-                            "description": "Application id (`app_…`)."
+                            "description": "Space id (`spc_…`)."
                           },
                           "name": {
                             "type": "string"
@@ -21145,14 +21152,14 @@
                 },
                 "example": {
                   "object": "library",
-                  "applications": [
+                  "spaces": [
                     {
-                      "id": "app_default",
+                      "id": "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
                       "name": "Default",
                       "isDefault": true
                     },
                     {
-                      "id": "app_staging",
+                      "id": "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
                       "name": "Staging",
                       "isDefault": false
                     }
@@ -21165,7 +21172,7 @@
                         "source": "local",
                         "name": "Inbox Triage",
                         "description": "Sorts incoming Gmail threads into priority buckets.",
-                        "installed_in": ["app_default"]
+                        "installed_in": ["spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0"]
                       }
                     ],
                     "skill": [],
@@ -21177,7 +21184,10 @@
                         "source": "system",
                         "name": "Gmail",
                         "description": "Google Mail OAuth integration.",
-                        "installed_in": ["app_default", "app_staging"]
+                        "installed_in": [
+                          "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+                          "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1"
+                        ]
                       }
                     ]
                   }
@@ -21293,17 +21303,17 @@
         "name": "Idempotency-Key",
         "in": "header",
         "required": false,
-        "description": "Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and application: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description).",
+        "description": "Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Cached for 24 hours, scoped to the organization and space: a repeat with the same body replays the original response with `Idempotent-Replayed: true`, the same key with a different body is `422 idempotency_conflict`, and a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description).",
         "schema": {
           "type": "string",
           "maxLength": 255
         }
       },
-      "SseAppId": {
-        "name": "applicationId",
+      "SseSpaceId": {
+        "name": "spaceId",
         "in": "query",
         "required": false,
-        "description": "Application ID. Required for cookie auth (SSE cannot send X-Application-Id header). Not needed for API key auth (app resolved from key).",
+        "description": "Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key).",
         "schema": {
           "type": "string"
         }
@@ -21317,10 +21327,10 @@
           "type": "string"
         }
       },
-      "XAppId": {
-        "name": "X-Application-Id",
+      "XSpaceId": {
+        "name": "X-Space-Id",
         "in": "header",
-        "description": "Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key).",
+        "description": "Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key).",
         "schema": {
           "type": "string"
         }
@@ -21348,7 +21358,7 @@
         "name": "active",
         "in": "query",
         "required": false,
-        "description": "When `true`, narrows the list to packages installed and enabled in the current application — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row.",
+        "description": "When `true`, narrows the list to packages installed and enabled in the current space — system packages with no install row drop out. Integrations are the one exception: they are filtered on effective activation, so an environment-provided system integration stays listed even though it has no install row.",
         "schema": {
           "type": "string",
           "enum": ["true"]
@@ -21602,9 +21612,9 @@
           }
         }
       },
-      "ApplicationPackage": {
+      "SpacePackage": {
         "type": "object",
-        "description": "A package installed in an application with its model/proxy/version overrides.",
+        "description": "A package installed in a space with its model/proxy/version overrides.",
         "required": [
           "packageId",
           "generationConfig",
@@ -21621,7 +21631,7 @@
         "properties": {
           "object": {
             "type": "string",
-            "enum": ["application_package"]
+            "enum": ["space_package"]
           },
           "packageId": {
             "type": "string",
@@ -21639,11 +21649,11 @@
           },
           "modelId": {
             "type": ["string", "null"],
-            "description": "Model override for this app"
+            "description": "Model override for this space"
           },
           "proxyId": {
             "type": ["string", "null"],
-            "description": "Proxy override for this app"
+            "description": "Proxy override for this space"
           },
           "version_id": {
             "type": ["integer", "null"],
@@ -21684,7 +21694,7 @@
           },
           "dashboard_sso_enabled": {
             "type": "boolean",
-            "description": "When true, org-level (dashboard) OAuth clients can be created and the SSO tab is exposed in the org settings UI. Defaults to false — most orgs only need application-level SSO for their end-users."
+            "description": "When true, org-level (dashboard) OAuth clients can be created and the SSO tab is exposed in the org settings UI. Defaults to false — most orgs only need space-level SSO for their end-users."
           }
         }
       },
@@ -21947,11 +21957,11 @@
       "AgentInputSettings": {
         "type": "object",
         "required": ["values", "locked_fields"],
-        "description": "The agent's stored input settings for one application: the values the editor set once (layer 2 of the input resolution) and the fields it froze. Both are full replacements — an omitted key means cleared, never unchanged.",
+        "description": "The agent's stored input settings for one space: the values the editor set once (layer 2 of the input resolution) and the fields it froze. Both are full replacements — an omitted key means cleared, never unchanged.",
         "properties": {
           "values": {
             "type": "object",
-            "description": "Values stored for this application. Validated against the manifest `input.schema` with `required` dropped: leaving a required field empty here means it is asked at launch.",
+            "description": "Values stored for this space. Validated against the manifest `input.schema` with `required` dropped: leaving a required field empty here means it is asked at launch.",
             "additionalProperties": true
           },
           "locked_fields": {
@@ -22051,7 +22061,7 @@
                 }
               }
             ],
-            "description": "AFPS schema wrapper for the agent's parameters, plus the per-application stored values and field locks. Resolution order at launch: author default (JSON Schema `default`) < stored value (`values`) < schedule value < caller input. A field named in `locked_fields` is not asked at launch and a caller that sets it is refused with 400 `locked_input_field`."
+            "description": "AFPS schema wrapper for the agent's parameters, plus the per-space stored values and field locks. Resolution order at launch: author default (JSON Schema `default`) < stored value (`values`) < schedule value < caller input. A field named in `locked_fields` is not asked at launch and a caller that sets it is refused with 400 `locked_input_field`."
           },
           "output": {
             "type": "object",
@@ -22322,7 +22332,7 @@
           "endUserId",
           "apiKeyId",
           "orgId",
-          "applicationId",
+          "spaceId",
           "scheduleId",
           "status",
           "input",
@@ -22511,9 +22521,10 @@
             "type": ["string", "null"],
             "description": "API key ID that triggered the run (null for dashboard/schedule runs)"
           },
-          "applicationId": {
+          "spaceId": {
             "type": "string",
-            "description": "Application ID (app_ prefix) that owns this run"
+            "pattern": "^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "description": "Space ID (spc_ prefix) that owns this run"
           },
           "metadata": {
             "type": ["object", "null"],
@@ -22708,7 +22719,7 @@
           "userId",
           "endUserId",
           "orgId",
-          "applicationId",
+          "spaceId",
           "name",
           "enabled",
           "cron_expression",
@@ -22748,9 +22759,10 @@
           "orgId": {
             "type": "string"
           },
-          "applicationId": {
+          "spaceId": {
             "type": "string",
-            "description": "Application ID (app_ prefix) that owns this schedule"
+            "pattern": "^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "description": "Space ID (spc_ prefix) that owns this schedule"
           },
           "name": {
             "type": ["string", "null"]
@@ -23613,7 +23625,7 @@
           }
         }
       },
-      "ApplicationObject": {
+      "SpaceObject": {
         "type": "object",
         "required": [
           "id",
@@ -23629,11 +23641,12 @@
         "properties": {
           "id": {
             "type": "string",
-            "description": "Application ID (app_ prefix)"
+            "pattern": "^spc_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "description": "Space ID (spc_ prefix)"
           },
           "object": {
             "type": "string",
-            "enum": ["application"],
+            "enum": ["space"],
             "description": "Object type"
           },
           "orgId": {
@@ -23642,11 +23655,11 @@
           },
           "name": {
             "type": "string",
-            "description": "Human-readable application name"
+            "description": "Human-readable space name"
           },
           "isDefault": {
             "type": "boolean",
-            "description": "Whether this is the default application"
+            "description": "Whether this is the default space"
           },
           "settings": {
             "type": "object",
@@ -23662,7 +23675,7 @@
           },
           "created_by": {
             "type": ["string", "null"],
-            "description": "ID of the user who created the application"
+            "description": "ID of the user who created the space"
           },
           "createdAt": {
             "type": "string",
@@ -23679,7 +23692,7 @@
         "required": [
           "id",
           "object",
-          "applicationId",
+          "spaceId",
           "name",
           "email",
           "externalId",
@@ -23697,9 +23710,9 @@
             "enum": ["end_user"],
             "description": "Object type"
           },
-          "applicationId": {
+          "spaceId": {
             "type": "string",
-            "description": "ID of the parent application"
+            "description": "ID of the parent space"
           },
           "name": {
             "type": ["string", "null"],
@@ -23782,7 +23795,7 @@
       },
       "LibraryPackageList": {
         "type": "array",
-        "description": "Packages of a single type visible to the org. Each entry carries an `installed_in` array listing the caller-org applications where the package is currently installed (empty array = not installed in any of the caller's apps).",
+        "description": "Packages of a single type visible to the org. Each entry carries an `installed_in` array listing the caller-org spaces where the package is currently installed (empty array = not installed in any of the caller's spaces).",
         "items": {
           "type": "object",
           "required": ["id", "type", "source", "name", "description", "installed_in"],
@@ -23809,7 +23822,7 @@
             },
             "installed_in": {
               "type": "array",
-              "description": "Application ids (`app_…`) belonging to the caller's org where this package is installed.",
+              "description": "Space ids (`spc_…`) belonging to the caller's org where this package is installed.",
               "items": {
                 "type": "string"
               }
@@ -24040,6 +24053,24 @@
               "status": 422,
               "detail": "The package archive expands past the 50 MB decompression limit and was refused (decompressed-budget-exceeded). Republish the package from bytes that fit the limit.",
               "code": "package_archive_unreadable",
+              "requestId": "req_abc123"
+            }
+          }
+        }
+      },
+      "NoPublishedVersion": {
+        "description": "Resource not found. On `PUT /api/schedules/{id}`, most commonly the schedule id itself does not exist (or belongs to another space) — that check runs first. Both writes also answer 404 when the target agent does not exist, or has no published version (`no_published_version`): on `POST` always, on `PUT` when the patch carries `input` or `version_override`. A schedule with no `version_override` fires the PUBLISHED manifest, so a never-published agent is refused at the write rather than 404ing on every tick; pin the working copy with `version_override: \"draft\"` to schedule it anyway.",
+        "content": {
+          "application/problem+json": {
+            "schema": {
+              "$ref": "#/components/schemas/ProblemDetail"
+            },
+            "example": {
+              "type": "https://docs.appstrate.dev/errors/not-found",
+              "title": "Not Found",
+              "status": 404,
+              "detail": "Agent '@acme/reporter' has no published version",
+              "code": "no_published_version",
               "requestId": "req_abc123"
             }
           }

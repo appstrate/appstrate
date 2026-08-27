@@ -960,13 +960,13 @@ export interface AuthResolution {
    */
   authMethod: string;
   /**
-   * Optional application binding. End-user strategies (API-key impersonation,
+   * Optional space binding. End-user strategies (API-key impersonation,
    * OIDC end_user flow) pin this so core's strict end-user filter has the
-   * owning app in context. Dashboard strategies (OIDC dashboard flow) leave
-   * it undefined — app context is then supplied per-request via the
-   * `X-Application-Id` header handled by `requireAppContext()`.
+   * owning space in context. Dashboard strategies (OIDC dashboard flow) leave
+   * it undefined — space context is then supplied per-request via the
+   * `X-Space-Id` header handled by `requireSpaceContext()`.
    */
-  applicationId?: string;
+  spaceId?: string;
   /** Permission strings already resolved by the strategy. */
   permissions: readonly string[];
   /** Optional end-user impersonation context (mirrors `c.get("endUser")`). */
@@ -1001,7 +1001,7 @@ export interface AuthResolution {
  */
 export interface EndUserContext {
   id: string;
-  applicationId: string;
+  spaceId: string;
   name?: string;
   email?: string;
 }
@@ -1172,7 +1172,7 @@ export interface RunStatusChangeParams {
    * filter applies" (i.e. skip rather than match).
    */
   packageId: string | null;
-  applicationId: string;
+  spaceId: string;
   status: "started" | "success" | "failed" | "timeout" | "cancelled";
   /** Cost in dollars (only on terminal status). */
   cost?: number;
@@ -1195,7 +1195,7 @@ export interface RunStatusChangeParams {
 /** Parameters passed to the `onRunConnectionMissing` event. */
 export interface RunConnectionMissingParams {
   orgId: string;
-  applicationId: string;
+  spaceId: string;
   /** Agent package id whose kickoff was blocked. */
   packageId: string;
   /** Actor whose request was blocked (user or end_user from the headless API). */
@@ -1252,7 +1252,7 @@ export interface ModuleInitContext {
 // as dead surface, exactly like an `AppstrateModule` member would. Each member's
 // own JSDoc states why the consumer cannot obtain the capability any other way.
 // The previous broad surface (orchestrator /
-// pubsub / realtime / inline / packages / models / applications / run CRUD)
+// pubsub / realtime / inline / packages / models / spaces / run CRUD)
 // mirrored an in-process module that has since been removed — it carried zero
 // live consumers, so it was dropped rather than left as speculative API.
 // Re-add a member here the moment a consumer genuinely needs it.

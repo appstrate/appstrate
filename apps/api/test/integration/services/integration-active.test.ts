@@ -5,7 +5,7 @@
  * the spawn resolver, agent readiness, the sidecar credential/bundle guards,
  * and the UI list. One rule:
  *
- *   1. An `application_packages` row EXISTS → its `enabled` flag wins (the
+ *   1. An `space_packages` row EXISTS → its `enabled` flag wins (the
  *      explicit, sticky operator decision; a disabled row stays inactive).
  *   2. NO row → auto-active iff the integration is a SYSTEM integration (offered
  *      via `SYSTEM_INTEGRATIONS`, with or WITHOUT a shared OAuth client — a DCR
@@ -20,7 +20,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
-import { applicationPackages } from "@appstrate/db/schema";
+import { spacePackages } from "@appstrate/db/schema";
 import {
   isIntegrationActive,
   listActiveIntegrationIds,
@@ -67,34 +67,32 @@ describe("integration activation precedence", () => {
   });
 
   async function installRow(packageId: string, enabled: boolean) {
-    await db
-      .insert(applicationPackages)
-      .values({ applicationId: ctx.defaultAppId, packageId, enabled });
+    await db.insert(spacePackages).values({ spaceId: ctx.defaultSpaceId, packageId, enabled });
   }
 
   it("auto-activates a system integration with no install row", async () => {
-    expect(await isIntegrationActive(SYSTEM_INTEGRATION, ctx.defaultAppId)).toBe(true);
+    expect(await isIntegrationActive(SYSTEM_INTEGRATION, ctx.defaultSpaceId)).toBe(true);
   });
 
   it("auto-activates a DCR system integration that ships no client", async () => {
     // Membership in SYSTEM_INTEGRATIONS — not client presence — drives
     // auto-active, so a remote MCP relying on Dynamic Client Registration is on
     // by default even without a static client.
-    expect(await isIntegrationActive(DCR_INTEGRATION, ctx.defaultAppId)).toBe(true);
+    expect(await isIntegrationActive(DCR_INTEGRATION, ctx.defaultSpaceId)).toBe(true);
   });
 
   it("respects an explicit disable on a DCR system integration (sticky opt-out)", async () => {
     await installRow(DCR_INTEGRATION, false);
-    expect(await isIntegrationActive(DCR_INTEGRATION, ctx.defaultAppId)).toBe(false);
+    expect(await isIntegrationActive(DCR_INTEGRATION, ctx.defaultSpaceId)).toBe(false);
   });
 
   it("leaves a non-system integration inactive with no install row", async () => {
-    expect(await isIntegrationActive(PLAIN_INTEGRATION, ctx.defaultAppId)).toBe(false);
+    expect(await isIntegrationActive(PLAIN_INTEGRATION, ctx.defaultSpaceId)).toBe(false);
   });
 
   it("respects an explicit disable on a system integration (sticky opt-out wins)", async () => {
     await installRow(SYSTEM_INTEGRATION, false);
-    expect(await isIntegrationActive(SYSTEM_INTEGRATION, ctx.defaultAppId)).toBe(false);
+    expect(await isIntegrationActive(SYSTEM_INTEGRATION, ctx.defaultSpaceId)).toBe(false);
   });
 
   it("honors an explicit enabled row on a system integration (row wins, same outcome)", async () => {
@@ -103,27 +101,27 @@ describe("integration activation precedence", () => {
     // "row EXISTS → enabled flag wins" branch fires for a system integration too
     // — so a later auto-active policy change can't silently flip an opted-in one.
     await installRow(SYSTEM_INTEGRATION, true);
-    expect(await isIntegrationActive(SYSTEM_INTEGRATION, ctx.defaultAppId)).toBe(true);
+    expect(await isIntegrationActive(SYSTEM_INTEGRATION, ctx.defaultSpaceId)).toBe(true);
 
-    const ids = await listActiveIntegrationIds([SYSTEM_INTEGRATION], ctx.defaultAppId);
+    const ids = await listActiveIntegrationIds([SYSTEM_INTEGRATION], ctx.defaultSpaceId);
     expect(ids.has(SYSTEM_INTEGRATION)).toBe(true);
   });
 
   it("honors an enabled install row for a non-system integration", async () => {
     await installRow(PLAIN_INTEGRATION, true);
-    expect(await isIntegrationActive(PLAIN_INTEGRATION, ctx.defaultAppId)).toBe(true);
+    expect(await isIntegrationActive(PLAIN_INTEGRATION, ctx.defaultSpaceId)).toBe(true);
   });
 
   it("honors a disabled install row for a non-system integration", async () => {
     await installRow(PLAIN_INTEGRATION, false);
-    expect(await isIntegrationActive(PLAIN_INTEGRATION, ctx.defaultAppId)).toBe(false);
+    expect(await isIntegrationActive(PLAIN_INTEGRATION, ctx.defaultSpaceId)).toBe(false);
   });
 
   it("batched listActiveIntegrationIds applies the same precedence", async () => {
     // system + no row → active; non-system + no row → inactive.
     const both = await listActiveIntegrationIds(
       [SYSTEM_INTEGRATION, PLAIN_INTEGRATION],
-      ctx.defaultAppId,
+      ctx.defaultSpaceId,
     );
     expect(both.has(SYSTEM_INTEGRATION)).toBe(true);
     expect(both.has(PLAIN_INTEGRATION)).toBe(false);
@@ -133,7 +131,7 @@ describe("integration activation precedence", () => {
     await installRow(PLAIN_INTEGRATION, true);
     const flipped = await listActiveIntegrationIds(
       [SYSTEM_INTEGRATION, PLAIN_INTEGRATION],
-      ctx.defaultAppId,
+      ctx.defaultSpaceId,
     );
     expect(flipped.has(SYSTEM_INTEGRATION)).toBe(false);
     expect(flipped.has(PLAIN_INTEGRATION)).toBe(true);
@@ -146,7 +144,7 @@ describe("integration activation precedence", () => {
     // agent editor. system (no row) → active; plain (no row) → inactive.
     const map = await resolveIntegrationActivations(
       [SYSTEM_INTEGRATION, DCR_INTEGRATION, PLAIN_INTEGRATION],
-      ctx.defaultAppId,
+      ctx.defaultSpaceId,
     );
     expect(map.get(SYSTEM_INTEGRATION)).toEqual({ active: true, blockUserConnections: false });
     expect(map.get(DCR_INTEGRATION)).toEqual({ active: true, blockUserConnections: false });
@@ -157,10 +155,10 @@ describe("integration activation precedence", () => {
 
     // Explicit disable on the system one is sticky and wins over auto-active.
     await installRow(SYSTEM_INTEGRATION, false);
-    const after = await resolveIntegrationActivations([SYSTEM_INTEGRATION], ctx.defaultAppId);
+    const after = await resolveIntegrationActivations([SYSTEM_INTEGRATION], ctx.defaultSpaceId);
     expect(after.get(SYSTEM_INTEGRATION)?.active).toBe(false);
 
     // Empty input → empty map (no query).
-    expect((await resolveIntegrationActivations([], ctx.defaultAppId)).size).toBe(0);
+    expect((await resolveIntegrationActivations([], ctx.defaultSpaceId)).size).toBe(0);
   });
 });

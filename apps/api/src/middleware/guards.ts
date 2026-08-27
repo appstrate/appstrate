@@ -8,16 +8,16 @@ import { getRunningRunsForPackage } from "../services/state/runs.ts";
 import { ApiError, forbidden, notFound, conflict, invalidRequest } from "../lib/errors.ts";
 
 /** Middleware: load an agent by route param and set it on context, or 404.
- *  Also checks that the current application has access to the package. */
+ *  Also checks that the current space has access to the package. */
 export function requireAgent() {
   return async (c: Context<AppEnv>, next: Next) => {
     const scope = c.req.param("scope");
     const name = c.req.param("name");
     const packageId = `${scope}/${name}`;
     const orgId = c.get("orgId");
-    const applicationId = c.get("applicationId");
+    const spaceId = c.get("spaceId");
 
-    const agent = await getPackageWithAccess(packageId, orgId, applicationId);
+    const agent = await getPackageWithAccess(packageId, orgId, spaceId);
     if (!agent) {
       throw new ApiError({
         status: 404,
@@ -32,7 +32,7 @@ export function requireAgent() {
 }
 
 /** Middleware: load an agent by route param and set it on context, or 404.
- *  Checks org ownership only — does NOT check app-level access.
+ *  Checks org ownership only — does NOT check space-level access.
  *  Use for org-level operations (editing manifest, skills, tools). */
 export function requireOrgAgent() {
   return async (c: Context<AppEnv>, next: Next) => {
@@ -105,18 +105,18 @@ export async function apiKeyOrgScopeGuard(c: Context<AppEnv>, next: Next) {
   return next();
 }
 
-/** Middleware: for API key callers, reject with 403 when the `:id`/`:applicationId`
- *  route param does not match the key's bound application. Sessions are
- *  passed through unchanged — any member can manage any app in their org.
+/** Middleware: for API key callers, reject with 403 when the `:id`/`:spaceId`
+ *  route param does not match the key's bound space. Sessions are
+ *  passed through unchanged — any member can manage any space in their org.
  *
- *  Why: `/api/applications` is org-scoped, not application-scoped, so the
+ *  Why: `/api/spaces` is org-scoped, not space-scoped, so the
  *  same orgId-only filtering pattern that lets a key escape its org also
- *  lets it escape its app within the same org. */
-export async function apiKeyAppScopeGuard(c: Context<AppEnv>, next: Next) {
+ *  lets it escape its space within the same org. */
+export async function apiKeySpaceScopeGuard(c: Context<AppEnv>, next: Next) {
   if (c.get("authMethod") !== "api_key") return next();
-  const paramAppId = c.req.param("id") ?? c.req.param("applicationId");
-  if (paramAppId && paramAppId !== c.get("applicationId")) {
-    throw forbidden("API key scope does not include this application");
+  const paramSpaceId = c.req.param("id") ?? c.req.param("spaceId");
+  if (paramSpaceId && paramSpaceId !== c.get("spaceId")) {
+    throw forbidden("API key scope does not include this space");
   }
   return next();
 }
@@ -129,7 +129,7 @@ export function requireMutableAgent() {
       throw forbidden("Cannot modify a system agent");
     }
     const running = await getRunningRunsForPackage(
-      { orgId: c.get("orgId"), applicationId: c.get("applicationId") },
+      { orgId: c.get("orgId"), spaceId: c.get("spaceId") },
       agent.id,
     );
     if (running > 0) {

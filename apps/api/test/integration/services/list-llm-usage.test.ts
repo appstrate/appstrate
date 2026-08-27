@@ -31,7 +31,7 @@ describe("listLlmUsage / getSettledFrontierId", () => {
     const run = await seedRun({
       packageId: "@meterorg/agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "success",
     });
     await db.insert(chatSessions).values({
@@ -130,13 +130,13 @@ describe("listLlmUsage / getSettledFrontierId", () => {
     const activeRun = await seedRun({
       packageId: "@meterorg/agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "running",
     });
     const doneRun = await seedRun({
       packageId: "@meterorg/agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "success",
     });
     await db.insert(llmUsage).values([
@@ -199,7 +199,7 @@ describe("listLlmUsage / getSettledFrontierId", () => {
     const activeRun = await seedRun({
       packageId: "@meterorg/agent",
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: "running",
     });
     await db.insert(llmUsage).values([

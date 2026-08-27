@@ -28,7 +28,7 @@ describe("recordAudit", () => {
 
     await recordAudit({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actorType: "user",
       actorId: ctx.user.id,
       action: "connection.created",
@@ -44,7 +44,7 @@ describe("recordAudit", () => {
     const rows = await db.select().from(auditEvents).where(eq(auditEvents.orgId, ctx.orgId));
     expect(rows).toHaveLength(1);
     const row = rows[0]!;
-    expect(row.applicationId).toBe(ctx.defaultAppId);
+    expect(row.spaceId).toBe(ctx.defaultSpaceId);
     expect(row.actorType).toBe("user");
     expect(row.actorId).toBe(ctx.user.id);
     expect(row.action).toBe("connection.created");
@@ -93,7 +93,7 @@ describe("recordAudit", () => {
     const rows = await db.select().from(auditEvents).where(eq(auditEvents.orgId, ctx.orgId));
     expect(rows).toHaveLength(1);
     const row = rows[0]!;
-    expect(row.applicationId).toBeNull();
+    expect(row.spaceId).toBeNull();
     expect(row.actorId).toBeNull();
     expect(row.resourceId).toBeNull();
     expect(row.before).toBeNull();

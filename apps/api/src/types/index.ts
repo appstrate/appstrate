@@ -49,16 +49,16 @@ export type AppEnv = {
      */
     authMethod: string;
     apiKeyId: string | null;
-    applicationId: string; // from API key auth or resolved by app-context middleware (X-Application-Id)
+    spaceId: string; // from API key auth or resolved by space-context middleware (X-Space-Id)
     /**
-     * Resolved application row (id/orgId/isDefault) set by
-     * `requireAppContext()` alongside `applicationId`. Services called from
-     * app-scoped routes should accept this shape directly instead of taking
-     * an `applicationId` string and re-SELECTing the row. Optional because
-     * auth strategies set `applicationId` before the middleware runs, but
-     * the `app` row is only loaded once the middleware executes.
+     * Resolved space row (id/orgId/isDefault) set by
+     * `requireSpaceContext()` alongside `spaceId`. Services called from
+     * space-scoped routes should accept this shape directly instead of taking
+     * a `spaceId` string and re-SELECTing the row. Optional because
+     * auth strategies set `spaceId` before the middleware runs, but
+     * the `space` row is only loaded once the middleware executes.
      */
-    app?: import("../middleware/app-context.ts").AppContextRow;
+    space?: import("../middleware/space-context.ts").SpaceContextRow;
     requestId: string;
     apiVersion: string;
     /**
@@ -89,8 +89,8 @@ export type AppEnv = {
     /**
      * Realm captured from the BA session row (or user row) at auth time.
      * `"platform"` for platform audiences (default, dashboard, org/instance
-     * OIDC clients); `"end_user:<applicationId>"` for end-users of an
-     * application-level OIDC client. Consumed by `requirePlatformRealm()`
+     * OIDC clients); `"end_user:<spaceId>"` for end-users of an
+     * space-level OIDC client. Consumed by `requirePlatformRealm()`
      * to reject BA cookie sessions that belong to a non-platform audience
      * when hitting platform routes.
      */

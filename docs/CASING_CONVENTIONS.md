@@ -141,7 +141,7 @@ These specific field names stay camelCase on **Drizzle, wire DTOs, OpenAPI, fron
 
 **Timestamps**: `createdAt`, `updatedAt`, `expiresAt`, `revokedAt`, `lastUsedAt`
 
-**Universal FK to ubiquitous tables**: `id`, `userId`, `orgId`, `applicationId`, `packageId`, `endUserId`, `apiKeyId`, `scheduleId`, `modelCredentialId`
+**Universal FK to ubiquitous tables**: `id`, `userId`, `orgId`, `spaceId`, `packageId`, `endUserId`, `apiKeyId`, `scheduleId`, `modelCredentialId`
 
 **Internal run carve-outs** (documented): `runNumber`, `runOrigin`, `contextSnapshot`
 
@@ -212,10 +212,10 @@ When adding a JSONB column, decide up front: **internal contract** (never return
 
 **Channels (all snake→camel via the same transform)**:
 
-- `run_update` — id, packageId, status, userId, endUserId, orgId, applicationId, scheduleId, error, startedAt, completedAt, duration.
-- `run_log` — id, runId, orgId, applicationId, type, level, event, message, data, createdAt.
-- `run_metric` — runId, orgId, applicationId, packageId, tokenUsage, costSoFar.
-- `connection_update` — id, integrationPackageId, authKey, userId, endUserId, applicationId, needsReconnection, deleted, operation. Actor-scoped server-side via subscriber filter on `userId`/`endUserId` (drops cross-actor rows; cross-app already gated by upstream SSE auth).
+- `run_update` — id, packageId, status, userId, endUserId, orgId, spaceId, scheduleId, error, startedAt, completedAt, duration.
+- `run_log` — id, runId, orgId, spaceId, type, level, event, message, data, createdAt.
+- `run_metric` — runId, orgId, spaceId, packageId, tokenUsage, costSoFar.
+- `connection_update` — id, integrationPackageId, authKey, userId, endUserId, spaceId, needsReconnection, deleted, operation. Actor-scoped server-side via subscriber filter on `userId`/`endUserId` (drops cross-actor rows; cross-space already gated by upstream SSE auth).
 
 **Why**: Historical. Not aligned with REST wire (snake_case + universal DB camelCase). Frontend components handle both shapes. Could be unified in future but not a bug.
 
@@ -268,15 +268,15 @@ Reason: SIEM queries (Datadog, Splunk) need stable field names, and all other au
 
 **Files**:
 
-- `packages/shared-types/src/index.ts` (`ApiKeyInfo`, `ApplicationInfo`, `EndUserInfo`, `OrgProxyInfo`, `SocialProviderView`, `SmtpConfigView`, paginated list envelopes)
-- `apps/api/src/openapi/schemas.ts` + `paths/{api-keys,applications,end-users,webhooks,oauth-clients,proxies,organizations}.ts`
+- `packages/shared-types/src/index.ts` (`ApiKeyInfo`, `SpaceInfo`, `EndUserInfo`, `OrgProxyInfo`, `SocialProviderView`, `SmtpConfigView`, paginated list envelopes)
+- `apps/api/src/openapi/schemas.ts` + `paths/{api-keys,spaces,end-users,webhooks,oauth-clients,proxies,organizations}.ts`
 - Webhook module CRUD surface (`apps/api/src/modules/webhooks/`)
 
 **Rule**: a fixed set of headless-platform / developer-surface wire fields stays **camelCase** end-to-end (TS schema + service + OpenAPI + frontend hook all match):
 
 - API key surface: `keyPrefix`
 - Proxy surface: `urlPrefix`
-- Application / end-user surface: `externalId`, `isDefault`, `allowedRedirectDomains`
+- Space / end-user surface: `externalId`, `isDefault`, `allowedRedirectDomains`
 - Pagination envelopes: `hasMore`
 - Webhook CRUD surface: `payloadMode`, `eventId`, `eventType`, `statusCode`
 
@@ -318,7 +318,7 @@ Don't introduce new endpoints in this surface; if a new model/proxy/credential e
 
 #### 5d — OAuth client management endpoints (Better Auth plugin pass-through)
 
-`/api/oauth/clients/*` management routes (CRUD on the `oauthClient` BA plugin table) use **camelCase** wire: `redirectUris`, `postLogoutRedirectUris`, `isFirstParty`, `allowSignup`, `signupRole`, `referencedOrgId`, `referencedApplicationId`, `clientSecret`.
+`/api/oauth/clients/*` management routes (CRUD on the `oauthClient` BA plugin table) use **camelCase** wire: `redirectUris`, `postLogoutRedirectUris`, `isFirstParty`, `allowSignup`, `signupRole`, `referencedOrgId`, `referencedSpaceId`, `clientSecret`.
 
 **Why**: these routes are CRUD pass-throughs on a Better Auth plugin-owned table. The wire shape mirrors the BA plugin's TS field names (Carve-out 4a chain). The actual OAuth 2.0 wire endpoints (`/oauth2/authorize`, `/oauth2/token`) correctly stay snake_case per RFC 6749 — only the management surface is camelCase.
 
@@ -330,7 +330,7 @@ Treat any new management-CRUD route on a BA plugin table the same way (mirror th
 
 Query params are wire surface. They follow the **same rule as wire JSON (Zone 1): snake_case by default**, with the same carve-outs applied by literal name:
 
-- **Universal DB-convention names** (Carve-out 4b) stay camelCase — `id`-style references and `*At` timestamps from the exact Carve-out 4b list. In-tree examples: `?runId=`, `?orgId=`, `?applicationId=`.
+- **Universal DB-convention names** (Carve-out 4b) stay camelCase — `id`-style references and `*At` timestamps from the exact Carve-out 4b list. In-tree examples: `?runId=`, `?orgId=`, `?spaceId=`.
 - **Pagination-envelope params** stay camelCase, matching the Carve-out 4n envelope fields: the cursor params `startingAfter` / `endingBefore` pair with the camelCase `hasMore` body field — `GET /api/end-users` (`routes/end-users.ts`).
 - **Headless-platform surface params** mirror their Carve-out 4n wire fields: `?externalId=` on `GET /api/end-users` matches the camelCase `externalId` DTO field.
 
@@ -416,7 +416,7 @@ This is the single canonical contract for frontend, SDK, github-action, and MCP 
 
 **Domain fields** (snake_case): `running_runs`, `used_by_agents`, `reused_by_agents`, `has_unarchived_changes`, `version_count`, `created_by_name`, `last_run`, `user_name`, `end_user_name`, `api_key_name`, `schedule_name`, `actor_name`, `actor_type`, `actor_id`, `manifest_name`, `latest_published_version`, `active_version`, `restored_version`, `total_connections`, `lock_version`, `auto_installed`, `agent_scope`, `agent_name`, `package_ephemeral`, `inline_manifest`, `inline_prompt`, `runner_name`, `runner_kind`, `model_label`, `proxy_label`, `version_label`, `model_source`, `version_dirty`, `token_usage`, `cron_expression`, `connection_overrides`, `last_run_at`, `next_run_at`, `model_id_override`, `proxy_id_override`, `version_override`, `artifact_size`, `yanked_reason`, `dist_tags`, `version_pin`, `draft_manifest`, `callback_url`, `started_at`, `completed_at`, `forked_from`
 
-**Application-package DTO domain fields** (snake_case — `application_package` object on `/api/applications/{id}/packages*`): `version_id`, `installed_at`, `package_type`, `package_source` (also the PUT request body's `version_id`). Note `modelId`/`proxyId` on the same object stay camelCase per asymmetry 5c. `activated_at` (integration activate 201 response) follows the same domain-timestamp rule.
+**Space-package DTO domain fields** (snake_case — `space_package` object on `/api/spaces/{id}/packages*`): `version_id`, `installed_at`, `package_type`, `package_source` (also the PUT request body's `version_id`). Note `modelId`/`proxyId` on the same object stay camelCase per asymmetry 5c. `activated_at` (integration activate 201 response) follows the same domain-timestamp rule.
 
 **Import-bundle response domain fields** (snake_case — `POST /api/packages/import-bundle` 201): `root_installed`, `root_package_id`, `root_version`, and per-item `imported[].version_id`.
 
@@ -426,7 +426,7 @@ This is the single canonical contract for frontend, SDK, github-action, and MCP 
 
 **Cloud billing wire**: `usage_percent`, `credits_used`, `credit_quota`, `period_end`, `cancel_at_period_end`, `plan_id`, `return_url`
 
-**Universal DB convention** (camelCase carve-out on wire): `id`, `createdAt`, `updatedAt`, `expiresAt`, `revokedAt`, `lastUsedAt`, `runNumber`, `userId`, `orgId`, `applicationId`, `packageId`, `endUserId`, `apiKeyId`, `scheduleId`, `runOrigin`, `contextSnapshot`, `modelCredentialId`
+**Universal DB convention** (camelCase carve-out on wire): `id`, `createdAt`, `updatedAt`, `expiresAt`, `revokedAt`, `lastUsedAt`, `runNumber`, `userId`, `orgId`, `spaceId`, `packageId`, `endUserId`, `apiKeyId`, `scheduleId`, `runOrigin`, `contextSnapshot`, `modelCredentialId`
 
 **⚠️ The carve-out is this EXACT list — not a pattern.** Only the timestamp fields (`*At`) and id fields (`id`, `*Id`) above stay camelCase. Look-alikes that are NOT on the list are domain fields and go **snake_case on the wire**, even though they resemble a carve-out:
 
@@ -538,7 +538,7 @@ rg "(\.|:\s+)(displayName|schemaVersion|forkedFrom|runningRuns|usedByAgents|reus
 
 ```bash
 # Universal DB convention should stay camelCase
-rg "(\.|:\s+)(created_at|updated_at|user_id|org_id|application_id|package_id|end_user_id|api_key_id|schedule_id|expires_at|revoked_at|last_used_at|run_number|run_origin|context_snapshot|model_credential_id)\b" -t ts -t tsx
+rg "(\.|:\s+)(created_at|updated_at|user_id|org_id|space_id|package_id|end_user_id|api_key_id|schedule_id|expires_at|revoked_at|last_used_at|run_number|run_origin|context_snapshot|model_credential_id)\b" -t ts -t tsx
 ```
 
 ### Find Drizzle pgTable with snake_case TS fields (bug)

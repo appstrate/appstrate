@@ -25,7 +25,7 @@ describe("End-Users API", () => {
       },
       body: JSON.stringify({
         name: "End-User Test Key",
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
       }),
     });
     expect(res.status).toBe(201);
@@ -149,7 +149,7 @@ describe("End-Users API", () => {
        * `NaN`, `??` did not catch it and neither did `Math.min(Math.max(NaN, 1),
        * 100)`. Drizzle's pg dialect emits the `limit` clause only for a
        * `number >= 0`, so the clause was DROPPED — not a 500, an unbounded query
-       * returning every end-user in the application, with `limit: null` and
+       * returning every end-user in the space, with `limit: null` and
        * `hasMore: false` in the envelope.
        *
        * `PAGE + 1` rows exist in every case below, so a dropped clause is
@@ -161,7 +161,7 @@ describe("End-Users API", () => {
         await db.insert(endUsers).values(
           Array.from({ length: PAGE + 1 }, (_, i) => ({
             id: `eu_limitprobe_${String(i).padStart(2, "0")}`,
-            applicationId: ctx.defaultAppId,
+            spaceId: ctx.defaultSpaceId,
             orgId: ctx.orgId,
             name: `Probe ${i}`,
           })),

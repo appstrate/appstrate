@@ -7,7 +7,7 @@
  * The tier-0 runner keys on the journal TAG (`pglite-migrate.ts`), so a file
  * whose DDL committed but whose tracking row did not is indistinguishable from
  * a file that never ran: the next boot replays it. That is the whole hazard —
- * `0040_config_into_input.sql` wraps every `application_packages.input_settings`
+ * `0040_config_into_input.sql` wraps every `space_packages.input_settings`
  * row unconditionally, so a replay nests each row a second time into
  * `{"values":{"values":…,"locked":[]},"locked":[]}` and the configured values
  * are gone. Tier 0 ships for "personal use, small devices (Raspberry Pi 4+,

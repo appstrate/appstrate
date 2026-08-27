@@ -48,7 +48,7 @@ export interface ReportContext {
    */
   instance: string;
   bearerToken: string;
-  applicationId: string;
+  spaceId: string;
   orgId: string | null;
 }
 
@@ -97,7 +97,7 @@ export function shouldReport(mode: ReportMode, ctx: ReportContext | null): boole
     if (!ctx) {
       throw new ReportConfigError(
         "--report=true requires an Appstrate profile or API key",
-        "Run `appstrate login`, or set APPSTRATE_API_KEY + APPSTRATE_INSTANCE + APPSTRATE_APP_ID",
+        "Run `appstrate login`, or set APPSTRATE_API_KEY + APPSTRATE_INSTANCE + APPSTRATE_SPACE_ID",
       );
     }
     return true;
@@ -142,16 +142,16 @@ export async function startReportSession(
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Authorization: `Bearer ${ctx.bearerToken}`,
-    // `/api/runs/*` is app-scoped; dashboard-user JWTs don't pin an app,
-    // so the middleware requires `X-Application-Id` explicitly. Missing this
-    // rejects every remote run with `application_context_required`.
-    "X-Application-Id": ctx.applicationId,
+    // `/api/runs/*` is space-scoped; dashboard-user JWTs don't pin a space,
+    // so the middleware requires `X-Space-Id` explicitly. Missing this
+    // rejects every remote run with "Space context required".
+    "X-Space-Id": ctx.spaceId,
   };
   if (ctx.orgId) headers["X-Org-Id"] = ctx.orgId;
 
   const sink = opts.ttlSeconds ? { sink: { ttl_seconds: opts.ttlSeconds } } : {};
   const baseBody = {
-    applicationId: ctx.applicationId,
+    spaceId: ctx.spaceId,
     input: {},
     contextSnapshot: truncateSnapshot(contextSnapshot),
     ...sink,

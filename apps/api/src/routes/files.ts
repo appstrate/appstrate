@@ -14,7 +14,7 @@
  *      family at all". Exactly what `runs:read` does for runs. Without it a
  *      key minted with the narrowest possible scope set (even `scopes: []`,
  *      which `validateScopes` accepts) could list and download every
- *      `agent_output` of the application.
+ *      `agent_output` of the space.
  *   2. The per-file container ACL (`getFileForActor` /
  *      `getFileCapabilities`) — "may this ACTOR touch THIS file",
  *      inherited from the run read-ACL or the chat-session owner. The
@@ -31,7 +31,7 @@ import type { AppEnv } from "../types/index.ts";
 import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor, actorFromIds } from "../lib/actor.ts";
-import { getAppScope } from "../lib/scope.ts";
+import { getSpaceScope } from "../lib/scope.ts";
 import { forbidden, notFound, payloadTooLarge, unauthorized } from "../lib/errors.ts";
 import { reprDigestSha256 } from "../lib/digest.ts";
 import { getPublicAppOrigin } from "../lib/public-url.ts";
@@ -72,7 +72,7 @@ export function createFilesRouter() {
   // and the `startingAfter` pagination param are camelCase; `run_id` /
   // `chat_session_id` are snake_case domain fields.
   router.get("/files", rateLimit(120), requirePermission("files", "read"), async (c) => {
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     const actor = getActor(c);
 
     const filters: ListFilesFilters = {};
@@ -97,7 +97,7 @@ export function createFilesRouter() {
   // GET /api/files/:id — metadata DTO. Token-minting route (the single GET
   // mints the signed `preview_url`), so it is rate-limited like the others.
   router.get("/files/:id", rateLimit(120), requirePermission("files", "read"), async (c) => {
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     const actor = getActor(c);
     const resolved = await getFileForActor(scope, actor, c.req.param("id")!, c.get("permissions"));
     if (!resolved) throw notFound("File not found");
@@ -113,7 +113,7 @@ export function createFilesRouter() {
     rateLimit(120),
     requirePermission("files", "read"),
     async (c) => {
-      const scope = getAppScope(c);
+      const scope = getSpaceScope(c);
       const actor = getActor(c);
       const resolved = await getFileForActor(scope, actor, c.req.param("id")!);
       if (!resolved) throw notFound("File not found");
@@ -166,7 +166,7 @@ export function createFilesRouter() {
   // DELETE /api/files/:id — allowed for a caller with the `files:delete`
   // permission (owner/admin) OR the file's own creator.
   router.delete("/files/:id", rateLimit(60), async (c) => {
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     const actor = getActor(c);
     const resolved = await getFileForActor(scope, actor, c.req.param("id")!, c.get("permissions"));
     if (!resolved) throw notFound("File not found");
@@ -192,7 +192,7 @@ export function createFilesRouter() {
   // own creator). Idempotent — pinning an already-permanent file is a no-op
   // that returns 200 with the (unchanged) file. Returns the updated DTO.
   router.post("/files/:id/keep", rateLimit(60), async (c) => {
-    const scope = getAppScope(c);
+    const scope = getSpaceScope(c);
     const actor = getActor(c);
     const resolved = await getFileForActor(scope, actor, c.req.param("id")!, c.get("permissions"));
     if (!resolved) throw notFound("File not found");
@@ -223,7 +223,7 @@ export function createFilesRouter() {
 
 /**
  * Cookie-less file preview router — MOUNTED OUTSIDE `/api`, BEFORE the auth
- * pipeline, so no cookie/API-key/org/app middleware ever touches it. Serves a
+ * pipeline, so no cookie/API-key/org/space middleware ever touches it. Serves a
  * previewable file in maximum isolation, branching on its
  * {@link previewKind}:
  *

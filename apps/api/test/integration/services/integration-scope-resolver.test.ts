@@ -15,7 +15,7 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import { integrationConnections } from "@appstrate/db/schema";
 import {
   computeRequiredScopes,
@@ -103,7 +103,7 @@ describe("integration-scope-resolver", () => {
   describe("computeRequiredScopes", () => {
     it("returns empty when no agent depends on the integration", async () => {
       const out = await computeRequiredScopes({
-        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         integrationId: INTEGRATION_ID,
         authKey: "primary",
       });
@@ -112,7 +112,7 @@ describe("integration-scope-resolver", () => {
 
     it("returns empty when the integration package itself isn't visible", async () => {
       const out = await computeRequiredScopes({
-        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         integrationId: "@nothing/here",
         authKey: "primary",
       });
@@ -130,12 +130,12 @@ describe("integration-scope-resolver", () => {
         }),
       });
       await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@scope/agent-reader",
       );
 
       const out = await computeRequiredScopes({
-        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         integrationId: INTEGRATION_ID,
         authKey: "primary",
       });
@@ -155,10 +155,10 @@ describe("integration-scope-resolver", () => {
           type: "agent",
           draftManifest: agentManifest(id, { version: "^1.0.0", tools: [...tools] }),
         });
-        await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, id);
+        await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
       }
       const out = await computeRequiredScopes({
-        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         integrationId: INTEGRATION_ID,
         authKey: "primary",
       });
@@ -173,12 +173,12 @@ describe("integration-scope-resolver", () => {
         draftManifest: agentManifest("@scope/agent-noselection", { version: "^1.0.0" }),
       });
       await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@scope/agent-noselection",
       );
 
       const out = await computeRequiredScopes({
-        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         integrationId: INTEGRATION_ID,
         authKey: "primary",
       });
@@ -197,12 +197,12 @@ describe("integration-scope-resolver", () => {
         }),
       });
       await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@scope/agent-manual",
       );
 
       const out = await computeRequiredScopes({
-        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         integrationId: INTEGRATION_ID,
         authKey: "primary",
       });
@@ -220,13 +220,10 @@ describe("integration-scope-resolver", () => {
           scopes: ["read"],
         }),
       });
-      await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        "@scope/agent-empty",
-      );
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@scope/agent-empty");
 
       const out = await computeRequiredScopes({
-        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         integrationId: INTEGRATION_ID,
         authKey: "primary",
       });
@@ -278,7 +275,7 @@ describe("integration-scope-resolver", () => {
           allow_undeclared_tools: true,
         }) as unknown as Record<string, unknown>,
       });
-      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INTEGRATION_ID);
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION_ID);
 
       await seedPackage({
         id: "@scope/agent-wildcard",
@@ -290,12 +287,12 @@ describe("integration-scope-resolver", () => {
         }),
       });
       await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         "@scope/agent-wildcard",
       );
 
       const out = await computeRequiredScopes({
-        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         integrationId: INTEGRATION_ID,
         authKey: "primary",
       });
@@ -318,13 +315,10 @@ describe("integration-scope-resolver", () => {
           dependencies: { integrations: { "@some/other": "^1.0.0" } },
         },
       });
-      await installPackage(
-        { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
-        "@scope/agent-other",
-      );
+      await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, "@scope/agent-other");
 
       const out = await computeRequiredScopes({
-        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         integrationId: INTEGRATION_ID,
         authKey: "primary",
       });
@@ -335,7 +329,7 @@ describe("integration-scope-resolver", () => {
   describe("getCurrentScopesGranted", () => {
     it("returns empty when the connection id doesn't exist", async () => {
       const granted = await getCurrentScopesGranted({
-        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         integrationId: INTEGRATION_ID,
         authKey: "primary",
         actor: { type: "user", id: ctx.user.id },
@@ -351,7 +345,7 @@ describe("integration-scope-resolver", () => {
           integrationId: INTEGRATION_ID,
           authKey: "primary",
           accountId: "acct-1",
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
           userId: ctx.user.id,
           credentialsEncrypted: "x",
           scopesGranted: ["read"],
@@ -363,13 +357,13 @@ describe("integration-scope-resolver", () => {
         integrationId: INTEGRATION_ID,
         authKey: "primary",
         accountId: "acct-2",
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: "x",
         scopesGranted: ["read", "send"],
       });
       const granted = await getCurrentScopesGranted({
-        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         integrationId: INTEGRATION_ID,
         authKey: "primary",
         actor: { type: "user", id: ctx.user.id },
@@ -386,14 +380,14 @@ describe("integration-scope-resolver", () => {
           integrationId: INTEGRATION_ID,
           authKey: "primary",
           accountId: "acct-foreign",
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
           userId: other.id,
           credentialsEncrypted: "x",
           scopesGranted: ["admin"],
         })
         .returning({ id: integrationConnections.id });
       const granted = await getCurrentScopesGranted({
-        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         integrationId: INTEGRATION_ID,
         authKey: "primary",
         actor: { type: "user", id: ctx.user.id },

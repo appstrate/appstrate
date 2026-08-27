@@ -74,7 +74,7 @@ The loader checks that range against the platform's `CORE_VERSION` at boot. It e
 
 A mismatch refuses to boot by default, naming the module and both versions. `MODULE_CONTRACT_ENFORCE=warn` downgrades it to a log line — the escape hatch for an operator running a module that has not been republished against the core major the platform ships.
 
-Everything else (`hooks`, `events`, `openApiComponentSchemas`, `openApiSchemas`, `emailOverrides`, `publicPaths`, `manifest.dependencies`) is optional. Use `publicPaths` for routes that bypass auth (e.g. inbound webhook callbacks). Modules that need `X-Application-Id` context for their routes gate it themselves (e.g. an explicit `applicationId` body/query field validated against the caller's org).
+Everything else (`hooks`, `events`, `openApiComponentSchemas`, `openApiSchemas`, `emailOverrides`, `publicPaths`, `manifest.dependencies`) is optional. Use `publicPaths` for routes that bypass auth (e.g. inbound webhook callbacks). Modules that need `X-Space-Id` context for their routes gate it themselves (e.g. an explicit `spaceId` body/query field validated against the caller's org).
 
 ## Database ownership rules
 
@@ -284,14 +284,14 @@ const jwtStrategy: AuthStrategy = {
       orgId: payload.org_id,
       orgRole: "admin",
       authMethod: "my-jwt",
-      applicationId: payload.app_id,
+      spaceId: payload.space_id,
       permissions: ["runs:read", "runs:write"],
       // Optional end-user impersonation. `EndUserContext` is exactly
-      // `{ id, applicationId, name?, email? }` — core has no end-user role
+      // `{ id, spaceId, name?, email? }` — core has no end-user role
       // vocabulary, so there is no `role` field to set here.
       endUser: {
         id: payload.enduser_id,
-        applicationId: payload.app_id,
+        spaceId: payload.space_id,
         email: payload.email,
       },
     };
@@ -311,7 +311,7 @@ const myModule: AppstrateModule = {
 
 **Ordering.** Strategies are tried in module load order (topological sort by `manifest.dependencies`). First non-null resolution wins. Core auth (API key + cookie) runs only when every strategy has returned `null`.
 
-**What a resolution sets on `c`.** Mirrors what core API-key auth sets: `user`, `orgId`, `orgSlug?`, `orgRole`, `authMethod`, `applicationId`, `permissions` (as a string set), optional `endUser`. Downstream middleware treats strategy-authenticated requests the same as API-key requests — org-context and permission-resolution middlewares are skipped because the strategy has already resolved everything.
+**What a resolution sets on `c`.** Mirrors what core API-key auth sets: `user`, `orgId`, `orgSlug?`, `orgRole`, `authMethod`, `spaceId`, `permissions` (as a string set), optional `endUser`. Downstream middleware treats strategy-authenticated requests the same as API-key requests — org-context and permission-resolution middlewares are skipped because the strategy has already resolved everything.
 
 **`permissions` type.** `readonly string[]` at the contract layer (not the typed `Permission[]` union) to keep the core RBAC catalog out of `@appstrate/core`. Use permission strings that match core's `resource:action` vocabulary — `requirePermission()` guards will 403 on unknown strings at request time.
 
@@ -343,7 +343,7 @@ Core enforces a single hard rule: when an end-user is in the request context (vi
 
 A module that needs a different visibility model (team-wide, org-admin end-users, etc.) expresses it out-of-band — typically by exposing its own routes under its own prefix (e.g. `/api/<mod>/runs`) that call the `listPackageRuns` service directly with whatever filters the module decides. Core stays strict and predictable; modules compose alternative UX on top.
 
-Applications embedding Appstrate headlessly that want an "admin dashboard" view simply don't send `Appstrate-User` on admin calls — a raw API key request has no `endUser` context, so the self-filter doesn't apply and the caller sees every run in the application (which `applicationId` still scopes).
+Applications embedding Appstrate headlessly that want an "admin dashboard" view simply don't send `Appstrate-User` on admin calls — a raw API key request has no `endUser` context, so the self-filter doesn't apply and the caller sees every run in the space (which `spaceId` still scopes).
 
 ## OpenAPI contributions
 

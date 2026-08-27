@@ -28,7 +28,7 @@ browser) and **browser OAuth** (CIMD / DCR, zero manual client registration).
 
 ## Path A — API key (no browser)
 
-Mint an API key in the dashboard (Settings → API keys) scoped to an application,
+Mint an API key in the dashboard (Settings → API keys) scoped to a space,
 granting `mcp:read` and `mcp:invoke`. The key is already scoped to one
 organization, so use that org's endpoint — no `X-Org-Id` header:
 
@@ -85,14 +85,14 @@ What happens under the hood:
    other org's MCP endpoint) — it can only ever drive `/api/mcp/o/<orgId>` for
    the one org it was issued for.
 
-> **Organization & application context.** The organization is fixed by the
+> **Organization & space context.** The organization is fixed by the
 > endpoint: the token is bound to the org in the URL, so an OAuth-onboarded
 > client needs **no** `X-Org-Id` header and there is no org-switch tool. To use
 > several organizations, add one MCP server entry per org (each runs its own
 > OAuth flow and gets its own org-bound token); the entries can be connected at
 > the same time. Within an org, calls run against that org's **default
-> application**. A client that needs a different application sends an
-> `X-Application-Id` header (it must belong to the org).
+> space**. A client that needs a different space sends an
+> `X-Space-Id` header (it must belong to the org).
 
 ### Self-hosting requirements for Path B
 

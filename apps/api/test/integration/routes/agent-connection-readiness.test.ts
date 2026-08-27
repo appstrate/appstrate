@@ -18,7 +18,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedPackage } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import { createVersionFromDraft } from "../../../src/services/package-versions.ts";
 import { eq } from "drizzle-orm";
 import { integrationConnections, packages } from "@appstrate/db/schema";
@@ -108,7 +108,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
       createdBy: ctx.user.id,
       draftManifest: manifest,
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
   }
 
   async function seedIntegration(required: boolean) {
@@ -119,7 +119,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
       source: "local",
       draftManifest: buildIntegrationManifest(INTEGRATION, required),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INTEGRATION);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
   }
 
   async function seedConnection() {
@@ -127,7 +127,7 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
       integrationId: INTEGRATION,
       authKey: "primary",
       accountId: "acct-rdy",
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,
       credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret-value" } }),

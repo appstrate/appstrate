@@ -3,7 +3,7 @@
 import { Hono } from "hono";
 import { eq, and, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packages, applicationPackages, applications } from "@appstrate/db/schema";
+import { packages, spacePackages, spaces } from "@appstrate/db/schema";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
@@ -12,21 +12,21 @@ import type { AppEnv } from "../types/index.ts";
 export function createLibraryRouter() {
   const router = new Hono<AppEnv>();
 
-  // GET /api/library — all packages grouped by type with install state per app
-  router.get("/", requirePermission("applications", "read"), async (c) => {
+  // GET /api/library — all packages grouped by type with install state per space
+  router.get("/", requirePermission("spaces", "read"), async (c) => {
     const orgId = c.get("orgId");
 
-    // Fetch apps and packages+installs in parallel
-    const [orgApps, rows] = await Promise.all([
+    // Fetch spaces and packages+installs in parallel
+    const [orgSpaces, rows] = await Promise.all([
       db
         .select({
-          id: applications.id,
-          name: applications.name,
-          isDefault: applications.isDefault,
+          id: spaces.id,
+          name: spaces.name,
+          isDefault: spaces.isDefault,
         })
-        .from(applications)
-        .where(eq(applications.orgId, orgId))
-        .orderBy(sql`CASE WHEN ${applications.isDefault} THEN 0 ELSE 1 END`),
+        .from(spaces)
+        .where(eq(spaces.orgId, orgId))
+        .orderBy(sql`CASE WHEN ${spaces.isDefault} THEN 0 ELSE 1 END`),
 
       db
         .select({
@@ -34,15 +34,15 @@ export function createLibraryRouter() {
           type: packages.type,
           source: packages.source,
           draftManifest: packages.draftManifest,
-          applicationId: applicationPackages.applicationId,
+          spaceId: spacePackages.spaceId,
         })
         .from(packages)
         .leftJoin(
-          applicationPackages,
+          spacePackages,
           and(
-            eq(applicationPackages.packageId, packages.id),
-            // Scope to org apps only — prevents leaking install state from other orgs
-            sql`${applicationPackages.applicationId} IN (SELECT ${applications.id} FROM ${applications} WHERE ${applications.orgId} = ${orgId})`,
+            eq(spacePackages.packageId, packages.id),
+            // Scope to org spaces only — prevents leaking install state from other orgs
+            sql`${spacePackages.spaceId} IN (SELECT ${spaces.id} FROM ${spaces} WHERE ${spaces.orgId} = ${orgId})`,
           ),
         )
         .where(and(orgOrSystemFilter(orgId), notEphemeralFilter()))
@@ -76,8 +76,8 @@ export function createLibraryRouter() {
         };
         pkgMap.set(row.id, entry);
       }
-      if (row.applicationId) {
-        entry.installed_in.push(row.applicationId);
+      if (row.spaceId) {
+        entry.installed_in.push(row.spaceId);
       }
     }
 
@@ -95,7 +95,7 @@ export function createLibraryRouter() {
 
     return c.json({
       object: "library",
-      applications: orgApps,
+      spaces: orgSpaces,
       packages: grouped,
     });
   });

@@ -3,7 +3,7 @@
 import { expect, type Page } from "@playwright/test";
 
 /**
- * Page Object for the sidebar navigation — org/app switcher and nav links.
+ * Page Object for the sidebar navigation — org/space switcher and nav links.
  */
 export class Sidebar {
   constructor(private page: Page) {}
@@ -17,11 +17,11 @@ export class Sidebar {
     return this.page.locator("[role='menu']");
   }
 
-  get appSubmenuTrigger() {
-    return this.page.getByTestId("app-submenu-trigger");
+  get spaceSubmenuTrigger() {
+    return this.page.getByTestId("space-submenu-trigger");
   }
 
-  /** Open the org/app switcher dropdown and wait for it to render. */
+  /** Open the org/space switcher dropdown and wait for it to render. */
   async openSwitcher() {
     await this.switcherButton.click();
     await expect(this.page.locator("[role='menu']")).toBeVisible();
@@ -35,14 +35,14 @@ export class Sidebar {
     await expect(this.page).toHaveURL("/");
   }
 
-  /** Open the app submenu and click an app by name. */
-  async switchApp(appName: string) {
+  /** Open the space submenu and click a space by name. */
+  async switchSpace(spaceName: string) {
     await this.openSwitcher();
-    // Hover the app submenu trigger to open the sub-content
-    await this.appSubmenuTrigger.hover();
-    await expect(this.page.getByText(appName)).toBeVisible();
-    await this.page.getByText(appName).click();
-    // Wait for the app switch to take effect
+    // Hover the space submenu trigger to open the sub-content
+    await this.spaceSubmenuTrigger.hover();
+    await expect(this.page.getByText(spaceName)).toBeVisible();
+    await this.page.getByText(spaceName).click();
+    // Wait for the space switch to take effect
     await this.page.waitForLoadState("domcontentloaded");
   }
 }

@@ -46,7 +46,7 @@ import { CONTEXT_FREE_FILENAMES_PHRASE } from "@appstrate/afps-runtime/bundle";
 import type { Actor } from "@appstrate/connect";
 import { getCatalog, collectReferencedSchemas, type CatalogOperation } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
-import type { AppScope } from "../../lib/scope.ts";
+import type { SpaceScope } from "../../lib/scope.ts";
 import {
   getFileForActor,
   streamFileContent,
@@ -120,8 +120,8 @@ export interface McpToolContext {
    * cannot follow no longer degrades the read).
    */
   actor: Actor;
-  /** The caller's org+app scope (org fixed by the endpoint/token; app resolved). */
-  scope: AppScope;
+  /** The caller's org+space scope (org fixed by the endpoint/token; space resolved). */
+  scope: SpaceScope;
   /** In-process dispatcher (defaults to the platform app at request time). */
   dispatch: Dispatch;
   /**
@@ -162,13 +162,13 @@ export const FORWARDED_AUTH_HEADERS = [
   "authorization",
   "cookie",
   "x-org-id",
-  "x-application-id",
+  "x-space-id",
   "appstrate-user",
   "appstrate-version",
 ] as const;
 // Headers the caller may NOT set via the `headers` arg: the auth context is
 // forwarded from the inbound MCP request and must not be reshaped by the
-// model (no swapping credentials, switching org/app, or forging end-user
+// model (no swapping credentials, switching org/space, or forging end-user
 // impersonation). Everything else (e.g. Credential-Proxy target headers) is
 // allowed — still bounded by RBAC on the dispatched route. The forwarded auth
 // set plus the hop-by-hop headers we set ourselves (`host`, `content-length`)
@@ -1373,8 +1373,8 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
     const start = performance.now();
     const headers = new Headers(ctx.authHeaders);
     // Trusted in-process re-entry — same rationale as invoke_operation: lets the
-    // org-pinned MCP token reach an app-scoped route, and lets requireAppContext
-    // fall back to the org default application when no X-Application-Id is forwarded.
+    // org-pinned MCP token reach a space-scoped route, and lets requireSpaceContext
+    // fall back to the org default space when no X-Space-Id is forwarded.
     headers.set(...internalDispatchHeader());
     const request = new Request(new URL("/api/me/context", ctx.origin).toString(), {
       method: "GET",

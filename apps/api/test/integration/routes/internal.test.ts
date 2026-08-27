@@ -35,7 +35,7 @@ describe("Internal API", () => {
     const exec = await seedRun({
       packageId: pkgId,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status: "running",
     });
@@ -72,7 +72,7 @@ describe("Internal API", () => {
       const doneRun = await seedRun({
         packageId: pkgId,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
       });
@@ -109,7 +109,7 @@ describe("Internal API", () => {
       await seedRun({
         packageId: pkgId,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
         checkpoint: { counter: 1 },
@@ -117,7 +117,7 @@ describe("Internal API", () => {
       await seedRun({
         packageId: pkgId,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
         checkpoint: { counter: 2 },
@@ -139,7 +139,7 @@ describe("Internal API", () => {
         await seedRun({
           packageId: pkgId,
           orgId: ctx.orgId,
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
           userId: ctx.user.id,
           status: "success",
           checkpoint: { i },
@@ -192,7 +192,7 @@ describe("Internal API", () => {
       await seedRun({
         packageId: "@otherorg/test-agent",
         orgId: other.orgId,
-        applicationId: other.defaultAppId,
+        spaceId: other.defaultSpaceId,
         userId: other.user.id,
         status: "success",
         checkpoint: { foreign: true },
@@ -211,7 +211,7 @@ describe("Internal API", () => {
       await seedRun({
         packageId: pkgId,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
         checkpoint: { key: "value" },
@@ -244,7 +244,7 @@ describe("Internal API", () => {
       await seedRun({
         packageId: pkgId,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
         checkpoint: { key: "v" },
@@ -266,18 +266,18 @@ describe("Internal API", () => {
     it("does not return checkpoints from a different end-user (actor isolation)", async () => {
       // The current `runningToken` belongs to a run triggered by
       // `ctx.user.id` (a dashboard user). Seed a successful end-user
-      // run for the SAME agent + SAME app and assert that its
+      // run for the SAME agent + SAME space and assert that its
       // checkpoint never appears in the running run's history — the
       // internal endpoint filters by the run's actor.
       const eu = await seedEndUser({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         externalId: `ext_${Date.now()}`,
       });
       await seedRun({
         packageId: pkgId,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: null,
         endUserId: eu.id,
         status: "success",
@@ -312,7 +312,7 @@ describe("Internal API", () => {
       // Two archive memories scoped to the running user's actor.
       await addMemories(
         pkgId,
-        ctx.defaultAppId,
+        ctx.defaultSpaceId,
         ctx.orgId,
         { type: "user", id: ctx.user.id },
         ["archived fact A", "archived fact B"],
@@ -336,7 +336,7 @@ describe("Internal API", () => {
       const { addMemories } = await import("../../../src/services/state/package-persistence.ts");
       await addMemories(
         pkgId,
-        ctx.defaultAppId,
+        ctx.defaultSpaceId,
         ctx.orgId,
         { type: "user", id: ctx.user.id },
         ["User prefers Python", "User likes coffee", "API quirk: 429 on /v1/x"],
@@ -357,7 +357,7 @@ describe("Internal API", () => {
       const contents = Array.from({ length: 12 }, (_, i) => `mem-${i}`);
       await addMemories(
         pkgId,
-        ctx.defaultAppId,
+        ctx.defaultSpaceId,
         ctx.orgId,
         { type: "user", id: ctx.user.id },
         contents,
@@ -376,12 +376,12 @@ describe("Internal API", () => {
       const { addMemories } = await import("../../../src/services/state/package-persistence.ts");
       const eu = await seedEndUser({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         externalId: `ext_${Date.now()}_recall`,
       });
       await addMemories(
         pkgId,
-        ctx.defaultAppId,
+        ctx.defaultSpaceId,
         ctx.orgId,
         { type: "end_user", id: eu.id },
         ["secret end-user memory"],
@@ -410,7 +410,7 @@ describe("Internal API", () => {
       const { addMemories } = await import("../../../src/services/state/package-persistence.ts");
       await addMemories(
         pkgId,
-        ctx.defaultAppId,
+        ctx.defaultSpaceId,
         ctx.orgId,
         { type: "user", id: ctx.user.id },
         ["entry"],
@@ -442,7 +442,7 @@ describe("Internal API", () => {
       const run = await seedRun({
         packageId: pkgId,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "running",
         modelCredentialId: credentialId,
@@ -556,7 +556,7 @@ describe("Internal API", () => {
       const remote = await seedRun({
         packageId: pkgId,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "running",
         runOrigin: "remote",
@@ -574,7 +574,7 @@ describe("Internal API", () => {
       const remote = await seedRun({
         packageId: pkgId,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "running",
         runOrigin: "remote",

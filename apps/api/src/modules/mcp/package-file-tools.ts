@@ -10,7 +10,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { MCP_SERVER_RUNTIME_CAPABILITIES, MCP_SERVER_RUNTIMES } from "@appstrate/core/mcp-server";
 import { PACKAGE_ZIP_MAX_COMPRESSED_BYTES } from "@appstrate/core/zip";
 import type { Actor } from "@appstrate/connect";
-import type { AppScope } from "../../lib/scope.ts";
+import type { SpaceScope } from "../../lib/scope.ts";
 import { getFileForActor, streamFileContent } from "../../services/files.ts";
 import {
   bundleImportAuditRecords,
@@ -23,7 +23,7 @@ import { asString, textResult } from "./tool-results.ts";
 interface PackageFileToolContext {
   permissions: ReadonlySet<string>;
   actor: Actor;
-  scope: AppScope;
+  scope: SpaceScope;
 }
 
 interface PackageFileBytes {
@@ -200,7 +200,7 @@ function buildImportPackageFileTool(ctx: PackageFileToolContext): AppstrateToolD
       })) {
         await recordAudit({
           orgId: ctx.scope.orgId,
-          applicationId: ctx.scope.applicationId,
+          spaceId: ctx.scope.spaceId,
           actorType: "user",
           actorId: ctx.actor.id,
           action: "package.version_created",

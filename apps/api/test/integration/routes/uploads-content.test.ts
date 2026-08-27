@@ -24,7 +24,7 @@ const BUCKET = "uploads";
 
 /** Unique storage path per test — truncateAll() resets the DB, not storage. */
 function uniquePath(label: string): string {
-  return `app_test/upl_${label}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}/file.bin`;
+  return `spc_test/upl_${label}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}/file.bin`;
 }
 
 function makeToken(overrides: Partial<FsUploadTokenPayload> & { k: string; s: number }): string {

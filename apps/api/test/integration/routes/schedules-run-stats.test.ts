@@ -57,7 +57,7 @@ describe("Schedule run counters", () => {
     return seedSchedule({
       packageId: agent.id,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       name,
     });
@@ -73,7 +73,7 @@ describe("Schedule run counters", () => {
       packageId,
       scheduleId,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       status,
       runNumber,
@@ -84,7 +84,7 @@ describe("Schedule run counters", () => {
   async function seedUnread(runId: string, recipientId: string) {
     await db.insert(notifications).values({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       recipientType: "user",
       recipientId,
       runId,
@@ -123,7 +123,7 @@ describe("Schedule run counters", () => {
     await seedUnread(r2.id, ctx.user.id);
     await db.insert(notifications).values({
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       recipientType: "user",
       recipientId: ctx.user.id,
       runId: r3.id,

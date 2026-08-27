@@ -46,14 +46,14 @@ getTestApp();
 
 /** Stage an upload row + write its bytes into the uploads bucket (FS). */
 async function stageUpload(
-  scope: { orgId: string; applicationId: string },
+  scope: { orgId: string; spaceId: string },
   createdBy: string,
   name: string,
   bytes: Uint8Array,
 ): Promise<string> {
   const up = await createUpload({
     orgId: scope.orgId,
-    applicationId: scope.applicationId,
+    spaceId: scope.spaceId,
     createdBy,
     name,
     size: bytes.byteLength,
@@ -85,13 +85,13 @@ async function orgBytesUsed(orgId: string): Promise<number> {
 
 describe("chat session delete — file teardown", () => {
   let ctx: TestContext;
-  let scope: { orgId: string; applicationId: string };
+  let scope: { orgId: string; spaceId: string };
   let actor: Actor;
 
   beforeEach(async () => {
     await truncateAll();
     ctx = await createTestContext({ orgSlug: "chatteardown" });
-    scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     actor = { type: "user", id: ctx.user.id };
   });
 

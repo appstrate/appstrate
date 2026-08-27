@@ -5,8 +5,8 @@
  *
  * Hooks backed by `/api/integrations/*` through the typed OpenAPI client.
  * Query keys are the openapi-react-query `[method, path, init]` triples; the
- * spec-declared `X-Org-Id`/`X-Application-Id` headers ride in `init` so the
- * keys stay org/app-scoped — switching org or application refetches instead
+ * spec-declared `X-Org-Id`/`X-Space-Id` headers ride in `init` so the
+ * keys stay org/space-scoped — switching org or space refetches instead
  * of serving another scope's cached page.
  */
 
@@ -54,7 +54,7 @@ export type IntegrationClient = NonNullable<
   paths["/api/integrations/{packageId}/auths/{authKey}/clients"]["get"]["responses"]["200"]["content"]["application/json"]["data"]
 >[number];
 import { useCurrentOrgId } from "./use-org";
-import { useCurrentApplicationId } from "./use-current-application";
+import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgScope } from "./use-org-scope";
 
 // Re-export wire types for component consumers — canonical definitions
@@ -165,7 +165,7 @@ export function useIntegrationConnections(packageId: string | undefined) {
  */
 function agentConnectionReadinessQueryOptions(
   orgId: string | null | undefined,
-  applicationId: string | null | undefined,
+  spaceId: string | null | undefined,
   agentPackageId: string | undefined,
   version?: string,
 ) {
@@ -185,11 +185,11 @@ function agentConnectionReadinessQueryOptions(
         ...(isVersioned(version) ? { query: { version } } : {}),
         header: {
           "X-Org-Id": orgId ?? undefined,
-          "X-Application-Id": applicationId ?? undefined,
+          "X-Space-Id": spaceId ?? undefined,
         },
       },
     },
-    { enabled: Boolean(orgId && applicationId && agentPackageId) },
+    { enabled: Boolean(orgId && spaceId && agentPackageId) },
   );
 }
 
@@ -202,8 +202,8 @@ function agentConnectionReadinessQueryOptions(
  */
 export function useAgentConnectionReadiness(agentPackageId: string | undefined) {
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
-  return useQuery(agentConnectionReadinessQueryOptions(orgId, applicationId, agentPackageId));
+  const spaceId = useCurrentSpaceId();
+  return useQuery(agentConnectionReadinessQueryOptions(orgId, spaceId, agentPackageId));
 }
 
 /**
@@ -218,10 +218,10 @@ export function useIntegrationAgentResolution(
   version?: string,
 ) {
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   return useQuery({
-    ...agentConnectionReadinessQueryOptions(orgId, applicationId, agentPackageId, version),
-    enabled: Boolean(orgId && applicationId && integrationId && agentPackageId),
+    ...agentConnectionReadinessQueryOptions(orgId, spaceId, agentPackageId, version),
+    enabled: Boolean(orgId && spaceId && integrationId && agentPackageId),
     select: (data) =>
       data.integrations.find((i) => i.integration_id === integrationId)?.resolution ?? null,
   });
@@ -238,10 +238,10 @@ export function useIntegrationRunBlocking(
   version?: string,
 ) {
   const orgId = useCurrentOrgId();
-  const applicationId = useCurrentApplicationId();
+  const spaceId = useCurrentSpaceId();
   return useQuery({
-    ...agentConnectionReadinessQueryOptions(orgId, applicationId, agentPackageId, version),
-    enabled: Boolean(orgId && applicationId && integrationId && agentPackageId),
+    ...agentConnectionReadinessQueryOptions(orgId, spaceId, agentPackageId, version),
+    enabled: Boolean(orgId && spaceId && integrationId && agentPackageId),
     select: (data) =>
       data.integrations.find((i) => i.integration_id === integrationId)?.run_blocking ?? false,
   });
@@ -273,7 +273,7 @@ export function useDeactivateIntegration() {
   const qc = useQueryClient();
   return useMutation({
     // DELETE → 204 empty (#657): deactivation removes the
-    // application_packages row; the detail stays GET-able.
+    // space_packages row; the detail stays GET-able.
     mutationFn: async (vars: { params: { path: { packageId: string } } }) => {
       await client.DELETE("/api/integrations/{packageId}/deactivate", {
         ...vars,

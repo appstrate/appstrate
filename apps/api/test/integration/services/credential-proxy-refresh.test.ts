@@ -18,7 +18,7 @@ import { seedPackage } from "../../helpers/seed.ts";
 import { proxyCall } from "../../../src/services/credential-proxy/core.ts";
 import { createMockOAuthServer, type MockOAuthServer } from "../../helpers/oauth-server.ts";
 import {
-  applicationPackages,
+  spacePackages,
   integrationConnections,
   integrationOauthClients,
 } from "@appstrate/db/schema";
@@ -73,16 +73,16 @@ async function setup(
     source: "local",
     draftManifest: oauthManifest(packageId),
   });
-  await db.insert(applicationPackages).values({
-    applicationId: ctx.defaultAppId,
+  await db.insert(spacePackages).values({
+    spaceId: ctx.defaultSpaceId,
     packageId,
   });
-  // Register the org's custom per-application client first so its id can pin the
+  // Register the org's custom per-space client first so its id can pin the
   // connection (client_ref is a flat client id).
   const [customClient] = await db
     .insert(integrationOauthClients)
     .values({
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       integrationId: packageId,
       authKey: "google",
       clientId: "client_abc",
@@ -93,13 +93,13 @@ async function setup(
     integrationId: packageId,
     authKey: "google",
     accountId: "acct-1",
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     credentialsEncrypted: encryptCredentialEnvelope({ outputs: fields }),
     scopesGranted: ["openid", "email"],
     sharedWithOrg: false,
     // oauth2 connections always pin their minting client by id; here the org's
-    // custom per-application client registered just above.
+    // custom per-space client registered just above.
     clientRef: customClient!.id,
     expiresAt: new Date(Date.now() - 60_000),
   });
@@ -107,7 +107,7 @@ async function setup(
 
 /**
  * Seed an integration + a connection pinned to a SYSTEM client (no custom
- * per-app client row). Refresh can only succeed by resolving the env system
+ * per-space client row). Refresh can only succeed by resolving the env system
  * client — proving the `client_ref` pin threads from the connection SELECT
  * through `selectAccessibleConnection` into `buildIntegrationOAuthRefreshContext`.
  */
@@ -124,15 +124,15 @@ async function setupSystemPinned(
     source: "local",
     draftManifest: oauthManifest(packageId),
   });
-  await db.insert(applicationPackages).values({
-    applicationId: ctx.defaultAppId,
+  await db.insert(spacePackages).values({
+    spaceId: ctx.defaultSpaceId,
     packageId,
   });
   await db.insert(integrationConnections).values({
     integrationId: packageId,
     authKey: "google",
     accountId: "acct-1",
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     credentialsEncrypted: encryptCredentialEnvelope({ outputs: fields }),
     scopesGranted: ["openid", "email"],
@@ -194,7 +194,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     }) as unknown as typeof fetch;
 
     const res = await proxyCall({
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
       method: "GET",
@@ -232,7 +232,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     }) as unknown as typeof fetch;
 
     const res = await proxyCall({
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
       method: "GET",
@@ -259,7 +259,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     }) as unknown as typeof fetch;
 
     const res = await proxyCall({
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
       method: "GET",
@@ -301,7 +301,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     });
 
     const res = await proxyCall({
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
       method: "POST",
@@ -320,7 +320,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
   });
 
   it("refreshes a SYSTEM-pinned connection using the env system client (end-to-end)", async () => {
-    // No custom per-app client row exists — refresh can ONLY succeed by resolving
+    // No custom per-space client row exists — refresh can ONLY succeed by resolving
     // the system client via the connection's `client_ref` (the system id). Proves
     // the pin threads from the connection SELECT through selectAccessibleConnection
     // into buildIntegrationOAuthRefreshContext.
@@ -352,7 +352,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     }) as unknown as typeof fetch;
 
     const res = await proxyCall({
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
       integrationId: packageId,
       method: "GET",

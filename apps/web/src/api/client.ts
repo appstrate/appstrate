@@ -9,7 +9,7 @@
  *   wrappers around the same client, with automatic query keys.
  *
  * Middleware injects platform context and normalizes errors:
- * - `X-Org-Id` / `X-Application-Id` headers injected from the org/app stores
+ * - `X-Org-Id` / `X-Space-Id` headers injected from the org/space stores
  * - non-2xx responses throw `ApiError` (RFC 9457 problem details), so React
  *   Query errors are `instanceof ApiError` with `code`/`status`/`requestId`.
  *   Note: because errors are thrown, the `{ error }` branch of direct

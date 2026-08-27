@@ -58,11 +58,11 @@ interface PackageActionsDropdownProps {
   // Skill/Tool-specific
   canDeletePackage?: boolean;
   onDeletePackage?: () => void;
-  // Uninstall from current app
+  // Uninstall from current space
   canUninstall?: boolean;
   onUninstall?: () => void;
-  // Integration-specific: deactivate in the current app (non-destructive —
-  // removes the application_packages row, keeps connections).
+  // Integration-specific: deactivate in the current space (non-destructive —
+  // removes the space_packages row, keeps connections).
   canDeactivate?: boolean;
   onDeactivate?: () => void;
   deactivatePending?: boolean;

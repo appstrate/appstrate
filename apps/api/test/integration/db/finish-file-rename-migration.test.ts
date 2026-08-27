@@ -46,7 +46,7 @@ async function seedFile(ctx: TestContext, storageKey: string): Promise<string> {
   await db.insert(files).values({
     id,
     orgId: ctx.orgId,
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     purpose: "agent_output",
     storageKey,
     name: "report.html",
@@ -92,27 +92,27 @@ describe("migration 0044 — finish the file rename at the physical layer", () =
   });
 
   it("rewrites the `documents/` storage-key prefix and leaves the rest of the key alone", async () => {
-    const legacy = await seedFile(ctx, "documents/app_1/file_abcd1234/report.html");
+    const legacy = await seedFile(ctx, "documents/spc_1/file_abcd1234/report.html");
     // A path whose LATER segments contain the word must survive untouched —
     // the rewrite is anchored on the bucket segment, which is the only one it
     // is allowed to move.
-    const nested = await seedFile(ctx, "documents/app_1/file_bbbb2222/documents/notes.md");
+    const nested = await seedFile(ctx, "documents/spc_1/file_bbbb2222/documents/notes.md");
 
     await replayMigration();
 
-    expect(await storageKeyOf(legacy)).toBe("files/app_1/file_abcd1234/report.html");
-    expect(await storageKeyOf(nested)).toBe("files/app_1/file_bbbb2222/documents/notes.md");
+    expect(await storageKeyOf(legacy)).toBe("files/spc_1/file_abcd1234/report.html");
+    expect(await storageKeyOf(nested)).toBe("files/spc_1/file_bbbb2222/documents/notes.md");
   });
 
   it("leaves a key already on the new layout byte-identical", async () => {
-    const already = await seedFile(ctx, "files/app_1/file_cccc3333/report.html");
+    const already = await seedFile(ctx, "files/spc_1/file_cccc3333/report.html");
     await replayMigration();
-    expect(await storageKeyOf(already)).toBe("files/app_1/file_cccc3333/report.html");
+    expect(await storageKeyOf(already)).toBe("files/spc_1/file_cccc3333/report.html");
   });
 
   it("rewrites the outbox's bucket, run-workspace key segment and reason labels", async () => {
-    const durable = await seedJob("documents", "app_1/file_dddd4444/a.txt", "document_deleted");
-    const expired = await seedJob("documents", "app_1/file_eeee5555/b.txt", "document_expired");
+    const durable = await seedJob("documents", "spc_1/file_dddd4444/a.txt", "document_deleted");
+    const expired = await seedJob("documents", "spc_1/file_eeee5555/b.txt", "document_expired");
     const workspace = await seedJob(
       "run-workspace",
       "run_7/documents/brief.pdf",
@@ -125,12 +125,12 @@ describe("migration 0044 — finish the file rename at the physical layer", () =
 
     expect(await jobOf(durable)).toEqual({
       bucket: "files",
-      storageKey: "app_1/file_dddd4444/a.txt",
+      storageKey: "spc_1/file_dddd4444/a.txt",
       reason: "file_deleted",
     });
     expect(await jobOf(expired)).toEqual({
       bucket: "files",
-      storageKey: "app_1/file_eeee5555/b.txt",
+      storageKey: "spc_1/file_eeee5555/b.txt",
       reason: "file_expired",
     });
     expect(await jobOf(workspace)).toEqual({
@@ -154,8 +154,8 @@ describe("migration 0044 — finish the file rename at the physical layer", () =
   });
 
   it("is idempotent — a second pass changes nothing", async () => {
-    const file = await seedFile(ctx, "documents/app_1/file_9999aaaa/report.html");
-    const job = await seedJob("documents", "app_1/file_9999aaaa/report.html", "document_deleted");
+    const file = await seedFile(ctx, "documents/spc_1/file_9999aaaa/report.html");
+    const job = await seedJob("documents", "spc_1/file_9999aaaa/report.html", "document_deleted");
     const workspace = await seedJob(
       "run-workspace",
       "run_8/documents/brief.pdf",

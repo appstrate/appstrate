@@ -16,7 +16,7 @@
  *    to Better Auth that would bypass our wiring.
  *  - The minted access token verifies against the module's
  *    `verifyEndUserAccessToken` — proving the JWT is ES256-signed by the
- *    `jwks` table + carries the `endUserId` + `applicationId` custom
+ *    `jwks` table + carries the `endUserId` + `spaceId` custom
  *    claims injected by `customAccessTokenClaims`.
  *  - PKCE enforcement: a tampered `code_verifier` fails exchange.
  *
@@ -121,17 +121,17 @@ async function registerClient(
     method: "POST",
     headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
     body: JSON.stringify({
-      level: "application",
+      level: "space",
       name: "E2E Satellite",
       redirectUris: ["https://satellite.example.com/callback"],
       scopes: ["openid", "profile", "email", "offline_access", "integrations:read", "runs:read"],
-      referencedApplicationId: ctx.defaultAppId,
+      referencedSpaceId: ctx.defaultSpaceId,
       isFirstParty: false,
       // Secure-by-default `allowSignup=false` would block fresh
       // end-user JIT creation during token mint. The E2E suite exercises
       // the happy path where new end-users sign up via the OIDC flow, so
       // we explicitly opt in here (matches a Portal-style deployment that
-      // wants JIT provisioning enabled for its application-level client).
+      // wants JIT provisioning enabled for its space-level client).
       allowSignup: true,
     }),
   });
@@ -149,12 +149,12 @@ async function registerClient(
  * This is what the browser does in production (GET login → POST
  * register/sign-up with cookie) and is required since the realm
  * resolver uses the pending-client cookie to tag the new BA user with
- * `realm="end_user:<applicationId>"`. Without this, the realm guard at
+ * `realm="end_user:<spaceId>"`. Without this, the realm guard at
  * token-mint rejects the flow because the user would default to
  * `realm="platform"`.
  */
 async function signUpEndUser(
-  applicationId: string,
+  spaceId: string,
   email = "alice@satellite.example.com",
   password = "Sup3rSecretPass!",
 ): Promise<{ cookie: string; userId: string }> {
@@ -170,7 +170,7 @@ async function signUpEndUser(
   const cookie = `better-auth.session_token=${match[1]}`;
   const body = (await res.json()) as { user: { id: string } };
   // In production the realm is set by the OIDC module's BA create hook
-  // when the `oidc_pending_client` cookie pins an application-level
+  // when the `oidc_pending_client` cookie pins a space-level
   // client. Forging a signed cookie from tests would require
   // reconstructing the HMAC from `BETTER_AUTH_SECRET` — overkill for a
   // flow test focused on PKCE mechanics, not on realm resolution
@@ -179,7 +179,7 @@ async function signUpEndUser(
   // so the token-mint realm check passes.
   await db
     .update(userTable)
-    .set({ realm: `end_user:${applicationId}` })
+    .set({ realm: `end_user:${spaceId}` })
     .where(eq(userTable.id, body.user.id));
   return { cookie, userId: body.user.id };
 }
@@ -240,7 +240,7 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
   });
 
   it("mints an access token via the full PKCE flow through the module consent handler", async () => {
-    const { cookie } = await signUpEndUser(ctx.defaultAppId);
+    const { cookie } = await signUpEndUser(ctx.defaultSpaceId);
 
     const verifier = randomVerifier();
     const challenge = await sha256Base64Url(verifier);
@@ -377,13 +377,13 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     // covered by `test/integration/middleware/enduser-token-auth.test.ts`
     // which spins up a local JWKS server). Here we assert the payload
     // shape — proving `customAccessTokenClaims` actually ran and injected
-    // `end_user_id` + `application_id` + `org_id` via `resolveOrCreateEndUser`.
+    // `end_user_id` + `space_id` + `org_id` via `resolveOrCreateEndUser`.
     const payload = decodeJwt(tokens.access_token) as {
       sub?: string;
       scope?: string;
       actor_type?: string;
       end_user_id?: string;
-      application_id?: string;
+      space_id?: string;
       org_id?: string;
     };
     expect(payload.sub).toBeTruthy();
@@ -391,7 +391,7 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     expect(payload.scope).toContain("offline_access");
     expect(payload.actor_type).toBe("end_user");
     expect(payload.end_user_id).toMatch(/^eu_/);
-    expect(payload.application_id).toBeTruthy();
+    expect(payload.space_id).toBeTruthy();
     expect(payload.org_id).toBeTruthy();
   });
 
@@ -407,7 +407,7 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     // signature check), so it could not catch this. This test round-trips
     // a REAL minted token through the full core auth middleware.
     const { cookie } = await signUpEndUser(
-      ctx.defaultAppId,
+      ctx.defaultSpaceId,
       "e2e-bearer@satellite.example.com",
       "Sup3rSecret!",
     );
@@ -415,7 +415,7 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     const tokens = await exchangeCodeForTokens(code, verifier);
     expect(tokens.access_token).toBeTruthy();
 
-    // Hit a core, non-app-scoped route with the minted token. The OIDC
+    // Hit a core, non-space-scoped route with the minted token. The OIDC
     // strategy must: verify the signature via the local JWKS, pass the
     // issuer check (`${APP_URL}/api/auth`), resolve the end-user from the
     // `endUserId` custom claim, and emit an AuthResolution — otherwise the
@@ -428,7 +428,7 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
 
   it("PKCE enforcement rejects a tampered code_verifier at /oauth2/token", async () => {
     const { cookie } = await signUpEndUser(
-      ctx.defaultAppId,
+      ctx.defaultSpaceId,
       "bob@satellite.example.com",
       "AnotherSecret123!",
     );
@@ -658,7 +658,7 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     });
     addMcpOrgAudience(ctx.orgId);
     try {
-      const { cookie } = await signUpEndUser(ctx.defaultAppId, "mcp-aud@satellite.example.com");
+      const { cookie } = await signUpEndUser(ctx.defaultSpaceId, "mcp-aud@satellite.example.com");
       const { code, verifier } = await runHappyPathToCode({ cookie });
       const mcpResource = getMcpOrgResourceUri(ctx.orgId);
       const tokens = await exchangeCodeForTokens(code, verifier, { resource: mcpResource });
@@ -700,7 +700,7 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
 
   it("issues a fresh JWT access token via grant_type=refresh_token with custom claims re-injected", async () => {
     const { cookie } = await signUpEndUser(
-      ctx.defaultAppId,
+      ctx.defaultSpaceId,
       "refresh@satellite.example.com",
       "Sup3rSecret!",
     );
@@ -725,17 +725,17 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     expect(refreshed.access_token).toBeTruthy();
     expect(refreshed.access_token).not.toBe(initialAccess);
 
-    // Prove customAccessTokenClaims re-ran on refresh — end_user_id + application_id
+    // Prove customAccessTokenClaims re-ran on refresh — end_user_id + space_id
     // are injected only by that closure, so their presence on the new token
     // is the canary.
     const payload = decodeJwt(refreshed.access_token) as {
       actor_type?: string;
       end_user_id?: string;
-      application_id?: string;
+      space_id?: string;
     };
     expect(payload.actor_type).toBe("end_user");
     expect(payload.end_user_id).toMatch(/^eu_/);
-    expect(payload.application_id).toBeTruthy();
+    expect(payload.space_id).toBeTruthy();
   });
 
   it("refresh_token grant also requires resource parameter", async () => {
@@ -757,7 +757,7 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
 
   it("introspect returns {active:true} for a live token and {active:false} for garbage", async () => {
     const { cookie } = await signUpEndUser(
-      ctx.defaultAppId,
+      ctx.defaultSpaceId,
       "intro@satellite.example.com",
       "Sup3rSecret!",
     );
@@ -804,7 +804,7 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     // revoke the refresh token" on revoke. We verify the contract by
     // attempting a refresh after revoke and asserting it fails.
     const { cookie } = await signUpEndUser(
-      ctx.defaultAppId,
+      ctx.defaultSpaceId,
       "revoke@satellite.example.com",
       "Sup3rSecret!",
     );

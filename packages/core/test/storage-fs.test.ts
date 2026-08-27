@@ -288,7 +288,7 @@ describe("FS upload token keyring rotation", () => {
   const KEY2 = "old-retired-upload-key-16+";
 
   function payload(): FsUploadTokenPayload {
-    return { k: "uploads/app_x/upl_y/doc.pdf", s: 1024, m: "application/pdf", e: future() };
+    return { k: "uploads/spc_x/upl_y/doc.pdf", s: 1024, m: "application/pdf", e: future() };
   }
 
   function future(): number {

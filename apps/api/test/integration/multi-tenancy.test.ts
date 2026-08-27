@@ -13,7 +13,7 @@ import { getTestApp } from "../helpers/app.ts";
 import { truncateAll } from "../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../helpers/auth.ts";
 import { seedAgent, seedRun, seedPackageVersion } from "../helpers/seed.ts";
-import { installPackage } from "../../src/services/application-packages.ts";
+import { installPackage } from "../../src/services/space-packages.ts";
 
 const app = getTestApp();
 
@@ -70,15 +70,9 @@ describe("Multi-tenancy isolation", () => {
 
     it("does not leak other org's agents in list", async () => {
       await seedAgent({ id: "@org-a/agent-1", orgId: orgA.orgId });
-      await installPackage(
-        { orgId: orgA.orgId, applicationId: orgA.defaultAppId },
-        "@org-a/agent-1",
-      );
+      await installPackage({ orgId: orgA.orgId, spaceId: orgA.defaultSpaceId }, "@org-a/agent-1");
       await seedAgent({ id: "@org-b/agent-1", orgId: orgB.orgId });
-      await installPackage(
-        { orgId: orgB.orgId, applicationId: orgB.defaultAppId },
-        "@org-b/agent-1",
-      );
+      await installPackage({ orgId: orgB.orgId, spaceId: orgB.defaultSpaceId }, "@org-b/agent-1");
 
       const resA = await app.request("/api/packages/agents", {
         headers: authHeaders(orgA),
@@ -108,7 +102,7 @@ describe("Multi-tenancy isolation", () => {
       const run = await seedRun({
         packageId: "@org-a/agent",
         orgId: orgA.orgId,
-        applicationId: orgA.defaultAppId,
+        spaceId: orgA.defaultSpaceId,
         userId: orgA.user.id,
         status: "success",
       });
@@ -125,7 +119,7 @@ describe("Multi-tenancy isolation", () => {
       const run = await seedRun({
         packageId: "@org-a/agent",
         orgId: orgA.orgId,
-        applicationId: orgA.defaultAppId,
+        spaceId: orgA.defaultSpaceId,
         userId: orgA.user.id,
         status: "success",
       });
@@ -142,7 +136,7 @@ describe("Multi-tenancy isolation", () => {
       const run = await seedRun({
         packageId: "@org-a/agent",
         orgId: orgA.orgId,
-        applicationId: orgA.defaultAppId,
+        spaceId: orgA.defaultSpaceId,
         userId: orgA.user.id,
         status: "running",
       });
@@ -160,7 +154,7 @@ describe("Multi-tenancy isolation", () => {
       await seedRun({
         packageId: "@org-a/agent",
         orgId: orgA.orgId,
-        applicationId: orgA.defaultAppId,
+        spaceId: orgA.defaultSpaceId,
         userId: orgA.user.id,
         status: "success",
       });

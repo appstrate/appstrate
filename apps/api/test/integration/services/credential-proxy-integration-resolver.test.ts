@@ -22,7 +22,7 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, createTestUser, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import { installPackage } from "../../../src/services/space-packages.ts";
 import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { encryptCredentialEnvelope, encryptCredentials } from "@appstrate/connect";
@@ -116,11 +116,11 @@ describe("credential-proxy integration-resolver", () => {
       source: "local",
       draftManifest: gmailManifest(token.url),
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INTEGRATION_ID);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION_ID);
     const [oauthClient] = await db
       .insert(integrationOauthClients)
       .values({
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         integrationId: INTEGRATION_ID,
         authKey: "primary",
         clientId: "cid",
@@ -153,12 +153,12 @@ describe("credential-proxy integration-resolver", () => {
         integrationId: INTEGRATION_ID,
         authKey: "primary",
         accountId: "acct-1",
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: opts.userId ?? null,
         endUserId: opts.endUserId ?? null,
         credentialsEncrypted: ciphertext,
         scopesGranted: ["read"],
-        // oauth2 connection → pins the org's custom per-app client by id (seeded above).
+        // oauth2 connection → pins the org's custom per-space client by id (seeded above).
         clientRef: customClientId,
       })
       .returning({ id: integrationConnections.id });
@@ -168,7 +168,7 @@ describe("credential-proxy integration-resolver", () => {
   function input(actorId = ctx.user.id) {
     return {
       integrationId: INTEGRATION_ID,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       actor: { type: "user" as const, id: actorId },
     };
@@ -220,7 +220,7 @@ describe("credential-proxy integration-resolver", () => {
         },
       },
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, NO_AUTH);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, NO_AUTH);
 
     await expect(
       resolveIntegrationProxyCredentials({ ...input(), integrationId: NO_AUTH }),

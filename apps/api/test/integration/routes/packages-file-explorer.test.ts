@@ -8,7 +8,7 @@
  * The invariants worth locking down are the ones a naive implementation gets
  * wrong: the draft is the DB overlaid on the stored ZIP (not the ZIP), a
  * published version is the pinned bytes (not the draft), the access gate is
- * the application install, and the bytes route can never be tricked into
+ * the space install, and the bytes route can never be tricked into
  * serving something a browser will execute.
  */
 
@@ -28,7 +28,7 @@ import {
 } from "../../../src/services/package-items/storage.ts";
 import { uploadPackageZip, buildMinimalZip } from "../../../src/services/package-storage.ts";
 import { insertShadowPackage } from "../../../src/services/inline-run.ts";
-import { hasPackageAccess } from "../../../src/services/application-packages.ts";
+import { hasPackageAccess } from "../../../src/services/space-packages.ts";
 import type { AgentManifest } from "../../../src/types/index.ts";
 
 const app = getTestApp();
@@ -95,7 +95,7 @@ describe("package file explorer", () => {
         draftManifest: manifestFor(id),
         draftContent: "draft prompt from DB",
       });
-      await seedInstalledPackage(ctx.defaultAppId, id);
+      await seedInstalledPackage(ctx.defaultSpaceId, id);
     });
 
     it("lists ZIP entries alongside the DB-authoritative files", async () => {
@@ -166,7 +166,7 @@ describe("package file explorer", () => {
         draftManifest: { ...manifestFor(skillId), type: "skill" },
         draftContent: "---\nname: a-skill\n---\nbody",
       });
-      await seedInstalledPackage(ctx.defaultAppId, skillId);
+      await seedInstalledPackage(ctx.defaultSpaceId, skillId);
 
       const { entries } = await listFiles(ctx, skillId);
       expect(entries.map((e) => e.path)).toEqual(["SKILL.md", "manifest.json"]);
@@ -193,7 +193,7 @@ describe("package file explorer", () => {
         draftManifest: { ...manifestFor(intId), type: "integration" },
         draftContent: "# Updated integration docs",
       });
-      await seedInstalledPackage(ctx.defaultAppId, intId);
+      await seedInstalledPackage(ctx.defaultSpaceId, intId);
       await uploadPackageFiles("integrations", ctx.orgId, intId, {
         "manifest.json": encoder.encode("{}"),
         "INTEGRATION.md": encoder.encode("# STALE docs from the ZIP"),
@@ -223,7 +223,7 @@ describe("package file explorer", () => {
         draftManifest: manifest,
         draftContent: JSON.stringify(manifest),
       });
-      await seedInstalledPackage(ctx.defaultAppId, intId);
+      await seedInstalledPackage(ctx.defaultSpaceId, intId);
       await uploadPackageFiles("integrations", ctx.orgId, intId, {
         "manifest.json": encoder.encode(JSON.stringify(manifest)),
         "server/index.js": encoder.encode("export default 1;"),
@@ -243,7 +243,7 @@ describe("package file explorer", () => {
         draftManifest: manifest,
         draftContent: JSON.stringify(manifest),
       });
-      await seedInstalledPackage(ctx.defaultAppId, mcpId);
+      await seedInstalledPackage(ctx.defaultSpaceId, mcpId);
       await uploadPackageFiles("mcp-servers", ctx.orgId, mcpId, {
         "manifest.json": encoder.encode("{}"),
         "server/index.js": encoder.encode("export default 1;"),
@@ -266,7 +266,7 @@ describe("package file explorer", () => {
         draftManifest: manifest,
         draftContent: "",
       });
-      await seedInstalledPackage(ctx.defaultAppId, mcpId);
+      await seedInstalledPackage(ctx.defaultSpaceId, mcpId);
 
       const { entries } = await listFiles(ctx, mcpId);
       expect(entries.map((e) => e.path)).toEqual(["manifest.json"]);
@@ -287,7 +287,7 @@ describe("package file explorer", () => {
         draftManifest: manifestFor(id, "2.0.0"),
         draftContent: "draft prompt",
       });
-      await seedInstalledPackage(ctx.defaultAppId, id);
+      await seedInstalledPackage(ctx.defaultSpaceId, id);
 
       const zip = buildMinimalZip(manifestFor(id), "published prompt v1", "prompt.md");
       await uploadPackageZip(id, "1.0.0", zip);
@@ -448,7 +448,7 @@ describe("package file explorer", () => {
         draftManifest: manifestFor(id),
         draftContent: "draft prompt",
       });
-      await seedInstalledPackage(ctx.defaultAppId, id);
+      await seedInstalledPackage(ctx.defaultSpaceId, id);
     });
 
     it("refuses a published artifact that expands past the ceiling, on both read routes", async () => {
@@ -530,7 +530,7 @@ describe("package file explorer", () => {
       );
     });
 
-    it("404s a package that is not installed in this application", async () => {
+    it("404s a package that is not installed in this space", async () => {
       const id = "@fexp/uninstalled";
       await seedPackage({ id, orgId: ctx.orgId, type: "agent", draftContent: "hi" });
 
@@ -544,15 +544,15 @@ describe("package file explorer", () => {
       const id = "@fexpother/private-agent";
       await seedPackage({ id, orgId: other.orgId, type: "agent", draftContent: "secret" });
 
-      // Install it in OUR application on purpose. `hasPackageAccess` does not
+      // Install it in OUR space on purpose. `hasPackageAccess` does not
       // filter `orgId`, so it now PASSES — which leaves `orgOrSystemFilter` as
       // the only thing standing between us and another org's bytes. Seeding
-      // the install in the foreign app instead would make this test green with
+      // the install in the foreign space instead would make this test green with
       // the org filter deleted.
-      await seedInstalledPackage(ctx.defaultAppId, id);
-      expect(
-        await hasPackageAccess({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, id),
-      ).toBe(true);
+      await seedInstalledPackage(ctx.defaultSpaceId, id);
+      expect(await hasPackageAccess({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id)).toBe(
+        true,
+      );
 
       const { res } = await listFiles(ctx, id);
       expect(res.status).toBe(404);
@@ -568,7 +568,7 @@ describe("package file explorer", () => {
       });
       const [shadow] = await db.select().from(packages).where(eq(packages.ephemeral, true));
       expect(shadow).toBeDefined();
-      await seedInstalledPackage(ctx.defaultAppId, shadow!.id);
+      await seedInstalledPackage(ctx.defaultSpaceId, shadow!.id);
 
       const { res } = await listFiles(ctx, shadow!.id);
       expect(res.status).toBe(404);
@@ -593,7 +593,7 @@ describe("package file explorer", () => {
         draftManifest: manifestFor(id),
         draftContent: "prompt body",
       });
-      await seedInstalledPackage(ctx.defaultAppId, id);
+      await seedInstalledPackage(ctx.defaultSpaceId, id);
     });
 
     it("serves raw bytes as a non-executable attachment", async () => {
@@ -690,7 +690,7 @@ describe("package file explorer", () => {
         draftManifest: manifestFor(id),
         draftContent: "etag body",
       });
-      await seedInstalledPackage(ctx.defaultAppId, id);
+      await seedInstalledPackage(ctx.defaultSpaceId, id);
     });
 
     it("round-trips to 304 with no body on the index", async () => {
@@ -787,7 +787,7 @@ describe("package file explorer", () => {
     });
 
     it("emits Vary on 200 AND 304 of both routes", async () => {
-      const expected = "X-Org-Id, X-Application-Id";
+      const expected = "X-Org-Id, X-Space-Id";
 
       const { res: index } = await listFiles(ctx, id);
       expect(index.headers.get("Vary")).toBe(expected);
@@ -827,7 +827,7 @@ describe("package file explorer", () => {
         draftManifest: manifestFor(id, "2.0.0"),
         draftContent: "draft prompt",
       });
-      await seedInstalledPackage(ctx.defaultAppId, id);
+      await seedInstalledPackage(ctx.defaultSpaceId, id);
       // A version row WITHOUT its artifact in storage. Any code path that
       // downloads the ZIP to answer the request must fail loudly.
       await seedPackageVersion({

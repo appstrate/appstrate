@@ -6,7 +6,7 @@
  * Finds every agent artifact whose declared integration would expose no
  * callable tool — the state `assertIntegrationExposesTools` turns into a failed
  * run — and reports, per row, whether it is merely explicitly selectable or
- * actively targeted by an application default / enabled schedule.
+ * actively targeted by a space default / enabled schedule.
  *
  * WHY NOT A SQL QUERY. A SQL approximation shipped first and was wrong in three
  * ways a query cannot fix without reimplementing the platform:
@@ -28,7 +28,7 @@
 
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { db } from "@appstrate/db/client";
-import { applicationPackages, packageVersions, packages, schedules } from "@appstrate/db/schema";
+import { spacePackages, packageVersions, packages, schedules } from "@appstrate/db/schema";
 import { eq, and } from "drizzle-orm";
 
 import { validateAgentIntegrationSelections } from "./integration-scope-validation.ts";
@@ -40,10 +40,10 @@ interface Finding {
   artifact: string;
   integrationId: string;
   reason: string;
-  /** Applications where this package is installed, making this artifact explicitly selectable. */
+  /** Spaces where this package is installed, making this artifact explicitly selectable. */
   installedIn: string[];
   /**
-   * Applications where a normal run/export path selects this artifact without
+   * Spaces where a normal run/export path selects this artifact without
    * an explicit version selector. These findings block rollout.
    */
   activeIn: string[];
@@ -171,11 +171,11 @@ export async function auditEmptyIntegrationSelections(): Promise<Finding[]> {
 
     const installs = await db
       .select({
-        applicationId: applicationPackages.applicationId,
-        versionId: applicationPackages.versionId,
+        spaceId: spacePackages.spaceId,
+        versionId: spacePackages.versionId,
       })
-      .from(applicationPackages)
-      .where(eq(applicationPackages.packageId, agent.id));
+      .from(spacePackages)
+      .where(eq(spacePackages.packageId, agent.id));
     const agentSchedules = await db
       .select({
         id: schedules.id,
@@ -191,8 +191,8 @@ export async function auditEmptyIntegrationSelections(): Promise<Finding[]> {
     interface Consumer {
       label: string;
       overrides: Record<string, string> | null;
-      application?: string;
-      activeApplication?: string;
+      space?: string;
+      activeSpace?: string;
       schedule?: { id: string; nextRunAt: string | null };
     }
     const consumers: Consumer[] = [];
@@ -214,8 +214,8 @@ export async function auditEmptyIntegrationSelections(): Promise<Finding[]> {
         consumers.push({
           label,
           overrides: null,
-          application: i.applicationId,
-          ...(activeLabels.has(label) ? { activeApplication: i.applicationId } : {}),
+          space: i.spaceId,
+          ...(activeLabels.has(label) ? { activeSpace: i.spaceId } : {}),
         });
       }
     }
@@ -249,10 +249,8 @@ export async function auditEmptyIntegrationSelections(): Promise<Finding[]> {
         activeIn: [],
         schedules: [],
       };
-      if (c?.application && !f.installedIn.includes(c.application))
-        f.installedIn.push(c.application);
-      if (c?.activeApplication && !f.activeIn.includes(c.activeApplication))
-        f.activeIn.push(c.activeApplication);
+      if (c?.space && !f.installedIn.includes(c.space)) f.installedIn.push(c.space);
+      if (c?.activeSpace && !f.activeIn.includes(c.activeSpace)) f.activeIn.push(c.activeSpace);
       if (c?.schedule && !f.schedules.some((s) => s.id === c.schedule!.id))
         f.schedules.push(c.schedule);
       rows.set(key, f);

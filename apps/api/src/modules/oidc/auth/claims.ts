@@ -8,7 +8,7 @@
  * `admin`-level permissions even if the granted scope set was broader at
  * client-registration time. End-user tokens filter through a fixed safe
  * allowlist (destructive admin scopes are never reachable via the embedding
- * app flow).
+ * space flow).
  *
  * Convention: `{resource}:{action}` for every non-identity scope. The scope
  * string `agents:run` grants the `agents:run` permission verbatim — no

@@ -18,22 +18,22 @@ import { sql } from "drizzle-orm";
 import { packageTypeEnum, packageSourceEnum } from "./enums.ts";
 import { user } from "./auth.ts";
 import { organizations } from "./organizations.ts";
-import { applications } from "./applications.ts";
+import { spaces } from "./spaces.ts";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 
-export const applicationPackages = pgTable(
-  "application_packages",
+export const spacePackages = pgTable(
+  "space_packages",
   {
-    applicationId: text("application_id")
+    spaceId: text("space_id")
       .notNull()
-      .references(() => applications.id, { onDelete: "cascade" }),
+      .references(() => spaces.id, { onDelete: "cascade" }),
     packageId: text("package_id")
       .notNull()
       .references(() => packages.id, { onDelete: "cascade" }),
     versionId: integer("version_id").references(() => packageVersions.id, {
       onDelete: "set null",
     }),
-    // The agent's stored input settings for this application, in one
+    // The agent's stored input settings for this space, in one
     // document:
     //   `values` — editor-set defaults for the agent's INPUT fields (AFPS
     //     `input.schema`). Layer 2 of the four-layer input resolution —
@@ -52,15 +52,15 @@ export const applicationPackages = pgTable(
     modelId: text("model_id"),
     generationConfig: jsonb("generation_config").$type<ModelGenerationSettings>(),
     proxyId: text("proxy_id"),
-    // Per-(application, integration) admin lock. Only meaningful for
+    // Per-(space, integration) admin lock. Only meaningful for
     // integration packages — set true to refuse user/end-user attempts
-    // to create their own connection on this integration in this app
+    // to create their own connection on this integration in this space
     // (POST /api/integration-connections returns 403). Existing user
     // connections stay functional; the lock is on creation only. The
     // intended workflow: admin enables this → connects → marks the
     // connection sharedWithOrg → users fall through resolution onto
-    // the single admin-shared connection. Stored on application_packages
-    // because the gate is per-(app, integration) and applicationPackages
+    // the single admin-shared connection. Stored on space_packages
+    // because the gate is per-(space, integration) and spacePackages
     // already keys on those (when type=integration).
     blockUserConnections: boolean("block_user_connections").notNull().default(false),
     enabled: boolean("enabled").notNull().default(true),
@@ -68,8 +68,8 @@ export const applicationPackages = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
-    primaryKey({ columns: [table.applicationId, table.packageId] }),
-    index("idx_application_packages_package_id").on(table.packageId),
+    primaryKey({ columns: [table.spaceId, table.packageId] }),
+    index("idx_space_packages_package_id").on(table.packageId),
   ],
 );
 

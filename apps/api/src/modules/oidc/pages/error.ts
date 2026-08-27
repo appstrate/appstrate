@@ -10,15 +10,15 @@
 
 import { html, type RawHtml } from "./html.ts";
 import { renderLayout } from "./layout.ts";
-import { PLATFORM_DEFAULT_BRANDING, type ResolvedAppBranding } from "../services/branding.ts";
+import { PLATFORM_DEFAULT_BRANDING, type ResolvedSpaceBranding } from "../services/branding.ts";
 
 interface ErrorPageProps {
-  /** Error title — e.g. "Application introuvable". */
+  /** Error title — e.g. "Espace introuvable". */
   title: string;
   /** Descriptive message explaining what happened. */
   message: string;
   /** Optional branding — falls back to platform defaults. */
-  branding?: ResolvedAppBranding;
+  branding?: ResolvedSpaceBranding;
 }
 
 export function renderErrorPage(props: ErrorPageProps): RawHtml {

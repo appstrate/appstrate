@@ -21,13 +21,13 @@ const storageDeletionJobSchema = {
     storage_key: {
       type: "string",
       description: "In-bucket object key (no bucket prefix).",
-      example: "app_abc/file_def/report.pdf",
+      example: "spc_abc/file_def/report.pdf",
     },
     reason: {
       type: "string",
       description:
         "Why the object is being purged (file_deleted | file_expired | org_deleted | " +
-        "application_deleted | end_user_deleted | run_workspace_deleted | version_deleted | " +
+        "space_deleted | end_user_deleted | run_workspace_deleted | version_deleted | " +
         "upload_expired | materialization_failed). Free text, not a constrained enum.",
     },
     attempts: { type: "integer", description: "Delete attempts made so far." },

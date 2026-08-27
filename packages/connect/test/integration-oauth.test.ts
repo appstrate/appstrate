@@ -53,7 +53,7 @@ describe("initiateIntegrationOAuth", () => {
       scopes: ["openid", "email", "https://www.googleapis.com/auth/gmail.readonly"],
       redirectUri: "http://localhost:3000/api/integrations/callback",
       orgId: "org_1",
-      applicationId: "app_1",
+      spaceId: "spc_1",
       actor: { type: "user", id: "u_1" },
     });
     const url = new URL(result.authUrl);
@@ -78,7 +78,7 @@ describe("initiateIntegrationOAuth", () => {
       clientSecret: "x",
       redirectUri: "http://localhost:3000/cb",
       orgId: "o",
-      applicationId: "a",
+      spaceId: "a",
       actor: { type: "user", id: "u" },
     });
     const stored = await store.get(state);
@@ -99,7 +99,7 @@ describe("initiateIntegrationOAuth", () => {
       resource: "https://api.example.com",
       redirectUri: "http://localhost:3000/cb",
       orgId: "o",
-      applicationId: "a",
+      spaceId: "a",
       actor: { type: "user", id: "u" },
     });
     expect(new URL(result.authUrl).searchParams.get("resource")).toBe("https://api.example.com");
@@ -115,7 +115,7 @@ describe("initiateIntegrationOAuth", () => {
       clientSecret: "s",
       redirectUri: "http://localhost:3000/cb",
       orgId: "o",
-      applicationId: "a",
+      spaceId: "a",
       actor: { type: "user", id: "u" },
     });
     expect(result.authUrl).toContain("prompt=consent&client_id=");
@@ -135,7 +135,7 @@ describe("initiateIntegrationOAuth", () => {
       authorizationParams: { access_type: "offline", prompt: "consent" },
       redirectUri: "http://localhost:3000/cb",
       orgId: "o",
-      applicationId: "a",
+      spaceId: "a",
       actor: { type: "user", id: "u" },
     });
     const url = new URL(result.authUrl);
@@ -155,7 +155,7 @@ describe("initiateIntegrationOAuth", () => {
       forceAccountSelect: true,
       redirectUri: "http://localhost:3000/cb",
       orgId: "o",
-      applicationId: "a",
+      spaceId: "a",
       actor: { type: "user", id: "u" },
     });
     // Manifest authorizationParams is merged last → its `prompt=consent` wins
@@ -174,7 +174,7 @@ describe("initiateIntegrationOAuth", () => {
       clientSecret: "s",
       redirectUri: "http://localhost:3000/cb",
       orgId: "o",
-      applicationId: "a",
+      spaceId: "a",
       actor: { type: "end_user", id: "eu_1" },
     });
     const stored = await store.get(state);
@@ -193,7 +193,7 @@ describe("initiateIntegrationOAuth", () => {
       codeChallengeMethodsSupported: ["S256"],
       redirectUri: "http://localhost:3000/cb",
       orgId: "o",
-      applicationId: "a",
+      spaceId: "a",
       actor: { type: "user", id: "u" },
     });
     const url = new URL(result.authUrl);
@@ -214,7 +214,7 @@ describe("initiateIntegrationOAuth", () => {
       codeChallengeMethodsSupported: [],
       redirectUri: "http://localhost:3000/cb",
       orgId: "o",
-      applicationId: "a",
+      spaceId: "a",
       actor: { type: "user", id: "u" },
     });
     const url = new URL(result.authUrl);
@@ -241,7 +241,7 @@ describe("initiateIntegrationOAuth", () => {
       clientSecret: "s",
       redirectUri: "http://localhost:3000/cb",
       orgId: "o",
-      applicationId: "a",
+      spaceId: "a",
       actor: { type: "user", id: "u" },
       discover,
     });
@@ -268,7 +268,7 @@ describe("initiateIntegrationOAuth", () => {
       clientSecret: "s",
       redirectUri: "http://localhost:3000/cb",
       orgId: "o",
-      applicationId: "a",
+      spaceId: "a",
       actor: { type: "user", id: "u" },
       discover,
     });
@@ -296,7 +296,7 @@ describe("initiateIntegrationOAuth", () => {
       codeChallengeMethodsSupported: ["plain"],
       redirectUri: "http://localhost:3000/cb",
       orgId: "o",
-      applicationId: "a",
+      spaceId: "a",
       actor: { type: "user", id: "u" },
       discover,
     });
@@ -323,7 +323,7 @@ describe("initiateIntegrationOAuth", () => {
       clientSecret: "s",
       redirectUri: "http://localhost:3000/cb",
       orgId: "o",
-      applicationId: "a",
+      spaceId: "a",
       actor: { type: "user", id: "u" },
       discover,
     });
@@ -361,7 +361,7 @@ describe("initiateIntegrationOAuth", () => {
           clientSecret: "s",
           redirectUri: "http://localhost:3000/cb",
           orgId: "o",
-          applicationId: "a",
+          spaceId: "a",
           actor: { type: "user", id: "u" },
         }),
     );
@@ -380,7 +380,7 @@ describe("initiateIntegrationOAuth", () => {
         clientSecret: "s",
         redirectUri: "http://localhost:3000/cb",
         orgId: "o",
-        applicationId: "a",
+        spaceId: "a",
         actor: { type: "user", id: "u" },
       });
     } catch (e) {
@@ -406,7 +406,7 @@ describe("initiateIntegrationOAuth", () => {
         clientSecret: "s",
         redirectUri: "http://localhost:3000/cb",
         orgId: "o",
-        applicationId: "a",
+        spaceId: "a",
         actor: { type: "user", id: "u" },
         issuer: "https://idp.example.com",
         discover,
@@ -438,7 +438,7 @@ describe("handleIntegrationOAuthCallback", () => {
       scopes: ["openid", "email"],
       redirectUri: "http://localhost:3000/cb",
       orgId: "org_1",
-      applicationId: "app_1",
+      spaceId: "spc_1",
       actor: { type: "user", id: "u_1" },
       ...overrides,
     });
@@ -647,7 +647,7 @@ describe("handleIntegrationOAuthCallback", () => {
       state: "S",
       orgId: "o",
       userId: "u",
-      applicationId: "a",
+      spaceId: "a",
       subjectId: "@official/gmail",
       codeVerifier: "v",
       scopesRequested: [],
@@ -706,7 +706,7 @@ describe("integration OAuth clientRef round-trip", () => {
       scopes: ["openid", "email"],
       redirectUri: "http://localhost:3000/cb",
       orgId: "org_1",
-      applicationId: "app_1",
+      spaceId: "spc_1",
       actor: { type: "user", id: "u_1" },
       ...(clientRef ? { clientRef } : {}),
     });

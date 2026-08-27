@@ -10,7 +10,7 @@ import {
   createTestUser,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedAgent, seedRun, seedEndUser, seedApplication } from "../../helpers/seed.ts";
+import { seedAgent, seedRun, seedEndUser, seedSpace } from "../../helpers/seed.ts";
 import {
   createRunNotifications,
   markNotificationReadByRun,
@@ -42,14 +42,14 @@ describe("Notifications API (per-recipient, issue #667)", () => {
     ctx = await createTestContext({ orgSlug: "notiforg" });
   });
 
-  const scope = () => ({ orgId: ctx.orgId, applicationId: ctx.defaultAppId });
+  const scope = () => ({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
 
-  /** Headers for an arbitrary user acting within ctx's org/app. */
+  /** Headers for an arbitrary user acting within ctx's org/space. */
   function headersFor(user: { cookie: string }): Record<string, string> {
     return {
       Cookie: user.cookie,
       "X-Org-Id": ctx.orgId,
-      "X-Application-Id": ctx.defaultAppId,
+      "X-Space-Id": ctx.defaultSpaceId,
     };
   }
 
@@ -69,7 +69,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
     const run = await seedRun({
       packageId: id,
       orgId: ctx.orgId,
-      applicationId: ctx.defaultAppId,
+      spaceId: ctx.defaultSpaceId,
       status: opts.status ?? "success",
       ...(opts.actor === "schedule" ? {} : opts.actor),
     });
@@ -100,7 +100,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
     it("end-user run notifies the end-user, not org members", async () => {
       const eu = await seedEndUser({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         name: "External",
       });
       await seedNotifiedRun({ agentName: "eu-agent", actor: { endUserId: eu.id } });
@@ -153,7 +153,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       const run = await seedRun({
         packageId: "@notiforg/race-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         status: "success",
         userId: ctx.user.id,
       });
@@ -190,7 +190,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       const run = await seedRun({
         packageId: "@notiforg/finalize-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         status: "running",
         userId: ctx.user.id,
       });
@@ -228,7 +228,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       const run = await seedRun({
         packageId: "@notiforg/finalize-twice",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         status: "running",
         userId: ctx.user.id,
       });
@@ -484,7 +484,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
     it("positively creates exactly one row for the end-user recipient", async () => {
       const eu = await seedEndUser({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         name: "EU positive",
       });
       const run = await seedNotifiedRun({ agentName: "eu-pos", actor: { endUserId: eu.id } });
@@ -507,7 +507,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       const run = await seedRun({
         packageId: inlineId,
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         status: "success",
         userId: ctx.user.id,
       });
@@ -542,7 +542,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
     it("an end-user actor marks their own notification read", async () => {
       const eu = await seedEndUser({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         name: "EU mark",
       });
       const run = await seedNotifiedRun({ agentName: "eu-mark", actor: { endUserId: eu.id } });
@@ -555,7 +555,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
     it("a dashboard user does NOT match an end-user's notification row", async () => {
       const eu = await seedEndUser({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         name: "EU isolated",
       });
       const run = await seedNotifiedRun({ agentName: "eu-iso", actor: { endUserId: eu.id } });
@@ -590,8 +590,8 @@ describe("Notifications API (per-recipient, issue #667)", () => {
     it("rejects a row with no recipient_id", async () => {
       await expectNotNullViolation(
         db.execute(
-          sql`INSERT INTO notifications (org_id, application_id, recipient_type, type)
-              VALUES (${ctx.orgId}, ${ctx.defaultAppId}, 'user', 'run_completed')`,
+          sql`INSERT INTO notifications (org_id, space_id, recipient_type, type)
+              VALUES (${ctx.orgId}, ${ctx.defaultSpaceId}, 'user', 'run_completed')`,
         ),
         "recipient_id",
       );
@@ -600,8 +600,8 @@ describe("Notifications API (per-recipient, issue #667)", () => {
     it("rejects a row with no recipient_type", async () => {
       await expectNotNullViolation(
         db.execute(
-          sql`INSERT INTO notifications (org_id, application_id, recipient_id, type)
-              VALUES (${ctx.orgId}, ${ctx.defaultAppId}, ${ctx.user.id}, 'run_completed')`,
+          sql`INSERT INTO notifications (org_id, space_id, recipient_id, type)
+              VALUES (${ctx.orgId}, ${ctx.defaultSpaceId}, ${ctx.user.id}, 'run_completed')`,
         ),
         "recipient_type",
       );
@@ -611,8 +611,8 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       let err: unknown;
       try {
         await db.execute(
-          sql`INSERT INTO notifications (org_id, application_id, recipient_type, recipient_id, type)
-              VALUES (${ctx.orgId}, ${ctx.defaultAppId}, 'robot', ${ctx.user.id}, 'run_completed')`,
+          sql`INSERT INTO notifications (org_id, space_id, recipient_type, recipient_id, type)
+              VALUES (${ctx.orgId}, ${ctx.defaultSpaceId}, 'robot', ${ctx.user.id}, 'run_completed')`,
         );
       } catch (e) {
         err = e;
@@ -642,7 +642,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
     it("deleteEndUser removes the end-user's notifications (incl. run-less)", async () => {
       const eu = await seedEndUser({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         name: "EU cleanup",
       });
       // A run-less notification: only the explicit cleanup (not the run
@@ -650,7 +650,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       // incidental to the end-user's runs cascading.
       await db.insert(notifications).values({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         recipientType: "end_user",
         recipientId: eu.id,
         type: "run_completed",
@@ -680,7 +680,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
     it("removeMember leaves end-user notifications intact (cleanup is recipient-typed)", async () => {
       const eu = await seedEndUser({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         name: "EU survives",
       });
       await seedNotifiedRun({ agentName: "eu-survive", actor: { endUserId: eu.id } });
@@ -707,7 +707,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       // Hand-insert a notification with a payload that lacks agent_id.
       await db.insert(notifications).values({
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         recipientType: "user",
         recipientId: ctx.user.id,
         type: "run_completed",
@@ -794,7 +794,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       for (let i = 0; i < 5; i++) {
         await db.insert(notifications).values({
           orgId: ctx.orgId,
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
           recipientType: "user",
           recipientId: ctx.user.id,
           type: "run_completed",
@@ -951,20 +951,20 @@ describe("Notifications API (per-recipient, issue #667)", () => {
     });
   });
 
-  // ─── Cross-application isolation (same org, different app) ───
+  // ─── Cross-space isolation (same org, different space) ───
 
-  describe("cross-application isolation", () => {
-    it("a notification in app A is invisible from app B in the same org", async () => {
-      await seedNotifiedRun({ actor: { userId: ctx.user.id } }); // app = ctx.defaultAppId
-      const appB = await seedApplication({ orgId: ctx.orgId, name: "App B" });
+  describe("cross-space isolation", () => {
+    it("a notification in space A is invisible from space B in the same org", async () => {
+      await seedNotifiedRun({ actor: { userId: ctx.user.id } }); // space = ctx.defaultSpaceId
+      const spaceB = await seedSpace({ orgId: ctx.orgId, name: "Space B" });
       const headersB = {
         Cookie: ctx.cookie,
         "X-Org-Id": ctx.orgId,
-        "X-Application-Id": appB.id,
+        "X-Space-Id": spaceB.id,
       };
 
       expect(await unreadCount(headersB)).toBe(0);
-      // …still visible in app A.
+      // …still visible in space A.
       expect(await unreadCount(authHeaders(ctx))).toBe(1);
     });
   });
@@ -1037,14 +1037,14 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       await seedRun({
         packageId: "@notiforg/shared-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
       });
       await seedRun({
         packageId: "@notiforg/shared-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: otherUser.id,
         status: "success",
       });
@@ -1063,14 +1063,14 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       await seedRun({
         packageId: "@notiforg/filter-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         status: "success",
       });
       await seedRun({
         packageId: "@notiforg/filter-agent",
         orgId: ctx.orgId,
-        applicationId: ctx.defaultAppId,
+        spaceId: ctx.defaultSpaceId,
         userId: otherUser.id,
         status: "success",
       });
@@ -1089,7 +1089,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
         await seedRun({
           packageId: "@notiforg/page-agent",
           orgId: ctx.orgId,
-          applicationId: ctx.defaultAppId,
+          spaceId: ctx.defaultSpaceId,
           userId: ctx.user.id,
           status: "success",
         });
@@ -1112,7 +1112,7 @@ describe("Notifications API (per-recipient, issue #667)", () => {
       await seedRun({
         packageId: "@isolatedrunorg/secret-agent",
         orgId: otherCtx.orgId,
-        applicationId: otherCtx.defaultAppId,
+        spaceId: otherCtx.defaultSpaceId,
         userId: otherCtx.user.id,
         status: "success",
       });

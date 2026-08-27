@@ -15,7 +15,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { applicationPackages, packages, runs, uploads, chatSessions } from "@appstrate/db/schema";
+import { spacePackages, packages, runs, uploads, chatSessions } from "@appstrate/db/schema";
 import { uploadStream } from "@appstrate/db/storage";
 import type { Actor } from "@appstrate/connect";
 import { getTestApp } from "../../helpers/app.ts";
@@ -74,7 +74,7 @@ async function apiKeyHeaders(
 ): Promise<Record<string, string>> {
   const key = await seedApiKey({
     orgId: ctx.orgId,
-    applicationId: ctx.defaultAppId,
+    spaceId: ctx.defaultSpaceId,
     createdBy: ctx.user.id,
     // `list_files` / `resources/read` re-dispatch in-process to
     // `GET /api/files*`, which is gated on `files:read` like every
@@ -84,12 +84,12 @@ async function apiKeyHeaders(
   return { Authorization: `Bearer ${key.rawKey}`, "X-Org-Id": ctx.orgId };
 }
 
-async function seedRun(scope: { orgId: string; applicationId: string }): Promise<string> {
+async function seedRun(scope: { orgId: string; spaceId: string }): Promise<string> {
   const id = `run_${crypto.randomUUID()}`;
   await db.insert(runs).values({
     id,
     orgId: scope.orgId,
-    applicationId: scope.applicationId,
+    spaceId: scope.spaceId,
     status: "running",
   });
   return id;
@@ -97,7 +97,7 @@ async function seedRun(scope: { orgId: string; applicationId: string }): Promise
 
 /** Publish an agent_output file with real bytes into the files bucket. */
 async function publishDoc(
-  scope: { orgId: string; applicationId: string },
+  scope: { orgId: string; spaceId: string },
   runId: string,
   name: string,
   mime: string,
@@ -116,7 +116,7 @@ async function publishDoc(
 
 /** Stage an upload row + write its bytes into the uploads bucket (FS). */
 async function stageUpload(
-  scope: { orgId: string; applicationId: string },
+  scope: { orgId: string; spaceId: string },
   createdBy: string | null,
   name: string,
   bytes: Uint8Array,
@@ -124,7 +124,7 @@ async function stageUpload(
 ): Promise<string> {
   const up = await createUpload({
     orgId: scope.orgId,
-    applicationId: scope.applicationId,
+    spaceId: scope.spaceId,
     createdBy,
     name,
     size: bytes.byteLength,
@@ -141,14 +141,14 @@ async function stageUpload(
 
 describe("mcp list_files", () => {
   let ctx: TestContext;
-  let scope: { orgId: string; applicationId: string };
+  let scope: { orgId: string; spaceId: string };
   let headers: Record<string, string>;
 
   beforeEach(async () => {
     await truncateAll();
     resetCatalog();
     ctx = await createTestContext({ orgSlug: "mcpdocs" });
-    scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     headers = await apiKeyHeaders(ctx);
   });
 
@@ -195,16 +195,16 @@ describe("mcp list_files", () => {
   });
 
   it("scopes to the caller's org — a foreign org's files are not listed", async () => {
-    // The tool resolves the actor + org+app scope from the forwarded auth (same
+    // The tool resolves the actor + org+space scope from the forwarded auth (same
     // as every other tool), so listFilesForActor never returns another org's
     // rows — the cross-tenant isolation the gallery relies on.
     const runA = await seedRun(scope);
     await publishDoc(scope, runA, "shared.txt", "text/plain", "visible");
 
     const foreign = await createTestContext({ orgSlug: "foreignorg" });
-    const foreignRun = await seedRun({ orgId: foreign.orgId, applicationId: foreign.defaultAppId });
+    const foreignRun = await seedRun({ orgId: foreign.orgId, spaceId: foreign.defaultSpaceId });
     await publishDoc(
-      { orgId: foreign.orgId, applicationId: foreign.defaultAppId },
+      { orgId: foreign.orgId, spaceId: foreign.defaultSpaceId },
       foreignRun,
       "foreign.txt",
       "text/plain",
@@ -258,14 +258,14 @@ describe("mcp list_files", () => {
 
 describe("mcp resources/read (appfile://)", () => {
   let ctx: TestContext;
-  let scope: { orgId: string; applicationId: string };
+  let scope: { orgId: string; spaceId: string };
   let headers: Record<string, string>;
 
   beforeEach(async () => {
     await truncateAll();
     resetCatalog();
     ctx = await createTestContext({ orgSlug: "mcpres" });
-    scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     headers = await apiKeyHeaders(ctx);
   });
 
@@ -409,9 +409,9 @@ describe("mcp resources/read (appfile://)", () => {
 
   it("errors on a foreign (cross-org) file", async () => {
     const foreign = await createTestContext({ orgSlug: "foreignres" });
-    const foreignRun = await seedRun({ orgId: foreign.orgId, applicationId: foreign.defaultAppId });
+    const foreignRun = await seedRun({ orgId: foreign.orgId, spaceId: foreign.defaultSpaceId });
     const foreignDoc = await publishDoc(
-      { orgId: foreign.orgId, applicationId: foreign.defaultAppId },
+      { orgId: foreign.orgId, spaceId: foreign.defaultSpaceId },
       foreignRun,
       "secret.txt",
       "text/plain",
@@ -505,14 +505,14 @@ describe("mcp resources/read (appfile://)", () => {
 
 describe("mcp file-backed package workflow", () => {
   let ctx: TestContext;
-  let scope: { orgId: string; applicationId: string };
+  let scope: { orgId: string; spaceId: string };
   let headers: Record<string, string>;
 
   beforeEach(async () => {
     await truncateAll();
     resetCatalog();
     ctx = await createTestContext({ orgSlug: "mcppkgdoc" });
-    scope = { orgId: ctx.orgId, applicationId: ctx.defaultAppId };
+    scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     headers = await apiKeyHeaders(ctx, ["agents:write"]);
   });
 
@@ -601,9 +601,9 @@ describe("mcp file-backed package workflow", () => {
       .where(eq(packages.id, packageId));
     expect(stored?.id).toBe(packageId);
     const [installed] = await db
-      .select({ packageId: applicationPackages.packageId })
-      .from(applicationPackages)
-      .where(eq(applicationPackages.packageId, packageId));
+      .select({ packageId: spacePackages.packageId })
+      .from(spacePackages)
+      .where(eq(spacePackages.packageId, packageId));
     expect(installed?.packageId).toBe(packageId);
 
     const conflictDocId = await publishDoc(

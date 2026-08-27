@@ -12,7 +12,7 @@
  *
  * The stake is asymmetric in both directions, which is why this file exists:
  *
- *   * wrap too little and `application_packages.input_settings` keeps a raw
+ *   * wrap too little and `space_packages.input_settings` keeps a raw
  *     `config` object, `getInstalledPackageSettings` resolves `asRecord(…)` to
  *     `{}`, and every configured input value is silently gone;
  *   * wrap too much and every row nests a second time into
@@ -30,6 +30,14 @@
  * shape inside it, replays the real SQL file, asserts, and rolls the whole thing
  * back — Postgres DDL is transactional, so the suite's schema is untouched
  * whether the case passes or throws.
+ *
+ * One of those tables is also renamed by a LATER migration: `0053` renamed
+ * `application_packages` to `space_packages`. `0040`'s bytes still say
+ * `application_packages`, and replaying the real file means replaying it
+ * verbatim — so the rewind below undoes that rename too, and every raw
+ * statement inside the pre-0040 window names the table the way the schema
+ * named it then. Rewriting the migration's text to today's name instead would
+ * mean the test no longer exercises the file that shipped.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -64,6 +72,8 @@ function rowsOf<T>(result: unknown): T[] {
 async function inPre0040Schema(body: (tx: Tx) => Promise<void>): Promise<void> {
   try {
     await db.transaction(async (tx) => {
+      // 0053's table rename, undone — 0040 names this table `application_packages`.
+      await tx.execute(sql`ALTER TABLE "space_packages" RENAME TO "application_packages"`);
       await tx.execute(
         sql`ALTER TABLE "application_packages" RENAME COLUMN "input_settings" TO "config"`,
       );
@@ -96,13 +106,13 @@ async function replayMigration(tx: Tx): Promise<void> {
 
 async function installWithConfig(
   tx: Tx,
-  applicationId: string,
+  spaceId: string,
   packageId: string,
   config: unknown,
 ): Promise<void> {
   await tx.execute(sql`
-    INSERT INTO "application_packages" ("application_id", "package_id", "config")
-    VALUES (${applicationId}, ${packageId}, ${JSON.stringify(config)}::jsonb)
+    INSERT INTO "application_packages" ("space_id", "package_id", "config")
+    VALUES (${spaceId}, ${packageId}, ${JSON.stringify(config)}::jsonb)
   `);
 }
 
@@ -127,10 +137,10 @@ async function seedScheduleWithOverride(
   // an end-user, never as neither.
   await tx.execute(sql`
     INSERT INTO "package_schedules"
-      ("id", "package_id", "user_id", "org_id", "application_id", "cron_expression",
+      ("id", "package_id", "user_id", "org_id", "space_id", "cron_expression",
        "input", "config_override")
     VALUES (
-      ${id}, ${packageId}, ${ctx.user.id}, ${ctx.orgId}, ${ctx.defaultAppId}, '0 * * * *',
+      ${id}, ${packageId}, ${ctx.user.id}, ${ctx.orgId}, ${ctx.defaultSpaceId}, '0 * * * *',
       ${input === null ? null : JSON.stringify(input)}::jsonb,
       ${configOverride === null ? null : JSON.stringify(configOverride)}::jsonb
     )
@@ -154,9 +164,9 @@ async function seedRunWithConfig(
 ): Promise<string> {
   const id = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
   await tx.execute(sql`
-    INSERT INTO "runs" ("id", "package_id", "org_id", "application_id", "input", "config")
+    INSERT INTO "runs" ("id", "package_id", "org_id", "space_id", "input", "config")
     VALUES (
-      ${id}, ${packageId}, ${ctx.orgId}, ${ctx.defaultAppId},
+      ${id}, ${packageId}, ${ctx.orgId}, ${ctx.defaultSpaceId},
       ${input === null ? null : JSON.stringify(input)}::jsonb,
       ${config === null ? null : JSON.stringify(config)}::jsonb
     )
@@ -197,7 +207,7 @@ describe("migration 0040 — fold the `config` namespace into `input`", () => {
 
   it("wraps stored values under `values`, with `locked` starting empty", async () => {
     await inPre0040Schema(async (tx) => {
-      await installWithConfig(tx, ctx.defaultAppId, PLAIN, { region: "eu-west", retries: 3 });
+      await installWithConfig(tx, ctx.defaultSpaceId, PLAIN, { region: "eu-west", retries: 3 });
 
       await replayMigration(tx);
 
@@ -215,7 +225,7 @@ describe("migration 0040 — fold the `config` namespace into `input`", () => {
     // agent's configured values are then unreachable: `asRecord("prod")` is `{}`,
     // and `locked` reads as `["eu-west"]` — a lock on a field that never existed.
     await inPre0040Schema(async (tx) => {
-      await installWithConfig(tx, ctx.defaultAppId, ADVERSARIAL, {
+      await installWithConfig(tx, ctx.defaultSpaceId, ADVERSARIAL, {
         values: "prod",
         locked: ["eu-west"],
       });
@@ -298,7 +308,7 @@ describe("migration 0040 — fold the `config` namespace into `input`", () => {
     });
   });
 
-  it("the `application_packages` wrap is one-shot — a replay nests it again", async () => {
+  it("the installed-package wrap is one-shot — a replay nests it again", async () => {
     // Recorded, not endorsed. This is the cost of an unconditional wrap, and it
     // is paid by nobody: drizzle's pg dialect applies migrations by TIMESTAMP
     // WATERMARK and `applyCorePGliteMigrations` by journal TAG, so editing this
@@ -308,7 +318,7 @@ describe("migration 0040 — fold the `config` namespace into `input`", () => {
     // predicate would make this test pass and the adversarial case above FAIL.
     // There is no sound shape test — the two are the same bytes.
     await inPre0040Schema(async (tx) => {
-      await installWithConfig(tx, ctx.defaultAppId, PLAIN, { region: "eu-west" });
+      await installWithConfig(tx, ctx.defaultSpaceId, PLAIN, { region: "eu-west" });
 
       await replayMigration(tx);
       await replayMigration(tx);

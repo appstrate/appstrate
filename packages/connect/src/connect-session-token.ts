@@ -41,8 +41,8 @@ export interface ConnectSessionClaims {
   v: 1;
   /** Organization the connection belongs to. */
   org_id: string;
-  /** Application scope. */
-  application_id: string;
+  /** Space scope. */
+  space_id: string;
   /** Platform member actor (mutually exclusive with `end_user_id`). */
   user_id?: string;
   /** Embedded end-user actor (`eu_…`, mutually exclusive with `user_id`). */
@@ -105,7 +105,7 @@ export function verifyConnectSession(
   if (typeof claims.exp !== "number" || claims.exp < Math.floor(Date.now() / 1000)) return null;
   if (typeof claims.jti !== "string" || !claims.jti) return null;
   if (typeof claims.org_id !== "string" || !claims.org_id) return null;
-  if (typeof claims.application_id !== "string" || !claims.application_id) return null;
+  if (typeof claims.space_id !== "string" || !claims.space_id) return null;
   if (typeof claims.package_id !== "string" || !claims.package_id) return null;
   if (typeof claims.auth_key !== "string" || !claims.auth_key) return null;
   if (!hasExactlyOneActor(claims)) return null;

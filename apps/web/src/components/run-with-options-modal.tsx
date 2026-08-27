@@ -94,7 +94,7 @@ function RunWithOptionsForm({
   isPending?: boolean;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  // Seeded from the STORED values only — they are per-application and do not
+  // Seeded from the STORED values only — they are per-space and do not
   // move with the version pick. Author `default`s deliberately stay out: they
   // belong to the selected version's schema, and seeding the draft's here would
   // send them as caller input (the top precedence layer) for whatever version

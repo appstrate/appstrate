@@ -13,8 +13,8 @@ it; start here when you need the detail behind a subsystem.
 
 Design notes for the internal subsystems — see [`architecture/`](./architecture/README.md)
 for the full index: run execution (Firecracker, sidecar, integrations runtime,
-run cost), files, model providers, and platform posture (observability,
-supply chain).
+run cost), tenancy and data (spaces, files), model providers, and platform
+posture (observability, supply chain).
 
 ## Guides
 

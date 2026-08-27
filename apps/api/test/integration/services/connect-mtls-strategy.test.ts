@@ -70,7 +70,7 @@ describe("mtls connect strategy", () => {
     const key = "-----BEGIN PRIVATE KEY-----\nMIGHAgEA\n-----END PRIVATE KEY-----";
     const conn = await strategy.complete(
       {
-        scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
         actor: { type: "user", id: ctx.user.id },
         integrationId: INTEG,
         authKey: "primary",
@@ -82,7 +82,7 @@ describe("mtls connect strategy", () => {
     expect(conn.auth_key).toBe("primary");
     expect(conn.packageId).toBe(INTEG);
 
-    // Defence-in-depth: verify the row in DB exists for this user + app.
+    // Defence-in-depth: verify the row in DB exists for this user + space.
     const rows = await db
       .select()
       .from(integrationConnections)
@@ -103,7 +103,7 @@ describe("mtls connect strategy", () => {
     await expect(
       strategy.complete(
         {
-          scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+          scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
           actor: { type: "user", id: ctx.user.id },
           integrationId: INTEG,
           authKey: "primary",
@@ -144,7 +144,7 @@ describe("mtls connect strategy", () => {
     await expect(
       strategy.complete(
         {
-          scope: { orgId: ctx.orgId, applicationId: ctx.defaultAppId },
+          scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
           actor: { type: "user", id: ctx.user.id },
           integrationId: INTEG,
           authKey: "primary",

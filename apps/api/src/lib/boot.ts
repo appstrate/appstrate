@@ -471,7 +471,7 @@ export async function bootBackground(): Promise<{ agentsHealthy: boolean }> {
  * deployment, forever — a broken database made to work silently, with nothing
  * recording when the repair could stop shipping. That is what
  * `docs/NO_TRANSITIONAL_CODE.md` §3 and §5 forbid. The DDL moved to
- * `scripts/migration/0003-oauth-resources-watermark-drift.sql`, run once by an
+ * `scripts/migration/0004-oauth-resources-watermark-drift.sql`, run once by an
  * operator; what stays here detects and refuses, the shape
  * `RETIRED_ENV_RENAMES` (`packages/env/src/index.ts`) already uses for a form
  * that must never silently work.
@@ -517,7 +517,7 @@ export async function assertOAuthResourceColumnsPresent(
       "schema, so 0006 — and every other migration below the corrupted watermark — was " +
       "silently skipped. Refusing to boot: token mint would fail at runtime on resource/MCP " +
       "flows, and the rest of the skipped set is unknown. Apply " +
-      "scripts/migration/0003-oauth-resources-watermark-drift.sql to this database (it ships " +
+      "scripts/migration/0004-oauth-resources-watermark-drift.sql to this database (it ships " +
       "the diagnostic query for the full extent of the drift), then restart.",
   );
 }

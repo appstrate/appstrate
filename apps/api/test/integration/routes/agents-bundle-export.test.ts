@@ -9,7 +9,7 @@
  *   - Round-trip determinism (two calls return byte-identical bodies)
  *   - No credentials leak (response bytes contain no connection secrets)
  *   - 404 on non-existent version
- *   - RBAC: 404 when agent is not accessible to the app
+ *   - RBAC: 404 when agent is not accessible to the space
  *   - Bundle-layer failures over stored dependency artifacts surface as coded
  *     RFC 9457 422s naming the dependency, not as an opaque 500
  */
@@ -21,8 +21,8 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { getTestApp } from "../../helpers/app.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
-import { packageDistTags, applicationPackages } from "@appstrate/db/schema";
+import { installPackage } from "../../../src/services/space-packages.ts";
+import { packageDistTags, spacePackages } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
 import * as storage from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
@@ -164,17 +164,14 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
       setLatest: true,
     });
 
-    // Install root in default app pinned to this version (so the export
+    // Install root in default space pinned to this version (so the export
     // resolves without a latest-tag lookup for the root).
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, rootPkgId);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, rootPkgId);
     await db
-      .update(applicationPackages)
+      .update(spacePackages)
       .set({ versionId: rootVer.versionId })
       .where(
-        and(
-          eq(applicationPackages.applicationId, ctx.defaultAppId),
-          eq(applicationPackages.packageId, rootPkgId),
-        ),
+        and(eq(spacePackages.spaceId, ctx.defaultSpaceId), eq(spacePackages.packageId, rootPkgId)),
       );
 
     const res = await app.request(`/api/agents/@exportorg/agent-root/bundle`, {
@@ -233,7 +230,7 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
       },
       setLatest: true,
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, rootPkgId);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, rootPkgId);
 
     const [r1, r2] = await Promise.all([
       app.request(`/api/agents/@exportorg/stable-agent/bundle`, {
@@ -275,7 +272,7 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
       content: "Plain prompt.",
       setLatest: true,
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, rootPkgId);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, rootPkgId);
 
     // A secret stored in connection profiles etc. must NEVER end up in
     // the bundle — our helper just asserts the secret string is absent
@@ -316,7 +313,7 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
       },
       setLatest: true,
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, rootPkgId);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, rootPkgId);
 
     const res = await app.request(`/api/agents/@exportorg/version-gated/bundle?version=99.99.99`, {
       headers: authHeaders(ctx),
@@ -331,7 +328,7 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
     // export endpoint. The error message should tell the caller how to
     // proceed rather than just saying "not found".
     await seedPackage({ id: rootPkgId, type: "agent", orgId: ctx.orgId });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, rootPkgId);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, rootPkgId);
 
     const res = await app.request(`/api/agents/@exportorg/draft-only/bundle`, {
       headers: authHeaders(ctx),
@@ -366,7 +363,7 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
       },
       setLatest: true,
     });
-    await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, rootPkgId);
+    await installPackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, rootPkgId);
   }
 
   async function exportDepRoot(ctx: TestContext) {
@@ -488,9 +485,9 @@ describe("GET /api/agents/:scope/:name/bundle — export", () => {
     expect(body.detail).not.toContain("fix the pin");
   });
 
-  it("returns 404 when the agent is not accessible to the app", async () => {
+  it("returns 404 when the agent is not accessible to the space", async () => {
     const rootPkgId = "@exportorg/uninstalled" as const;
-    // Seeded in the org catalog but NOT installed in the default app.
+    // Seeded in the org catalog but NOT installed in the default space.
     await seedVersionedPackage({
       id: rootPkgId,
       type: "agent",
