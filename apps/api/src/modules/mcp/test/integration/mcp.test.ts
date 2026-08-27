@@ -18,6 +18,7 @@ import { getEnv } from "@appstrate/env";
 import { auditEvents } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { truncateAll, db } from "../../../../../test/helpers/db.ts";
+import { flushRedis } from "../../../../../test/helpers/redis.ts";
 import { createTestContext, orgOnlyHeaders } from "../../../../../test/helpers/auth.ts";
 import { seedApiKey } from "../../../../../test/helpers/seed.ts";
 import { setPlatformApp } from "../../../../lib/platform-app.ts";
@@ -416,6 +417,13 @@ describe("mcp tool round-trip", () => {
 describe("mcp audit + rate limiting", () => {
   beforeEach(async () => {
     await truncateAll();
+    // The burst assertion below counts requests against a Redis-backed limiter
+    // whose keys `truncateAll()` does not touch. Without this the test silently
+    // depends on every suite that ran before it having spent none of that
+    // budget — it passes alone and gets a premature 429 in a full run, which is
+    // exactly what happened once this branch added request-making tests
+    // upstream of it. 24 other suites already flush for the same reason.
+    await flushRedis();
     resetCatalog();
   });
 
