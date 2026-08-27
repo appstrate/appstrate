@@ -19,8 +19,23 @@
  * compile against one definition.
  */
 
-/** A single file field: `format: "uri"` + a `contentMediaType`. */
-function isSingleFileNode(node: Record<string, unknown>): boolean {
+/** Narrow an `unknown` schema node to an indexable object, or `undefined`. */
+function asNode(schema: unknown): Record<string, unknown> | undefined {
+  return schema && typeof schema === "object" ? (schema as Record<string, unknown>) : undefined;
+}
+
+/**
+ * A single file field: `format: "uri"` + a DECLARED `contentMediaType`.
+ *
+ * "Declared" is `!= null && !== false`, deliberately NOT truthiness: the
+ * keyword's presence is what marks the field as a file, and whether its value
+ * is a well-formed media type is the manifest validator's job, not this
+ * predicate's. `contentMediaType: ""` is therefore a file field — the same
+ * reading `apps/api/src/services/inline-run.ts` documents and relies on.
+ */
+export function isSingleFileNode(schema: unknown): boolean {
+  const node = asNode(schema);
+  if (!node) return false;
   return node.format === "uri" && node.contentMediaType != null && node.contentMediaType !== false;
 }
 
@@ -28,8 +43,9 @@ function isSingleFileNode(node: Record<string, unknown>): boolean {
  * Resolve a node's `items` schema, handling the JSON Schema boolean / tuple
  * forms (`items: false` → none; `items: [first, …]` → first object entry).
  */
-function resolveItems(node: Record<string, unknown>): Record<string, unknown> | undefined {
-  const items = node.items;
+export function resolveItems(schema: unknown): Record<string, unknown> | undefined {
+  const node = asNode(schema);
+  const items = node?.items;
   if (!items || typeof items === "boolean") return undefined;
   if (Array.isArray(items)) {
     const first = items[0];
@@ -39,7 +55,10 @@ function resolveItems(node: Record<string, unknown>): Record<string, unknown> | 
   return undefined;
 }
 
-function resolveType(node: Record<string, unknown>): string | undefined {
+/** Resolve a node's `type` (JSON Schema allows a union array — first wins). */
+export function resolveType(schema: unknown): string | undefined {
+  const node = asNode(schema);
+  if (!node) return undefined;
   if (typeof node.type === "string") return node.type;
   if (Array.isArray(node.type) && node.type.length > 0 && typeof node.type[0] === "string") {
     return node.type[0];
@@ -52,12 +71,19 @@ function resolveType(node: Record<string, unknown>): string | undefined {
  * OR an array whose items are such a node.
  */
 export function isFileField(schema: unknown): boolean {
-  if (!schema || typeof schema !== "object") return false;
-  const node = schema as Record<string, unknown>;
-  if (isSingleFileNode(node)) return true;
-  if (resolveType(node) === "array") {
-    const items = resolveItems(node);
-    if (items && isSingleFileNode(items)) return true;
-  }
-  return false;
+  return isSingleFileNode(schema) || isMultipleFileField(schema);
+}
+
+/**
+ * Detect a MULTIPLE-files field: an array whose `items` are a single file node.
+ *
+ * Shares {@link isSingleFileNode} with {@link isFileField} by construction, so
+ * the two can never disagree about the same array node — they did, when
+ * `@appstrate/core/form` carried its own copy that tested
+ * `!!items.contentMediaType`: for `contentMediaType: ""` the field was a file
+ * field that was not multiple, and the RJSF adapter rendered a single-file
+ * widget bound to an array property.
+ */
+export function isMultipleFileField(schema: unknown): boolean {
+  return resolveType(schema) === "array" && isSingleFileNode(resolveItems(schema));
 }

@@ -621,10 +621,17 @@ describe("listOrgModelProviderCredentials — built-in alias-only binding mask",
     expect(entry!.source).toBe("built-in");
     expect(entry!.apiShape).toBeNull();
     expect(entry!.baseUrl).toBeNull();
-    // The backing host/model id must not appear anywhere in the serialized view.
-    expect(JSON.stringify(entry)).not.toContain("anthropic.com");
-    expect(JSON.stringify(entry)).not.toContain("anthropic-messages");
-    expect(JSON.stringify(entry)).not.toContain("claude-");
+    // The label is masked too, and asserting it POSITIVELY is what makes this
+    // case discriminate: dropping the mask yields the provider display name
+    // ("Anthropic"), which contains none of the lowercase substrings below.
+    expect(entry!.label).toBe("System models");
+    // The backing host/model id must not appear anywhere in the serialized
+    // view — including the vendor name in its display casing.
+    const serialized = JSON.stringify(entry);
+    expect(serialized).not.toContain("Anthropic");
+    expect(serialized).not.toContain("anthropic.com");
+    expect(serialized).not.toContain("anthropic-messages");
+    expect(serialized).not.toContain("claude-");
   });
 
   it("keeps apiShape/baseUrl for a built-in key backing any non-aliased model", async () => {

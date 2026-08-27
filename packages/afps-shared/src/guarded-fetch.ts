@@ -54,8 +54,23 @@
 
 import { resolveAndCheckHost, type HostResolver } from "./ssrf-dns.ts";
 
+/**
+ * Redirect hops any guarded chain will chase before giving up — the ONE budget
+ * in the codebase, and the default of both followers.
+ *
+ * It used to be two unrelated numbers: `maxRedirects ?? 5` here and a hard
+ * `MAX_REDIRECTS = 10` in `@appstrate/afps-runtime`'s credential-proxy
+ * follower, neither aware of the other. 10 is the surviving value because it is
+ * the one with a reason: the credential proxy walks multi-step OAuth/CAS dances
+ * whose session cookie lands on an intermediate 302 (#473), and five hops does
+ * not always reach the end of one. Nothing is weakened by the raise — every hop
+ * is independently DNS-checked, allowlist-checked and credential-stripped, so
+ * the cap is a loop/DoS bound, not a trust boundary.
+ */
+export const DEFAULT_MAX_REDIRECTS = 10;
+
 export interface GuardedFetchOptions {
-  /** Max redirect hops to follow before giving up. Default 5. */
+  /** Max redirect hops to follow before giving up. Default {@link DEFAULT_MAX_REDIRECTS}. */
   maxRedirects?: number;
   /**
    * Deadline in ms covering the redirect chain up to the final response's
@@ -188,7 +203,7 @@ export async function guardedFetch(
   init?: RequestInit,
   opts?: GuardedFetchOptions,
 ): Promise<Response> {
-  const maxRedirects = opts?.maxRedirects ?? 5;
+  const maxRedirects = opts?.maxRedirects ?? DEFAULT_MAX_REDIRECTS;
 
   let current = stripUserInfoAndFragment(new URL(typeof input === "string" ? input : input.href));
   assertHttp(current);
@@ -338,11 +353,22 @@ export async function guardedFetch(
         }
       }
 
-      // Standard redirect method/body rewriting: 303 (and 301/302 for POST per
-      // browser convention) → GET with no body; 307/308 preserve method + body
-      // (already dropped above when crossing a host boundary).
-      if (res.status === 303 || ((res.status === 301 || res.status === 302) && method !== "HEAD")) {
-        method = method === "HEAD" ? "HEAD" : "GET";
+      // Standard redirect method/body rewriting, per WHATWG fetch
+      // (HTTP-redirect fetch step 11) + RFC 9110 §15.4:
+      //   - 301/302 downgrade POST → GET; every OTHER method is preserved.
+      //   - 303 downgrades everything except GET/HEAD → GET.
+      //   - 307/308 preserve method + body (already dropped above when
+      //     crossing a host boundary).
+      // The 301/302 clause used to read `method !== "HEAD"`, which turned a
+      // 302'd PUT/PATCH/DELETE into a bodyless GET — a request the caller never
+      // made, and a silent one. `@appstrate/afps-runtime`'s credential-proxy
+      // follower always had the conformant rule; this side did not, and the
+      // two disagreed about the same response.
+      const toGet =
+        ((res.status === 301 || res.status === 302) && method === "POST") ||
+        (res.status === 303 && method !== "GET" && method !== "HEAD");
+      if (toGet) {
+        method = "GET";
         dropBody();
       }
       current = next;

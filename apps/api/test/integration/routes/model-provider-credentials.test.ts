@@ -315,12 +315,13 @@ describe("Model Provider Keys API", () => {
       const modelRes = await app.request("/api/models", {
         method: "POST",
         headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        // `apiShape` / `baseUrl` are deliberately NOT part of this body — they
+        // are pinned by the credential's `providerId`. They used to be sent and
+        // silently stripped; the body is `.strict()` now, so they are gone.
         body: JSON.stringify({
           label: "Sonnet pinned",
           credentialId: credId,
           modelId: "claude-sonnet-4-6",
-          apiShape: "anthropic-messages",
-          baseUrl: "https://api.anthropic.com",
         }),
       });
       expect(modelRes.status).toBe(201);

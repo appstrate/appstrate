@@ -25,7 +25,6 @@ describe("End-Users API", () => {
       },
       body: JSON.stringify({
         name: "End-User Test Key",
-        spaceId: ctx.defaultSpaceId,
       }),
     });
     expect(res.status).toBe(201);

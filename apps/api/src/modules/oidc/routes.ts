@@ -31,6 +31,7 @@ import { getPublicAppOrigin } from "../../lib/public-url.ts";
 import { db } from "@appstrate/db/client";
 import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH } from "@appstrate/db/password-policy";
 import { user, spaces } from "@appstrate/db/schema";
+import { validateSpaceInOrg } from "../../middleware/space-context.ts";
 import { getOrgSettings, getOrgMember } from "../../services/organizations.ts";
 import { resolvePermissions } from "../../lib/permissions.ts";
 import type { OrgRole } from "../../types/index.ts";
@@ -138,77 +139,89 @@ const redirectUriSchema = z
   .url("redirectUris must be valid URLs")
   .refine(isValidRedirectUri, "redirectUri scheme or host is not allowed");
 
-const createOrgClientSchema = z.object({
-  level: z.literal("org"),
-  name: z.string().min(1).max(200),
-  redirectUris: z.array(redirectUriSchema).min(1),
-  postLogoutRedirectUris: z.array(redirectUriSchema).optional(),
-  scopes: z.array(z.string().min(1)).optional(),
-  referencedOrgId: z.string().min(1),
-  isFirstParty: z.boolean().optional(),
-  allowSignup: z.boolean().optional(),
-  signupRole: z.enum(SIGNUP_ROLE_ALLOWED).optional(),
-});
+const createOrgClientSchema = z
+  .object({
+    level: z.literal("org"),
+    name: z.string().min(1).max(200),
+    redirectUris: z.array(redirectUriSchema).min(1),
+    postLogoutRedirectUris: z.array(redirectUriSchema).optional(),
+    scopes: z.array(z.string().min(1)).optional(),
+    referencedOrgId: z.string().min(1),
+    isFirstParty: z.boolean().optional(),
+    allowSignup: z.boolean().optional(),
+    signupRole: z.enum(SIGNUP_ROLE_ALLOWED).optional(),
+  })
+  .strict();
 
-const createSpaceClientSchema = z.object({
-  level: z.literal("space"),
-  name: z.string().min(1).max(200),
-  redirectUris: z.array(redirectUriSchema).min(1),
-  postLogoutRedirectUris: z.array(redirectUriSchema).optional(),
-  scopes: z.array(z.string().min(1)).optional(),
-  referencedSpaceId: z.string().min(1),
-  isFirstParty: z.boolean().optional(),
-  // Unified signup opt-in. Secure-by-default → when omitted, the service
-  // stores `false` and fresh end-user sign-ins are rejected until the
-  // admin pre-creates them via the headless API.
-  allowSignup: z.boolean().optional(),
-  // Passed through to the service so we can reject it with a clear 400
-  // (signupRole is only meaningful on org-level clients).
-  signupRole: z.enum(SIGNUP_ROLE_ALLOWED).optional(),
-});
+const createSpaceClientSchema = z
+  .object({
+    level: z.literal("space"),
+    name: z.string().min(1).max(200),
+    redirectUris: z.array(redirectUriSchema).min(1),
+    postLogoutRedirectUris: z.array(redirectUriSchema).optional(),
+    scopes: z.array(z.string().min(1)).optional(),
+    referencedSpaceId: z.string().min(1),
+    isFirstParty: z.boolean().optional(),
+    // Unified signup opt-in. Secure-by-default → when omitted, the service
+    // stores `false` and fresh end-user sign-ins are rejected until the
+    // admin pre-creates them via the headless API.
+    allowSignup: z.boolean().optional(),
+    // Passed through to the service so we can reject it with a clear 400
+    // (signupRole is only meaningful on org-level clients).
+    signupRole: z.enum(SIGNUP_ROLE_ALLOWED).optional(),
+  })
+  .strict();
 
 export const createOAuthClientSchema = z.discriminatedUnion("level", [
   createOrgClientSchema,
   createSpaceClientSchema,
 ]);
 
-export const smtpConfigUpsertSchema = z.object({
-  host: z.string().min(1).max(253),
-  port: z.number().int().min(1).max(65535),
-  username: z.string().min(1).max(320),
-  pass: z.string().min(1).max(1024),
-  fromAddress: z.email(),
-  // Reject CRLF/quotes to prevent email header injection — value is
-  // concatenated into `"${fromName}" <${fromAddress}>` at send time.
-  fromName: z
-    .string()
-    .max(200)
-    .regex(/^[^"\r\n]*$/, "fromName must not contain quotes or line breaks")
-    .optional(),
-  secureMode: z.enum(["auto", "tls", "starttls", "none"]).optional(),
-});
+export const smtpConfigUpsertSchema = z
+  .object({
+    host: z.string().min(1).max(253),
+    port: z.number().int().min(1).max(65535),
+    username: z.string().min(1).max(320),
+    pass: z.string().min(1).max(1024),
+    fromAddress: z.email(),
+    // Reject CRLF/quotes to prevent email header injection — value is
+    // concatenated into `"${fromName}" <${fromAddress}>` at send time.
+    fromName: z
+      .string()
+      .max(200)
+      .regex(/^[^"\r\n]*$/, "fromName must not contain quotes or line breaks")
+      .optional(),
+    secureMode: z.enum(["auto", "tls", "starttls", "none"]).optional(),
+  })
+  .strict();
 
-export const smtpConfigTestSchema = z.object({
-  to: z.email(),
-});
+export const smtpConfigTestSchema = z
+  .object({
+    to: z.email(),
+  })
+  .strict();
 
 const socialProviderIdSchema = z.enum(SOCIAL_PROVIDER_IDS);
 
-export const socialProviderUpsertSchema = z.object({
-  clientId: z.string().min(1).max(512),
-  clientSecret: z.string().min(1).max(2048),
-  scopes: z.array(z.string().min(1).max(128)).max(32).optional(),
-});
+export const socialProviderUpsertSchema = z
+  .object({
+    clientId: z.string().min(1).max(512),
+    clientSecret: z.string().min(1).max(2048),
+    scopes: z.array(z.string().min(1).max(128)).max(32).optional(),
+  })
+  .strict();
 
-export const updateOAuthClientSchema = z.object({
-  redirectUris: z.array(redirectUriSchema).min(1).optional(),
-  postLogoutRedirectUris: z.array(redirectUriSchema).optional(),
-  scopes: z.array(z.string().min(1)).optional(),
-  disabled: z.boolean().optional(),
-  isFirstParty: z.boolean().optional(),
-  allowSignup: z.boolean().optional(),
-  signupRole: z.enum(SIGNUP_ROLE_ALLOWED).optional(),
-});
+export const updateOAuthClientSchema = z
+  .object({
+    redirectUris: z.array(redirectUriSchema).min(1).optional(),
+    postLogoutRedirectUris: z.array(redirectUriSchema).optional(),
+    scopes: z.array(z.string().min(1)).optional(),
+    disabled: z.boolean().optional(),
+    isFirstParty: z.boolean().optional(),
+    allowSignup: z.boolean().optional(),
+    signupRole: z.enum(SIGNUP_ROLE_ALLOWED).optional(),
+  })
+  .strict();
 
 // ─── Shared page context loader ───────────────────────────────────────────────
 
@@ -474,12 +487,7 @@ export function createOidcRouter() {
         }
       } else {
         // space-level: the space must belong to the caller's org.
-        const [space] = await db
-          .select({ orgId: spaces.orgId })
-          .from(spaces)
-          .where(eq(spaces.id, data.referencedSpaceId))
-          .limit(1);
-        if (!space || space.orgId !== orgId) {
+        if (!(await validateSpaceInOrg(data.referencedSpaceId, orgId))) {
           throw forbidden("referencedSpaceId must belong to the current organization");
         }
       }
@@ -620,14 +628,20 @@ export function createOidcRouter() {
   // row, verification emails, magic-link, and reset-password are disabled for
   // that space's clients. See `services/smtp.ts` for the resolver.
 
+  /**
+   * Resolve `:id` as a space of the caller's org, or refuse.
+   *
+   * Delegates to the canonical `validateSpaceInOrg` rather than repeating its
+   * SELECT: this copy used to run the query with NO id-shape guard, so a
+   * retired `app_` id — the one input `assertSpaceId` exists to diagnose —
+   * answered a generic 404 instead of naming the un-run `app_` → `spc_`
+   * migration. A well-formed `spc_` id that names no row of this org is still
+   * a 404; a malformed id is now a 400, as it is on every other space-scoped
+   * surface.
+   */
   const assertSpaceBelongsToOrg = async (c: Context<AppEnv>, spaceId: string) => {
-    const orgId = c.get("orgId");
-    const [space] = await db
-      .select({ orgId: spaces.orgId })
-      .from(spaces)
-      .where(eq(spaces.id, spaceId))
-      .limit(1);
-    if (!space || space.orgId !== orgId) throw notFound("Space not found");
+    const space = await validateSpaceInOrg(spaceId, c.get("orgId"));
+    if (!space) throw notFound("Space not found");
   };
 
   router.get(

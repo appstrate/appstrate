@@ -640,6 +640,10 @@ export const oidcPaths = {
             },
           },
         },
+        "400": {
+          description:
+            "Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` \u2192 `spc_` migration).",
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { description: "Space or configuration not found" },
         "429": { $ref: "#/components/responses/RateLimited" },
@@ -702,6 +706,10 @@ export const oidcPaths = {
       security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
       responses: {
         "204": { description: "Deleted" },
+        "400": {
+          description:
+            "Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` \u2192 `spc_` migration).",
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { description: "Space or configuration not found" },
         "429": { $ref: "#/components/responses/RateLimited" },
@@ -777,6 +785,10 @@ export const oidcPaths = {
               schema: { $ref: "#/components/schemas/SocialProviderView" },
             },
           },
+        },
+        "400": {
+          description:
+            "Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` \u2192 `spc_` migration).",
         },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { description: "Space or configuration not found" },
@@ -855,6 +867,10 @@ export const oidcPaths = {
       security: [{ cookieAuth: [] }, { bearerApiKey: [] }],
       responses: {
         "204": { description: "Deleted" },
+        "400": {
+          description:
+            "Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` \u2192 `spc_` migration).",
+        },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { description: "Space or configuration not found" },
         "429": { $ref: "#/components/responses/RateLimited" },

@@ -321,7 +321,7 @@ describe("Spaces API", () => {
     // (`PUT /api/agents/{scope}/{name}/input-settings`, which validates them
     // against the manifest input schema and refuses an unsatisfiable locked
     // required field). This generic route must not be a second, unvalidated one.
-    it("ignores an `input_settings` key in the body — it is not a write path for stored input values", async () => {
+    it("refuses an `input_settings` key in the body — it is not a write path for stored input values", async () => {
       await seedPackage({ id: "@testorg/no-input-settings-write", orgId: ctx.orgId });
       await seedInstalledPackage(ctx.defaultSpaceId, "@testorg/no-input-settings-write");
 
@@ -329,7 +329,11 @@ describe("Spaces API", () => {
         input_settings: { values: { hello: "world" }, locked: [] },
       });
 
-      expect(res.status).toBe(200);
+      // The body is `.strict()`, so this is a 400 that names the field rather
+      // than a 200 that quietly drops it — the caller learns its write did not
+      // happen instead of believing it did.
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({ code: "validation_failed" });
       const [row] = await db
         .select({ inputSettings: spacePackages.inputSettings })
         .from(spacePackages)
@@ -366,6 +370,48 @@ describe("Spaces API", () => {
         .from(spacePackages)
         .where(installedRowWhere(packageId));
       expect(row?.modelId).toBeNull();
+    });
+
+    // Same refusal, same message, its own wire field — the invariant the
+    // hoisted `validateGenerationOverride` establishes across all three routes
+    // that run this pipeline (see the sibling case in `agents.test.ts`).
+    it("names the generationConfig field when no model resolves at all", async () => {
+      const packageId = "@testorg/no-model-generation-agent";
+      await seedPackage({ id: packageId, orgId: ctx.orgId });
+      await seedInstalledPackage(ctx.defaultSpaceId, packageId);
+
+      const res = await putPackage(packageId, {
+        modelId: null,
+        generationConfig: { temperature: 0.4 },
+      });
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({
+        code: "invalid_request",
+        param: "generationConfig",
+        detail: "A model must be configured before generation settings can be saved",
+      });
+    });
+
+    // Control for the reconcile rule the three routes now state identically:
+    // a patch that does NOT carry `modelId` cannot have changed the selected
+    // model, so stored generation settings are left exactly as they were —
+    // never silently rewritten by an unrelated field's update.
+    it("leaves stored generation settings untouched on a patch without modelId", async () => {
+      const packageId = "@testorg/untouched-generation-agent";
+      await seedPackage({ id: packageId, orgId: ctx.orgId });
+      await seedInstalledPackage(ctx.defaultSpaceId, packageId, {
+        generationConfig: { temperature: 0.7 },
+      });
+
+      const res = await putPackage(packageId, { enabled: false });
+
+      expect(res.status).toBe(200);
+      const [row] = await db
+        .select({ generation: spacePackages.generationConfig })
+        .from(spacePackages)
+        .where(installedRowWhere(packageId));
+      expect(row?.generation).toEqual({ temperature: 0.7 });
     });
 
     it("reconciles persisted generation defaults when the model changes", async () => {

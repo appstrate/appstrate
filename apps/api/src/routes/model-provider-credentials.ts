@@ -43,28 +43,32 @@ import {
 import { readJsonBody } from "../lib/request-body.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 
-export const createSchema = z.object({
-  /**
-   * Optional. When omitted, the server derives the label from the provider's
-   * `displayName`. Either way it is deduped against existing org credentials
-   * (suffixed ` (2)`, ` (3)`, … on collision). See {@link dedupeCredentialLabel}.
-   */
-  label: z.string().min(1).optional(),
-  providerId: z.string().min(1, "providerId is required"),
-  apiKey: z.string().min(1, "apiKey is required"),
-  /** Required only for providers with `baseUrlOverridable: true` (e.g. `openai-compatible`). */
-  baseUrlOverride: z.url({ error: "baseUrlOverride must be a valid URL" }).optional().nullable(),
-});
+export const createSchema = z
+  .object({
+    /**
+     * Optional. When omitted, the server derives the label from the provider's
+     * `displayName`. Either way it is deduped against existing org credentials
+     * (suffixed ` (2)`, ` (3)`, … on collision). See {@link dedupeCredentialLabel}.
+     */
+    label: z.string().min(1).optional(),
+    providerId: z.string().min(1, "providerId is required"),
+    apiKey: z.string().min(1, "apiKey is required"),
+    /** Required only for providers with `baseUrlOverridable: true` (e.g. `openai-compatible`). */
+    baseUrlOverride: z.url({ error: "baseUrlOverride must be a valid URL" }).optional().nullable(),
+  })
+  .strict();
 
 /**
  * `apiShape` and `baseUrl` are intentionally absent — they are pinned by the
  * canonical `providerId` selected at create time and cannot be mutated.
  * To switch providers, delete the credential and re-create it.
  */
-export const updateSchema = z.object({
-  label: z.string().min(1).optional(),
-  apiKey: z.string().min(1).optional(),
-});
+export const updateSchema = z
+  .object({
+    label: z.string().min(1).optional(),
+    apiKey: z.string().min(1).optional(),
+  })
+  .strict();
 
 /** PG referential-integrity violation on delete. PostgreSQL raises
  * `foreign_key_violation` (23503); PGlite (tier 0) surfaces `ON DELETE
@@ -87,12 +91,14 @@ function pgErrorCode(err: unknown): string | undefined {
   return undefined;
 }
 
-export const testInlineSchema = z.object({
-  apiShape: z.string().min(1),
-  baseUrl: z.url(),
-  apiKey: z.string().optional(),
-  existingKeyId: z.string().optional(),
-});
+export const testInlineSchema = z
+  .object({
+    apiShape: z.string().min(1),
+    baseUrl: z.url(),
+    apiKey: z.string().optional(),
+    existingKeyId: z.string().optional(),
+  })
+  .strict();
 
 /**
  * Build the picker-facing model list for one provider. The vendored

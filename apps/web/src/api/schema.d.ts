@@ -19010,6 +19010,13 @@ export interface operations {
                     "application/json": components["schemas"]["SmtpConfigView"];
                 };
             };
+            /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
             404: {
@@ -19092,6 +19099,13 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
             404: {
@@ -19166,6 +19180,13 @@ export interface operations {
                     "application/json": components["schemas"]["SocialProviderView"];
                 };
             };
+            /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             403: components["responses"]["Forbidden"];
             /** @description Space or configuration not found */
             404: {
@@ -19238,6 +19259,13 @@ export interface operations {
         responses: {
             /** @description Deleted */
             204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Malformed space id — `spc_` + a UUID is the only accepted shape (a retired `app_` id names the un-run `app_` → `spc_` migration). */
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };

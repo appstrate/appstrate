@@ -45,9 +45,43 @@
  * the dependency edge runs `connect → afps-runtime`; the CLI path cannot
  * import `@appstrate/connect` without a cycle. The sidecar already depends
  * on `@appstrate/afps-runtime`, so both consumers reach this module freely.
+ *
+ * ## Why this is not `@appstrate/afps-shared`'s `guardedFetch`
+ *
+ * There ARE two redirect followers in this codebase and that is deliberate, so
+ * this section exists to stop the question being reopened. `guardedFetch` is
+ * the primitive for a request whose HOST is untrusted; this follower is the
+ * primitive for a request whose CREDENTIAL is the asset. Three differences are
+ * contractual, not drift, and the credential-proxy oracle
+ * (`runtime-pi/sidecar/test/credential-proxy.test.ts`) pins each:
+ *
+ *   - **Return shape.** `guardedFetch` is `fetch`-shaped — it returns a bare
+ *     `Response`, is re-exported from the published `@appstrate/core/ssrf`, and
+ *     `@appstrate/connect`'s DCR client consumes it CAST as `typeof fetch`.
+ *     This follower must return `finalUrl` (callers drive OAuth-code / CAS-
+ *     ticket / magic-link chains off the terminal hop URL, #471) and `hops`
+ *     (the operator debug envelope, #404). Widening the published signature to
+ *     carry those would break every `typeof fetch` consumer.
+ *   - **Credential policy.** `guardedFetch` strips credentials on ANY
+ *     cross-origin hop and, once a `validateHop` contract is declared, drops
+ *     the request body too. This follower deliberately FORWARDS credentials
+ *     across origins that are inside a declared `authorized_uris` boundary —
+ *     that is what makes multi-host APIs (Dropbox `api.` ⇄ `content.`) work.
+ *     Folding the two would mean an option that disables the shared
+ *     primitive's central safety property for one caller.
+ *   - **Cookie continuity.** Every hop's `Set-Cookie` is merged into a
+ *     per-integration jar and recomposed onto the next hop (#473). The shared
+ *     primitive has no jar and no reason to grow one.
+ *
+ * What the two DO share is now actually shared: the SSRF blocklist
+ * (`@appstrate/afps-shared/ssrf`), the DNS-rebind check (`./ssrf-dns`) and the
+ * redirect budget ({@link MAX_REDIRECTS}). The one capability this follower
+ * still lacks is `guardedFetch`'s connection PIN to the DNS-validated address
+ * — see {@link refuseSsrfUrl} for why it cannot simply be lifted here.
  */
 
 import { isBlockedUrl } from "@appstrate/afps-shared/ssrf";
+import { DEFAULT_MAX_REDIRECTS } from "@appstrate/afps-shared/guarded-fetch";
 import { resolveAndCheckHost, type HostResolver } from "@appstrate/afps-shared/ssrf-dns";
 import { matchesAuthorizedUriSpec, stripUserInfoAndFragment } from "./http-call-core.ts";
 
@@ -59,8 +93,15 @@ export { stripUserInfoAndFragment };
 
 export type { HostResolver } from "@appstrate/afps-shared/ssrf-dns";
 
-/** Maximum redirect hops the follower will chase before giving up. */
-export const MAX_REDIRECTS = 10;
+/**
+ * Maximum redirect hops the follower will chase before giving up.
+ *
+ * Re-exported from `@appstrate/afps-shared` rather than spelled again: this
+ * used to be an independent `10` while `guardedFetch`'s default was `5`, two
+ * budgets for the same job that nothing held together. The shared constant is
+ * now the single number and this name is its local alias.
+ */
+export const MAX_REDIRECTS = DEFAULT_MAX_REDIRECTS;
 
 /**
  * Check a target URL against a list of `authorized_uris` patterns using
@@ -157,10 +198,22 @@ export function hostLiterallyAllowlisted(url: string, specs: string[]): boolean 
  * names), then resolve every A/AAAA record and refuse if ANY lands in a
  * blocked range (fail closed on resolution failure). A DNS name whose
  * record points inside (10.x, 169.254.169.254, …) passes `isBlockedUrl`
- * alone — this closes the rebind-to-internal vector. The connection is
- * delegated to `fetch`, which re-resolves, so this is fail-closed
- * defence-in-depth with a documented residual TOCTOU, not a full
- * resolve-and-pin.
+ * alone — this closes the rebind-to-internal vector.
+ *
+ * RESIDUAL TOCTOU, stated rather than papered over: the connection is delegated
+ * to the caller's `fetchFn`, which re-resolves the name, so a record that flips
+ * between this check and the connect is not caught here.
+ * `@appstrate/afps-shared`'s `guardedFetch` closes exactly this by rewriting the
+ * request URL to the validated address and carrying the logical hostname on
+ * `Host` + `tls.serverName`. It cannot be lifted into this follower as things
+ * stand: the pin requires OWNING the socket semantics (Bun's global `fetch` and
+ * its `tls` extension), and every caller here supplies its own `fetchFn` — the
+ * sidecar threads one through `AppDeps` and may also set a Bun `proxy` on the
+ * init, whose ACLs match on hostname. Pinning behind a
+ * `fetchFn === globalThis.fetch` test would give production a security
+ * mechanism that no test in the oracle suite can reach, because every one of
+ * them injects a stub. Closing it means giving this module a real transport
+ * seam first.
  */
 async function refuseSsrfUrl(url: string, resolveHost?: HostResolver): Promise<PreflightResult> {
   const blocked: PreflightResult = {

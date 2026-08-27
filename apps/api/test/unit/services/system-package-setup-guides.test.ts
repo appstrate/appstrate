@@ -44,6 +44,12 @@ interface Pkg {
 async function loadPackages(): Promise<Pkg[]> {
   const { packages, warnings } = await loadSystemPackages(ARCHIVE_DIR);
   expect(warnings).toEqual([]);
+  // `loadSystemPackages` swallows a `readdir` failure and returns an empty
+  // set, and ARCHIVE_DIR is a five-level relative climb — so a moved test
+  // file or a renamed directory would leave every assertion below comparing
+  // `[]` to `[]` and reporting success over zero packages. Anchor the whole
+  // file on the archive actually having been read.
+  expect(packages.length).toBeGreaterThan(0);
   return packages.map((entry) => {
     const manifest = entry.manifest as Record<string, unknown>;
     const auths = (manifest.auths ?? {}) as Record<string, Record<string, unknown>>;

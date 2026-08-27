@@ -638,7 +638,6 @@ describe("realtime SSE routes (integration)", () => {
         },
         body: JSON.stringify({
           name: "SSE Test Key",
-          spaceId: ctx.defaultSpaceId,
         }),
       });
       expect(res.status).toBe(201);

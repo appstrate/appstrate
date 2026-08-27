@@ -751,4 +751,85 @@ describeRequiresRedis("scheduler service", () => {
       expect(row!.enabled).toBe(true);
     });
   });
+
+  // ── Cross-space isolation (same org, different space) ────
+  //
+  // Every scheduler CRUD predicate is scoped by BOTH `orgId` and `spaceId`
+  // (`scopedWhere`). A cross-ORG case is satisfied by the org half alone, so
+  // it cannot tell a present `spaceId` predicate from a missing one — drop
+  // any of them and a second space in the same org sees, edits and deletes
+  // the first space's schedules. These cases are the only thing standing
+  // between that and a silent org-wide leak. Mirrors the shape of
+  // `routes/notifications.test.ts` → "cross-space isolation".
+  describe("cross-space isolation", () => {
+    let spaceBId: string;
+    let scheduleIdInA: string;
+
+    beforeEach(async () => {
+      const spaceB = await seedSpace({ orgId, name: "Space B" });
+      spaceBId = spaceB.id;
+      const created = await createSchedule(
+        { orgId: orgId, spaceId: defaultSpaceId },
+        packageId,
+        actor,
+        { name: "Space A Schedule", cronExpression: "0 * * * *" },
+      );
+      scheduleIdInA = created.id;
+    });
+
+    it("does not list a schedule belonging to another space", async () => {
+      expect(await listSchedules({ orgId: orgId, spaceId: spaceBId }, actor)).toHaveLength(0);
+      // Control: the same org, the owning space — still there.
+      expect(await listSchedules({ orgId: orgId, spaceId: defaultSpaceId }, actor)).toHaveLength(1);
+    });
+
+    it("does not list a package's schedules from another space", async () => {
+      expect(
+        await listPackageSchedules({ orgId: orgId, spaceId: spaceBId }, packageId, actor),
+      ).toHaveLength(0);
+      expect(
+        await listPackageSchedules({ orgId: orgId, spaceId: defaultSpaceId }, packageId, actor),
+      ).toHaveLength(1);
+    });
+
+    it("does not resolve a schedule by id from another space", async () => {
+      expect(
+        await getSchedule(scheduleIdInA, { orgId: orgId, spaceId: spaceBId }, actor),
+      ).toBeNull();
+      expect(
+        await getSchedule(scheduleIdInA, { orgId: orgId, spaceId: defaultSpaceId }, actor),
+      ).not.toBeNull();
+    });
+
+    // `updateSchedule` gates on its own `getSchedule(id, scope)` read and
+    // returns null on a miss, so the UPDATE's `spaceId` predicate is
+    // defence-in-depth BEHIND that read and cannot be reached independently
+    // through this function. What this case pins is the caller-visible half:
+    // a cross-space update is a null no-op, never a silent success.
+    it("reports no update issued from another space, and the row is unchanged", async () => {
+      expect(
+        await updateSchedule({ orgId: orgId, spaceId: spaceBId }, scheduleIdInA, {
+          name: "Hijacked",
+        }),
+      ).toBeNull();
+      const survivor = await getSchedule(
+        scheduleIdInA,
+        { orgId: orgId, spaceId: defaultSpaceId },
+        actor,
+      );
+      expect(survivor?.name).toBe("Space A Schedule");
+    });
+
+    it("reports no delete from another space, and the row survives", async () => {
+      expect(await deleteSchedule({ orgId: orgId, spaceId: spaceBId }, scheduleIdInA)).toBe(false);
+      expect(
+        await getSchedule(scheduleIdInA, { orgId: orgId, spaceId: defaultSpaceId }, actor),
+      ).not.toBeNull();
+      // Control: the identical call from the OWNING space does delete, so
+      // "false + survives" above is the predicate at work, not a broken id.
+      expect(await deleteSchedule({ orgId: orgId, spaceId: defaultSpaceId }, scheduleIdInA)).toBe(
+        true,
+      );
+    });
+  });
 });

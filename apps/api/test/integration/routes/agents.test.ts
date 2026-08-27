@@ -1276,6 +1276,28 @@ describe("Agents API", () => {
       expect(await get.json()).toMatchObject({ modelId: null, generation: null });
     });
 
+    // The "no model resolves" refusal was written out four times across
+    // `agents.ts`, `spaces.ts` and the two schedule handlers — same literal
+    // message, and only two of the four pointed the RFC 9457 `param` at the
+    // field the client actually sent. All four now go through one
+    // `validateGenerationOverride`, so every route names its own wire field.
+    it("names the generation field when no model resolves at all", async () => {
+      await seedModelAgent();
+
+      const res = await app.request("/api/agents/@myorg/model-agent/model", {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ modelId: null, generation: { temperature: 0.4 } }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({
+        code: "invalid_request",
+        param: "generation",
+        detail: "A model must be configured before generation settings can be saved",
+      });
+    });
+
     it("reconciles persisted generation defaults when the model changes", async () => {
       await seedModelAgent();
       await updateInstalledPackage(

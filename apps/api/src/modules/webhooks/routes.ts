@@ -14,9 +14,6 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
-import { db } from "@appstrate/db/client";
-import { spaces } from "@appstrate/db/schema";
 import type { AppEnv } from "../../types/index.ts";
 import { rateLimit } from "../../middleware/rate-limit.ts";
 import { idempotency } from "../../middleware/idempotency.ts";
@@ -38,65 +35,74 @@ import { readJsonBody } from "../../lib/request-body.ts";
 import { requireModulePermission } from "@appstrate/core/permissions";
 import { getOrgScope, type SpaceScope, type OrgScope } from "../../lib/scope.ts";
 import { assertSpaceId } from "../../lib/ids.ts";
+import { validateSpaceInOrg } from "../../middleware/space-context.ts";
 import { parseListPagination } from "../../lib/list-query.ts";
 
 /**
  * Assert that a space belongs to the given org.
  * Throws `forbidden` if the space does not exist or belongs to another org.
+ *
+ * Delegates to the canonical `validateSpaceInOrg` — same SELECT, plus the
+ * `assertSpaceId` shape guard this copy did not have. Both call sites already
+ * assert the shape with a `spaceId` param name, so that guard is a backstop
+ * here rather than the primary diagnostic.
  */
 async function assertSpaceBelongsToOrg(spaceId: string, orgId: string): Promise<void> {
-  const [space] = await db
-    .select({ orgId: spaces.orgId })
-    .from(spaces)
-    .where(eq(spaces.id, spaceId))
-    .limit(1);
-  if (!space || space.orgId !== orgId) {
+  if (!(await validateSpaceInOrg(spaceId, orgId))) {
     throw forbidden("spaceId must belong to the current organization");
   }
 }
 
-const createOrgWebhookSchema = z.object({
-  level: z.literal("org"),
-  url: z.url("url must be a valid URL"),
-  events: z.array(webhookEventSchema).min(1, "events is required"),
-  packageId: z.string().nullable().optional(),
-  payloadMode: z.enum(["full", "summary"]).optional(),
-  enabled: z.boolean().optional(),
-});
+const createOrgWebhookSchema = z
+  .object({
+    level: z.literal("org"),
+    url: z.url("url must be a valid URL"),
+    events: z.array(webhookEventSchema).min(1, "events is required"),
+    packageId: z.string().nullable().optional(),
+    payloadMode: z.enum(["full", "summary"]).optional(),
+    enabled: z.boolean().optional(),
+  })
+  .strict();
 
-const createSpaceWebhookSchema = z.object({
-  level: z.literal("space"),
-  // Shape deliberately NOT re-encoded here: `assertSpaceId` (called by the
-  // handler right after parse) is the single implementation of the space-id
-  // shape check AND of its two diagnostics — a retired `app_` id must say "run
-  // the `app_` → `spc_` migration" on this route exactly as it does on
-  // `X-Space-Id`. A `.regex()` here would win the race and answer with a
-  // generic message instead.
-  spaceId: z.string(),
-  url: z.url("url must be a valid URL"),
-  events: z.array(webhookEventSchema).min(1, "events is required"),
-  packageId: z.string().nullable().optional(),
-  payloadMode: z.enum(["full", "summary"]).optional(),
-  enabled: z.boolean().optional(),
-});
+const createSpaceWebhookSchema = z
+  .object({
+    level: z.literal("space"),
+    // Shape deliberately NOT re-encoded here: `assertSpaceId` (called by the
+    // handler right after parse) is the single implementation of the space-id
+    // shape check AND of its two diagnostics — a retired `app_` id must say "run
+    // the `app_` → `spc_` migration" on this route exactly as it does on
+    // `X-Space-Id`. A `.regex()` here would win the race and answer with a
+    // generic message instead.
+    spaceId: z.string(),
+    url: z.url("url must be a valid URL"),
+    events: z.array(webhookEventSchema).min(1, "events is required"),
+    packageId: z.string().nullable().optional(),
+    payloadMode: z.enum(["full", "summary"]).optional(),
+    enabled: z.boolean().optional(),
+  })
+  .strict();
 
 export const createWebhookSchema = z.discriminatedUnion("level", [
   createOrgWebhookSchema,
   createSpaceWebhookSchema,
 ]);
 
-export const updateWebhookSchema = z.object({
-  url: z.url().optional(),
-  events: z.array(webhookEventSchema).min(1).optional(),
-  packageId: z.string().nullable().optional(),
-  payloadMode: z.enum(["full", "summary"]).optional(),
-  enabled: z.boolean().optional(),
-});
+export const updateWebhookSchema = z
+  .object({
+    url: z.url().optional(),
+    events: z.array(webhookEventSchema).min(1).optional(),
+    packageId: z.string().nullable().optional(),
+    payloadMode: z.enum(["full", "summary"]).optional(),
+    enabled: z.boolean().optional(),
+  })
+  .strict();
 
 /** Optional body of `POST /api/webhooks/{id}/rotate`. */
-export const rotateSecretSchema = z.object({
-  windowSeconds: z.number().int().positive().optional(),
-});
+export const rotateSecretSchema = z
+  .object({
+    windowSeconds: z.number().int().positive().optional(),
+  })
+  .strict();
 
 export function createWebhooksRouter() {
   const router = new Hono<AppEnv>();

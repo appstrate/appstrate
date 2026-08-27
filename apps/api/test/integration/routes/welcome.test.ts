@@ -131,7 +131,12 @@ describe("Welcome API", () => {
       expect(await res.text()).toBe("");
     });
 
-    it("handles extra fields in request body gracefully", async () => {
+    // This used to assert a 204 for `{ displayName, extraField }` — "handles
+    // extra fields gracefully". Silently dropping a field the caller sent IS
+    // the failure mode, not graceful handling: the SPA's only caller sends
+    // `{ displayName }` and nothing else, so anything extra is a typo or a
+    // stale client, and both are worth a 400 that names the field.
+    it("refuses an unknown field in the request body", async () => {
       const testUser = await createTestUser();
 
       const res = await app.request("/api/welcome/setup", {
@@ -143,7 +148,13 @@ describe("Welcome API", () => {
         body: JSON.stringify({ displayName: "Valid", extraField: "ignored" }),
       });
 
-      expect(res.status).toBe(204);
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as {
+        code?: string;
+        errors?: Array<{ code?: string }>;
+      };
+      expect(body.code).toBe("validation_failed");
+      expect(body.errors?.some((e) => e.code === "unknown_field")).toBe(true);
     });
 
     // Issue #172 (extension) — same-class as PATCH /api/profile.

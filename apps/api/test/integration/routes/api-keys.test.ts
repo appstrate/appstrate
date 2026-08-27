@@ -44,7 +44,6 @@ describe("API Keys API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "Test Key",
-          spaceId: ctx.defaultSpaceId,
         }),
       });
 
@@ -66,13 +65,16 @@ describe("API Keys API", () => {
   });
 
   describe("POST /api/api-keys", () => {
-    it("creates an API key with name and spaceId", async () => {
+    // The key is scoped by `X-Space-Id`, never by a body field: the spec says
+    // so and the handler reads `getSpaceScope(c)`. The body is `.strict()`, so a
+    // `spaceId` sent here is a 400 rather than a value the server ignores while
+    // the caller believes it chose the space.
+    it("creates an API key scoped by the X-Space-Id header", async () => {
       const res = await app.request("/api/api-keys", {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "My API Key",
-          spaceId: ctx.defaultSpaceId,
         }),
       });
 
@@ -89,7 +91,6 @@ describe("API Keys API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "Prefixed Key",
-          spaceId: ctx.defaultSpaceId,
         }),
       });
 
@@ -108,7 +109,6 @@ describe("API Keys API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "To Delete",
-          spaceId: ctx.defaultSpaceId,
         }),
       });
       const { id } = (await createRes.json()) as any;
@@ -129,7 +129,6 @@ describe("API Keys API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "Ephemeral Key",
-          spaceId: ctx.defaultSpaceId,
         }),
       });
       const { id } = (await createRes.json()) as any;
@@ -157,7 +156,6 @@ describe("API Keys API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "Scoped Key",
-          spaceId: ctx.defaultSpaceId,
           scopes: ["agents:read", "agents:run", "runs:read"],
         }),
       });
@@ -176,7 +174,6 @@ describe("API Keys API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "Full Access Key",
-          spaceId: ctx.defaultSpaceId,
         }),
       });
 
@@ -194,7 +191,6 @@ describe("API Keys API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "Session Scope Key",
-          spaceId: ctx.defaultSpaceId,
           scopes: ["agents:read", "org:delete", "billing:manage", "members:invite"],
         }),
       });
@@ -212,7 +208,6 @@ describe("API Keys API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "Invalid Scope Key",
-          spaceId: ctx.defaultSpaceId,
           scopes: ["agents:read", "not-a-scope", "invalid:permission"],
         }),
       });
@@ -236,7 +231,6 @@ describe("API Keys API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "Never Minted",
-          spaceId: ctx.defaultSpaceId,
           scopes: ["documents:read"],
         }),
       });
@@ -256,7 +250,6 @@ describe("API Keys API", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "Listed Scoped Key",
-          spaceId: ctx.defaultSpaceId,
           scopes: ["agents:read", "agents:run"],
         }),
       });

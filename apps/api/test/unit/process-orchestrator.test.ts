@@ -135,13 +135,6 @@ describe("ProcessOrchestrator", () => {
     });
   });
 
-  describe("ensureImages", () => {
-    it("is a no-op", async () => {
-      orchestrator = new ProcessOrchestrator();
-      await orchestrator.ensureImages(["some-image:latest"]); // should not throw
-    });
-  });
-
   describe("cleanupOrphans", () => {
     beforeEach(async () => {
       await resetDataDir();

@@ -33,41 +33,43 @@ import { getOrgModelProviderCredential } from "../services/model-providers/crede
  * authorization servers only allowlist `http://localhost:PORT/...`
  * redirect_uris, so any platform-hosted callback URL is rejected.
  */
-export const importBody = z.object({
-  providerId: z
-    .string()
-    .min(1)
-    .refine(
-      (id) => isOAuthModelProvider(id),
-      "providerId must be a registered OAuth model provider",
-    ),
-  /**
-   * Optional. When omitted, the server derives the label from the provider's
-   * `displayName` and dedupes against existing org credentials.
-   * `@appstrate/connect-helper` no longer invents one client-side.
-   */
-  label: z.string().min(1).max(120).optional(),
-  accessToken: z.string().min(1, "accessToken is required"),
-  refreshToken: z.string().min(1, "refreshToken is required"),
-  /** Unix ms timestamp; CLI converts pi-ai's `expires` field as-is. */
-  expiresAt: z.number().int().positive().optional().nullable(),
-  /**
-   * Account email associated with the credential. Either forwarded by
-   * the CLI from the OAuth response body, or re-derived server-side by
-   * the provider's `extractTokenIdentity` hook.
-   */
-  email: z.email().max(320).optional(),
-  /**
-   * Abstract account/tenant identifier — the well-known `accountId`
-   * slot from {@link ModelProviderIdentity}. When the CLI surfaces it
-   * from the OAuth response body we trust the body-level value (it's
-   * cheaper than re-decoding the token); otherwise the provider's
-   * `extractTokenIdentity` hook fills it in server-side. Constrained
-   * to a reasonable length — provider-specific format validation
-   * (e.g. "must be a UUID") belongs in the module's hook.
-   */
-  accountId: z.string().min(1).max(120).optional(),
-});
+export const importBody = z
+  .object({
+    providerId: z
+      .string()
+      .min(1)
+      .refine(
+        (id) => isOAuthModelProvider(id),
+        "providerId must be a registered OAuth model provider",
+      ),
+    /**
+     * Optional. When omitted, the server derives the label from the provider's
+     * `displayName` and dedupes against existing org credentials.
+     * `@appstrate/connect-helper` no longer invents one client-side.
+     */
+    label: z.string().min(1).max(120).optional(),
+    accessToken: z.string().min(1, "accessToken is required"),
+    refreshToken: z.string().min(1, "refreshToken is required"),
+    /** Unix ms timestamp; CLI converts pi-ai's `expires` field as-is. */
+    expiresAt: z.number().int().positive().optional().nullable(),
+    /**
+     * Account email associated with the credential. Either forwarded by
+     * the CLI from the OAuth response body, or re-derived server-side by
+     * the provider's `extractTokenIdentity` hook.
+     */
+    email: z.email().max(320).optional(),
+    /**
+     * Abstract account/tenant identifier — the well-known `accountId`
+     * slot from {@link ModelProviderIdentity}. When the CLI surfaces it
+     * from the OAuth response body we trust the body-level value (it's
+     * cheaper than re-decoding the token); otherwise the provider's
+     * `extractTokenIdentity` hook fills it in server-side. Constrained
+     * to a reasonable length — provider-specific format validation
+     * (e.g. "must be a UUID") belongs in the module's hook.
+     */
+    accountId: z.string().min(1).max(120).optional(),
+  })
+  .strict();
 
 /** providerId regex matches the registry's canonical ids. */
 const providerIdSchema = z
@@ -80,13 +82,15 @@ const providerIdSchema = z
  * registry can compare it against the documented schema — see
  * `apps/api/src/openapi/zod-schema-registry.ts`.
  */
-export const createPairingBody = z.object({
-  providerId: providerIdSchema.refine(
-    (id) => isOAuthModelProvider(id),
-    "providerId must be a registered OAuth model provider",
-  ),
-  credentialId: z.uuid().optional(),
-});
+export const createPairingBody = z
+  .object({
+    providerId: providerIdSchema.refine(
+      (id) => isOAuthModelProvider(id),
+      "providerId must be a registered OAuth model provider",
+    ),
+    credentialId: z.uuid().optional(),
+  })
+  .strict();
 
 /**
  * Pair-redeem handler for the canonical

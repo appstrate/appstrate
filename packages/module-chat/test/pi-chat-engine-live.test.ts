@@ -103,6 +103,27 @@ function openAiSse(): Response {
 
 const capture: Capture = { authHeaders: [], bodies: [] };
 
+/**
+ * When set, the provider stub PARKS the completions request instead of
+ * answering it, and reports whether the client end was torn down. That is the
+ * only externally visible consequence of the engine's `typedSession.abort()`:
+ * a stop unblocks the engine's own await either way, so only the upstream
+ * request going away distinguishes "the Pi loop was stopped" from "the Pi loop
+ * is still running with nobody listening".
+ *
+ * Module-level and reset in `afterEach`, for the same reason `mcpInitGate` is:
+ * a parked request left armed would hang every later turn in this file.
+ */
+let providerPark: {
+  /** Called once the completions request has landed (session is constructed). */
+  arrived: () => void;
+  /** Resolves true if the client aborted, false if the stub gave up waiting. */
+  settle: (clientAborted: boolean) => void;
+} | null = null;
+
+/** How long the parked request waits for a teardown before reporting none. */
+const PARK_GIVE_UP_MS = 3_000;
+
 const server = Bun.serve({
   port: 0,
   async fetch(req) {
@@ -110,7 +131,20 @@ const server = Bun.serve({
     if (path.endsWith("/chat/completions")) {
       capture.authHeaders.push(req.headers.get("authorization") ?? "");
       capture.bodies.push(await req.text());
-      return openAiSse();
+      if (!providerPark) return openAiSse();
+      const park = providerPark;
+      park.arrived();
+      return new Promise<Response>((resolve) => {
+        const giveUp = setTimeout(() => {
+          park.settle(false);
+          resolve(openAiSse());
+        }, PARK_GIVE_UP_MS);
+        req.signal.addEventListener("abort", () => {
+          clearTimeout(giveUp);
+          park.settle(true);
+          resolve(new Response(null, { status: 499 }));
+        });
+      });
     }
     if (path.startsWith("/api/mcp/")) return mcpResponse(req);
     return new Response("unexpected: " + path, { status: 404 });
@@ -121,6 +155,7 @@ const ORIGIN = `http://127.0.0.1:${server.port}`;
 afterAll(() => server.stop(true));
 afterEach(() => {
   mcpInitGate = null;
+  providerPark = null;
 });
 
 function orgModel(): OrgModel {
@@ -278,6 +313,47 @@ describe("runPiChat against a stub provider", () => {
     // retryable flag, no request id.
     expect(finish.messageMetadata?.appstrate?.turn).not.toHaveProperty("errorCategory");
     expect(JSON.stringify(chunks)).not.toContain("errorCategory");
+  }, 30_000);
+
+  it("tears the live Pi session down when a stop lands mid-inference", async () => {
+    // The two other stop cases in this file abort during CONSTRUCTION — one up
+    // front, one on a wedged MCP handshake — so neither ever reaches
+    // `createAgentSession`, and `typedSession.abort()` in the engine's catch
+    // was asserted nowhere. Delete it and every one of those cases still
+    // passes: the client gets its start/finish envelope, the slot is released
+    // on drain, and the Pi loop keeps running against the provider until the
+    // turn deadline, billing tokens nobody will ever read.
+    //
+    // Parking the provider request is what makes that observable. The engine's
+    // own await returns on abort either way (`untilAborted` races the signal),
+    // so the ONLY difference the outside world can see is whether the upstream
+    // request is torn down with the session.
+    let arrived!: () => void;
+    const requestArrived = new Promise<void>((resolve) => {
+      arrived = resolve;
+    });
+    let settle!: (clientAborted: boolean) => void;
+    const providerTornDown = new Promise<boolean>((resolve) => {
+      settle = resolve;
+    });
+    providerPark = { arrived, settle };
+
+    const stopped = new AbortController();
+    const turn = runTurn(() => "loopback-midflight", stopped.signal);
+    // Only press stop once the completions request has actually landed —
+    // that is the proof the session exists and the prompt is in flight.
+    await requestArrived;
+    stopped.abort(new Error("stopped by user"));
+
+    const { chunks } = await turn;
+    expect(await providerTornDown).toBe(true);
+    // Still a well-formed, non-error turn (same contract as the other stops).
+    // The step chunks in between are whatever the model got through before the
+    // stop — not pinned here, only the envelope and the absence of an error.
+    const types = chunks.map((c) => c.type);
+    expect(types.at(0)).toBe("start");
+    expect(types.at(-1)).toBe("finish");
+    expect(types).not.toContain("error");
   }, 30_000);
 
   it("opens the stream before the platform-MCP handshake completes", async () => {

@@ -22,20 +22,26 @@ import { ApiError, notFound, internalError, systemEntityForbidden } from "../lib
 import { readJsonBody } from "../lib/request-body.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 
-export const createProxySchema = z.object({
-  label: z.string().min(1, "label is required"),
-  url: z.url({ error: "url must be a valid URL" }),
-});
+export const createProxySchema = z
+  .object({
+    label: z.string().min(1, "label is required"),
+    url: z.url({ error: "url must be a valid URL" }),
+  })
+  .strict();
 
-export const updateProxySchema = z.object({
-  label: z.string().min(1).optional(),
-  url: z.url().optional(),
-  enabled: z.boolean().optional(),
-});
+export const updateProxySchema = z
+  .object({
+    label: z.string().min(1).optional(),
+    url: z.url().optional(),
+    enabled: z.boolean().optional(),
+  })
+  .strict();
 
-export const setDefaultSchema = z.object({
-  proxyId: z.string().nullable(),
-});
+export const setDefaultSchema = z
+  .object({
+    proxyId: z.string().nullable(),
+  })
+  .strict();
 
 export function createProxiesRouter() {
   const router = new Hono<AppEnv>();

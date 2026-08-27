@@ -193,13 +193,17 @@ async function validateManifestForRoute(
 // Shared helpers for package CRUD routes
 // ═══════════════════════════════════════════════
 
-export const githubImportSchema = z.object({
-  url: z.url("Missing 'url' field"),
-});
+export const githubImportSchema = z
+  .object({
+    url: z.url("Missing 'url' field"),
+  })
+  .strict();
 
-export const forkSchema = z.object({
-  name: z.string().regex(SLUG_REGEX, "Name must match slug format").optional(),
-});
+export const forkSchema = z
+  .object({
+    name: z.string().regex(SLUG_REGEX, "Name must match slug format").optional(),
+  })
+  .strict();
 
 /**
  * JSON-body create/update payloads for the manifest-driven package types
@@ -211,10 +215,12 @@ export const forkSchema = z.object({
  * Both objects are non-strict, so an unknown key (a client still sending the
  * retired `source_code`, say) is silently stripped rather than rejected.
  */
-export const packageJsonCreateSchema = z.object({
-  manifest: z.record(z.string(), z.unknown()),
-  content: z.string().optional(),
-});
+export const packageJsonCreateSchema = z
+  .object({
+    manifest: z.record(z.string(), z.unknown()),
+    content: z.string().optional(),
+  })
+  .strict();
 
 /**
  * The create body of a type whose content file is MANDATORY — `agent` and
@@ -229,30 +235,34 @@ export const packageJsonCreateSchema = z.object({
  * it is a `refine` rather than `.min(1)` because "not blank" has no JSON
  * Schema spelling, so the published body says `required` and nothing more.
  */
-export const packageJsonCreateWithContentSchema = z.object({
-  manifest: z.record(z.string(), z.unknown()),
-  content: z.string().refine((v) => v.trim().length > 0, "Content cannot be empty"),
-});
+export const packageJsonCreateWithContentSchema = z
+  .object({
+    manifest: z.record(z.string(), z.unknown()),
+    content: z.string().refine((v) => v.trim().length > 0, "Content cannot be empty"),
+  })
+  .strict();
 
-export const packageJsonUpdateSchema = z.object({
-  manifest: z.record(z.string(), z.unknown()).optional(),
-  content: z.string().optional(),
-  /**
-   * Optimistic-lock token. Mandatory and integral — the value is a row version,
-   * never a fraction. This used to be `z.number().optional()` with a hand-rolled
-   * `null / typeof !== "number"` check in the handler restating both rules; the
-   * schema now carries them, so the spec's `required: ["lock_version"]` and
-   * `type: "integer"` have exactly one runtime counterpart.
-   */
-  lock_version: z.number().int(),
-});
+export const packageJsonUpdateSchema = z
+  .object({
+    manifest: z.record(z.string(), z.unknown()).optional(),
+    content: z.string().optional(),
+    /**
+     * Optimistic-lock token. Mandatory and integral — the value is a row version,
+     * never a fraction. This used to be `z.number().optional()` with a hand-rolled
+     * `null / typeof !== "number"` check in the handler restating both rules; the
+     * schema now carries them, so the spec's `required: ["lock_version"]` and
+     * `type: "integer"` have exactly one runtime counterpart.
+     */
+    lock_version: z.number().int(),
+  })
+  .strict();
 
 /**
  * Body of `POST /api/packages/{type}/{scope}/{name}/versions`. The body itself
  * is optional (`requestBody.required: false`) — the SPA omits it entirely when
  * no override is chosen — so `version` is the only member and it is optional.
  */
-export const createVersionBodySchema = z.object({ version: z.string().min(1).optional() });
+export const createVersionBodySchema = z.object({ version: z.string().min(1).optional() }).strict();
 
 /** Enrich items with creator display names (batch lookup). */
 async function enrichWithCreatorNames<T extends { created_by?: string | null }>(

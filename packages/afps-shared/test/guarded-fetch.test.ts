@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, afterEach } from "bun:test";
-import { guardedFetch, SsrfBlockedError } from "../src/guarded-fetch.ts";
+import { DEFAULT_MAX_REDIRECTS, guardedFetch, SsrfBlockedError } from "../src/guarded-fetch.ts";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -269,6 +269,87 @@ describe("guardedFetch — SSRF", () => {
       { resolve: resolverFor({ "idp.example": ["203.0.113.9"] }) },
     );
     expect(seen[1]!.body).toBeUndefined();
+  });
+
+  // WHATWG fetch (HTTP-redirect fetch step 11) / RFC 9110 §15.4.3: 301 and 302
+  // downgrade POST → GET and nothing else. This clause used to read
+  // `method !== "HEAD"`, so a 302'd PUT became a bodyless GET — a request the
+  // caller never made. `@appstrate/afps-runtime`'s credential-proxy follower
+  // always had the conformant rule, which is how the pair disagreed about one
+  // response.
+  it("preserves method + body on a 301/302 for every method except POST", async () => {
+    for (const method of ["PUT", "PATCH", "DELETE"]) {
+      const seen: Array<{ method?: string; body: unknown }> = [];
+      globalThis.fetch = (async (_input: string | URL | Request, reqInit?: RequestInit) => {
+        seen.push({ method: reqInit?.method, body: reqInit?.body });
+        if (seen.length === 1) {
+          return new Response(null, {
+            status: 302,
+            headers: { location: "https://same.example/moved" },
+          });
+        }
+        return new Response("done", { status: 200 });
+      }) as unknown as typeof fetch;
+
+      await guardedFetch(
+        "https://same.example/thing",
+        { method, body: "payload" },
+        { resolve: resolverFor({ "same.example": ["203.0.113.7"] }) },
+      );
+      expect(seen[1]!.method).toBe(method);
+      expect(seen[1]!.body).toBe("payload");
+    }
+  });
+
+  // Control for the case above: POST IS downgraded, so the assertion is about
+  // the method and not about redirects being followed verbatim.
+  it("downgrades POST → GET and drops the body on a 302", async () => {
+    const seen: Array<{ method?: string; body: unknown }> = [];
+    globalThis.fetch = (async (_input: string | URL | Request, reqInit?: RequestInit) => {
+      seen.push({ method: reqInit?.method, body: reqInit?.body });
+      if (seen.length === 1) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://same.example/moved" },
+        });
+      }
+      return new Response("done", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await guardedFetch(
+      "https://same.example/thing",
+      { method: "POST", body: "payload" },
+      { resolve: resolverFor({ "same.example": ["203.0.113.7"] }) },
+    );
+    expect(seen[1]!.method).toBe("GET");
+    expect(seen[1]!.body).toBeUndefined();
+  });
+
+  // The budget divergence this constant exists to end: it was `5` here and a
+  // hard `10` in `@appstrate/afps-runtime`'s credential-proxy follower, two
+  // numbers for one job with nothing holding them together.
+  it("defaults to DEFAULT_MAX_REDIRECTS hops when the caller sets no budget", async () => {
+    const run = async (chainLength: number) => {
+      let n = 0;
+      globalThis.fetch = (async () => {
+        n += 1;
+        return n <= chainLength
+          ? new Response(null, {
+              status: 302,
+              headers: { location: `https://hop.example/${n}` },
+            })
+          : new Response("done", { status: 200 });
+      }) as unknown as typeof fetch;
+      return guardedFetch("https://hop.example/start", undefined, {
+        resolve: resolverFor({ "hop.example": ["203.0.113.9"] }),
+      });
+    };
+
+    // Exactly at the budget: still followed to the terminal response.
+    expect((await run(DEFAULT_MAX_REDIRECTS)).status).toBe(200);
+    // One hop past it: refused. Both halves, so the assertion cannot pass for a
+    // budget of 0 or for one that never stops.
+    await expect(run(DEFAULT_MAX_REDIRECTS + 1)).rejects.toBeInstanceOf(SsrfBlockedError);
   });
 
   it("stops after maxRedirects", async () => {

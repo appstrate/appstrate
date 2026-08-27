@@ -29,6 +29,45 @@ describe("isFileField / isMultipleFileField", () => {
     expect(isFileField(prop)).toBe(true);
     expect(isMultipleFileField(prop)).toBe(true);
   });
+
+  // The two predicates used to be two implementations: `isFileField`
+  // delegated to `@appstrate/afps-shared` ("`contentMediaType` DECLARED"),
+  // `isMultipleFileField` kept a local copy testing `!!items.contentMediaType`.
+  // An empty-string media type is the input that separates them, and it made
+  // the pair answer opposite things about ONE node — so `mapAfpsToRjsf` marked
+  // an array property `ui:widget: "file"` without `multiple`, i.e. a
+  // single-file picker bound to an array.
+  it("agrees with isFileField on an array whose items declare an EMPTY contentMediaType", () => {
+    const prop = {
+      type: "array" as const,
+      items: { type: "string" as const, format: "uri", contentMediaType: "" },
+    };
+    expect(isFileField(prop)).toBe(true);
+    expect(isMultipleFileField(prop)).toBe(true);
+
+    const { uiSchema } = mapAfpsToRjsf({
+      schema: { type: "object", properties: { docs: prop } },
+    });
+    expect(uiSchema.docs).toMatchObject({ "ui:widget": "file", "ui:options": { multiple: true } });
+  });
+
+  // Control: the two must also agree the OTHER way. An array of plain URIs
+  // declares no `contentMediaType` at all, so neither predicate may fire —
+  // without this half the assertion above passes for a predicate that
+  // returned `true` unconditionally.
+  it("agrees with isFileField on an array of plain URIs (no contentMediaType)", () => {
+    const prop = {
+      type: "array" as const,
+      items: { type: "string" as const, format: "uri" },
+    };
+    expect(isFileField(prop)).toBe(false);
+    expect(isMultipleFileField(prop)).toBe(false);
+
+    const { uiSchema } = mapAfpsToRjsf({
+      schema: { type: "object", properties: { links: prop } },
+    });
+    expect(uiSchema.links).toBeUndefined();
+  });
 });
 
 describe("getOrderedKeys", () => {

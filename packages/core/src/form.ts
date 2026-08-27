@@ -20,7 +20,12 @@
 // ─── JSON Schema Types (from @types/json-schema, draft-07 — compatible with 2020-12) ─
 
 import type { JSONSchema7, JSONSchema7Type, JSONSchema7TypeName } from "json-schema";
-import { isFileField as isFileFieldShared } from "@appstrate/afps-shared/file-field";
+import {
+  isFileField as isFileFieldShared,
+  isMultipleFileField as isMultipleFileFieldShared,
+  resolveItems,
+  resolveType,
+} from "@appstrate/afps-shared/file-field";
 export type { JSONSchema7, JSONSchema7Type, JSONSchema7TypeName };
 
 /** A JSON Schema object with typed properties — the root of input/output schemas. */
@@ -67,24 +72,6 @@ export interface SchemaWrapper {
   property_order?: string[];
 }
 
-// ─── Internal helpers ────────────────────────────────────────────────────────
-
-/** Resolve the `type` string from a JSONSchema7 (handles array types by picking the first). */
-function getType(prop: JSONSchema7): string | undefined {
-  if (typeof prop.type === "string") return prop.type;
-  if (Array.isArray(prop.type) && prop.type.length > 0) return prop.type[0];
-  return undefined;
-}
-
-/** Resolve the `items` schema (handles boolean / tuple forms). */
-function getItems(prop: JSONSchema7): JSONSchema7 | undefined {
-  if (!prop.items) return undefined;
-  if (typeof prop.items === "boolean") return undefined;
-  if (Array.isArray(prop.items))
-    return typeof prop.items[0] === "object" ? prop.items[0] : undefined;
-  return prop.items;
-}
-
 // ─── File Field Detection ────────────────────────────────────────────────────
 
 /**
@@ -96,10 +83,13 @@ export function isFileField(prop: JSONSchema7): boolean {
   return isFileFieldShared(prop);
 }
 
-/** Detect a multiple-files field (array of file URIs). */
+/**
+ * Detect a multiple-files field (array of file URIs). Delegates to the same
+ * canonical predicate as {@link isFileField}, so the two cannot disagree about
+ * one node.
+ */
 export function isMultipleFileField(prop: JSONSchema7): boolean {
-  const items = getItems(prop);
-  return getType(prop) === "array" && items?.format === "uri" && !!items?.contentMediaType;
+  return isMultipleFileFieldShared(prop);
 }
 
 /** Whether a schema has any file fields (format: "uri" + contentMediaType). */
@@ -203,9 +193,9 @@ export function mapAfpsToRjsf(rawWrapper: SchemaWrapper): {
     const hint = uiHints?.[key];
     const constraint = fileConstraints?.[key];
     const constraintMaxSize = constraint?.max_size;
-    const items = getItems(prop);
+    const items = resolveItems(prop);
     const isArrayOfEnum =
-      getType(prop) === "array" && Array.isArray(items?.enum) && items.enum.length > 0;
+      resolveType(prop) === "array" && Array.isArray(items?.enum) && items.enum.length > 0;
     const isConst = "const" in prop;
 
     if (hint?.placeholder) {

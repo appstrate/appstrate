@@ -71,10 +71,6 @@ describe("cross-module contract — onRunStatusChange → webhook delivery", () 
     spaceId = defaultSpaceId;
   });
 
-  it("webhooks module exposes an onRunStatusChange handler", () => {
-    expect(webhooksModule.events?.onRunStatusChange).toBeDefined();
-  });
-
   it("the handler persists a webhook_deliveries row for a matching event", async () => {
     // RFC 2606 `.test` TLD is guaranteed never to resolve — the fetch fails
     // fast with a DNS error, but a `webhook_deliveries` row with status="failed"
@@ -128,10 +124,6 @@ describe("cross-module contract — onRunStatusChange → webhook delivery", () 
       .from(webhookDeliveries)
       .where(eq(webhookDeliveries.webhookId, webhook.id));
     expect(rows).toHaveLength(0);
-  });
-
-  it("webhooks module exposes an onRunConnectionMissing handler", () => {
-    expect(webhooksModule.events?.onRunConnectionMissing).toBeDefined();
   });
 
   it("the onRunConnectionMissing handler persists a run.connection_missing delivery", async () => {

@@ -38,7 +38,11 @@ import { readJsonBody } from "../lib/request-body.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { getSpaceScope } from "../lib/scope.ts";
 import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";
-import { assertExplicitModelExists, resolveModel } from "../services/org-models.ts";
+import {
+  assertExplicitModelExists,
+  resolveModel,
+  validateGenerationOverride,
+} from "../services/org-models.ts";
 import {
   buildBundleForAgentExport,
   buildBundleFromAgentDraft,
@@ -50,16 +54,16 @@ import { rateLimit } from "../middleware/rate-limit.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import {
-  ModelGenerationError,
   modelGenerationSettingsSchema,
   reconcileModelGenerationSettings,
-  resolveModelGenerationSettings,
 } from "@appstrate/core/model-generation";
-export const proxyIdSchema = z.object({ proxyId: z.string().nullable() });
-export const modelIdSchema = z.object({
-  modelId: z.string().nullable(),
-  generation: modelGenerationSettingsSchema.nullable().optional(),
-});
+export const proxyIdSchema = z.object({ proxyId: z.string().nullable() }).strict();
+export const modelIdSchema = z
+  .object({
+    modelId: z.string().nullable(),
+    generation: modelGenerationSettingsSchema.nullable().optional(),
+  })
+  .strict();
 
 /**
  * Body of `PUT /api/agents/{scope}/{name}/input-settings` — the agent's stored
@@ -384,23 +388,11 @@ export function createAgentsRouter() {
         explicitModel ?? (await resolveModel(scope.orgId, agent.id, data.modelId));
       let generation = data.generation;
       if (generation && Object.keys(generation).length > 0) {
-        if (!selectedModel) {
-          throw invalidRequest(
-            "A model must be configured before generation settings can be saved",
-          );
-        }
-        try {
-          generation = resolveModelGenerationSettings({
-            capabilities: selectedModel.generation,
-            override: generation,
-          });
-        } catch (error) {
-          if (error instanceof ModelGenerationError) {
-            throw invalidRequest(error.message, "generation");
-          }
-          throw error;
-        }
+        generation = validateGenerationOverride(generation, selectedModel, "generation");
       } else if (generation === undefined && current.generationConfig) {
+        // `modelId` is REQUIRED on this body, so "the model may have changed"
+        // — the precondition the other two routes spell out as
+        // `modelId !== undefined` — always holds here. See `spaces.ts`.
         generation = reconcileModelGenerationSettings(
           current.generationConfig,
           selectedModel?.generation,
