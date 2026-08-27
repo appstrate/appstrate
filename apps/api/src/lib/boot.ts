@@ -493,7 +493,7 @@ export async function bootBackground(): Promise<{ agentsHealthy: boolean }> {
  * appears from here on, and for restores of a backup taken before the heal.
  *
  * Restoring the columns therefore clears the boot refusal, not the drift.
- * `scripts/migration/0003-…` ships the ledger diagnostic for the real extent,
+ * `scripts/migration/0004-…` ships the ledger diagnostic for the real extent,
  * and its header says the same thing.
  *
  * The general check — compare `max(created_at)` in `__drizzle_migrations`

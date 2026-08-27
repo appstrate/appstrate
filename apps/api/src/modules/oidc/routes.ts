@@ -288,9 +288,11 @@ async function loadPageContext(
       );
     }
   }
-  // Resolve SMTP per-client: `level=space` reads `space_smtp_configs`,
-  // `level=org`/`level=instance` falls back to env SMTP. Null → email features
-  // disabled for this flow (no instance fallback for space-level clients).
+  // Resolve SMTP per-client, split by level the same way social providers are
+  // just below: `level=space` reads `space_smtp_configs`, `level=org` /
+  // `level=instance` read the instance config from env. Null → email features
+  // disabled for this flow; a space-level client does NOT fall through to the
+  // instance transport.
   const smtp = await resolveSmtpForClient(record);
   if (opts.requireSmtp && !smtp) {
     return c.html(renderErrorPage(opts.requireSmtp).value, 404);

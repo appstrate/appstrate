@@ -30,7 +30,7 @@ authority; `bun run verify:no-migration-dml` enforces it.
 3. **Fenced** — `SET LOCAL lock_timeout` and `statement_timeout`.
 4. **Rehearsed** — `pg_dump` production → throwaway `postgres:16-alpine` →
    apply → verify. Record the row counts in the header. When the script repairs
-   a state no reachable database is in — `0003` — say so in the header and mark
+   a state no reachable database is in — `0004` — say so in the header and mark
    the counts UNMEASURED, so a reader never mistakes a required value for an
    observed one.
 5. **Verifiable** — ship the "before" and "after" queries alongside it.
