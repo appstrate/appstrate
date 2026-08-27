@@ -77,10 +77,13 @@ describe("isFileField / isMultipleFileField", () => {
 
 // `@appstrate/core/form` carries its own copy of the AFPS file-field rule
 // instead of importing `@appstrate/afps-shared/file-field`, because core ships
-// as SOURCE to npm and its declared floor — `@appstrate/afps-shared@^0.5.0` —
-// exports only `isFileField` from that subpath. See the block comment above
-// `isFileField` in `../src/form.ts` for the full reasoning and for what would
-// let the two merge.
+// as SOURCE to npm: a consumer's `tsc` compiles core's files against the
+// `@appstrate/afps-shared` THEIR install resolves. Core's declared floor is
+// `^0.7.0` and `0.7.0` — the first release to export `isMultipleFileField`
+// from that subpath — is not published yet, so the import is unresolvable for
+// a consumer today. See the block comment above `isFileField` in
+// `../src/form.ts` for the full reasoning and for what would let the two
+// merge.
 //
 // This is the thing that keeps the parallel copies honest. The import below
 // resolves to LOCAL workspace source (tests are not part of the published
@@ -138,6 +141,20 @@ describe("file-field rule parity with @appstrate/afps-shared", () => {
     const multiple = nodes.map(([, node]) => sharedIsMultipleFileField(node));
     expect(multiple).toContain(true);
     expect(multiple).toContain(false);
+  });
+
+  // `@appstrate/afps-shared` is PUBLISHED, so every name this subpath exports
+  // is a semver commitment to out-of-tree consumers — taking one back later is
+  // a breaking release. Its three internal helpers (`isSingleFileNode`,
+  // `resolveItems`, `resolveType`) are shared implementation detail of the two
+  // predicates above and have no importer anywhere in this repo; exporting
+  // them would promise a surface nobody asked for, on a module whose own
+  // header argues that core must NOT import them. Pinned here rather than in
+  // `packages/afps-shared/test/` because this is the file that already owns
+  // the relationship between the two copies of this rule.
+  it("exports the two predicates and nothing else", async () => {
+    const surface = Object.keys(await import("@appstrate/afps-shared/file-field")).sort();
+    expect(surface).toEqual(["isFileField", "isMultipleFileField"]);
   });
 });
 

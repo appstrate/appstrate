@@ -17,7 +17,11 @@
  * the platform's own error catalogue.
  *
  * The base class is structural — `name`, `code`, `message`, optional
- * `details`, optional `cause`. We do not introduce a runtime
+ * `details`, optional `cause`. `cause` reaches it through the fourth
+ * constructor argument of BOTH concrete classes, so a resolver that refuses
+ * inside a `catch` can carry the error it caught instead of dropping it; the
+ * argument is `ErrorOptions`, NOT the `details` bag, so the chain stays
+ * operator-facing and `formatErrorChain` can walk it. We do not introduce a runtime
  * `instanceof AfpsRuntimeError` check anywhere because the existing typed
  * errors (BundleError, BundleSignaturePolicyError, …) predate this
  * module and we do not want to break user code that does
@@ -88,8 +92,9 @@ export class AuthorizedUrisError extends AfpsRuntimeError {
     code: "AUTHORIZED_URIS_EMPTY" | "AUTHORIZED_URIS_MISMATCH",
     message: string,
     details?: Record<string, unknown>,
+    options?: ErrorOptions,
   ) {
-    super(message, details);
+    super(message, details, options);
     this.code = code;
   }
 }
@@ -99,8 +104,13 @@ export class ResolverError extends AfpsRuntimeError {
   override readonly name = "ResolverError";
   readonly code: ResolverErrorCode;
 
-  constructor(code: ResolverErrorCode, message: string, details?: Record<string, unknown>) {
-    super(message, details);
+  constructor(
+    code: ResolverErrorCode,
+    message: string,
+    details?: Record<string, unknown>,
+    options?: ErrorOptions,
+  ) {
+    super(message, details, options);
     this.code = code;
   }
 }

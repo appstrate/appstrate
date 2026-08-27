@@ -431,15 +431,37 @@ export function renderFieldPath(path: readonly PropertyKey[]): string {
  * When neither a path nor a fallback is available the field defaults to
  * `"body"` rather than the empty string, so clients always receive a usable
  * pointer.
+ *
+ * `unrecognized_keys` is the one issue that does NOT name its field through
+ * `path`: Zod reports the container's path (EMPTY for a top-level body) and
+ * puts the offending names in `issue.keys`. Routing it through the generic
+ * branch therefore blamed `fallbackField` — so `PUT /agents/{scope}/{name}/
+ * skills` (`param: "skillIds"`) answered `field: "skillIds"` for a body whose
+ * `skillIds` was perfectly valid, naming the one field the client got right.
+ * Each unrecognized key gets its OWN entry, appended to the container path, so
+ * `{ extra, other }` yields two actionable pointers instead of one ambiguous
+ * combined message.
  */
 export function zodIssuesToFieldErrors(
   issues: readonly z.core.$ZodIssue[],
   fallbackField?: string,
 ): ValidationFieldError[] {
-  return issues.map((issue) => {
+  return issues.flatMap((issue) => {
+    if (issue.code === "unrecognized_keys" && issue.keys.length > 0) {
+      const single = issue.keys.length === 1;
+      return issue.keys.map((key) => ({
+        field: renderFieldPath([...issue.path, key]),
+        code: mapZodCode(issue),
+        // One key: Zod's own message already names exactly that key, so it is
+        // reused verbatim. Several: the combined message lists them all, which
+        // would repeat every key on every entry — render the per-key form in
+        // Zod's own spelling instead.
+        message: single ? issue.message : `Unrecognized key: ${JSON.stringify(key)}`,
+      }));
+    }
     const path = renderFieldPath(issue.path);
     const field = path || fallbackField || "body";
-    return { field, code: mapZodCode(issue), message: issue.message };
+    return [{ field, code: mapZodCode(issue), message: issue.message }];
   });
 }
 
@@ -447,7 +469,9 @@ export function zodIssuesToFieldErrors(
  * Parse a request body with a Zod schema. On failure throws a 400 with every
  * issue populated in `errors[]` so clients receive all problems in one call.
  * The optional `param` is a fallback used when Zod reports an empty path —
- * never as a prefix on top of a resolved path.
+ * never as a prefix on top of a resolved path, and never for an
+ * `unrecognized_keys` issue, which names its own field (see
+ * {@link zodIssuesToFieldErrors}).
  */
 export function parseBody<T extends z.ZodType>(
   schema: T,

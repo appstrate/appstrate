@@ -23,11 +23,6 @@ export type ManifestDeliveryHttp = NonNullable<
 >;
 
 /**
- * Sidecar runtime configuration. The sidecar process reads this from its
- * own environment at boot and uses it for the lifetime of the run. The
- * platform sends every field as an env var when spawning the container.
- */
-/**
  * Header the AGENT container stamps on every request to its sidecar's control
  * surface (`/llm/*`, `/mcp`, `/integrations/boot-report`, `/runtime-events`),
  * carrying {@link SidecarConfig.sidecarAuthToken}.
@@ -42,6 +37,11 @@ export type ManifestDeliveryHttp = NonNullable<
  */
 export const SIDECAR_AUTH_HEADER = "x-appstrate-sidecar-auth";
 
+/**
+ * Sidecar runtime configuration. The sidecar process reads this from its
+ * own environment at boot and uses it for the lifetime of the run. The
+ * platform sends every field as an env var when spawning the container.
+ */
 export interface SidecarConfig {
   runToken: string;
   /**

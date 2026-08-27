@@ -60,6 +60,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A rejected unknown body key now names ITSELF in `errors[].field`**
+  (`./api-errors`) — `zodIssuesToFieldErrors` previously rendered every
+  `unrecognized_keys` issue through the generic path, and Zod 4 gives that issue
+  an EMPTY `path`. The field therefore fell back to the caller's `param` option,
+  or to the placeholder `"body"` when there was none. A request carrying
+  `{"skillIds":["@a/b"],"extra":1}` came back blaming `skillIds` — a field that
+  was correct — and a body with no `param` came back blaming `"body"`, which
+  points at nothing. Both are now the offending key, taken from `issue.keys` and
+  prefixed with the issue's own path for a nested object.
+  A body with N unknown keys now yields N entries instead of one, each naming
+  its own key; a single key keeps Zod's exact message. `errors[].code` is still
+  `unknown_field` and the status is still `400`, so a consumer that branches on
+  the code is unaffected — one that branches on `field === "body"` is not.
+  Every other issue code is byte-identical, including the `param` fallback,
+  which still fires for a genuinely path-less issue such as a root-level
+  `invalid_type`.
+  This lands with ~65 request bodies closing at once across the platform, so it
+  is the difference between a 400 a caller can act on and one that sends them
+  to the wrong field.
+
 - **`integrationManifestSchema` refuses a bare auth-scheme
   `delivery.http.prefix`** (`./integration`) — a new hard rejection of a
   manifest that validated on 9.0.0, so an integration that installed before now
@@ -80,20 +100,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   moves `packages.draft_manifest` and `package_versions.manifest`, with a
   `WHERE` that is exactly the condition the validator now refuses.
 
-- **`@appstrate/afps-shared` dependency range moved to `^0.6.0`.** The grammar
-  behind the rule above is `isBareAuthSchemePrefix`, exported from the new
-  `@appstrate/afps-shared/delivery-http` — the leaf that already owns the
-  `delivery.http` projection both core and `@appstrate/afps-runtime` read. It
-  lives there rather than here because the runtime has a second authoring
-  surface for the same value (a hand-written local creds file, which no
-  manifest validator ever sees) and must refuse the identical form; a copy of
-  the token grammar on each side is the shape this change exists to retire, and
-  the runtime deliberately carries no `@appstrate/core` runtime dependency.
-  Nothing in core's own surface moves.
+- **`@appstrate/afps-shared` dependency range moved to `^0.7.0`.** Two things
+  moved it, and both are behaviour a core consumer receives only if the range
+  admits them.
 
-  **Publish `afps-shared@0.6.0` before this release** — `verify-package-resolves.ts`
-  packs and installs the real tarball outside the monorepo, so an unpublished
-  leaf fails the publish rather than the first consumer's `npm install`.
+  First, `isBareAuthSchemePrefix` — the grammar behind the rule above —
+  is exported from `@appstrate/afps-shared/delivery-http`, the leaf that
+  already owns the `delivery.http` projection both core and
+  `@appstrate/afps-runtime` read. It lives there rather than here because the
+  runtime has a second authoring surface for the same value (a hand-written
+  local creds file, which no manifest validator ever sees) and must refuse the
+  identical form; a copy of the token grammar on each side is the shape this
+  change exists to retire, and the runtime deliberately carries no
+  `@appstrate/core` runtime dependency. That arrived in `afps-shared@0.6.0`,
+  which is on npm.
+
+  Second, the two `guardedFetch` changes below. `./ssrf` is a pure re-export
+  barrel over `@appstrate/afps-shared/guarded-fetch`, so what a consumer gets
+  from it is decided ENTIRELY by the version their install resolves — and the
+  published `0.6.0` still has `maxRedirects ?? 5`, the non-conformant 301/302
+  clause, and no `DEFAULT_MAX_REDIRECTS`. Those changes ship in
+  `afps-shared@0.7.0`; `0.x` puts breaking changes in the MINOR position, so
+  `^0.6.0` does not admit them and the floor had to rise. Nothing in core's own
+  surface moves for this, beyond the one re-export named below.
+
+  **Publish `afps-shared@0.7.0` before this release** (`git tag
+afps-shared@0.7.0`; see `packages/afps-shared/CHANGELOG.md`). Until it is on
+  npm, `bun scripts/verify-package-resolves.ts packages/core` fails — it packs
+  core and installs the real tarball outside the monorepo, so an unpublished
+  leaf fails HERE rather than in the first consumer's `npm install`. That is
+  the gate working, not a regression.
 
 - **`isMultipleFileField` now agrees with `isFileField`** (`./form`) — the two
   predicates were two rules. `isFileField` asked "`format: "uri"` plus a
@@ -110,15 +146,24 @@ contentMediaType: "" } }` is the input that separated them — a file field that
 
   That predicate stays a copy of `@appstrate/afps-shared/file-field`'s rather
   than an import of it, deliberately: core ships as source, so a consumer's
-  `tsc` compiles these files against the `@appstrate/afps-shared@^0.5.0` its own
-  install resolves, and published 0.5.0 exports only `isFileField` from that
-  subpath. Importing the rest typechecks in the monorepo and breaks every
-  consumer on npm. `packages/core/test/form.test.ts` asserts the two agree
-  table-wide so they cannot drift while they are apart; merging them needs an
-  `@appstrate/afps-shared` release exporting the helpers and a floor bump here,
-  in that order.
+  `tsc` compiles these files against whatever `@appstrate/afps-shared` their
+  own install resolves. The floor this window raises to is `^0.7.0`, and
+  `0.7.0` is the FIRST release to export `isMultipleFileField` from that
+  subpath — it is not on npm yet, so importing it today breaks every consumer
+  install, exactly as importing it at the previous `^0.6.0` floor would have
+  (published `0.6.0` exports only `isFileField` there; verified against the
+  tarball, not inferred). `packages/core/test/form.test.ts` asserts the two
+  agree table-wide so they cannot drift while they are apart. The remaining
+  step to merge them is now only the publish: once `afps-shared@0.7.0` is on
+  npm, this block can become
+  `export { isFileField, isMultipleFileField } from "@appstrate/afps-shared/file-field"`.
+  The three helpers underneath (`isSingleFileNode`, `resolveItems`,
+  `resolveType`) are private to the leaf on purpose and stay duplicated
+  regardless — they are implementation detail of those two predicates, not
+  surface.
 
-- **`guardedFetch` follows the WHATWG 301/302 method rule** (`./ssrf`) — the
+- **`guardedFetch` follows the WHATWG 301/302 method rule** (`./ssrf`, shipped
+  in `afps-shared@0.7.0` — see the range entry above) — the
   downgrade clause read `(301 | 302) && method !== "HEAD" → GET`, so a 302'd
   `PUT`/`PATCH`/`DELETE` was re-issued as a bodyless `GET`: a request the caller
   never made, silently. WHATWG fetch (HTTP-redirect fetch step 11) and RFC 9110
@@ -126,8 +171,11 @@ contentMediaType: "" } }` is the input that separated them — a file field that
   GET/HEAD, and 307/308 still preserve method and body. `GET` and `POST`
   callers — every current one in this repo — are unaffected.
 
-- **`guardedFetch`'s default `maxRedirects` is 10, not 5** (`./ssrf`), exported
-  as `DEFAULT_MAX_REDIRECTS` from `@appstrate/afps-shared/guarded-fetch`. It was
+- **`guardedFetch`'s default `maxRedirects` is 10, not 5** (`./ssrf`, shipped
+  in `afps-shared@0.7.0` — see the range entry above), and the constant is now
+  re-exported from `@appstrate/core/ssrf` as **`DEFAULT_MAX_REDIRECTS`**, so a
+  consumer calling `guardedFetch` from this package can name the ceiling
+  instead of copying the number. It was
   one of two unrelated budgets for the same job (the credential-proxy follower
   in `@appstrate/afps-runtime` hard-coded `10`), and 10 is the value with a
   reason: multi-step OAuth/CAS chains do not always terminate within five hops.

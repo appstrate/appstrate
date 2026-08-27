@@ -18,19 +18,25 @@
  * compile against one definition.
  *
  * ── `@appstrate/core/form` HAS A PARALLEL COPY OF THIS RULE, ON PURPOSE ──
- * Only `isFileField` is exported from the `@appstrate/afps-shared@0.5.0` on
- * npm, which is the floor `@appstrate/core` declares (`^0.5.0`). Core ships as
- * source, so a consumer's `tsc` compiles core's files against THAT install —
- * importing `isMultipleFileField` / `resolveItems` / `resolveType` from here
- * typechecks in this workspace and fails on npm. Core therefore carries its own
+ * `isMultipleFileField` is new in THIS version (0.7.0), which is not on npm
+ * yet; the newest published release, 0.6.0, exports `isFileField` from this
+ * subpath and nothing else. `@appstrate/core` ships as source, so a consumer's
+ * `tsc` compiles core's files against the `@appstrate/afps-shared` their own
+ * install resolves — importing `isMultipleFileField` from here typechecks in
+ * this workspace and cannot resolve for them. Core therefore carries its own
  * copy, derived from the same single-file-node rule; `packages/core/test/
  * form.test.ts` asserts the two agree table-wide, so a change made HERE and not
  * there (or vice versa) fails that test.
  *
- * Merging them is a release operation, in this order: publish an
- * `@appstrate/afps-shared` release exporting these helpers → raise core's
- * `dependencies["@appstrate/afps-shared"]` floor to it → replace core's copy
- * with an import. Not before.
+ * Core has ALREADY raised its floor to `^0.7.0`, so the remaining step is the
+ * publish (`git tag afps-shared@0.7.0`); after it lands, core's copy is
+ * replaced by an import of the two predicates. Not before.
+ *
+ * The helpers below (`asNode`, `isSingleFileNode`, `resolveItems`,
+ * `resolveType`) are deliberately NOT exported and are not part of that plan.
+ * They are implementation detail of the two predicates, they have no importer
+ * anywhere, and every name this package exports is a semver commitment to
+ * out-of-tree consumers that only a breaking release can take back.
  */
 
 /** Narrow an `unknown` schema node to an indexable object, or `undefined`. */
@@ -47,7 +53,7 @@ function asNode(schema: unknown): Record<string, unknown> | undefined {
  * predicate's. `contentMediaType: ""` is therefore a file field — the same
  * reading `apps/api/src/services/inline-run.ts` documents and relies on.
  */
-export function isSingleFileNode(schema: unknown): boolean {
+function isSingleFileNode(schema: unknown): boolean {
   const node = asNode(schema);
   if (!node) return false;
   return node.format === "uri" && node.contentMediaType != null && node.contentMediaType !== false;
@@ -57,7 +63,7 @@ export function isSingleFileNode(schema: unknown): boolean {
  * Resolve a node's `items` schema, handling the JSON Schema boolean / tuple
  * forms (`items: false` → none; `items: [first, …]` → first object entry).
  */
-export function resolveItems(schema: unknown): Record<string, unknown> | undefined {
+function resolveItems(schema: unknown): Record<string, unknown> | undefined {
   const node = asNode(schema);
   const items = node?.items;
   if (!items || typeof items === "boolean") return undefined;
@@ -70,7 +76,7 @@ export function resolveItems(schema: unknown): Record<string, unknown> | undefin
 }
 
 /** Resolve a node's `type` (JSON Schema allows a union array — first wins). */
-export function resolveType(schema: unknown): string | undefined {
+function resolveType(schema: unknown): string | undefined {
   const node = asNode(schema);
   if (!node) return undefined;
   if (typeof node.type === "string") return node.type;

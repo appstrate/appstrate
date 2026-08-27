@@ -296,10 +296,25 @@ export function parsePackageZip(
     if (err instanceof DecompressionLimitError) {
       // A resource-exhaustion verdict → ZIP_BOMB; a structural one → ZIP_INVALID.
       if (err.reason === "corrupt-archive") {
-        throw new PackageZipError("ZIP_INVALID", "Failed to decompress ZIP artifact", undefined, {
-          cause: err,
-        });
+        // Same rule as the generic branch below, and for the same reason: this
+        // is the verdict that means "the archive is structurally broken", the
+        // one an uploader can actually act on, and `DecompressionLimitError`'s
+        // detail is the only text that says HOW ("not a ZIP archive",
+        // "invalid distance", "unexpected EOF"). A fixed string collapsed all
+        // of them into one shrug.
+        //
+        // Safe to surface: for `corrupt-archive` the detail is either a
+        // literal of ours or the fflate decoder's own static sentence. It
+        // carries no request context and nothing credential-adjacent — the
+        // only uploader-controlled string `DecompressionLimitError` ever
+        // interpolates is an archive entry name, and that belongs to
+        // `file-too-large`, which lands on the ZIP_BOMB branch below.
+        throw new PackageZipError("ZIP_INVALID", getErrorMessage(err), undefined, { cause: err });
       }
+      // Deliberately fixed. The budget verdicts already name themselves
+      // completely — there is no decoder sentence to add — and their detail
+      // CAN be an archive entry name (`file-too-large` passes `file.name`),
+      // i.e. attacker-chosen text that would be echoed into a 400.
       throw new PackageZipError("ZIP_BOMB", "Decompressed size exceeds limit", undefined, {
         cause: err,
       });

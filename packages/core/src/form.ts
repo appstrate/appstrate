@@ -74,20 +74,30 @@ export interface SchemaWrapper {
 //
 // WHY. `@appstrate/core` is PUBLISHED to npm as source (`src/**` as `.ts`, no
 // build step, no `.d.ts` barrier), so a consumer's own `tsc` compiles these
-// files against whatever `@appstrate/afps-shared` its install resolves. Our
-// floor is the `^0.5.0` range in `packages/core/package.json`, and published
-// 0.5.0 exports `isFileField` from `./file-field` and NOTHING else — no
-// `isMultipleFileField`, no `resolveItems`, no `resolveType`. Importing those
-// typechecks here (the workspace resolves afps-shared to local source) and
-// fails for every consumer on npm (TS2305/TS2459). `scripts/verify-package-
+// files against whatever `@appstrate/afps-shared` its install resolves — never
+// against the workspace copy. Read the floor from
+// `packages/core/package.json` → `dependencies["@appstrate/afps-shared"]`; it
+// is `^0.7.0`, and `0.7.0` is the FIRST release to export
+// `isMultipleFileField` from `./file-field`. It is not on npm yet (`npm view
+// @appstrate/afps-shared versions` tops out at 0.6.0, which exports
+// `isFileField` from that subpath and nothing else), so importing it today
+// fails a consumer install outright — the same outcome as importing it at the
+// previous `^0.6.0` floor, for a different reason. `scripts/verify-package-
 // resolves.ts` — CI job "Package resolves for consumers (packages/core)" —
 // packs the real artifact into a clean npm project and is what catches it.
 //
-// WHAT WOULD LET THEM MERGE. Publish an `@appstrate/afps-shared` release that
-// exports the four helpers, then raise core's floor to it (`packages/core/
-// package.json` → `dependencies["@appstrate/afps-shared"]`). Only then can this
-// block become `export { isFileField, isMultipleFileField } from
-// "@appstrate/afps-shared/file-field"`.
+// The three helpers underneath (`isSingleFileNode`, `resolveItems`,
+// `resolveType`) are NOT part of that story: they are private to the shared
+// module on purpose — implementation detail of its two predicates, and a name
+// exported from a published package is a semver commitment nobody asked for.
+// They stay duplicated here whatever the floor says.
+//
+// WHAT WOULD LET THE TWO PREDICATES MERGE. Publish `afps-shared@0.7.0` (`git
+// tag afps-shared@0.7.0`). The floor bump it needs has already been made, so
+// that publish is the only remaining step: after it, this block becomes
+// `export { isFileField, isMultipleFileField } from
+// "@appstrate/afps-shared/file-field"`, with the `JSONSchema7` parameter types
+// below re-declared at the call sites that want them.
 //
 // HOW THE COPIES ARE HELD TOGETHER MEANWHILE. Both sides derive every predicate
 // from ONE single-file-node rule, so `isFileField` and `isMultipleFileField`
