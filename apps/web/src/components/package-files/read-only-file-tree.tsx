@@ -22,15 +22,24 @@ import {
   flattenVisibleRows,
   nextTreeFocus,
   type PackageFileEntry,
+  type TreeNode,
 } from "../../lib/package-file-tree";
 
 const ROW_HEIGHT = 26;
+const NO_DIRECTORIES: readonly string[] = [];
+const NO_COLLAPSED_PATHS: readonly string[] = [];
 
 interface ReadOnlyFileTreeProps {
   entries: readonly PackageFileEntry[];
-  /** Path of the file whose preview is showing, or `null`. */
+  /** Directories that must remain visible even when they contain no file. */
+  directories?: readonly string[];
+  /** Directories collapsed on first mount without changing the shared default. */
+  initialCollapsedPaths?: readonly string[];
+  /** Path of the node whose preview is showing, or `null`. */
   selectedPath: string | null;
   onSelect: (path: string) => void;
+  /** Optional richer selection for explorers that also preview directories. */
+  onSelectNode?: (node: TreeNode) => void;
   /** Accessible name of the tree (translated by the caller). */
   label: string;
   /** `id` of the panel this tree drives — announced as `aria-controls`. */
@@ -40,18 +49,23 @@ interface ReadOnlyFileTreeProps {
 
 export function ReadOnlyFileTree({
   entries,
+  directories = NO_DIRECTORIES,
+  initialCollapsedPaths = NO_COLLAPSED_PATHS,
   selectedPath,
   onSelect,
+  onSelectNode,
   label,
   controlsId,
   className,
 }: ReadOnlyFileTreeProps) {
-  const tree = useMemo(() => buildFileTree(entries), [entries]);
+  const tree = useMemo(() => buildFileTree(entries, directories), [directories, entries]);
   // The user's CLOSED directories, not their open ones. Package archives are
   // small (tens of files), so the whole artifact is visible at a glance by
   // default — and a directory that appears in a later refetch is open by
   // construction rather than the one closed row in an otherwise open tree.
-  const [collapsedDirs, setCollapsedDirs] = useState<ReadonlySet<string>>(() => new Set());
+  const [collapsedDirs, setCollapsedDirs] = useState<ReadonlySet<string>>(
+    () => new Set(initialCollapsedPaths),
+  );
   const [focusedId, setFocusedId] = useState<string | null>(null);
 
   const rows = useMemo(() => flattenVisibleRows(tree, collapsedDirs), [tree, collapsedDirs]);
@@ -114,6 +128,7 @@ export function ReadOnlyFileTree({
       // never disagree with the file the preview then fetches.
       if (row.node.kind === "file") onSelect(row.node.entry.path);
       else setCollapsed(row.node.path, row.expanded);
+      onSelectNode?.(row.node);
       return;
     }
 
@@ -133,7 +148,7 @@ export function ReadOnlyFileTree({
   // somewhere sensible inside the tree.
   const tabbableId =
     rows.find((row) => row.node.id === focusedId)?.node.id ??
-    rows.find((row) => row.node.kind === "file" && row.node.entry.path === selectedPath)?.node.id ??
+    rows.find((row) => row.node.path === selectedPath)?.node.id ??
     rows[0]?.node.id ??
     null;
 
@@ -149,7 +164,7 @@ export function ReadOnlyFileTree({
         {virtualizer.getVirtualItems().map((virtualRow) => {
           const row = rows[virtualRow.index]!;
           const node = row.node;
-          const isSelected = node.kind === "file" && node.entry.path === selectedPath;
+          const isSelected = node.path === selectedPath;
           const isFocused = node.id === focusedId;
           const Icon = node.kind === "file" ? FileIcon : row.expanded ? FolderOpen : Folder;
           return (
@@ -160,7 +175,7 @@ export function ReadOnlyFileTree({
               aria-setsize={row.setSize}
               aria-posinset={row.posInSet}
               aria-expanded={node.kind === "dir" ? row.expanded : undefined}
-              aria-selected={node.kind === "file" ? isSelected : undefined}
+              aria-selected={isSelected}
               tabIndex={node.id === tabbableId ? 0 : -1}
               data-tree-focused={isFocused ? "true" : undefined}
               onFocus={() => setFocusedId(node.id)}
@@ -168,9 +183,10 @@ export function ReadOnlyFileTree({
                 setFocusedId(node.id);
                 if (node.kind === "file") onSelect(node.entry.path);
                 else setCollapsed(node.path, row.expanded);
+                onSelectNode?.(node);
               }}
               className={cn(
-                "hover:bg-muted/60 focus-visible:ring-ring flex cursor-pointer items-center gap-1.5 rounded-sm pr-2 text-sm outline-none focus-visible:ring-2",
+                "hover:bg-muted/60 focus-visible:ring-ring flex cursor-pointer items-center justify-start gap-1.5 rounded-sm pr-2 text-left text-sm outline-none focus-visible:ring-2",
                 isSelected ? "bg-muted text-foreground font-medium" : "text-muted-foreground",
               )}
               style={{

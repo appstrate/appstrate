@@ -349,6 +349,12 @@ export const runs: Run[] = [
     duration: null,
     cost: null,
     cost_pricing_status: null,
+    token_usage: {
+      input_tokens: 18_420,
+      output_tokens: 3_190,
+      cache_creation_input_tokens: 2_400,
+      cache_read_input_tokens: 9_800,
+    },
     unread: true,
     runNumber: 131,
   }),
@@ -368,9 +374,33 @@ export const runs: Run[] = [
       },
     },
     primary_document_id: "doc_lab_1",
+    document_counts: { input: 1, output: 2 },
     proxy_label: "Sortie Europe",
     runner_name: "Runner Appstrate Montréal",
     runner_kind: "docker",
+  }),
+  makeRun({
+    id: "run_08",
+    status: "failed",
+    runNumber: 127,
+    started_at: ago(2_880),
+    completed_at: ago(2_879),
+    duration: 54_000,
+    error: "Le relevé Mastercard ne contenait pas la colonne de devise attendue.",
+    input: { trimestre: "2025-Q4", documents: ["document://doc_lab_3"] },
+    config: { devise: "CAD", validation_humaine: true, langue: "fr-CA" },
+    document_counts: { input: 1, output: 0 },
+  }),
+  makeRun({
+    id: "run_09",
+    status: "timeout",
+    runNumber: 126,
+    started_at: ago(4_320),
+    completed_at: ago(4_290),
+    duration: 1_800_000,
+    error: "Le rapprochement a dépassé la durée maximale de 30 minutes.",
+    input: { trimestre: "2025-Q4", documents: ["document://doc_lab_3"] },
+    config: { devise: "CAD", validation_humaine: false, langue: "fr-CA" },
   }),
   makeRun({
     id: "run_03",
@@ -439,6 +469,7 @@ export const runs: Run[] = [
     user_name: "Pierre",
     duration: 74_000,
     cost: 0.21,
+    document_counts: { input: 0, output: 0 },
     runNumber: 95,
     started_at: ago(520),
     completed_at: ago(519),
@@ -475,6 +506,15 @@ export const runs: Run[] = [
     completed_at: ago(609),
   }),
 ];
+
+export const agentRunActivity: Json200<"/api/agents/{scope}/{name}/run-activity", "get"> = {
+  window_days: 30,
+  window_start: new Date(T0 - 30 * 24 * 60 * 60_000).toISOString(),
+  total: 34,
+  success: 27,
+  failed: 4,
+  timeout: 1,
+};
 
 const STATUS_CYCLE = [
   "success",
@@ -638,6 +678,7 @@ export const schedules: Json200<"/api/schedules", "get"> = {
       id: "sch_01",
       packageId: "@default/wiki-brain",
       name: "Tous les matins à 7 h",
+      version_override: "0.3.0",
       last_run_number: 96,
     }),
     makeSchedule({
@@ -671,6 +712,7 @@ export const schedules: Json200<"/api/schedules", "get"> = {
       cron_expression: "0 16 * * 5",
       userId: "user_lab_2",
       actor_name: "Pierre",
+      version_override: "published",
       last_run_at: null,
       next_run_at: ago(-20_000),
     }),
@@ -1003,7 +1045,12 @@ export const qboMcpServerDetail: Json200<"/api/packages/mcp-servers/{scope}/{nam
   auto_installed: false,
   lock_version: 7,
   version: "1.0.0",
-  manifest: {},
+  manifest: {
+    name: "@tractr/qbo-mcp",
+    version: "1.0.0",
+    type: "mcp-server",
+    server: { type: "node", entry_point: "src/server.ts" },
+  } as never,
   manifest_name: "@tractr/qbo-mcp",
   version_count: 1,
   has_unarchived_changes: true,
@@ -1025,10 +1072,7 @@ type PackageFileIndex = Json200<"/api/packages/{scope}/{name}/files", "get">;
 
 function skillFileIndex(content: string): PackageFileIndex {
   return {
-    entries: [
-      { path: "SKILL.md", size: content.length, media_kind: "text", inline: content },
-      { path: "manifest.json", size: 3, media_kind: "text", inline: "{}\n" },
-    ],
+    entries: [{ path: "SKILL.md", size: content.length, media_kind: "text", inline: content }],
   };
 }
 
@@ -1038,16 +1082,94 @@ function mcpServerFileIndex(): PackageFileIndex {
   };
 }
 
-export const comptaReferencesSkillFiles: Json200<"/api/packages/{scope}/{name}/files", "get"> =
-  skillFileIndex(comptaReferencesSkillDetail.content ?? "");
+const qboMcpManifest = `${JSON.stringify(qboMcpServerDetail.manifest, null, 2)}\n`;
+const qboMcpEntryPoint = `import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+
+const server = new McpServer({ name: "qbo-mcp", version: "1.0.0" });
+
+server.tool("list_invoices", "Liste les factures QuickBooks accessibles", {}, async () => ({
+  content: [{ type: "text", text: "Connexion QuickBooks requise" }],
+}));
+`;
+
+const fiscalYearReference = `<overview>
+
+Definition de l'annee fiscale Tractr, conventions de nommage et chemins Google Drive.
+
+</overview>
+
+<fiscal_year>
+
+Annee fiscale : 1er septembre au 31 aout.
+
+| Trimestre | Mois | Annee calendaire |
+|-----------|------|-----------------|
+| Q1 | Septembre, Octobre, Novembre | Annee de debut |
+| Q2 | Decembre, Janvier, Fevrier | Decembre = annee debut, Jan-Fev = annee fin |
+| Q3 | Mars, Avril, Mai | Annee de fin |
+| Q4 | Juin, Juillet, Aout | Annee de fin |
+
+</fiscal_year>
+`;
+const extractPdfScript = `#!/usr/bin/env python3
+"""Lecture deterministe locale d'un PDF avec pdfplumber."""
+import sys
+import json
+import pdfplumber
+
+def main():
+    path = sys.argv[1]
+    with pdfplumber.open(path) as pdf:
+        print(json.dumps({"page_count": len(pdf.pages)}, ensure_ascii=False))
+
+if __name__ == "__main__":
+    main()
+`;
+
+export const comptaReferencesSkillFiles: Json200<"/api/packages/{scope}/{name}/files", "get"> = {
+  entries: [
+    {
+      path: "SKILL.md",
+      size: (comptaReferencesSkillDetail.content ?? "").length,
+      media_kind: "text",
+      inline: comptaReferencesSkillDetail.content ?? "",
+    },
+    {
+      path: "references/fiscal-year.md",
+      size: fiscalYearReference.length,
+      media_kind: "text",
+      inline: fiscalYearReference,
+    },
+    {
+      path: "scripts/extract-pdf.py",
+      size: extractPdfScript.length,
+      media_kind: "text",
+      inline: extractPdfScript,
+    },
+  ],
+};
 export const triageSentimentSkillFiles: Json200<"/api/packages/{scope}/{name}/files", "get"> =
   skillFileIndex(triageSentimentSkillDetail.content ?? "");
 export const wikiBrainSkillFiles: Json200<"/api/packages/{scope}/{name}/files", "get"> =
   skillFileIndex(wikiBrainSkillDetail.content ?? "");
 export const gdriveMcpServerFiles: Json200<"/api/packages/{scope}/{name}/files", "get"> =
   mcpServerFileIndex();
-export const qboMcpServerFiles: Json200<"/api/packages/{scope}/{name}/files", "get"> =
-  mcpServerFileIndex();
+export const qboMcpServerFiles: Json200<"/api/packages/{scope}/{name}/files", "get"> = {
+  entries: [
+    {
+      path: "manifest.json",
+      size: qboMcpManifest.length,
+      media_kind: "text",
+      inline: qboMcpManifest,
+    },
+    {
+      path: "src/server.ts",
+      size: qboMcpEntryPoint.length,
+      media_kind: "text",
+      inline: qboMcpEntryPoint,
+    },
+  ],
+};
 
 export const packageFileIndexes: Record<string, PackageFileIndex> = {
   "@tractr/compta-trimestrielle": {
@@ -1323,7 +1445,10 @@ export const agentDetail: Json200<"/api/packages/agents/{scope}/{name}", "get"> 
     schema_version: "0.6",
     dependencies: {
       skills: { "@tractr/compta-references": "1.4.0" },
-      mcp_servers: { "@appstrate/gdrive-mcp": "2.1.0" },
+      mcp_servers: {
+        "@appstrate/gdrive-mcp": "2.1.0",
+        "@tractr/qbo-mcp": "1.0.0",
+      },
       integrations: { "@appstrate/google-drive": "2.1.0" },
     },
     integrations_configuration: {
@@ -1388,7 +1513,10 @@ export const agentDetail: Json200<"/api/packages/agents/{scope}/{name}", "get"> 
   },
   dependencies: {
     skills: [{ id: "@tractr/compta-references", version: "1.4.0" }],
-    mcp_servers: [{ id: "@appstrate/gdrive-mcp", version: "2.1.0" }],
+    mcp_servers: [
+      { id: "@appstrate/gdrive-mcp", version: "2.1.0" },
+      { id: "@tractr/qbo-mcp", version: "1.0.0" },
+    ],
     integrations: [
       { id: "@appstrate/google-drive", version: "2.1.0", tools: ["drive_search", "drive_upload"] },
     ],
@@ -1418,19 +1546,107 @@ export const runLogs: Json200<"/api/runs/{id}/logs", "get"> = {
     {
       id: 2,
       runId: "run_01",
-      type: "agent",
+      type: "progress",
       level: "info",
       event: "tool.call",
-      message: "drive_search : 42 relevés trouvés dans finances/2026-Q2.",
+      message: "Tool: drive_search",
+      data: {
+        tool: "drive_search",
+        toolCallId: "call_drive_search",
+        args: { path: "finances/2026-Q2" },
+      } as unknown as components["schemas"]["RunLog"]["data"],
       createdAt: ago(2),
     },
     {
       id: 3,
       runId: "run_01",
+      type: "progress",
+      level: "info",
+      event: "tool.result",
+      message: "Tool result: drive_search",
+      data: {
+        tool: "drive_search",
+        toolCallId: "call_drive_search",
+        isError: false,
+        result: { count: 42 },
+        durationMs: 1_240,
+      } as unknown as components["schemas"]["RunLog"]["data"],
+      createdAt: ago(1),
+    },
+    {
+      id: 4,
+      runId: "run_01",
+      type: "progress",
+      level: "debug",
+      event: "turn.completed",
+      message: null,
+      data: {
+        event: "turn",
+        index: 0,
+        contextTokens: 51_200,
+        inputTokens: 49_800,
+        outputTokens: 620,
+        cacheReadTokens: 1_400,
+        cacheWriteTokens: 0,
+        latencyMs: 4_800,
+        contextWindow: 200_000,
+      } as unknown as components["schemas"]["RunLog"]["data"],
+      createdAt: ago(1),
+    },
+    {
+      id: 5,
+      runId: "run_01",
+      type: "progress",
+      level: "debug",
+      event: "turn.completed",
+      message: null,
+      data: {
+        event: "turn",
+        index: 1,
+        contextTokens: 68_900,
+        inputTokens: 52_300,
+        outputTokens: 910,
+        cacheReadTokens: 16_600,
+        cacheWriteTokens: 0,
+        latencyMs: 6_200,
+        contextWindow: 200_000,
+      } as unknown as components["schemas"]["RunLog"]["data"],
+      createdAt: ago(1),
+    },
+    {
+      id: 6,
+      runId: "run_01",
       type: "agent",
       level: "warn",
-      event: "tool.call",
+      event: "log",
       message: "Deux marchands sans mapping : SQ *TIM HORTONS, AMZN MKTP CA.",
+      createdAt: ago(1),
+    },
+    {
+      id: 7,
+      runId: "run_01",
+      type: "progress",
+      level: "debug",
+      event: "assistant.message",
+      message: "42 relevés trouvés dans finances/2026-Q2.",
+      data: {
+        event: "assistant_message",
+        message: "42 relevés trouvés dans finances/2026-Q2.",
+      } as unknown as components["schemas"]["RunLog"]["data"],
+      createdAt: ago(1),
+    },
+    {
+      id: 8,
+      runId: "run_01",
+      type: "progress",
+      level: "info",
+      event: "tool.call",
+      message: "Tool: drive_upload",
+      data: {
+        tool: "drive_upload",
+        toolCallId: "call_drive_upload",
+        args: { name: "recapitulatif-2026-Q2.xlsx" },
+      } as unknown as components["schemas"]["RunLog"]["data"],
       createdAt: ago(1),
     },
   ],
@@ -1575,12 +1791,122 @@ export const agentConnectionReadiness: Json200<
   ],
 };
 
+type AgentDiagnostics = Json200<"/api/agents/{scope}/{name}/diagnostics", "get">;
+
+/** Healthy is explicit: an empty diagnostic list is a valid assessed state. */
+export const agentDiagnosticsHealthy: AgentDiagnostics = {
+  status: "healthy",
+  blocking_count: 0,
+  warning_count: 0,
+  can_launch: true,
+  diagnostics: [],
+};
+
+/** Heavy exercises multiple non-blocking points without inventing a failed agent. */
+export const agentDiagnosticsWarnings: AgentDiagnostics = {
+  status: "warning",
+  blocking_count: 0,
+  warning_count: 2,
+  can_launch: true,
+  diagnostics: [
+    {
+      code: "schedule_version_differs",
+      severity: "warning",
+      title: "Une planification utilise une autre version",
+      explanation:
+        "La mémorisation quotidienne utilise la version 0.3.0 alors que cette vue inspecte le brouillon.",
+      field: "schedules.sch_01.version",
+      target: { node: "schedules", item: "sch_01" },
+      correction: {
+        destination: "schedule",
+        section: "version",
+        params: { scheduleId: "sch_01" },
+      },
+      recoverable_on_launch: false,
+    },
+    {
+      code: "schedule_version_differs",
+      severity: "warning",
+      title: "Une planification utilise une autre version",
+      explanation:
+        "Le rappel du vendredi utilise la version publiée au lieu du brouillon inspecté.",
+      field: "schedules.sch_04.version",
+      target: { node: "schedules", item: "sch_04" },
+      correction: {
+        destination: "schedule",
+        section: "version",
+        params: { scheduleId: "sch_04" },
+      },
+      recoverable_on_launch: false,
+    },
+  ],
+};
+
+/** Empty represents a deliberately incomplete draft and therefore real blockers. */
+export const agentDiagnosticsBlocking: AgentDiagnostics = {
+  status: "blocking",
+  blocking_count: 2,
+  warning_count: 0,
+  can_launch: false,
+  diagnostics: [
+    {
+      code: "empty_prompt",
+      severity: "blocking",
+      title: "Prompt vide",
+      explanation: "Le prompt de l’agent doit être rédigé avant son exécution.",
+      field: "prompt",
+      target: { node: "agent", item: null },
+      correction: { destination: "bundle", section: "prompt", params: {} },
+      recoverable_on_launch: false,
+    },
+    {
+      code: "invalid_config",
+      severity: "blocking",
+      title: "Entrée requise manquante",
+      explanation: "La période éditoriale doit être configurée avant la prochaine exécution.",
+      field: "config.editorial_period",
+      target: { node: "config", item: "editorial_period" },
+      correction: {
+        destination: "configuration",
+        section: "inputs",
+        params: { field: "editorial_period" },
+      },
+      recoverable_on_launch: false,
+    },
+  ],
+};
+
 /** Latest published version + the draft the editor is on. */
 export const agentVersionInfo: Json200<"/api/packages/agents/{scope}/{name}/versions/info", "get"> =
   {
     latest_published_version: "1.4.0",
     active_version: "1.4.0",
   };
+
+export const agentVersions: Json200<"/api/packages/agents/{scope}/{name}/versions", "get"> = {
+  versions: [
+    {
+      id: 6,
+      packageId: "@tractr/compta-trimestrielle",
+      version: "1.4.0",
+      integrity: "sha256-3f9a1c8e7d6b5a4938271605f4e3d2c1b0a9f8e7d6c5b4a3928170f6e5d4c3b2",
+      artifact_size: 48_120,
+      yanked: false,
+      created_by: USER_ID,
+      createdAt: ago(3_000),
+    },
+    {
+      id: 5,
+      packageId: "@tractr/compta-trimestrielle",
+      version: "1.3.0",
+      integrity: "sha256-8e7d6b5a4938271605f4e3d2c1b0a9f8e7d6c5b4a3928170f6e5d4c3b2a1908f7e",
+      artifact_size: 46_870,
+      yanked: false,
+      created_by: USER_ID,
+      createdAt: ago(86_400),
+    },
+  ],
+};
 
 /** The version the selector resolves `latest` to. */
 export const agentLatestVersion: components["schemas"]["PackageVersionDetail"] = {
@@ -2385,7 +2711,7 @@ export const connectionTest: Json200<"/api/models/{id}/test", "post"> = {
 export const library: Json200<"/api/library", "get"> = {
   object: "library",
   applications: [
-    { id: "app_default", name: "Default", isDefault: true },
+    { id: APP_ID, name: "Production", isDefault: true },
     { id: "app_compta", name: "Comptabilité", isDefault: false },
     { id: "app_veille", name: "Veille", isDefault: false },
   ],
@@ -2397,7 +2723,7 @@ export const library: Json200<"/api/library", "get"> = {
         name: "Compta trimestrielle",
         description: "Pipeline de comptabilité trimestrielle.",
         source: "local",
-        installed_in: ["app_default", "app_compta"],
+        installed_in: [APP_ID, "app_compta"],
       },
       {
         type: "agent" as const,
@@ -2405,7 +2731,7 @@ export const library: Json200<"/api/library", "get"> = {
         name: "Wiki-brain",
         description: "Mémoire proactive par personne.",
         source: "system",
-        installed_in: ["app_default"],
+        installed_in: [APP_ID],
       },
       {
         type: "agent" as const,
@@ -2433,7 +2759,7 @@ export const library: Json200<"/api/library", "get"> = {
         name: "Google Drive",
         description: "Fichiers, documents et dossiers partagés.",
         source: "system",
-        installed_in: ["app_default", "app_compta", "app_veille"],
+        installed_in: [APP_ID, "app_compta", "app_veille"],
       },
       {
         type: "integration" as const,

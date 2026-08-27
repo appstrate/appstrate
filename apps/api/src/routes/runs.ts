@@ -10,6 +10,7 @@ import {
   getRunningRunsForPackage,
   deletePackageRuns,
   listPackageRuns,
+  getPackageRunActivity,
   listGlobalRuns,
   listRunLogs,
   RUN_LOG_LEVELS,
@@ -366,15 +367,31 @@ export function createRunsRouter() {
       .min(0)
       .catch(0)
       .parse(c.req.query("offset") ?? 0);
+    const status = closedSetListQuery(c, "status", runStatusValues);
     const endUser = c.get("endUser");
     const result = await listPackageRuns(scope, agent.id, {
       limit,
       offset,
       endUserId: endUser?.id,
       actor: getActor(c),
+      status,
     });
     setOffsetLinkHeader({ c, limit, offset, total: result.total });
     return c.json(result);
+  });
+
+  // GET /api/agents/:scope/:name/run-activity — one 30-day aggregate for the
+  // operational overview. This remains a separate read from the paginated run
+  // list so the browser never has to download every page to compute a rate.
+  router.get(`/agents/${SCOPED_PACKAGE_ROUTE}/run-activity`, requireAgent(), async (c) => {
+    const agent = c.get("package");
+    const scope = getAppScope(c);
+    const endUser = c.get("endUser");
+    return c.json(
+      await getPackageRunActivity(scope, agent.id, {
+        endUserId: endUser?.id,
+      }),
+    );
   });
 
   // GET /api/runs — global paginated run list across the application.

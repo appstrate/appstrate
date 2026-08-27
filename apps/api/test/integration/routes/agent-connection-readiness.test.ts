@@ -17,8 +17,16 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedAgent, seedPackage } from "../../helpers/seed.ts";
-import { installPackage } from "../../../src/services/application-packages.ts";
+import {
+  seedAgent,
+  seedOrgModel,
+  seedOrgModelProviderKey,
+  seedPackage,
+} from "../../helpers/seed.ts";
+import {
+  installPackage,
+  updateInstalledPackage,
+} from "../../../src/services/application-packages.ts";
 import { createVersionFromDraft } from "../../../src/services/package-versions.ts";
 import { eq } from "drizzle-orm";
 import { integrationConnections, packages } from "@appstrate/db/schema";
@@ -93,6 +101,20 @@ interface ReadinessBody {
   }>;
 }
 
+interface DiagnosticsBody {
+  status: "healthy" | "warning" | "blocking";
+  blocking_count: number;
+  warning_count: number;
+  can_launch: boolean;
+  diagnostics: Array<{
+    code: string;
+    severity: "blocking" | "warning";
+    target: { node: string | null; item: string | null };
+    correction: { destination: string; section: string | null };
+    recoverable_on_launch: boolean;
+  }>;
+}
+
 describe("GET /api/agents/:scope/:name/connection-readiness", () => {
   let ctx: TestContext;
 
@@ -122,6 +144,18 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
     await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, INTEGRATION);
   }
 
+  async function configureUsableModel() {
+    const credential = await seedOrgModelProviderKey({ orgId: ctx.orgId });
+    const model = await seedOrgModel({
+      orgId: ctx.orgId,
+      credentialId: credential.id,
+      enabled: true,
+    });
+    await updateInstalledPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, AGENT, {
+      modelId: model.id,
+    });
+  }
+
   async function seedConnection() {
     await db.insert(integrationConnections).values({
       integrationId: INTEGRATION,
@@ -137,6 +171,13 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
 
   function getReadiness() {
     return app.request(`/api/agents/${AGENT}/connection-readiness`, {
+      method: "GET",
+      headers: authHeaders(ctx),
+    });
+  }
+
+  function getDiagnostics() {
+    return app.request(`/api/agents/${AGENT}/diagnostics`, {
       method: "GET",
       headers: authHeaders(ctx),
     });
@@ -169,6 +210,42 @@ describe("GET /api/agents/:scope/:name/connection-readiness", () => {
 
     // Parity: the run gate rejects with 412.
     expect((await postRun()).status).toBe(412);
+  });
+
+  it("returns an explicit healthy diagnostics result", async () => {
+    await seedAgentWith(buildAgentManifest([], false));
+    await configureUsableModel();
+
+    const res = await getDiagnostics();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DiagnosticsBody;
+    expect(body).toMatchObject({
+      status: "healthy",
+      blocking_count: 0,
+      warning_count: 0,
+      can_launch: true,
+      diagnostics: [],
+    });
+  });
+
+  it("routes a recoverable connection blocker to the toolbox and connections settings", async () => {
+    await seedAgentWith(buildAgentManifest([INTEGRATION], true));
+    await seedIntegration(false);
+    await configureUsableModel();
+
+    const res = await getDiagnostics();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as DiagnosticsBody;
+    expect(body.status).toBe("blocking");
+    expect(body.blocking_count).toBe(1);
+    expect(body.can_launch).toBe(true);
+    expect(body.diagnostics[0]).toMatchObject({
+      code: "not_connected",
+      severity: "blocking",
+      target: { node: "toolbox", item: INTEGRATION },
+      correction: { destination: "configuration", section: "connections" },
+      recoverable_on_launch: true,
+    });
   });
 
   it("inert OPTIONAL integration (no tools, not required) → present but not blocking", async () => {

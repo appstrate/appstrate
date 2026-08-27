@@ -31,10 +31,13 @@ type Handler = (url: URL, scenario: Scenario, headers: Headers, body: unknown) =
 
 type LabEndUser = f.Json200<"/api/end-users/{id}", "get">;
 type EndUserPatch = f.JsonRequest<"/api/end-users/{id}", "patch">;
+type LabAgentDetail = f.Json200<"/api/packages/agents/{scope}/{name}", "get">;
+type AgentUpdate = f.JsonRequest<"/api/packages/agents/{scope}/{name}", "put">;
 
 const changedEndUsers = new Map<string, LabEndUser>();
 const deletedEndUsers = new Set<string>();
 const dashboardSsoByOrg = new Map<string, boolean>();
+const changedAgentBundles = new Map<string, LabAgentDetail>();
 
 export function resetEndUserLabState(): void {
   changedEndUsers.clear();
@@ -43,6 +46,10 @@ export function resetEndUserLabState(): void {
 
 export function resetSettingsLabState(): void {
   dashboardSsoByOrg.clear();
+}
+
+export function resetAgentEditorLabState(): void {
+  changedAgentBundles.clear();
 }
 
 function endUserFixture(id: string): LabEndUser | null {
@@ -76,6 +83,86 @@ function isPermanentPackageDetail(headers: Headers): boolean {
 
 function isEndUserPatch(body: unknown): body is EndUserPatch {
   return typeof body === "object" && body !== null && !Array.isArray(body);
+}
+
+function isAgentUpdate(body: unknown): body is AgentUpdate {
+  return (
+    typeof body === "object" &&
+    body !== null &&
+    !Array.isArray(body) &&
+    "manifest" in body &&
+    typeof body.manifest === "object" &&
+    body.manifest !== null &&
+    "content" in body &&
+    typeof body.content === "string" &&
+    "lock_version" in body &&
+    typeof body.lock_version === "number"
+  );
+}
+
+function agentDetailFixture(packageId: string): LabAgentDetail {
+  const changed = changedAgentBundles.get(packageId);
+  if (changed) return changed;
+  if (packageId === f.agentDetail.id) return f.agentDetail;
+  const listed = f.agents.data.find((agent) => agent.id === packageId);
+  const name = packageId.split("/").pop() ?? packageId;
+  const displayName =
+    listed?.display_name ??
+    name
+      .split("-")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+  const lastRun = f.runs.find((run) => run.packageId === packageId);
+  const detailVersion = listed?.version ?? f.agentDetail.version ?? "0.1.0";
+  const baseManifest = f.agentDetail.manifest!;
+  const detail: LabAgentDetail = {
+    ...f.agentDetail,
+    id: packageId,
+    display_name: displayName,
+    description: listed?.description ?? f.agentDetail.description,
+    source: listed?.source ?? f.agentDetail.source,
+    scope: listed?.scope ?? f.agentDetail.scope,
+    version: detailVersion,
+    running_runs: listed?.running_runs ?? 0,
+    last_run: lastRun?.started_at
+      ? {
+          id: lastRun.id,
+          status: lastRun.status,
+          started_at: lastRun.started_at,
+          duration: lastRun.duration,
+        }
+      : null,
+    manifest: {
+      ...baseManifest,
+      name: packageId,
+      version: detailVersion,
+      display_name: displayName,
+      description: listed?.description ?? f.agentDetail.description,
+      dependencies: {},
+    },
+    dependencies: { skills: [], mcp_servers: [], integrations: [] },
+  };
+  if (packageId !== "@tractr/analyse-recurrence-articles-tastet") return detail;
+  return {
+    ...detail,
+    prompt: "",
+    config: {
+      ...detail.config,
+      schema: {
+        type: "object",
+        properties: {
+          editorial_period: { type: "string", title: "Période éditoriale" },
+        },
+        required: ["editorial_period"],
+      } as never,
+      current: {},
+    },
+  };
+}
+
+function agentPackageId(url: URL): string {
+  const parts = url.pathname.split("/").filter(Boolean);
+  return `${decodeURIComponent(parts[2] ?? "")}/${decodeURIComponent(parts[3] ?? "")}`;
 }
 
 function orgIdFromSettingsUrl(url: URL): string {
@@ -527,21 +614,23 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   {
     method: "GET",
     pattern: /^\/api\/packages\/agents\/[^/]+\/[^/]+$/,
-    handler: (url) => {
+    handler: (url) => ({ status: 200, body: agentDetailFixture(typedPackageId(url)) }),
+  },
+  {
+    method: "PUT",
+    pattern: /^\/api\/packages\/agents\/[^/]+\/[^/]+$/,
+    handler: (url, scenario, _headers, body) => {
+      if (!isAgentUpdate(body)) return { status: 400, body: {} };
       const packageId = typedPackageId(url);
-      if (packageId === f.agentDetail.id) return { status: 200, body: f.agentDetail };
-      const name = packageId.split("/").pop() ?? packageId;
-      return {
-        status: 200,
-        body: {
-          ...f.agentDetail,
-          id: packageId,
-          display_name: name
-            .split("-")
-            .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-            .join(" "),
-        },
+      const current = agentDetailFixture(packageId);
+      const updated: LabAgentDetail = {
+        ...current,
+        manifest: body.manifest,
+        prompt: body.content,
+        lock_version: body.lock_version + 1,
       };
+      if (scenario !== "error") changedAgentBundles.set(packageId, updated);
+      return { status: scenario === "error" ? 500 : 200, body: updated };
     },
   },
   {
@@ -561,11 +650,23 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
     handler: (url, s) => {
       const parts = url.pathname.split("/");
       const runId = parts[parts.length - 2] ?? "";
+      const run = f.runs.find((candidate) => candidate.id === runId);
       const rows = f.runLogs.data.map((row, index) => ({
         ...row,
         id: index + 1,
         runId,
       }));
+      if (run?.status === "failed" && run.error) {
+        rows.push({
+          id: rows.length + 1,
+          runId,
+          type: "system",
+          level: "error",
+          event: "run.failed",
+          message: run.error,
+          createdAt: run.completed_at ?? run.started_at ?? rows[0]!.createdAt,
+        });
+      }
       return { status: 200, body: { ...f.runLogs, data: list(rows, s) } };
     },
   },
@@ -596,6 +697,28 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   },
   {
     method: "GET",
+    pattern: /^\/api\/agents\/[^/]+\/[^/]+\/diagnostics$/,
+    handler: (url, scenario) => {
+      const packageId = agentPackageId(url);
+      const nominal =
+        packageId === "@default/wiki-brain"
+          ? f.agentDiagnosticsWarnings
+          : packageId === "@tractr/analyse-recurrence-articles-tastet"
+            ? f.agentDiagnosticsBlocking
+            : f.agentDiagnosticsHealthy;
+      return {
+        status: 200,
+        body:
+          scenario === "empty"
+            ? f.agentDiagnosticsBlocking
+            : scenario === "heavy"
+              ? f.agentDiagnosticsWarnings
+              : nominal,
+      };
+    },
+  },
+  {
+    method: "GET",
     pattern: /^\/api\/agents\/[^/]+\/[^/]+\/model$/,
     handler: () => ({ status: 200, body: f.agentModel }),
   },
@@ -607,10 +730,9 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   {
     method: "GET",
     pattern: /^\/api\/agents\/[^/]+\/[^/]+\/schedules$/,
-    handler: (_url, scenario) => {
-      const rows = f.schedules.data.filter(
-        (schedule) => schedule.packageId === "@tractr/compta-trimestrielle",
-      );
+    handler: (url, scenario) => {
+      const packageId = agentPackageId(url);
+      const rows = f.schedules.data.filter((schedule) => schedule.packageId === packageId);
       return {
         status: 200,
         body: { ...f.schedules, data: list(rows, scenario) },
@@ -619,9 +741,28 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
   },
   {
     method: "GET",
+    pattern: /^\/api\/agents\/[^/]+\/[^/]+\/run-activity$/,
+    handler: (_url, scenario) => ({
+      status: 200,
+      body:
+        scenario === "empty"
+          ? { ...f.agentRunActivity, total: 0, success: 0, failed: 0, timeout: 0 }
+          : f.agentRunActivity,
+    }),
+  },
+  {
+    method: "GET",
     pattern: /^\/api\/agents\/[^/]+\/[^/]+\/runs$/,
     handler: (url, s) => {
-      const all = list(f.runs, s, f.heavyRuns);
+      const packageId = genericPackageId(url);
+      const requestedStatuses = new Set(
+        (url.searchParams.get("status") ?? "").split(",").filter(Boolean),
+      );
+      const all = list(f.runs, s, f.heavyRuns).filter(
+        (run) =>
+          run.packageId === packageId &&
+          (requestedStatuses.size === 0 || requestedStatuses.has(run.status)),
+      );
       const offset = Number(url.searchParams.get("offset") ?? 0);
       const limit = Number(url.searchParams.get("limit") ?? 12);
       const page = all.slice(offset, offset + limit);
@@ -635,6 +776,14 @@ const ROUTES: Array<{ method: string; pattern: RegExp; handler: Handler }> = [
         },
       };
     },
+  },
+  {
+    method: "GET",
+    pattern: /^\/api\/packages\/agents\/[^/]+\/[^/]+\/versions$/,
+    handler: (_url, s) => ({
+      status: 200,
+      body: { versions: list(f.agentVersions.versions, s) },
+    }),
   },
   {
     // The version selector asks for both on mount, and they are two different

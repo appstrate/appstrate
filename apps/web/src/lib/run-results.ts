@@ -15,12 +15,7 @@ export interface RunResultsStateInput {
 export function classifyRunResults(input: RunResultsStateInput) {
   const hasStructuredOutput = !!input.output && Object.keys(input.output).length > 0;
   const shouldRenderDocuments =
-    input.documentsLoading ||
-    input.documentsError ||
-    input.loadedDocumentCount > 0 ||
-    input.expectedDocumentCount > 0;
-  const hasProduction =
-    shouldRenderDocuments || hasStructuredOutput || input.hasRunMemory || input.hasPrimaryDocument;
+    input.loadedDocumentCount > 0 || input.expectedDocumentCount > 0 || input.hasPrimaryDocument;
   const hasDurableProduction =
     input.loadedDocumentCount > 0 ||
     input.expectedDocumentCount > 0 ||
@@ -31,7 +26,7 @@ export function classifyRunResults(input: RunResultsStateInput) {
   return {
     hasStructuredOutput,
     shouldRenderDocuments,
-    hasProduction,
+    hasProduction: hasDurableProduction,
     isPartial: (input.status === "failed" || input.status === "cancelled") && hasDurableProduction,
   };
 }

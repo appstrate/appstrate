@@ -68,6 +68,7 @@ interface RunListProps {
   view?: ListView;
   /** Level-one tables preserve every selected column behind horizontal overflow. */
   tableColumnMode?: "tiered" | "scroll";
+  tableSurface?: "framed" | "integrated";
 }
 
 export function RunList({
@@ -87,6 +88,7 @@ export function RunList({
   countLabel,
   view = "table",
   tableColumnMode = "tiered",
+  tableSurface = "framed",
 }: RunListProps) {
   const { t } = useTranslation(["agents"]);
   const agentName = useRunAgentName(fixedAgentName);
@@ -140,6 +142,7 @@ export function RunList({
           empty={emptyState}
           banner={page === 0 ? firstPageBanner : undefined}
           columnMode={tableColumnMode}
+          surface={tableSurface}
         />
       ) : (
         <CardGrid

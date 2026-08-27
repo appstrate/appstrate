@@ -55,6 +55,8 @@ export function DocumentListPanel({
   toolbar,
   tableLabel,
   tableColumnMode = "tiered",
+  tableSurface = "framed",
+  tableShowHeader = true,
 }: {
   documents: DocumentDto[];
   isLoading: boolean;
@@ -89,6 +91,10 @@ export function DocumentListPanel({
   tableLabel?: string;
   /** Level-one collections keep every reader-selected column reachable. */
   tableColumnMode?: "tiered" | "scroll";
+  /** Integrated rails already provide the surrounding surface. */
+  tableSurface?: "framed" | "integrated";
+  /** The compact snapshot list names the group in its accordion trigger. */
+  tableShowHeader?: boolean;
 }) {
   const { t } = useTranslation("documents");
   const download = useDocumentDownload();
@@ -203,6 +209,8 @@ export function DocumentListPanel({
             label={tableLabel ?? t("tableLabel")}
             columns={columns}
             columnMode={tableColumnMode}
+            surface={tableSurface}
+            showHeader={tableShowHeader}
             rows={documents}
             rowKey={(doc) => doc.id}
             rowHref={(doc) =>

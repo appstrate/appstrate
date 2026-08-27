@@ -1442,9 +1442,10 @@ export async function listPackageRuns(
     offset?: number;
     endUserId?: string | null;
     actor?: Actor | null;
+    status?: RunStatus[];
   } = {},
 ) {
-  const { limit = 50, offset = 0, endUserId, actor = null } = options;
+  const { limit = 50, offset = 0, endUserId, actor = null, status } = options;
   const conditions = [
     eq(runs.packageId, packageId),
     eq(runs.orgId, scope.orgId),
@@ -1453,7 +1454,64 @@ export async function listPackageRuns(
   if (endUserId) {
     conditions.push(eq(runs.endUserId, endUserId));
   }
+  if (status && status.length > 0) {
+    conditions.push(inArray(runs.status, status));
+  }
   return listRunsWithFilter(and(...conditions)!, limit, offset, actor);
+}
+
+export type PackageRunActivity = {
+  window_days: number;
+  window_start: string;
+  total: number;
+  success: number;
+  failed: number;
+  timeout: number;
+};
+
+/**
+ * Aggregate one agent's recent activity in a single tenant-scoped query.
+ *
+ * This deliberately returns the raw terminal-status counts instead of a
+ * precomputed rate. The caller can then render an honest unavailable state
+ * when there are no terminal runs, while the contract remains useful to
+ * clients that need the underlying numbers.
+ */
+export async function getPackageRunActivity(
+  scope: AppScope,
+  packageId: string,
+  options: { endUserId?: string | null; now?: Date } = {},
+): Promise<PackageRunActivity> {
+  const windowDays = 30;
+  const windowStart = new Date(
+    (options.now ?? new Date()).getTime() - windowDays * 24 * 60 * 60 * 1000,
+  );
+  const conditions = [
+    eq(runs.packageId, packageId),
+    eq(runs.orgId, scope.orgId),
+    eq(runs.applicationId, scope.applicationId),
+    gte(runs.startedAt, windowStart),
+  ];
+  if (options.endUserId) conditions.push(eq(runs.endUserId, options.endUserId));
+
+  const [row] = await db
+    .select({
+      total: sql<string>`count(*)`,
+      success: sql<string>`count(*) filter (where ${eq(runs.status, "success")})`,
+      failed: sql<string>`count(*) filter (where ${eq(runs.status, "failed")})`,
+      timeout: sql<string>`count(*) filter (where ${eq(runs.status, "timeout")})`,
+    })
+    .from(runs)
+    .where(and(...conditions));
+
+  return {
+    window_days: windowDays,
+    window_start: windowStart.toISOString(),
+    total: Number(row?.total ?? 0),
+    success: Number(row?.success ?? 0),
+    failed: Number(row?.failed ?? 0),
+    timeout: Number(row?.timeout ?? 0),
+  };
 }
 
 /**

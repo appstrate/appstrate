@@ -21,12 +21,19 @@ describe("run results classification", () => {
     expect(classify({ output: {} }).hasProduction).toBe(false);
   });
 
-  it("does not turn a document API error into an empty run", () => {
+  it("keeps server-reported documents available when the document API fails", () => {
     expect(classify({ expectedDocumentCount: 2, documentsError: true })).toMatchObject({
       shouldRenderDocuments: true,
       hasProduction: true,
     });
-    expect(classify({ status: "failed", documentsError: true }).isPartial).toBe(false);
+  });
+
+  it("does not qualify a document API error as production", () => {
+    expect(classify({ status: "failed", documentsError: true })).toMatchObject({
+      shouldRenderDocuments: false,
+      hasProduction: false,
+      isPartial: false,
+    });
   });
 
   it("marks retained output from failed and cancelled runs as partial", () => {

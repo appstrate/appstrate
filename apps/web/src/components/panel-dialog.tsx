@@ -38,6 +38,8 @@ interface PanelDialogProps {
   reserveCloseArea?: boolean;
   /** Prototype the panel as a shell surface below the two-line mobile header. */
   mobileAsSurface?: boolean;
+  /** Sticky action area owned by the content pane, never by the rail. */
+  contentFooter?: ReactNode;
   children: ReactNode;
   onClose: () => void;
 }
@@ -50,6 +52,7 @@ export function PanelDialog({
   closeLabel,
   reserveCloseArea = false,
   mobileAsSurface = false,
+  contentFooter,
   children,
   onClose,
 }: PanelDialogProps) {
@@ -115,9 +118,13 @@ export function PanelDialog({
         {contentScrollArea ? (
           <div className="flex min-w-0 flex-1 flex-col">
             <ScrollArea className="min-h-0 min-w-0 flex-1">{content}</ScrollArea>
+            {contentFooter}
           </div>
         ) : (
-          <div className="min-w-0 flex-1 overflow-y-auto">{content}</div>
+          <div className="flex min-w-0 flex-1 flex-col">
+            <div className="min-h-0 flex-1 overflow-y-auto">{content}</div>
+            {contentFooter}
+          </div>
         )}
       </DialogContent>
     </Dialog>

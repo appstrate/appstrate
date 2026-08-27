@@ -1573,6 +1573,72 @@ export const schemas = {
       },
     },
   },
+  AgentDiagnostics: {
+    type: "object",
+    description:
+      "Shared, ordered diagnostics for one agent installation and definition. An empty diagnostics array with status healthy is a successful result.",
+    required: ["status", "blocking_count", "warning_count", "can_launch", "diagnostics"],
+    properties: {
+      status: { type: "string", enum: ["healthy", "warning", "blocking"] },
+      blocking_count: { type: "integer", minimum: 0 },
+      warning_count: { type: "integer", minimum: 0 },
+      can_launch: {
+        type: "boolean",
+        description:
+          "False when at least one blocker cannot be resolved by the launch recovery flow.",
+      },
+      diagnostics: {
+        type: "array",
+        items: {
+          type: "object",
+          required: [
+            "code",
+            "severity",
+            "title",
+            "explanation",
+            "field",
+            "target",
+            "correction",
+            "recoverable_on_launch",
+          ],
+          properties: {
+            code: { type: "string" },
+            severity: { type: "string", enum: ["blocking", "warning"] },
+            title: { type: "string" },
+            explanation: { type: "string" },
+            field: { type: "string" },
+            target: {
+              type: "object",
+              required: ["node", "item"],
+              properties: {
+                node: {
+                  type: ["string", "null"],
+                  enum: ["agent", "config", "skills", "toolbox", "model", "schedules", null],
+                },
+                item: { type: ["string", "null"] },
+              },
+            },
+            correction: {
+              type: "object",
+              required: ["destination", "section", "params"],
+              properties: {
+                destination: {
+                  type: "string",
+                  enum: ["bundle", "configuration", "schedule"],
+                },
+                section: { type: ["string", "null"] },
+                params: {
+                  type: "object",
+                  additionalProperties: { type: "string" },
+                },
+              },
+            },
+            recoverable_on_launch: { type: "boolean" },
+          },
+        },
+      },
+    },
+  },
   IntegrationPin: {
     type: "object",
     required: [

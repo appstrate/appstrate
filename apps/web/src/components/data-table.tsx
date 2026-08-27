@@ -93,6 +93,10 @@ interface DataTableProps<T> extends CollectionState {
    * behind horizontal overflow when the table becomes narrow.
    */
   columnMode?: "tiered" | "scroll";
+  /** Remove the second frame when the table already lives on a white surface. */
+  surface?: "framed" | "integrated";
+  /** Compact embedded lists may keep semantic headers without drawing a header band. */
+  showHeader?: boolean;
 }
 
 /**
@@ -169,6 +173,8 @@ export function DataTable<T>({
   banner,
   label,
   columnMode = "tiered",
+  surface = "framed",
+  showHeader = true,
   ...state
 }: DataTableProps<T>) {
   // The order lives in `collection.ts`, shared with the card grid: a caller
@@ -203,7 +209,9 @@ export function DataTable<T>({
         data-data-table-frame
         className={cn(
           "@container/table overflow-hidden",
-          "bg-card rounded-lg border shadow-sm [[data-settings-table-surface=integrated]_&]:rounded-none [[data-settings-table-surface=integrated]_&]:border-0 [[data-settings-table-surface=integrated]_&]:bg-transparent [[data-settings-table-surface=integrated]_&]:shadow-none",
+          surface === "integrated"
+            ? "bg-transparent"
+            : "bg-card rounded-lg border shadow-sm [[data-settings-table-surface=integrated]_&]:rounded-none [[data-settings-table-surface=integrated]_&]:border-0 [[data-settings-table-surface=integrated]_&]:bg-transparent [[data-settings-table-surface=integrated]_&]:shadow-none",
         )}
       >
         {verdict === "error" ? (state.error ?? <ErrorState compact />) : state.empty}
@@ -216,7 +224,9 @@ export function DataTable<T>({
       data-data-table-frame
       className={cn(
         "@container/table overflow-hidden",
-        "bg-card rounded-lg border shadow-sm [[data-settings-table-surface=integrated]_&]:rounded-none [[data-settings-table-surface=integrated]_&]:border-0 [[data-settings-table-surface=integrated]_&]:bg-transparent [[data-settings-table-surface=integrated]_&]:shadow-none",
+        surface === "integrated"
+          ? "bg-transparent"
+          : "bg-card rounded-lg border shadow-sm [[data-settings-table-surface=integrated]_&]:rounded-none [[data-settings-table-surface=integrated]_&]:border-0 [[data-settings-table-surface=integrated]_&]:bg-transparent [[data-settings-table-surface=integrated]_&]:shadow-none",
       )}
     >
       <ScrollArea data-data-table-scroll>
@@ -230,7 +240,7 @@ export function DataTable<T>({
           )}
           style={tracks}
         >
-          <thead role="rowgroup" className="block">
+          <thead role="rowgroup" className={showHeader ? "block" : "sr-only"}>
             <tr
               role="row"
               data-data-table-row

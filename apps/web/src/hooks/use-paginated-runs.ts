@@ -80,7 +80,7 @@ export function usePaginatedRuns({
       if (packageId) {
         const { scope, name } = splitPackageRef(packageId);
         const { data } = await client.GET("/api/agents/{scope}/{name}/runs", {
-          params: { path: { scope, name }, query: { limit, offset } },
+          params: { path: { scope, name }, query: { limit, offset, status: statusKey } },
         });
         return data!;
       }
@@ -112,5 +112,23 @@ export function usePaginatedRuns({
       return sameQuestion ? prev : undefined;
     },
     enabled: !!applicationId && (scheduleId ? !!scheduleId : packageId ? !!packageId : true),
+  });
+}
+
+/** One server-side aggregate for the agent overview's fixed 30-day window. */
+export function useAgentRunActivity(packageId: string | undefined) {
+  const orgId = useCurrentOrgId();
+  const applicationId = useCurrentApplicationId();
+
+  return useQuery({
+    queryKey: ["agent-run-activity", orgId, applicationId, packageId],
+    queryFn: async () => {
+      const { scope, name } = splitPackageRef(packageId!);
+      const { data } = await client.GET("/api/agents/{scope}/{name}/run-activity", {
+        params: { path: { scope, name } },
+      });
+      return data!;
+    },
+    enabled: !!orgId && !!applicationId && !!packageId,
   });
 }

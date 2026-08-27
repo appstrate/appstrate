@@ -13,7 +13,7 @@ interface ScheduleCardProps {
   schedule: EnrichedSchedule;
   agentName?: string;
   /** The level-one collection needs a real vertical card; embedded lists keep the compact row. */
-  variant?: "compact" | "collection";
+  variant?: "compact" | "collection" | "integrated";
 }
 
 export function ScheduleCard({ schedule, agentName, variant = "compact" }: ScheduleCardProps) {
@@ -88,7 +88,11 @@ export function ScheduleCard({ schedule, agentName, variant = "compact" }: Sched
   return (
     <Link
       to={`/schedules/${schedule.id}`}
-      className="border-border bg-card hover:bg-accent/50 block rounded-lg border transition-colors"
+      className={
+        variant === "integrated"
+          ? "hover:bg-muted/30 block transition-colors"
+          : "border-border bg-card hover:bg-accent/50 block rounded-lg border transition-colors"
+      }
     >
       <div className="flex items-center gap-2 p-3">
         <span className="truncate font-medium">{schedule.name || schedule.id}</span>

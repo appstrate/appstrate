@@ -76,6 +76,7 @@ interface SchemaSectionProps {
   fields: SchemaField[];
   onChange: (fields: SchemaField[]) => void;
   readOnly?: boolean;
+  surface?: "card" | "settings";
 }
 
 const TYPE_OPTIONS = ["string", "number", "integer", "boolean", "array", "object"];
@@ -414,7 +415,14 @@ function SortableFieldCard({
   );
 }
 
-export function SchemaSection({ title, mode, fields, onChange, readOnly }: SchemaSectionProps) {
+export function SchemaSection({
+  title,
+  mode,
+  fields,
+  onChange,
+  readOnly,
+  surface = "card",
+}: SchemaSectionProps) {
   const { t } = useTranslation(["agents", "common"]);
   const add = () => onChange([...fields, emptyField(mode)]);
 
@@ -441,8 +449,8 @@ export function SchemaSection({ title, mode, fields, onChange, readOnly }: Schem
     }
   }
 
-  return (
-    <SectionCard title={title}>
+  const content = (
+    <>
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={fields.map((f) => f._id)} strategy={verticalListSortingStrategy}>
           {fields.map((field, i) => (
@@ -469,6 +477,20 @@ export function SchemaSection({ title, mode, fields, onChange, readOnly }: Schem
           {t("editor.addField")}
         </Button>
       )}
-    </SectionCard>
+    </>
   );
+
+  if (surface === "settings") {
+    return (
+      <section className="space-y-4">
+        <div>
+          <h3 className="text-lg font-semibold">{title}</h3>
+          <div className="border-border mt-2 border-b" />
+        </div>
+        <div className="space-y-3">{content}</div>
+      </section>
+    );
+  }
+
+  return <SectionCard title={title}>{content}</SectionCard>;
 }

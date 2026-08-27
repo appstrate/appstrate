@@ -2610,6 +2610,28 @@ handlers now reproduce the real lifecycle boundary. Inline Results also keeps
 Source visible, with the exact retained Prompt and Manifest or an explicit
 expired state, rather than linking to a shadow Agent that does not exist.
 
+**Agent and Run consolidation preview, 27 August.** The latest Agent shell and
+the latest Run detail now share one review branch instead of three independent
+worktrees. The Agent's local surface is organised around Overview, Map, Files,
+Runs, Configuration and Memory. Overview keeps health full width, then places
+Executions, Activity and Memory in three equal columns at desktop widths. A
+white outer surface on the grey page carries the elevation; bordered cards
+inside that white surface do not carry another shadow.
+
+Run detail no longer has an Overview tab whose facts merely repeated the other
+destinations. It exposes Journal and Results only. An active, failed or
+terminal Run without durable production opens Journal; a terminal Run with
+durable production opens Results. Journal keeps the realtime log on the left
+and the immutable launch facts in edge-to-edge accordions on the right. Only
+Execution opens initially. Search and filters operate locally on the loaded log
+entries and combine across message text, level and event type. Results reuses
+the Agent split-navigation grammar for Productions, structured output and
+Memory, and omits destinations that have no retained content.
+
+This consolidation is still a visual review surface. Its focused component and
+Lab checks run during iteration, but the repository gates remain deliberately
+deferred until the combined Agent map is accepted.
+
 **12. Accessibility, which nothing here has ever checked.** The branch
 re-declares ARIA roles on the table because this file demands it, and that is
 the whole of it: not one contrast ratio, keyboard path or touch target has ever

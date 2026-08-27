@@ -203,6 +203,7 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
     "embedded model-catalog value object; canonical runtime type lives in @appstrate/core",
   AgentConnectionReadiness:
     "bulk agent connection-readiness envelope; SPA uses the generated spec type (integrations[].resolution is the registered IntegrationAgentResolution)",
+  AgentDiagnostics: "agent diagnostics envelope; SPA consumes the generated OpenAPI type directly",
   OAuthClientObject: "OIDC oauth-admin wire; no shared-type (SPA uses the generated spec type)",
   OAuthClientWithSecret: "OIDC client-create wire; no shared-type",
   OAuthTokenResponse: "internal credential-proxy wire; mirrors @appstrate/core/sidecar-types",

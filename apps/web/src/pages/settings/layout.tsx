@@ -10,7 +10,7 @@
  * after a context switch.
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, Settings, X } from "lucide-react";
 import { toast } from "sonner";
@@ -29,6 +29,7 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { client } from "../../api/client";
 import { AppVersion } from "../../components/app-version";
 import { SettingsPageActionTargetsProvider } from "../../components/settings/settings-page-actions";
+import { RailLink } from "../../components/settings/rail-link";
 import { NavigateKeepingState } from "../../components/navigate-keeping-state";
 import { PanelDialog } from "../../components/panel-dialog";
 import { useAppConfig } from "../../hooks/use-app-config";
@@ -86,41 +87,6 @@ function ContextSelector({ value, label, disabled, options, onValueChange }: Con
         ))}
       </SelectContent>
     </Select>
-  );
-}
-
-function RailLink({
-  item,
-  label,
-  active,
-  state,
-  mobile = false,
-  onNavigate,
-}: {
-  item: UnifiedSettingsNavItem;
-  label: string;
-  active: boolean;
-  state?: unknown;
-  mobile?: boolean;
-  onNavigate?: () => void;
-}) {
-  return (
-    <Link
-      to={item.to}
-      state={state}
-      onClick={onNavigate}
-      aria-current={active ? "page" : undefined}
-      className={cn(
-        "flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-        mobile && "min-h-11",
-        active
-          ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-          : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
-      )}
-    >
-      <item.icon className="size-4 shrink-0" />
-      <span className="truncate">{label}</span>
-    </Link>
   );
 }
 

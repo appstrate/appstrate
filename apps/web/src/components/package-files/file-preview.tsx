@@ -31,6 +31,7 @@
 import { useTranslation } from "react-i18next";
 import { Download, FileWarning } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
+import { cn } from "@appstrate/ui/cn";
 import { formatBytes } from "@appstrate/core/format";
 import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
 import { MonacoEditor } from "../monaco";
@@ -50,9 +51,18 @@ interface FilePreviewProps {
   packageId: string;
   version: string | undefined;
   entry: PackageFileEntry;
+  className?: string;
+  hideHeader?: boolean;
 }
 
-export function FilePreview({ id, packageId, version, entry }: FilePreviewProps) {
+export function FilePreview({
+  id,
+  packageId,
+  version,
+  entry,
+  className,
+  hideHeader = false,
+}: FilePreviewProps) {
   const { t } = useTranslation("agents");
   const { resolvedTheme } = useTheme();
   const { text, isLoading, isError } = usePackageFile(packageId, version, entry);
@@ -68,26 +78,28 @@ export function FilePreview({ id, packageId, version, entry }: FilePreviewProps)
       id={id}
       role="region"
       aria-label={entry.path}
-      className="border-border bg-card flex min-w-0 flex-col rounded-lg border"
+      className={cn("border-border bg-card flex min-w-0 flex-col rounded-lg border", className)}
     >
-      <div className="border-border flex items-center gap-3 border-b px-3 py-2">
-        <span
-          className="text-foreground min-w-0 flex-1 truncate font-mono text-xs"
-          title={entry.path}
-        >
-          {entry.path}
-        </span>
-        <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
-          {formatBytes(entry.size)}
-        </span>
-        {/* "Télécharger le fichier", not "Télécharger": the actions dropdown
+      {!hideHeader && (
+        <div className="border-border flex items-center gap-3 border-b px-3 py-2">
+          <span
+            className="text-foreground min-w-0 flex-1 truncate font-mono text-xs"
+            title={entry.path}
+          >
+            {entry.path}
+          </span>
+          <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+            {formatBytes(entry.size)}
+          </span>
+          {/* "Télécharger le fichier", not "Télécharger": the actions dropdown
             already shows a Download-icon "Télécharger" for the WHOLE archive,
             and both are visible on this tab at the same time. */}
-        <Button variant="outline" size="sm" onClick={() => void download(entry.path)}>
-          <Download size={14} />
-          {t("files.downloadFile")}
-        </Button>
-      </div>
+          <Button variant="outline" size="sm" onClick={() => void download(entry.path)}>
+            <Download size={14} />
+            {t("files.downloadFile")}
+          </Button>
+        </div>
+      )}
 
       {blocked ? (
         <div className="text-muted-foreground flex flex-col items-center justify-center gap-3 px-4 py-16 text-center">

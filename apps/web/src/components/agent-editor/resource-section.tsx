@@ -45,6 +45,7 @@ interface ResourceSectionProps {
    * (the list always renders so the leading items show).
    */
   leadingItems?: ReactNode;
+  surface?: "card" | "settings";
 }
 
 function VersionSelect({
@@ -102,6 +103,7 @@ export function ResourceSection({
   selectedEntries,
   onChange,
   leadingItems,
+  surface = "card",
 }: ResourceSectionProps) {
   const { t } = useTranslation(["agents", "common"]);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -199,8 +201,8 @@ export function ResourceSection({
     </label>
   );
 
-  return (
-    <SectionCard title={title} headerRight={uploadButton}>
+  const content = (
+    <>
       {isLoading ? (
         <div className="text-muted-foreground flex items-center justify-center py-6">
           <Spinner />
@@ -313,6 +315,27 @@ export function ResourceSection({
           ))}
         </div>
       )}
+    </>
+  );
+
+  if (surface === "settings") {
+    return (
+      <section className="space-y-4">
+        <div>
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-lg font-semibold">{title}</h3>
+            {uploadButton}
+          </div>
+          <div className="border-border mt-2 border-b" />
+        </div>
+        <div className="space-y-3">{content}</div>
+      </section>
+    );
+  }
+
+  return (
+    <SectionCard title={title} headerRight={uploadButton}>
+      {content}
     </SectionCard>
   );
 }

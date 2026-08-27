@@ -263,6 +263,46 @@ export const agentsPaths = {
       },
     },
   },
+  "/api/agents/{scope}/{name}/diagnostics": {
+    get: {
+      operationId: "getAgentDiagnostics",
+      tags: ["Agents"],
+      summary: "Get shared diagnostics for an agent",
+      description:
+        "Returns the tenant-scoped readiness blockers and non-blocking warnings used by Agent Overview, the launch header and the visual map. Diagnostics are ordered with blockers first and carry stable semantic targets plus correction destinations.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+        {
+          name: "version",
+          in: "query",
+          required: false,
+          schema: { type: "string" },
+          description:
+            "Agent definition to inspect. Omitted values resolve the live draft used by the editor UI.",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Agent diagnostics, including an explicit healthy empty state",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/AgentDiagnostics" },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
   "/api/agents/{scope}/{name}/persistence": {
     get: {
       operationId: "listAgentPersistence",

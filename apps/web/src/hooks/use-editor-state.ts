@@ -39,6 +39,8 @@ export interface UseEditorStateOptions<S extends EditorStateBase> {
    * surface inline errors without hitting the server.
    */
   validate?: (state: S) => { error: string; tab?: string } | null;
+  /** Optional host callback after the shared mutation succeeds. */
+  onSuccess?: () => void;
 }
 
 export interface UseEditorStateReturn<S extends EditorStateBase> {
@@ -74,7 +76,7 @@ export interface UseEditorStateReturn<S extends EditorStateBase> {
 export function useEditorState<S extends EditorStateBase>(
   opts: UseEditorStateOptions<S>,
 ): UseEditorStateReturn<S> {
-  const { initialState, packageType, packageId, isEdit, toWireBody, validate } = opts;
+  const { initialState, packageType, packageId, isEdit, toWireBody, validate, onSuccess } = opts;
   const qc = useQueryClient();
   const createPkg = useCreatePackage(packageType);
   const updatePkg = useUpdatePackage(packageType, packageId || "");
@@ -158,15 +160,16 @@ export function useEditorState<S extends EditorStateBase>(
             ...(body as Parameters<typeof updatePkg.mutate>[0]),
             lock_version: state.lock_version!,
           },
-          { onError: (err) => setError(err.message) },
+          { onSuccess, onError: (err) => setError(err.message) },
         );
       } else {
         createPkg.mutate(body as Parameters<typeof createPkg.mutate>[0], {
+          onSuccess,
           onError: (err) => setError(err.message),
         });
       }
     },
-    [state, isEdit, validate, allowNavigation, toWireBody, createPkg, updatePkg],
+    [state, isEdit, validate, allowNavigation, toWireBody, createPkg, updatePkg, onSuccess],
   );
 
   const isPending = createPkg.isPending || updatePkg.isPending;

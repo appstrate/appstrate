@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useParams, useNavigate, Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { usePackageDetail } from "../hooks/use-packages";
-import type { OrgPackageItemDetail } from "@appstrate/shared-types";
+import type { AgentDetail, OrgPackageItemDetail } from "@appstrate/shared-types";
 import type { PackageType } from "@appstrate/core/validation";
 import { useAuth } from "../hooks/use-auth";
 import { useOrg } from "../hooks/use-org";
@@ -77,6 +77,9 @@ function AgentEditorInner({
   packageId,
   isEdit,
   effectiveTimeoutSeconds,
+  presentation = "page",
+  onCancel,
+  initialTab = "general",
 }: {
   initialState: AgentEditorState;
   resolvedDeps: { skills: unknown[] } | null;
@@ -88,10 +91,13 @@ function AgentEditorInner({
    * the agent detail the page already loaded — undefined when creating.
    */
   effectiveTimeoutSeconds?: number;
+  presentation?: "page" | "panel-dialog";
+  onCancel?: () => void;
+  initialTab?: GenericEditorTab;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<GenericEditorTab>("general");
+  const [activeTab, setActiveTab] = useState<GenericEditorTab>(initialTab);
 
   const {
     state,
@@ -99,6 +105,8 @@ function AgentEditorInner({
     updateManifest,
     blocker,
     error,
+    setError,
+    isDirty,
     jsonEditorKey,
     bumpJsonKey,
     saveDraft,
@@ -120,6 +128,7 @@ function AgentEditorInner({
       }
       return null;
     },
+    onSuccess: presentation === "panel-dialog" ? onCancel : undefined,
   });
 
   const metadata = useMemo(() => manifestToMetadata(state.manifest), [state.manifest]);
@@ -167,6 +176,13 @@ function AgentEditorInner({
     }
   };
 
+  const discardChanges = () => {
+    setState(initialState);
+    setSchemaFields(manifestToSchemaFields(initialState.manifest));
+    setError(null);
+    bumpJsonKey();
+  };
+
   // Sync resolved skill metadata from server (names, descriptions)
   useEffect(() => {
     if (!resolvedDeps) return;
@@ -190,12 +206,24 @@ function AgentEditorInner({
 
   const agentTabs: Array<{ id: GenericEditorTab; label: string }> = [
     { id: "general", label: t("editor.tabGeneral") },
-    { id: "prompt", label: primaryDisplayFile("agent").name },
+    {
+      id: "prompt",
+      label:
+        presentation === "panel-dialog" ? t("editor.tabPrompt") : primaryDisplayFile("agent").name,
+    },
     { id: "schema", label: t("editor.tabSchema") },
     { id: "skills", label: t("editor.tabSkills") },
     { id: "integrations", label: t("editor.tabIntegrations") },
     { id: "json", label: t("editor.tabJson") },
   ];
+  const agentTabDescriptions: Partial<Record<GenericEditorTab, string>> = {
+    general: t("editor.description.general"),
+    prompt: t("editor.description.prompt"),
+    schema: t("editor.description.schema"),
+    skills: t("editor.description.skills"),
+    integrations: t("editor.description.integrations"),
+    json: t("editor.description.json"),
+  };
 
   return (
     <EditorShell
@@ -212,11 +240,28 @@ function AgentEditorInner({
       error={error}
       isPending={isPending}
       onSubmit={onSubmit}
-      onCancel={() => navigate(isEdit ? `/agents/${packageId}` : "/")}
+      onCancel={onCancel ?? (() => navigate(isEdit ? `/agents/${packageId}` : "/"))}
       hideSubmitBar={activeTab === "json"}
+      presentation={presentation}
+      panelTitle={presentation === "panel-dialog" ? t("editor.editBundle") : undefined}
+      activeDescription={
+        presentation === "panel-dialog" ? agentTabDescriptions[activeTab] : undefined
+      }
+      activeSecondaryDescription={
+        presentation === "panel-dialog" && activeTab === "prompt"
+          ? t("editor.promptHint")
+          : undefined
+      }
+      isDirty={isDirty}
+      onDiscardChanges={discardChanges}
     >
       {activeTab === "general" && (
-        <MetadataSection value={metadata} onChange={onMetadataChange} isEdit={isEdit}>
+        <MetadataSection
+          value={metadata}
+          onChange={onMetadataChange}
+          isEdit={isEdit}
+          surface={presentation === "panel-dialog" ? "settings" : "card"}
+        >
           <div className="space-y-2">
             <FormField
               id="meta-timeout"
@@ -251,6 +296,7 @@ function AgentEditorInner({
         <PromptEditor
           value={state.prompt}
           onChange={(prompt) => setState((s) => ({ ...s, prompt }))}
+          showHint={presentation !== "panel-dialog"}
         />
       )}
       {activeTab === "schema" && (
@@ -260,18 +306,21 @@ function AgentEditorInner({
             mode="input"
             fields={getSchemaFields("input")}
             onChange={onSchemaChange("input")}
+            surface={presentation === "panel-dialog" ? "settings" : "card"}
           />
           <SchemaSection
             title={t("editor.outputTitle")}
             mode="output"
             fields={getSchemaFields("output")}
             onChange={onSchemaChange("output")}
+            surface={presentation === "panel-dialog" ? "settings" : "card"}
           />
           <SchemaSection
             title={t("editor.configTitle")}
             mode="config"
             fields={getSchemaFields("config")}
             onChange={onSchemaChange("config")}
+            surface={presentation === "panel-dialog" ? "settings" : "card"}
           />
         </>
       )}
@@ -290,36 +339,60 @@ function AgentEditorInner({
               return { ...s, manifest: m };
             });
           }}
+          surface={presentation === "panel-dialog" ? "settings" : "card"}
         />
       )}
       {activeTab === "integrations" && (
-        <ResourceSection
-          type="integration"
-          title={t("editor.tabIntegrations")}
-          emptyLabel={t("editor.integrationsEmpty")}
-          selectedEntries={getResourceEntries(state.manifest, "integrations")}
-          onChange={(updater) => {
-            setState((s) => {
-              const prev = getResourceEntries(s.manifest, "integrations");
-              const next = typeof updater === "function" ? updater(prev) : updater;
-              const m = { ...s.manifest };
-              setResourceEntries(m, "integrations", next);
-              return { ...s, manifest: m };
-            });
-          }}
-          leadingItems={
-            <RuntimeToolsGroup
-              selected={getRuntimeTools(state.manifest)}
-              onChange={(next) => {
-                setState((s) => {
-                  const m = { ...s.manifest };
-                  setRuntimeTools(m, next);
-                  return { ...s, manifest: m };
-                });
-              }}
-            />
-          }
-        />
+        <div className={presentation === "panel-dialog" ? "space-y-8" : undefined}>
+          {presentation === "panel-dialog" && (
+            <section className="space-y-4">
+              <div>
+                <h3 className="text-lg font-semibold">{t("editor.tabRuntimeTools")}</h3>
+                <div className="border-border mt-2 border-b" />
+              </div>
+              <RuntimeToolsGroup
+                selected={getRuntimeTools(state.manifest)}
+                onChange={(next) => {
+                  setState((s) => {
+                    const m = { ...s.manifest };
+                    setRuntimeTools(m, next);
+                    return { ...s, manifest: m };
+                  });
+                }}
+              />
+            </section>
+          )}
+          <ResourceSection
+            type="integration"
+            title={t("editor.tabIntegrations")}
+            emptyLabel={t("editor.integrationsEmpty")}
+            selectedEntries={getResourceEntries(state.manifest, "integrations")}
+            onChange={(updater) => {
+              setState((s) => {
+                const prev = getResourceEntries(s.manifest, "integrations");
+                const next = typeof updater === "function" ? updater(prev) : updater;
+                const m = { ...s.manifest };
+                setResourceEntries(m, "integrations", next);
+                return { ...s, manifest: m };
+              });
+            }}
+            leadingItems={
+              presentation === "page" ? (
+                <RuntimeToolsGroup
+                  selected={getRuntimeTools(state.manifest)}
+                  onChange={(next) => {
+                    setState((s) => {
+                      const m = { ...s.manifest };
+                      setRuntimeTools(m, next);
+                      return { ...s, manifest: m };
+                    });
+                  }}
+                />
+              ) : undefined
+            }
+            surface={presentation === "panel-dialog" ? "settings" : "card"}
+          />
+        </div>
       )}
       {activeTab === "json" && (
         <JsonEditor
@@ -336,6 +409,37 @@ function AgentEditorInner({
 
       <UnsavedChangesModal blocker={blocker} onSaveDraft={isEdit ? saveDraft : undefined} />
     </EditorShell>
+  );
+}
+
+/** Existing rich Agent editor hosted in the same panel shell as Settings. */
+export function AgentBundleEditorModal({
+  detail,
+  onClose,
+  initialTab,
+}: {
+  detail: AgentDetail;
+  onClose: () => void;
+  initialTab?: "general" | "prompt" | "schema" | "skills" | "integrations" | "json";
+}) {
+  const initialState: AgentEditorState = {
+    manifest: withNormalizedManifest(detail.manifest ?? {}),
+    prompt: detail.prompt || "",
+    lock_version: detail.lock_version,
+  };
+
+  return (
+    <AgentEditorInner
+      key={detail.id}
+      initialState={initialState}
+      resolvedDeps={detail.dependencies ?? null}
+      packageId={detail.id}
+      isEdit
+      effectiveTimeoutSeconds={detail.effective_timeout_seconds}
+      presentation="panel-dialog"
+      onCancel={onClose}
+      initialTab={initialTab}
+    />
   );
 }
 

@@ -1,23 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
-export const RUN_DETAIL_TABS = ["execution", "results"] as const;
+export const RUN_DETAIL_TABS = ["journal", "results"] as const;
 
 export type RunDetailTab = (typeof RUN_DETAIL_TABS)[number];
 
 export interface RunTabAvailability {
   isActive: boolean;
-  isSuccessful: boolean;
+  isFailed: boolean;
   hasResults: boolean;
 }
 
 /** Select the primary task for the current lifecycle state. */
 export function initialRunDetailTab({
   isActive,
-  isSuccessful,
+  isFailed,
   hasResults,
 }: RunTabAvailability): RunDetailTab {
-  if (!isActive && isSuccessful && hasResults) return "results";
-  return "execution";
+  if (isActive || isFailed) return "journal";
+  return hasResults ? "results" : "journal";
 }
 
 /**
@@ -29,6 +29,8 @@ export function effectiveRunDetailTab(
   requested: RunDetailTab,
   availability: RunTabAvailability,
 ): RunDetailTab {
-  if (requested === "results" && availability.isActive) return "execution";
+  if (requested === "results" && !availability.hasResults) {
+    return initialRunDetailTab(availability);
+  }
   return requested;
 }

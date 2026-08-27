@@ -45,6 +45,9 @@ interface PackageActionsDropdownProps {
   hasPublishedVersion?: boolean;
   onCreateVersion?: () => void;
   onFork?: () => void;
+  /** Override route navigation when editing is hosted in the current surface. */
+  onEdit?: () => void;
+  editLabel?: string;
   // Agent-specific
   runningRuns?: number;
   hasRuns?: boolean;
@@ -83,6 +86,8 @@ export function PackageActionsDropdown({
   hasPublishedVersion,
   onCreateVersion,
   onFork,
+  onEdit,
+  editLabel,
   runningRuns = 0,
   hasRuns,
   hasMemories,
@@ -178,9 +183,11 @@ export function PackageActionsDropdown({
 
         {/* ── Edit ── */}
         {isMutable && (
-          <DropdownMenuItem onSelect={() => navigate(packageEditPath(type, packageId))}>
+          <DropdownMenuItem
+            onSelect={() => (onEdit ? onEdit() : navigate(packageEditPath(type, packageId)))}
+          >
             <Pencil size={14} />
-            {t("btn.edit")}
+            {editLabel ?? t("btn.edit")}
           </DropdownMenuItem>
         )}
 

@@ -73,7 +73,10 @@ export interface TreeRow {
  * input order: the server sorts by path today, but the rendered order must not
  * silently depend on that.
  */
-export function buildFileTree(entries: readonly PackageFileEntry[]): TreeNode[] {
+export function buildFileTree(
+  entries: readonly PackageFileEntry[],
+  explicitDirectories: readonly string[] = [],
+): TreeNode[] {
   const roots: TreeNode[] = [];
   // Directory path → its children array, so a segment seen again is reused
   // instead of duplicated. Directory paths are therefore unique by
@@ -98,11 +101,8 @@ export function buildFileTree(entries: readonly PackageFileEntry[]): TreeNode[] 
     }
   };
 
-  for (const entry of entries) {
-    const segments = entry.path.split("/").filter((s) => s.length > 0);
-    const fileName = segments.pop();
-    if (fileName === undefined) continue; // defensive: a path of only separators
-
+  const ensureDirectory = (directoryPath: string) => {
+    const segments = directoryPath.split("/").filter((segment) => segment.length > 0);
     let siblings = roots;
     let prefix = "";
     for (const segment of segments) {
@@ -121,6 +121,19 @@ export function buildFileTree(entries: readonly PackageFileEntry[]): TreeNode[] 
       }
       siblings = children;
     }
+  };
+
+  for (const path of explicitDirectories) ensureDirectory(path);
+
+  for (const entry of entries) {
+    const segments = entry.path.split("/").filter((s) => s.length > 0);
+    const fileName = segments.pop();
+    if (fileName === undefined) continue; // defensive: a path of only separators
+
+    const directoryPath = segments.join("/");
+    ensureDirectory(directoryPath);
+    const siblings = directoryPath === "" ? roots : dirs.get(directoryPath)!;
+    const prefix = directoryPath;
 
     const path = prefix === "" ? fileName : `${prefix}/${fileName}`;
     siblings.push({ kind: "file", id: nextId("file", path), path, name: fileName, entry });

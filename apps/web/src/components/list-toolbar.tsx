@@ -351,7 +351,9 @@ export function ListToolbar({
   view,
   onViewChange,
   actions,
+  adjacentActions,
   placement = "page",
+  panelFiltersAdjacent = false,
 }: {
   /**
    * The text filter that opens shadcn's own toolbar — present only where the
@@ -374,8 +376,12 @@ export function ListToolbar({
   onViewChange?: (view: ListView) => void;
   /** Actions for an embedded collection that has no page header of its own. */
   actions?: ReactNode;
+  /** Compact controls that belong directly beside panel search and filters. */
+  adjacentActions?: ReactNode;
   /** A panel keeps its compact, always-visible search instead of page-level responsive chrome. */
   placement?: "page" | "panel";
+  /** Keep the filter trigger beside search while panel actions stay on the right. */
+  panelFiltersAdjacent?: boolean;
 }) {
   const { t } = useTranslation("common");
   const activeCount = filters.reduce((total, filter) => total + filter.values.length, 0);
@@ -400,10 +406,29 @@ export function ListToolbar({
                 className="[[data-slot=dialog-content]_&]:bg-background h-8 w-full max-w-[250px]"
               />
             )}
+            {panelFiltersAdjacent && filters.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                aria-expanded={open}
+                title={t("toolbar.filters")}
+                className={cn(TOOLBAR_UTILITY, "aria-expanded:bg-accent")}
+                onClick={() => setOpen((wasOpen) => !wasOpen)}
+              >
+                <Filter />
+                <span className="hidden @xl/bar:inline">{t("toolbar.filters")}</span>
+                {activeCount > 0 && (
+                  <Badge variant="secondary" className="rounded-sm px-1 font-normal">
+                    {activeCount}
+                  </Badge>
+                )}
+              </Button>
+            )}
+            {adjacentActions}
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
-            {filters.length > 0 && (
+            {!panelFiltersAdjacent && filters.length > 0 && (
               <Button
                 variant="outline"
                 size="sm"

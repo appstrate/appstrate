@@ -57,7 +57,7 @@ export function AgentIntegrationsBlock({ entries, agentPackageId }: AgentIntegra
   if (entries.length === 0) return null;
 
   return (
-    <div className="space-y-2">
+    <div className="divide-y">
       {entries.map((entry) => (
         <IntegrationConnectionCard
           key={entry.id}
@@ -240,7 +240,7 @@ function CardShell({
   children?: React.ReactNode;
 }) {
   return (
-    <div className="border-border bg-card flex items-center justify-between gap-3 rounded-md border px-3 py-2">
+    <div className="hover:bg-muted/30 flex items-center justify-between gap-3 px-2 py-3 transition-colors">
       <div className="flex min-w-0 items-center gap-2">
         <Puzzle className="text-muted-foreground size-4 shrink-0" />
         <div className="min-w-0">

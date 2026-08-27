@@ -23,6 +23,7 @@ import { ApiKeyCreateModal } from "../api-key-create-modal";
 import { Ban, CalendarClock, Play } from "lucide-react";
 import { EmptyState } from "../page-states";
 import { openAsModal } from "../../lib/modal-route";
+import type { RunStatus } from "@appstrate/shared-types";
 
 export function AgentRunsTab({
   packageId,
@@ -34,8 +35,12 @@ export function AgentRunsTab({
   configSchemaOverride?: JSONSchemaObject;
 }) {
   const { t } = useTranslation(["agents", "common"]);
+  const location = useLocation();
   const { data: detail } = usePackageDetail("agent", packageId);
   const readiness = useAgentReadiness(detail, undefined, undefined, configSchemaOverride);
+  const requestedStatus = new URLSearchParams(location.search).get("agentRunStatus");
+  const status: RunStatus[] | undefined =
+    requestedStatus === "failed,timeout" ? ["failed", "timeout"] : undefined;
 
   if (!detail) return null;
 
@@ -46,7 +51,9 @@ export function AgentRunsTab({
     <RunList
       packageId={packageId}
       pageSize={12}
+      status={status}
       hideAgentName
+      tableSurface="integrated"
       emptyState={
         <EmptyState message={t("detail.emptyRuns")} icon={Play} compact>
           <RunAgentButton
@@ -82,9 +89,9 @@ export function AgentSchedulesTab({ packageId }: { packageId: string }) {
           </Button>
         </EmptyState>
       ) : (
-        <div className="space-y-2">
+        <div className="divide-y">
           {schedules.map((sched) => (
-            <ScheduleCard key={sched.id} schedule={sched} />
+            <ScheduleCard key={sched.id} schedule={sched} variant="integrated" />
           ))}
         </div>
       )}

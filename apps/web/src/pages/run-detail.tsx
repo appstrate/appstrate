@@ -4,7 +4,7 @@ import { useState, useCallback, useMemo, useEffect } from "react";
 import { useParams, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
+import { Tabs, TabsContent } from "@appstrate/ui/components/tabs";
 import { usePackageDetail } from "../hooks/use-packages";
 import { useRun, useRunLogs } from "../hooks/use-runs";
 import { useRunAgent, useCancelRun } from "../hooks/use-mutations";
@@ -27,12 +27,15 @@ import { useRunMemories, useRunPinned } from "../hooks/use-persistence";
 import { runKeys, invalidateRunLogs } from "../lib/query-keys";
 import { inlineRunDisplayName, runPageTitle } from "../lib/run-title";
 import type { RunDetailTab } from "../lib/run-detail-tabs";
-import { RunHeaderSummary } from "../components/run-detail/run-header-summary";
+import { RunHeaderActions, RunHeaderSummary } from "../components/run-detail/run-header-summary";
 import { RunExecutionView } from "../components/run-detail/run-execution-view";
 import { RunResultsView } from "../components/run-detail/run-results-view";
 import { Button } from "@appstrate/ui/components/button";
-import { ArrowRight, Check, Clipboard, Play, Settings2 } from "lucide-react";
-import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
+import { ArrowRight } from "lucide-react";
+import {
+  AgentLocalTabsList,
+  AgentLocalTabsTrigger,
+} from "../components/agent-detail/agent-local-tabs";
 
 /** Wire shape of a persisted log row (spec `RunLog`); `createdAt` is an ISO string. */
 type RunLogEntry = components["schemas"]["RunLog"];
@@ -86,7 +89,6 @@ export function RunDetailPage() {
   const runAgent = useRunAgent(packageId);
   const cancelRun = useCancelRun();
   const [inputOpen, setInputOpen] = useState(false);
-  const { copied: errorCopied, copy: copyError } = useCopyToClipboard();
   const { historicalLogs, structuredOutput, turnRows } = useMemo(() => {
     if (!logs) {
       return { historicalLogs: [], structuredOutput: null, turnRows: [] };
@@ -111,7 +113,7 @@ export function RunDetailPage() {
   const { data: runPinned } = useRunPinned(packageId, runId);
   const runMemoryCount = (runMemories?.length ?? 0) + (runPinned?.length ?? 0);
   const hasRunMemory = runMemoryCount > 0;
-  const hasResults =
+  const hasDurableResults =
     hasOutput ||
     (run?.document_counts.output ?? 0) > 0 ||
     hasRunMemory ||
@@ -225,18 +227,24 @@ export function RunDetailPage() {
 
   return (
     <div>
-      <PageHeader title={title} breadcrumbs={breadcrumbs} />
-
-      <RunHeaderSummary
-        run={enrichedRun}
-        isRunning={isRunning}
-        canRerun={!isRunning && run.status !== "failed" && !isInline && !!agent}
-        canCancel={isRunning && enrichedRun.runOrigin !== "remote"}
-        rerunPending={runAgent.isPending}
-        cancelPending={cancelRun.isPending}
-        onRerun={() => setInputOpen(true)}
-        onCancel={() => cancelRun.mutate(runId!)}
-      />
+      <PageHeader
+        title={title}
+        breadcrumbs={breadcrumbs}
+        wrapActions
+        actions={
+          <RunHeaderActions
+            run={enrichedRun}
+            canRerun={!isRunning && !isInline && !!agent}
+            canCancel={isRunning && enrichedRun.runOrigin !== "remote"}
+            rerunPending={runAgent.isPending}
+            cancelPending={cancelRun.isPending}
+            onRerun={() => setInputOpen(true)}
+            onCancel={() => cancelRun.mutate(runId!)}
+          />
+        }
+      >
+        <RunHeaderSummary run={enrichedRun} isRunning={isRunning} />
+      </PageHeader>
 
       {agent && (
         <RunModal
@@ -258,102 +266,60 @@ export function RunDetailPage() {
         />
       )}
 
-      {run.status === "failed" && run.error && (
-        <div className="border-destructive/20 bg-destructive/10 mb-4 rounded-lg border px-4 py-3">
-          <p className="text-destructive text-sm font-medium">{t("run.failureTitle")}</p>
-          <p className="text-destructive/90 mt-1 text-sm">{run.error}</p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {agent && !isInline && (
-              <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={runAgent.isPending}
-                  onClick={() =>
-                    runAgent.mutate({
-                      input: (run.input as Record<string, unknown>) ?? {},
-                      version: run.version_ref,
-                    })
-                  }
-                >
-                  <Play className="size-3.5" />
-                  {t("run.rerun")}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={runAgent.isPending}
-                  onClick={() => setInputOpen(true)}
-                >
-                  <Settings2 className="size-3.5" />
-                  {t("run.modifyAndRerun")}
-                </Button>
-              </>
-            )}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                void copyError(
-                  JSON.stringify({ runId: run.id, status: run.status, error: run.error }, null, 2),
-                )
-              }
-            >
-              {errorCopied ? <Check className="size-3.5" /> : <Clipboard className="size-3.5" />}
-              {errorCopied ? t("run.errorCopied") : t("run.copyError")}
-            </Button>
-          </div>
-        </div>
-      )}
-
-      <RunDegradedBanner metadata={run.metadata} />
-
-      <RunArtifactsBanner artifacts={run.artifacts} />
-
       <RunDetailTabsController
         key={runId}
         availability={{
           isActive: isRunning,
-          isSuccessful: run.status === "success",
-          hasResults,
+          isFailed: run.status === "failed",
+          hasResults: isTerminal && hasDurableResults,
         }}
       >
         {({ activeTab, setActiveTab }) => (
           <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as RunDetailTab)}>
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <TabsList>
-                <TabsTrigger value="execution">{t("run.tabExecution")}</TabsTrigger>
-                <TabsTrigger value="results" disabled={isRunning}>
-                  {t("run.tabResults")}
-                </TabsTrigger>
-              </TabsList>
-              {isRunning && (
-                <p className="text-muted-foreground hidden text-xs sm:block">
-                  {t("run.resultsAvailableAfterExecution")}
-                </p>
-              )}
+            <div
+              className="bg-card overflow-hidden rounded-lg border shadow-sm [&_.shadow-md]:shadow-none [&_.shadow-sm]:shadow-none"
+              data-run-detail-surface
+            >
+              <AgentLocalTabsList>
+                <AgentLocalTabsTrigger value="journal">{t("run.tabJournal")}</AgentLocalTabsTrigger>
+                {isTerminal && hasDurableResults && (
+                  <AgentLocalTabsTrigger value="results">
+                    {t("run.tabResults")}
+                  </AgentLocalTabsTrigger>
+                )}
+              </AgentLocalTabsList>
+
+              <TabsContent value="journal" className="mt-0">
+                <RunExecutionView
+                  run={enrichedRun}
+                  logs={allLogs}
+                  turns={turnRows}
+                  headerActions={
+                    run.status === "success" && hasDurableResults ? (
+                      <Button variant="outline" size="sm" onClick={() => setActiveTab("results")}>
+                        {t("run.viewResults")}
+                        <ArrowRight className="size-3.5" />
+                      </Button>
+                    ) : undefined
+                  }
+                  notices={
+                    <>
+                      <RunDegradedBanner metadata={run.metadata} />
+                      <RunArtifactsBanner artifacts={run.artifacts} />
+                    </>
+                  }
+                />
+              </TabsContent>
+
+              <TabsContent value="results" className="mt-0">
+                <RunResultsView
+                  run={enrichedRun}
+                  packageId={packageId}
+                  output={finalOutput}
+                  hasRunMemory={hasRunMemory}
+                />
+              </TabsContent>
             </div>
-
-            <TabsContent value="execution" className="mt-0">
-              {run.status === "success" && hasResults && (
-                <div className="mb-4 flex justify-end">
-                  <Button variant="outline" size="sm" onClick={() => setActiveTab("results")}>
-                    {t("run.viewResults")}
-                    <ArrowRight className="size-3.5" />
-                  </Button>
-                </div>
-              )}
-              <RunExecutionView run={enrichedRun} logs={allLogs} turns={turnRows} />
-            </TabsContent>
-
-            <TabsContent value="results" className="mt-0">
-              <RunResultsView
-                run={enrichedRun}
-                packageId={packageId}
-                output={finalOutput}
-                hasRunMemory={hasRunMemory}
-              />
-            </TabsContent>
           </Tabs>
         )}
       </RunDetailTabsController>

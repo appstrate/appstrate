@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useEffect } from "react";
+import { Fragment, lazy, Suspense, useState, useEffect } from "react";
 import { toast } from "sonner";
-import { useParams, Link, Navigate } from "react-router-dom";
+import { useParams, Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
+import { cn } from "@appstrate/ui/cn";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
 import {
   usePackageDetail,
@@ -22,15 +23,14 @@ import { EmptyState, LoadingState } from "../components/page-states";
 import { CardGrid } from "../components/card-grid";
 import { getVersionRedirect, hasActualChanges } from "../lib/version-helpers";
 import { packageDetailPath } from "../lib/package-paths";
-import { isModelSelectable } from "../lib/model-selectability";
-import { AlertTriangle, Layers } from "lucide-react";
+import { Layers } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 
 // Shared components
 import { ConfirmModal } from "../components/confirm-modal";
 import { SharedHeader } from "../components/package-detail/shared-header";
 import { PackageActionsDropdown } from "../components/package-detail/package-actions-dropdown";
 import { VersionBanners } from "../components/version-banners";
-import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
 import { VersionHistory } from "../components/version-history";
 import { DiffTab } from "../components/diff-tab";
 import { FileExplorer } from "../components/package-files/file-explorer";
@@ -43,91 +43,108 @@ import { AgentActions } from "../components/package-detail/agent-actions";
 import { AgentRunsTab, AgentMemoryTab } from "../components/package-detail/agent-tabs";
 import { AgentOverviewTab } from "../components/agent-detail/agent-overview-tab";
 import { AgentConfigurationView } from "../components/agent-detail/agent-configuration-view";
-import { AgentBundleTab } from "../components/agent-detail/agent-bundle-tab";
+import {
+  AgentLocalTabsList,
+  AgentLocalTabsSeparator,
+  AgentLocalTabsTrigger,
+} from "../components/agent-detail/agent-local-tabs";
 import { AGENT_DETAIL_TABS } from "../lib/agent-detail-tabs";
 import { RunAgentButton } from "../components/run-agent-button";
 import { PackageCard } from "../components/package-card";
-import { useAgentReadiness } from "../hooks/use-agent-readiness";
-import { useAgentIntegrationsReadiness } from "../hooks/use-agent-integrations-readiness";
-import { useModels, useAgentModel } from "../hooks/use-models";
+import { diagnosticsAllowLaunch, useAgentDiagnostics } from "../hooks/use-agent-diagnostics";
 
 type DetailTab =
   | "overview"
+  | "map"
+  | "files"
   | "runs"
   | "configuration"
   | "memory"
-  | "bundle"
   | "versions"
   | "diff"
   | "content"
   | "usedBy";
 
 const EMPTY_CONFIG_SCHEMA: JSONSchemaObject = { type: "object", properties: {} };
+const AgentBundleEditorModal = lazy(() =>
+  import("./package-editor").then((module) => ({ default: module.AgentBundleEditorModal })),
+);
 
 // ─── Agent Run Button (inline, no wrapper) ────────────────────────────
 
 function AgentRunButtonInline({
   packageId,
   versionLabel,
-  configSchemaOverride,
 }: {
   packageId: string;
   versionLabel: string | undefined;
-  configSchemaOverride?: JSONSchemaObject;
 }) {
   const { t } = useTranslation("agents");
   const { data: detail } = usePackageDetail("agent", packageId);
-  const { data: models } = useModels();
-  const { data: agentModel } = useAgentModel(packageId);
-  const readiness = useAgentReadiness(detail, agentModel?.modelId, models, configSchemaOverride);
-  // Launch-time integration readiness — drives the non-blocking orange badge.
-  // Same server resolver as the run-kickoff 412 (see useAgentIntegrationsReadiness).
-  const integrationsReady = useAgentIntegrationsReadiness(packageId);
+  const diagnostics = useAgentDiagnostics(packageId, versionLabel);
 
   if (!detail) return null;
 
-  const { hasRequiredConfig, hasModel, hasPrompt, hasRequiredSkills } = readiness;
-  // Integration connection gaps don't disable Run — they surface as a warning
-  // badge here and the recovery modal at run-kickoff (412 → MissingConnectionsModal).
-  const runDisabled = !hasPrompt || !hasRequiredSkills || !hasRequiredConfig || !hasModel;
-  const runDisabledTitle = !hasPrompt
-    ? t("detail.titleEmptyPrompt")
-    : !hasRequiredSkills
-      ? t("detail.titleMissingSkill")
-      : !hasRequiredConfig
-        ? t("detail.titleConfig")
-        : !hasModel
-          ? t("detail.titleModel")
-          : undefined;
+  const result = diagnostics.data;
+  const runDisabled = diagnostics.isLoading || !diagnosticsAllowLaunch(result);
+  const runDisabledTitle = result?.diagnostics.find(
+    (item) => item.severity === "blocking" && !item.recoverable_on_launch,
+  )?.explanation;
+  const status = diagnostics.isLoading ? "loading" : (result?.status ?? "warning");
+  const statusLabel = diagnostics.isLoading
+    ? t("detail.diagnostics.assessing")
+    : result?.status === "healthy"
+      ? t("detail.diagnostics.readyBadge")
+      : result?.status === "blocking"
+        ? t("detail.diagnostics.blockingTitle", { count: result.blocking_count })
+        : t("detail.diagnostics.warningTitle", { count: result?.warning_count ?? 0 });
+  const connectionWarning =
+    result?.diagnostics.some(
+      (item) => item.severity === "blocking" && item.recoverable_on_launch,
+    ) ?? false;
 
   return (
-    <RunAgentButton
-      packageId={packageId}
-      detail={detail}
-      version={versionLabel}
-      disabled={runDisabled}
-      disabledTitle={runDisabledTitle}
-      connectionWarning={!runDisabled && !integrationsReady.ready}
-      showLabel
-    />
-  );
-}
-
-function ModelRequiredAlert() {
-  const { t } = useTranslation(["settings", "agents"]);
-  const { data: models } = useModels();
-
-  const hasAnyModel = models?.some((m) => m.is_default && isModelSelectable(m));
-  if (hasAnyModel || hasAnyModel === undefined) return null;
-
-  return (
-    <Alert variant="destructive" className="mb-4">
-      <AlertTriangle className="h-4 w-4" />
-      <AlertTitle>{t("models.alert.noModel", { ns: "settings" })}</AlertTitle>
-      <AlertDescription className="flex items-center justify-between">
-        <span>{t("models.alert.noModelDescription", { ns: "settings" })}</span>
-      </AlertDescription>
-    </Alert>
+    <>
+      <Popover>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            className={cn(
+              "rounded px-1.5 py-0.5 text-[0.65rem] font-medium focus-visible:ring-2 focus-visible:outline-none",
+              status === "healthy"
+                ? "bg-success/10 text-success hover:bg-success/15"
+                : status === "blocking"
+                  ? "bg-destructive/10 text-destructive hover:bg-destructive/15"
+                  : "bg-warning/15 text-warning hover:bg-warning/20",
+            )}
+          >
+            {statusLabel}
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-80 p-4">
+          <p className="text-sm font-semibold">{t("detail.diagnostics.title")}</p>
+          <p className="text-muted-foreground mt-1 text-xs">{statusLabel}</p>
+          {result && result.diagnostics.length > 0 && (
+            <ul className="mt-3 space-y-2">
+              {result.diagnostics.slice(0, 4).map((item) => (
+                <li key={`${item.code}:${item.field}`} className="text-xs">
+                  {item.title}
+                </li>
+              ))}
+            </ul>
+          )}
+        </PopoverContent>
+      </Popover>
+      <RunAgentButton
+        packageId={packageId}
+        detail={detail}
+        version={versionLabel}
+        disabled={runDisabled}
+        disabledTitle={runDisabledTitle}
+        connectionWarning={!runDisabled && connectionWarning}
+        showLabel
+      />
+    </>
   );
 }
 
@@ -135,6 +152,8 @@ function ModelRequiredAlert() {
 
 export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
+  const location = useLocation();
+  const navigate = useNavigate();
   const {
     scope,
     name,
@@ -202,18 +221,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     type === "agent"
       ? [...AGENT_DETAIL_TABS]
       : ["overview", "versions", "diff", "content", "usedBy"];
-  // Configuration tab visibility (uses draft schema — version-aware override applied after loading)
-  const draftConfigSchema = agentDetail?.config?.schema;
-  const hasDraftConfigSchema = !!(
-    draftConfigSchema?.properties && Object.keys(draftConfigSchema.properties).length > 0
-  );
-  const hasMissingRequiredConfig =
-    type === "agent" &&
-    hasDraftConfigSchema &&
-    draftConfigSchema?.required?.some((key) => {
-      const val = agentDetail?.config?.current?.[key];
-      return val === undefined || val === null || val === "";
-    });
   // Agents open on their installation overview. Every other type opens where its SUBSTANCE
   // lives, which `lib/package-files.ts` already encodes and which does not
   // depend on how much metadata the author happened to fill in: a skill IS its
@@ -224,9 +231,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   // still wins in `useTabWithHash`.
   const defaultTab: DetailTab =
     type === "agent"
-      ? isVersionView
-        ? "bundle"
-        : "overview"
+      ? "overview"
       : primaryDisplayFile(type).source === "content"
         ? "content"
         : "overview";
@@ -237,6 +242,27 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
     if (tab === "versions" && source === "system") setTab(defaultTab);
   }, [tab, hasArchivableChanges, isVersionView, source, defaultTab, setTab]);
   const [createVersionOpen, setCreateVersionOpen] = useState(false);
+  const [bundleEditorOpen, setBundleEditorOpen] = useState(false);
+  const requestedBundleTab = new URLSearchParams(location.search).get("agentBundle");
+  const bundleEditorInitialTab =
+    requestedBundleTab === "general" ||
+    requestedBundleTab === "prompt" ||
+    requestedBundleTab === "schema" ||
+    requestedBundleTab === "skills" ||
+    requestedBundleTab === "integrations" ||
+    requestedBundleTab === "json"
+      ? requestedBundleTab
+      : undefined;
+  const closeBundleEditor = () => {
+    setBundleEditorOpen(false);
+    if (!requestedBundleTab) return;
+    const search = new URLSearchParams(location.search);
+    search.delete("agentBundle");
+    navigate(
+      { pathname: location.pathname, search: search.toString(), hash: location.hash },
+      { replace: true },
+    );
+  };
 
   // ── Loading / Error ──
   if (isLoading || (isVersionView && versionLoading)) return <LoadingState />;
@@ -317,11 +343,12 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
   };
 
   const agentTabLabels: Record<(typeof AGENT_DETAIL_TABS)[number], string> = {
-    overview: t("detail.tabOverview"),
+    overview: t("detail.overview.summary"),
+    map: t("detail.overview.map"),
+    files: t("detail.overview.explorer"),
     runs: t("detail.tabRuns"),
     configuration: t("detail.tabConfiguration"),
     memory: t("detail.tabMemory"),
-    bundle: t("detail.tabBundle"),
   };
   const agentTabs: Array<{ id: DetailTab; label: string }> = AGENT_DETAIL_TABS.map((id) => ({
     id,
@@ -357,11 +384,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         hasUnarchivedChanges={hasArchivableChanges}
         actionsLeft={
           type === "agent" ? (
-            <AgentRunButtonInline
-              packageId={packageId}
-              versionLabel={versionLabel}
-              configSchemaOverride={isHistoricalVersion ? effectiveConfigSchema : undefined}
-            />
+            <AgentRunButtonInline packageId={packageId} versionLabel={versionLabel} />
           ) : undefined
         }
         actionsRight={
@@ -375,6 +398,7 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
               downloadBundle={downloadBundle}
               onCreateVersion={() => setCreateVersionOpen(true)}
               onFork={() => setForkOpen(true)}
+              onEditBundle={() => setBundleEditorOpen(true)}
             />
           ) : (
             <div className="flex items-center gap-2">
@@ -432,8 +456,6 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         activeUrl={packageDetailPath(type, packageId)}
       />
 
-      {type === "agent" && <ModelRequiredAlert />}
-
       {!isOwned && (
         <div className="mb-4 flex items-center gap-3 rounded-lg border border-blue-500/30 bg-blue-500/5 px-4 py-3 text-sm">
           <span className="text-blue-400">{t("ownership.readOnly")}</span>
@@ -464,64 +486,94 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         </div>
       )}
 
-      {type === "agent" && hasMissingRequiredConfig && (
-        <div className="border-warning/30 bg-warning/5 mb-4 flex items-center gap-3 rounded-lg border px-4 py-3 text-sm">
-          <span className="text-warning text-base leading-none">⚠</span>
-          <span className="text-warning">{t("detail.configAlert")}</span>
+      {type === "agent" && agentDetail && (
+        <div
+          className="bg-card overflow-hidden rounded-lg border shadow-sm"
+          data-agent-detail-surface
+        >
+          <Tabs value={tab} onValueChange={(value) => setTab(value as DetailTab)}>
+            <AgentLocalTabsList>
+              {agentTabs.map((item) => (
+                <Fragment key={item.id}>
+                  {item.id === "map" && <AgentLocalTabsSeparator />}
+                  <AgentLocalTabsTrigger value={item.id}>{item.label}</AgentLocalTabsTrigger>
+                </Fragment>
+              ))}
+            </AgentLocalTabsList>
+
+            <TabsContent value="overview" className="mt-0">
+              <AgentOverviewTab
+                packageId={packageId}
+                detail={agentDetail}
+                version={versionLabel}
+                isHistorical={isHistoricalVersion}
+                currentManifest={currentManifest}
+                currentContent={currentContent}
+                surface="summary"
+                onOpenFiles={() => setTab("files")}
+              />
+            </TabsContent>
+            <TabsContent value="map" className="mt-0">
+              <AgentOverviewTab
+                packageId={packageId}
+                detail={agentDetail}
+                version={versionLabel}
+                isHistorical={isHistoricalVersion}
+                currentManifest={currentManifest}
+                currentContent={currentContent}
+                surface="map"
+                onOpenFiles={() => setTab("files")}
+              />
+            </TabsContent>
+            <TabsContent value="files" className="mt-0">
+              <AgentOverviewTab
+                packageId={packageId}
+                detail={agentDetail}
+                version={versionLabel}
+                isHistorical={isHistoricalVersion}
+                currentManifest={currentManifest}
+                currentContent={currentContent}
+                surface="files"
+                onOpenFiles={() => setTab("files")}
+              />
+            </TabsContent>
+            <TabsContent value="runs" className="mt-0 p-6">
+              <AgentRunsTab
+                packageId={packageId}
+                versionLabel={versionLabel}
+                configSchemaOverride={isHistoricalVersion ? effectiveConfigSchema : undefined}
+              />
+            </TabsContent>
+            <TabsContent value="configuration" className="mt-0">
+              <AgentConfigurationView
+                packageId={packageId}
+                detail={agentDetail}
+                configSchemaOverride={isHistoricalVersion ? effectiveConfigSchema : undefined}
+                isHistorical={isHistoricalVersion}
+              />
+            </TabsContent>
+            <TabsContent value="memory" className="mt-0">
+              <AgentMemoryTab packageId={packageId} />
+            </TabsContent>
+          </Tabs>
         </div>
       )}
 
-      {/* Tab bar */}
-      <Tabs value={tab} onValueChange={(v) => setTab(v as DetailTab)} className="mb-4">
-        <div className="max-w-full overflow-x-auto pb-1">
-          <TabsList className="w-max">
-            {tabDefs.map((td) => (
-              <TabsTrigger key={td.id} value={td.id}>
-                {td.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </div>
-      </Tabs>
-
-      {/* Tab content */}
-      {type === "agent" && tab === "overview" && agentDetail && !isHistoricalVersion && (
-        <AgentOverviewTab packageId={packageId} detail={agentDetail} />
-      )}
-      {type === "agent" && tab === "overview" && isHistoricalVersion && (
-        <div className="text-muted-foreground rounded-lg border p-4 text-sm">
-          {t("detail.overview.historicalUnavailable")}
-        </div>
-      )}
-      {type === "agent" && tab === "configuration" && agentDetail && (
-        <AgentConfigurationView
-          packageId={packageId}
-          detail={agentDetail}
-          configSchemaOverride={isHistoricalVersion ? effectiveConfigSchema : undefined}
-          isHistorical={isHistoricalVersion}
-        />
-      )}
-      {type === "agent" && tab === "runs" && (
-        <AgentRunsTab
-          packageId={packageId}
-          versionLabel={versionLabel}
-          configSchemaOverride={isHistoricalVersion ? effectiveConfigSchema : undefined}
-        />
-      )}
-      {type === "agent" && tab === "memory" && <AgentMemoryTab packageId={packageId} />}
-      {type === "agent" && tab === "bundle" && agentDetail && (
-        <AgentBundleTab
-          packageId={packageId}
-          detail={agentDetail}
-          version={versionLabel}
-          isOwned={isOwned}
-          isHistorical={isHistoricalVersion}
-          latestVersion={latestVersionForDiff}
-          currentManifest={currentManifest}
-          currentContent={currentContent}
-        />
+      {type !== "agent" && (
+        <Tabs value={tab} onValueChange={(v) => setTab(v as DetailTab)} className="mb-4">
+          <div className="max-w-full overflow-x-auto pb-1">
+            <TabsList className="w-max">
+              {tabDefs.map((td) => (
+                <TabsTrigger key={td.id} value={td.id}>
+                  {td.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </div>
+        </Tabs>
       )}
 
+      {/* Non-Agent tab content */}
       {/* Both follow the version being viewed: the explorer through
           `versionLabel`, the overview through the manifest picked above. */}
       {type !== "agent" && tab === "overview" && (
@@ -578,6 +630,16 @@ export function UnifiedPackageDetailPage({ type }: { type: PackageType }) {
         packageId={packageId}
         hasUnarchivedChanges={hasArchivableChanges}
       />
+
+      {(bundleEditorOpen || Boolean(bundleEditorInitialTab)) && agentDetail && (
+        <Suspense fallback={<LoadingState />}>
+          <AgentBundleEditorModal
+            detail={agentDetail}
+            initialTab={bundleEditorInitialTab}
+            onClose={closeBundleEditor}
+          />
+        </Suspense>
+      )}
 
       <ForkPackageModal
         open={forkOpen}

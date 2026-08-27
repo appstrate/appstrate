@@ -552,6 +552,31 @@ describe("Runs API", () => {
       expect(found).toBeDefined();
     });
 
+    it("filters an agent's runs by several statuses", async () => {
+      const packageId = "@runorg/filtered-agent";
+      await seedAgent({ id: packageId, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, packageId);
+      for (const status of ["success", "failed", "timeout"] as const) {
+        await seedRun({
+          packageId,
+          orgId: ctx.orgId,
+          applicationId: ctx.defaultAppId,
+          userId: ctx.user.id,
+          status,
+        });
+      }
+
+      const res = await app.request(
+        `/api/agents/${packageId}/runs?status=failed,timeout`,
+        { headers: authHeaders(ctx) },
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { data: Array<{ status: string }>; total: number };
+      expect(body.total).toBe(2);
+      expect(body.data.map((run) => run.status).sort()).toEqual(["failed", "timeout"]);
+    });
+
     it("respects org isolation", async () => {
       const otherCtx = await createTestContext({ orgSlug: "otherorg" });
       await seedAgent({ id: "@otherorg/secret-agent", orgId: otherCtx.orgId });
@@ -574,6 +599,54 @@ describe("Runs API", () => {
     it("returns 401 without authentication", async () => {
       const res = await app.request("/api/agents/@runorg/my-agent/runs");
       expect(res.status).toBe(401);
+    });
+  });
+
+  describe("GET /api/agents/:scope/:name/run-activity", () => {
+    it("aggregates the fixed 30-day window without paging run rows", async () => {
+      const packageId = "@runorg/activity-agent";
+      await seedAgent({ id: packageId, orgId: ctx.orgId, createdBy: ctx.user.id });
+      await installPackage({ orgId: ctx.orgId, applicationId: ctx.defaultAppId }, packageId);
+
+      const recent = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+      for (const status of [
+        "success",
+        "success",
+        "failed",
+        "timeout",
+        "running",
+        "cancelled",
+      ] as const) {
+        await seedRun({
+          packageId,
+          orgId: ctx.orgId,
+          applicationId: ctx.defaultAppId,
+          userId: ctx.user.id,
+          status,
+          startedAt: recent,
+        });
+      }
+      await seedRun({
+        packageId,
+        orgId: ctx.orgId,
+        applicationId: ctx.defaultAppId,
+        userId: ctx.user.id,
+        status: "success",
+        startedAt: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000),
+      });
+
+      const res = await app.request(`/api/agents/${packageId}/run-activity`, {
+        headers: authHeaders(ctx),
+      });
+
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({
+        window_days: 30,
+        total: 6,
+        success: 2,
+        failed: 1,
+        timeout: 1,
+      });
     });
   });
 

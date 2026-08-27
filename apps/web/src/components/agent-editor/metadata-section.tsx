@@ -31,9 +31,16 @@ interface MetadataSectionProps {
    * the fields every package type shares.
    */
   children?: React.ReactNode;
+  surface?: "card" | "settings";
 }
 
-export function MetadataSection({ value, onChange, isEdit, children }: MetadataSectionProps) {
+export function MetadataSection({
+  value,
+  onChange,
+  isEdit,
+  children,
+  surface = "card",
+}: MetadataSectionProps) {
   const { t } = useTranslation(["agents", "common"]);
   const update = (patch: Partial<MetadataState>) => onChange({ ...value, ...patch });
   const [nameEdited, setNameEdited] = useState(isEdit);
@@ -62,8 +69,8 @@ export function MetadataSection({ value, onChange, isEdit, children }: MetadataS
     }
   };
 
-  return (
-    <SectionCard title={t("editor.metadata")}>
+  const identityFields = (
+    <>
       <FormField
         id="meta-displayName"
         label={t("editor.metaDisplayName")}
@@ -93,16 +100,23 @@ export function MetadataSection({ value, onChange, isEdit, children }: MetadataS
         description={t("editor.metaScopeDesc")}
         disabled
       />
-      <FormField
-        id="meta-version"
-        label={t("editor.metaVersion")}
-        required
-        value={value.version}
-        onChange={(v) => update({ version: v })}
-        placeholder="1.0.0"
-        description={t("editor.metaVersionDesc")}
-      />
-      {children}
+    </>
+  );
+
+  const versionField = (
+    <FormField
+      id="meta-version"
+      label={t("editor.metaVersion")}
+      required
+      value={value.version}
+      onChange={(v) => update({ version: v })}
+      placeholder="1.0.0"
+      description={t("editor.metaVersionDesc")}
+    />
+  );
+
+  const publicationDetails = (
+    <>
       <div className="space-y-2">
         <Label htmlFor="meta-description">{t("editor.metaDescription")}</Label>
         <Textarea
@@ -139,6 +153,48 @@ export function MetadataSection({ value, onChange, isEdit, children }: MetadataS
           onKeyDown={handleKeywordInput}
         />
       </div>
-    </SectionCard>
+    </>
+  );
+
+  const publicationFields = (
+    <>
+      {versionField}
+      {publicationDetails}
+    </>
+  );
+
+  const fields = (
+    <>
+      {identityFields}
+      {versionField}
+      {children}
+      {publicationDetails}
+    </>
+  );
+
+  if (surface === "settings") {
+    return (
+      <div className="space-y-8">
+        <SettingsFieldGroup title={t("editor.identity")}>{identityFields}</SettingsFieldGroup>
+        <SettingsFieldGroup title={t("editor.publication")}>{publicationFields}</SettingsFieldGroup>
+        {children && (
+          <SettingsFieldGroup title={t("editor.execution")}>{children}</SettingsFieldGroup>
+        )}
+      </div>
+    );
+  }
+
+  return <SectionCard title={t("editor.metadata")}>{fields}</SectionCard>;
+}
+
+function SettingsFieldGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section>
+      <div>
+        <h3 className="text-lg font-semibold">{title}</h3>
+        <div className="border-border mt-2 border-b" />
+      </div>
+      <div className="max-w-2xl space-y-5 pt-4">{children}</div>
+    </section>
   );
 }

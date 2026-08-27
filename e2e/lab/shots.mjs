@@ -87,6 +87,26 @@ for (const scenario of SCENARIOS) {
       await page.goto(`${BASE}${screen.path}`, { waitUntil: "domcontentloaded" });
     }
     if (screen.settleMs) await page.waitForTimeout(screen.settleMs);
+    if (screen.clickText) {
+      const target = page.getByText(screen.clickText, { exact: true }).first();
+      await target.waitFor({ state: "visible" });
+      await target.click();
+    }
+    for (const step of screen.steps ?? []) {
+      if (step.type === "clickLabel") {
+        const target = page.getByLabel(step.label, { exact: true }).first();
+        await target.waitFor({ state: "visible" });
+        await target.click();
+      } else if (step.type === "clickText") {
+        const target = page.getByText(step.text, { exact: true }).first();
+        await target.waitFor({ state: "visible" });
+        await target.click();
+      } else if (step.type === "fillTextbox") {
+        const target = page.getByRole("textbox", { name: step.label, exact: true }).first();
+        await target.waitFor({ state: "visible" });
+        await target.fill(step.value);
+      }
+    }
     for (const width of WIDTHS) {
       await page.setViewportSize({ width, height: 1000 });
       // Long enough for the queries the screen fires on mount to answer, which

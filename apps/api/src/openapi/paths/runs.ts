@@ -292,6 +292,15 @@ export const runsPaths = {
           in: "query",
           schema: { type: "integer", minimum: 0, default: 0 },
         },
+        {
+          name: "status",
+          in: "query",
+          description: "One run status or a comma-separated set, for example failed,timeout.",
+          schema: {
+            type: "string",
+            pattern: "^(pending|running|success|failed|timeout|cancelled)(,(pending|running|success|failed|timeout|cancelled))*$",
+          },
+        },
       ],
       responses: {
         "200": {
@@ -383,6 +392,57 @@ export const runsPaths = {
             },
           },
         },
+      },
+    },
+  },
+  "/api/agents/{scope}/{name}/run-activity": {
+    get: {
+      operationId: "getAgentRunActivity",
+      tags: ["Runs"],
+      summary: "Get recent run activity for an agent",
+      description:
+        "Return one tenant-scoped aggregate for the last 30 days. The success rate is intentionally derived by clients from success / (success + failed + timeout); cancelled, pending, and running runs are excluded from that denominator.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XAppId" },
+        { $ref: "#/components/parameters/PackageScope" },
+        { $ref: "#/components/parameters/PackageName" },
+      ],
+      responses: {
+        "200": {
+          description: "Thirty-day run activity aggregate",
+          headers: {
+            "Request-Id": { $ref: "#/components/headers/RequestId" },
+            "Appstrate-Version": { $ref: "#/components/headers/AppstrateVersion" },
+          },
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  window_days: { type: "integer", enum: [30] },
+                  window_start: { type: "string", format: "date-time" },
+                  total: { type: "integer", minimum: 0 },
+                  success: { type: "integer", minimum: 0 },
+                  failed: { type: "integer", minimum: 0 },
+                  timeout: { type: "integer", minimum: 0 },
+                },
+                required: [
+                  "window_days",
+                  "window_start",
+                  "total",
+                  "success",
+                  "failed",
+                  "timeout",
+                ],
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },

@@ -279,6 +279,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agents/{scope}/{name}/diagnostics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get shared diagnostics for an agent
+         * @description Returns the tenant-scoped readiness blockers and non-blocking warnings used by Agent Overview, the launch header and the visual map. Diagnostics are ordered with blockers first and carry stable semantic targets plus correction destinations.
+         */
+        get: operations["getAgentDiagnostics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agents/{scope}/{name}/model": {
         parameters: {
             query?: never;
@@ -405,6 +425,26 @@ export interface paths {
          * @description Start an agent run (fire-and-forget — the response does not wait for execution). Returns `201` + the created run resource — same shape as `GET /runs/{id}` — including the resolved `model_label` / `model_source`. Rate-limited to 20/min. The body is JSON. File-typed input fields (`format: uri` + `contentMediaType` in the agent's input schema) accept either of two forms: (1) an `upload://upl_xxx` reference from `createUpload` — stage the bytes first by PUTting them to the signed URL (see `createUpload` for the step-by-step recipe); or (2) an inline RFC 2397 data URI `data:<mime>;name=<filename>;base64,<payload>` with up to 4 MiB of decoded content (`name` is optional) — the single-call path for JSON-only clients such as MCP. Inline bytes are written to the run workspace as a document and the payload is stripped from the persisted run input (the stored value keeps only a `data:<mime>;name=<doc>;base64,` marker). Declared binary MIMEs are verified by magic-byte sniffing in both forms. Send `rerun_from` instead of `input` to replay a previous run's input — same documents, new overrides — without re-uploading. The effective model is resolved at run creation with precedence: request `modelId` > agent model setting > org default model > system default. Without an explicit `modelId`, a change to the org default model between triggers applies to the next run — send `modelId` to pin a specific model per run. A run against a published version assembles its bundle from stored artifacts before the container starts, so a bad artifact fails the trigger rather than the run: `422 dependency_unresolved` (a pin with no published version), `422 bundle_invalid` (the stored archive cannot be assembled), `422 bundle_signature_invalid` (rejected by `AFPS_SIGNATURE_POLICY`), or `500 bundle_integrity_mismatch` (the stored bytes no longer match the integrity hash recorded at publish time — republish the package). No run row is created in any of those cases.
          */
         post: operations["runAgent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents/{scope}/{name}/run-activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get recent run activity for an agent
+         * @description Return one tenant-scoped aggregate for the last 30 days. The success rate is intentionally derived by clients from success / (success + failed + timeout); cancelled, pending, and running runs are excluded from that denominator.
+         */
+        get: operations["getAgentRunActivity"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4707,6 +4747,37 @@ export interface components {
             /** @description Run timeout that will actually be enforced, in seconds: the manifest's `timeout` (or the platform default when it declares none) clamped to this deployment's `PLATFORM_RUN_LIMITS.timeout_ceiling_seconds`. Compare with `manifest.timeout` to detect a capped declaration. Emitted for system agents too, which do not expose `manifest`. */
             effective_timeout_seconds: number;
         };
+        /** @description Shared, ordered diagnostics for one agent installation and definition. An empty diagnostics array with status healthy is a successful result. */
+        AgentDiagnostics: {
+            /** @enum {string} */
+            status: "healthy" | "warning" | "blocking";
+            blocking_count: number;
+            warning_count: number;
+            /** @description False when at least one blocker cannot be resolved by the launch recovery flow. */
+            can_launch: boolean;
+            diagnostics: {
+                code: string;
+                /** @enum {string} */
+                severity: "blocking" | "warning";
+                title: string;
+                explanation: string;
+                field: string;
+                target: {
+                    /** @enum {string|null} */
+                    node: "agent" | "config" | "skills" | "toolbox" | "model" | "schedules" | null;
+                    item: string | null;
+                };
+                correction: {
+                    /** @enum {string} */
+                    destination: "bundle" | "configuration" | "schedule";
+                    section: string | null;
+                    params: {
+                        [key: string]: string;
+                    };
+                };
+                recoverable_on_launch: boolean;
+            }[];
+        };
         AgentListItem: {
             id: string;
             display_name?: string;
@@ -6629,6 +6700,44 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    getAgentDiagnostics: {
+        parameters: {
+            query?: {
+                /** @description Agent definition to inspect. Omitted values resolve the live draft used by the editor UI. */
+                version?: string;
+            };
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Agent diagnostics, including an explicit healthy empty state */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentDiagnostics"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     getAgentModel: {
         parameters: {
             query?: never;
@@ -7208,11 +7317,57 @@ export interface operations {
             };
         };
     };
+    getAgentRunActivity: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Application ID. Required for app-scoped routes (agents, runs, schedules, and app-scoped module routes). Not needed for API key auth (app resolved from key). */
+                "X-Application-Id"?: components["parameters"]["XAppId"];
+            };
+            path: {
+                /** @description Package scope (e.g. @myorg) */
+                scope: components["parameters"]["PackageScope"];
+                /** @description Package name */
+                name: components["parameters"]["PackageName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Thirty-day run activity aggregate */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {integer} */
+                        window_days: 30;
+                        /** Format: date-time */
+                        window_start: string;
+                        total: number;
+                        success: number;
+                        failed: number;
+                        timeout: number;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     listAgentRuns: {
         parameters: {
             query?: {
                 limit?: number;
                 offset?: number;
+                /** @description One run status or a comma-separated set, for example failed,timeout. */
+                status?: string;
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */

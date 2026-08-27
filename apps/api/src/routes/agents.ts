@@ -36,6 +36,7 @@ import { readJsonBody } from "../lib/request-body.ts";
 import { asJSONSchemaObject, mergeWithDefaults } from "@appstrate/core/form";
 import { getAppScope } from "../lib/scope.ts";
 import { resolveAgentConnectionReadiness } from "../services/integration-pins-service.ts";
+import { getAgentDiagnostics } from "../services/agent-diagnostics.ts";
 import { assertExplicitModelExists, resolveModel } from "../services/org-models.ts";
 import {
   buildBundleForAgentExport,
@@ -243,6 +244,27 @@ export function createAgentsRouter() {
         await resolveAgentConnectionReadiness({
           scope: getAppScope(c),
           agentPackageId: agent.id,
+          actor: getActor(c),
+          isAdmin: role === "owner" || role === "admin",
+          version: c.req.query("version"),
+        }),
+      );
+    },
+  );
+
+  // GET /api/agents/:scope/:name/diagnostics — shared readiness and warning
+  // projection for Overview, the header and the visual Agent Map.
+  router.get(
+    `/${SCOPED_PACKAGE_ROUTE}/diagnostics`,
+    requireAgent(),
+    requirePermission("agents", "read"),
+    async (c) => {
+      const agent = c.get("package");
+      const role = c.get("orgRole");
+      return c.json(
+        await getAgentDiagnostics({
+          scope: getAppScope(c),
+          agent,
           actor: getActor(c),
           isAdmin: role === "owner" || role === "admin",
           version: c.req.query("version"),

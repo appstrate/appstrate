@@ -88,10 +88,12 @@ const expectedEndpoints = [
   "GET /api/agents/{scope}/{name}/model",
   "PUT /api/agents/{scope}/{name}/model",
   "GET /api/agents/{scope}/{name}/bundle",
+  "GET /api/agents/{scope}/{name}/diagnostics",
 
   // Runs
   "POST /api/agents/{scope}/{name}/run",
   "GET /api/agents/{scope}/{name}/runs",
+  "GET /api/agents/{scope}/{name}/run-activity",
   "DELETE /api/agents/{scope}/{name}/runs",
   "GET /api/runs/{id}",
   "GET /api/runs/{id}/logs",
