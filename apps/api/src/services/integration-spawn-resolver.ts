@@ -682,6 +682,7 @@ function resolveWorkspaceMount(
       `Integration '${integrationId}': mcp-server _meta.workspace is malformed — ${
         err instanceof Error ? err.message : String(err)
       }`,
+      { cause: err },
     );
   }
   if (!mount) return {};

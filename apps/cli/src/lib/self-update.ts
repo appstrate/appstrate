@@ -368,6 +368,10 @@ export async function resolveTargetVersion(
         `GitHub Releases API returned 403 (likely rate-limited). ` +
           `Pin a specific version with --release X.Y.Z, or wait for the ` +
           `60 req/h-per-IP limit to reset.`,
+        // "likely" is a guess from the status code alone. The HttpError holds
+        // GitHub's actual response body, which says whether it was the rate
+        // limit or something else — keep it reachable instead of guessing.
+        { cause: err },
       );
     }
     throw err;

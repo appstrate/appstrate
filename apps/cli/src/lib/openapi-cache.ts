@@ -250,7 +250,9 @@ export async function fetchOpenApi(
   try {
     doc = (await res.json()) as OpenApiDocument;
   } catch (err) {
-    throw new Error(`OpenAPI schema response was not valid JSON: ${getErrorMessage(err)}`);
+    throw new Error(`OpenAPI schema response was not valid JSON: ${getErrorMessage(err)}`, {
+      cause: err,
+    });
   }
   if (!doc || typeof doc !== "object") {
     throw new Error("OpenAPI schema response was empty or not an object.");

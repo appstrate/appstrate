@@ -281,7 +281,30 @@ export default tseslint.config(
         "error",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
-      "preserve-caught-error": "off",
+      // `preserve-caught-error`. On, and deliberately so: rethrowing a new
+      // error while dropping the caught one destroys the only record of what
+      // actually failed — the driver's message, the errno, the provider's
+      // response body — and leaves the operator a hand-written summary of a
+      // failure nobody can now inspect. That is precisely the information
+      // PR #1161 (failure legibility) exists to preserve, so the `"off"` this
+      // replaces was undoing a release's worth of work one `catch` at a time,
+      // and was the only rule in this file suppressed without a reason.
+      //
+      // Measured 2026-08-27 at the moment of flipping it on: 20 violations
+      // across `apps/api`, `apps/cli`, `packages/core` and
+      // `packages/module-chat`, all fixed in the same commit — 19 by threading
+      // the caught error through as `cause`, one exempted inline in
+      // `apps/api/src/services/llm-usage-retry.ts` (see the prose there).
+      //
+      // Known limit, so nobody reads a clean run as more than it is: the rule
+      // only inspects `throw new <builtin Error>`. It says nothing about
+      // `throw new ApiError(...)` / `PackageZipError` / `ResolverError` and the
+      // ~24 other custom error classes this repo throws from `catch` blocks.
+      // Measured the same day: 61 such throws carry no `cause`, 19 of which do
+      // not reference the caught binding at all. Those are the same defect,
+      // unlinted — fixing them needs `cause` threaded through each class's
+      // constructor, which is not what this rule buys.
+      "preserve-caught-error": "error",
     },
   },
   {

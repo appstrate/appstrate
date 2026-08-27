@@ -23,6 +23,7 @@ import {
 } from "@appstrate/afps-shared/unzip-bounded";
 import { stripWrapperPrefix } from "@appstrate/afps-shared/archive-prefix";
 import { PACKAGE_CONTENT_FILE } from "./package-files.ts";
+import { getErrorMessage } from "./errors.ts";
 
 export type { Zippable };
 export { unzipBounded, DecompressionLimitError };
@@ -118,7 +119,12 @@ export function unzipArtifact(
     });
   } catch (err) {
     if (err instanceof DecompressionLimitError) throw err; // surface bomb/limit verbatim
-    throw new Error("Failed to decompress ZIP artifact");
+    // Both halves matter: the message names the operation, and fflate's own
+    // message names what was wrong with the bytes (truncated central
+    // directory, unsupported compression method, …). Inline it AND attach the
+    // error — nothing here reads a `cause` chain today (see the API error
+    // handler), so the message is what actually reaches a human.
+    throw new Error(`Failed to decompress ZIP artifact: ${getErrorMessage(err)}`, { cause: err });
   }
 
   // Sanitize: filter out path traversal, absolute paths, null bytes, backslashes, __MACOSX, and directory entries
@@ -198,13 +204,17 @@ export class PackageZipError extends Error {
    * @param code - Error code (e.g. "FILE_TOO_LARGE", "ZIP_INVALID", "MISSING_MANIFEST")
    * @param message - Human-readable error description
    * @param details - Optional structured error details (e.g. validation error list)
+   * @param options - Standard `ErrorOptions`; pass `{ cause }` when raising this
+   *   from a `catch` so the underlying decoder/IO error is not discarded.
+   *   `preserve-caught-error` cannot see custom classes, so this is on us.
    */
   constructor(
     public code: string,
     message: string,
     public details?: unknown,
+    options?: ErrorOptions,
   ) {
-    super(message);
+    super(message, options);
     this.name = "PackageZipError";
   }
 }
@@ -286,11 +296,21 @@ export function parsePackageZip(
     if (err instanceof DecompressionLimitError) {
       // A resource-exhaustion verdict → ZIP_BOMB; a structural one → ZIP_INVALID.
       if (err.reason === "corrupt-archive") {
-        throw new PackageZipError("ZIP_INVALID", "Failed to decompress ZIP artifact");
+        throw new PackageZipError("ZIP_INVALID", "Failed to decompress ZIP artifact", undefined, {
+          cause: err,
+        });
       }
-      throw new PackageZipError("ZIP_BOMB", "Decompressed size exceeds limit");
+      throw new PackageZipError("ZIP_BOMB", "Decompressed size exceeds limit", undefined, {
+        cause: err,
+      });
     }
-    throw new PackageZipError("ZIP_INVALID", "Failed to decompress ZIP artifact");
+    // `unzipArtifact` above already names the operation AND inlines the
+    // decoder's own message; re-wrapping with a fixed string would discard
+    // that on the one path where it reaches a human — `routes/packages.ts`
+    // renders `PackageZipError.message` into the 400 the uploader sees, so
+    // "invalid zip data" vs "unexpected EOF" is the difference between a
+    // fixable report and a shrug.
+    throw new PackageZipError("ZIP_INVALID", getErrorMessage(err), undefined, { cause: err });
   }
 
   // Strip single wrapper folder if present (e.g. ZIPs from macOS Finder)

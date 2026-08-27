@@ -622,6 +622,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
         throw new Error(
           `Firecracker jailer: could not make "${artifact}" root:root 0644 (jailed VMMs ` +
             `hardlink and read it as unprivileged uids): ${getErrorMessage(err)}`,
+          { cause: err },
         );
       }
     }
@@ -1494,6 +1495,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
       throw new Error(
         `Firecracker orchestrator: failed to persist the VMM pid for run ${handle.runId} — ` +
           `killed the VMM rather than leave it unsweepable: ${getErrorMessage(err)}`,
+        { cause: err },
       );
     }
 
@@ -1512,6 +1514,7 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
         throw new Error(
           `Firecracker orchestrator: MMDS credential injection failed for run ${handle.runId} — ` +
             `destroyed the VM rather than boot it without credentials: ${getErrorMessage(err)}`,
+          { cause: err },
         );
       } finally {
         // Scrub the payload from the API heap regardless of outcome.
@@ -1825,7 +1828,9 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
         backoff: 1,
       });
     } catch (err) {
-      throw new Error(`MMDS PUT failed after ${attempts} attempts: ${getErrorMessage(err)}`);
+      throw new Error(`MMDS PUT failed after ${attempts} attempts: ${getErrorMessage(err)}`, {
+        cause: err,
+      });
     }
   }
 
@@ -2379,6 +2384,9 @@ export class FirecrackerOrchestrator implements RunOrchestrator {
           throw new Error(
             `another Firecracker orchestrator (pid ${existingPid}) owns this host — ` +
               `two instances would sweep each other's TAP devices and collide on subnets`,
+            // The EEXIST that brought us into this catch. The message above is
+            // the diagnosis; the cause carries the path and errno behind it.
+            { cause: err },
           );
         }
       }

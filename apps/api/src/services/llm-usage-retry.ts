@@ -133,6 +133,14 @@ export async function recordLlmUsageReliably(
         directError: getErrorMessage(directError),
         queueError: getErrorMessage(queueError),
       });
+      // `AggregateError.errors` IS the preservation mechanism here: both caught
+      // errors are carried in it, in full, and both are also logged one line
+      // above. `preserve-caught-error` only recognises the `cause` option, so it
+      // reads this as a discard. Adding `{ cause: queueError }` would duplicate
+      // `errors[1]` and assert that the enqueue failure caused the direct-write
+      // failure — it did not. They are two independent attempts at the same
+      // write, which is the exact shape AggregateError exists to express.
+      // eslint-disable-next-line preserve-caught-error -- see above: both caught errors are in `.errors`
       throw new AggregateError(
         [directError, queueError],
         "llm_usage persistence and durable retry enqueue both failed",

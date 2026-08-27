@@ -173,6 +173,7 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
           `for a co-located daemon over a Unix socket) and FIRECRACKER_RUNNER_TOKEN ` +
           `(shared bearer secret, at least 16 chars). See ` +
           `apps/api/src/modules/firecracker/README.md. (${getErrorMessage(err)})`,
+        { cause: err },
       );
     }
   }
@@ -220,6 +221,7 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
       throw new Error(
         `appstrate-runner ${route}: request to ${env.FIRECRACKER_RUNNER_URL} failed ` +
           `(${getErrorMessage(err)}) — is appstrate-runner running and reachable?`,
+        { cause: err },
       );
     }
     if (!res.ok) {
@@ -528,6 +530,7 @@ export class RemoteFirecrackerOrchestrator implements RunOrchestrator {
           throw new Error(
             `appstrate-runner ${RUNNER_ROUTES.streamLogs}: log stream failed after ` +
               `${MAX_STREAM_RECONNECTS} reconnect attempts: ${getErrorMessage(err)}`,
+            { cause: err },
           );
         }
         logger.warn("firecracker: log stream interrupted — reconnecting", {

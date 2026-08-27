@@ -93,6 +93,7 @@ export function compileCached(schema: JSONSchemaObject): ReturnType<typeof ajv.c
       // object) to callers on hot paths.
       throw new Error(
         `Failed to compile config JSON schema: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
       );
     } finally {
       // `ajv.compile` registers the schema object (and its `$id`, when

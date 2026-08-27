@@ -965,7 +965,7 @@ function safeParseJson(raw: string, source: string): Record<string, unknown> {
     return parsed as Record<string, unknown>;
   } catch (err) {
     if (err instanceof SyntaxError) {
-      throw new Error(`${source} is not valid JSON: ${err.message}`);
+      throw new Error(`${source} is not valid JSON: ${err.message}`, { cause: err });
     }
     throw err;
   }

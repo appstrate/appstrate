@@ -399,15 +399,21 @@ export async function runWithRollback<T>(
     } catch (restoreErr) {
       const originalMsg = getErrorMessage(err);
       const restoreMsg = getErrorMessage(restoreErr);
+      // Two live failures here. `restoreErr` is the one this catch owns and
+      // the one nothing else records, so it is the cause; the original
+      // upgrade failure is re-thrown with its own `cause` on the other branch
+      // and its message is already inlined above.
       throw new Error(
         `Upgrade failed (${originalMsg}). Rollback also failed (${restoreMsg}); ` +
           `.backup files are preserved in ${dir} for manual recovery.`,
+        { cause: restoreErr },
       );
     }
     const msg = getErrorMessage(err);
     throw new Error(
       `Upgrade failed (${msg}). Original files restored from backup; ` +
         `run \`docker compose up -d\` in ${dir} to resume on the previous config.`,
+      { cause: err },
     );
   }
 }

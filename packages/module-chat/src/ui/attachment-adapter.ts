@@ -77,7 +77,10 @@ export function createChatAttachmentAdapter(deps: {
         // Two rejections ARE actionable by the user, so they keep their own
         // wording; `code` is read structurally to avoid depending on the host's
         // error class.
-        throw new Error(t(uploadFailureKey(err)));
+        // The chip shows the translated text only; the host uploader's
+        // technical message rides along as `cause` so it is still in the
+        // browser console instead of gone.
+        throw new Error(t(uploadFailureKey(err)), { cause: err });
       }
       return {
         ...attachment,
