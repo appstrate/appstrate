@@ -43,7 +43,7 @@ import type {
 // ResolvedConnectionMap is consumed via input prop (`resolvedConnections`) below.
 import { isToolsWildcard, parseManifestIntegrations } from "@appstrate/core/dependencies";
 import {
-  getMcpServerRuntime,
+  effectiveMcpServerType,
   getMcpServerMcpConfigEnv,
   getMcpServerWorkspaceMount,
   renderMcpConfigEnv,
@@ -474,22 +474,23 @@ async function resolveOne(
     }
     const mcpServer = resolution.manifest;
     referencedMcpServer = mcpServer;
-    const run = (mcpServer as { server?: { type?: string; entry_point?: string } }).server;
+    const run = (mcpServer as { server?: { entry_point?: string } }).server;
+    // The runtime this server actually spawns under: the Appstrate `_meta`
+    // override, else the MCPB `server.type`. Decided by core so the
+    // connect-login path (`connect/connect-run-launcher.ts`) cannot decide it
+    // differently — it once did, and the same bun-native package spawned under
+    // two interpreters depending on which path reached it.
+    const effectiveType = effectiveMcpServerType(mcpServer);
     // Defensive: mcpServerManifestSchema makes `server.{type,entry_point}`
     // required, so a manifest that parsed (non-null above) always has them.
     // Kept as a fail-closed guard against a future schema relaxation.
-    if (!run?.type || !run.entry_point) {
+    if (!effectiveType || !run?.entry_point) {
       logger.warn("referenced mcp-server has no runnable server config; skipping", {
         integrationId,
         mcpServerId: ref.name,
       });
       return drop("mcp_server_not_runnable", `referenced mcp-server '${ref.name}'`);
     }
-    // The Appstrate runtime override (`_meta["dev.appstrate/mcp-server"].runtime`)
-    // wins over the MCPB `server.type`. MCPB has no `bun` type, so a bun-native
-    // server keeps an MCPB-vocabulary `server.type: "node"` and declares
-    // `bun` in _meta; the runner then picks the bun interpreter/image.
-    const effectiveType = getMcpServerRuntime(mcpServer) ?? run.type;
     // AFPS §7.1 — propagate `source.server.vendored` build-provenance signal
     // through the spawn spec → boot report so operators can audit "this run
     // used a vendored foreign package". Only meaningful for local sources.
