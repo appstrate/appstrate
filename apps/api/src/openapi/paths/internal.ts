@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The `409` answered by BOTH `/internal/integration-credentials/{scope}/{name}`
+ * The `409` shared by BOTH `/internal/integration-credentials/{scope}/{name}`
  * operations. Module-local const, NOT a `#/components/responses/*` $ref: the same
- * object is serialized at both sites, so the emitted spec stays byte-identical to
- * the hand-written pair it replaces. Same technique as `paths/files.ts`'s
+ * object is serialized at both sites. Same technique as `paths/files.ts`'s
  * `pipelineResponses`.
+ *
+ * The `/refresh` operation spreads this and EXTENDS the description with one
+ * more code that only it can answer (`connect_run_no_refresh`) — the two are
+ * therefore no longer byte-identical, deliberately: a shared description that
+ * enumerated a code the GET never returns would be worse than a divergent one.
  */
 const integrationCredentialsConflict409 = {
   description:
@@ -236,7 +240,7 @@ export const internalPaths = {
       tags: ["Internal"],
       summary: "Fetch live credentials + HTTP delivery plans for an installed integration",
       description:
-        "Sidecar-only. Auth via Bearer run token. Backs the MITM `MitmCredentialSource.current()` + `.deliveryPlans()` calls — returns per-auth resolved credentials + `HttpDeliveryPlan` derived from the integration's `manifest.auths.{key}.delivery.http` declaration. OAuth2 tokens are proactively refreshed when within `OAUTH_REFRESH_LEAD_MS` of expiry. Verifies that the run's agent declares this integration in `dependencies.integrations` AND that the integration is installed on the run's space. A `200` with an EMPTY `auths` array means one thing only: the integration declares no auth. Every state where a credential was expected but could not be produced fails instead — `404` when the actor has no connection (or the connection this run pinned at kickoff was deleted/unshared since), `409` when the pinned manifest version no longer declares the connection's auth, `410` when the credential is dead. The sidecar reads an empty payload as *no `delivery.http` auths, skip the MITM listener*, so answering `200` for a broken state boots the run with zero credentials and every upstream call leaves uncredentialed.",
+        "Sidecar-only. Auth via Bearer run token. Backs the MITM `MitmCredentialSource.current()` + `.deliveryPlans()` calls — returns per-auth resolved credentials + `HttpDeliveryPlan` derived from the integration's `manifest.auths.{key}.delivery.http` declaration. OAuth2 tokens are proactively refreshed when within `OAUTH_REFRESH_LEAD_MS` of expiry. Verifies that the run's agent declares this integration in `dependencies.integrations` AND that the integration is installed on the run's space. A `200` with an EMPTY `auths` array means one thing only: the integration declares no auth. Every state where a credential was expected but could not be produced fails instead — `404` when the actor has no connection (or the connection this run pinned at kickoff was deleted/unshared since), `409` when the pinned manifest version no longer declares the connection's auth, `410` when the credential is dead. The sidecar reads an empty payload as *no `delivery.http` auths, skip the MITM listener*, so answering `200` for a broken state boots the run with zero credentials and every upstream call leaves uncredentialed. One caller is authorised differently: an ephemeral CONNECT run (`run_at: \"link\"` orchestrated `connect.tool` login) has no run row and no agent to walk, so it is authorised against the launcher-published grant naming the single integration it is connecting, and always receives the EMPTY payload — it exists to MINT the credential, its login secret arrives out of band, and the session it captures is installed in-process.",
       security: [{ bearerExecToken: [] }],
       parameters: [
         { $ref: "#/components/parameters/PackageScope" },
@@ -283,7 +287,7 @@ export const internalPaths = {
       tags: ["Internal"],
       summary: "Force-refresh OAuth2 credentials for an installed integration",
       description:
-        "Sidecar-only. Same response shape as the GET endpoint; forces a refresh of every OAuth2 auth on this integration regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. Non-OAuth2 auths are returned unchanged.",
+        "Sidecar-only. Same response shape as the GET endpoint; forces a refresh of every OAuth2 auth on this integration regardless of remaining token lifetime. Called by the MITM listener's `refreshOnUnauthorized` hook when upstream returns 401. Non-OAuth2 auths are returned unchanged. An ephemeral CONNECT run's token is refused here with `409 connect_run_no_refresh`: the platform holds no stored credential for that connection yet — minting one is the reason the connect run exists — so there is nothing a refresh could produce.",
       security: [{ bearerExecToken: [] }],
       parameters: [
         { $ref: "#/components/parameters/PackageScope" },
@@ -301,7 +305,10 @@ export const internalPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "409": integrationCredentialsConflict409,
+        "409": {
+          ...integrationCredentialsConflict409,
+          description: `${integrationCredentialsConflict409.description} A fourth cause is unique to this operation: \`connect_run_no_refresh\` — the caller is an ephemeral connect run, which has no stored credential to force-refresh (its session is minted in-process by the integration's login tool). The sidecar treats any non-2xx here as "do not retry now" and leaves the upstream response untouched.`,
+        },
         "410": {
           description:
             "The credential is dead and the connection has been flagged `needsReconnection` — same semantics and same three causes as the GET endpoint.",
@@ -330,7 +337,7 @@ export const internalPaths = {
       tags: ["Internal"],
       summary: "Fetch the AFPS bundle bytes for a referenced mcp-server package",
       description:
-        "Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an installed integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. Returns the raw ZIP archive (`application/zip`). The sidecar passes `?version=` with the concrete version the spawn resolver pinned from `source.server.version` (#588) so the bytes match the manifest the resolver read. It is omitted for system mcp-servers: the spawn resolver answers those from the in-memory boot registry, which holds one version per id, so no concrete version is pinned onto the spawn spec and there is nothing for the sidecar to forward. (They do have `package_versions` rows — the route simply never reaches that lookup for them, short-circuiting on the registry first.) For any other mcp-server `?version=` is mandatory — omitting it is a 400, never a fallback to the newest published version (that fallback is the manifest/bytes skew #588 closed).",
+        "Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an installed integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. An ephemeral CONNECT run has neither a run row nor an agent, so its token is authorised instead against the launcher-published grant, by exact match on the single mcp-server and concrete version its spawn spec resolved — strictly narrower than the dependency walk, never wider. Returns the raw ZIP archive (`application/zip`). The sidecar passes `?version=` with the concrete version the spawn resolver pinned from `source.server.version` (#588) so the bytes match the manifest the resolver read. It is omitted for system mcp-servers: the spawn resolver answers those from the in-memory boot registry, which holds one version per id, so no concrete version is pinned onto the spawn spec and there is nothing for the sidecar to forward. (They do have `package_versions` rows — the route simply never reaches that lookup for them, short-circuiting on the registry first.) For any other mcp-server `?version=` is mandatory — omitting it is a 400, never a fallback to the newest published version (that fallback is the manifest/bytes skew #588 closed).",
       security: [{ bearerExecToken: [] }],
       parameters: [
         { $ref: "#/components/parameters/PackageScope" },
@@ -358,7 +365,7 @@ export const internalPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": {
           description:
-            "Agent does not reference this mcp-server through an installed integration, or the requested `?version=` does not exist.",
+            "Agent does not reference this mcp-server through an installed integration, or the requested `?version=` does not exist. For a connect run: the request names a package or version outside its grant, or the grant is gone (the connect run ended, or it expired).",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

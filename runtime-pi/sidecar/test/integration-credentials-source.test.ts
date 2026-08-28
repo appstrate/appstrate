@@ -504,4 +504,70 @@ describe("fetchInitialIntegrationCredentials", () => {
       }),
     ).rejects.toThrow("HTTP 500");
   });
+
+  it("REQUIRES a JSON body on success — a 204 aborts boot", async () => {
+    // Pins why the platform's connect-run branch answers `200` with an EMPTY
+    // payload rather than `204`. The success path is
+    // `normalizeIntegrationCredentialsWire(await res.json())` — unconditional,
+    // with no no-content branch — so a bodyless 2xx throws just as hard as a
+    // 4xx, from one line further down. `204` is therefore NOT an equally
+    // workable choice on this endpoint: it would require shipping a matching
+    // sidecar change, and the sidecar is a separately built image the platform
+    // is version-locked to at boot.
+    const fetchFn = (async () => new Response(null, { status: 204 })) as unknown as typeof fetch;
+    await expect(
+      fetchInitialIntegrationCredentials("@scope/name", {
+        platformApiUrl: "http://api",
+        runToken: "tok",
+        fetchFn,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("an EMPTY payload yields a source that injects NOTHING, and still accepts the minted session", async () => {
+    // The other half of that justification: `200` + empty is not read as "we
+    // have credentials". This is the EXACT wire the platform's connect branch
+    // emits (`serializeIntegrationCredentialsWire` of an empty wire), fed
+    // through the real deserialization boundary into the real source.
+    const emptyWire = { auths: [], delivery_plans: {}, expires_at_epoch_ms: {} };
+    const fetchFn = (async () =>
+      new Response(JSON.stringify(emptyWire), { status: 200 })) as unknown as typeof fetch;
+    const initialPayload = await fetchInitialIntegrationCredentials("@scope/name", {
+      platformApiUrl: "http://api",
+      runToken: "tok",
+      fetchFn,
+    });
+
+    const source = createIntegrationCredentialsSource({
+      integrationId: "@scope/name",
+      platformApiUrl: "http://api",
+      runToken: "tok",
+      initialPayload,
+      fetchFn,
+    });
+
+    // Nothing to inject: the MITM listener reads these on every request, so an
+    // empty pair means it adds no header rather than replaying a phantom one.
+    expect(source.current().auths).toEqual([]);
+    expect(source.deliveryPlans()).toEqual({});
+
+    // …and the session the login tool mints still lands on the same source —
+    // which is where a connect run's credentials actually come from.
+    source.setSessionOutputs(
+      {
+        authKey: "session",
+        authType: "custom",
+        fields: { session_token: "sess-1" },
+        authorizedUris: ["https://api.example.test/**"],
+      },
+      {
+        headerName: "Authorization",
+        headerPrefix: "Bearer ",
+        value: "sess-1",
+        allowServerOverride: false,
+      },
+    );
+    expect(source.deliveryPlans().session?.value).toBe("sess-1");
+    expect(source.current().auths).toHaveLength(1);
+  });
 });

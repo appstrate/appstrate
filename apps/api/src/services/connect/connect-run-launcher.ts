@@ -62,6 +62,12 @@ import {
   type WorkloadHandle,
 } from "../orchestrator/index.ts";
 import { getExecutionMode } from "../../infra/mode.ts";
+import {
+  CONNECT_ID_PREFIX,
+  connectRunGrantTtlSeconds,
+  deleteConnectRunGrant,
+  writeConnectRunGrant,
+} from "./connect-run-grant.ts";
 import type { ConnectToolExecution, ConnectToolExecutor } from "./orchestrated-strategy.ts";
 import type { CredentialBundle } from "./strategy.ts";
 
@@ -433,7 +439,9 @@ class ConnectRunExecutor implements ConnectToolExecutor {
       });
     }
     const orch = this.orchestrator ?? getOrchestrator();
-    const connectId = `connect_${randomBytes(12).toString("hex")}`;
+    // Prefix comes from the grant module so the mint site and the
+    // `/internal/*` discriminator can never drift apart.
+    const connectId = `${CONNECT_ID_PREFIX}${randomBytes(12).toString("hex")}`;
     const runToken = signRunToken(connectId);
     // Per-connect-run ephemeral key for the result channel. The sidecar
     // encrypts the captured credential bundle with it (AES-256-GCM) before
@@ -443,11 +451,43 @@ class ConnectRunExecutor implements ConnectToolExecutor {
     const resultKey = randomBytes(32);
 
     const spec = await buildConnectLoginSpec(execution, this.resolveMcpServer);
+    // `buildConnectLoginSpec` always names the referenced mcp-server for a
+    // local source (and rejects every other source kind), so this is an
+    // invariant check, not a fallback. It is here rather than folded into the
+    // grant below because an unnamed server would mint a grant that authorises
+    // nothing, and a connect run that boots without a usable grant fails as
+    // "bundle not found" three layers away from the cause.
+    const grantedMcpServerId = spec.manifest.server?.packageId;
+    if (!grantedMcpServerId) {
+      throw new Error(
+        "connect-run: spawn spec carries no server.packageId — refusing to launch a sidecar it cannot authorise",
+      );
+    }
 
     let boundary: IsolationBoundary | undefined;
     let sidecar: WorkloadHandle | undefined;
 
     try {
+      // The connect run's ENTIRE authorization on `/internal/*`. There is no
+      // `runs` row behind `connectId` and no agent manifest to walk, so the
+      // grant is what the byte + credentials routes match against — one
+      // integration, one mcp-server, one concrete version, for as long as this
+      // connect run lives. Written BEFORE the sidecar exists so its first call
+      // already finds it, and revoked in the `finally` below.
+      await writeConnectRunGrant(
+        connectId,
+        {
+          orgId: execution.scope.orgId,
+          integrationId: execution.integrationId,
+          mcpServerId: grantedMcpServerId,
+          // `null` = system mcp-server (no published version; the byte route
+          // serves it from the boot registry by id alone). The grant then
+          // authorises ONLY that short-circuit.
+          mcpServerVersion: spec.manifest.server?.version ?? null,
+        },
+        connectRunGrantTtlSeconds(this.timeoutMs),
+      );
+
       boundary = await orch.createIsolationBoundary(connectId);
       sidecar = await orch.createSidecar(connectId, boundary, {
         runToken,
@@ -469,6 +509,16 @@ class ConnectRunExecutor implements ConnectToolExecutor {
       });
       return bundle;
     } finally {
+      // Revoke the grant FIRST: past this line no token bearing `connectId`
+      // authorises anything, whether the run succeeded, failed, or timed out.
+      // The TTL is only the crash backstop for a process that never reaches
+      // here.
+      await deleteConnectRunGrant(connectId).catch((err) => {
+        logger.error("connect-run: failed to revoke the authorization grant", {
+          connectId,
+          error: getErrorMessage(err),
+        });
+      });
       // Cleanup order mirrors runPlatformContainer: sidecar → boundary.
       if (sidecar) {
         await orch.removeWorkload(sidecar).catch((err) => {
