@@ -66,9 +66,8 @@ interface TurnErrorState {
  * transient assistant-ui error for a failure that never reached a finish chunk.
  *
  * Every path localizes a category — the client never renders provider text. A
- * turn persisted before the category existed carries none, so it degrades to
- * the generic failure instead of surfacing the raw upstream string its
- * `errorText` used to hold.
+ * turn carrying no category degrades to the generic failure rather than to
+ * anything provider-shaped.
  */
 export function turnErrorState(
   message: AssistantState["message"],
@@ -89,12 +88,18 @@ export function turnErrorState(
   // A deadline with NO category adds nothing: nothing failed, and the generic
   // "generation failed" sentence would contradict a notice that says the turn
   // was cut mid-work. Hence the category is required for that branch, while the
-  // `"error"` branch keeps degrading a legacy category-less turn to `unknown`.
+  // `"error"` branch degrades a category-less turn to `unknown`.
   if (
     turn?.finishReason === "error" ||
     (turn?.finishReason === "deadline" && turn.errorCategory !== undefined)
   ) {
     return {
+      // `errorCategory` is OPTIONAL on the persisted shape — it is stamped only
+      // on a turn that carried an error, so the type forces a default here and
+      // the compiler rejects the bare index. Not a legacy accommodation: the
+      // `"deadline"` disjunct above has already proved it present, but a
+      // disjunction narrows nothing, and the metadata is read back out of
+      // unvalidated JSONB either way.
       text: t(TURN_ERROR_KEY[turn.errorCategory ?? "unknown"]),
       // Retry is a property of the CAUSE, not of the ceiling: a deadline turn
       // whose cause was rate limiting is retryable, one whose credential is

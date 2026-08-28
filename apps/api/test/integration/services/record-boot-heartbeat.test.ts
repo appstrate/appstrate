@@ -16,6 +16,10 @@
  *   - run whose sink is closed          → "closed" (no advance)
  *   - run past its boot deadline        → "deadline-passed" (no advance)
  *   - unknown runId                     → "closed"
+ *
+ * The deadline comparison is unconditional (`boot_deadline_at > now`), so a
+ * row without one gets no bump either; the last test here pins the invariant
+ * that makes that safe — every creation path that opens a sink stamps one.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -41,7 +45,7 @@ async function seedRun(
     lastHeartbeatAt?: Date;
     lastEventSequence?: number;
     sinkClosedAt?: Date | null;
-    bootDeadlineAt?: Date | null;
+    bootDeadlineAt?: Date;
   } = {},
 ): Promise<string> {
   const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
@@ -58,8 +62,7 @@ async function seedRun(
     startedAt: new Date(),
     lastHeartbeatAt: overrides.lastHeartbeatAt ?? new Date(),
     lastEventSequence: overrides.lastEventSequence ?? 0,
-    bootDeadlineAt:
-      "bootDeadlineAt" in overrides ? overrides.bootDeadlineAt : new Date(Date.now() + 300_000),
+    bootDeadlineAt: overrides.bootDeadlineAt ?? new Date(Date.now() + 300_000),
   });
   return runId;
 }
@@ -140,20 +143,6 @@ describe("recordBootHeartbeat — boot-window synthetic keep-alive gating", () =
     expect(outcome).toBe("deadline-passed");
     const after = await readHeartbeat(runId);
     expect(after!.getTime()).toBe(seeded.getTime());
-  });
-
-  it("still bumps a pre-migration row that has no boot deadline", async () => {
-    const seeded = new Date(Date.now() - 120_000);
-    const runId = await seedRun(ctx, agentId, {
-      lastHeartbeatAt: seeded,
-      bootDeadlineAt: null,
-    });
-
-    const outcome = await recordBootHeartbeat(runId);
-
-    expect(outcome).toBe("bumped");
-    const after = await readHeartbeat(runId);
-    expect(after!.getTime()).toBeGreaterThan(seeded.getTime());
   });
 
   it("returns closed for an unknown runId", async () => {

@@ -1182,9 +1182,12 @@ export type BootHeartbeatOutcome = "bumped" | "guest-active" | "closed" | "deadl
  * platform vouching for a run it is still provisioning must not be able to
  * vouch forever (a wedged Docker daemon, a daemon call that never returns).
  * Past the deadline the bump is refused and the startup-deadline predicate
- * in the watchdog finalises the row with an accurate error. Rows with a
- * NULL deadline (pre-migration runs) keep the old unbounded behaviour —
- * they are still bounded by the sink expiry.
+ * in the watchdog finalises the row with an accurate error. The comparison
+ * is unconditional: a NULL deadline does not match `> now`, so such a row
+ * gets no bump at all. Every row this function can reach carries one —
+ * {@link createRun} stamps it on every path that opens a sink, and the pump
+ * that calls this (`services/run-boot-heartbeat.ts`) only ever names a run THIS
+ * process is provisioning right now.
  */
 export async function recordBootHeartbeat(runId: string): Promise<BootHeartbeatOutcome> {
   const now = new Date();
@@ -1196,7 +1199,7 @@ export async function recordBootHeartbeat(runId: string): Promise<BootHeartbeatO
         eq(runs.id, runId),
         isNull(runs.sinkClosedAt),
         eq(runs.lastEventSequence, 0),
-        or(isNull(runs.bootDeadlineAt), gt(runs.bootDeadlineAt, now)),
+        gt(runs.bootDeadlineAt, now),
       ),
     )
     .returning({ id: runs.id });
