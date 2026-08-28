@@ -2,16 +2,19 @@
 -- scheme its separator: `"Bearer"` → `"Bearer "`, in `package_versions.manifest`
 -- and `packages.draft_manifest`.
 --
--- NOT REHEARSED AGAINST A PRODUCTION DUMP, and this file does NOT qualify for
--- `0004`'s exemption from that requirement. `0004` may skip the README's step 4
--- because it repairs a corruption no database reachable from here is in, so
--- there is no dump to restore; the WHY below says the opposite about this one —
--- reachable production databases hold these rows, which is the entire reason
--- the file exists. Step 4 (`pg_dump` production → throwaway
--- `postgres:16-alpine` → apply → verify) is therefore still OWED, on a restored
--- copy of the database that is about to be written, before an operator runs
--- this. The counts below are UNMEASURED: the operator measures their own with
--- the "verify before" query, on their own database, first.
+-- REHEARSED AND APPLIED — production, 2026-08-28, in the v1.0.0-beta.54 window.
+-- README step 4 was run on a restored `pg_dump` of the database about to be
+-- written, as this file's own text demanded (it does NOT qualify for `0004`'s
+-- exemption: reachable production databases hold these rows, which is the
+-- entire reason it exists).
+--
+-- Measured, identical on the rehearsal copy and on production: **126
+-- `package_versions.manifest` + 77 `packages.draft_manifest`**, both "verify
+-- after" counts 0, and a replay reporting `UPDATE 0` twice.
+--
+-- It was applied FIRST, against the still-running beta.53 platform, per the
+-- box below — the outage window for doing so is zero, and the window for
+-- deferring it is the length of the deploy.
 --
 -- What HAS been rehearsed is the STATEMENT, on a synthetic fixture rather than
 -- on real data: applied twice on `postgres:16-alpine` over every shape named
