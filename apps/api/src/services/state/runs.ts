@@ -1183,11 +1183,24 @@ export type BootHeartbeatOutcome = "bumped" | "guest-active" | "closed" | "deadl
  * vouch forever (a wedged Docker daemon, a daemon call that never returns).
  * Past the deadline the bump is refused and the startup-deadline predicate
  * in the watchdog finalises the row with an accurate error. The comparison
- * is unconditional: a NULL deadline does not match `> now`, so such a row
- * gets no bump at all. Every row this function can reach carries one —
- * {@link createRun} stamps it on every path that opens a sink, and the pump
- * that calls this (`services/run-boot-heartbeat.ts`) only ever names a run THIS
- * process is provisioning right now.
+ * is unconditional: `> now` is NULL-rejecting, so a row with NO deadline is
+ * not bumped either — and, because the disambiguation query below then finds
+ * an open sink at sequence 0, it is reported as `"deadline-passed"`, which
+ * `services/run-boot-heartbeat.ts` logs as "run blew its provisioning
+ * deadline" about a run that never had one. That is accepted, not overlooked:
+ * the state is unreachable. Every row this function can reach carries a
+ * deadline — {@link createRun} stamps it in the same spread as
+ * `sinkExpiresAt`, which both callers (`run-pipeline.ts`, `run-creation.ts`)
+ * pass unconditionally — and the pump that calls this only ever names a run
+ * THIS process is provisioning right now.
+ *
+ * That reach is also why this function and the watchdog read the column
+ * differently, which is NOT an inconsistency: `run-watchdog.ts` keeps
+ * `isNotNull(bootDeadlineAt)` in its predicate and a `?? 0` on the budget
+ * because it sweeps EVERY open-sink row in the database, including rows a
+ * previous release created; this function is only ever handed a run id by the
+ * in-process pump for a run it is provisioning right now, so a row from an
+ * older release can never be its argument.
  */
 export async function recordBootHeartbeat(runId: string): Promise<BootHeartbeatOutcome> {
   const now = new Date();

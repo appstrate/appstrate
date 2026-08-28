@@ -168,9 +168,12 @@ every `EXECUTE` and `format(…)` as the SQL it becomes. This is not a hypotheti
 bypass: `EXECUTE format(…)` is already the dominant form here for catalog-guarded
 DDL — a couple of dozen sites, spread across the rename migrations and growing
 with every new one, so it is the form the next author reaches for. Derive the
-figure rather than reading one here, because it has drifted before:
-`grep -c 'EXECUTE format(' packages/db/drizzle/*.sql`. What is worth re-checking
-is not the total but the invariant behind it — every site is a `RENAME`, a
+figure rather than reading one here, because it has drifted before —
+`grep -o 'EXECUTE format(' packages/db/drizzle/*.sql | wc -l` prints it as one
+number (`grep -c` over the same glob prints one line per file, almost all
+`:0`). That total counts every occurrence, including the handful sitting inside
+`--` comments, so it runs ahead of the number of live statements. What is worth
+re-checking is not the total but the invariant behind it — every site is a `RENAME`, a
 `DROP CONSTRAINT` or a probe, and not one is a write. A write found there is
 reported unconditionally, with no carve-out: the target is typically a `%I`
 filled from a catalog query, so there is no table name a licence could land on.

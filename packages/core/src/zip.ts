@@ -271,10 +271,16 @@ export function parsePackageZip(
 ): ParsedPackageZip {
   // The signature says `options` cannot be a number, so an in-tree call site
   // that passes one fails to compile. This runtime check outlives that type on
-  // purpose: `@appstrate/core` is PUBLISHED, and an out-of-tree consumer in
-  // plain JS (or one that never runs `tsc`) can still pass the retired
-  // positional `maxSize` with no compiler in the way. Hence the cast — the
-  // check has to test a shape the type has already ruled out.
+  // purpose: `@appstrate/core` is PUBLISHED, and a published consumer can still
+  // pass the retired positional `maxSize` with no compiler in the way. Be exact
+  // about who that is — this package ships RAW TypeScript (`"./zip":
+  // "./src/zip.ts"`, `files: ["src", …]`, `engines.bun`, no build step), so a
+  // plain-JS Node consumer of this subpath cannot exist at all. The reachable
+  // caller is narrower: a Bun consumer that never runs `tsc` — its own `check`
+  // is lint-only, or the call is in a `.js`/`.mjs` file, or it types the
+  // argument `any`. Bun executes the `.ts` and erases the type either way.
+  // Hence the cast — the check has to test a shape the type has already ruled
+  // out.
   //
   // Deleting the check instead would not restore the old behaviour, it would
   // HIDE it: a number falls through `options ?? {}`, `opts.maxSize` reads

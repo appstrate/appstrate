@@ -283,13 +283,20 @@ describe("parsePackageZip", () => {
     expect(parsePackageZip(zip).droppedRuntimeTools).toEqual([]);
   });
 
-  it("honours maxSize in both directions", () => {
+  // Both limits are derived from the fixture's own compressed size, so NEITHER
+  // is `PACKAGE_ZIP_MAX_COMPRESSED_BYTES` (10 MB). That matters: a limit equal
+  // to the default is passed identically by a build that never reads
+  // `opts.maxSize` at all, since the value it falls back to is the same number.
+  // One byte under the archive must reject it — that line goes red the moment
+  // the option stops being read — and exactly the archive's size must accept
+  // it, pinning the comparison as `>` rather than `>=`.
+  it("enforces the exact maxSize the caller passes", () => {
     const zip = makeZip({
       "manifest.json": validAgentManifest(),
       "prompt.md": "# Test prompt",
     });
-    expect(() => parsePackageZip(zip, { maxSize: 1 })).toThrow(PackageZipError);
-    expect(parsePackageZip(zip, { maxSize: 10 * 1024 * 1024 }).packageId).toBe("@test/my-agent");
+    expect(() => parsePackageZip(zip, { maxSize: zip.length - 1 })).toThrow(PackageZipError);
+    expect(parsePackageZip(zip, { maxSize: zip.length }).packageId).toBe("@test/my-agent");
   });
 
   // `@appstrate/core` is published, so the retired positional `maxSize` can

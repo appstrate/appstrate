@@ -15,11 +15,18 @@
  *   - run that has emitted events (seq>0) → "guest-active" (no advance)
  *   - run whose sink is closed          → "closed" (no advance)
  *   - run past its boot deadline        → "deadline-passed" (no advance)
+ *   - run with NO boot deadline at all  → "deadline-passed" (no advance)
  *   - unknown runId                     → "closed"
  *
- * The deadline comparison is unconditional (`boot_deadline_at > now`), so a
- * row without one gets no bump either; the last test here pins the invariant
- * that makes that safe — every creation path that opens a sink stamps one.
+ * The deadline comparison is unconditional (`boot_deadline_at > now`), which a
+ * NULL deadline does not satisfy — so such a row is refused, and refused under
+ * the `deadline-passed` label, because the disambiguation query behind the
+ * failed UPDATE then finds an open sink at sequence 0. That outcome is pinned
+ * by "reports deadline-passed for a row with no boot deadline at all"; what
+ * keeps it unreachable in production is pinned by "stamps a boot deadline on
+ * every run created with an open sink". Both are referred to by NAME, never by
+ * position — they are neither first nor last here, and a name cannot drift when
+ * a test is inserted beside them.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
@@ -45,7 +52,12 @@ async function seedRun(
     lastHeartbeatAt?: Date;
     lastEventSequence?: number;
     sinkClosedAt?: Date | null;
-    bootDeadlineAt?: Date;
+    /**
+     * `null` seeds a row with NO deadline — distinct from omitting the key,
+     * which takes the default. Hence the `in` test below rather than `??`,
+     * which cannot tell the two apart.
+     */
+    bootDeadlineAt?: Date | null;
   } = {},
 ): Promise<string> {
   const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
@@ -62,7 +74,8 @@ async function seedRun(
     startedAt: new Date(),
     lastHeartbeatAt: overrides.lastHeartbeatAt ?? new Date(),
     lastEventSequence: overrides.lastEventSequence ?? 0,
-    bootDeadlineAt: overrides.bootDeadlineAt ?? new Date(Date.now() + 300_000),
+    bootDeadlineAt:
+      "bootDeadlineAt" in overrides ? overrides.bootDeadlineAt : new Date(Date.now() + 300_000),
   });
   return runId;
 }
@@ -136,6 +149,27 @@ describe("recordBootHeartbeat — boot-window synthetic keep-alive gating", () =
     const runId = await seedRun(ctx, agentId, {
       lastHeartbeatAt: seeded,
       bootDeadlineAt: new Date(Date.now() - 1_000),
+    });
+
+    const outcome = await recordBootHeartbeat(runId);
+
+    expect(outcome).toBe("deadline-passed");
+    const after = await readHeartbeat(runId);
+    expect(after!.getTime()).toBe(seeded.getTime());
+  });
+
+  it("reports deadline-passed for a row with no boot deadline at all", async () => {
+    // `gt(boot_deadline_at, now)` is NULL-rejecting, so a row without a
+    // deadline is not bumped either. The disambiguation query then sees an
+    // open sink at sequence 0 and labels it `deadline-passed` — which is what
+    // `run-boot-heartbeat.ts` logs as "run blew its provisioning deadline"
+    // about a run that never had one. The state is unreachable through
+    // `createRun` (see "stamps a boot deadline on every run created with an
+    // open sink"); this pins what the code actually does if it is ever reached.
+    const seeded = new Date(Date.now() - 120_000);
+    const runId = await seedRun(ctx, agentId, {
+      lastHeartbeatAt: seeded,
+      bootDeadlineAt: null,
     });
 
     const outcome = await recordBootHeartbeat(runId);
