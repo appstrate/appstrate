@@ -1,27 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { orgRoleEnum } from "@appstrate/db/schema";
-import { ACCEPTED_RUNTIME_TOOL_IDS } from "@appstrate/core/runtime-tools-catalog";
+import { SELECTABLE_RUNTIME_TOOLS } from "@appstrate/core/runtime-tools-catalog";
 import { SPACE_ID_RE } from "../lib/ids.ts";
 
 const ORG_ROLES = [...orgRoleEnum.enumValues];
 
 /**
- * Runtime-tool ids a manifest may DECLARE.
- *
- * `ACCEPTED_RUNTIME_TOOL_IDS` is not a second set: it is defined as
- * `[...SELECTABLE_RUNTIME_TOOLS]`, retyped as the non-empty MUTABLE tuple
- * `z.enum()` wants. The two CANNOT diverge, so importing one rather than the
- * other guards nothing — an earlier version of this comment claimed it did.
- * They were genuinely distinct only while a retired spelling was resolved on
- * read (`publish_document`, #1177); that alias table is gone.
- *
- * The import stays on ACCEPTED because deleting the binding is now a
- * `@appstrate/core` MAJOR, not a hygiene edit: the name shipped in the
- * published 8.0.0 tarball, so out-of-tree consumers may already import it.
- * Collapsing the two onto SELECTABLE is deferred to core 9.0.0.
+ * Runtime-tool ids a manifest may DECLARE — the canonical catalog
+ * ({@link SELECTABLE_RUNTIME_TOOLS}) spread into the mutable `string[]` a JSON
+ * Schema `enum` member takes. There is no second list to pick from and no
+ * reason to import anything but the catalog itself.
  */
-const RUNTIME_TOOL_IDS = [...ACCEPTED_RUNTIME_TOOL_IDS];
+const RUNTIME_TOOL_IDS = [...SELECTABLE_RUNTIME_TOOLS];
 
 /**
  * The org-settings members, shared by the READ component (`OrgSettings`, below)
