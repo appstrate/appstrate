@@ -9,12 +9,12 @@
  */
 
 import { describe, it, expect, afterAll } from "bun:test";
+import type { PubSub } from "@appstrate/core/platform-types";
 import { LocalPubSub } from "../../src/infra/pubsub/local-pubsub.ts";
 import { LocalCache } from "../../src/infra/cache/local-cache.ts";
 import { LocalRateLimiterFactory } from "../../src/infra/rate-limit/local-rate-limit.ts";
 import { LocalQueue } from "../../src/infra/queue/local-queue.ts";
 import { PermanentJobError } from "../../src/infra/queue/interface.ts";
-import type { PubSub } from "../../src/infra/pubsub/interface.ts";
 import type { KeyValueCache } from "../../src/infra/cache/interface.ts";
 import type { RateLimiterFactory } from "../../src/infra/rate-limit/interface.ts";
 import type { JobQueue, QueueJob } from "../../src/infra/queue/interface.ts";

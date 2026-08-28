@@ -39,6 +39,22 @@ export type { McpServerManifest };
 // scope and declares no `sideEffects: false` — so a browser consumer that only
 // needs the runtime hint cannot tree-shake it away. Measured: +65 kB gzipped
 // on the integration detail page.
+//
+// `MCP_SERVER_APPSTRATE_META_KEY` is the one name in this list with no in-tree
+// reader through EITHER subpath (it is used inside both modules, never
+// imported across one), so a dead-export scan run with `includeEntryExports`
+// on `packages/core` reports THIS LINE. It stays: `./mcp-server` is the
+// complete façade by contract (core 6.2.0 CHANGELOG), `./mcp-server-meta` is
+// only the bundler escape hatch behind it, and dropping one of six names would
+// break that published subpath for an out-of-tree manifest author — the exact
+// consumer the key exists for — to save a re-export line. FIVE of the six are
+// read through the façade in-tree today — `MCP_SERVER_RUNTIME_CAPABILITIES` and
+// `MCP_SERVER_RUNTIMES` (`apps/api/src/modules/mcp/package-file-tools.ts`),
+// `isMcpServerRuntime` and the `McpServerRuntime` type (both sidecar
+// `integration-runtime-adapter-*.ts`), and `getMcpServerRuntime`
+// (`apps/api/src/services/integration-spawn-resolver.ts`) — so it is a live
+// façade, not a shim keeping an old import path alive. Only
+// `MCP_SERVER_APPSTRATE_META_KEY` itself has no in-tree reader.
 export {
   MCP_SERVER_APPSTRATE_META_KEY,
   MCP_SERVER_RUNTIME_CAPABILITIES,

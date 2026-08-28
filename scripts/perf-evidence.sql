@@ -1,25 +1,67 @@
 -- SPDX-License-Identifier: Apache-2.0
 --
--- Production evidence for the two performance questions that cannot be answered
--- from the source tree. Read-only: no DDL, no writes, safe on a live primary
--- (every statement is a catalog read or a bounded sample).
+-- Production evidence for two performance questions that CANNOT be answered
+-- from the source tree — only from a live database with real rows and real
+-- planner statistics.
 --
 --   psql "$DATABASE_URL" -f scripts/perf-evidence.sql
 --
+-- STANDING OPERATOR TOOL, not one-off evidence-gathering. It is deliberately
+-- referenced by no `bun run` script, no workflow and no test — same posture,
+-- and same reason, as `scripts/check-index-drift.ts`: it needs a production
+-- connection string, so it is run by a human on a jump host, never by CI. Both
+-- sections are generic — no table, index or column list is hard-coded to a
+-- particular audit — so the script keeps answering its questions after the
+-- schema moves on. `DATABASE_URL` is the only input.
+--
+-- READ-ONLY. No DDL, no writes, safe on a live primary: every statement is a
+-- catalog read or a bounded sample. It takes no locks a reader does not.
+--
+-- Each section below states what it reports, and the traps in reading one are
+-- commented at the statement they apply to. What only a header can carry is
+-- why each question is still open and when its answer goes stale.
+--
+-- ============================ THE TWO QUESTIONS ============================
+--
 -- Question 1 — is a slimmer run-list DTO worth breaking the response contract?
---   The list endpoints ship `input`, `result`, `checkpoint`, `context_snapshot`
---   and friends in full. Dropping them from list responses is a public contract
---   change, so it needs a number first: how many bytes per row are actually at
---   stake, at p50 and p95, versus the rest of the row.
+--   STATUS: OPEN. `enrichedRunColumns` (`apps/api/src/services/state/runs.ts`)
+--   still projects `input`, `result`, `checkpoint` and `context_snapshot`, and
+--   `runRowToWireDto` still serialises them on EVERY row of EVERY list page.
+--   Dropping them from list responses is a public contract change — `GET
+--   /api/runs` declares `#/components/schemas/Run` and `detect:breaking` will
+--   block it — so it needs a dated API version, and therefore a number first:
+--   how many bytes per row are actually at stake, at p50 and p95, versus the
+--   rest of the row. Sections 1a-1c are that number. The decision rule the
+--   author of a slimming PR owes a reviewer: a small `droppable_pct_at_p95`
+--   means the contract break buys nothing; a large one that 1c shows to be a
+--   handful of outliers argues for capping the fields, not removing them.
+--   RE-RUN before deciding, and again after any change to which `runs` columns
+--   the list projects.
 --
 -- Question 2 — are the prefix indexes redundant?
---   An index whose column list is a strict prefix of another index on the same
---   table is functionally covered by it — but "covered" is not "useless": the
---   shorter index is smaller, cheaper to keep cached, and the planner may still
---   prefer it (locally, Postgres picked `idx_run_logs_run_id` over the wider
---   composite for a `run_id` lookup). Section 2 reports usage, size and the
---   stats window; dropping anything without an `EXPLAIN (ANALYZE, BUFFERS)` on
---   the real queries is guesswork.
+--   STATUS: the 2026-08 instance is CLOSED, the question is not. Migration
+--   `0039_unique_nebula` dropped 18 indexes (13 of them strict leading-prefix
+--   duplicates) and `0041_restore_squash_indexes` restored the two covers that
+--   turned out to be missing from production. Section 2a is the detector that
+--   finds the NEXT batch, not a record of that one: treat a row as a CANDIDATE,
+--   never a verdict, and settle it with an `EXPLAIN (ANALYZE, BUFFERS)` on the
+--   real query against production — that is how `0039` justified its first
+--   entry, and it is the only thing that distinguishes a dead index from a
+--   chosen one.
+--   RE-RUN after any release that ADDS indexes, and before any `DROP INDEX`:
+--   the finding class recurs by construction, since every new composite can
+--   turn an existing narrow index into a prefix duplicate.
+--   PAIR IT WITH `scripts/check-index-drift.ts`, which owns the other half. 2a
+--   reads `pg_index`, so it sees only what really exists; an index the SCHEMA
+--   declares may be absent from production (`0000_init.sql` is a squash and
+--   production predates it). Verify the SURVIVING index against the live
+--   catalog before dropping the candidate it is supposed to cover.
+--   OPS NOTE. `DROP INDEX CONCURRENTLY` cannot run inside a transaction and
+--   drizzle wraps the whole pending batch in one, so a drop migration must use
+--   a plain `DROP INDEX` behind a `SET LOCAL lock_timeout` fence. `0039` is
+--   the worked example.
+--
+-- Both — re-run before a release that claims a performance win on these paths.
 
 \pset pager off
 \timing off

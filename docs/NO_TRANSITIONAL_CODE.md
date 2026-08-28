@@ -165,12 +165,18 @@ at apply time exactly as the bare statement would, and it is written inside a
 string literal — which the gate blanks, because a migration header discussing
 `UPDATE` in prose is the common case here. So the gate also reads the argument of
 every `EXECUTE` and `format(…)` as the SQL it becomes. This is not a hypothetical
-bypass: `EXECUTE format(…)` is already how this directory writes catalog-guarded
-DDL (23 occurrences across `0043`, `0047`, `0048` and `0053`, every one a
-`RENAME`, a `DROP CONSTRAINT` or a probe), so it is the form the next author
-reaches for. A write found there is reported unconditionally, with no carve-out:
-the target is typically a `%I` filled from a catalog query, so there is no table
-name a licence could land on.
+bypass: `EXECUTE format(…)` is already the dominant form here for catalog-guarded
+DDL — a couple of dozen sites, spread across the rename migrations and growing
+with every new one, so it is the form the next author reaches for. Derive the
+figure rather than reading one here, because it has drifted before —
+`grep -o 'EXECUTE format(' packages/db/drizzle/*.sql | wc -l` prints it as one
+number (`grep -c` over the same glob prints one line per file, almost all
+`:0`). That total counts every occurrence, including the handful sitting inside
+`--` comments, so it runs ahead of the number of live statements. What is worth
+re-checking is not the total but the invariant behind it — every site is a `RENAME`, a
+`DROP CONSTRAINT` or a probe, and not one is a write. A write found there is
+reported unconditionally, with no carve-out: the target is typically a `%I`
+filled from a catalog query, so there is no table name a licence could land on.
 
 **A `CREATE FUNCTION` body is not.** `CREATE FUNCTION audit_fn() … $$ BEGIN
 INSERT INTO audit …; RETURN NEW; END; $$` writes no row when the migration is

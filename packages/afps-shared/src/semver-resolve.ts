@@ -9,8 +9,8 @@
  * string, and for applying yank policy by pre-filtering the
  * `rangeVersions` and `distTags` inputs accordingly.
  *
- * This is the SINGLE source of truth, re-exported by
- * `@appstrate/core/semver` and `@appstrate/afps-runtime/bundle/semver-resolve`.
+ * This is the SINGLE source of truth, re-exported by `@appstrate/core/semver`
+ * and imported directly by `@appstrate/afps-runtime`.
  *
  * Conventional yank policy (matches npm/crates.io):
  * - `exactVersions`: include yanked (exact pins always resolve).

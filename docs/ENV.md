@@ -152,6 +152,26 @@ Values and semantics are unchanged — only the names moved.
 `ORG_STORAGE_QUOTA_BYTES` (per-org durable-storage byte quota) never carried the
 old vocabulary and did not move.
 
+## Pre-1.0 renames — also refused (breaking)
+
+Three more names moved during the `v1.0.0-alpha.*` series and are refused by the
+same guard. They were shipped: `release.yml` fires on every `v*` tag, so each
+alpha published GHCR images and CLI binaries, and an `.env` written against one
+of those builds still carries the left column. Grep for it the same way:
+
+| Was                      | Now                | Governs                                    | Last shipped as   |
+| ------------------------ | ------------------ | ------------------------------------------ | ----------------- |
+| `APPSTRATE_MODULES`      | `MODULES`          | comma-separated list of modules to load    | `v1.0.0-alpha.35` |
+| `EXECUTION_ADAPTER`      | `RUN_ADAPTER`      | how a run is executed (`process`/`docker`) | `v1.0.0-alpha.18` |
+| `EXECUTION_TOKEN_SECRET` | `RUN_TOKEN_SECRET` | HMAC secret for run bearer tokens          | `v1.0.0-alpha.18` |
+
+`MODULES` and `RUN_ADAPTER` both carry a default, which is the whole hazard: the
+old spelling used to be stripped as an unknown key and the platform booted with
+a module list or a run adapter the operator never chose — the same silent drift
+as issue #513. `RUN_TOKEN_SECRET` is required, so the old spelling already
+aborted boot; it now aborts naming the rename instead of reporting a missing
+variable the operator never typed.
+
 ## `EGRESS_ALLOW_INTERNAL_HOSTS` — full semantics
 
 Opt-in, comma-separated hostnames the operator explicitly trusts on private/internal addresses. Exempts **only** the SSRF host blocklist — never the redirect discipline — across every platform egress site that consults it: OAuth token exchange/refresh/discovery, LLM upstream `baseUrl`, org proxies, org model tests, credential-proxy targets, and remote MCP servers (spawn validation allows plain `http://` for these hosts). The value is forwarded to the sidecar under the same name at launch, so the sidecar's own gates honour the same allowlist.

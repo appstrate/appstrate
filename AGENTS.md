@@ -115,7 +115,7 @@ appstrate/
 ### Database
 
 - **No RLS** -- all queries filter by `orgId` at the application level (multi-tenant)
-- Schema: `packages/db/src/schema/` (barrel: `packages/db/src/schema.ts`). Counts drift — derive them, don't quote them: `grep -c "= pgTable(" packages/db/src/schema/*.ts`
+- Schema: `packages/db/src/schema/` (barrel: `packages/db/src/schema/index.ts`). Counts drift — derive them, don't quote them: `grep -c "= pgTable(" packages/db/src/schema/*.ts`
 - Modules own **no** tables. Every table a module reads/writes lives in the core schema and migrates with it
 - Migrations: edit the schema -> `bun run db:generate`. **Applied automatically at boot** (PGlite + PostgreSQL); `bun run db:migrate` is a manual escape hatch, not part of the normal loop
 - Service layer: function-based (no classes), `apps/api/src/services/state/` (runs, notifications, package-persistence) is the central data-access layer

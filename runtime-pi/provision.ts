@@ -191,14 +191,23 @@ export async function provisionWorkspace(deps: ProvisionDeps): Promise<void> {
  * file the manifest listed IS fatal, same reasoning as the bundle (#549).
  */
 export async function provisionFiles(deps: ProvisionDeps): Promise<void> {
-  // `/files` is the ONLY manifest path. There is no `/documents` probe: the
-  // platform that serves this container validates at boot that `PI_IMAGE` and
-  // `SIDECAR_IMAGE` carry its own version (`@appstrate/env`, via
-  // `findRuntimeImageTagMismatch`), so the counterpart on the other end of this
-  // request is never a platform older than this image — and no released
-  // platform ever served `/documents` anyway (the rename landed after
-  // `v1.0.0-beta.51`). A 404 here therefore carries exactly ONE meaning, the
-  // one the route documents: this run carries no input files.
+  // `/files` is the ONLY manifest path. There is no `/documents` probe, and the
+  // reason is the ROUTE, not the image-tag guard: a platform old enough to
+  // serve `/documents` (pre-#1193) has no `/files` route, so it answers 404 —
+  // which is already the documented "this run carries no input files" case.
+  // Probing a second path would buy nothing and would put a dual-read fallback
+  // on the common boot path (`docs/NO_TRANSITIONAL_CODE.md` §1).
+  //
+  // Do NOT lean on `findRuntimeImageTagMismatch` (`@appstrate/env`) to argue
+  // this: it compares `PI_IMAGE` against `SIDECAR_IMAGE` unconditionally, but
+  // the PLATFORM only joins that comparison when all three refs are release
+  // versions. A digest-pinned ref is exempt outright, and `:latest`, `dev`,
+  // `sha-…` and `{{major}}.{{minor}}` all take the platform back out — so a
+  // released platform under `:latest` runtime images boots fine and is a
+  // supported deployment. Platform/image skew IS reachable; it just cannot
+  // produce a `documents`-keyed body here, because the only writer of that
+  // body is the platform's `parseRunFilesManifest`, which throws on the
+  // retired spelling rather than serving it.
   const manifestUrl = deps.sinkUrl.replace(/\/events$/, "/files");
   let manifestRes: Response;
   try {

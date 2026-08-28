@@ -74,7 +74,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **`PUBLISHED_FILE_LOG_EVENT`** — same value, `"file"`, so nothing on the wire
   moves and no row starts or stops being recognised.
 
+- **`ACCEPTED_RUNTIME_TOOL_IDS`** (`./runtime-tools-catalog`) — a second binding
+  for a list that was already exported. It was defined as
+  `[...SELECTABLE_RUNTIME_TOOLS]`, so the two sets were identical by
+  construction and could not drift; the sole reason its own docblock gave for
+  keeping it was a type one — that `z.enum()` needs a non-empty MUTABLE tuple
+  and would not take the `as const` readonly tuple. That stopped being true:
+  Zod 4's `z.enum` is declared `<const T extends readonly string[]>`, so
+  `z.enum(SELECTABLE_RUNTIME_TOOLS)` compiles and infers the same exact literal
+  union. With the reason gone the binding is transition scaffolding
+  (`docs/NO_TRANSITIONAL_CODE.md` §3) and is deleted rather than re-justified.
+  The two lists genuinely differed only while the retired `publish_document`
+  spelling (#1177) was resolved on read; that alias table is long gone, and a
+  stray retired id is DROPPED and reported by `canonicalizeRuntimeToolIds`,
+  never remapped. That history now lives on `canonicalizeRuntimeToolIds`, which
+  implements it.
+  Consumers should import **`SELECTABLE_RUNTIME_TOOLS`** — same five ids in the
+  same order, so no manifest, no wire enum and no generated JSON Schema moves.
+  Removing a published export is breaking, so this is a **major**.
+
 ### Changed
+
+- **`parsePackageZip` no longer accepts a bare `number` as its second argument**
+  (`./zip`) — the retired positional `maxSize`, replaced by
+  `ParsePackageZipOptions` in 6.0.0. TypeScript callers now get a compile error;
+  a plain-JS caller that passes a number gets a `TypeError` naming the object
+  form and the value it passed. Pass `{ maxSize: N }`.
+  The check is a runtime throw and not a deletion on purpose: with the branch
+  simply gone, a number falls through `options ?? {}`, `maxSize` reads
+  `undefined`, and the DEFAULT 10 MB ceiling silently replaces the limit the
+  caller asked for — a caller requesting 1 MB would get 10 MB with no error at
+  all. A retired form that can still arrive from outside fails loudly, never
+  works (`docs/NO_TRANSITIONAL_CODE.md` step 5).
+  A `TypeError` rather than a `PackageZipError`: nothing is wrong with the
+  archive, the call is. Consumers catching `PackageZipError` around this call
+  will NOT catch it, which is the intent — a caller-API defect must not be
+  rendered into the 400 an uploader reads.
+  Breaking for any consumer still on the positional form, so this is a **major**.
 
 - **A rejected unknown body key now names ITSELF in `errors[].field`**
   (`./api-errors`) — `zodIssuesToFieldErrors` previously rendered every

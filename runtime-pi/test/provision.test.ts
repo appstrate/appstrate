@@ -282,11 +282,24 @@ describe("provisionFiles", () => {
     expect(await exists(path.join(ws, "documents"))).toBe(false);
   });
 
-  it("ignores a manifest carrying only the retired `documents` key", async () => {
-    // `files` is the only key read. No platform this image can talk to emits
-    // the retired spelling — the platform validates its runtime image tags
-    // against its own version at boot — so a `files`-less manifest is a
-    // malformed one, and "no input files" is the honest reading of it.
+  it("reads no `documents` fallback out of the manifest body", async () => {
+    // The BODY-key half of the no-fallback pair; the test below is the
+    // path half. `files` is the only key read, and this fails the moment
+    // anyone reintroduces a `manifest.documents ?? manifest.files` dual read
+    // — `k.txt` would land in the workspace.
+    //
+    // It is a fallback guard, NOT an assertion that this input can occur.
+    // It cannot: `APPSTRATE_SINK_URL` points at the platform API, whose
+    // `/api/runs/:id/files` route serves whatever `parseRunFilesManifest`
+    // returns, and that reader THROWS by name on a stored manifest still
+    // carrying the retired spelling (`apps/api/src/services/
+    // run-workspace-manifest.ts`) — a 500, not a `documents`-keyed body. A
+    // platform old enough to have written one has no `/files` route at all,
+    // so it answers 404, which is the case below. The loud failure
+    // `docs/NO_TRANSITIONAL_CODE.md` step 5 asks for therefore already
+    // exists, once, on the side that actually reads the stored bytes; a
+    // second retirement-aware branch in this image would be a code path no
+    // supported deployment can reach.
     config.files = () =>
       Response.json({
         documents: [{ name: "k.txt", workspace_name: "k.txt", size: 3 }],
@@ -299,6 +312,8 @@ describe("provisionFiles", () => {
 
     expect(messages).toHaveLength(0);
     expect(await exists(path.join(ws, "files", "k.txt"))).toBe(false);
+    // No per-file fetch was even attempted — the manifest yielded no names.
+    expect(config.requestedPaths.filter((p) => p.includes("/files/"))).toEqual([]);
   });
 
   it("does not probe the retired /documents manifest path on a 404", async () => {

@@ -126,9 +126,13 @@ export interface AppstrateTurnMetadata {
   /**
    * Stable, provider-neutral class for retry UI + telemetry.
    *
-   * Absent on a turn persisted before this field existed, when the failure copy
-   * was the provider's own unclassified string (`errorText`, removed): such a
-   * turn reads as `unknown` rather than rendering raw upstream text.
+   * OPTIONAL because it is stamped only on a turn that actually carried an
+   * error: `buildPiTurnMetadata` (`pi-chat/pi-turn-closure.ts`) derives it from
+   * the classified `ClientTurnError`, and the ordinary turn — the one that
+   * simply finished — has none. So a reader indexing a table by this field must
+   * carry a default for the common case, not for a historical one; the client
+   * degrades a category-less turn to `unknown` rather than rendering raw
+   * upstream text.
    */
   errorCategory?: ChatTurnErrorCategory;
   /** Whether retrying later may succeed without changing the request. */

@@ -32,8 +32,32 @@ import { normalizeHttpUrl } from "@appstrate/core/url";
  */
 export const REDACTED_CONNECT_LINK = "[connect link hidden — the chat renders the connect card]";
 
-/** Field names carrying a connect/authorize URL (snake + camel). */
-const CONNECT_URL_KEYS = new Set(["connect_url", "auth_url", "connectUrl", "authUrl"]);
+/**
+ * Field names carrying a connect/authorize URL. Exactly the two the platform
+ * emits — `auth_url` (Porte B, the headless OAuth2 start) and `connect_url`
+ * (Porte A, the hosted Connect portal), both in `routes/integrations.ts`.
+ *
+ * Two, and no camelCase twin, because this walk only ever sees Appstrate's own
+ * wire: the chat opens ONE MCP connection, to the platform's own org-scoped
+ * endpoint (`platform-mcp.ts`), dispatched in-process through the REST
+ * pipeline — there is no third-party MCP server in this path whose casing this
+ * set would have to tolerate. And a spelling-based denylist could not be a
+ * foreign-payload safety net anyway: a stranger is as free to call the field
+ * `url` or `href`.
+ *
+ * What pins the spelling is the endpoints themselves, not a casing gate:
+ * `bun run check` has no HTTP-response casing check at all — `verify:openapi`
+ * performs none, and `lint:manifest-casing` covers AFPS manifests, not HTTP
+ * responses. The two spellings above are what `apps/api/src/routes/
+ * integrations.ts` returns — `{ auth_url, state }` for Porte B and
+ * `{ connect_url, expires_at }` for Porte A — the latter also declared
+ * `required: ["connect_url", "expires_at"]` in `apps/api/src/openapi/paths/
+ * integrations.ts`. `verify:openapi` asserts that endpoint is documented and
+ * that its 2xx response declares a schema; it does NOT diff the declared keys
+ * against what the handler emits, so the route and the declaration are the
+ * pair to re-read if this set ever looks wrong.
+ */
+const CONNECT_URL_KEYS = new Set(["connect_url", "auth_url"]);
 
 /** Depth bound for the redaction walk — MCP payloads are shallow. */
 const MAX_REDACT_DEPTH = 16;
@@ -48,7 +72,7 @@ const MAX_REDACT_DEPTH = 16;
 export interface ConnectOffer {
   /** Absolute http(s) URL — validated at capture time. */
   connect_url: string;
-  /** Legacy OAuth flows pair `auth_url` with a correlation `state`. */
+  /** Porte B (the headless OAuth2 start) pairs `auth_url` with a correlation `state`. */
   state?: string;
   expires_at?: number;
 }
@@ -61,15 +85,25 @@ interface SplitResult {
   offer: ConnectOffer | null;
 }
 
-/** Build an offer from the node whose connect key just got redacted. */
+/**
+ * Build an offer from the node whose connect key just got redacted. Siblings
+ * are read under their wire spelling only — same reason as
+ * {@link CONNECT_URL_KEYS}: `expires_at` is what Porte A returns beside
+ * `connect_url`, and nothing on this path emits a camelCase twin.
+ *
+ * `expires_at` is worth naming explicitly, because the general policy points
+ * the other way: `docs/CASING_CONVENTIONS.md` carve-out 4b lists `expiresAt`
+ * among the DB-convention fields that stay camelCase everywhere INCLUDING the
+ * wire. This endpoint does not follow that carve-out — it emits `expires_at`,
+ * as the OpenAPI response schema for `POST …/connect/start` requires and as
+ * `routes/integrations.ts` writes — and the same document's internal
+ * sidecar↔platform section lists `expires_at` too. A reader follows what the
+ * endpoint emits, not the carve-out; the tension is in the policy document,
+ * and reconciling it there is out of this module's scope.
+ */
 function offerFromNode(obj: Record<string, unknown>, url: string): ConnectOffer {
   const state = typeof obj.state === "string" ? obj.state : undefined;
-  const expiresAt =
-    typeof obj.expires_at === "number"
-      ? obj.expires_at
-      : typeof obj.expiresAt === "number"
-        ? obj.expiresAt
-        : undefined;
+  const expiresAt = typeof obj.expires_at === "number" ? obj.expires_at : undefined;
   return {
     connect_url: url,
     ...(state !== undefined ? { state } : {}),
@@ -78,10 +112,10 @@ function offerFromNode(obj: Record<string, unknown>, url: string): ConnectOffer 
 }
 
 /**
- * Deep-walk `value`, replacing any `connect_url`/`auth_url`/`connectUrl`/`authUrl`
- * string with the placeholder and capturing the first absolute-URL offer. When
- * nothing changed the original reference is returned so callers can keep text
- * byte-identical (prompt caching).
+ * Deep-walk `value`, replacing any `connect_url`/`auth_url` string with the
+ * placeholder and capturing the first absolute-URL offer. When nothing changed
+ * the original reference is returned so callers can keep text byte-identical
+ * (prompt caching).
  */
 function splitValue(value: unknown, depth: number): SplitResult {
   if (depth > MAX_REDACT_DEPTH || value == null || typeof value !== "object") {

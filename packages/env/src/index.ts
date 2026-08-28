@@ -107,14 +107,46 @@ const describeRuntimeImageMismatch = (m: RuntimeImageTagMismatch): string => {
 /**
  * Retired env names mapped to what replaced them. Boot refuses while one is
  * still set — see the superRefine below for why silence is the wrong answer
- * here. Four come from the `document` -> `file` rename (#1177);
+ * here.
+ *
+ * ─── Membership rule (so an audit does not have to re-derive it) ─────
+ *
+ * A name belongs here when all three hold:
+ *   1. it was RENAMED, not deleted — there is a replacement to name;
+ *   2. at least one TAGGED release shipped the old spelling, so a live `.env`
+ *      can still carry it. `release.yml` fires on every `v*` tag, and the first
+ *      one is `v1.0.0-alpha.1` (2026-03-14), NOT `v1.0.0-beta.1` — the alpha
+ *      series published GHCR images and CLI binaries like any other release;
+ *   3. nothing aliases the old name any more, so leaving it set changes
+ *      behaviour in silence rather than loudly.
+ * A rename whose old spelling never reached a tag is not an entry: no supported
+ * upgrade path carries it, and a guard for it could only ever fire on an `.env`
+ * nobody could have written.
+ *
+ * ─── Provenance of the eight ─────────────────────────────────────────
+ *
+ * Four come from the `document` -> `file` rename (#1177).
  * `OAUTH_ALLOWED_INTERNAL_IDP_HOSTS` is the OAuth-era spelling of the SSRF
  * internal-host allowlist, which the schema aliased but the sidecar's raw
  * `process.env` read did not — so the two disagreed on which hosts were exempt.
+ * The last three are the pre-1.0 renames, added later than the code that made
+ * them because the alpha tags were mistaken for pre-release: `EXECUTION_ADAPTER`
+ * and `EXECUTION_TOKEN_SECRET` were renamed by the flow->agent / execution->run
+ * pass (#16, 2026-04-02) and shipped under the old spelling in every release up
+ * to `v1.0.0-alpha.18`; `APPSTRATE_MODULES` was renamed to `MODULES` on
+ * 2026-04-14 and shipped as `APPSTRATE_MODULES` in `v1.0.0-alpha.35`. Two of
+ * those three replacements carry a `.default(...)` — an operator still on the
+ * old spelling silently gets the default, which for `MODULES` is exactly the
+ * drift #513 was (a self-host booting with model providers it never asked for
+ * or asked away). `RUN_TOKEN_SECRET` is hard-required, so the old spelling
+ * already aborted boot; what it did not do is say WHICH name moved.
  */
 const RETIRED_ENV_RENAMES: Record<string, string> = {
+  APPSTRATE_MODULES: "MODULES",
   DOCUMENT_MAX_FILE_BYTES: "FILE_MAX_BYTES",
   DOCUMENT_RETENTION_DAYS: "FILE_RETENTION_DAYS",
+  EXECUTION_ADAPTER: "RUN_ADAPTER",
+  EXECUTION_TOKEN_SECRET: "RUN_TOKEN_SECRET",
   OAUTH_ALLOWED_INTERNAL_IDP_HOSTS: "EGRESS_ALLOW_INTERNAL_HOSTS",
   RUN_MAX_DOCUMENTS: "RUN_MAX_FILES",
   WORKSPACE_MAX_DOCS_BYTES: "WORKSPACE_MAX_FILES_BYTES",
@@ -1008,7 +1040,7 @@ export const envSchema = z
       path: [mismatch.oddOneOut === "sidecar" ? "SIDECAR_IMAGE" : "PI_IMAGE"],
     });
   })
-  // Two classes of retired name, one guard. The file-limit variables were
+  // Three classes of retired name, one guard. The file-limit variables were
   // renamed by #1177 with no alias, and Zod strips unknown keys — so an `.env`
   // still carrying an old name booted cleanly with the limit silently back at
   // its default. That is not a cosmetic regression for two of them:
@@ -1023,6 +1055,15 @@ export const envSchema = z
   // only half-way, since the schema honoured it but the sidecar's raw
   // `process.env` read never did, leaving a host exempt on the platform's
   // egress paths and blocked in-run. One name, one answer: it refuses to boot.
+  //
+  // The pre-1.0 renames (`APPSTRATE_MODULES`, `EXECUTION_ADAPTER`,
+  // `EXECUTION_TOKEN_SECRET`) are the first class again, one release era
+  // earlier — see the membership rule on `RETIRED_ENV_RENAMES`. Two of them
+  // revert to a `.default(...)`, so an alpha-era `.env` boots with a module
+  // list or a run adapter the operator never chose. `EXECUTION_TOKEN_SECRET`
+  // is the exception that still earns a row: `RUN_TOKEN_SECRET` is required,
+  // so boot already fails — but on "Required" for a name the operator never
+  // typed, which is a worse diagnostic than naming the rename.
   //
   // Read from raw `process.env` rather than the parsed object, because the
   // parsed object is exactly where these no longer exist. Same shape as

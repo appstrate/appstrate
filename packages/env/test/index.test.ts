@@ -32,6 +32,13 @@ const TRACKED = [
   "WORKSPACE_MAX_FILES_BYTES",
   "OAUTH_ALLOWED_INTERNAL_IDP_HOSTS",
   "EGRESS_ALLOW_INTERNAL_HOSTS",
+  "APPSTRATE_MODULES",
+  "MODULES",
+  "EXECUTION_ADAPTER",
+  "RUN_ADAPTER",
+  // `EXECUTION_TOKEN_SECRET`'s replacement, `RUN_TOKEN_SECRET`, is tracked
+  // above already — it is one of the required names `setBaseEnv` sets.
+  "EXECUTION_TOKEN_SECRET",
 ] as const;
 
 type Snap = Record<(typeof TRACKED)[number], string | undefined>;
@@ -633,6 +640,59 @@ describe("the retired egress-allowlist name is refused, not aliased", () => {
   });
 });
 
+describe("the pre-1.0 renamed names are refused, not ignored", () => {
+  let s: Snap;
+
+  beforeEach(() => {
+    s = snap();
+    setBaseEnv();
+    _resetCacheForTesting();
+  });
+
+  afterEach(() => {
+    restore(s);
+    _resetCacheForTesting();
+  });
+
+  // Three renames from the alpha era. They belong in the map for the same
+  // reason the file-limit four do — a tagged release shipped the old spelling,
+  // so a live `.env` can still carry it. `release.yml` fires on every `v*` tag
+  // and the first is `v1.0.0-alpha.1` (2026-03-14): `EXECUTION_ADAPTER` /
+  // `EXECUTION_TOKEN_SECRET` shipped through `v1.0.0-alpha.18` (#16 renamed
+  // them on 2026-04-02), `APPSTRATE_MODULES` shipped in `v1.0.0-alpha.35`.
+  const RENAMES: [string, string, string][] = [
+    ["APPSTRATE_MODULES", "MODULES", "oidc,webhooks"],
+    ["EXECUTION_ADAPTER", "RUN_ADAPTER", "docker"],
+    ["EXECUTION_TOKEN_SECRET", "RUN_TOKEN_SECRET", "s".repeat(32)],
+  ];
+
+  for (const [retired, replacement, value] of RENAMES) {
+    it(`aborts boot on ${retired}, naming ${replacement}`, () => {
+      process.env[retired] = value;
+      expect(() => getEnv()).toThrow(new RegExp(`${retired}.*${replacement}`, "s"));
+    });
+  }
+
+  it("control: the replacement names parse normally", () => {
+    // Without this the assertions above would pass just as well against a
+    // schema that rejected the module list and the run adapter outright.
+    process.env.MODULES = "oidc,webhooks";
+    process.env.RUN_ADAPTER = "docker";
+    const env = getEnv();
+    expect(env.MODULES).toBe("oidc,webhooks");
+    expect(env.RUN_ADAPTER).toBe("docker");
+  });
+
+  it("the silent revert is what the guard prevents: MODULES falls back to its default", () => {
+    // Zod strips unknown keys, so before this entry an `.env` carrying
+    // `APPSTRATE_MODULES` booted cleanly with `MODULES` back at its default —
+    // a self-host running a module list nobody chose. That is #513's failure
+    // mode, which is why this one is a boot failure and not a warning.
+    process.env.APPSTRATE_MODULES = "oidc";
+    expect(() => getEnv()).toThrow(/no longer read/);
+  });
+});
+
 describe("an explicitly blanked retired name is not 'still set'", () => {
   let s: Snap;
 
@@ -657,6 +717,9 @@ describe("an explicitly blanked retired name is not 'still set'", () => {
     "DOCUMENT_RETENTION_DAYS",
     "RUN_MAX_DOCUMENTS",
     "WORKSPACE_MAX_DOCS_BYTES",
+    "APPSTRATE_MODULES",
+    "EXECUTION_ADAPTER",
+    "EXECUTION_TOKEN_SECRET",
   ]) {
     it(`boots with ${retired}= (blank), which reverts nothing`, () => {
       // Compose's `${VAR:-}` forwarding produces exactly this when the host var
@@ -671,8 +734,8 @@ describe("an explicitly blanked retired name is not 'still set'", () => {
   }
 
   it("control: the same name with a value is still refused", () => {
-    // Without this, the four above would pass just as well against a guard that
-    // had been deleted outright.
+    // Without this, the loop above would pass just as well against a guard
+    // that had been deleted outright.
     process.env.DOCUMENT_RETENTION_DAYS = "30";
     expect(() => getEnv()).toThrow(/no longer read/);
   });

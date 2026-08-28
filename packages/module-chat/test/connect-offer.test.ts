@@ -55,6 +55,21 @@ describe("splitConnectPayload", () => {
     expect(offer).toBeNull();
   });
 
+  // The no-dual-read half of the pair above. `CONNECT_URL_KEYS` and
+  // `offerFromNode` read the wire spelling ONLY — what
+  // `routes/integrations.ts` actually emits (`connect_url` / `auth_url`, and
+  // `expires_at` beside them). This fails the moment anyone reinstates a
+  // `obj.expires_at ?? obj.expiresAt` fallback or a `connectUrl` key: the camel
+  // twin would start being redacted and captured, and neither expectation here
+  // would hold.
+  it("reads the wire spelling only — a camelCase twin is neither redacted nor offered", () => {
+    const payload = { connectUrl: URL_, connect_url: URL_, expiresAt: 1784142529000 };
+    const { redacted, offer } = splitConnectPayload(payload);
+    expect((redacted as { connectUrl: string }).connectUrl).toBe(URL_);
+    expect((redacted as { connect_url: string }).connect_url).toBe(REDACTED_CONNECT_LINK);
+    expect(offer).toEqual({ connect_url: URL_ });
+  });
+
   it("captures the first offer when several are present, redacting all", () => {
     const payload = {
       first: { auth_url: "https://a.example/one" },

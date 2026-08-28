@@ -17,8 +17,7 @@
 import { and, eq } from "drizzle-orm";
 import { toSlug } from "@appstrate/core/naming";
 import { db } from "./client.ts";
-import { organizations } from "./schema.ts";
-import { organizationMembers } from "./schema/organizations.ts";
+import { organizations, organizationMembers } from "./schema/organizations.ts";
 
 /**
  * Return type of the exported `createBootstrapOrg`; callers read it by
