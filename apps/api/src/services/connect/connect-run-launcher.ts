@@ -48,6 +48,7 @@ import {
   type IntegrationSpawnSpec,
 } from "@appstrate/core/sidecar-types";
 import { resolveMcpServerForSpawn } from "../integration-service.ts";
+import { getMcpServerRuntime } from "@appstrate/core/mcp-server-meta";
 import {
   getIntegrationSourceKind,
   getLocalServerRef,
@@ -189,7 +190,24 @@ const defaultMcpServerResolver: McpServerResolver = async (packageId, orgId, pin
   // resolver contract here is deliberately the loose `{ type?, entry_point? }`
   // so a test fixture needs no schema import.
   const run = (resolution.manifest as { server?: { type?: string; entry_point?: string } }).server;
-  return { ...(run ? { server: run } : {}), version: resolution.version };
+  if (!run) return { version: resolution.version };
+  // The Appstrate runtime override (`_meta["dev.appstrate/mcp-server"].runtime`)
+  // wins over the MCPB `server.type`, exactly as it does on the agent-run path
+  // (`integration-spawn-resolver.ts`). MCPB has no `bun` type, so a bun-native
+  // server keeps an MCPB-vocabulary `server.type: "node"` and declares `bun` in
+  // `_meta`; without this the SAME package spawns under bun for an agent run
+  // and under node for a connect login.
+  //
+  // It is applied HERE, at the resolution boundary, rather than in
+  // `buildConnectLoginSpec`: the builder only ever sees `{ type, entry_point }`,
+  // so resolving it there would mean widening the contract to carry the whole
+  // manifest — and the two paths would still be free to drift. Collapsing it
+  // into the resolver leaves exactly one place where a runtime is decided.
+  const effectiveType = getMcpServerRuntime(resolution.manifest) ?? run.type;
+  return {
+    server: { ...run, ...(effectiveType ? { type: effectiveType } : {}) },
+    version: resolution.version,
+  };
 };
 
 export async function buildConnectLoginSpec(
