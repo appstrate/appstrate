@@ -2,7 +2,7 @@
 
 import { getRedisConnection, getRedisSubscriber } from "../../lib/redis.ts";
 import { logger } from "../../lib/logger.ts";
-import type { PubSub } from "./interface.ts";
+import type { PubSub } from "@appstrate/core/platform-types";
 import { getErrorMessage } from "@appstrate/core/errors";
 
 export class RedisPubSub implements PubSub {

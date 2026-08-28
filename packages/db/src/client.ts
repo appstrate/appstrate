@@ -2,7 +2,7 @@
 
 import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import { getEnv } from "@appstrate/env";
-import * as schema from "./schema.ts";
+import * as schema from "./schema/index.ts";
 
 const env = getEnv();
 

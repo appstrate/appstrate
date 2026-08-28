@@ -102,7 +102,6 @@ ignore:
   - "**/test/**"
   - "scripts/**"
   - "packages/db/src/schema/**"
-  - "packages/db/src/schema.ts"
   - "packages/shared-types/**"
 
 comment:

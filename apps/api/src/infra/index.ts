@@ -5,8 +5,8 @@
  * Auto-selects Redis or local implementations based on environment.
  */
 
+import type { PubSub } from "@appstrate/core/platform-types";
 import { hasRedis } from "./mode.ts";
-import type { PubSub } from "./pubsub/interface.ts";
 import type { KeyValueCache } from "./cache/interface.ts";
 import type { RateLimiterFactory } from "./rate-limit/interface.ts";
 import type { EventBuffer } from "./event-buffer/interface.ts";

@@ -148,7 +148,7 @@ Tier 0 (zero-install) requires only Bun.
 ### Development Workflow
 
 - **New API route**: route file in `routes/` + OpenAPI path file in `openapi/paths/` + wire in `index.ts`. Run `bun run verify:openapi`, then `bun run generate:api` to refresh the SPA's generated types (`verify:api-types` in `check` fails otherwise). Every 2xx JSON response must declare a schema (verify-openapi step 6).
-- **DB migration (core)**: edit the domain file under `packages/db/src/schema/<domain>.ts` (`packages/db/src/schema.ts` is a 4-line barrel re-exporting `schema/index.ts` — nothing is defined there) → `bun run db:generate` (needs `DATABASE_URL` for drizzle-kit). Applied automatically at boot (PGlite + PostgreSQL) — no manual `db:migrate`.
+- **DB migration (core)**: edit the domain file under `packages/db/src/schema/<domain>.ts` (the barrel is `packages/db/src/schema/index.ts` — nothing is defined there) → `bun run db:generate` (needs `DATABASE_URL` for drizzle-kit). Applied automatically at boot (PGlite + PostgreSQL) — no manual `db:migrate`.
 - **Module tables**: there are none separately — a module's tables live in the core schema (`packages/db/src/schema/<domain>.ts`) and migrate with core. No per-module migration step.
 - **Quality gate**: `bun run check` — 18 task names, not 2: `turbo typecheck lint format:check` plus
   `verify:openapi`, `verify:api-types`, `verify:type-coverage`, `verify:compose-defaults`,
@@ -211,7 +211,7 @@ Full guide (commands and tiers, `bunfig.toml` preload and module auto-discovery,
 
 ## Database
 
-Core schema: `packages/db/src/schema/` (Drizzle, barrel via `schema.ts`) — includes the tables modules read/write (e.g. `schema/oidc.ts`, `schema/webhooks.ts`). Modules own no separate schema. All migrations applied automatically at boot — no manual `db:migrate`. `bun run db:generate` for new migrations. No RLS — app-level security by `orgId` (+ `spaceId`). Key headless tables: `spaces` (`spc_`), `endUsers` (`eu_`), `spacePackages`.
+Core schema: `packages/db/src/schema/` (Drizzle, barrel via `schema/index.ts`) — includes the tables modules read/write (e.g. `schema/oidc.ts`, `schema/webhooks.ts`). Modules own no separate schema. All migrations applied automatically at boot — no manual `db:migrate`. `bun run db:generate` for new migrations. No RLS — app-level security by `orgId` (+ `spaceId`). Key headless tables: `spaces` (`spc_`), `endUsers` (`eu_`), `spacePackages`.
 
 ## Environment Variables
 

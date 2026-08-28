@@ -10,8 +10,8 @@
  */
 
 import semver from "semver";
+import { resolveVersionString } from "@appstrate/afps-shared/semver-resolve";
 import { BundleError } from "./errors.ts";
-import { resolveVersionString } from "./semver-resolve.ts";
 import {
   formatPackageIdentity,
   parsePackageIdentity,

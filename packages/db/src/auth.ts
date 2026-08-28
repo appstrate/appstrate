@@ -13,8 +13,8 @@ import { createLogger } from "@appstrate/core/logger";
 const logger = createLogger("info");
 import type { BeforeSignupContext, AfterSignupContext } from "@appstrate/core/module";
 import { db } from "./client.ts";
-import * as schema from "./schema.ts";
-import { profiles, orgInvitations, user } from "./schema.ts";
+import * as schema from "./schema/index.ts";
+import { profiles, orgInvitations, user } from "./schema/index.ts";
 import { getEnv } from "@appstrate/env";
 import {
   evaluateSignupPolicy,

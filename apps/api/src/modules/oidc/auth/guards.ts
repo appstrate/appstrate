@@ -551,7 +551,7 @@ async function enforceDeviceApproveRealm(ctx: {
   // on authoritative state.
   //
   // Correctness relies on the schema-level UNIQUE constraint on
-  // `device_codes.user_code` (see `schema.ts::deviceCode` and migration
+  // `device_codes.user_code` (see `schema/oidc.ts::deviceCode` and migration
   // `0004_device_codes.sql`). Without it, two concurrently-issued rows
   // could share a `user_code` and `.limit(1)` would silently mask the
   // collision — picking an arbitrary row whose `clientId` may not match

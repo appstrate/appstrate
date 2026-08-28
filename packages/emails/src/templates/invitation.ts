@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { escapeHtml } from "@appstrate/core/html";
 import type { EmailPropsMap, RenderedEmail, SupportedLocale } from "../types.ts";
-import { escapeHtml } from "./layout.ts";
 
 const strings = {
   fr: {
