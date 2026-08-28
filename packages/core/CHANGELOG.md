@@ -58,6 +58,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **`PUBLISHED_FILE_LOG_EVENT`** — same value, `"file"`, so nothing on the wire
   moves and no row starts or stops being recognised.
 
+- **`ACCEPTED_RUNTIME_TOOL_IDS`** (`./runtime-tools-catalog`) — a second binding
+  for a list that was already exported. It was defined as
+  `[...SELECTABLE_RUNTIME_TOOLS]`, so the two sets were identical by
+  construction and could not drift; the sole reason its own docblock gave for
+  keeping it was a type one — that `z.enum()` needs a non-empty MUTABLE tuple
+  and would not take the `as const` readonly tuple. That stopped being true:
+  Zod 4's `z.enum` is declared `<const T extends readonly string[]>`, so
+  `z.enum(SELECTABLE_RUNTIME_TOOLS)` compiles and infers the same exact literal
+  union. With the reason gone the binding is transition scaffolding
+  (`docs/NO_TRANSITIONAL_CODE.md` §3) and is deleted rather than re-justified.
+  The two lists genuinely differed only while the retired `publish_document`
+  spelling (#1177) was resolved on read; that alias table is long gone, and a
+  stray retired id is DROPPED and reported by `canonicalizeRuntimeToolIds`,
+  never remapped. That history now lives on `canonicalizeRuntimeToolIds`, which
+  implements it.
+  Consumers should import **`SELECTABLE_RUNTIME_TOOLS`** — same five ids in the
+  same order, so no manifest, no wire enum and no generated JSON Schema moves.
+  Removing a published export is breaking, so this is a **major**.
+
 ### Changed
 
 - **`parsePackageZip` no longer accepts a bare `number` as its second argument**

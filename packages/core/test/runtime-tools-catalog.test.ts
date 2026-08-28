@@ -5,15 +5,19 @@ import {
   SELECTABLE_RUNTIME_TOOLS,
   EVENT_EMITTER_RUNTIME_TOOLS,
   RUNTIME_TOOL_CATALOG,
-  ACCEPTED_RUNTIME_TOOL_IDS,
   canonicalizeRuntimeToolIds,
   isSelectableRuntimeTool,
 } from "../src/runtime-tools-catalog.ts";
 
 describe("runtime-tools-catalog", () => {
   it("SELECTABLE set is the event emitters plus the publishing tool", () => {
-    // Guards against drift with the OpenAPI manifest enum + the agent-editor
-    // checklist, which mirror this list. If you change one, change all.
+    // Spelled out literally on purpose: recomposing the expectation from the
+    // same expression the source composes it from would pass whatever the
+    // source said. Guards against drift with the OpenAPI manifest enum + the
+    // agent-editor checklist, which mirror this list, and with the Zod
+    // `runtime_tools` enum and the generated AFPS JSON Schema, which are built
+    // from it — an id missing here stops a persisted manifest validating. If
+    // you change one, change all.
     expect([...SELECTABLE_RUNTIME_TOOLS]).toEqual(["output", "log", "note", "pin", "publish_file"]);
   });
 
@@ -52,26 +56,10 @@ describe("runtime-tools-catalog", () => {
 // ---------------------------------------------------------------------------
 
 describe("runtime-tool id reading", () => {
-  it("the accepted-id list is exactly the selectable one — no retired spelling", () => {
-    // Spelled out literally on purpose: recomposing the expectation from the
-    // same expression the source composes it from would pass whatever the
-    // source said. This is the list the Zod `runtime_tools` enum and the
-    // generated AFPS JSON Schema are built from — an id missing here stops a
-    // persisted manifest validating.
-    expect([...ACCEPTED_RUNTIME_TOOL_IDS] as string[]).toEqual([
-      "output",
-      "log",
-      "note",
-      "pin",
-      "publish_file",
-    ]);
-  });
-
   it("the retired publish_document spelling is known nowhere", () => {
     expect(isSelectableRuntimeTool("publish_document")).toBe(false);
     expect(RUNTIME_TOOL_CATALOG.map((e) => e.id)).not.toContain("publish_document" as never);
     expect([...SELECTABLE_RUNTIME_TOOLS]).not.toContain("publish_document" as never);
-    expect([...ACCEPTED_RUNTIME_TOOL_IDS] as string[]).not.toContain("publish_document");
   });
 
   it("drops the retired spelling and REPORTS it rather than resolving it", () => {

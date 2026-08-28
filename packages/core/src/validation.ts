@@ -14,7 +14,7 @@ import {
 } from "@afps-spec/schema";
 import { integrationManifestSchema, type IntegrationManifest } from "./integration.ts";
 import { mcpServerManifestSchema, type McpServerManifest } from "./mcp-server.ts";
-import { ACCEPTED_RUNTIME_TOOL_IDS, canonicalizeRuntimeToolIds } from "./runtime-tools-catalog.ts";
+import { SELECTABLE_RUNTIME_TOOLS, canonicalizeRuntimeToolIds } from "./runtime-tools-catalog.ts";
 import { findRetiredDependencyKeys } from "./dependencies.ts";
 
 export { integrationManifestSchema, type IntegrationManifest };
@@ -293,14 +293,14 @@ const agentManifestObjectSchema = afpsAgentManifestObjectSchema.extend({
   // `_meta`, because it is woven through the run pipeline (catalog
   // validation, prompt builder, sidecar tool registration) and namespacing
   // it would be disproportionate.
-  // The enum is {@link ACCEPTED_RUNTIME_TOOL_IDS}, which is the canonical list
+  // The enum is {@link SELECTABLE_RUNTIME_TOOLS}, which is the canonical list
   // and nothing else — there are no retired spellings left to accept. An id
   // the platform does not know is DROPPED structurally by
   // `dropRetiredRuntimeTools` before Zod ever sees it, and the drop is
   // reported to the caller rather than guessed at. Resolution is deliberately
   // not a Zod `.transform()`: that makes the field unrepresentable in the
   // generated AFPS JSON Schema and erases the enum.
-  runtime_tools: z.array(z.enum(ACCEPTED_RUNTIME_TOOL_IDS)).optional(),
+  runtime_tools: z.array(z.enum(SELECTABLE_RUNTIME_TOOLS)).optional(),
 });
 
 /**

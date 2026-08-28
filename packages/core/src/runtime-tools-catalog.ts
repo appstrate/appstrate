@@ -95,31 +95,6 @@ export const RUNTIME_TOOL_CATALOG: readonly RuntimeToolCatalogEntry[] = [
 // Reading stored ids
 // ---------------------------------------------------------------------------
 
-/**
- * {@link SELECTABLE_RUNTIME_TOOLS}, retyped as the non-empty MUTABLE tuple
- * `z.enum()` requires — that is the whole of the difference, and the only
- * reason this second binding exists. `[...X] as const` yields a readonly tuple,
- * which `z.enum` will not take.
- *
- * It is NOT a drift guard. The commit that removed the alias table defended
- * keeping both names on the grounds that the OpenAPI schema should import
- * ACCEPTED "so the request-body enum cannot silently become the editor's list
- * the next time the two differ". They cannot differ: this is defined as a
- * spread of that one.
- *
- * There used to be an alias table here mapping `publish_document` forward to
- * `publish_file` (#1177), kept because `runtime_tools` is persisted inside
- * agent manifests — including published ZIPs, which are immutable. It is gone:
- * no system package ships that spelling, and no stored manifest carries it.
- * A manifest that somehow did would have the id DROPPED, not silently
- * mistaken for another tool — see {@link canonicalizeRuntimeToolIds}, which
- * reports every drop to its caller.
- */
-export const ACCEPTED_RUNTIME_TOOL_IDS = [...SELECTABLE_RUNTIME_TOOLS] as [
-  SelectableRuntimeTool,
-  ...SelectableRuntimeTool[],
-];
-
 /** Type guard: is `value` a selectable (canonical) runtime tool id? */
 export function isSelectableRuntimeTool(value: unknown): value is SelectableRuntimeTool {
   return (
@@ -149,6 +124,13 @@ export interface CanonicalizedRuntimeToolIds {
  * Every drop is REPORTED in {@link CanonicalizedRuntimeToolIds.dropped} rather
  * than swallowed — that is what keeps a manifest naming a retired tool
  * runnable while still telling its caller what was removed.
+ *
+ * There used to be an alias table mapping `publish_document` forward to
+ * `publish_file` (#1177), kept because `runtime_tools` is persisted inside
+ * agent manifests — including published ZIPs, which are immutable. It is gone:
+ * no system package ships that spelling, and no stored manifest carries it. A
+ * manifest that somehow did has the id DROPPED and reported here, never
+ * silently mistaken for another tool.
  *
  * Pure and allocation-light; no Zod, no schema. The one helper every read path
  * should funnel stored ids through.
