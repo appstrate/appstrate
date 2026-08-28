@@ -42,6 +42,54 @@ INFRA_ALLOWLIST`. It had been asserted and false — at `v1.0.0-beta.53` the
 
 ### Changed
 
+- **BREAKING: the `application` entity is now `space`, everywhere, with no
+  compatibility layer** (#1227). The org-scoped container that delimits agents,
+  skills and integrations is renamed across 619 files — wire, database, headers,
+  routes, CLI, SPA and telemetry. `docs/NO_TRANSITIONAL_CODE.md` §1 forbids
+  aliases and dual-read paths, so this breaks the contract ON PURPOSE: a caller
+  still sending `X-Application-Id` or calling `/api/applications` now fails
+  loudly rather than being quietly accommodated. Verified: no `/api/applications`
+  route survives anywhere in `apps/`.
+  `app_`-prefixed ids become `spc_`; the header is `X-Space-Id`; the OTel
+  attribute is `appstrate.space.id` (the old series goes to zero without
+  erroring, so dashboards must be repointed rather than debugged).
+  `@appstrate/core` and `@appstrate/afps-runtime` both change public surface —
+  each needs a major release, and `cloud` needs a CODE change, not just a
+  version bump.
+
+  **Deploying this is a maintenance window, not a rolling deploy**, and the
+  operator steps are not optional:
+  - One replica, port closed, migrations at boot. §1 forbids the
+    expand-migrate-contract that would make a rolling deploy possible.
+  - `pg_dump -Fc` immediately before. **There is no down migration**, and
+    rolling the image back does not roll the schema back: the watermark is
+    compared by timestamp, so a reverted deploy finds nothing to apply and runs
+    old code against a renamed schema.
+  - **Two artifacts, both required.** `0053_applications_to_spaces.sql` applies
+    at boot and renames the catalog;
+    `scripts/migration/0003-application-ids-to-space-ids.sql` is run BY HAND and
+    rewrites the values. Neither is sufficient alone.
+  - Then `VALIDATE CONSTRAINT` on `webhooks_level_values`,
+    `webhooks_level_check` and `oauth_clients_level_check` — `0053` adds them
+    `NOT VALID` because the rows still hold the old value at that point.
+  - **Do NOT rewrite storage keys.** `files.storage_key`,
+    `uploads.storage_key` and `storage_deletion_jobs.storage_key` keep their
+    `app_` path segment deliberately: `0003` moves no bytes, so rewriting the
+    keys would point every row at an object that does not exist. Nothing
+    compares a storage key to a space id. New objects are written under `spc_`;
+    old ones stay where they are.
+  - Do not run `audit:storage-orphans` until verification is complete.
+  - Announce the CLI break: nothing gates an installed CLI to a version, and §1
+    forbids building such a mechanism, so users run `npm i -g appstrate@latest`
+    on the day. Open dashboard tabs must hard-refresh, and OAuth connect flows
+    in flight will fail (short Redis TTL, drainable).
+
+  Untouched, because the word means something else there: `appfile://` (it
+  encodes a `file_` id and never carried a space id), `APP_URL`, `--app-url`,
+  the turborepo `apps/` directory, the Hono `app` variable, the ~3,100
+  `application/*` MIME literals, `appp_`, and every use meaning the platform
+  itself or a third-party OAuth app registered at Google, GitHub or Discord.
+
 - **BREAKING: every remaining JSON request body is `.strict()` too — an unknown
   key is a `400` instead of a silent strip.** The entry above closed the package
   JSON bodies; this closes the rest of the API. `apps/api/src/routes/*.ts` went
